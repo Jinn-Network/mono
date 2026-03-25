@@ -1,0 +1,11 @@
+{
+  "adapter": "local",
+  "desiredStates": [
+    {
+      "id": "example-1",
+      "description": "The health check endpoint should return HTTP 200"
+    }
+  ],
+  "runner": "simple",
+  "dbPath": "./jinn-client.db"
+}
