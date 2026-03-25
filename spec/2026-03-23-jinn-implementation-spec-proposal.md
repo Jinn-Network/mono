@@ -107,11 +107,11 @@ Pays participants who perform evaluation on the execution layer. Qualifying crit
 
 The market for evaluation quality lives in the gauge. ve-JINN holders choose which distribution contracts to fund. A contract with weak qualifying criteria (easy to game, low evaluation standards) attracts zero votes and receives zero emissions. A contract with credible criteria attracts votes and thrives.
 
-Different distribution contracts can serve different execution environments (Base, Arbitrum, future chains), different marketplaces (ERC-8183, OLAS, MPP-compatible), and different incentive strategies. New contract types require DAO approval of a factory; instances of approved factories are deployed freely and compete for ve-JINN vote weight.
+Different distribution contracts can serve different execution environments (Base, Arbitrum, future chains), different marketplaces (OLAS Mech Marketplace, ERC-8183, MPP-compatible), and different incentive strategies. New contract types require DAO approval of a factory; instances of approved factories are deployed freely and compete for ve-JINN vote weight.
 
 ## 4. Execution Layer
 
-### 4.1 ERC-8183
+### 4.1 Marketplace
 
 The primary marketplace for the attempt lifecycle.
 
@@ -121,6 +121,8 @@ The primary marketplace for the attempt lifecycle.
 - Escrow releases on positive evaluation
 
 USDC in escrow is the marketplace-level settlement. It operates independently of JINN emissions. The fee can be small — its function is to signal genuine demand, not to be the primary incentive.
+
+Phase 0 operates on the **OLAS Mech Marketplace** — the existing request/delivery infrastructure on Base. Requests represent desired states, deliveries represent restoration attempts and evaluations. The JinnRouter (see `2026-03-25-activity-checker.md`) mediates request creation and tracks per-role activity. ERC-8183 is a candidate for Phase 1+ as the marketplace evolves.
 
 ### 4.2 ERC-8004
 
@@ -273,7 +275,7 @@ When used, each domain naturally progresses: new (high emissions, diverse approa
 
 - Operate within the OLAS ecosystem using existing contracts
 - OLAS staking contracts for distribution infrastructure
-- Build Jinn-specific activity checkers that read ERC-8183 evaluation events
+- Build Jinn-specific activity checkers (JinnRouter) that read Mech Marketplace request and delivery counters
 - Validate the full training loop end-to-end: creation → restoration → evaluation → knowledge → improved restoration
 - Single execution environment (Base)
 - No JINN token — use OLAS mechanisms as-is
