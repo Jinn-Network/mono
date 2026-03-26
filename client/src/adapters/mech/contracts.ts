@@ -7,28 +7,28 @@ import {
   type WalletClient,
   type Log,
 } from 'viem';
-import { MECH_MARKETPLACE_ABI, MECH_ABI, NATIVE_PAYMENT_TYPE } from './types.js';
+import { MECH_MARKETPLACE_ABI, MECH_ABI, JINN_ROUTER_ABI, NATIVE_PAYMENT_TYPE } from './types.js';
 import { executeSafeTransaction } from './safe.js';
 
-export async function submitMarketplaceRequest(
+export async function submitRestorationJob(
   publicClient: PublicClient,
   walletClient: WalletClient,
   safeAddress: Address,
-  marketplaceAddress: Address,
+  routerAddress: Address,
   mechAddress: Address,
   requestDataHex: Hex,
   priceWei: bigint,
   responseTimeout: bigint,
 ): Promise<string[]> {
   const calldata = encodeFunctionData({
-    abi: MECH_MARKETPLACE_ABI,
-    functionName: 'request',
-    args: [requestDataHex, priceWei, NATIVE_PAYMENT_TYPE, mechAddress, responseTimeout, '0x' as Hex],
+    abi: JINN_ROUTER_ABI,
+    functionName: 'createRestorationJob',
+    args: [requestDataHex, mechAddress, priceWei, responseTimeout, NATIVE_PAYMENT_TYPE, '0x' as Hex],
   });
 
   const txHash = await executeSafeTransaction(publicClient, walletClient, {
     safeAddress,
-    to: marketplaceAddress,
+    to: routerAddress,
     value: priceWei,
     data: calldata,
   });
@@ -39,13 +39,13 @@ export async function submitMarketplaceRequest(
   for (const log of receipt.logs) {
     try {
       const decoded = decodeEventLog({
-        abi: MECH_MARKETPLACE_ABI,
+        abi: JINN_ROUTER_ABI,
         data: log.data,
         topics: log.topics,
       });
-      if (decoded.eventName === 'MarketplaceRequest') {
-        const ids = (decoded.args as { requestIds: readonly Hex[] }).requestIds;
-        requestIds.push(...ids.map(String));
+      if (decoded.eventName === 'RestorationJobCreated') {
+        const args = decoded.args as { requestId: Hex };
+        requestIds.push(String(args.requestId));
       }
     } catch {
       // Not our event
@@ -53,6 +53,104 @@ export async function submitMarketplaceRequest(
   }
 
   return requestIds;
+}
+
+export async function submitEvaluationJob(
+  publicClient: PublicClient,
+  walletClient: WalletClient,
+  safeAddress: Address,
+  routerAddress: Address,
+  restorationRequestId: Hex,
+  mechAddress: Address,
+  requestDataHex: Hex,
+  priceWei: bigint,
+  responseTimeout: bigint,
+): Promise<string[]> {
+  const calldata = encodeFunctionData({
+    abi: JINN_ROUTER_ABI,
+    functionName: 'createEvaluationJob',
+    args: [restorationRequestId, requestDataHex, mechAddress, priceWei, responseTimeout, NATIVE_PAYMENT_TYPE, '0x' as Hex],
+  });
+
+  const txHash = await executeSafeTransaction(publicClient, walletClient, {
+    safeAddress,
+    to: routerAddress,
+    value: priceWei,
+    data: calldata,
+  });
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+  const requestIds: string[] = [];
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: JINN_ROUTER_ABI,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'EvaluationJobCreated') {
+        const args = decoded.args as { requestId: Hex };
+        requestIds.push(String(args.requestId));
+      }
+    } catch {
+      // Not our event
+    }
+  }
+
+  return requestIds;
+}
+
+const CLAIM_RETRY_ATTEMPTS = 3;
+const CLAIM_RETRY_DELAY_MS = 2000;
+
+export async function claimDelivery(
+  publicClient: PublicClient,
+  walletClient: WalletClient,
+  safeAddress: Address,
+  routerAddress: Address,
+  requestId: Hex,
+): Promise<Hex> {
+  const calldata = encodeFunctionData({
+    abi: JINN_ROUTER_ABI,
+    functionName: 'claimDelivery',
+    args: [requestId],
+  });
+
+  for (let attempt = 1; attempt <= CLAIM_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await executeSafeTransaction(publicClient, walletClient, {
+        safeAddress,
+        to: routerAddress,
+        value: 0n,
+        data: calldata,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+
+      // AlreadyClaimed — idempotent, treat as success
+      if (message.includes('AlreadyClaimed')) {
+        console.error(`[router] claimDelivery: already claimed ${requestId}`);
+        return '0x' as Hex;
+      }
+
+      // RequestNotFound — not a router request, skip entirely
+      if (message.includes('RequestNotFound')) {
+        throw err;
+      }
+
+      // NotDelivered — marketplace state may not have settled yet, retry
+      if (message.includes('NotDelivered') && attempt < CLAIM_RETRY_ATTEMPTS) {
+        console.error(`[router] claimDelivery: not yet delivered, retry ${attempt}/${CLAIM_RETRY_ATTEMPTS}`);
+        await new Promise(r => setTimeout(r, CLAIM_RETRY_DELAY_MS));
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  throw new Error(`claimDelivery failed after ${CLAIM_RETRY_ATTEMPTS} attempts for ${requestId}`);
 }
 
 export async function getMechDeliveryRate(
