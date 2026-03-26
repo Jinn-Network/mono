@@ -15,10 +15,12 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createPublicClient,
+  createWalletClient,
   decodeEventLog,
   http,
   type Address,
@@ -30,6 +32,7 @@ import {
   decodeMarketplaceRequestLogs,
 } from '../src/adapters/mech/contracts.js';
 import {
+  MECH_ABI,
   MECH_MARKETPLACE_ABI,
   JINN_ROUTER_ABI,
 } from '../src/adapters/mech/types.js';
@@ -507,6 +510,205 @@ async function main(): Promise<void> {
           await daemon.stop();
           console.log('    Daemon stopped');
         }
+      }),
+    );
+
+    // ── Phase 9: Priority window ────────────────────────────────────────────
+
+    results.push(
+      await runPhase('Phase 9: Priority window — non-priority mech delivers after timeout', async () => {
+        // Create a fresh adapter for this test
+        const windowAdapter = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
+          mechContractAddress: MECH_ADDRESS,  // Priority mech = 0xD03d
+          safeAddress: OPERATOR_SAFE_ADDRESS,
+          agentEoaPrivateKey: OPERATOR_EOA_KEY as Hex,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: 8453,
+        });
+        await windowAdapter.initialize();
+
+        // Post a request with priorityMech = 0xD03d
+        const requestId = await windowAdapter.postDesiredState({
+          id: 'priority-window-test',
+          description: 'Priority window test',
+          type: 'restoration',
+          attemptId: 'priority-window-test/1',
+          attemptNumber: 1,
+        });
+        console.log(`    Posted request: ${requestId.slice(0, 14)}...`);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Read the response timeout from mapRequestIdInfos
+        const info = await publicClient.readContract({
+          address: MARKETPLACE_ADDRESS,
+          abi: MECH_MARKETPLACE_ABI,
+          functionName: 'mapRequestIdInfos',
+          args: [requestId as Hex],
+        });
+        const responseTimeout = (info as unknown as any[])[3] as bigint;
+        const currentBlock = await publicClient.getBlock();
+        const timeToWait = Number(responseTimeout) - Number(currentBlock.timestamp) + 1;
+        console.log(`    Response timeout: ${responseTimeout}, need to advance ${timeToWait}s`);
+
+        // Advance time past the timeout
+        await jsonRpc(ANVIL_RPC, 'evm_increaseTime', [timeToWait > 0 ? timeToWait : 301]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Now impersonate the SECOND mech's operator (0x8c083's operator)
+        const SECOND_MECH: Address = '0x8c083Dfe9bee719a05Ba3c75A9B16BE4ba52c299';
+        const secondOperator = await publicClient.readContract({
+          address: SECOND_MECH,
+          abi: MECH_ABI,
+          functionName: 'getOperator',
+        }) as Address;
+        console.log(`    Second mech operator: ${secondOperator}`);
+
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [secondOperator, '0x56BC75E2D63100000']);
+        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [secondOperator]);
+
+        const secondOpWallet = createWalletClient({
+          chain: base,
+          transport: http(ANVIL_RPC),
+          account: secondOperator,
+        });
+
+        // Deliver from the SECOND mech (not the priority mech)
+        const deliveryData = ('0x' + 'ff'.repeat(32)) as Hex;
+        const deliverHash = await secondOpWallet.writeContract({
+          address: SECOND_MECH,
+          abi: MECH_ABI,
+          functionName: 'deliverToMarketplace',
+          args: [[requestId as Hex], [deliveryData]],
+        });
+        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [secondOperator]);
+
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: deliverHash });
+        if (receipt.status !== 'success') throw new Error('Delivery from non-priority mech failed');
+
+        // Verify: deliveryMech should be the SECOND mech, not the priority mech
+        const postInfo = await publicClient.readContract({
+          address: MARKETPLACE_ADDRESS,
+          abi: MECH_MARKETPLACE_ABI,
+          functionName: 'mapRequestIdInfos',
+          args: [requestId as Hex],
+        });
+        const deliveryMech = (postInfo as unknown as any[])[1] as string;
+        if (deliveryMech.toLowerCase() === MECH_ADDRESS.toLowerCase()) {
+          throw new Error('deliveryMech is the priority mech — expected the second mech');
+        }
+        if (deliveryMech.toLowerCase() !== SECOND_MECH.toLowerCase()) {
+          throw new Error(`Unexpected deliveryMech: ${deliveryMech}`);
+        }
+        console.log(`    Non-priority mech delivered after timeout: ${deliveryMech}`);
+
+        await windowAdapter.stop();
+      }),
+    );
+
+    // ── Phase 10: Crash recovery ──────────────────────────────────────────────
+
+    results.push(
+      await runPhase('Phase 10: Crash recovery — adapter recovers pending state', async () => {
+        // Use a temp file for the store (not :memory:) so it persists across adapter instances
+        const tmpDbPath = join(tmpdir(), `jinn-e2e-${Date.now()}.db`);
+        const { Store } = await import('../src/store/store.js');
+
+        // Step 1: Create adapter with persistent store, post a request
+        const store1 = new Store(tmpDbPath);
+        const adapter1 = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
+          mechContractAddress: MECH_ADDRESS,
+          safeAddress: OPERATOR_SAFE_ADDRESS,
+          agentEoaPrivateKey: OPERATOR_EOA_KEY as Hex,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: 8453,
+        }, store1);
+        await adapter1.initialize();
+
+        const requestId = await adapter1.postDesiredState({
+          id: 'crash-recovery-test',
+          description: 'Crash recovery test',
+          type: 'restoration',
+          attemptId: 'crash-recovery-test/1',
+          attemptNumber: 1,
+        });
+        console.log(`    Posted request: ${requestId.slice(0, 14)}...`);
+
+        // Save the block cursor
+        store1.setLastProcessedBlock(await publicClient.getBlockNumber());
+
+        // Step 2: Stop adapter (simulating crash)
+        await adapter1.stop();
+        store1.close();
+        console.log('    Adapter stopped (simulating crash)');
+
+        // Step 3: Deliver while adapter is down (impersonate operator)
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        const operator = await publicClient.readContract({
+          address: MECH_ADDRESS,
+          abi: MECH_ABI,
+          functionName: 'getOperator',
+        }) as Address;
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [operator, '0x56BC75E2D63100000']);
+        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [operator]);
+        const opWallet = createWalletClient({
+          chain: base,
+          transport: http(ANVIL_RPC),
+          account: operator,
+        });
+        const deliveryData = ('0x' + 'ee'.repeat(32)) as Hex;
+        await opWallet.writeContract({
+          address: MECH_ADDRESS,
+          abi: MECH_ABI,
+          functionName: 'deliverToMarketplace',
+          args: [[requestId as Hex], [deliveryData]],
+        });
+        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [operator]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        console.log('    Delivery happened while adapter was down');
+
+        // Step 4: Create NEW adapter with same store — should recover
+        const store2 = new Store(tmpDbPath);
+        const adapter2 = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
+          mechContractAddress: MECH_ADDRESS,
+          safeAddress: OPERATOR_SAFE_ADDRESS,
+          agentEoaPrivateKey: OPERATOR_EOA_KEY as Hex,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: 8453,
+        }, store2);
+        await adapter2.initialize();
+
+        // Verify recovery — check adapter internal state
+        // Access via type assertion since these are private
+        const adapterAny = adapter2 as any;
+        const recoveredPending = adapterAny.pendingEvaluations?.size ?? 0;
+        const recoveredClaimed = adapterAny.claimedButNotEvaluated?.size ?? 0;
+        console.log(`    Recovered: ${recoveredPending} pending, ${recoveredClaimed} claimed-not-evaluated`);
+
+        if (recoveredPending === 0 && recoveredClaimed === 0) {
+          throw new Error('Recovery did not rebuild pending state');
+        }
+        console.log('    Crash recovery verified — pending state rebuilt from on-chain events');
+
+        await adapter2.stop();
+        store2.close();
+
+        // Clean up temp DB
+        try { (await import('node:fs')).unlinkSync(tmpDbPath); } catch {}
       }),
     );
 
