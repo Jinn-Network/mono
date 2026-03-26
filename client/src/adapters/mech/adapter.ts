@@ -47,6 +47,9 @@ export class MechAdapter implements ExecutionAdapter {
   // Restoration requests where claimDelivery succeeded but evaluation creation failed.
   // Swept on each poll cycle so they don't require a new Deliver event.
   private claimedButNotEvaluated = new Set<string>();
+  // Original desired states keyed by request ID (restoration and evaluation)
+  // so we can yield accurate desiredState in DeliveredResult
+  private originalStates = new Map<string, DesiredState>();
   private store?: Store;
 
   constructor(config: MechAdapterConfig, store?: Store) {
@@ -187,6 +190,7 @@ export class MechAdapter implements ExecutionAdapter {
 
     // Store for evaluation creation after delivery is claimed
     this.pendingEvaluations.set(restorationRequestId, state);
+    this.originalStates.set(restorationRequestId, { ...state, type: 'restoration' });
 
     return restorationRequestId;
   }
@@ -307,9 +311,10 @@ export class MechAdapter implements ExecutionAdapter {
                 artifacts: resultPayload.artifacts as string[] | undefined,
               };
 
-              const desiredState: DesiredState = {
-                id: (resultPayload.requestId as string) ?? requestId,
-                description: (resultPayload.description as string) ?? '',
+              // Use the original desired state — not the result payload
+              const desiredState = this.originalStates.get(requestId) ?? {
+                id: requestId,
+                description: '',
               };
 
               yield {
@@ -318,6 +323,9 @@ export class MechAdapter implements ExecutionAdapter {
                 result: restorationResult,
                 deliveryMechAddress: mechAddress,
               };
+
+              // Clean up after yielding
+              this.originalStates.delete(requestId);
             } catch (err) {
               console.error(`[mech] Failed to parse delivery ${requestId}:`, err);
             }
@@ -366,6 +374,11 @@ export class MechAdapter implements ExecutionAdapter {
 
       if (evalRequestIds.length > 0) {
         this.pendingEvaluationClaims.add(evalRequestIds[0]);
+        // Copy original state to evaluation request ID so delivery can use it
+        const origState = this.originalStates.get(requestId);
+        if (origState) {
+          this.originalStates.set(evalRequestIds[0], { ...origState, type: 'evaluation' });
+        }
       }
 
       // Success — clean up both tracking sets
