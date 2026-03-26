@@ -47,7 +47,7 @@ const __dirname = join(fileURLToPath(import.meta.url), '..');
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
-const ANVIL_PATH = process.env['ANVIL_PATH'] ?? '/Users/adrianobradley/.foundry/bin/anvil';
+const ANVIL_PATH = process.env['ANVIL_PATH'] ?? '/Users/gcd/.foundry/bin/anvil';
 const ANVIL_PORT = 8546;
 const ANVIL_RPC = `http://127.0.0.1:${ANVIL_PORT}`;
 
@@ -451,10 +451,11 @@ async function main(): Promise<void> {
           args: [submittedRequestId],
         });
         const [priorityMech, , requester] = info as [Address, Address, Address, bigint, bigint, Hex];
-        if (requester.toLowerCase() !== safeAddress.toLowerCase()) {
-          throw new Error(`Expected requester=${safeAddress}, got ${requester}`);
+        // With the JinnRouter, the marketplace sees the router as the requester (not the Safe)
+        if (requester.toLowerCase() !== ROUTER_ADDRESS.toLowerCase()) {
+          throw new Error(`Expected requester=${ROUTER_ADDRESS} (router), got ${requester}`);
         }
-        console.log(`    Requester (Safe): ${requester}`);
+        console.log(`    Requester (router): ${requester}`);
         console.log(`    Priority mech: ${priorityMech}`);
       }),
     );
@@ -531,20 +532,10 @@ async function main(): Promise<void> {
         }) as Address;
         console.log(`    Mech operator: ${operator}`);
 
-        // Create adapter for delivery watching
-        const deliveryAdapter = new MechAdapter({
-          rpcUrl: ANVIL_RPC,
-          mechMarketplaceAddress: MARKETPLACE_ADDRESS,
-          routerAddress: ROUTER_ADDRESS,
-          mechContractAddress: MECH_ADDRESS,
-          safeAddress,
-          agentEoaPrivateKey: ANVIL_ACCOUNT_KEY,
-          ipfsRegistryUrl: mockIpfsUrl,
-          ipfsGatewayUrl: mockIpfsUrl,
-          pollIntervalMs: 500,
-          chainId: base.id,
-        });
-        await deliveryAdapter.initialize();
+        // Reuse the adapter from Phase 5c — it holds pendingEvaluations for the submitted request.
+        // The isOurs guard in watchForDeliveries skips deliveries not tracked by this adapter.
+        if (!adapter) throw new Error('No adapter from Phase 5c');
+        const deliveryAdapter = adapter;
 
         // Fund and impersonate the operator, then deliver
         await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [operator, '0x56BC75E2D63100000']);
