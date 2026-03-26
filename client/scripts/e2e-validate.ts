@@ -362,6 +362,27 @@ async function main(): Promise<void> {
         if (!foundEvalJob) {
           throw new Error('No EvaluationJobCreated event found on router');
         }
+
+        // Verify DeliveryClaimed event (staking counter increment)
+        let foundClaim = false;
+        for (const log of routerLogs) {
+          try {
+            const decoded = decodeEventLog({
+              abi: JINN_ROUTER_ABI,
+              data: log.data,
+              topics: log.topics,
+            });
+            if (decoded.eventName === 'DeliveryClaimed') {
+              const claimArgs = decoded.args as unknown as { jobType: number };
+              console.log(`    DeliveryClaimed event: jobType=${claimArgs.jobType}`);
+              foundClaim = true;
+            }
+          } catch { /* not our event */ }
+        }
+        if (!foundClaim) {
+          throw new Error('No DeliveryClaimed event found — staking counter not incremented');
+        }
+        console.log('    Staking counter verified: delivery claimed on router');
       }),
     );
 
@@ -436,6 +457,34 @@ async function main(): Promise<void> {
           throw new Error(`Expected pendingEvaluationClaims to be empty, got ${adapterAny.pendingEvaluationClaims.size}`);
         }
         console.log('    pendingEvaluationClaims is empty — lifecycle complete');
+
+        // Verify DeliveryClaimed event for evaluation (staking counter)
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        const evalBlock = await publicClient.getBlockNumber();
+        const evalRouterLogs = await publicClient.getLogs({
+          address: ROUTER_ADDRESS,
+          fromBlock: evalBlock - 10n,
+          toBlock: evalBlock,
+        });
+        let foundEvalClaim = false;
+        for (const log of evalRouterLogs) {
+          try {
+            const decoded = decodeEventLog({
+              abi: JINN_ROUTER_ABI,
+              data: log.data,
+              topics: log.topics,
+            });
+            if (decoded.eventName === 'DeliveryClaimed') {
+              const claimArgs = decoded.args as unknown as { jobType: number };
+              console.log(`    DeliveryClaimed event: jobType=${claimArgs.jobType}`);
+              foundEvalClaim = true;
+            }
+          } catch {}
+        }
+        if (!foundEvalClaim) {
+          throw new Error('No DeliveryClaimed event found for evaluation — staking counter not incremented');
+        }
+        console.log('    Staking counter verified: evaluation delivery claimed');
       }),
     );
 
