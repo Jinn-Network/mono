@@ -52,6 +52,7 @@ const ANVIL_PORT = 8546;
 const ANVIL_RPC = `http://127.0.0.1:${ANVIL_PORT}`;
 
 const MARKETPLACE_ADDRESS: Address = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
+const ROUTER_ADDRESS: Address = '0xfFa7118A3D820cd4E820010837D65FAfF463181B';
 const MECH_ADDRESS: Address = '0x8c083Dfe9bee719a05Ba3c75A9B16BE4ba52c299';
 
 const ANVIL_ACCOUNT_KEY: Hex = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
@@ -228,6 +229,7 @@ async function main(): Promise<void> {
         const adapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
           mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
           mechContractAddress: MECH_ADDRESS,
           safeAddress: account.address, // dummy for initialization
           agentEoaPrivateKey: ANVIL_ACCOUNT_KEY,
@@ -422,6 +424,7 @@ async function main(): Promise<void> {
         adapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
           mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
           mechContractAddress: MECH_ADDRESS,
           safeAddress,
           agentEoaPrivateKey: ANVIL_ACCOUNT_KEY,
@@ -466,6 +469,7 @@ async function main(): Promise<void> {
         const pollAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
           mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
           mechContractAddress: MECH_ADDRESS,
           safeAddress,
           agentEoaPrivateKey: ANVIL_ACCOUNT_KEY,
@@ -531,6 +535,7 @@ async function main(): Promise<void> {
         const deliveryAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
           mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
           mechContractAddress: MECH_ADDRESS,
           safeAddress,
           agentEoaPrivateKey: ANVIL_ACCOUNT_KEY,
@@ -626,6 +631,7 @@ async function main(): Promise<void> {
         const operatorAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
           mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
           mechContractAddress: OPERATOR_MECH_ADDRESS,
           safeAddress: OPERATOR_SAFE_ADDRESS,
           agentEoaPrivateKey: OPERATOR_EOA_KEY,
@@ -705,6 +711,7 @@ async function main(): Promise<void> {
         const loopAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
           mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
           mechContractAddress: OPERATOR_MECH_ADDRESS,
           safeAddress: OPERATOR_SAFE_ADDRESS,
           agentEoaPrivateKey: OPERATOR_EOA_KEY,
