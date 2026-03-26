@@ -4,6 +4,7 @@ import type { DesiredState } from '../types/index.js';
 import { Store } from '../store/store.js';
 import { CreatorLoop } from './creator.js';
 import { RestorerLoop } from './restorer.js';
+import { DeliveryWatcherLoop } from './delivery-watcher.js';
 
 export interface DaemonConfig {
   adapter: ExecutionAdapter;
@@ -17,6 +18,7 @@ export class Daemon {
   private store: Store;
   private creatorLoop: CreatorLoop;
   private restorerLoop: RestorerLoop;
+  private deliveryWatcherLoop: DeliveryWatcherLoop;
   private adapter: ExecutionAdapter;
   private loopPromises: Promise<void>[] = [];
   private cachedShutdownState: string | null = null;
@@ -26,6 +28,7 @@ export class Daemon {
     this.adapter = config.adapter;
     this.creatorLoop = new CreatorLoop(this.adapter, config.desiredStates, this.store);
     this.restorerLoop = new RestorerLoop(this.adapter, config.runner, this.store);
+    this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter);
   }
 
   async start(): Promise<void> {
@@ -36,12 +39,14 @@ export class Daemon {
     this.loopPromises = [
       this.creatorLoop.run().catch(err => console.error('[daemon] creator crashed:', err)),
       this.restorerLoop.run().catch(err => console.error('[daemon] restorer crashed:', err)),
+      this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
     ];
   }
 
   async stop(): Promise<void> {
     this.creatorLoop.stop();
     this.restorerLoop.stop();
+    this.deliveryWatcherLoop.stop();
 
     // Stop the adapter to unblock any pending async iterators
     await this.adapter.stop();

@@ -15,9 +15,10 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   createPublicClient,
-  createWalletClient,
   decodeEventLog,
   http,
   type Address,
@@ -30,15 +31,11 @@ import {
 } from '../src/adapters/mech/contracts.js';
 import {
   MECH_MARKETPLACE_ABI,
-  MECH_ABI,
   JINN_ROUTER_ABI,
 } from '../src/adapters/mech/types.js';
 import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import {
-  uploadToIpfs,
-  cidToDigestHex,
-  buildResultPayload,
-} from '../src/adapters/mech/ipfs.js';
+
+const __dirname = join(fileURLToPath(import.meta.url), '..');
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -235,98 +232,61 @@ async function main(): Promise<void> {
       }),
     );
 
-    // ── Phase 3: Restorer picks up request and delivers ──────────────────────
+    // ── Phase 3: Restorer picks up and delivers via RestorerLoop + ClaudeRunner ──
 
-    // Create the generators once — they are infinite and carry state
-    const requestIter = adapter!.watchForRequests()[Symbol.asyncIterator]();
+    const { RestorerLoop } = await import('../src/daemon/restorer.js');
+    const { ClaudeRunner } = await import('../src/runner/claude.js');
+    const { Store } = await import('../src/store/store.js');
+
+    const store = new Store(':memory:');
+    const mockAgentPath = join(__dirname, 'mock-agent.sh');
+    const runner = new ClaudeRunner({ claudePath: mockAgentPath });
+    const restorer = new RestorerLoop(adapter!, runner, store);
+
+    // Create the delivery iterator once — it is infinite and carries state
     const deliveryIter = adapter!.watchForDeliveries()[Symbol.asyncIterator]();
 
     results.push(
-      await runPhase('Phase 3: Restorer picks up request and delivers', async () => {
+      await runPhase('Phase 3: Restorer picks up request and delivers via ClaudeRunner', async () => {
         if (!adapter || !restorationRequestId) throw new Error('Missing state from prior phases');
 
-        // Mine blocks to advance past the cursor
+        // Mine blocks so the restorer sees the request
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-        // Start watching for requests with timeout
+        // Mine blocks continuously while processOne runs
         const miningInterval = setInterval(async () => {
           try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /* ignore */ }
         }, 1000);
 
-        let request: Awaited<ReturnType<typeof requestIter.next>>;
         try {
-          request = await Promise.race([
-            requestIter.next(),
-            sleep(20000).then(() => { throw new Error('watchForRequests timed out after 20s'); }),
+          // processOne: watchForRequests → ClaudeRunner → mock-agent.sh → submitResult
+          const processed = await Promise.race([
+            restorer.processOne(),
+            sleep(60000).then(() => { throw new Error('restorer.processOne timed out after 60s'); }),
           ]);
+          if (!processed) throw new Error('processOne returned false — no request found');
         } finally {
           clearInterval(miningInterval);
         }
 
-        if (request.done || !request.value) throw new Error('watchForRequests ended unexpectedly');
-        const req = request.value;
+        console.log('    RestorerLoop.processOne() completed');
 
-        if (!req.desiredState.description.includes('E2E router flow test')) {
-          throw new Error(`Expected description containing "E2E router flow test", got "${req.desiredState.description}"`);
-        }
-        console.log(`    watchForRequests yielded requestId: ${req.requestId}`);
-        console.log(`    description: "${req.desiredState.description}"`);
-
-        // Read mech operator
-        const mechOperator = await publicClient.readContract({
-          address: MECH_ADDRESS,
-          abi: MECH_ABI,
-          functionName: 'getOperator',
-        }) as Address;
-        console.log(`    Mech operator: ${mechOperator}`);
-
-        // Fund and impersonate operator
-        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [mechOperator, '0x56BC75E2D63100000']);
-        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [mechOperator]);
-
-        const operatorWallet = createWalletClient({
-          chain: base,
-          transport: http(ANVIL_RPC),
-          account: mechOperator,
-        });
-
-        // Build mock delivery data — upload to real IPFS and get CID digest
-        const deliveryPayload = buildResultPayload(restorationRequestId, {
-          data: 'E2E mock restoration delivery',
-        });
-        const deliveryCid = await uploadToIpfs('https://registry.autonolas.tech', deliveryPayload);
-        const deliveryDigest = cidToDigestHex(deliveryCid);
-
-        // Call AgentMech.deliverToMarketplace as impersonated operator
-        const deliverHash = await operatorWallet.writeContract({
-          address: MECH_ADDRESS,
-          abi: MECH_ABI,
-          functionName: 'deliverToMarketplace',
-          args: [[restorationRequestId as Hex], [deliveryDigest]],
-        });
-
-        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [mechOperator]);
-
-        const deliverReceipt = await publicClient.waitForTransactionReceipt({ hash: deliverHash });
-        if (deliverReceipt.status !== 'success') throw new Error('Deliver transaction reverted');
-
-        // Verify Deliver event in receipt
-        let hasDeliverEvent = false;
-        for (const log of deliverReceipt.logs) {
-          try {
-            const decoded = decodeEventLog({
-              abi: MECH_ABI,
-              data: log.data,
-              topics: log.topics,
-            });
-            if (decoded.eventName === 'Deliver') hasDeliverEvent = true;
-          } catch { /* not our event */ }
-        }
-        if (!hasDeliverEvent) throw new Error('No Deliver event in receipt');
-        console.log('    Deliver event confirmed in receipt');
-
-        // Mine a block
+        // Mine a block to confirm the delivery transaction
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Verify on-chain: mapRequestIdInfos should show a non-zero deliveryMech
+        const info = await publicClient.readContract({
+          address: MARKETPLACE_ADDRESS,
+          abi: MECH_MARKETPLACE_ABI,
+          functionName: 'mapRequestIdInfos',
+          args: [restorationRequestId as Hex],
+        }) as [string, string, string, bigint, bigint, string];
+
+        const deliveryMech = info[1];
+        if (deliveryMech === '0x0000000000000000000000000000000000000000') {
+          throw new Error('deliveryMech is zero — delivery did not happen');
+        }
+        console.log(`    Delivery confirmed on-chain, deliveryMech: ${deliveryMech}`);
       }),
     );
 
@@ -402,72 +362,31 @@ async function main(): Promise<void> {
     // ── Phase 5: Restorer picks up evaluation and delivers ───────────────────
 
     results.push(
-      await runPhase('Phase 5: Restorer picks up evaluation and delivers', async () => {
+      await runPhase('Phase 5: Restorer picks up evaluation and delivers via ClaudeRunner', async () => {
         if (!adapter) throw new Error('Missing adapter');
 
-        // Mine blocks to advance
+        // Mine blocks so the restorer sees the evaluation request
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Mine blocks continuously while processOne runs
         const miningInterval = setInterval(async () => {
           try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /* ignore */ }
         }, 1000);
 
-        let request: Awaited<ReturnType<typeof requestIter.next>>;
         try {
-          request = await Promise.race([
-            requestIter.next(),
-            sleep(20000).then(() => { throw new Error('watchForRequests timed out after 20s'); }),
+          // processOne: watchForRequests yields evaluation → ClaudeRunner → mock-agent.sh → submitResult
+          const processed = await Promise.race([
+            restorer.processOne(),
+            sleep(60000).then(() => { throw new Error('restorer.processOne timed out after 60s'); }),
           ]);
+          if (!processed) throw new Error('processOne returned false — no evaluation request found');
         } finally {
           clearInterval(miningInterval);
         }
 
-        if (request.done || !request.value) throw new Error('watchForRequests ended unexpectedly');
-        const req = request.value;
+        console.log('    RestorerLoop.processOne() completed for evaluation');
 
-        console.log(`    watchForRequests yielded evaluation request: ${req.requestId}`);
-        console.log(`    type: ${req.desiredState.type}`);
-
-        if (req.desiredState.type !== 'evaluation') {
-          throw new Error(`Expected type 'evaluation', got '${req.desiredState.type}'`);
-        }
-
-        // Read mech operator
-        const mechOperator = await publicClient.readContract({
-          address: MECH_ADDRESS,
-          abi: MECH_ABI,
-          functionName: 'getOperator',
-        }) as Address;
-
-        // Impersonate mech operator and deliver evaluation
-        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [mechOperator, '0x56BC75E2D63100000']);
-        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [mechOperator]);
-
-        const operatorWallet = createWalletClient({
-          chain: base,
-          transport: http(ANVIL_RPC),
-          account: mechOperator,
-        });
-
-        // Build evaluation delivery data — upload to real IPFS
-        const evalPayload = buildResultPayload(req.requestId, {
-          data: JSON.stringify({ verdict: 'pass', score: 0.95 }),
-        });
-        const evalCid = await uploadToIpfs('https://registry.autonolas.tech', evalPayload);
-        const evalDigest = cidToDigestHex(evalCid);
-
-        const deliverHash = await operatorWallet.writeContract({
-          address: MECH_ADDRESS,
-          abi: MECH_ABI,
-          functionName: 'deliverToMarketplace',
-          args: [[req.requestId as Hex], [evalDigest]],
-        });
-
-        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [mechOperator]);
-
-        const deliverReceipt = await publicClient.waitForTransactionReceipt({ hash: deliverHash });
-        if (deliverReceipt.status !== 'success') throw new Error('Evaluation deliver tx reverted');
-        console.log('    Evaluation delivery submitted');
-
-        // Mine a block
+        // Mine a block to confirm
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
       }),
     );
@@ -514,10 +433,82 @@ async function main(): Promise<void> {
       }),
     );
 
-    // ── Phase 7: Full daemon loop (skipped) ──────────────────────────────────
-    // The step-by-step phases 2-6 already validate the complete flow.
-    // A full daemon test with impersonation + real signing is complex and
-    // deferred as a follow-up.
+    // ── Phase 7: Full daemon loop ──────────────────────────────────────────────
+
+    results.push(
+      await runPhase('Phase 7: Full daemon loop — all three concurrent loops', async () => {
+        const { Daemon } = await import('../src/daemon/daemon.js');
+
+        // Fresh adapter for daemon — independent state from phases 2-6
+        const daemonAdapter = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
+          mechContractAddress: MECH_ADDRESS,
+          safeAddress: OPERATOR_SAFE_ADDRESS,
+          agentEoaPrivateKey: OPERATOR_EOA_KEY as Hex,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: base.id,
+        });
+        await daemonAdapter.initialize();
+
+        const daemon = new Daemon({
+          adapter: daemonAdapter,
+          runner: new ClaudeRunner({ claudePath: mockAgentPath }),
+          desiredStates: [{ id: 'daemon-e2e', description: 'Daemon full loop test' }],
+          dbPath: ':memory:',
+          shutdownTimeoutMs: 10000,
+        });
+
+        await daemon.start();
+        console.log('    Daemon started with all three loops');
+
+        // Mine blocks continuously so on-chain state advances
+        const mineInterval = setInterval(async () => {
+          try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /* ignore */ }
+        }, 1000);
+
+        try {
+          // Record block before daemon activity for event scanning
+          const startBlock = await publicClient.getBlockNumber();
+
+          // Wait for the full cycle: restoration + evaluation both claimed
+          await waitFor('Daemon completes full cycle', async () => {
+            const currentBlock = await publicClient.getBlockNumber();
+            if (currentBlock <= startBlock) return false;
+
+            const logs = await publicClient.getLogs({
+              address: ROUTER_ADDRESS,
+              fromBlock: startBlock,
+              toBlock: currentBlock,
+            });
+
+            let claimCount = 0;
+            for (const log of logs) {
+              try {
+                const decoded = decodeEventLog({
+                  abi: JINN_ROUTER_ABI,
+                  data: log.data,
+                  topics: log.topics,
+                });
+                if (decoded.eventName === 'DeliveryClaimed') claimCount++;
+              } catch { /* not our event */ }
+            }
+
+            console.log(`    DeliveryClaimed events so far: ${claimCount}`);
+            return claimCount >= 2;
+          }, 120000, 3000);
+
+          console.log('    Daemon completed full restoration + evaluation cycle');
+        } finally {
+          clearInterval(mineInterval);
+          await daemon.stop();
+          console.log('    Daemon stopped');
+        }
+      }),
+    );
 
   } finally {
     // ── Phase 8: Cleanup ─────────────────────────────────────────────────────
