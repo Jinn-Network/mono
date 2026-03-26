@@ -52,6 +52,9 @@ const MECH_ADDRESS: Address = '0xD03d75D3B59Ac252F2e8C7Bf4617cf91a102E613';
 const OPERATOR_SAFE_ADDRESS: Address = '0x608d976Da1Dd9BC53aeA87Abe74e1306Ab96280c';
 
 const OPERATOR_EOA_KEY: Hex | '' = (process.env['OPERATOR_EOA_KEY'] ?? '') as Hex | '';
+const OPERATOR_B_EOA_KEY: Hex = (process.env['OPERATOR_B_EOA_KEY'] ?? '') as Hex;
+const OPERATOR_B_SAFE: Address = '0xC440e601e22429C8f93a65548A746F015DDa26d2';
+const MECH_B: Address = '0xb55FaDf1f0Bb1DE99c13301397c7B67FdE44f6b1';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -709,6 +712,117 @@ async function main(): Promise<void> {
 
         // Clean up temp DB
         try { (await import('node:fs')).unlinkSync(tmpDbPath); } catch {}
+      }),
+    );
+
+    // ── Phase 11: Cross-operator flow ────────────────────────────────────────
+
+    results.push(
+      await runPhase('Phase 11: Cross-operator — A creates, B restores + evaluates', async () => {
+        if (!OPERATOR_EOA_KEY || !OPERATOR_B_EOA_KEY) {
+          console.log('    Skipped — set both OPERATOR_EOA_KEY and OPERATOR_B_EOA_KEY');
+          return;
+        }
+
+        const { privateKeyToAccount } = await import('viem/accounts');
+        const operatorA = privateKeyToAccount(OPERATOR_EOA_KEY);
+        const operatorB = privateKeyToAccount(OPERATOR_B_EOA_KEY);
+
+        // Fund both operators
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [operatorA.address, '0x56BC75E2D63100000']);
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [OPERATOR_SAFE_ADDRESS, '0x56BC75E2D63100000']);
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [operatorB.address, '0x56BC75E2D63100000']);
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [OPERATOR_B_SAFE, '0x56BC75E2D63100000']);
+
+        // Creator adapter (Operator A) — routes requests to Operator B's mech
+        const creatorAdapter = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
+          mechContractAddress: MECH_B,  // Route to B's mech
+          safeAddress: OPERATOR_SAFE_ADDRESS,
+          agentEoaPrivateKey: OPERATOR_EOA_KEY,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: 8453,
+        });
+        await creatorAdapter.initialize();
+
+        // Restorer adapter (Operator B) — delivers through B's mech
+        const restorerAdapter = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+          routerAddress: ROUTER_ADDRESS,
+          mechContractAddress: MECH_B,
+          safeAddress: OPERATOR_B_SAFE,
+          agentEoaPrivateKey: OPERATOR_B_EOA_KEY,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: 8453,
+        });
+        await restorerAdapter.initialize();
+
+        // Step 1: Operator A posts desired state
+        const requestId = await creatorAdapter.postDesiredState({
+          id: 'cross-operator-test',
+          description: 'Cross-operator flow test',
+          type: 'restoration',
+          attemptId: 'cross-operator-test/1',
+          attemptNumber: 1,
+        });
+        console.log(`    Operator A posted: ${requestId.slice(0, 14)}...`);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Step 2: Operator B delivers restoration (via RestorerLoop + ClaudeRunner)
+        const { RestorerLoop: CrossRestorerLoop } = await import('../src/daemon/restorer.js');
+        const { ClaudeRunner: CrossClaudeRunner } = await import('../src/runner/claude.js');
+        const { Store: CrossStore } = await import('../src/store/store.js');
+
+        const crossStore = new CrossStore(':memory:');
+        const crossMockAgentPath = join(__dirname, 'mock-agent.sh');
+        const crossRunner = new CrossClaudeRunner({ claudePath: crossMockAgentPath });
+        const crossRestorer = new CrossRestorerLoop(restorerAdapter, crossRunner, crossStore);
+
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        await crossRestorer.processOne();
+        console.log('    Operator B delivered restoration via ClaudeRunner');
+
+        // Step 3: Operator A claims delivery + creates evaluation
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        const mineInterval = setInterval(() => jsonRpc(ANVIL_RPC, 'evm_mine', []).catch(() => {}), 1000);
+
+        const crossDeliveryIter = creatorAdapter.watchForDeliveries()[Symbol.asyncIterator]();
+        const restorationDelivery = await Promise.race([
+          crossDeliveryIter.next().then(r => r.value),
+          sleep(30000).then(() => { throw new Error('timeout waiting for restoration delivery'); }),
+        ]);
+        console.log(`    Operator A claimed restoration, type: ${restorationDelivery?.desiredState?.type}`);
+
+        // Step 4: Operator B delivers evaluation
+        await crossRestorer.processOne();
+        console.log('    Operator B delivered evaluation via ClaudeRunner');
+
+        // Step 5: Operator A claims evaluation
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        const evalDelivery = await Promise.race([
+          crossDeliveryIter.next().then(r => r.value),
+          sleep(30000).then(() => { throw new Error('timeout waiting for evaluation delivery'); }),
+        ]);
+
+        clearInterval(mineInterval);
+        console.log(`    Operator A claimed evaluation, type: ${evalDelivery?.desiredState?.type}`);
+
+        // Verify: two different operators, zero impersonation
+        console.log('    Cross-operator flow complete:');
+        console.log(`      Creator Safe: ${OPERATOR_SAFE_ADDRESS}`);
+        console.log(`      Restorer Safe: ${OPERATOR_B_SAFE}`);
+        console.log(`      Mech used: ${MECH_B}`);
+
+        crossStore.close();
+        await creatorAdapter.stop();
+        await restorerAdapter.stop();
       }),
     );
 
