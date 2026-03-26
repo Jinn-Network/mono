@@ -27,8 +27,11 @@ import {
   decodeMarketplaceRequestLogs,
   decodeDeliverLogs,
   callDeliverToMarketplace,
+  scanRestorationJobs,
+  scanEvaluationJobs,
 } from './contracts.js';
 import { type MechAdapterConfig, MECH_MARKETPLACE_ABI } from './types.js';
+import type { Store } from '../../store/store.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -44,9 +47,11 @@ export class MechAdapter implements ExecutionAdapter {
   // Restoration requests where claimDelivery succeeded but evaluation creation failed.
   // Swept on each poll cycle so they don't require a new Deliver event.
   private claimedButNotEvaluated = new Set<string>();
+  private store?: Store;
 
-  constructor(config: MechAdapterConfig) {
+  constructor(config: MechAdapterConfig, store?: Store) {
     this.config = config;
+    this.store = store;
   }
 
   async initialize(): Promise<void> {
@@ -60,6 +65,93 @@ export class MechAdapter implements ExecutionAdapter {
     const blockNumber = await this.publicClient.getBlockNumber();
     this.requestBlockCursor = blockNumber;
     this.deliveryBlockCursor = blockNumber;
+
+    // Recover pending state from on-chain events
+    if (this.store) {
+      await this.recoverPendingState(blockNumber);
+    }
+  }
+
+  private async recoverPendingState(currentBlock: bigint): Promise<void> {
+    const fromBlock = this.store?.getLastProcessedBlock() ?? currentBlock;
+    if (fromBlock >= currentBlock) return;
+
+    console.error(`[mech] Recovering pending state from block ${fromBlock} to ${currentBlock}`);
+
+    // Scan for restoration jobs this creator posted
+    const restorations = await scanRestorationJobs(
+      this.publicClient,
+      this.config.routerAddress,
+      this.config.safeAddress,
+      fromBlock,
+      currentBlock,
+    );
+
+    // Scan for evaluation jobs this creator posted
+    const evaluations = await scanEvaluationJobs(
+      this.publicClient,
+      this.config.routerAddress,
+      this.config.safeAddress,
+      fromBlock,
+      currentBlock,
+    );
+
+    // Build set of restoration IDs that already have evaluation jobs
+    const hasEvaluation = new Set(evaluations.map(e => e.restorationRequestId));
+
+    // Check each restoration's delivery status
+    for (const restoration of restorations) {
+      if (hasEvaluation.has(restoration.requestId)) {
+        // Evaluation already created — check if eval delivery needs claiming
+        const evalJob = evaluations.find(e => e.restorationRequestId === restoration.requestId);
+        if (evalJob) {
+          const evalInfo = await this.publicClient.readContract({
+            address: this.config.mechMarketplaceAddress,
+            abi: MECH_MARKETPLACE_ABI,
+            functionName: 'mapRequestIdInfos',
+            args: [evalJob.requestId as `0x${string}`],
+          }) as [string, string, string, bigint, bigint, string];
+          if (evalInfo[1] === '0x0000000000000000000000000000000000000000') {
+            // Evaluation not yet delivered — track it
+            this.pendingEvaluationClaims.add(evalJob.requestId);
+          }
+          // If delivered, fully complete — nothing to track
+        }
+        continue;
+      }
+
+      // No evaluation job yet — check delivery status
+      const info = await this.publicClient.readContract({
+        address: this.config.mechMarketplaceAddress,
+        abi: MECH_MARKETPLACE_ABI,
+        functionName: 'mapRequestIdInfos',
+        args: [restoration.requestId as `0x${string}`],
+      }) as [string, string, string, bigint, bigint, string];
+
+      const deliveryMech = info[1];
+      if (deliveryMech === '0x0000000000000000000000000000000000000000') {
+        // Not delivered yet — track for evaluation after delivery
+        this.pendingEvaluations.set(restoration.requestId, {
+          id: restoration.requestId,
+          description: '', // Original description not available from events, but not needed for evaluation creation
+        });
+      } else {
+        // Delivered but no evaluation — needs claim + evaluation creation
+        this.pendingEvaluations.set(restoration.requestId, {
+          id: restoration.requestId,
+          description: '',
+        });
+        this.claimedButNotEvaluated.add(restoration.requestId);
+      }
+    }
+
+    // Set delivery block cursor to scan from recovery point
+    this.deliveryBlockCursor = fromBlock;
+
+    const recovered = this.pendingEvaluations.size + this.pendingEvaluationClaims.size + this.claimedButNotEvaluated.size;
+    if (recovered > 0) {
+      console.error(`[mech] Recovered: ${this.pendingEvaluations.size} pending evaluations, ${this.pendingEvaluationClaims.size} pending eval claims, ${this.claimedButNotEvaluated.size} claimed but not evaluated`);
+    }
   }
 
   async postDesiredState(state: DesiredState): Promise<RequestId> {
@@ -233,6 +325,11 @@ export class MechAdapter implements ExecutionAdapter {
         }
       } catch (err) {
         console.error('[mech] Error polling for deliveries:', err);
+      }
+
+      // Persist block cursor for crash recovery
+      if (this.store && this.deliveryBlockCursor > 0n) {
+        this.store.setLastProcessedBlock(this.deliveryBlockCursor);
       }
 
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));

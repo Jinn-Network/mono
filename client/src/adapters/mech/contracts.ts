@@ -196,6 +196,99 @@ export async function pollDeliverEvents(
   });
 }
 
+// ── Router event scanning (for crash recovery) ──────────────────────────────
+
+export interface RestorationJobRecord {
+  requestId: string;
+  creator: string;
+}
+
+export interface EvaluationJobRecord {
+  requestId: string;
+  restorationRequestId: string;
+  creator: string;
+}
+
+export async function scanRestorationJobs(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  creator: Address,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<RestorationJobRecord[]> {
+  const results: RestorationJobRecord[] = [];
+  const chunkSize = 9999n;
+
+  for (let start = fromBlock; start <= toBlock; start += chunkSize + 1n) {
+    const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
+    const logs = await publicClient.getLogs({
+      address: routerAddress,
+      fromBlock: start,
+      toBlock: end,
+    });
+
+    for (const log of logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: JINN_ROUTER_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        if (decoded.eventName === 'RestorationJobCreated') {
+          const args = decoded.args as { creator: Address; requestId: Hex };
+          if (args.creator.toLowerCase() === creator.toLowerCase()) {
+            results.push({ requestId: String(args.requestId), creator: String(args.creator) });
+          }
+        }
+      } catch {}
+    }
+  }
+
+  return results;
+}
+
+export async function scanEvaluationJobs(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  creator: Address,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<EvaluationJobRecord[]> {
+  const results: EvaluationJobRecord[] = [];
+  const chunkSize = 9999n;
+
+  for (let start = fromBlock; start <= toBlock; start += chunkSize + 1n) {
+    const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
+    const logs = await publicClient.getLogs({
+      address: routerAddress,
+      fromBlock: start,
+      toBlock: end,
+    });
+
+    for (const log of logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: JINN_ROUTER_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        if (decoded.eventName === 'EvaluationJobCreated') {
+          const args = decoded.args as { creator: Address; requestId: Hex; restorationRequestId: Hex };
+          if (args.creator.toLowerCase() === creator.toLowerCase()) {
+            results.push({
+              requestId: String(args.requestId),
+              restorationRequestId: String(args.restorationRequestId),
+              creator: String(args.creator),
+            });
+          }
+        }
+      } catch {}
+    }
+  }
+
+  return results;
+}
+
 // ── Event decoding helpers ───────────────────────────────────────────────────
 
 export interface DecodedMarketplaceRequest {
