@@ -19,7 +19,9 @@ import {
   parseDesiredStateFromPayload,
 } from './ipfs.js';
 import {
-  submitMarketplaceRequest,
+  submitRestorationJob,
+  submitEvaluationJob,
+  claimDelivery,
   getMechDeliveryRate,
   getTimeoutBounds,
   decodeMarketplaceRequestLogs,
@@ -37,7 +39,8 @@ export class MechAdapter implements ExecutionAdapter {
   private stopped = false;
   private requestBlockCursor = 0n;
   private deliveryBlockCursor = 0n;
-  private deferredEvaluations: Array<{ requestId: string; desiredState: import('../../types/index.js').DesiredState }> = [];
+  private pendingEvaluations = new Map<string, import('../../types/index.js').DesiredState>();
+  private pendingEvaluationClaims = new Set<string>();
 
   constructor(config: MechAdapterConfig) {
     this.config = config;
@@ -57,7 +60,6 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   async postDesiredState(state: DesiredState): Promise<RequestId> {
-    // Post restoration request
     const restorationState: DesiredState = {
       ...state,
       type: state.type ?? 'restoration',
@@ -71,11 +73,11 @@ export class MechAdapter implements ExecutionAdapter {
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
 
-    const restorationRequestIds = await submitMarketplaceRequest(
+    const restorationRequestIds = await submitRestorationJob(
       this.publicClient,
       this.walletClient,
       this.config.safeAddress,
-      this.config.mechMarketplaceAddress,
+      this.config.routerAddress,
       this.config.mechContractAddress,
       restorationDataHex,
       deliveryRate,
@@ -83,33 +85,13 @@ export class MechAdapter implements ExecutionAdapter {
     );
 
     if (restorationRequestIds.length === 0) {
-      throw new PermanentError('No request IDs returned from marketplace');
+      throw new PermanentError('No request IDs returned from router');
     }
 
     const restorationRequestId = restorationRequestIds[0];
 
-    // Post linked evaluation request
-    const evaluationState: DesiredState = {
-      ...state,
-      type: 'evaluation',
-      attemptId: state.attemptId,
-      attemptNumber: state.attemptNumber,
-      restorationRequestId,
-    };
-    const evaluationPayload = buildDesiredStatePayload(evaluationState);
-    const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
-    const evaluationDataHex = cidToDigestHex(evaluationCid);
-
-    await submitMarketplaceRequest(
-      this.publicClient,
-      this.walletClient,
-      this.config.safeAddress,
-      this.config.mechMarketplaceAddress,
-      this.config.mechContractAddress,
-      evaluationDataHex,
-      deliveryRate,
-      maxTimeout,
-    );
+    // Store for evaluation creation after delivery is claimed
+    this.pendingEvaluations.set(restorationRequestId, state);
 
     return restorationRequestId;
   }
@@ -117,24 +99,6 @@ export class MechAdapter implements ExecutionAdapter {
   async *watchForRequests(): AsyncIterable<RestorationRequest> {
     while (!this.stopped) {
       try {
-        console.error(`[mech] watchForRequests poll — deferred: ${this.deferredEvaluations.length}, cursor: ${this.requestBlockCursor}`);
-        // Re-check deferred evaluation requests first
-        if (this.deferredEvaluations.length > 0) {
-          console.error(`[mech] Checking ${this.deferredEvaluations.length} deferred evaluation(s)`);
-        }
-        const stillDeferred: typeof this.deferredEvaluations = [];
-        for (const deferred of this.deferredEvaluations) {
-          const ready = await this.isEvaluationReady(deferred.desiredState);
-          if (ready) {
-            console.error(`[mech] Deferred evaluation ${deferred.requestId} is now ready`);
-            yield { requestId: deferred.requestId, desiredState: deferred.desiredState };
-          } else {
-            stillDeferred.push(deferred);
-          }
-        }
-        this.deferredEvaluations = stillDeferred;
-
-        // Poll for new events
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.requestBlockCursor) {
           const logs = await this.publicClient.getLogs({
@@ -151,17 +115,6 @@ export class MechAdapter implements ExecutionAdapter {
               const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${digest}`) as Record<string, unknown>;
               const desiredState = parseDesiredStateFromPayload(payload);
 
-              // Evaluation requests: only yield after restoration has been delivered
-              if (desiredState.type === 'evaluation' && desiredState.restorationRequestId) {
-                if (await this.isEvaluationReady(desiredState)) {
-                  yield { requestId, desiredState };
-                } else {
-                  // Defer — re-check on next poll
-                  this.deferredEvaluations.push({ requestId, desiredState });
-                }
-                continue;
-              }
-
               yield { requestId, desiredState };
             } catch (err) {
               console.error(`[mech] Failed to parse request ${requestId}:`, err);
@@ -173,24 +126,6 @@ export class MechAdapter implements ExecutionAdapter {
       }
 
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
-    }
-  }
-
-  private async isEvaluationReady(desiredState: DesiredState): Promise<boolean> {
-    if (!desiredState.restorationRequestId) return false;
-    try {
-      const info = await this.publicClient.readContract({
-        address: this.config.mechMarketplaceAddress,
-        abi: MECH_MARKETPLACE_ABI,
-        functionName: 'mapRequestIdInfos',
-        args: [desiredState.restorationRequestId as `0x${string}`],
-      }) as [string, string, string, bigint, bigint, string];
-      const deliveryMech = info[1];
-      console.error(`[mech] isEvaluationReady: restorationRequestId=${desiredState.restorationRequestId.slice(0, 10)}... deliveryMech=${deliveryMech}`);
-      return deliveryMech !== '0x0000000000000000000000000000000000000000';
-    } catch (err) {
-      console.error(`[mech] isEvaluationReady error:`, err);
-      return false;
     }
   }
 
@@ -228,22 +163,85 @@ export class MechAdapter implements ExecutionAdapter {
 
           const decoded = decodeDeliverLogs(logs);
           for (const { requestId, deliveryDataHex, mechAddress } of decoded) {
+            // Only claim deliveries for requests this client created
+            const isOurs = this.pendingEvaluations.has(requestId) || this.pendingEvaluationClaims.has(requestId);
+            if (!isOurs) continue;
+
             try {
-              // deliveryDataHex is the SHA256 digest of the result on IPFS
+              // Claim the delivery on the router
+              await claimDelivery(
+                this.publicClient,
+                this.walletClient,
+                this.config.safeAddress,
+                this.config.routerAddress,
+                requestId as `0x${string}`,
+              );
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              if (message.includes('RequestNotFound')) {
+                console.error(`[mech] claimDelivery skipped (not a router request): ${requestId}`);
+                continue;
+              }
+              console.error(`[mech] claimDelivery failed for ${requestId}:`, err);
+              // Don't remove from pending — will retry next poll
+              continue;
+            }
+
+            // If this was a restoration delivery, post the evaluation job
+            if (this.pendingEvaluations.has(requestId)) {
+              const originalState = this.pendingEvaluations.get(requestId)!;
+              try {
+                const evaluationState: DesiredState = {
+                  ...originalState,
+                  type: 'evaluation',
+                  restorationRequestId: requestId,
+                };
+                const evaluationPayload = buildDesiredStatePayload(evaluationState);
+                const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
+                const evaluationDataHex = cidToDigestHex(evaluationCid);
+
+                const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
+                const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
+
+                const evalRequestIds = await submitEvaluationJob(
+                  this.publicClient,
+                  this.walletClient,
+                  this.config.safeAddress,
+                  this.config.routerAddress,
+                  requestId as `0x${string}`,
+                  this.config.mechContractAddress,
+                  evaluationDataHex,
+                  deliveryRate,
+                  maxTimeout,
+                );
+
+                if (evalRequestIds.length > 0) {
+                  this.pendingEvaluationClaims.add(evalRequestIds[0]);
+                }
+
+                // Only remove after evaluation job succeeds
+                this.pendingEvaluations.delete(requestId);
+              } catch (err) {
+                console.error(`[mech] Failed to create evaluation job for ${requestId}:`, err);
+                // Don't remove from pendingEvaluations — will retry on next delivery detection
+              }
+            }
+
+            // If this was an evaluation delivery, just clear the tracking
+            if (this.pendingEvaluationClaims.has(requestId)) {
+              this.pendingEvaluationClaims.delete(requestId);
+            }
+
+            // Parse and yield the delivery result
+            try {
               const deliveryDigest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
               const resultPayload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${deliveryDigest}`) as Record<string, unknown>;
 
-              // We need the original desired state too — fetch from the request's data
-              // The Deliver event includes the requestId but not the original requestData.
-              // We look up the original request by scanning MarketplaceRequest events,
-              // or we accept that the result payload includes enough context.
               const restorationResult: RestorationResult = {
                 data: (resultPayload.data as string) ?? JSON.stringify(resultPayload),
                 artifacts: resultPayload.artifacts as string[] | undefined,
               };
 
-              // Construct a minimal desired state from the result payload
-              // The result payload includes requestId which we can use to look up the state
               const desiredState: DesiredState = {
                 id: (resultPayload.requestId as string) ?? requestId,
                 description: (resultPayload.description as string) ?? '',
