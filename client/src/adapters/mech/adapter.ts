@@ -41,6 +41,9 @@ export class MechAdapter implements ExecutionAdapter {
   private deliveryBlockCursor = 0n;
   private pendingEvaluations = new Map<string, import('../../types/index.js').DesiredState>();
   private pendingEvaluationClaims = new Set<string>();
+  // Restoration requests where claimDelivery succeeded but evaluation creation failed.
+  // Swept on each poll cycle so they don't require a new Deliver event.
+  private claimedButNotEvaluated = new Set<string>();
 
   constructor(config: MechAdapterConfig) {
     this.config = config;
@@ -152,6 +155,11 @@ export class MechAdapter implements ExecutionAdapter {
   async *watchForDeliveries(): AsyncIterable<DeliveredResult> {
     while (!this.stopped) {
       try {
+        // Retry evaluation creation for claimed restorations that failed previously
+        for (const rid of [...this.claimedButNotEvaluated]) {
+          await this.tryCreateEvaluationJob(rid);
+        }
+
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.deliveryBlockCursor) {
           const logs = await this.publicClient.getLogs({
@@ -189,42 +197,7 @@ export class MechAdapter implements ExecutionAdapter {
 
             // If this was a restoration delivery, post the evaluation job
             if (this.pendingEvaluations.has(requestId)) {
-              const originalState = this.pendingEvaluations.get(requestId)!;
-              try {
-                const evaluationState: DesiredState = {
-                  ...originalState,
-                  type: 'evaluation',
-                  restorationRequestId: requestId,
-                };
-                const evaluationPayload = buildDesiredStatePayload(evaluationState);
-                const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
-                const evaluationDataHex = cidToDigestHex(evaluationCid);
-
-                const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
-                const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
-
-                const evalRequestIds = await submitEvaluationJob(
-                  this.publicClient,
-                  this.walletClient,
-                  this.config.safeAddress,
-                  this.config.routerAddress,
-                  requestId as `0x${string}`,
-                  this.config.mechContractAddress,
-                  evaluationDataHex,
-                  deliveryRate,
-                  maxTimeout,
-                );
-
-                if (evalRequestIds.length > 0) {
-                  this.pendingEvaluationClaims.add(evalRequestIds[0]);
-                }
-
-                // Only remove after evaluation job succeeds
-                this.pendingEvaluations.delete(requestId);
-              } catch (err) {
-                console.error(`[mech] Failed to create evaluation job for ${requestId}:`, err);
-                // Don't remove from pendingEvaluations — will retry on next delivery detection
-              }
+              await this.tryCreateEvaluationJob(requestId);
             }
 
             // If this was an evaluation delivery, just clear the tracking
@@ -263,6 +236,48 @@ export class MechAdapter implements ExecutionAdapter {
       }
 
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
+    }
+  }
+
+  private async tryCreateEvaluationJob(requestId: string): Promise<void> {
+    if (!this.pendingEvaluations.has(requestId)) return;
+    const originalState = this.pendingEvaluations.get(requestId)!;
+    try {
+      const evaluationState: DesiredState = {
+        ...originalState,
+        type: 'evaluation',
+        restorationRequestId: requestId,
+      };
+      const evaluationPayload = buildDesiredStatePayload(evaluationState);
+      const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
+      const evaluationDataHex = cidToDigestHex(evaluationCid);
+
+      const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
+      const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
+
+      const evalRequestIds = await submitEvaluationJob(
+        this.publicClient,
+        this.walletClient,
+        this.config.safeAddress,
+        this.config.routerAddress,
+        requestId as `0x${string}`,
+        this.config.mechContractAddress,
+        evaluationDataHex,
+        deliveryRate,
+        maxTimeout,
+      );
+
+      if (evalRequestIds.length > 0) {
+        this.pendingEvaluationClaims.add(evalRequestIds[0]);
+      }
+
+      // Success — clean up both tracking sets
+      this.pendingEvaluations.delete(requestId);
+      this.claimedButNotEvaluated.delete(requestId);
+    } catch (err) {
+      console.error(`[mech] Failed to create evaluation job for ${requestId}:`, err);
+      // Track for retry on next poll cycle (doesn't require a new Deliver event)
+      this.claimedButNotEvaluated.add(requestId);
     }
   }
 
