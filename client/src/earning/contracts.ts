@@ -98,6 +98,9 @@ export interface ChainConfig {
   gnosisSafeSameAddressMultisig: string;
   bondAmount: bigint;
   agentId: number;
+  mechMarketplace: string;
+  mechFactory: string;
+  mechRequestPrice: bigint;
   serviceHash: string;
   serviceNft: string;
   minEoaGasEth: bigint;
@@ -115,6 +118,11 @@ const BASE_CONFIG: ChainConfig = {
 
   // Tokens
   olasToken: '0x54330d28ca3357F294334BDC454a032e7f353416',
+
+  // Mech marketplace
+  mechMarketplace: '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020',
+  mechFactory: '0x2E008211f34b25A7d7c102403c6C2C3B665a1abe', // Native payment type
+  mechRequestPrice: 99n, // wei — ecosystem standard
 
   // Jinn staking (JinnRouter activity checker)
   stakingContract: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
@@ -288,6 +296,20 @@ export const SERVICE_REGISTRY_APPROVE_ABI = [
     ],
     name: 'approve',
     outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+export const MECH_MARKETPLACE_CREATE_ABI = [
+  {
+    inputs: [
+      { name: 'serviceId', type: 'uint256' },
+      { name: 'mechFactory', type: 'address' },
+      { name: 'payload', type: 'bytes' },
+    ],
+    name: 'create',
+    outputs: [{ name: 'mech', type: 'address' }],
     stateMutability: 'nonpayable',
     type: 'function',
   },
