@@ -16,7 +16,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Contract, JsonRpcProvider, keccak256, AbiCoder, zeroPadValue, toBeHex } from 'ethers';
+import { Contract, JsonRpcProvider, Interface, keccak256, AbiCoder, zeroPadValue, toBeHex } from 'ethers';
 import { EarningBootstrapper } from '../src/earning/bootstrap.js';
 import {
   SERVICE_REGISTRY_L2_ABI,
@@ -208,6 +208,13 @@ async function main(): Promise<void> {
           throw new Error('EOA ETH balance is still 0 after anvil_setBalance');
         }
 
+        // Fund Safe with ETH (needed for payable calls like activateRegistration)
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
+          safeAddress,
+          '0x56BC75E2D63100000', // 100 ETH
+        ]);
+        console.log(`    Funded Safe (${safeAddress}) with 100 ETH`);
+
         // Fund Safe with OLAS using anvil_setStorageAt
         // OLAS on Base uses standard ERC-20 layout: balances mapping at slot 0
         const olasAmount = 10000n * 10n ** 18n; // 10,000 OLAS (2x the bond)
@@ -215,6 +222,30 @@ async function main(): Promise<void> {
         const value = zeroPadValue(toBeHex(olasAmount), 32);
 
         await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [OLAS_TOKEN, slot, value]);
+
+        // Fund staking contract with OLAS for rewards via deposit()
+        // First: give the EOA OLAS tokens
+        const eoaOlasSlot = erc20BalanceSlot(eoaAddress);
+        const eoaOlasAmount = 100000n * 10n ** 18n;
+        await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [OLAS_TOKEN, eoaOlasSlot, zeroPadValue(toBeHex(eoaOlasAmount), 32)]);
+
+        // Approve + deposit OLAS into the staking contract (impersonated EOA)
+        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [eoaAddress]);
+
+        const olasApprove = new Interface(['function approve(address spender, uint256 amount) returns (bool)']).encodeFunctionData('approve', [CHAIN_CONFIG.stakingContract, eoaOlasAmount]);
+        await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: eoaAddress, to: OLAS_TOKEN, data: olasApprove }]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        const depositData = new Interface(['function deposit(uint256 amount)']).encodeFunctionData('deposit', [eoaOlasAmount]);
+        await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: eoaAddress, to: CHAIN_CONFIG.stakingContract, data: depositData }]);
+
+        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [eoaAddress]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Verify availableRewards
+        const stakingContract = new Contract(CHAIN_CONFIG.stakingContract, ['function availableRewards() view returns (uint256)'], new JsonRpcProvider(ANVIL_RPC));
+        const rewards = await stakingContract.availableRewards();
+        console.log(`    Staking contract availableRewards: ${rewards} (${Number(rewards) / 1e18} OLAS)`);
 
         // Verify OLAS balance
         const provider = new JsonRpcProvider(ANVIL_RPC);
