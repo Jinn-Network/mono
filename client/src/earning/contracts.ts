@@ -151,7 +151,7 @@ export const SERVICE_MANAGER_ABI = [
       { name: 'agentIds', type: 'uint32[]' },
       { name: 'agentParams', type: 'tuple[]', components: [
         { name: 'slots', type: 'uint32' },
-        { name: 'bond', type: 'uint256' },
+        { name: 'bond', type: 'uint96' },
       ]},
       { name: 'threshold', type: 'uint32' },
     ],

@@ -559,6 +559,22 @@ export class EarningBootstrapper {
       }
     }
 
+    // Fallback: extract from ERC721 Transfer event (mint from 0x0)
+    const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+    const zeroTopic = '0x0000000000000000000000000000000000000000000000000000000000000000';
+    for (const log of receipt.logs) {
+      if (
+        log.address.toLowerCase() === serviceRegistryAddress &&
+        log.topics[0] === transferTopic &&
+        log.topics[1] === zeroTopic // from = 0x0 (mint)
+      ) {
+        const tokenId = parseInt(log.topics[3], 16);
+        if (!isNaN(tokenId) && tokenId > 0) {
+          return tokenId;
+        }
+      }
+    }
+
     return null;
   }
 
