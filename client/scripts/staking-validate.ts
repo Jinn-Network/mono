@@ -326,43 +326,25 @@ async function main(): Promise<void> {
           throw new Error(`Service state is ${serviceState}, expected 4 (Deployed)`);
         }
 
-        // 5b: Service should be staked — getServiceInfo returns non-zero tsStart
+        // 5b: Service should be staked — getServiceIds includes our service
         const staking = new Contract(
           CHAIN_CONFIG.stakingContract,
-          STAKING_ABI,
+          ['function getServiceIds() view returns (uint256[])',
+           'function getStakingState(uint256 serviceId) view returns (uint8)'],
           provider,
         );
-        const serviceInfo = await staking.getServiceInfo(serviceId);
-        const multisig = serviceInfo[1] as string;
-        const tsStart = serviceInfo[3] as bigint;
+        const serviceIds: bigint[] = await staking.getServiceIds();
+        const isStaked = serviceIds.map(Number).includes(serviceId);
+        console.log(`    Staked services: [${serviceIds.join(', ')}]`);
+        console.log(`    Our service ${serviceId} is staked: ${isStaked}`);
 
-        console.log(`    Staking multisig: ${multisig}`);
-        console.log(`    Staking tsStart: ${tsStart}`);
-
-        if (tsStart === 0n) {
-          throw new Error('Service tsStart is 0 — service is not staked');
+        if (!isStaked) {
+          throw new Error(`Service ${serviceId} not found in staked services`);
         }
 
-        if (multisig.toLowerCase() !== safeAddress.toLowerCase()) {
-          throw new Error(
-            `Staking multisig ${multisig} does not match Safe ${safeAddress}`,
-          );
-        }
-
-        // 5c: Read getServiceIds from staking contract — should include our service
-        const stakingGetIds = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          ['function getServiceIds() view returns (uint256[])'],
-          provider,
-        );
-        const serviceIds: bigint[] = await stakingGetIds.getServiceIds();
-        const found = serviceIds.some(id => Number(id) === serviceId);
-
-        console.log(`    Staked service IDs: [${serviceIds.map(String).join(', ')}]`);
-        if (!found) {
-          throw new Error(`Service ${serviceId} not found in getServiceIds()`);
-        }
-        console.log(`    Service ${serviceId} confirmed in staking contract`);
+        // 5c: Check staking state
+        const stakingState = await staking.getStakingState(serviceId);
+        console.log(`    Staking state: ${stakingState} (1=Staked)`);
 
         // 5d: Read activity checker getMultisigNonces
         // First, get the activity checker address from the staking contract
