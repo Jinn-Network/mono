@@ -18,3 +18,6 @@ export { DeliveryWatcherLoop } from './daemon/delivery-watcher.js';
 
 // Store
 export { Store } from './store/store.js';
+
+// Earning
+export { EarningBootstrapper, type EarningBootstrapperOptions } from './earning/bootstrap.js';
