@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Earning bootstrap step progression:
  *   wallet -> safe_predicted -> awaiting_funding -> safe_deployed ->
  *   service_created -> service_activated -> agents_registered ->
- *   service_deployed -> service_staked -> complete
+ *   service_deployed -> service_staked -> mech_deployed -> complete
  */
 export const EarningStepSchema = z.enum([
   'wallet',
@@ -16,6 +16,7 @@ export const EarningStepSchema = z.enum([
   'agents_registered',
   'service_deployed',
   'service_staked',
+  'mech_deployed',
   'complete',
 ]);
 
@@ -35,6 +36,7 @@ export const EARNING_STEP_ORDER: readonly EarningStep[] = [
   'agents_registered',
   'service_deployed',
   'service_staked',
+  'mech_deployed',
   'complete',
 ] as const;
 
@@ -44,6 +46,7 @@ export const EarningStateSchema = z
     agent_address: z.string().nullable(),
     safe_address: z.string().nullable(),
     service_id: z.number().nullable(),
+    mech_address: z.string().nullable(),
     staking_address: z.string().nullable(),
     chain: z.literal('base'),
     error: z.string().nullable(),
@@ -59,6 +62,7 @@ export function createDefaultEarningState(): EarningState {
     agent_address: null,
     safe_address: null,
     service_id: null,
+    mech_address: null,
     staking_address: null,
     chain: 'base',
     error: null,

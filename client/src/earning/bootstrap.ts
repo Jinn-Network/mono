@@ -4,7 +4,7 @@
  * Drives the complete earning setup flow:
  *   wallet -> safe_predicted -> awaiting_funding -> safe_deployed ->
  *   service_created -> service_activated -> agents_registered ->
- *   service_deployed -> service_staked -> complete
+ *   service_deployed -> service_staked -> mech_deployed -> complete
  *
  * Each step is idempotent -- safe to re-run after interruption.
  */
@@ -25,6 +25,7 @@ import {
   SERVICE_REGISTRY_APPROVE_ABI,
   SERVICE_REGISTRY_L2_ABI,
   STAKING_ABI,
+  MECH_MARKETPLACE_CREATE_ABI,
   cidToBytes32,
   getChainConfig,
 } from './contracts.js';
@@ -150,6 +151,8 @@ export class EarningBootstrapper {
         return this.stepDeployService(state, password);
       case 'service_staked':
         return this.stepStakeService(state, password);
+      case 'mech_deployed':
+        return this.stepDeployMech(state, password);
       case 'complete':
         return state;
       default:
@@ -478,7 +481,89 @@ export class EarningBootstrapper {
     ]);
 
     console.error(`[earning-bootstrap] Service ${serviceId} staked (tx: ${result.hash})`);
-    return this.store.patch({ step: 'complete' });
+    return this.store.patch({ step: 'mech_deployed' });
+  }
+
+  // -----------------------------------------------------------------------
+  // Step 10: mech_deployed
+  // -----------------------------------------------------------------------
+
+  private async stepDeployMech(state: EarningState, password: string): Promise<EarningState> {
+    if (state.mech_address) {
+      console.error(`[earning-bootstrap] Mech already deployed at ${state.mech_address}, skipping`);
+      return this.store.patch({ step: 'complete' });
+    }
+
+    const serviceId = state.service_id!;
+    const signerKey = await this.loadPrivateKey(password);
+    const safe = await this.getSafe(state, signerKey);
+
+    const mechMarketplaceIface = new Interface(MECH_MARKETPLACE_CREATE_ABI);
+
+    // Encode the request price as the payload
+    const { AbiCoder } = await import('ethers');
+    const payload = AbiCoder.defaultAbiCoder().encode(['uint256'], [this.config.mechRequestPrice]);
+
+    const createData = mechMarketplaceIface.encodeFunctionData('create', [
+      serviceId,
+      this.config.mechFactory,
+      payload,
+    ]);
+
+    console.error(`[earning-bootstrap] Deploying mech for service ${serviceId}`);
+    const result = await executeSafeTxBatch(safe, [
+      { to: this.config.mechMarketplace, value: '0', data: createData },
+    ]);
+
+    // Wait for confirmation and parse CreateMech event
+    console.error(`[earning-bootstrap] Mech deployment tx: ${result.hash}`);
+    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    let mechAddress: string | null = null;
+
+    if (!receipt) {
+      throw new Error(`Mech deployment tx not confirmed: ${result.hash}`);
+    } else if (receipt.status === 0) {
+      throw new Error(`Mech deployment tx reverted: ${result.hash}`);
+    }
+
+    if (receipt) {
+      console.error(`[earning-bootstrap] Receipt has ${receipt.logs.length} logs:`);
+      for (const log of receipt.logs) {
+        console.error(`  addr=${log.address.slice(0, 10)}... topic0=${log.topics[0]?.slice(0, 10)}... topics=${log.topics.length}`);
+      }
+      // CreateMech(address indexed mech, uint256 indexed serviceId, address indexed mechFactory)
+      // Topic0 = 0x46e1ca45c09520471c43e2e88eca33bb51803011cfd456933629dcc645ecacd6
+      const createMechTopic = '0x46e1ca45c09520471c43e2e88eca33bb51803011cfd456933629dcc645ecacd6';
+      for (const log of receipt.logs) {
+        if (log.topics[0] === createMechTopic && log.topics.length >= 2) {
+          mechAddress = getAddress('0x' + log.topics[1].slice(26));
+          break;
+        }
+      }
+
+      // Fallback: scan for any log from the marketplace with enough topics
+      if (!mechAddress) {
+        for (const log of receipt.logs) {
+          if (log.address.toLowerCase() === this.config.mechMarketplace.toLowerCase() && log.topics.length >= 2) {
+            const potentialMech = '0x' + log.topics[1].slice(26);
+            if (potentialMech.length === 42 && potentialMech !== '0x0000000000000000000000000000000000000000') {
+              mechAddress = getAddress(potentialMech);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (!mechAddress) {
+      throw new Error(`CreateMech event not found in tx ${result.hash}`);
+    }
+
+    console.error(`[earning-bootstrap] Mech deployed at ${mechAddress} (tx: ${result.hash})`);
+    return this.store.patch({
+      step: 'complete',
+      mech_address: mechAddress,
+    });
   }
 
   // -----------------------------------------------------------------------
