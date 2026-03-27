@@ -3,14 +3,12 @@
  *
  * Reads an MCP config file from --mcp-config, spawns the jinn-client MCP server
  * as a subprocess via StdioClientTransport, discovers tools, and executes
- * a deterministic restoration sequence.
+ * a deterministic sequence based on the request type.
  *
- * Matches the protocol repo's mock-agent.ts pattern — the agent is a separate
- * process that interacts with the system via MCP tools, not inline code.
+ * For restoration requests: produces a mock restoration result.
+ * For evaluation requests: fetches the restoration context, produces a verdict.
  *
  * Args: -p <prompt> --mcp-config <path> [--allowedTools <filter>] [--model <model>]
- *
- * Usage: npx tsx scripts/mock-agent.ts -p "prompt" --mcp-config /path/to/config.json
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -36,8 +34,6 @@ if (!prompt) {
 }
 
 if (!mcpConfigPath) {
-  // No MCP config — fall back to simple prompt-in/result-out mode
-  // (backwards compatible with non-MCP usage)
   const descMatch = prompt.match(/Description:\s*(.+)/);
   const description = descMatch?.[1]?.trim() ?? 'unknown';
   process.stdout.write(JSON.stringify({
@@ -72,7 +68,7 @@ if (!serverName) {
 }
 
 const serverDef = config.mcpServers[serverName]!;
-process.stderr.write(`[mock-agent] Connecting to MCP server '${serverName}': ${serverDef.command} ${serverDef.args.join(' ')}\n`);
+process.stderr.write(`[mock-agent] Connecting to MCP server '${serverName}'\n`);
 
 // ── Spawn MCP server and connect ─────────────────────────────────────────────
 
@@ -88,65 +84,100 @@ const client = new Client({
 });
 
 await client.connect(transport);
-process.stderr.write('[mock-agent] Connected to MCP server\n');
-
-// ── Discover tools ───────────────────────────────────────────────────────────
 
 const { tools } = await client.listTools();
-process.stderr.write(`[mock-agent] Discovered ${tools.length} tools: ${tools.map(t => t.name).join(', ')}\n`);
+process.stderr.write(`[mock-agent] Discovered ${tools.length} tools\n`);
 
 // ── Helper ───────────────────────────────────────────────────────────────────
 
 async function callTool(name: string, toolArgs: Record<string, unknown>): Promise<string> {
-  process.stderr.write(`[mock-agent] Calling tool: ${name}(${JSON.stringify(toolArgs)})\n`);
+  process.stderr.write(`[mock-agent] Calling: ${name}\n`);
   const result = await client.callTool({ name, arguments: toolArgs });
   const content = result.content as Array<{ type: string; text?: string }>;
-  const text = content
+  return content
     .filter((c) => c.type === 'text' && c.text)
     .map(c => c.text!)
     .join('\n');
-  process.stderr.write(`[mock-agent] Result: ${text.slice(0, 200)}\n`);
-  return text;
 }
 
-// ── Execute deterministic restoration sequence ───────────────────────────────
+// ── Get desired state ────────────────────────────────────────────────────────
 
-// Step 1: Get desired state from MCP server
-process.stderr.write('[mock-agent] Step 1: Getting desired state...\n');
 const stateJson = await callTool('get_desired_state', {});
-const state = JSON.parse(stateJson) as { id: string; description: string; requestId: string };
+const state = JSON.parse(stateJson) as {
+  id: string;
+  description: string;
+  requestId: string;
+  type?: string;
+  restorationRequestId?: string;
+};
 
-// Step 2: Report progress
-process.stderr.write('[mock-agent] Step 2: Reporting progress...\n');
-await callTool('report_progress', { message: `Starting restoration for: ${state.description}` });
+const isEvaluation = state.type === 'evaluation';
+process.stderr.write(`[mock-agent] Request type: ${state.type || 'restoration'}\n`);
 
-// Step 3: Submit restoration result
-process.stderr.write('[mock-agent] Step 3: Submitting result...\n');
-await callTool('submit_restoration_result', {
-  success: true,
-  description: `Mock restoration completed for: ${state.description}`,
-  data: JSON.stringify({
+// ── Execute based on type ────────────────────────────────────────────────────
+
+if (isEvaluation) {
+  // ── Evaluation flow ──────────────────────────────────────────────────────
+  // A real agent would:
+  // 1. Fetch the restoration delivery from IPFS using restorationRequestId
+  // 2. Read the original desired state description
+  // 3. Compare: did the restoration achieve the desired state?
+  // 4. Return a verdict
+
+  await callTool('report_progress', {
+    message: `Evaluating restoration ${state.restorationRequestId?.slice(0, 14)}... for: ${state.description}`,
+  });
+
+  // Mock evaluation: always succeeds (deterministic)
+  // A real agent would do actual verification here
+  const verdict = {
+    protocol: 'jinn-client/v1',
+    type: 'evaluation-verdict',
+    desiredStateId: state.id,
+    restorationRequestId: state.restorationRequestId,
+    requestId: state.requestId,
+    success: true,
+    reason: `Mock evaluation: desired state "${state.description}" verified as restored`,
+    evaluatedAt: new Date().toISOString(),
+    agent: 'mock-agent',
+  };
+
+  await callTool('submit_restoration_result', {
+    success: true,
+    description: verdict.reason,
+    data: JSON.stringify(verdict),
+  });
+
+  process.stdout.write(JSON.stringify(verdict));
+  process.stderr.write('[mock-agent] Evaluation verdict delivered.\n');
+
+} else {
+  // ── Restoration flow ─────────────────────────────────────────────────────
+
+  await callTool('report_progress', {
+    message: `Restoring: ${state.description}`,
+  });
+
+  const result = {
     protocol: 'jinn-client/v1',
     type: 'restoration-result',
     desiredStateId: state.id,
     requestId: state.requestId,
+    description: state.description,
+    success: true,
     restoredAt: new Date().toISOString(),
     agent: 'mock-agent',
-  }),
-});
+  };
 
-// Step 4: Write final result to stdout (captured by ClaudeRunner)
-const finalResult = JSON.stringify({
-  protocol: 'jinn-client/v1',
-  type: 'restoration-result',
-  desiredStateId: state.id,
-  description: state.description,
-  success: true,
-  agent: 'mock-agent',
-});
-process.stdout.write(finalResult);
+  await callTool('submit_restoration_result', {
+    success: true,
+    description: `Mock restoration completed for: ${state.description}`,
+    data: JSON.stringify(result),
+  });
 
-process.stderr.write('[mock-agent] Restoration complete. Exiting.\n');
+  process.stdout.write(JSON.stringify(result));
+  process.stderr.write('[mock-agent] Restoration delivered.\n');
+}
 
 // ── Cleanup ──────────────────────────────────────────────────────────────────
 

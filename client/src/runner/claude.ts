@@ -41,6 +41,8 @@ export class ClaudeRunner implements Runner {
             DESIRED_STATE_ID: desiredState.id,
             DESIRED_STATE_DESCRIPTION: desiredState.description,
             DESIRED_STATE_CONTEXT: desiredState.context ? JSON.stringify(desiredState.context) : '',
+            DESIRED_STATE_TYPE: desiredState.type ?? '',
+            RESTORATION_REQUEST_ID: desiredState.restorationRequestId ?? '',
             REQUEST_ID: context.requestId,
           },
         },

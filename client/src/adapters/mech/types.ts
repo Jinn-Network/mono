@@ -1,6 +1,7 @@
 export interface MechAdapterConfig {
   rpcUrl: string;
   mechMarketplaceAddress: `0x${string}`;
+  routerAddress: `0x${string}`;  // JinnRouter proxy on Base
   mechContractAddress: `0x${string}`;
   safeAddress: `0x${string}`;
   agentEoaPrivateKey: `0x${string}`;
@@ -128,6 +129,71 @@ export const MECH_MARKETPLACE_DELIVER_ABI = [
       { name: 'deliveryRates', type: 'uint256[]' },
     ],
     outputs: [{ name: 'deliveredRequests', type: 'bool[]' }],
+  },
+] as const;
+
+export const JINN_ROUTER_ABI = [
+  {
+    name: 'createRestorationJob',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'requestData', type: 'bytes' },
+      { name: 'priorityMech', type: 'address' },
+      { name: 'maxDeliveryRate', type: 'uint256' },
+      { name: 'responseTimeout', type: 'uint256' },
+      { name: 'paymentType', type: 'bytes32' },
+      { name: 'paymentData', type: 'bytes' },
+    ],
+    outputs: [{ name: 'requestId', type: 'bytes32' }],
+  },
+  {
+    name: 'createEvaluationJob',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'restorationRequestId', type: 'bytes32' },
+      { name: 'requestData', type: 'bytes' },
+      { name: 'evaluationMech', type: 'address' },
+      { name: 'maxDeliveryRate', type: 'uint256' },
+      { name: 'responseTimeout', type: 'uint256' },
+      { name: 'paymentType', type: 'bytes32' },
+      { name: 'paymentData', type: 'bytes' },
+    ],
+    outputs: [{ name: 'requestId', type: 'bytes32' }],
+  },
+  {
+    name: 'claimDelivery',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    outputs: [],
+  },
+  {
+    name: 'RestorationJobCreated',
+    type: 'event',
+    inputs: [
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'requestId', type: 'bytes32', indexed: true },
+    ],
+  },
+  {
+    name: 'EvaluationJobCreated',
+    type: 'event',
+    inputs: [
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'requestId', type: 'bytes32', indexed: true },
+      { name: 'restorationRequestId', type: 'bytes32', indexed: true },
+    ],
+  },
+  {
+    name: 'DeliveryClaimed',
+    type: 'event',
+    inputs: [
+      { name: 'claimer', type: 'address', indexed: true },
+      { name: 'requestId', type: 'bytes32', indexed: true },
+      { name: 'jobType', type: 'uint8', indexed: false },
+    ],
   },
 ] as const;
 

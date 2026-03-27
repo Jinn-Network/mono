@@ -41,6 +41,15 @@ export class Store {
     return row?.value ?? null;
   }
 
+  getLastProcessedBlock(): bigint | null {
+    const row = this.db.prepare('SELECT value FROM config WHERE key = ?').get('last_processed_block') as { value: string } | undefined;
+    return row?.value ? BigInt(row.value) : null;
+  }
+
+  setLastProcessedBlock(block: bigint): void {
+    this.db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run('last_processed_block', block.toString());
+  }
+
   close(): void {
     this.db.close();
   }
