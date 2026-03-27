@@ -27,6 +27,8 @@ const desiredState = {
   context: process.env['DESIRED_STATE_CONTEXT']
     ? JSON.parse(process.env['DESIRED_STATE_CONTEXT']) as Record<string, unknown>
     : undefined,
+  type: process.env['DESIRED_STATE_TYPE'] ?? '',
+  restorationRequestId: process.env['RESTORATION_REQUEST_ID'] ?? '',
 };
 
 const requestId = process.env['REQUEST_ID'] ?? '';
@@ -44,6 +46,8 @@ server.tool(
         id: desiredState.id,
         description: desiredState.description,
         context: desiredState.context,
+        type: desiredState.type || undefined,
+        restorationRequestId: desiredState.restorationRequestId || undefined,
         requestId,
       }),
     }],
