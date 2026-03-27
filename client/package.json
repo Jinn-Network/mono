@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "tsx src/index.ts",
-    "e2e": "tsx scripts/e2e-validate.ts"
+    "e2e": "tsx scripts/e2e-validate.ts",
+    "staking": "tsx scripts/staking-validate.ts"
   },
   "dependencies": {
     "@jinn-network/mech-client-ts": "^0.0.6",
