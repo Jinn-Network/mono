@@ -79,6 +79,44 @@ ${contextSection}
 Work autonomously. Do not ask questions.`;
 }
 
+// Environment allowlist for agent subprocess — only pass what's needed.
+// The agent must never see private keys, operator passwords, or secrets.
+const ENV_ALLOWLIST = [
+  'PATH',
+  'HOME',
+  'USER',
+  'SHELL',
+  'LANG',
+  'TERM',
+  'TMPDIR',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'NODE_PATH',
+  'NODE_OPTIONS',
+  'NPM_CONFIG_PREFIX',
+];
+
+const ENV_BLOCKLIST = [
+  'PRIVATE_KEY',
+  'SECRET',
+  'PASSWORD',
+  'OPERATOR',
+  'MNEMONIC',
+  'KEYSTORE',
+  'API_KEY',
+  'AUTH_TOKEN',
+  'SERVICE_ROLE',
+];
+
+function buildAgentEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of ENV_ALLOWLIST) {
+    if (process.env[key]) env[key] = process.env[key]!;
+  }
+  return env;
+}
+
 function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, model?: string, timeoutMs?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = ['-p', prompt, '--mcp-config', mcpConfigPath];
@@ -87,7 +125,7 @@ function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, m
 
     const child = spawn(claudePath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: buildAgentEnv(),
       timeout: timeoutMs,
     });
 
