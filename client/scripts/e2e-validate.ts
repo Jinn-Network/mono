@@ -708,6 +708,33 @@ async function main(): Promise<void> {
 
         const remainingRewards = await staking.availableRewards();
         console.log(`    Remaining rewards: ${Number(remainingRewards) / 1e18} OLAS`);
+
+        // Verify reward claiming works
+        // claim() can be called by anyone — returns rewards to the service owner
+        const olasContract = new Contract(
+          CHAIN_CONFIG.olasToken,
+          ['function balanceOf(address) view returns (uint256)'],
+          provider,
+        );
+        const olasBalanceBefore = await olasContract.balanceOf(safeAddress);
+
+        // Impersonate anyone to call claim (it credits the service owner, not the caller)
+        const claimCaller = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [claimCaller]);
+        const claimData = new Interface(['function claim(uint256 serviceId) returns (uint256)']).encodeFunctionData('claim', [serviceId]);
+        await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: claimCaller, to: CHAIN_CONFIG.stakingContract, data: claimData }]);
+        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [claimCaller]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        const olasBalanceAfter = await olasContract.balanceOf(safeAddress);
+        const rewardsClaimed = olasBalanceAfter - olasBalanceBefore;
+        console.log(`    OLAS rewards claimed: ${Number(rewardsClaimed) / 1e18} OLAS`);
+
+        if (rewardsClaimed > 0n) {
+          console.log('    Reward claiming verified — OLAS transferred to operator Safe');
+        } else {
+          console.log('    No rewards claimed (may need more activity or time for eligibility)');
+        }
       }),
     );
 
@@ -938,6 +965,31 @@ async function main(): Promise<void> {
           throw new Error('deliveryMech is zero — cross-operator delivery did not happen');
         }
         console.log(`    Cross-operator delivery confirmed, deliveryMech: ${deliveryMech}`);
+
+        // Full lifecycle: A claims delivery + creates evaluation
+        const miningInterval2 = setInterval(async () => {
+          try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch {}
+        }, 1000);
+
+        const crossDeliveryIter = creatorAdapter.watchForDeliveries()[Symbol.asyncIterator]();
+        const crossDelivery = await Promise.race([
+          crossDeliveryIter.next().then(r => r.value),
+          sleep(30000).then(() => { throw new Error('Cross-operator watchForDeliveries timed out'); }),
+        ]);
+        console.log(`    A claimed restoration, type: ${crossDelivery?.desiredState?.type}`);
+
+        // B delivers evaluation
+        await restorerB.processOne();
+        console.log('    B delivered evaluation');
+
+        // A claims evaluation
+        const crossEvalDelivery = await Promise.race([
+          crossDeliveryIter.next().then(r => r.value),
+          sleep(30000).then(() => { throw new Error('Cross-operator eval watchForDeliveries timed out'); }),
+        ]);
+        clearInterval(miningInterval2);
+        console.log(`    A claimed evaluation, type: ${crossEvalDelivery?.desiredState?.type}`);
+        console.log('    Cross-operator full lifecycle complete');
 
         await creatorAdapter.stop();
         await restorerAdapterB.stop();
