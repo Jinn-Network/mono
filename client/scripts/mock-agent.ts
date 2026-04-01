@@ -118,32 +118,43 @@ process.stderr.write(`[mock-agent] Request type: ${state.type || 'restoration'}\
 
 if (isEvaluation) {
   // ── Evaluation flow ──────────────────────────────────────────────────────
-  // A real agent would:
-  // 1. Fetch the restoration delivery from IPFS using restorationRequestId
-  // 2. Read the original desired state description
-  // 3. Compare: did the restoration achieve the desired state?
-  // 4. Return a verdict
 
   await callTool('report_progress', {
     message: `Evaluating restoration ${state.restorationRequestId?.slice(0, 14)}... for: ${state.description}`,
   });
 
-  // Mock evaluation: always succeeds (deterministic)
-  // A real agent would do actual verification here
+  // Fetch the restoration delivery data
+  const deliveryJson = await callTool('get_restoration_delivery', {});
+  const delivery = JSON.parse(deliveryJson) as {
+    restorationRequestId?: string;
+    deliveryData?: unknown;
+    error?: string;
+  };
+
+  const hasDelivery = !delivery.error && delivery.deliveryData;
+  const deliverySummary = hasDelivery
+    ? (typeof delivery.deliveryData === 'string' ? delivery.deliveryData.slice(0, 200) : JSON.stringify(delivery.deliveryData).slice(0, 200))
+    : 'no delivery data available';
+
+  process.stderr.write(`[mock-agent] Delivery data: ${deliverySummary}\n`);
+
   const verdict = {
     protocol: 'jinn-client/v1',
     type: 'evaluation-verdict',
     desiredStateId: state.id,
     restorationRequestId: state.restorationRequestId,
     requestId: state.requestId,
-    success: true,
-    reason: `Mock evaluation: desired state "${state.description}" verified as restored`,
+    success: hasDelivery,
+    reason: hasDelivery
+      ? `Mock evaluation: restoration delivery received and verified for "${state.description}"`
+      : `Mock evaluation: no restoration delivery data available for "${state.description}"`,
+    deliveryData: delivery.deliveryData,
     evaluatedAt: new Date().toISOString(),
     agent: 'mock-agent',
   };
 
   await callTool('submit_restoration_result', {
-    success: true,
+    success: verdict.success,
     description: verdict.reason,
     data: JSON.stringify(verdict),
   });
@@ -153,6 +164,11 @@ if (isEvaluation) {
 
 } else {
   // ── Restoration flow ─────────────────────────────────────────────────────
+
+  // Check for prior knowledge before attempting restoration
+  const priorJson = await callTool('search_artifacts', { tags: ['restoration'], limit: 5 });
+  const prior = JSON.parse(priorJson) as { results: unknown[] };
+  process.stderr.write(`[mock-agent] Found ${prior.results.length} prior artifacts\n`);
 
   await callTool('report_progress', {
     message: `Restoring: ${state.description}`,
@@ -168,6 +184,13 @@ if (isEvaluation) {
     restoredAt: new Date().toISOString(),
     agent: 'mock-agent',
   };
+
+  await callTool('publish_artifact', {
+    title: `Restoration approach for: ${state.description.slice(0, 50)}`,
+    content: 'Mock agent used deterministic restoration strategy.',
+    tags: ['mock', 'restoration'],
+    outcome: 'SUCCESS',
+  });
 
   await callTool('submit_restoration_result', {
     success: true,

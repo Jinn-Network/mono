@@ -4,7 +4,7 @@ export interface RunnerContext {
   requestId: RequestId;
   workingDirectory: string;
   timeoutMs: number;
-  // TODO: Add mcpServer: McpServer when MCP server is implemented
+  storePath?: string;
 }
 
 export interface Runner {
