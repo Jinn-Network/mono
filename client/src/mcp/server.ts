@@ -7,13 +7,16 @@
  *   DESIRED_STATE_DESCRIPTION — Human-readable description
  *   DESIRED_STATE_CONTEXT     — JSON context (optional)
  *   REQUEST_ID                — On-chain request ID
+ *   RESTORATION_DELIVERY_DATA — JSON delivery data (evaluation requests only)
  *
  * Usage: npx tsx src/mcp/server.ts
  */
 
+import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { Store } from '../store/store.js';
 
 const server = new McpServer({
   name: 'jinn-client',
@@ -32,6 +35,8 @@ const desiredState = {
 };
 
 const requestId = process.env['REQUEST_ID'] ?? '';
+const storePath = process.env['STORE_PATH'] ?? '';
+const store = storePath ? new Store(storePath) : null;
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +95,82 @@ server.tool(
     console.error(`[mcp] Result: ${JSON.stringify(result)}`);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify({ submitted: true, ...result }) }],
+    };
+  },
+);
+
+server.tool(
+  'get_restoration_delivery',
+  'Get the restoration result that needs to be evaluated (only available for evaluation requests)',
+  {},
+  async () => {
+    const raw = process.env['RESTORATION_DELIVERY_DATA'];
+    if (!raw) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ error: 'Not an evaluation request or no delivery data available' }),
+        }],
+      };
+    }
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          restorationRequestId: desiredState.restorationRequestId,
+          deliveryData: JSON.parse(raw),
+        }),
+      }],
+    };
+  },
+);
+
+server.tool(
+  'publish_artifact',
+  'Publish a knowledge artifact for future agents to reference',
+  {
+    title: z.string().describe('Short title for the artifact'),
+    content: z.string().describe('The artifact content (text, JSON, etc)'),
+    tags: z.array(z.string()).optional().describe('Tags for categorization'),
+    outcome: z.enum(['SUCCESS', 'FAILURE', 'UNKNOWN']).optional().describe('Outcome of the work this artifact relates to'),
+  },
+  async ({ title, content, tags, outcome }) => {
+    const id = randomUUID();
+    if (store) {
+      store.insertArtifact({
+        id,
+        desiredStateId: desiredState.id,
+        requestId,
+        title,
+        content,
+        tags: tags ?? [],
+        outcome: outcome ?? 'UNKNOWN',
+      });
+    }
+    console.error(`[mcp] Artifact published: ${id} — ${title}`);
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify({ published: true, id, title }) }],
+    };
+  },
+);
+
+server.tool(
+  'search_artifacts',
+  'Search previously published knowledge artifacts',
+  {
+    tags: z.array(z.string()).optional().describe('Filter by tags'),
+    outcome: z.enum(['SUCCESS', 'FAILURE', 'UNKNOWN']).optional().describe('Filter by outcome'),
+    limit: z.number().optional().describe('Max results (default 50)'),
+  },
+  async ({ tags, outcome, limit }) => {
+    if (!store) {
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'No store configured', results: [] }) }],
+      };
+    }
+    const results = store.searchArtifacts({ tags, outcome, limit });
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify({ results }) }],
     };
   },
 );

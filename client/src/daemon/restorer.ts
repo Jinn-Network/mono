@@ -46,6 +46,7 @@ export class RestorerLoop {
         requestId: request.requestId,
         workingDirectory: this.workingDirectory,
         timeoutMs: this.timeoutMs,
+        storePath: this.store.path,
       });
 
       await this.adapter.submitResult(request.requestId, result);

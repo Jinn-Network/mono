@@ -409,7 +409,8 @@ async function main(): Promise<void> {
     const { ClaudeRunner } = await import('../src/runner/claude.js');
     const { Store } = await import('../src/store/store.js');
 
-    const store = new Store(':memory:');
+    const storePath = join(tmpDir!, 'jinn-e2e.db');
+    const store = new Store(storePath);
     const mockAgentPath = join(__dirname, 'mock-agent.sh');
     const runner = new ClaudeRunner({ claudePath: mockAgentPath });
     const restorer = new RestorerLoop(adapter!, runner, store);
@@ -599,6 +600,23 @@ async function main(): Promise<void> {
         console.log(`    Evaluation delivery claimed for requestId: ${del.requestId}`);
         console.log(`    desiredState.type: ${del.desiredState.type}`);
 
+        // Verify the evaluation verdict contains restoration delivery data
+        // (proves get_restoration_delivery tool worked in the mock agent)
+        try {
+          const verdict = JSON.parse(del.result.data) as {
+            type?: string;
+            deliveryData?: unknown;
+            success?: boolean;
+          };
+          if (verdict.type === 'evaluation-verdict' && verdict.deliveryData) {
+            console.log('    Evaluation verdict contains deliveryData — get_restoration_delivery worked');
+          } else if (verdict.type === 'evaluation-verdict') {
+            console.log('    WARNING: Evaluation verdict has no deliveryData — get_restoration_delivery may not have received data');
+          }
+        } catch {
+          console.log('    Could not parse evaluation result data');
+        }
+
         // Verify tracking is clean
         const adapterAny = adapter as unknown as {
           pendingEvaluations: Map<string, unknown>;
@@ -636,6 +654,43 @@ async function main(): Promise<void> {
           throw new Error('No DeliveryClaimed event found for evaluation — staking counter not incremented');
         }
         console.log('    Staking counter verified: evaluation delivery claimed');
+      }),
+    );
+
+    // ── Phase 8b: Artifact verification ────────────────────────────────────────
+
+    results.push(
+      await runPhase('Phase 8b: Verify artifacts — publish_artifact wrote to store, search_artifacts works', async () => {
+        // The mock agent calls publish_artifact during restoration (Phase 5)
+        // and search_artifacts before restoration. Verify the store has data.
+        const artifacts = store.searchArtifacts({ tags: ['restoration'] });
+        if (artifacts.length === 0) {
+          throw new Error('No artifacts found with tag "restoration" — publish_artifact did not write to store');
+        }
+        console.log(`    Found ${artifacts.length} artifact(s) in store`);
+        for (const a of artifacts) {
+          console.log(`      - [${a.outcome}] ${a.title}`);
+        }
+
+        // Verify artifact has expected fields
+        const first = artifacts[0];
+        if (!first.id || !first.title || !first.content) {
+          throw new Error('Artifact missing required fields (id, title, content)');
+        }
+        if (first.outcome !== 'SUCCESS') {
+          throw new Error(`Expected outcome SUCCESS, got ${first.outcome}`);
+        }
+        console.log('    Artifact fields verified: id, title, content, outcome=SUCCESS');
+
+        // Verify search by outcome works
+        const failures = store.searchArtifacts({ outcome: 'FAILURE' });
+        console.log(`    Search by outcome=FAILURE: ${failures.length} results (expected 0)`);
+
+        const successes = store.searchArtifacts({ outcome: 'SUCCESS' });
+        if (successes.length !== artifacts.length) {
+          throw new Error(`outcome=SUCCESS count (${successes.length}) doesn't match tag search (${artifacts.length})`);
+        }
+        console.log('    Artifact search verified');
       }),
     );
 

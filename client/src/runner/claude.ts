@@ -44,6 +44,10 @@ export class ClaudeRunner implements Runner {
             DESIRED_STATE_TYPE: desiredState.type ?? '',
             RESTORATION_REQUEST_ID: desiredState.restorationRequestId ?? '',
             REQUEST_ID: context.requestId,
+            RESTORATION_DELIVERY_DATA: desiredState.type === 'evaluation' && desiredState.context?.restorationResult
+              ? JSON.stringify(desiredState.context.restorationResult)
+              : '',
+            STORE_PATH: context.storePath ?? '',
           },
         },
       },
@@ -64,17 +68,30 @@ export function buildPrompt(desiredState: DesiredState): string {
     contextSection = `\n## Context\n${JSON.stringify(desiredState.context, null, 2)}\n`;
   }
 
-  return `You are restoring a desired state.
+  const isEvaluation = desiredState.type === 'evaluation';
+
+  const instructions = isEvaluation
+    ? `## Instructions
+1. Use get_desired_state to understand what was requested
+2. Use get_restoration_delivery to fetch the restoration result
+3. Evaluate whether the restoration achieved the desired state
+4. Use submit_restoration_result to report your verdict
+5. Use report_progress to log progress along the way
+6. Optionally use publish_artifact to record any insights`
+    : `## Instructions
+1. Use get_desired_state to understand what needs to be restored
+2. Take the necessary actions to restore it
+3. Use submit_restoration_result to report what you did
+4. Use report_progress to log progress along the way
+5. Optionally use publish_artifact to record any insights`;
+
+  return `You are ${isEvaluation ? 'evaluating a restoration' : 'restoring a desired state'}.
 
 ## Desired State
 ID: ${desiredState.id}
 Description: ${desiredState.description}
 ${contextSection}
-## Instructions
-1. Use get_desired_state to understand what needs to be restored
-2. Take the necessary actions to restore it
-3. Use submit_restoration_result to report what you did
-4. Use report_progress to log progress along the way
+${instructions}
 
 Work autonomously. Do not ask questions.`;
 }

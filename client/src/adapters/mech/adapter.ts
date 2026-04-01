@@ -291,9 +291,17 @@ export class MechAdapter implements ExecutionAdapter {
               continue;
             }
 
-            // If this was a restoration delivery, post the evaluation job
+            // If this was a restoration delivery, fetch result and post the evaluation job
             if (this.pendingEvaluations.has(requestId)) {
-              await this.tryCreateEvaluationJob(requestId);
+              let restorationResultData: string | undefined;
+              try {
+                const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
+                const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${digest}`) as Record<string, unknown>;
+                restorationResultData = (payload.data as string) ?? JSON.stringify(payload);
+              } catch (err) {
+                console.error(`[mech] Failed to fetch restoration result for evaluation: ${requestId}`, err);
+              }
+              await this.tryCreateEvaluationJob(requestId, restorationResultData);
             }
 
             // If this was an evaluation delivery, just clear the tracking
@@ -344,7 +352,7 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  private async tryCreateEvaluationJob(requestId: string): Promise<void> {
+  private async tryCreateEvaluationJob(requestId: string, restorationResultData?: string): Promise<void> {
     if (!this.pendingEvaluations.has(requestId)) return;
     const originalState = this.pendingEvaluations.get(requestId)!;
     try {
@@ -352,6 +360,10 @@ export class MechAdapter implements ExecutionAdapter {
         ...originalState,
         type: 'evaluation',
         restorationRequestId: requestId,
+        context: {
+          ...originalState.context,
+          ...(restorationResultData ? { restorationResult: restorationResultData } : {}),
+        },
       };
       const evaluationPayload = buildDesiredStatePayload(evaluationState);
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
