@@ -18,6 +18,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@safe-global/protocol-kit": "^6.1.2",
     "@safe-global/types-kit": "^3.0.0",
+    "@slicekit/erc8128": "^0.3.3",
     "better-sqlite3": "^11.0.0",
     "hono": "^4.0.0",
     "viem": "^2.0.0",
