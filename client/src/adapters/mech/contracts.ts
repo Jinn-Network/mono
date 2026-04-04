@@ -7,7 +7,7 @@ import {
   type WalletClient,
   type Log,
 } from 'viem';
-import { MECH_MARKETPLACE_ABI, MECH_ABI, JINN_ROUTER_ABI, NATIVE_PAYMENT_TYPE } from './types.js';
+import { MECH_MARKETPLACE_ABI, MECH_ABI, JINN_ROUTER_ABI, CLAIM_REGISTRY_ABI, NATIVE_PAYMENT_TYPE } from './types.js';
 import { executeSafeTransaction } from './safe.js';
 
 export async function submitRestorationJob(
@@ -153,6 +153,59 @@ export async function claimDelivery(
   throw new Error(`claimDelivery failed after ${CLAIM_RETRY_ATTEMPTS} attempts for ${requestId}`);
 }
 
+// ── ClaimRegistry helpers ──────────────────────────────────────────────────
+
+export async function claimJob(
+  publicClient: PublicClient,
+  walletClient: WalletClient,
+  safeAddress: Address,
+  claimRegistryAddress: Address,
+  requestId: Hex,
+): Promise<string> {
+  const data = encodeFunctionData({
+    abi: CLAIM_REGISTRY_ABI,
+    functionName: 'claimJob',
+    args: [requestId],
+  });
+
+  try {
+    const txHash = await executeSafeTransaction(
+      publicClient, walletClient,
+      { safeAddress, to: claimRegistryAddress, value: 0n, data },
+    );
+    await publicClient.waitForTransactionReceipt({ hash: txHash as Hex });
+    return txHash;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('JobAlreadyClaimed')) {
+      return ''; // Already claimed by someone else
+    }
+    if (message.includes('IneligibleToClaim')) {
+      return ''; // Not eligible
+    }
+    if (message.includes('GS013') || message.includes('execution reverted')) {
+      // Safe execution failed (inner call reverted) — treat as claim failure
+      return '';
+    }
+    throw err;
+  }
+}
+
+export async function getJobClaim(
+  publicClient: PublicClient,
+  claimRegistryAddress: Address,
+  requestId: Hex,
+): Promise<{ claimer: Address; expiresAt: bigint }> {
+  const result = await publicClient.readContract({
+    address: claimRegistryAddress,
+    abi: CLAIM_REGISTRY_ABI,
+    functionName: 'getJobClaim',
+    args: [requestId],
+  }) as [Address, bigint];
+
+  return { claimer: result[0], expiresAt: result[1] };
+}
+
 export async function getMechDeliveryRate(
   publicClient: PublicClient,
   mechAddress: Address,
@@ -294,6 +347,7 @@ export async function scanEvaluationJobs(
 export interface DecodedMarketplaceRequest {
   requestId: string;
   requestDataHex: string;
+  priorityMech: string;
 }
 
 export function decodeMarketplaceRequestLogs(logs: Log[]): DecodedMarketplaceRequest[] {
@@ -307,6 +361,7 @@ export function decodeMarketplaceRequestLogs(logs: Log[]): DecodedMarketplaceReq
       });
       if (decoded.eventName === 'MarketplaceRequest') {
         const args = decoded.args as {
+          priorityMech: string;
           requestIds: readonly Hex[];
           requestDatas: readonly Hex[];
         };
@@ -314,6 +369,7 @@ export function decodeMarketplaceRequestLogs(logs: Log[]): DecodedMarketplaceReq
           results.push({
             requestId: String(args.requestIds[i]),
             requestDataHex: String(args.requestDatas[i]),
+            priorityMech: String(args.priorityMech),
           });
         }
       }

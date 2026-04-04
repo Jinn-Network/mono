@@ -32,6 +32,7 @@ import {
 } from './contracts.js';
 import { type MechAdapterConfig, MECH_MARKETPLACE_ABI } from './types.js';
 import type { Store } from '../../store/store.js';
+import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -51,10 +52,12 @@ export class MechAdapter implements ExecutionAdapter {
   // so we can yield accurate desiredState in DeliveredResult
   private originalStates = new Map<string, DesiredState>();
   private store?: Store;
+  private claimPolicy: ClaimPolicy;
 
   constructor(config: MechAdapterConfig, store?: Store) {
     this.config = config;
     this.store = store;
+    this.claimPolicy = config.claimPolicy ?? new AcceptAllPolicy();
   }
 
   async initialize(): Promise<void> {
@@ -208,7 +211,10 @@ export class MechAdapter implements ExecutionAdapter {
           this.requestBlockCursor = currentBlock;
 
           const decoded = decodeMarketplaceRequestLogs(logs);
-          for (const { requestId, requestDataHex } of decoded) {
+          for (const { requestId, requestDataHex, priorityMech } of decoded) {
+            if (!this.claimPolicy.shouldAccept({ requestId, requestDataHex, priorityMech })) {
+              continue;
+            }
             try {
               const digest = requestDataHex.startsWith('0x') ? requestDataHex.slice(2) : requestDataHex;
               const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${digest}`) as Record<string, unknown>;
@@ -228,8 +234,11 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  async claimRequest(_requestId: RequestId): Promise<void> {
-    // Mech marketplace: claiming is implicit via delivery assignment
+  async claimRequest(requestId: RequestId): Promise<void> {
+    const allowed = await this.claimPolicy.confirmClaim(requestId);
+    if (!allowed) {
+      throw new PermanentError(`Claim policy rejected request ${requestId}`);
+    }
   }
 
   async submitResult(requestId: RequestId, result: RestorationResult): Promise<void> {

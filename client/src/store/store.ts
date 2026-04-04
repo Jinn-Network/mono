@@ -24,6 +24,14 @@ CREATE TABLE IF NOT EXISTS artifacts (
 
 CREATE INDEX IF NOT EXISTS idx_artifacts_desired_state ON artifacts (desired_state_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_outcome ON artifacts (outcome);
+
+CREATE TABLE IF NOT EXISTS claims (
+  request_id TEXT PRIMARY KEY,
+  claimer_mech TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  signature TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 export class Store {
@@ -115,6 +123,33 @@ export class Store {
       ...row,
       tags: JSON.parse(row.tags) as string[],
     }));
+  }
+
+  insertClaim(claim: { requestId: string; claimerMech: string; expiresAt: number; signature: string }): void {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO claims (request_id, claimer_mech, expires_at, signature)
+      VALUES (@requestId, @claimerMech, @expiresAt, @signature)
+    `).run(claim);
+  }
+
+  getActiveClaim(requestId: string): { requestId: string; claimerMech: string; expiresAt: number; signature: string } | null {
+    const now = Math.floor(Date.now() / 1000);
+    const row = this.db.prepare(
+      'SELECT request_id, claimer_mech, expires_at, signature FROM claims WHERE request_id = ? AND expires_at > ?'
+    ).get(requestId, now) as { request_id: string; claimer_mech: string; expires_at: number; signature: string } | undefined;
+    if (!row) return null;
+    return {
+      requestId: row.request_id,
+      claimerMech: row.claimer_mech,
+      expiresAt: row.expires_at,
+      signature: row.signature,
+    };
+  }
+
+  cleanExpiredClaims(): number {
+    const now = Math.floor(Date.now() / 1000);
+    const result = this.db.prepare('DELETE FROM claims WHERE expires_at <= ?').run(now);
+    return result.changes;
   }
 
   close(): void {

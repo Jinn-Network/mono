@@ -1052,10 +1052,12 @@ async function main(): Promise<void> {
       }),
     );
 
-    // ── Phase 13: Priority Window ────────────────────────────────────────────
+    // ── Phase 13: Priority Window + ClaimPolicy ────────────────────────────
+
+    const { PriorityWindowPolicy } = await import('../src/adapters/mech/claim-policy.js');
 
     results.push(
-      await runPhase('Phase 13: Priority Window — deliver after timeout from non-priority mech', async () => {
+      await runPhase('Phase 13: Priority Window — PriorityWindowPolicy rejects during window, accepts after', async () => {
         if (!agentEoaPrivateKey || !safeAddress || !mechAddress) {
           throw new Error('Missing credentials from Phase 2');
         }
@@ -1098,10 +1100,31 @@ async function main(): Promise<void> {
         const responseTimeout = reqInfo[3];
         console.log(`    responseTimeout: ${responseTimeout}s`);
 
+        // Create PriorityWindowPolicy for operator B (non-priority mech)
+        const policyB = new PriorityWindowPolicy(
+          mechAddressB as Address,
+          publicClient as unknown as import('viem').PublicClient,
+          MARKETPLACE_ADDRESS as `0x${string}`,
+        );
+
+        // Verify: policy rejects B during A's priority window
+        const rejectedDuringWindow = await policyB.confirmClaim(priorityRequestId);
+        if (rejectedDuringWindow) {
+          throw new Error('PriorityWindowPolicy should reject non-priority mech during window');
+        }
+        console.log('    PriorityWindowPolicy correctly rejected non-priority mech during window');
+
         // Advance time past the priority window
         await jsonRpc(ANVIL_RPC, 'evm_increaseTime', [Number(responseTimeout) + 1]);
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
         console.log('    Time advanced past priority window');
+
+        // Verify: policy accepts B after window expires
+        const acceptedAfterWindow = await policyB.confirmClaim(priorityRequestId);
+        if (!acceptedAfterWindow) {
+          throw new Error('PriorityWindowPolicy should accept after window expires');
+        }
+        console.log('    PriorityWindowPolicy correctly accepted after window expiry');
 
         // Impersonate operator B's mech operator and deliver via B's mech directly
         const operatorB = await publicClient.readContract({
@@ -1150,6 +1173,195 @@ async function main(): Promise<void> {
         console.log(`    Delivery from non-priority mech confirmed: ${deliveryMech}`);
 
         await windowAdapter.stop();
+      }),
+    );
+
+    // ── Phase 13b: On-Chain ClaimRegistry ──────────────────────────────────
+
+    const { OnChainClaimPolicy } = await import('../src/adapters/mech/claim-policy.js');
+    const { CLAIM_REGISTRY_ABI } = await import('../src/adapters/mech/types.js');
+
+    results.push(
+      await runPhase('Phase 13b: On-Chain ClaimRegistry — deploy, claim, reject, expire, reclaim', async () => {
+        if (!agentEoaPrivateKey || !safeAddress || !mechAddress) {
+          throw new Error('Missing credentials from Phase 2');
+        }
+        if (!agentEoaPrivateKeyB || !safeAddressB || !mechAddressB) {
+          throw new Error('Missing operator B credentials from Phase 12');
+        }
+
+        // Deploy ClaimRegistry on Anvil using a funded deployer
+        const { createWalletClient: createWC } = await import('viem');
+        const { privateKeyToAccount } = await import('viem/accounts');
+
+        // Use a fresh deployer account
+        const deployerKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex; // Anvil default key 0
+        const deployerAccount = privateKeyToAccount(deployerKey);
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [deployerAccount.address, '0x56BC75E2D63100000']);
+
+        const deployerWallet = createWC({
+          account: deployerAccount,
+          chain: base,
+          transport: http(ANVIL_RPC),
+        });
+
+        // Read compiled bytecode
+        const { readFileSync: readFS } = await import('node:fs');
+        const { join: joinPath } = await import('node:path');
+        const artifactPath = joinPath(__dirname, '..', '..', '..', 'protocol', 'contracts', 'artifacts', 'src', 'claiming', 'ClaimRegistry.sol', 'ClaimRegistry.json');
+        const artifact = JSON.parse(readFS(artifactPath, 'utf-8'));
+
+        // Deploy with 60s TTL (short for testing)
+        const CLAIM_TTL = 60;
+        const constructorArgs = AbiCoder.defaultAbiCoder().encode(
+          ['uint256', 'address'],
+          [CLAIM_TTL, deployerAccount.address],
+        );
+        const deployData = (artifact.bytecode + constructorArgs.slice(2)) as Hex;
+
+        const deployHash = await deployerWallet.sendTransaction({
+          data: deployData,
+          chain: base,
+        });
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
+        const claimRegistryAddress = deployReceipt.contractAddress!;
+        console.log(`    ClaimRegistry deployed at: ${claimRegistryAddress}`);
+
+        // Create viem clients for operator A and B
+        const { createClients } = await import('../src/adapters/mech/safe.js');
+        const clientsA = createClients(ANVIL_RPC, agentEoaPrivateKey as Hex);
+        const clientsB = createClients(ANVIL_RPC, agentEoaPrivateKeyB as Hex);
+
+        // Post a request for operator A to claim
+        const claimTestAdapter = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS as `0x${string}`,
+          routerAddress: ROUTER_ADDRESS as `0x${string}`,
+          mechContractAddress: mechAddress as `0x${string}`,
+          safeAddress: safeAddress as `0x${string}`,
+          agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: base.id,
+        });
+        await claimTestAdapter.initialize();
+
+        const claimTestRequestId = await claimTestAdapter.postDesiredState({
+          id: 'claim-registry-test',
+          description: 'ClaimRegistry E2E test',
+          type: 'restoration',
+          attemptId: 'claim-registry-test/1',
+          attemptNumber: 1,
+        });
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        console.log(`    Test requestId: ${claimTestRequestId}`);
+
+        // --- Test 1: Operator A claims successfully ---
+        const { claimJob: claimJobFn, getJobClaim: getJobClaimFn } = await import('../src/adapters/mech/contracts.js');
+
+        const claimTxA = await claimJobFn(
+          clientsA.publicClient,
+          clientsA.walletClient,
+          safeAddress as Address,
+          claimRegistryAddress as Address,
+          claimTestRequestId as Hex,
+        );
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        if (!claimTxA) throw new Error('Operator A claimJob failed');
+        console.log('    Operator A claimed successfully');
+
+        // Verify claim on-chain
+        const claimInfo = await getJobClaimFn(
+          publicClient as unknown as import('viem').PublicClient,
+          claimRegistryAddress as Address,
+          claimTestRequestId as Hex,
+        );
+        if (claimInfo.claimer.toLowerCase() !== (safeAddress as string).toLowerCase()) {
+          throw new Error(`Expected claimer ${safeAddress}, got ${claimInfo.claimer}`);
+        }
+        console.log(`    Claim verified: claimer=${claimInfo.claimer}`);
+
+        // --- Test 2: Operator B rejected (already claimed) ---
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        const claimTxB = await claimJobFn(
+          clientsB.publicClient,
+          clientsB.walletClient,
+          safeAddressB as Address,
+          claimRegistryAddress as Address,
+          claimTestRequestId as Hex,
+        );
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        if (claimTxB !== '') throw new Error('Operator B should have been rejected (claim returned non-empty)');
+        console.log('    Operator B correctly rejected (JobAlreadyClaimed)');
+
+        // --- Test 3: OnChainClaimPolicy rejects B ---
+        const policyB = new OnChainClaimPolicy(
+          mechAddressB as Address,
+          publicClient as unknown as import('viem').PublicClient,
+          clientsB.walletClient,
+          safeAddressB as Address,
+          MARKETPLACE_ADDRESS as `0x${string}`,
+          claimRegistryAddress as Address,
+        );
+
+        const policyResult = await policyB.confirmClaim(claimTestRequestId);
+        if (policyResult) throw new Error('OnChainClaimPolicy should reject B (A has active claim)');
+        console.log('    OnChainClaimPolicy correctly rejected operator B');
+
+        // --- Test 4: Expire claim, operator B reclaims ---
+        await jsonRpc(ANVIL_RPC, 'evm_increaseTime', [CLAIM_TTL + 1]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // getJobClaim should return zero (expired)
+        const expiredInfo = await getJobClaimFn(
+          publicClient as unknown as import('viem').PublicClient,
+          claimRegistryAddress as Address,
+          claimTestRequestId as Hex,
+        );
+        if (expiredInfo.claimer !== '0x0000000000000000000000000000000000000000') {
+          throw new Error('Expected expired claim to return zero address');
+        }
+        console.log('    Claim expired (getJobClaim returns zero)');
+
+        // B can now claim
+        const claimTxB2 = await claimJobFn(
+          clientsB.publicClient,
+          clientsB.walletClient,
+          safeAddressB as Address,
+          claimRegistryAddress as Address,
+          claimTestRequestId as Hex,
+        );
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        if (!claimTxB2) throw new Error('Operator B reclaim failed after expiry');
+
+        const reclaimInfo = await getJobClaimFn(
+          publicClient as unknown as import('viem').PublicClient,
+          claimRegistryAddress as Address,
+          claimTestRequestId as Hex,
+        );
+        if (reclaimInfo.claimer.toLowerCase() !== (safeAddressB as string).toLowerCase()) {
+          throw new Error(`Expected reclaimer ${safeAddressB}, got ${reclaimInfo.claimer}`);
+        }
+        console.log(`    Operator B reclaimed after expiry: claimer=${reclaimInfo.claimer}`);
+
+        // --- Test 5: Verify punishment counter ---
+        const expiredCount = await publicClient.readContract({
+          address: claimRegistryAddress as Address,
+          abi: CLAIM_REGISTRY_ABI,
+          functionName: 'expiredClaimCount',
+          args: [safeAddress as Address],
+        }) as bigint;
+        if (expiredCount !== 1n) {
+          throw new Error(`Expected expiredClaimCount=1 for operator A, got ${expiredCount}`);
+        }
+        console.log(`    Punishment verified: operator A expiredClaimCount=${expiredCount}`);
+
+        await claimTestAdapter.stop();
       }),
     );
 

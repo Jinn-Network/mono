@@ -1,3 +1,5 @@
+import type { ClaimPolicy } from './claim-policy.js';
+
 export interface MechAdapterConfig {
   rpcUrl: string;
   mechMarketplaceAddress: `0x${string}`;
@@ -9,6 +11,8 @@ export interface MechAdapterConfig {
   ipfsGatewayUrl: string;   // Read endpoint (e.g., https://gateway.autonolas.tech)
   pollIntervalMs: number;
   chainId: number;
+  claimPolicy?: ClaimPolicy;
+  claimRegistryAddress?: `0x${string}`;
 }
 
 export const MECH_MARKETPLACE_ABI = [
@@ -194,6 +198,57 @@ export const JINN_ROUTER_ABI = [
       { name: 'requestId', type: 'bytes32', indexed: true },
       { name: 'jobType', type: 'uint8', indexed: false },
     ],
+  },
+] as const;
+
+export const CLAIM_REGISTRY_ABI = [
+  {
+    name: 'claimJob',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    outputs: [],
+  },
+  {
+    name: 'getJobClaim',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    outputs: [
+      { name: 'claimer', type: 'address' },
+      { name: 'expiresAt', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'releaseClaim',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    outputs: [],
+  },
+  {
+    name: 'JobClaimed',
+    type: 'event',
+    inputs: [
+      { name: 'requestId', type: 'bytes32', indexed: true },
+      { name: 'claimer', type: 'address', indexed: true },
+      { name: 'expiresAt', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'ClaimExpired',
+    type: 'event',
+    inputs: [
+      { name: 'requestId', type: 'bytes32', indexed: true },
+      { name: 'previousClaimer', type: 'address', indexed: true },
+    ],
+  },
+  {
+    name: 'expiredClaimCount',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
 
