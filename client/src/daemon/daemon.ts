@@ -8,6 +8,8 @@ import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
+import { Registry8004, type RegistryConfig } from '../discovery/registry.js';
+import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../discovery/subgraph.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -20,6 +22,10 @@ export interface DaemonConfig {
   apiPort?: number;
   peers?: string[];
   signer?: EthHttpSigner;
+  registry?: RegistryConfig;
+  subgraphUrl?: string;
+  /** This node's public HTTP endpoint (for 8004 registration) */
+  nodeEndpoint?: string;
 }
 
 export class Daemon {
@@ -32,6 +38,7 @@ export class Daemon {
   private cachedShutdownState: string | null = null;
   private apiServer?: ApiServer;
   private peerSync?: PeerSync;
+  private registry?: Registry8004;
 
   constructor(private readonly config: DaemonConfig) {
     this.store = new Store(config.dbPath);
@@ -51,7 +58,24 @@ export class Daemon {
     this.apiServer = await startApiServer({
       port: apiPort,
       store: this.store,
+      onArtifactPublished: (artifact) => this.registerArtifact(artifact),
     });
+
+    // Initialize 8004 registry if configured
+    if (this.config.registry) {
+      this.registry = new Registry8004(this.config.registry);
+      console.log('[daemon] 8004 registry configured');
+    }
+
+    // Backfill remote artifacts from subgraph if configured
+    const subgraphUrl = this.config.subgraphUrl ?? process.env['JINN_SUBGRAPH_URL'];
+    if (subgraphUrl) {
+      try {
+        await this.backfillFromSubgraph({ url: subgraphUrl });
+      } catch (err) {
+        console.error('[daemon] Subgraph backfill failed (non-fatal):', err instanceof Error ? err.message : err);
+      }
+    }
 
     // Start peer sync if peers configured
     const peers = this.config.peers ?? (process.env['JINN_PEERS'] ?? '').split(',').filter(Boolean);
@@ -96,5 +120,64 @@ export class Daemon {
 
   getShutdownState(): string | null {
     return this.cachedShutdownState;
+  }
+
+  /**
+   * Register an artifact on the 8004 registry (fire-and-forget).
+   * Called after local artifact publish if registry is configured.
+   */
+  registerArtifact(artifact: { id: string; title: string; tags: string[]; outcome: string }): void {
+    if (!this.registry) return;
+    const endpoint = this.config.nodeEndpoint ?? `http://localhost:${this.config.apiPort ?? DEFAULT_API_PORT}`;
+    this.registry.registerArtifact({ ...artifact, endpoint }).catch(err => {
+      console.error(`[daemon] 8004 artifact registration failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+    });
+  }
+
+  private async backfillFromSubgraph(config: SubgraphConfig): Promise<void> {
+    console.log(`[daemon] Backfilling from subgraph: ${config.url}`);
+
+    // Backfill artifacts
+    const artifacts = await queryArtifacts(config);
+    let artifactCount = 0;
+    for (const result of artifacts) {
+      const artifactId = getMetadataValue(result, 'artifactId');
+      const title = getMetadataValue(result, 'title') ?? '';
+      const outcome = getMetadataValue(result, 'outcome') ?? 'UNKNOWN';
+      const endpoint = getMetadataValue(result, 'endpoint') ?? '';
+      const tagsRaw = getMetadataValue(result, 'tags');
+      const tags = tagsRaw ? JSON.parse(tagsRaw) as string[] : [];
+
+      if (!artifactId || !endpoint) continue;
+
+      this.store.insertRemoteArtifact({
+        id: artifactId,
+        desiredStateId: '',
+        requestId: '',
+        title,
+        tags,
+        outcome: outcome as 'SUCCESS' | 'FAILURE' | 'UNKNOWN',
+        ownerAddress: result.owner,
+        endpoint,
+      });
+      artifactCount++;
+    }
+
+    // Backfill peer nodes
+    const nodes = await queryNodes(config);
+    const discoveredPeers: string[] = [];
+    for (const result of nodes) {
+      const endpoint = getMetadataValue(result, 'endpoint');
+      if (endpoint) discoveredPeers.push(endpoint);
+    }
+
+    console.log(`[daemon] Backfill complete: ${artifactCount} artifacts, ${discoveredPeers.length} nodes`);
+
+    // Auto-add discovered peers to peer sync
+    if (discoveredPeers.length > 0 && this.peerSync) {
+      // PeerSync is already running with configured peers — discovered peers
+      // would need to be merged. For now, just log them.
+      console.log(`[daemon] Discovered peers: ${discoveredPeers.join(', ')}`);
+    }
   }
 }

@@ -22,6 +22,7 @@ export interface ApiServerConfig {
   port: number;
   store: Store;
   requireAuth?: boolean; // default true for mutations
+  onArtifactPublished?: (artifact: { id: string; title: string; tags: string[]; outcome: string }) => void;
 }
 
 export interface ApiServer {
@@ -35,7 +36,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   const server = createServer(async (req, res) => {
     try {
-      await handleRequest(req, res, store, nonceStore, config.requireAuth ?? true);
+      await handleRequest(req, res, store, nonceStore, config.requireAuth ?? true, config.onArtifactPublished);
     } catch (err) {
       console.error('[api] Unhandled error:', err);
       sendJson(res, 500, { error: 'Internal server error' });
@@ -61,6 +62,7 @@ async function handleRequest(
   store: Store,
   nonceStore: NonceStore,
   requireAuth: boolean,
+  onArtifactPublished?: (artifact: { id: string; title: string; tags: string[]; outcome: string }) => void,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const method = req.method ?? 'GET';
@@ -145,6 +147,7 @@ async function handleRequest(
       outcome: outcome as 'SUCCESS' | 'FAILURE' | 'UNKNOWN',
     });
 
+    onArtifactPublished?.({ id, title, tags, outcome });
     sendJson(res, 201, { id, published: true });
     return;
   }
