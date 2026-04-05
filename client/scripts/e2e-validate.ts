@@ -1208,7 +1208,7 @@ async function main(): Promise<void> {
         // Read compiled bytecode
         const { readFileSync: readFS } = await import('node:fs');
         const { join: joinPath } = await import('node:path');
-        const artifactPath = joinPath(__dirname, '..', '..', '..', 'protocol', 'contracts', 'artifacts', 'src', 'claiming', 'ClaimRegistry.sol', 'ClaimRegistry.json');
+        const artifactPath = joinPath(__dirname, '..', '..', 'contracts', 'artifacts', 'src', 'claiming', 'ClaimRegistry.sol', 'ClaimRegistry.json');
         const artifact = JSON.parse(readFS(artifactPath, 'utf-8'));
 
         // Deploy with 60s TTL (short for testing)
