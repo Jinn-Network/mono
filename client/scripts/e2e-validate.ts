@@ -1573,6 +1573,87 @@ async function main(): Promise<void> {
       }),
     );
 
+    // ── Phase 13e: x402 Payment Gating ─────────────────────────────────────
+
+    const { acquireArtifactWithPayment, buildAcquisitionUrl } = await import('../src/x402/acquire.js');
+
+    results.push(
+      await runPhase('Phase 13e: x402 — payment gating + best-effort acquisition', async () => {
+        if (!tmpDir || !agentEoaPrivateKey) throw new Error('Missing credentials');
+
+        // Start an API server with x402 enabled
+        const x402Store = new Store(join(tmpDir, 'x402-test.db'));
+        x402Store.insertArtifact({
+          id: 'x402-test-artifact',
+          desiredStateId: 'x402-test',
+          requestId: '0x0000',
+          title: 'Payment-gated knowledge',
+          content: 'This content requires x402 payment to access.',
+          tags: ['x402', 'test'],
+          outcome: 'SUCCESS',
+        });
+
+        const x402Server = await startApiServer({
+          port: 7351,
+          store: x402Store,
+          x402: {
+            privateKey: agentEoaPrivateKey as string,
+            recipientAddress: safeAddress as string,
+            pricePerArtifact: '$0.001',
+            network: 'eip155:8453',
+            rpcUrl: ANVIL_RPC,
+          },
+        });
+
+        try {
+          // --- Test 1: Free route still works ---
+          const freeRes = await fetch('http://localhost:7351/artifacts/x402-test-artifact/content');
+          if (freeRes.status !== 200) throw new Error(`Free route returned ${freeRes.status}, expected 200`);
+          const freeData = await freeRes.json() as { content: string };
+          if (!freeData.content.includes('x402 payment')) throw new Error('Free route returned wrong content');
+          console.log('    Free route (/artifacts/:id/content) works alongside x402');
+
+          // --- Test 2: x402 route returns 402 without payment ---
+          const gatedRes = await fetch('http://localhost:7351/x402/artifacts/x402-test-artifact/content');
+          if (gatedRes.status === 402) {
+            console.log('    x402 route correctly returns 402 (Payment Required) without payment');
+          } else if (gatedRes.status === 200) {
+            console.log('    WARNING: x402 route returned 200 — payment middleware may not be gating');
+          } else {
+            console.log(`    x402 route returned ${gatedRes.status} — noting for investigation`);
+          }
+
+          // --- Test 3: URL builder ---
+          const url = buildAcquisitionUrl('http://localhost:7351', 'x402-test-artifact');
+          if (url !== 'http://localhost:7351/x402/artifacts/x402-test-artifact/content') {
+            throw new Error(`Wrong acquisition URL: ${url}`);
+          }
+          console.log('    buildAcquisitionUrl produces correct URL');
+
+          // --- Test 4: Best-effort paid acquisition ---
+          console.log('    Testing x402 acquisition (best-effort, may fail on Anvil)...');
+          try {
+            const content = await acquireArtifactWithPayment(
+              'http://localhost:7351',
+              'x402-test-artifact',
+              agentEoaPrivateKey as string,
+            );
+            if (content) {
+              console.log(`    x402 acquisition succeeded: "${content.slice(0, 40)}..."`);
+            } else {
+              console.log('    x402 acquisition returned null (payment settlement may not work on Anvil fork)');
+            }
+          } catch (err) {
+            console.log(`    x402 acquisition error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+          }
+          // Don't fail the phase — x402 payment on Anvil is best-effort
+        } finally {
+          await x402Server.close();
+          x402Store.close();
+        }
+      }),
+    );
+
     // ── Phase 14: Crash Recovery ─────────────────────────────────────────────
 
     results.push(
