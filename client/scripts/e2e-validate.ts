@@ -1365,6 +1365,93 @@ async function main(): Promise<void> {
       }),
     );
 
+    // ── Phase 13c: Cross-Node Artifact Sync ────────────────────────────────
+
+    const { startApiServer } = await import('../src/api/server.js');
+    const { PeerSync } = await import('../src/api/peers.js');
+
+    results.push(
+      await runPhase('Phase 13c: Cross-Node Artifact Sync — two API servers, publish, sync, acquire', async () => {
+        if (!tmpDir) throw new Error('Missing tmpDir from Phase 1');
+
+        // Create two stores (two independent nodes)
+        const storeA = new Store(join(tmpDir, 'node-a.db'));
+        const storeB = new Store(join(tmpDir, 'node-b.db'));
+
+        // Start two API servers on different ports
+        const serverA = await startApiServer({ port: 7341, store: storeA, requireAuth: false });
+        const serverB = await startApiServer({ port: 7342, store: storeB, requireAuth: false });
+        console.log(`    Node A API on port ${serverA.port}`);
+        console.log(`    Node B API on port ${serverB.port}`);
+
+        try {
+          // --- Test 1: Node A publishes an artifact ---
+          const artifactId = 'cross-node-test-artifact';
+          storeA.insertArtifact({
+            id: artifactId,
+            desiredStateId: 'cross-node-test',
+            requestId: '0x0000',
+            title: 'Cross-node knowledge: restoration strategy alpha',
+            content: 'When restoring FLOOR invariants, check historical baselines first.',
+            tags: ['restoration', 'strategy', 'floor'],
+            outcome: 'SUCCESS',
+          });
+          console.log('    Node A published artifact');
+
+          // Verify it's searchable on A's API
+          const searchA = await fetch(`http://localhost:${serverA.port}/artifacts/search?tags=restoration`);
+          const searchAData = await searchA.json() as { results: unknown[] };
+          if (searchAData.results.length === 0) throw new Error('Node A search returned no results');
+          console.log(`    Node A search: ${searchAData.results.length} result(s)`);
+
+          // --- Test 2: Node B syncs from Node A ---
+          const peerSync = new PeerSync({
+            peers: [`http://localhost:${serverA.port}`],
+            store: storeB,
+          });
+
+          const synced = await peerSync.syncOnce();
+          if (synced === 0) throw new Error('Peer sync returned 0 artifacts');
+          console.log(`    Node B synced ${synced} artifact(s) from Node A`);
+
+          // Verify it appears in B's local search
+          const searchB = storeB.searchArtifacts({ tags: ['restoration'] });
+          if (searchB.length === 0) throw new Error('Node B search returned no results after sync');
+          console.log(`    Node B local search: ${searchB.length} result(s)`);
+
+          // Verify content is NOT cached yet (remote artifact, metadata only)
+          const cachedContent = storeB.getArtifactContent(artifactId);
+          if (cachedContent !== null) throw new Error('Content should not be cached before acquire');
+          console.log('    Content not cached yet (metadata only)');
+
+          // --- Test 3: Node B acquires content from Node A ---
+          const content = await peerSync.acquireContent(artifactId);
+          if (!content) throw new Error('acquireContent returned null');
+          if (!content.includes('historical baselines')) {
+            throw new Error(`Unexpected content: ${content.slice(0, 50)}`);
+          }
+          console.log(`    Node B acquired content: "${content.slice(0, 50)}..."`);
+
+          // Verify content is now cached
+          const cachedAfter = storeB.getArtifactContent(artifactId);
+          if (!cachedAfter) throw new Error('Content should be cached after acquire');
+          console.log('    Content cached locally on Node B');
+
+          // --- Test 4: Second acquire hits cache ---
+          const cached2 = await peerSync.acquireContent(artifactId);
+          if (cached2 !== content) throw new Error('Second acquire should return same cached content');
+          console.log('    Second acquire served from cache');
+
+          peerSync.stop();
+        } finally {
+          await serverA.close();
+          await serverB.close();
+          storeA.close();
+          storeB.close();
+        }
+      }),
+    );
+
     // ── Phase 14: Crash Recovery ─────────────────────────────────────────────
 
     results.push(
