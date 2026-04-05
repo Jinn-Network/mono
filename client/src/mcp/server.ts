@@ -175,6 +175,56 @@ server.tool(
   },
 );
 
+server.tool(
+  'acquire_artifact',
+  'Fetch the content of a remote artifact from a peer node',
+  {
+    id: z.string().describe('Artifact ID to acquire'),
+  },
+  async ({ id }) => {
+    if (!store) {
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'No store configured' }) }],
+      };
+    }
+
+    // Check if content is already cached locally
+    const cached = store.getArtifactContent(id);
+    if (cached) {
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ id, content: cached, cached: true }) }],
+      };
+    }
+
+    // Check if we know where to fetch it
+    const remoteInfo = store.getRemoteArtifactInfo(id);
+    if (!remoteInfo) {
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: `Artifact ${id} not found (no remote info)` }) }],
+      };
+    }
+
+    // Fetch from peer
+    try {
+      const response = await fetch(`${remoteInfo.endpoint}/artifacts/${id}/content`);
+      if (!response.ok) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: `Fetch failed: ${response.status}` }) }],
+        };
+      }
+      const data = await response.json() as { content: string };
+      store.cacheRemoteContent(id, data.content);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ id, content: data.content, cached: false }) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: `Fetch error: ${err instanceof Error ? err.message : String(err)}` }) }],
+      };
+    }
+  },
+);
+
 // ── Start ────────────────────────────────────────────────────────────────────
 
 const transport = new StdioServerTransport();

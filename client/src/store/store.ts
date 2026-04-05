@@ -16,14 +16,19 @@ CREATE TABLE IF NOT EXISTS artifacts (
   desired_state_id TEXT NOT NULL,
   request_id TEXT NOT NULL,
   title TEXT NOT NULL,
-  content TEXT NOT NULL,
+  content TEXT,
   tags TEXT NOT NULL DEFAULT '[]',
   outcome TEXT NOT NULL CHECK (outcome IN ('SUCCESS', 'FAILURE', 'UNKNOWN')),
+  remote INTEGER NOT NULL DEFAULT 0,
+  owner_address TEXT,
+  endpoint TEXT,
+  price TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_artifacts_desired_state ON artifacts (desired_state_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_outcome ON artifacts (outcome);
+CREATE INDEX IF NOT EXISTS idx_artifacts_remote ON artifacts (remote);
 
 `;
 
@@ -116,6 +121,48 @@ export class Store {
       ...row,
       tags: JSON.parse(row.tags) as string[],
     }));
+  }
+
+  insertRemoteArtifact(artifact: {
+    id: string;
+    desiredStateId: string;
+    requestId: string;
+    title: string;
+    tags: string[];
+    outcome: 'SUCCESS' | 'FAILURE' | 'UNKNOWN';
+    ownerAddress: string;
+    endpoint: string;
+    price?: string;
+  }): void {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO artifacts (id, desired_state_id, request_id, title, tags, outcome, remote, owner_address, endpoint, price)
+      VALUES (@id, @desiredStateId, @requestId, @title, @tags, @outcome, 1, @ownerAddress, @endpoint, @price)
+    `).run({
+      ...artifact,
+      tags: JSON.stringify(artifact.tags),
+      price: artifact.price ?? null,
+    });
+  }
+
+  getArtifactContent(id: string): string | null {
+    const row = this.db.prepare('SELECT content FROM artifacts WHERE id = ?').get(id) as { content: string | null } | undefined;
+    return row?.content ?? null;
+  }
+
+  getRemoteArtifactInfo(id: string): { endpoint: string; ownerAddress: string; price?: string } | null {
+    const row = this.db.prepare(
+      'SELECT endpoint, owner_address, price FROM artifacts WHERE id = ? AND remote = 1'
+    ).get(id) as { endpoint: string; owner_address: string; price: string | null } | undefined;
+    if (!row) return null;
+    return {
+      endpoint: row.endpoint,
+      ownerAddress: row.owner_address,
+      price: row.price ?? undefined,
+    };
+  }
+
+  cacheRemoteContent(id: string, content: string): void {
+    this.db.prepare('UPDATE artifacts SET content = ? WHERE id = ?').run(content, id);
   }
 
   close(): void {
