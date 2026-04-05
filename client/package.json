@@ -14,13 +14,18 @@
     "staking": "tsx scripts/staking-validate.ts"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.12",
     "@jinn-network/mech-client-ts": "^0.0.6",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@safe-global/protocol-kit": "^6.1.2",
     "@safe-global/types-kit": "^3.0.0",
     "@slicekit/erc8128": "^0.3.3",
+    "@x402/core": "^2.9.0",
+    "@x402/evm": "^2.9.0",
+    "@x402/fetch": "^2.9.0",
+    "@x402/hono": "^2.9.0",
     "better-sqlite3": "^11.0.0",
-    "hono": "^4.0.0",
+    "hono": "^4.12.10",
     "viem": "^2.0.0",
     "zod": "^3.22.0"
   },

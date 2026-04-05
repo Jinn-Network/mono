@@ -10,6 +10,7 @@ import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import { Registry8004, type RegistryConfig } from '../discovery/registry.js';
 import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../discovery/subgraph.js';
+import type { X402Config } from '../x402/handler.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -26,6 +27,7 @@ export interface DaemonConfig {
   subgraphUrl?: string;
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint?: string;
+  x402?: X402Config;
 }
 
 export class Daemon {
@@ -59,6 +61,7 @@ export class Daemon {
       port: apiPort,
       store: this.store,
       onArtifactPublished: (artifact) => this.registerArtifact(artifact),
+      x402: this.config.x402,
     });
 
     // Initialize 8004 registry if configured
