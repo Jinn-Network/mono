@@ -1,7 +1,6 @@
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { MECH_MARKETPLACE_ABI } from './types.js';
 import { claimJob, getJobClaim } from './contracts.js';
-import type { Store } from '../../store/store.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,20 +20,6 @@ export interface RequestCandidate {
 export interface ClaimPolicy {
   shouldAccept(candidate: RequestCandidate): boolean;
   confirmClaim(requestId: string): Promise<boolean>;
-}
-
-// ── Claim store interface (for SignedClaimPolicy) ────────────────────────────
-
-export interface ClaimRecord {
-  requestId: string;
-  claimerMech: string;
-  expiresAt: number;
-  signature: string;
-}
-
-export interface ClaimStore {
-  getClaim(requestId: string): Promise<ClaimRecord | null>;
-  publishClaim(claim: ClaimRecord): Promise<void>;
 }
 
 // ── AcceptAllPolicy ──────────────────────────────────────────────────────────
@@ -92,113 +77,6 @@ export class PriorityWindowPolicy implements ClaimPolicy {
     // Not our priority — only proceed if window expired
     const block = await this.publicClient.getBlock();
     return block.timestamp >= responseTimeout;
-  }
-}
-
-// ── SignedClaimPolicy ────────────────────────────────────────────────────────
-
-const CLAIM_DOMAIN = {
-  name: 'JinnClaims',
-  version: '1',
-} as const;
-
-const CLAIM_TYPES = {
-  Claim: [
-    { name: 'requestId', type: 'bytes32' },
-    { name: 'claimerMech', type: 'address' },
-    { name: 'expiresAt', type: 'uint256' },
-  ],
-} as const;
-
-export class SignedClaimPolicy implements ClaimPolicy {
-  private readonly claimTTLSeconds: number;
-
-  constructor(
-    private readonly ourMechAddress: Address,
-    private readonly publicClient: PublicClient,
-    private readonly marketplaceAddress: Address,
-    private readonly walletClient: WalletClient,
-    private readonly claimStore: ClaimStore,
-    claimTTLSeconds = 300,
-  ) {
-    this.claimTTLSeconds = claimTTLSeconds;
-  }
-
-  shouldAccept(candidate: RequestCandidate): boolean {
-    // Same fast filter as PriorityWindowPolicy
-    return true;
-  }
-
-  async confirmClaim(requestId: string): Promise<boolean> {
-    // 1. Check delivery status
-    const info = await this.publicClient.readContract({
-      address: this.marketplaceAddress,
-      abi: MECH_MARKETPLACE_ABI,
-      functionName: 'mapRequestIdInfos',
-      args: [requestId as Hex],
-    }) as [string, string, string, bigint, bigint, string];
-
-    const [priorityMech, deliveryMech, , responseTimeout] = info;
-
-    if (deliveryMech !== ZERO_ADDRESS) {
-      return false;
-    }
-
-    // 2. Check priority window
-    const block = await this.publicClient.getBlock();
-    if (priorityMech.toLowerCase() !== this.ourMechAddress.toLowerCase()) {
-      if (block.timestamp < responseTimeout) {
-        return false;
-      }
-    }
-
-    // 3. Check existing claims
-    const existingClaim = await this.claimStore.getClaim(requestId);
-    if (existingClaim) {
-      const now = Math.floor(Date.now() / 1000);
-      if (existingClaim.claimerMech.toLowerCase() !== this.ourMechAddress.toLowerCase() && existingClaim.expiresAt > now) {
-        return false; // Active claim from another operator
-      }
-    }
-
-    // 4. Sign and publish our claim
-    const expiresAt = Math.floor(Date.now() / 1000) + this.claimTTLSeconds;
-
-    const [account] = await this.walletClient.getAddresses();
-    const signature = await this.walletClient.signTypedData({
-      account,
-      domain: { ...CLAIM_DOMAIN, chainId: await this.publicClient.getChainId() },
-      types: CLAIM_TYPES,
-      primaryType: 'Claim',
-      message: {
-        requestId: requestId as Hex,
-        claimerMech: this.ourMechAddress,
-        expiresAt: BigInt(expiresAt),
-      },
-    });
-
-    await this.claimStore.publishClaim({
-      requestId,
-      claimerMech: this.ourMechAddress,
-      expiresAt,
-      signature,
-    });
-
-    return true;
-  }
-}
-
-// ── LocalClaimStore (SQLite-backed) ──────────────────────────────────────────
-
-export class LocalClaimStore implements ClaimStore {
-  constructor(private readonly store: Store) {}
-
-  async getClaim(requestId: string): Promise<ClaimRecord | null> {
-    return this.store.getActiveClaim(requestId);
-  }
-
-  async publishClaim(claim: ClaimRecord): Promise<void> {
-    this.store.insertClaim(claim);
   }
 }
 
