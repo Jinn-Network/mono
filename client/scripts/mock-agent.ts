@@ -114,6 +114,14 @@ const state = JSON.parse(stateJson) as {
 const isEvaluation = state.type === 'evaluation';
 process.stderr.write(`[mock-agent] Request type: ${state.type || 'restoration'}\n`);
 
+// ── Simulate failure if requested ────────────────────────────────────────────
+
+if (process.env['MOCK_AGENT_FAIL'] === '1') {
+  process.stderr.write('[mock-agent] MOCK_AGENT_FAIL=1 — simulating agent crash\n');
+  await client.close();
+  process.exit(1);
+}
+
 // ── Execute based on type ────────────────────────────────────────────────────
 
 if (isEvaluation) {
@@ -138,10 +146,17 @@ if (isEvaluation) {
 
   process.stderr.write(`[mock-agent] Delivery data: ${deliverySummary}\n`);
 
-  // Also search for restoration results via artifacts (proves search-based discovery works)
+  // Search for restoration results via artifacts (proves search-based discovery works)
   const searchJson = await callTool('search_artifacts', { tags: ['restoration-result'], limit: 5 });
-  const searchResults = JSON.parse(searchJson) as { results: unknown[] };
-  process.stderr.write(`[mock-agent] Found ${searchResults.results.length} restoration-result artifacts via search\n`);
+  const searchResults = JSON.parse(searchJson) as { results: Array<{ content?: string }> };
+  process.stderr.write(`[mock-agent] Found ${searchResults.results.length} restoration-result artifact(s) via search\n`);
+
+  // Verify search results are consistent with delivery data
+  if (hasDelivery && searchResults.results.length > 0) {
+    process.stderr.write('[mock-agent] Search-based discovery confirmed: delivery data and artifact search both have results\n');
+  } else if (hasDelivery && searchResults.results.length === 0) {
+    process.stderr.write('[mock-agent] WARNING: delivery data exists but search found no restoration-result artifacts\n');
+  }
 
   const verdict = {
     protocol: 'jinn-client/v1',

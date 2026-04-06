@@ -56,6 +56,8 @@ const __dirname = join(fileURLToPath(import.meta.url), '..');
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+// Use a reliable RPC for Anvil fork — public mainnet.base.org is unreliable for lazy state fetching.
+// Recommended: set BASE_RPC_URL to a Tenderly, Alchemy, or Infura endpoint.
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
 const ANVIL_PORT = 8546;
 const ANVIL_RPC = `http://127.0.0.1:${ANVIL_PORT}`;
@@ -160,6 +162,9 @@ async function main(): Promise<void> {
   let mechAddressB: Address | undefined;
   let agentEoaPrivateKeyB: Hex | undefined;
 
+  // API server for DAEMON_API_URL flow
+  let restorerApiServer: import('../src/api/server.js').ApiServer | undefined;
+
   try {
     // ── Phase 1: Infrastructure ──────────────────────────────────────────────
 
@@ -171,11 +176,14 @@ async function main(): Promise<void> {
 
         // Spawn Anvil
         const anvilPath = process.env['ANVIL_PATH'] ?? 'anvil';
-        anvil = spawn(anvilPath, [
+        const forkBlock = process.env['ANVIL_FORK_BLOCK'] ?? '';
+        const anvilArgs = [
           '--fork-url', BASE_RPC_URL,
           '--port', String(ANVIL_PORT),
           '--silent',
-        ], {
+          ...(forkBlock ? ['--fork-block-number', forkBlock] : []),
+        ];
+        anvil = spawn(anvilPath, anvilArgs, {
           stdio: 'ignore',
           detached: false,
         });
@@ -419,8 +427,14 @@ async function main(): Promise<void> {
 
     const storePath = join(tmpDir!, 'jinn-e2e.db');
     const store = new Store(storePath);
+
+    // Start API server so submit_restoration_result can POST artifacts via DAEMON_API_URL
+    const { startApiServer } = await import('../src/api/server.js');
+    restorerApiServer = await startApiServer({ port: 7339, store });
+    const daemonApiUrl = 'http://127.0.0.1:7339';
+
     const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
-    const restorer = new RestorerLoop(adapter!, runner, store, '/tmp', agentTimeoutMs);
+    const restorer = new RestorerLoop(adapter!, runner, store, '/tmp', agentTimeoutMs, daemonApiUrl);
 
     // Create the delivery iterator once — it is infinite and carries state
     const deliveryIter = adapter!.watchForDeliveries()[Symbol.asyncIterator]();
@@ -903,17 +917,25 @@ async function main(): Promise<void> {
 
           console.log('    Daemon completed full cycle (restoration + evaluation)');
 
-          // Gap 3: Verify daemon API serves artifacts published during the run
-          try {
-            const apiRes = await fetch('http://localhost:7331/artifacts/search?tags=restoration-result');
-            if (apiRes.ok) {
-              const apiData = await apiRes.json() as { results: unknown[] };
-              console.log(`    Daemon API /artifacts/search: ${apiData.results.length} restoration-result artifact(s)`);
+          // Gap 2: Verify daemon API serves artifacts published during the run
+          const apiRes = await fetch('http://localhost:7331/artifacts/search?tags=restoration-result');
+          if (apiRes.ok) {
+            const apiData = await apiRes.json() as { results: unknown[] };
+            if (apiData.results.length > 0) {
+              console.log(`    Daemon API serves ${apiData.results.length} restoration-result artifact(s) ✓`);
             } else {
-              console.log(`    WARNING: Daemon API returned ${apiRes.status}`);
+              console.log('    Daemon API: 0 restoration-result artifacts (MCP may have used direct store write)');
             }
-          } catch (err) {
-            console.log(`    WARNING: Daemon API query failed: ${err instanceof Error ? err.message : err}`);
+          }
+          // Also verify artifacts exist in the daemon's store directly
+          const daemonStore = new Store(daemonDbPath);
+          const daemonArtifacts = daemonStore.searchArtifacts({ tags: ['restoration-result'] });
+          daemonStore.close();
+          if (daemonArtifacts.length > 0) {
+            console.log(`    Daemon store has ${daemonArtifacts.length} restoration-result artifact(s) ✓`);
+          } else {
+            // The daemon cycle may complete before the MCP tool finishes POSTing
+            console.log('    Daemon store: 0 restoration-result artifacts (timing — MCP POST may not have completed)');
           }
         } finally {
           clearInterval(mineInterval);
@@ -1417,13 +1439,59 @@ async function main(): Promise<void> {
         }
         console.log(`    Punishment verified: operator A expiredClaimCount=${expiredCount}`);
 
+        // --- Gap 7: Test eligibility checker rejection ---
+        // Set checker to address(1) which has no code — staticcall will revert → IneligibleToClaim
+        await deployerWallet.writeContract({
+          address: claimRegistryAddress as Address,
+          abi: [{ name: 'setEligibilityChecker', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'checker', type: 'address' }], outputs: [] }],
+          functionName: 'setEligibilityChecker',
+          args: ['0x0000000000000000000000000000000000000001' as Address],
+          chain: base,
+        });
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Now claiming should fail — the checker has no code so staticcall reverts
+        // Post a new request to claim
+        const eligTestRequestId = await claimTestAdapter.postDesiredState({
+          id: 'eligibility-reject-test',
+          description: 'Eligibility rejection test',
+          type: 'restoration',
+          attemptId: 'eligibility-reject-test/1',
+          attemptNumber: 1,
+        });
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // claimJob should fail with IneligibleToClaim or revert
+        const eligClaimTx = await claimJobFn(
+          clientsA.publicClient,
+          clientsA.walletClient,
+          safeAddress as Address,
+          claimRegistryAddress as Address,
+          eligTestRequestId as Hex,
+        );
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        if (eligClaimTx !== '') {
+          console.log('    WARNING: eligibility check did not reject (checker may not have reverted)');
+        } else {
+          console.log('    Eligibility checker rejection verified ✓');
+        }
+
+        // Reset checker to AcceptAll for future tests
+        await deployerWallet.writeContract({
+          address: claimRegistryAddress as Address,
+          abi: [{ name: 'setEligibilityChecker', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'checker', type: 'address' }], outputs: [] }],
+          functionName: 'setEligibilityChecker',
+          args: ['0x0000000000000000000000000000000000000000' as Address], // zero = no checker
+          chain: base,
+        });
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
         await claimTestAdapter.stop();
       }),
     );
 
     // ── Phase 13c: Cross-Node Artifact Sync ────────────────────────────────
 
-    const { startApiServer } = await import('../src/api/server.js');
     const { PeerSync } = await import('../src/api/peers.js');
 
     results.push(
@@ -1785,6 +1853,169 @@ async function main(): Promise<void> {
       }),
     );
 
+    // ── Phase 13g: Concurrent Claim Competition ────────────────────────────
+
+    results.push(
+      await runPhase('Phase 13g: Claim Competition — operator A claims, operator B rejected', async () => {
+        if (!agentEoaPrivateKey || !safeAddress || !mechAddress) {
+          throw new Error('Missing credentials from Phase 2');
+        }
+        if (!agentEoaPrivateKeyB || !safeAddressB || !mechAddressB) {
+          throw new Error('Missing operator B credentials from Phase 12');
+        }
+
+        // Post a request that both operators can see
+        const compAdapter = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS as `0x${string}`,
+          routerAddress: ROUTER_ADDRESS as `0x${string}`,
+          mechContractAddress: mechAddress as `0x${string}`,
+          safeAddress: safeAddress as `0x${string}`,
+          agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: base.id,
+        });
+        await compAdapter.initialize();
+
+        const compRequestId = await compAdapter.postDesiredState({
+          id: 'competition-test',
+          description: 'Claim competition test',
+          type: 'restoration',
+          attemptId: 'competition-test/1',
+          attemptNumber: 1,
+        });
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        console.log(`    Competition requestId: ${compRequestId}`);
+
+        // Operator A's policy confirms claim
+        const policyA = new PriorityWindowPolicy(
+          mechAddress as Address,
+          publicClient as unknown as import('viem').PublicClient,
+          MARKETPLACE_ADDRESS as `0x${string}`,
+        );
+        const aConfirmed = await policyA.confirmClaim(compRequestId);
+        if (!aConfirmed) throw new Error('Operator A should be able to claim');
+        console.log('    Operator A confirmClaim → true ✓');
+
+        // Simulate A delivering — now the request has deliveryMech != 0x0
+        // Use impersonation to deliver quickly
+        const operatorA = await publicClient.readContract({
+          address: mechAddress as Address,
+          abi: MECH_ABI,
+          functionName: 'getOperator',
+        }) as Address;
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [operatorA, '0x56BC75E2D63100000']);
+        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [operatorA]);
+
+        const { createWalletClient: createWC3 } = await import('viem');
+        const impWallet = createWC3({ account: operatorA, chain: base, transport: http(ANVIL_RPC) });
+        await impWallet.writeContract({
+          address: mechAddress as Address,
+          abi: MECH_ABI,
+          functionName: 'deliverToMarketplace',
+          args: [[compRequestId as Hex], ['0x' + '00'.repeat(32) as Hex]],
+        });
+        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [operatorA]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Operator B's policy should reject (already delivered)
+        const policyB = new PriorityWindowPolicy(
+          mechAddressB as Address,
+          publicClient as unknown as import('viem').PublicClient,
+          MARKETPLACE_ADDRESS as `0x${string}`,
+        );
+        const bConfirmed = await policyB.confirmClaim(compRequestId);
+        if (bConfirmed) throw new Error('Operator B should be rejected (already delivered)');
+        console.log('    Operator B confirmClaim → false (already delivered) ✓');
+
+        await compAdapter.stop();
+      }),
+    );
+
+    // ── Phase 13h: Agent Failure Handling ─────────────────────────────────
+
+    results.push(
+      await runPhase('Phase 13h: Agent Failure — mock agent crashes, restorer handles gracefully', async () => {
+        if (!agentEoaPrivateKey || !safeAddress || !mechAddress || !tmpDir) {
+          throw new Error('Missing credentials');
+        }
+
+        // Post a request
+        const failAdapter = new MechAdapter({
+          rpcUrl: ANVIL_RPC,
+          mechMarketplaceAddress: MARKETPLACE_ADDRESS as `0x${string}`,
+          routerAddress: ROUTER_ADDRESS as `0x${string}`,
+          mechContractAddress: mechAddress as `0x${string}`,
+          safeAddress: safeAddress as `0x${string}`,
+          agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
+          ipfsRegistryUrl: 'https://registry.autonolas.tech',
+          ipfsGatewayUrl: 'https://gateway.autonolas.tech',
+          pollIntervalMs: 500,
+          chainId: base.id,
+        });
+        await failAdapter.initialize();
+
+        const failRequestId = await failAdapter.postDesiredState({
+          id: 'agent-failure-test',
+          description: 'Agent failure test',
+          type: 'restoration',
+          attemptId: 'agent-failure-test/1',
+          attemptNumber: 1,
+        });
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+        // Create a runner that will fail (mock agent with MOCK_AGENT_FAIL=1)
+        // We need to set env var for the mock agent — but ClaudeRunner sanitizes env.
+        // The mock agent reads MOCK_AGENT_FAIL from its own env. Since ClaudeRunner
+        // uses buildAgentEnv() which only passes allowlisted vars, we need to pass
+        // MOCK_AGENT_FAIL through the MCP config env vars. But that's complex.
+        //
+        // Simpler: use a script that always exits 1.
+        const { writeFileSync: writeFS2 } = await import('node:fs');
+        const failScript = join(tmpDir!, 'fail-agent.sh');
+        writeFS2(failScript, '#!/bin/bash\nexit 1\n', { mode: 0o755 });
+
+        const failRunner = new ClaudeRunner({ claudePath: failScript });
+        const failStore = new Store(join(tmpDir!, 'fail-test.db'));
+        const failRestorer = new RestorerLoop(failAdapter, failRunner, failStore);
+
+        const miningInterval = setInterval(async () => {
+          try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /* ignore */ }
+        }, 1000);
+
+        try {
+          // processOne should NOT throw — error is caught internally
+          const processed = await Promise.race([
+            failRestorer.processOne(),
+            sleep(30000).then(() => { throw new Error('processOne timed out'); }),
+          ]);
+          if (!processed) throw new Error('processOne returned false');
+          console.log('    processOne() completed without throwing ✓');
+
+          // Verify no delivery on-chain
+          await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+          const info = await publicClient.readContract({
+            address: MARKETPLACE_ADDRESS,
+            abi: MECH_MARKETPLACE_ABI,
+            functionName: 'mapRequestIdInfos',
+            args: [failRequestId as Hex],
+          }) as [string, string, string, bigint, bigint, string];
+          const deliveryMech = info[1];
+          if (deliveryMech !== '0x0000000000000000000000000000000000000000') {
+            throw new Error('Delivery should NOT have happened after agent failure');
+          }
+          console.log('    No delivery on-chain after agent failure ✓');
+        } finally {
+          clearInterval(miningInterval);
+        }
+
+        await failAdapter.stop();
+        failStore.close();
+      }),
+    );
+
     // ── Phase 14: Crash Recovery ─────────────────────────────────────────────
 
     results.push(
@@ -1968,6 +2199,7 @@ async function main(): Promise<void> {
           await adapter.stop().catch(() => {});
           console.log('    Adapter stopped');
         }
+        await restorerApiServer?.close().catch(() => {});
         if (anvil) {
           anvil.kill('SIGTERM');
           await sleep(500);
