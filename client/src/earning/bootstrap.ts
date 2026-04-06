@@ -614,9 +614,29 @@ export class EarningBootstrapper {
   }
 
   private async parseServiceIdFromTx(txHash: string): Promise<number | null> {
-    const receipt = await this.provider.getTransactionReceipt(txHash);
+    // Retry fetching receipt: Anvil fork may return receipt without logs on first attempt
+    let receipt = await this.provider.getTransactionReceipt(txHash);
+
+    // If receipt exists but has no logs, retry more aggressively (Anvil lazy state)
+    if (receipt && receipt.logs.length === 0) {
+      for (let i = 0; i < 15; i++) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const retryReceipt = await this.provider.getTransactionReceipt(txHash);
+        if (retryReceipt && retryReceipt.logs.length > 0) {
+          receipt = retryReceipt;
+          console.error(`[earning-bootstrap] Receipt logs appeared after ${(i + 1) * 200}ms`);
+          break;
+        }
+      }
+    }
+
     if (!receipt) {
       return null;
+    }
+
+    // Log count for debugging
+    if (receipt.logs.length === 0) {
+      console.error(`[earning-bootstrap] Warning: receipt has no logs after all retries for tx ${txHash}`);
     }
 
     const registryIface = new Interface(SERVICE_REGISTRY_L2_ABI);
