@@ -11,6 +11,8 @@ import type { MetaTransactionData, TransactionResult } from '@safe-global/types-
 
 export type { MetaTransactionData, TransactionResult };
 
+const SAFE_EXECUTION_FALLBACK_GAS_LIMIT = 2_000_000;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SafeInitFn = (config: any) => Promise<SafeInstance>;
 
@@ -108,5 +110,19 @@ export async function executeSafeTxBatch(
 ): Promise<TransactionResult> {
   const safeTx = await safe.createTransaction({ transactions });
   const signedTx = await safe.signTransaction(safeTx);
-  return safe.executeTransaction(signedTx);
+
+  try {
+    return await safe.executeTransaction(signedTx);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes('GS013')) {
+      throw err;
+    }
+
+    // Safe SDK gas estimation intermittently fails on certain inner calls
+    // (notably staking approve+stake batches) even when the transaction itself succeeds.
+    return safe.executeTransaction(signedTx, {
+      gasLimit: SAFE_EXECUTION_FALLBACK_GAS_LIMIT,
+    });
+  }
 }

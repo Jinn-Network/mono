@@ -16,12 +16,14 @@
  * Usage: npx tsx scripts/e2e-validate.ts
  */
 
-import 'dotenv/config';
+import { config as dotenvConfig } from 'dotenv';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   Contract,
   Interface,
@@ -35,6 +37,7 @@ import {
 import {
   createPublicClient,
   decodeEventLog,
+  encodeFunctionData,
   http,
   type Address,
   type Hex,
@@ -48,6 +51,7 @@ import {
   MECH_ABI,
   MECH_MARKETPLACE_ABI,
   JINN_ROUTER_ABI,
+  NATIVE_PAYMENT_TYPE,
 } from '../src/adapters/mech/types.js';
 import { MechAdapter } from '../src/adapters/mech/adapter.js';
 import { EarningBootstrapper } from '../src/earning/bootstrap.js';
@@ -69,6 +73,33 @@ const OLAS_TOKEN = CHAIN_CONFIG.olasToken;
 
 const MARKETPLACE_ADDRESS: Address = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
 const ROUTER_ADDRESS: Address = '0xfFa7118A3D820cd4E820010837D65FAfF463181B';
+const MARKETPLACE_AGENT_FACTORY_SENTINEL: Address = '0x000000000000000000000000000000000000dEaD';
+const MARKETPLACE_SLOT_SCAN_MAX = 64n;
+const UINT32_MAX = 0xffff_ffffn;
+const RESPONSE_TIMEOUT_HEADROOM = 3600n;
+const MARKETPLACE_DIAGNOSTIC_ABI = [
+  {
+    name: 'mapAgentMechFactories',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'mapMechFactories',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'checkMech',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'mech', type: 'address' }],
+    outputs: [{ name: 'multisig', type: 'address' }],
+  },
+] as const;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -137,6 +168,221 @@ function erc20BalanceSlot(holder: string, mappingSlot: bigint = 0n): string {
     [holder, mappingSlot],
   );
   return keccak256(encoded);
+}
+
+function addressMappingSlot(holder: Address, mappingSlot: bigint): Hex {
+  const encoded = AbiCoder.defaultAbiCoder().encode(
+    ['address', 'uint256'],
+    [holder, mappingSlot],
+  );
+  return keccak256(encoded) as Hex;
+}
+
+function addressStorageWord(address: Address): Hex {
+  return zeroPadValue(address, 32) as Hex;
+}
+
+function sameAddress(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+async function getStorageWord(contractAddress: Address, slot: Hex): Promise<Hex> {
+  return await jsonRpc(ANVIL_RPC, 'eth_getStorageAt', [contractAddress, slot, 'latest']) as Hex;
+}
+
+async function setStorageWord(contractAddress: Address, slot: Hex, value: Hex): Promise<void> {
+  await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [contractAddress, slot, value]);
+}
+
+async function readAgentFactory(publicClient: PublicClient, mechAddress: Address): Promise<Address> {
+  return await publicClient.readContract({
+    address: MARKETPLACE_ADDRESS,
+    abi: MARKETPLACE_DIAGNOSTIC_ABI,
+    functionName: 'mapAgentMechFactories',
+    args: [mechAddress],
+  }) as Address;
+}
+
+async function readFactoryWhitelist(publicClient: PublicClient, factoryAddress: Address): Promise<boolean> {
+  return await publicClient.readContract({
+    address: MARKETPLACE_ADDRESS,
+    abi: MARKETPLACE_DIAGNOSTIC_ABI,
+    functionName: 'mapMechFactories',
+    args: [factoryAddress],
+  }) as boolean;
+}
+
+async function checkMech(publicClient: PublicClient, mechAddress: Address): Promise<Address> {
+  return await publicClient.readContract({
+    address: MARKETPLACE_ADDRESS,
+    abi: MARKETPLACE_DIAGNOSTIC_ABI,
+    functionName: 'checkMech',
+    args: [mechAddress],
+  }) as Address;
+}
+
+async function pinAgentFactoryMapping(
+  publicClient: PublicClient,
+  mechAddress: Address,
+  factoryAddress: Address,
+): Promise<bigint> {
+  for (let candidateSlot = 0n; candidateSlot <= MARKETPLACE_SLOT_SCAN_MAX; candidateSlot++) {
+    const slot = addressMappingSlot(mechAddress, candidateSlot);
+    const original = await getStorageWord(MARKETPLACE_ADDRESS, slot);
+
+    let matched = false;
+    try {
+      await setStorageWord(MARKETPLACE_ADDRESS, slot, addressStorageWord(MARKETPLACE_AGENT_FACTORY_SENTINEL));
+
+      const readBack = await readAgentFactory(publicClient, mechAddress);
+      if (sameAddress(readBack, MARKETPLACE_AGENT_FACTORY_SENTINEL)) {
+        await setStorageWord(MARKETPLACE_ADDRESS, slot, addressStorageWord(factoryAddress));
+        matched = true;
+        return candidateSlot;
+      }
+    } finally {
+      if (!matched) {
+        await setStorageWord(MARKETPLACE_ADDRESS, slot, original);
+      }
+    }
+  }
+
+  throw new Error(
+    `Could not locate mapAgentMechFactories storage slot for ${mechAddress} within 0-${MARKETPLACE_SLOT_SCAN_MAX}`,
+  );
+}
+
+async function warmCreateRestorationJobPath(
+  safeAddress: Address,
+  mechAddress: Address,
+  deliveryRate: bigint,
+  responseTimeout: bigint,
+): Promise<void> {
+  const data = encodeFunctionData({
+    abi: JINN_ROUTER_ABI,
+    functionName: 'createRestorationJob',
+    args: ['0x1234', mechAddress, deliveryRate, responseTimeout, NATIVE_PAYMENT_TYPE, '0x'],
+  });
+
+  await jsonRpc(ANVIL_RPC, 'eth_call', [
+    {
+      from: safeAddress,
+      to: ROUTER_ADDRESS,
+      value: toBeHex(deliveryRate),
+      data,
+    },
+    'latest',
+  ]);
+}
+
+async function stabilizeForkedMarketplaceState(
+  publicClient: PublicClient,
+  safeAddress: Address,
+  mechAddress: Address,
+): Promise<void> {
+  const expectedFactory = CHAIN_CONFIG.mechFactory as Address;
+
+  const [factoryBefore, factoryWhitelisted] = await Promise.all([
+    readAgentFactory(publicClient, mechAddress),
+    readFactoryWhitelist(publicClient, expectedFactory),
+  ]);
+
+  let checkMechBefore: string;
+  try {
+    checkMechBefore = await checkMech(publicClient, mechAddress);
+  } catch (err) {
+    checkMechBefore = `revert: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  console.log(
+    `    [fork] marketplace before: agentFactory=${factoryBefore}, factoryWhitelisted=${factoryWhitelisted}, checkMech=${checkMechBefore}`,
+  );
+
+  const pinnedSlot = await pinAgentFactoryMapping(publicClient, mechAddress, expectedFactory);
+  const factoryAfter = await readAgentFactory(publicClient, mechAddress);
+  if (!sameAddress(factoryAfter, expectedFactory)) {
+    throw new Error(
+      `Pinned mapAgentMechFactories slot ${pinnedSlot}, but readback was ${factoryAfter} instead of ${expectedFactory}`,
+    );
+  }
+
+  const [deliveryRate, timeoutBounds] = await Promise.all([
+    publicClient.readContract({
+      address: mechAddress,
+      abi: MECH_ABI,
+      functionName: 'maxDeliveryRate',
+    }) as Promise<bigint>,
+    Promise.all([
+      publicClient.readContract({
+        address: MARKETPLACE_ADDRESS,
+        abi: MECH_MARKETPLACE_ABI,
+        functionName: 'minResponseTimeout',
+      }) as Promise<bigint>,
+      publicClient.readContract({
+        address: MARKETPLACE_ADDRESS,
+        abi: MECH_MARKETPLACE_ABI,
+        functionName: 'maxResponseTimeout',
+      }) as Promise<bigint>,
+    ]),
+  ]);
+
+  await warmCreateRestorationJobPath(
+    safeAddress,
+    mechAddress,
+    deliveryRate,
+    timeoutBounds[1],
+  );
+
+  const checkMechAfter = await checkMech(publicClient, mechAddress);
+  console.log(
+    `    [fork] pinned mapAgentMechFactories slot ${pinnedSlot}; checkMech now resolves to ${checkMechAfter}`,
+  );
+}
+
+async function resolveForkTimestamp(forkBlock?: string): Promise<bigint> {
+  try {
+    const upstreamBlock = await jsonRpc(BASE_RPC_URL, 'eth_getBlockByNumber', [
+      forkBlock ? toBeHex(BigInt(forkBlock)) : 'latest',
+      false,
+    ]) as { timestamp?: string } | null;
+    if (upstreamBlock?.timestamp) {
+      return BigInt(upstreamBlock.timestamp);
+    }
+  } catch {
+    // Fallback to wall clock time if upstream block lookup fails.
+  }
+
+  return BigInt(Math.floor(Date.now() / 1000));
+}
+
+async function normalizeForkTimestamp(
+  publicClient: PublicClient,
+  forkBlock?: string,
+): Promise<void> {
+  const latestBlock = await publicClient.getBlock();
+  if (latestBlock.timestamp <= UINT32_MAX - RESPONSE_TIMEOUT_HEADROOM) {
+    console.log(`    Fork timestamp: ${latestBlock.timestamp}`);
+    return;
+  }
+
+  const targetTimestamp = await resolveForkTimestamp(forkBlock);
+  const cappedTarget = targetTimestamp <= UINT32_MAX - RESPONSE_TIMEOUT_HEADROOM
+    ? targetTimestamp
+    : UINT32_MAX - RESPONSE_TIMEOUT_HEADROOM;
+
+  await jsonRpc(ANVIL_RPC, 'evm_setTime', [Number(cappedTarget)]);
+  await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+  const normalizedBlock = await publicClient.getBlock();
+  if (normalizedBlock.timestamp > UINT32_MAX - RESPONSE_TIMEOUT_HEADROOM) {
+    throw new Error(
+      `Fork timestamp ${normalizedBlock.timestamp} still exceeds uint32.max safety window after evm_setTime`,
+    );
+  }
+
+  console.log(
+    `    Normalized fork timestamp from ${latestBlock.timestamp} to ${normalizedBlock.timestamp}`,
+  );
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -210,6 +456,8 @@ async function main(): Promise<void> {
 
         const blockNumber = await publicClient.getBlockNumber();
         console.log(`    Anvil forked at block ${blockNumber}`);
+
+        await normalizeForkTimestamp(publicClient, forkBlock || undefined);
       }),
     );
 
@@ -370,6 +618,11 @@ async function main(): Promise<void> {
         const nonces: bigint[] = await checker.getMultisigNonces(safeAddress);
         console.log(`    Activity checker: ${activityChecker}`);
         console.log(`    Initial nonces: [${nonces.map(String).join(', ')}]`);
+
+        // Anvil can lazily fetch stale/zero marketplace storage from the fork RPC
+        // during the first request transaction. Pin the mech factory mapping into
+        // local fork state and simulate the router path before the real tx.
+        await stabilizeForkedMarketplaceState(publicClient, safeAddress, mechAddress);
       }),
     );
 
@@ -378,6 +631,13 @@ async function main(): Promise<void> {
     results.push(
       await runPhase('Phase 4: Creator posts desired state', async () => {
         if (!adapter) throw new Error('No adapter from Phase 3');
+
+        // Mine multiple blocks and wait to ensure RPC state is synchronized
+        // (nonce may be stale from bootstrap, especially with Anvil fork RPC delays)
+        for (let i = 0; i < 3; i++) {
+          await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+          await sleep(100);
+        }
 
         restorationRequestId = await adapter.postDesiredState({
           id: 'e2e-test',
@@ -455,7 +715,7 @@ async function main(): Promise<void> {
         try {
           const processed = await Promise.race([
             restorer.processOne(),
-            sleep(60000).then(() => { throw new Error('restorer.processOne timed out after 60s'); }),
+            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`restorer.processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
           ]);
           if (!processed) throw new Error('processOne returned false — no request found');
         } finally {
@@ -578,7 +838,7 @@ async function main(): Promise<void> {
         try {
           const processed = await Promise.race([
             restorer.processOne(),
-            sleep(60000).then(() => { throw new Error('restorer.processOne timed out after 60s'); }),
+            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`restorer.processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
           ]);
           if (!processed) throw new Error('processOne returned false — no evaluation request found');
         } finally {
@@ -1025,6 +1285,9 @@ async function main(): Promise<void> {
         console.log(`    Operator B Safe: ${safeAddressB}`);
         console.log(`    Operator B Mech: ${mechAddressB}`);
 
+        // Stabilize B's mech on the marketplace
+        await stabilizeForkedMarketplaceState(publicClient as unknown as import('viem').PublicClient, safeAddressB as Address, mechAddressB as Address);
+
         // Creator adapter (Operator A) — posts request targeting B's mech
         const creatorAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
@@ -1143,6 +1406,10 @@ async function main(): Promise<void> {
         if (!agentEoaPrivateKeyB || !safeAddressB || !mechAddressB) {
           throw new Error('Missing operator B credentials from Phase 12');
         }
+
+        // Re-normalize timestamp and stabilize marketplace state
+        await normalizeForkTimestamp(publicClient as unknown as import('viem').PublicClient);
+        await stabilizeForkedMarketplaceState(publicClient as unknown as import('viem').PublicClient, safeAddress as Address, mechAddress as Address);
 
         // Operator A posts a request with priority = A's mech
         const windowAdapter = new MechAdapter({
@@ -1313,6 +1580,10 @@ async function main(): Promise<void> {
         const clientsB = createClients(ANVIL_RPC, agentEoaPrivateKeyB as Hex);
 
         // Post a request for operator A to claim
+        // Re-normalize timestamp (may have drifted from evm_increaseTime in earlier phases)
+        await normalizeForkTimestamp(publicClient as unknown as import('viem').PublicClient);
+        await stabilizeForkedMarketplaceState(publicClient as unknown as import('viem').PublicClient, safeAddress as Address, mechAddress as Address);
+
         const claimTestAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
           mechMarketplaceAddress: MARKETPLACE_ADDRESS as `0x${string}`,
@@ -1865,6 +2136,9 @@ async function main(): Promise<void> {
           throw new Error('Missing operator B credentials from Phase 12');
         }
 
+        await normalizeForkTimestamp(publicClient as unknown as import('viem').PublicClient);
+        await stabilizeForkedMarketplaceState(publicClient as unknown as import('viem').PublicClient, safeAddress as Address, mechAddress as Address);
+
         // Post a request that both operators can see
         const compAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
@@ -1942,6 +2216,9 @@ async function main(): Promise<void> {
         if (!agentEoaPrivateKey || !safeAddress || !mechAddress || !tmpDir) {
           throw new Error('Missing credentials');
         }
+
+        await normalizeForkTimestamp(publicClient as unknown as import('viem').PublicClient);
+        await stabilizeForkedMarketplaceState(publicClient as unknown as import('viem').PublicClient, safeAddress as Address, mechAddress as Address);
 
         // Post a request
         const failAdapter = new MechAdapter({
@@ -2027,6 +2304,10 @@ async function main(): Promise<void> {
         if (!agentEoaPrivateKeyB || !safeAddressB || !mechAddressB) {
           throw new Error('Missing operator B credentials from Phase 12');
         }
+
+        // Re-stabilize marketplace state for both mechs
+        await normalizeForkTimestamp(publicClient as unknown as import('viem').PublicClient);
+        await stabilizeForkedMarketplaceState(publicClient as unknown as import('viem').PublicClient, safeAddress as Address, mechAddress as Address);
 
         const dbPath = join(tmpDir, 'crash-recovery.db');
 
