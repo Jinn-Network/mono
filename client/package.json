@@ -9,7 +9,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "tsx src/index.ts",
+    "start": "tsx src/main.ts",
     "e2e": "tsx scripts/e2e-validate.ts",
     "staking": "tsx scripts/staking-validate.ts"
   },
