@@ -12,10 +12,15 @@ export interface ActiveAttempt {
 
 export class CreatorLoop {
   private stopped = false;
-  private posted = new Set<string>();
+  private posted = new Map<string, number>(); // stateId → timestamp of last post
   private attempts = new Map<string, ActiveAttempt>();
   private stopResolve: (() => void) | null = null;
   private stopPromise: Promise<void>;
+
+  // Minimum interval between posting the same desired state (ms).
+  // ~20 activities/day needed; each cycle = 4 activities; 5 cycles/day = 1 every ~4.8h.
+  // Use 4h to provide safety margin.
+  private static readonly REPOST_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
   constructor(
     private readonly adapter: ExecutionAdapter,
@@ -28,10 +33,14 @@ export class CreatorLoop {
   }
 
   async tick(): Promise<RequestId | null> {
+    const now = Date.now();
     for (const state of this.desiredStates) {
-      if (this.posted.has(state.id)) continue;
+      const lastPosted = this.posted.get(state.id);
+      if (lastPosted && (now - lastPosted) < CreatorLoop.REPOST_INTERVAL_MS) continue;
+
       try {
-        const attemptNumber = 1;
+        const prev = this.attempts.get(state.id);
+        const attemptNumber = prev ? prev.attemptNumber + 1 : 1;
         const attemptId = `${state.id}/${attemptNumber}`;
         const stateWithAttempt: DesiredState = {
           ...state,
@@ -40,7 +49,7 @@ export class CreatorLoop {
           attemptNumber,
         };
         const requestId = await this.adapter.postDesiredState(stateWithAttempt);
-        this.posted.add(state.id);
+        this.posted.set(state.id, now);
         this.attempts.set(state.id, {
           desiredState: state,
           attemptNumber,
