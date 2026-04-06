@@ -5,7 +5,8 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy:claim-registry": "hardhat run scripts/deploy-claim-registry.ts"
+    "deploy:claim-registry": "hardhat run scripts/deploy-claim-registry.ts",
+    "validate:phase1a": "hardhat run scripts/validate-phase1a.ts"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
