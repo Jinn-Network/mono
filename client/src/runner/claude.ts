@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { DesiredState, RestorationResult } from '../types/index.js';
 import type { Runner, RunnerContext } from './runner.js';
+import { Store } from '../store/store.js';
 
 const __dirname = join(fileURLToPath(import.meta.url), '..');
 
@@ -48,14 +49,31 @@ export class ClaudeRunner implements Runner {
               ? JSON.stringify(desiredState.context.restorationResult)
               : '',
             STORE_PATH: context.storePath ?? '',
+            DAEMON_API_URL: context.daemonApiUrl ?? '',
           },
         },
       },
     }));
 
     try {
-      const output = await spawnAgent(this.claudePath, prompt, mcpConfigPath, this.model, context.timeoutMs);
-      return { data: output };
+      await spawnAgent(this.claudePath, prompt, mcpConfigPath, this.model, context.timeoutMs);
+
+      // Read result from store — the MCP tool published it as an artifact
+      if (context.storePath) {
+        const store = new Store(context.storePath);
+        try {
+          const isEvaluation = desiredState.type === 'evaluation';
+          const tag = isEvaluation ? 'evaluation-verdict' : 'restoration-result';
+          const artifact = store.getArtifactByRequestId(context.requestId, tag);
+          if (artifact) {
+            return { data: artifact.content };
+          }
+        } finally {
+          store.close();
+        }
+      }
+
+      return { data: '' };
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -134,7 +152,7 @@ function buildAgentEnv(): Record<string, string> {
   return env;
 }
 
-function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, model?: string, timeoutMs?: number): Promise<string> {
+function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, model?: string, timeoutMs?: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = ['-p', prompt, '--mcp-config', mcpConfigPath];
     if (model) args.push('--model', model);
@@ -146,14 +164,13 @@ function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, m
       timeout: timeoutMs,
     });
 
-    let stdout = '';
     let stderr = '';
-    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stdout?.on('data', () => { /* stdout ignored — results come via store */ });
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
 
     child.on('close', (code) => {
       if (code === 0) {
-        resolve(stdout.trim());
+        resolve();
       } else {
         reject(new Error(`Agent exited with code ${code}: ${stderr.slice(0, 500)}`));
       }

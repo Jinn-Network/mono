@@ -5,6 +5,7 @@ export interface RunnerContext {
   workingDirectory: string;
   timeoutMs: number;
   storePath?: string;
+  daemonApiUrl?: string;
 }
 
 export interface Runner {

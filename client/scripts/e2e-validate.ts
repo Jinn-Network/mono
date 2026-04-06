@@ -409,11 +409,18 @@ async function main(): Promise<void> {
     const { ClaudeRunner } = await import('../src/runner/claude.js');
     const { Store } = await import('../src/store/store.js');
 
+    const USE_REAL_AGENT = process.env['JINN_E2E_AGENT'] === 'real';
+    const agentPath = USE_REAL_AGENT ? 'claude' : join(__dirname, 'mock-agent.sh');
+    const agentModel = USE_REAL_AGENT ? 'claude-haiku-4-5-20251001' : undefined;
+    const agentTimeoutMs = USE_REAL_AGENT ? 120000 : 60000;
+    if (USE_REAL_AGENT) {
+      console.log('    Using REAL Claude agent');
+    }
+
     const storePath = join(tmpDir!, 'jinn-e2e.db');
     const store = new Store(storePath);
-    const mockAgentPath = join(__dirname, 'mock-agent.sh');
-    const runner = new ClaudeRunner({ claudePath: mockAgentPath });
-    const restorer = new RestorerLoop(adapter!, runner, store);
+    const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
+    const restorer = new RestorerLoop(adapter!, runner, store, '/tmp', agentTimeoutMs);
 
     // Create the delivery iterator once — it is infinite and carries state
     const deliveryIter = adapter!.watchForDeliveries()[Symbol.asyncIterator]();
@@ -818,7 +825,7 @@ async function main(): Promise<void> {
 
         const daemon = new Daemon({
           adapter: daemonAdapter,
-          runner: new ClaudeRunner({ claudePath: mockAgentPath }),
+          runner: new ClaudeRunner({ claudePath: agentPath, model: agentModel }),
           desiredStates: [{ id: 'daemon-loop-test', description: 'Daemon loop E2E test' }],
           dbPath: ':memory:',
           shutdownTimeoutMs: 10000,
@@ -989,7 +996,7 @@ async function main(): Promise<void> {
 
         // B picks up the request and delivers
         const storeB = new Store(':memory:');
-        const restorerB = new RestorerLoop(restorerAdapterB, runner, storeB);
+        const restorerB = new RestorerLoop(restorerAdapterB, runner, storeB, '/tmp', agentTimeoutMs);
 
         const miningInterval = setInterval(async () => {
           try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /* ignore */ }

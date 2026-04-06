@@ -37,6 +37,7 @@ const desiredState = {
 const requestId = process.env['REQUEST_ID'] ?? '';
 const storePath = process.env['STORE_PATH'] ?? '';
 const store = storePath ? new Store(storePath) : null;
+const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -80,21 +81,41 @@ server.tool(
     data: z.string().optional().describe('Result data or artifact content'),
   },
   async ({ success, description, data }) => {
-    // Write result to stdout as JSON — ClaudeRunner captures this
-    const result = {
-      protocol: 'jinn-client/v1',
-      type: 'restoration-result',
-      requestId,
+    const isEvaluation = desiredState.type === 'evaluation';
+    const resultTag = isEvaluation ? 'evaluation-verdict' : 'restoration-result';
+    const id = randomUUID();
+
+    const artifact = {
+      id,
       desiredStateId: desiredState.id,
-      success,
-      description,
-      data: data ?? description,
-      completedAt: new Date().toISOString(),
+      requestId,
+      title: `${resultTag}: ${description.slice(0, 80)}`,
+      content: data ?? description,
+      tags: [resultTag, success ? 'success' : 'failure'],
+      outcome: (success ? 'SUCCESS' : 'FAILURE') as 'SUCCESS' | 'FAILURE' | 'UNKNOWN',
     };
-    // Use stderr for the structured result (stdout is for MCP protocol)
-    console.error(`[mcp] Result: ${JSON.stringify(result)}`);
+
+    // Publish via daemon API if available, otherwise direct store write
+    if (daemonApiUrl) {
+      try {
+        const response = await fetch(`${daemonApiUrl}/artifacts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(artifact),
+        });
+        if (!response.ok) {
+          console.error(`[mcp] Failed to POST artifact to daemon: ${response.status}`);
+        }
+      } catch (err) {
+        console.error(`[mcp] Failed to POST artifact to daemon:`, err);
+      }
+    } else if (store) {
+      store.insertArtifact(artifact);
+    }
+
+    console.error(`[mcp] Result published as artifact: ${id} [${resultTag}]`);
     return {
-      content: [{ type: 'text' as const, text: JSON.stringify({ submitted: true, ...result }) }],
+      content: [{ type: 'text' as const, text: JSON.stringify({ submitted: true, id, tag: resultTag }) }],
     };
   },
 );

@@ -41,12 +41,14 @@ export class Daemon {
   private apiServer?: ApiServer;
   private peerSync?: PeerSync;
   private registry?: Registry8004;
+  private readonly apiPort: number;
 
   constructor(private readonly config: DaemonConfig) {
     this.store = new Store(config.dbPath);
     this.adapter = config.adapter;
+    this.apiPort = config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
     this.creatorLoop = new CreatorLoop(this.adapter, config.desiredStates, this.store);
-    this.restorerLoop = new RestorerLoop(this.adapter, config.runner, this.store);
+    this.restorerLoop = new RestorerLoop(this.adapter, config.runner, this.store, '/tmp', 300000, `http://127.0.0.1:${this.apiPort}`);
     this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter);
   }
 
@@ -56,9 +58,8 @@ export class Daemon {
     this.cachedShutdownState = 'running';
 
     // Start HTTP API server
-    const apiPort = this.config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
     this.apiServer = await startApiServer({
-      port: apiPort,
+      port: this.apiPort,
       store: this.store,
       onArtifactPublished: (artifact) => this.registerArtifact(artifact),
       x402: this.config.x402,

@@ -16,6 +16,7 @@ export class RestorerLoop {
     private readonly store: Store,
     private readonly workingDirectory: string = '/tmp',
     private readonly timeoutMs: number = 300000,
+    private readonly daemonApiUrl?: string,
   ) {
     this.stopPromise = new Promise(resolve => {
       this.stopResolve = resolve;
@@ -47,6 +48,7 @@ export class RestorerLoop {
         workingDirectory: this.workingDirectory,
         timeoutMs: this.timeoutMs,
         storePath: this.store.path,
+        daemonApiUrl: this.daemonApiUrl,
       });
 
       await this.adapter.submitResult(request.requestId, result);

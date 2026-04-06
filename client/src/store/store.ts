@@ -161,6 +161,14 @@ export class Store {
     };
   }
 
+  getArtifactByRequestId(requestId: string, tag: string): { id: string; title: string; content: string; tags: string[]; outcome: string } | null {
+    const row = this.db.prepare(
+      `SELECT id, title, content, tags, outcome FROM artifacts WHERE request_id = ? AND tags LIKE ? ORDER BY created_at DESC LIMIT 1`
+    ).get(requestId, `%${tag}%`) as { id: string; title: string; content: string; tags: string; outcome: string } | undefined;
+    if (!row) return null;
+    return { ...row, tags: JSON.parse(row.tags) as string[] };
+  }
+
   cacheRemoteContent(id: string, content: string): void {
     this.db.prepare('UPDATE artifacts SET content = ? WHERE id = ?').run(content, id);
   }
