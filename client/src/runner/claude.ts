@@ -158,30 +158,46 @@ function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, m
     if (model) args.push('--model', model);
     args.push('--allowedTools', 'mcp__jinn-client__*');
 
+    console.log(`[runner] Spawning agent: ${claudePath} ${args.slice(0, 3).join(' ')} ... (timeout: ${timeoutMs}ms)`);
+
+    const agentEnv = buildAgentEnv();
     const child = spawn(claudePath, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: buildAgentEnv(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: agentEnv,
       timeout: timeoutMs,
     });
 
+    // Close stdin immediately so Claude doesn't wait for input
+    child.stdin?.end();
+
+    console.log(`[runner] Agent process spawned (pid: ${child.pid})`);
+
     let stdout = '';
     let stderr = '';
-    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.stdout?.on('data', (d: Buffer) => {
+      stdout += d.toString();
+      // Stream output as it arrives
+      const lines = d.toString().trim();
+      if (lines) console.log(`[runner:stdout] ${lines.slice(0, 200)}`);
+    });
+    child.stderr?.on('data', (d: Buffer) => {
+      stderr += d.toString();
+      const lines = d.toString().trim();
+      if (lines) console.error(`[runner:stderr] ${lines.slice(0, 200)}`);
+    });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
+      console.log(`[runner] Agent process closed (code: ${code}, signal: ${signal})`);
       if (code === 0) {
-        if (stdout.trim()) console.log(`[runner] Agent output: ${stdout.slice(0, 500)}`);
-        if (stderr.trim()) console.error(`[runner] Agent stderr: ${stderr.slice(0, 500)}`);
         resolve();
       } else {
-        console.error(`[runner] Agent failed (code ${code})`);
-        if (stdout.trim()) console.log(`[runner] Agent output: ${stdout.slice(0, 500)}`);
-        if (stderr.trim()) console.error(`[runner] Agent stderr: ${stderr.slice(0, 500)}`);
-        reject(new Error(`Agent exited with code ${code}: ${stderr.slice(0, 500)}`));
+        reject(new Error(`Agent exited with code ${code}, signal ${signal}: ${stderr.slice(0, 500)}`));
       }
     });
 
-    child.on('error', reject);
+    child.on('error', (err) => {
+      console.error(`[runner] Agent spawn error:`, err.message);
+      reject(err);
+    });
   });
 }
