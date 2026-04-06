@@ -681,7 +681,7 @@ async function main(): Promise<void> {
     const USE_REAL_AGENT = process.env['JINN_E2E_AGENT'] === 'real';
     const agentPath = USE_REAL_AGENT ? 'claude' : join(__dirname, 'mock-agent.sh');
     const agentModel = USE_REAL_AGENT ? 'claude-haiku-4-5-20251001' : undefined;
-    const agentTimeoutMs = USE_REAL_AGENT ? 120000 : 60000;
+    const agentTimeoutMs = USE_REAL_AGENT ? 300000 : 60000;
     if (USE_REAL_AGENT) {
       console.log('    Using REAL Claude agent');
     }
