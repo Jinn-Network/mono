@@ -56,7 +56,7 @@ const EARNING_DIR = process.env['JINN_EARNING_DIR'] ?? join(DEFAULT_DIR, 'earnin
 const DB_PATH = process.env['JINN_DB_PATH'] ?? join(DEFAULT_DIR, 'jinn.db');
 const POLL_INTERVAL_MS = parseInt(process.env['JINN_POLL_INTERVAL_MS'] ?? '5000', 10);
 const CLAUDE_PATH = process.env['JINN_CLAUDE_PATH'] ?? 'claude';
-const CLAUDE_MODEL = process.env['JINN_CLAUDE_MODEL'];
+const CLAUDE_MODEL = process.env['JINN_CLAUDE_MODEL'] ?? 'claude-haiku-4-5-20251001';
 
 const CHAIN_CONFIG = getChainConfig('base');
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
