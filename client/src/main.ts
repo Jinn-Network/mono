@@ -42,7 +42,8 @@ const PASSWORD: string = (() => {
 
 const config = loadConfig(getConfigPathFromArgs());
 
-const CHAIN_CONFIG = getChainConfig('base');
+const NETWORK_CHAIN = config.network === 'testnet' ? 'base-sepolia' : 'base';
+const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN);
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = '0xfFa7118A3D820cd4E820010837D65FAfF463181B' as const;
 
@@ -57,7 +58,7 @@ async function bootstrap(): Promise<{
 
   const bootstrapper = new EarningBootstrapper({
     earningDir: config.earningDir,
-    chain: 'base',
+    chain: NETWORK_CHAIN,
     rpcUrl: config.rpcUrl,
   });
 

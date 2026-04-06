@@ -55,7 +55,7 @@ const ServiceState = {
 
 export interface EarningBootstrapperOptions {
   earningDir?: string;
-  chain?: 'base';
+  chain?: 'base' | 'base-sepolia';
   rpcUrl?: string;
 }
 
