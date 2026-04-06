@@ -19,5 +19,8 @@ export { DeliveryWatcherLoop } from './daemon/delivery-watcher.js';
 // Store
 export { Store } from './store/store.js';
 
+// Config
+export { loadConfig, getConfigPathFromArgs, JinnConfigSchema, type JinnConfig } from './config.js';
+
 // Earning
 export { EarningBootstrapper, type EarningBootstrapperOptions } from './earning/bootstrap.js';

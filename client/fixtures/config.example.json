@@ -1,0 +1,12 @@
+{
+  "rpcUrl": "https://mainnet.base.org",
+  "claudeModel": "claude-haiku-4-5-20251001",
+  "pollIntervalMs": 5000,
+  "apiPort": 7331,
+  "desiredStates": [
+    {
+      "id": "health-check",
+      "description": "The service is running and participating in the Jinn protocol loop."
+    }
+  ]
+}

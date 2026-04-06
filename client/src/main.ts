@@ -5,40 +5,28 @@
  * Bootstraps earning (wallet → Safe → service → staking → mech),
  * then starts the daemon with MechAdapter + ClaudeRunner on Base.
  *
- * Required env:
- *   JINN_PASSWORD          — keystore encryption password
+ * Config resolution (highest priority wins):
+ *   1. Environment variables (JINN_*, BASE_RPC_URL)
+ *   2. Config file (~/.jinn-client/config.json or --config <path>)
+ *   3. Built-in defaults
  *
- * Optional env:
- *   BASE_RPC_URL           — Base RPC endpoint (default: https://mainnet.base.org)
- *   JINN_EARNING_DIR       — earning state directory (default: ~/.jinn-client/earning)
- *   JINN_DB_PATH           — SQLite database path (default: ~/.jinn-client/jinn.db)
- *   JINN_POLL_INTERVAL_MS  — chain poll interval in ms (default: 5000)
- *   JINN_API_PORT          — HTTP API port (default: 7331)
- *   JINN_CLAUDE_PATH       — path to claude CLI (default: claude)
- *   JINN_CLAUDE_MODEL      — model to use for restoration/evaluation
- *   JINN_PEERS             — comma-separated peer URLs
- *   JINN_SUBGRAPH_URL      — The Graph subgraph for artifact discovery
- *   JINN_DESIRED_STATES    — path to JSON file with desired states array
+ * JINN_PASSWORD (env-only) is required for keystore encryption.
  *
  * Usage:
- *   JINN_PASSWORD=secret npx tsx src/main.ts
  *   JINN_PASSWORD=secret npm start
+ *   JINN_PASSWORD=secret npm start -- --config ./my-config.json
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { Wallet } from 'ethers';
+import { loadConfig, getConfigPathFromArgs } from './config.js';
 import { EarningBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { EarningStateStore } from './earning/store.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import { Daemon } from './daemon/daemon.js';
-import { Store } from './store/store.js';
-import type { DesiredState } from './types/index.js';
 
-// ── Config from env ─────────────────────────────────────────────────────────
+// ── Password (env-only — never in config files) ────────────────────────────
 
 const PASSWORD: string = (() => {
   const p = process.env['JINN_PASSWORD'];
@@ -50,45 +38,13 @@ const PASSWORD: string = (() => {
   return p;
 })();
 
-const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
-const DEFAULT_DIR = join(homedir(), '.jinn-client');
-const EARNING_DIR = process.env['JINN_EARNING_DIR'] ?? join(DEFAULT_DIR, 'earning');
-const DB_PATH = process.env['JINN_DB_PATH'] ?? join(DEFAULT_DIR, 'jinn.db');
-const POLL_INTERVAL_MS = parseInt(process.env['JINN_POLL_INTERVAL_MS'] ?? '5000', 10);
-const CLAUDE_PATH = process.env['JINN_CLAUDE_PATH'] ?? 'claude';
-const CLAUDE_MODEL = process.env['JINN_CLAUDE_MODEL'] ?? 'claude-haiku-4-5-20251001';
+// ── Load config ─────────────────────────────────────────────────────────────
+
+const config = loadConfig(getConfigPathFromArgs());
 
 const CHAIN_CONFIG = getChainConfig('base');
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = '0xfFa7118A3D820cd4E820010837D65FAfF463181B' as const;
-
-// ── Desired states ──────────────────────────────────────────────────────────
-
-function loadDesiredStates(): DesiredState[] {
-  const statesPath = process.env['JINN_DESIRED_STATES'];
-  if (statesPath) {
-    if (!existsSync(statesPath)) {
-      console.error(`Fatal: JINN_DESIRED_STATES file not found: ${statesPath}`);
-      process.exit(1);
-    }
-    const raw = readFileSync(statesPath, 'utf-8');
-    const parsed = JSON.parse(raw) as DesiredState[];
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      console.error('Fatal: JINN_DESIRED_STATES must be a non-empty JSON array.');
-      process.exit(1);
-    }
-    console.log(`[main] Loaded ${parsed.length} desired state(s) from ${statesPath}`);
-    return parsed;
-  }
-
-  // Default: a single health-check desired state
-  return [
-    {
-      id: 'health-check',
-      description: 'The service is running and participating in the Jinn protocol loop.',
-    },
-  ];
-}
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -100,9 +56,9 @@ async function bootstrap(): Promise<{
   console.log('[main] Running earning bootstrap...');
 
   const bootstrapper = new EarningBootstrapper({
-    earningDir: EARNING_DIR,
+    earningDir: config.earningDir,
     chain: 'base',
-    rpcUrl: BASE_RPC_URL,
+    rpcUrl: config.rpcUrl,
   });
 
   const result = await bootstrapper.bootstrap(PASSWORD);
@@ -125,7 +81,7 @@ async function bootstrap(): Promise<{
   }
 
   // Load the private key from the keystore
-  const store = new EarningStateStore(EARNING_DIR);
+  const store = new EarningStateStore(config.earningDir);
   const keystoreJson = await store.loadKeystore();
   const wallet = await Wallet.fromEncryptedJson(keystoreJson, PASSWORD);
 
@@ -148,31 +104,34 @@ async function main(): Promise<void> {
   console.log('[main] jinn-client starting on Base');
 
   const { agentPrivateKey, safeAddress, mechAddress } = await bootstrap();
-  const desiredStates = loadDesiredStates();
 
   const adapter = new MechAdapter({
-    rpcUrl: BASE_RPC_URL,
+    rpcUrl: config.rpcUrl,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
     routerAddress: ROUTER_ADDRESS,
     mechContractAddress: mechAddress,
     safeAddress,
     agentEoaPrivateKey: agentPrivateKey,
-    ipfsRegistryUrl: 'https://registry.autonolas.tech',
-    ipfsGatewayUrl: 'https://gateway.autonolas.tech',
-    pollIntervalMs: POLL_INTERVAL_MS,
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    ipfsGatewayUrl: config.ipfsGatewayUrl,
+    pollIntervalMs: config.pollIntervalMs,
     chainId: 8453,
   });
 
   const runner = new ClaudeRunner({
-    claudePath: CLAUDE_PATH,
-    model: CLAUDE_MODEL,
+    claudePath: config.claudePath,
+    model: config.claudeModel,
   });
 
   const daemon = new Daemon({
     adapter,
     runner,
-    desiredStates,
-    dbPath: DB_PATH,
+    desiredStates: config.desiredStates,
+    dbPath: config.dbPath,
+    apiPort: config.apiPort,
+    peers: config.peers.length > 0 ? config.peers : undefined,
+    subgraphUrl: config.subgraphUrl,
+    nodeEndpoint: config.nodeEndpoint,
   });
 
   // Graceful shutdown
