@@ -1,0 +1,10 @@
+[build]
+builder = "NIXPACKS"
+nixpacksConfigPath = "deploy/rpc-proxy/nixpacks.toml"
+watchPatterns = ["/services/rpc-proxy/**", "/package.json", "/deploy/rpc-proxy/**"]
+
+[deploy]
+startCommand = "npx tsx services/rpc-proxy/src/index.ts"
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

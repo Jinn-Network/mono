@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "esnext",
+    "moduleResolution": "node",
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "jinn-node/*": ["jinn-node/src/*"],
+      "@jinn/types": ["jinn-node/src/types"]
+    },
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noImplicitAny": false
+  },
+  "include": [
+    "scripts/**/*.ts",
+    "tests/**/*.ts",
+    "tests-next/**/*.ts",
+    "control-api/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "jinn-node",
+    "ponder",
+    "scripts/archive",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ],
+  "references": [
+    { "path": "./jinn-node" }
+  ]
+}

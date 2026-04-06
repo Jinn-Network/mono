@@ -1,0 +1,15 @@
+{
+  "buildCommand": "yarn build",
+  "outputDirectory": ".next",
+  "installCommand": "yarn install",
+  "framework": "nextjs",
+  "env": {
+    "NEXT_PUBLIC_SUBGRAPH_URL": "https://indexer.jinn.network/graphql",
+    "NEXT_PUBLIC_X402_GATEWAY_URL": "https://x402-gateway-production.up.railway.app",
+    "NEXT_PUBLIC_SUPABASE_URL": "https://clnwgxgvmnrkwqdblqgf.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsbndneGd2bW5ya3dxZGJscWdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYxOTQ4NTAsImV4cCI6MjA2MTc3MDg1MH0.zmF9VwuDcI7HvpNBTc0qisjwCh_egVzbjXzaEuEr3XA",
+    "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID": "ce09a03dd97589dcb7c03441b7c6073e",
+    "RPC_URL": "https://rpc.jinn.network",
+    "RPC_PROXY_TOKEN": "a5cc690f6ff4bf2e1996ab1929f0148f89483e36f"
+  }
+}

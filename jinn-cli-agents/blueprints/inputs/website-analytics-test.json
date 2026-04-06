@@ -1,0 +1,13 @@
+{
+  "timePeriod": "30 days",
+  "websiteIds": [
+    "0d8e685a-d498-445d-99c6-671bf3d63b1d",
+    "5d17aa53-3e8d-4b03-b03b-a42518ed0e00",
+    "cfa31df1-0dff-4c14-8a5b-cad39c8f12c5"
+  ],
+  "websiteLabels": {
+    "0d8e685a-d498-445d-99c6-671bf3d63b1d": "The Lamp (Blog)",
+    "5d17aa53-3e8d-4b03-b03b-a42518ed0e00": "Jinn Website",
+    "cfa31df1-0dff-4c14-8a5b-cad39c8f12c5": "Jinn Explorer"
+  }
+}

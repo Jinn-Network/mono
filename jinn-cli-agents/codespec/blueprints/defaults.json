@@ -1,0 +1,137 @@
+{
+  "$schema": "../schema/invariant.schema.json",
+  "invariants": [
+    {
+      "id": "DB-CONFIG",
+      "type": "BOOLEAN",
+      "condition": "All runtime code reads configuration through the centralized config module via explicit getters. No direct process.env access in runtime code.",
+      "assessment": "Check for process.env.* usage outside config/index.ts. All env vars should be accessed via exported helpers like getRequiredRpcUrl(), getSupabaseUrl().",
+      "why": "Orthodoxy: one obvious way to access config. Discoverability: named getters are searchable, validation errors explain what's missing. Security: schema validation catches missing secrets before deployment.",
+      "examples": {
+        "do": [
+          "const rpcUrl = getRequiredRpcUrl();",
+          "Extend config/index.ts schema when adding new env vars",
+          "Use RUNTIME_ENVIRONMENT flag (default, test, review) for runtime overrides"
+        ],
+        "dont": [
+          "const rpcUrl = process.env.RPC_URL || process.env.MECHX_CHAIN_RPC;",
+          "Access process.env directly in runtime code",
+          "Introduce new env vars without adding to centralized config"
+        ]
+      },
+      "exceptions": [
+        "One-off scripts or tests may read process.env if documented and not introducing canonical patterns",
+        "Transitional compatibility layers inside config module"
+      ]
+    },
+    {
+      "id": "DB-TEMP-SECRETS",
+      "type": "BOOLEAN",
+      "condition": "Tests, fixtures, and local tooling write generated wallets or secrets only to the canonical temp secret workspace (outside git worktrees) and clean up afterward",
+      "assessment": "Check for .operate-test/ or similar secret directories created beneath tracked repositories. All ephemeral secrets should go to OS temp directory.",
+      "why": "Automation that stages 'everything' cannot accidentally pick up secret fixtures. IDEs and commit UIs never surface sensitive files inside tracked trees.",
+      "examples": {
+        "do": [
+          "Use mkdtempSync(join(tmpdir(), 'jinn-operate-test-')) to create temp workspace",
+          "Inject absolute path via OPERATE_HOME environment variable",
+          "Clean up secrets after test completes"
+        ],
+        "dont": [
+          "Use join(process.cwd(), '.operate-test') which creates secrets in git worktree",
+          "Derive secret paths from process.cwd()",
+          "Leave test secrets behind after tests complete"
+        ]
+      }
+    },
+    {
+      "id": "DB-HTTP",
+      "type": "BOOLEAN",
+      "condition": "All runtime HTTP calls use the shared client module with timeouts, structured errors, and retry/backoff. No direct fetch() calls.",
+      "assessment": "Check for direct fetch() calls in runtime code. All HTTP should use postJson, getJson, graphQLRequest from http/client.ts.",
+      "why": "Orthodoxy: one pattern for HTTP keeps formatting, logging, and error handling consistent. Discoverability: named helpers are searchable. Security: timeouts prevent hangs, retries smooth failures, centralized logging prevents secret leaks.",
+      "examples": {
+        "do": [
+          "const data = await graphQLRequest<Response>({ query, variables, context: { requestId } });",
+          "Extend http/client.ts for new behavior (streaming) so protections apply",
+          "Use helper options: requestId, headers, timeoutMs, retries"
+        ],
+        "dont": [
+          "const res = await fetch(url, { method: 'POST', body }); // no timeout",
+          "Implement custom retry logic outside the shared client",
+          "Call fetch directly in runtime code"
+        ]
+      },
+      "exceptions": [
+        "Browser-only code with equivalent safeguards",
+        "Unit tests in controlled environments with documented deviation",
+        "One-off scripts with documented reason"
+      ]
+    },
+    {
+      "id": "DB-STAGED-GUARD",
+      "type": "BOOLEAN",
+      "condition": "Auto-commit or auto-push helpers call the canonical staged-tree validator immediately before committing, enforcing the shared denylist",
+      "assessment": "Check all auto-commit/push paths. Verify gitGuard.ensureSafeStagedTree() is called after staging and before committing.",
+      "why": "Auto-commit paths bypass human review--the guard is the only defense. Centralized checks keep denylist synchronized. Failures clearly identify offending paths.",
+      "examples": {
+        "do": [
+          "await git.add({ all: true }); await gitGuard.ensureSafeStagedTree(); await git.commit({ message });",
+          "Propagate guard errors to abort workflow with context",
+          "Update shared denylist when new patterns emerge"
+        ],
+        "dont": [
+          "await git.add({ all: true }); await git.commit({ message }); // no guard",
+          "Catch and suppress guard violations",
+          "Maintain private denylist overrides"
+        ]
+      }
+    },
+    {
+      "id": "DB-LOGGING",
+      "type": "BOOLEAN",
+      "condition": "All runtime code logs through the shared Pino logger. Components create child loggers with component tags and use structured metadata. No console.* in production code.",
+      "assessment": "Check for console.log/warn/error in runtime code. All logging should use logger from logging/index.ts with child loggers per component.",
+      "why": "Orthodoxy: one logging pipeline keeps formatting and routing consistent. Discoverability: structured fields (requestId, jobId) make logs searchable. Security: centralized logging prevents accidental secret leakage.",
+      "examples": {
+        "do": [
+          "const workerLogger = logger.child({ component: 'WORKER' });",
+          "workerLogger.info({ requestId, status }, 'Delivering job');",
+          "Keep sensitive values out of log fields"
+        ],
+        "dont": [
+          "console.error('Safe delivery failed', err);",
+          "Log concatenated strings instead of structured objects",
+          "Include private keys or tokens in log fields"
+        ]
+      },
+      "exceptions": [
+        "Tests asserting specific console output",
+        "Browser-facing code with devtools logging not reaching production",
+        "CLI tools using scriptLogger adapter"
+      ]
+    },
+    {
+      "id": "DB-ERROR-HANDLING",
+      "type": "BOOLEAN",
+      "condition": "Every catch block surfaces the error. Optional flows log warning with context; critical flows log and rethrow. No empty catch blocks or error-suppressing .catch() patterns.",
+      "assessment": "Scan for empty catch {} blocks, .catch(() => ...) without logging. Every catch must log or rethrow.",
+      "why": "Orthodoxy: single discoverable error-handling idiom. Discoverability: logs provide breadcrumbs for future agents. Security: prevents silent data loss or hidden failures.",
+      "examples": {
+        "do": [
+          "catch (error) { workerLogger.error({ requestId, error: serializeError(error) }, 'Failed'); throw error; }",
+          "Non-critical paths: log at warn level and continue",
+          "Use serializeError() for readable error details without leaking secrets"
+        ],
+        "dont": [
+          "catch {} // empty",
+          ".catch(() => null) // suppresses without logging",
+          "return null; // in catch without logging cause"
+        ]
+      },
+      "exceptions": [
+        "Test helpers deliberately swallowing errors during cleanup (documented)",
+        "Inline parse guards with explicit fallback: try { JSON.parse(...) } catch { return null; } (tolerated if documented)"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+# CodeSpec Violation Suppressions
+#
+# Use this file to suppress known violations that cannot be fixed or are
+# intentional deviations from the spec.
+#
+# Format:
+#   - fingerprint: <violation-fingerprint>
+#     reason: <why this violation is suppressed>
+#     expiry: <optional: YYYY-MM-DD when this suppression should be reviewed>
+#     approved_by: <who approved this suppression>
+#
+# Example:
+#   - fingerprint: abc123
+#     reason: Legacy third-party library constraint
+#     expiry: 2025-12-31
+#     approved_by: @username
+
+suppressions: []

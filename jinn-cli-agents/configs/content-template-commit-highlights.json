@@ -1,0 +1,8 @@
+{
+    "name": "Commit Highlights",
+    "sources": [
+        "https://github.com/oaksprout/jinn-gemini"
+    ],
+    "lookbackPeriod": "7 days",
+    "streamName": "commit-highlights"
+}

@@ -1,0 +1,25 @@
+# CodeSpec Violation Ownership
+#
+# Use this file to assign default owners for violations in specific directories
+# or for specific types of violations.
+#
+# Format:
+#   paths:
+#     <glob-pattern>: <owner>
+#
+#   clauses:
+#     <clause>: <owner>
+#
+# Example:
+#   paths:
+#     worker/*: @backend-team
+#     frontend/*: @frontend-team
+#     ponder/*: @data-team
+#
+#   clauses:
+#     obj3: @security-team
+#     r1: @security-team
+
+paths: {}
+
+clauses: {}

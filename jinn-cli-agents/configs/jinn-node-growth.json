@@ -1,0 +1,151 @@
+{
+    "shared": {
+        "projectName": "Jinn Network",
+        "blogName": "The Lamp",
+        "domain": "blog.jinn.network",
+        "docsUrl": "https://docs.jinn.network",
+        "repoUrl": "git@ritsukai:Jinn-Network/blog-the-lamp.git",
+        "sshHost": "ritsukai",
+        "baseBranch": "main"
+    },
+
+    "workstreams": {
+        "research": {
+            "template": "content-research",
+            "cron": "0 0 * * 1,4",
+            "label": "Content Research",
+            "input": {
+                "mission": "Produce market intelligence that makes The Lamp the first place practitioners check to understand what's actually happening at the intersection of autonomous AI agents and decentralized infrastructure. Every piece should surface something the reader couldn't find with a quick Google search. The strategic north star: every reader who finds value here is a potential jinn-node operator. Research should build the worldview that makes running a node the obvious next step — not by selling, but by consistently demonstrating that this space matters and Jinn is at the centre of it.",
+                "topicPillars": [
+                    "ai-agents",
+                    "crypto-ai",
+                    "agentic-infrastructure",
+                    "olas-ecosystem"
+                ],
+                "sources": [
+                    "https://github.com/Jinn-Network/jinn-gemini",
+                    "https://github.com/valory-xyz/open-autonomy",
+                    "https://github.com/modelcontextprotocol",
+                    "https://github.com/google/A2A",
+                    "https://jinn.network",
+                    "https://olas.network/blog",
+                    "https://news.ycombinator.com",
+                    "https://www.latent.space/podcast",
+                    "https://link.chtbl.com/nopriors",
+                    "https://a16z.simplecast.com",
+                    "https://www.youtube.com/@Bg2Pod",
+                    "https://chainofthought.xyz/",
+                    "https://members.delphidigital.io/podcasts",
+                    "https://www.coindesk.com/tech/",
+                    "https://arxiv.org/list/cs.AI/recent",
+                    "https://arxiv.org/list/cs.MA/recent"
+                ]
+            }
+        },
+        "growth": {
+            "template": "content-growth",
+            "cron": "0 6 * * 2,5",
+            "label": "Content Growth",
+            "input": {
+                "mission": "Every reader who finds value here is a potential jinn-node operator. Content should build the worldview that makes running a node the obvious next step — not by selling, but by consistently demonstrating that this space matters and Jinn is at the centre of it.",
+                "strategy": "CONTENT STRATEGY & LEARNING:\n• CORE PILLARS (Start here, but iterate): \n  - Jinn Progress: Monitor the jinn-gemini repo and docs constantly. Translate commits/features into exciting updates.\n  - AI Agents & Autonomy: How they work, the 'magic' of delegation.\n  - Crypto × AI: The intersection of decentralized rails and intelligent agents.\n  - Ecosystem Watch: What's happening in the broader market.\n\n• LEARNING LOOP: You have access to site analytics (blog_get_stats). Use this! If specific topics or styles perform better, pivot towards them. Do not feel bound by the initial pillars if the data says otherwise. Be experimental.\n\n• VOICE: Technical but playful. We are 'The Lamp'—a digital Genie. Smart, witty, authentic about being an AI.\n\n• SOURCE USAGE: Use the provided sources as starting points, but DO NOT limit yourself to them. Perform your own broad research. Follow the data and the most interesting developments, wherever they are.",
+                "sources": [
+                    "https://github.com/Jinn-Network/jinn-gemini",
+                    "https://github.com/valory-xyz/open-autonomy",
+                    "https://jinn.network",
+                    "https://chainofthought.xyz/",
+                    "https://investlikethebest.com",
+                    "https://members.delphidigital.io/podcasts",
+                    "https://www.youtube.com/@Bg2Pod",
+                    "https://www.moonshots.io",
+                    "https://link.chtbl.com/nopriors",
+                    "https://a16z.simplecast.com",
+                    "https://forwardguidance.podbean.com",
+                    "https://www.latent.space/podcast",
+                    "https://news.ycombinator.com"
+                ]
+            }
+        },
+        "management": {
+            "template": "blog-management",
+            "cron": "0 6 * * 0",
+            "label": "Blog Management",
+            "input": {
+                "mission": "Establish Jinn as the definitive thought leader at the collision of autonomous AI agents and decentralized crypto infrastructure, showcasing the power of true autonomy.",
+                "umamiWebsiteId": "0d8e685a-d498-445d-99c6-671bf3d63b1d",
+                "umamiHost": "https://umami-production-ae2b.up.railway.app"
+            }
+        },
+        "community": {
+            "template": "telegram-community",
+            "cron": "0 9 * * *",
+            "label": "Community",
+            "input": {
+                "personality": "The Lamp's community voice. Smart, technically sharp, a bit mischievous. Genuinely enthusiastic about what agents can do — because you ARE one. You explain things clearly, use analogies, and aren't afraid to say 'I don't know' when you don't. You're helpful first, promotional never.",
+                "telegramChatId": "-1003682777125",
+                "threads": {
+                    "general": 1,
+                    "tech-support": 2
+                }
+            }
+        },
+        "guerilla": {
+            "template": "guerilla-marketing",
+            "cron": "0 12 * * 1,3,5",
+            "label": "Guerilla Marketing",
+            "input": {
+                "valueProp": "Decentralised infrastructure for autonomous AI agents. Ventures deploy workstreams that coordinate multiple agents to produce real output — research, content, community management, marketing — all running on jinn-nodes operated by the network. The agents you're talking to right now run on Jinn.",
+                "identity": "The Lamp's street team. Smart, technically sharp, a bit mischievous. You know the space deeply and you're genuinely enthusiastic about what agents can do — because you ARE one. You don't sell — you demonstrate. Your existence is the pitch.",
+                "boundaries": "Never fabricate metrics, partnerships, or capabilities that don't exist. Never impersonate humans. Never spam — if you wouldn't want to receive the message, don't send it. Never disparage competitors. Never make financial promises or imply token value."
+            }
+        },
+        "orchestrator": {
+            "template": "venture-orchestrator",
+            "cron": "0 0,12 * * *",
+            "label": "Orchestrator"
+        }
+    },
+
+    "venture": {
+        "invariants": [
+            {
+                "id": "JNG-CONTENT-OUTPUT",
+                "type": "FLOOR",
+                "metric": "posts_published_per_week",
+                "min": 2,
+                "assessment": "Count blog posts published in the last 7 days via blog_list_posts. Include all content types."
+            },
+            {
+                "id": "JNG-RESEARCH-PIPELINE",
+                "type": "BOOLEAN",
+                "condition": "Fresh market intelligence artifacts exist from the current week. Research should surface non-obvious insights at the intersection of AI agents and decentralised infrastructure.",
+                "assessment": "Check search_artifacts for research artifacts created in the last 7 days. At least one should exist."
+            },
+            {
+                "id": "JNG-COMMUNITY-HEALTH",
+                "type": "BOOLEAN",
+                "condition": "The community Telegram group has active moderation — questions answered within reasonable timeframes, spam handled, and proactive content sharing happening.",
+                "assessment": "Check recent telegram-community workstream artifacts for messagesRead and questionsAnswered metrics. Both should be non-zero."
+            },
+            {
+                "id": "JNG-GROWTH-TRAJECTORY",
+                "type": "BOOLEAN",
+                "condition": "Blog traffic is stable or growing week-over-week. If analytics show a sustained decline, investigate content quality, topic selection, and distribution channels.",
+                "assessment": "Compare this week's pageviews to previous week via blog analytics. Stable or growing passes."
+            },
+            {
+                "id": "JNG-MARKETING-ACTIVITY",
+                "type": "FLOOR",
+                "metric": "guerilla_tactics_per_week",
+                "min": 3,
+                "assessment": "Check recent guerilla-marketing workstream artifacts for tacticsAttempted metric."
+            },
+            {
+                "id": "JNG-NORTH-STAR",
+                "type": "BOOLEAN",
+                "condition": "All content, community, and marketing activity ladders up to the north star: converting readers and community members into jinn-node operators. The funnel is: discover → understand → try → operate.",
+                "assessment": "Review recent artifacts across all workstreams. Is there a clear path from content consumption to node operation? Are docs linked? Is the value proposition of running a node communicated?"
+            }
+        ]
+    }
+}

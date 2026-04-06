@@ -1,0 +1,46 @@
+{
+    "name": "Measurement Enforcement Test",
+    "description": "Minimal blueprint to verify measurement coverage enforcement. Agent writes a short summary and measures its own output against 3 mission invariants.",
+    "version": "1.0.0",
+    "priceWei": "0",
+    "invariants": [
+        {
+            "id": "GOAL-SUMMARY",
+            "type": "BOOLEAN",
+            "condition": "Produce a 2-3 sentence summary about how software systems use invariants for quality assurance.",
+            "assessment": "Verify the output contains a coherent 2-3 sentence summary about invariants in software quality.",
+            "measurement": {
+                "type": "BOOLEAN",
+                "hint": "Measure whether the summary was produced and is on-topic."
+            }
+        },
+        {
+            "id": "GOAL-WORD-COUNT",
+            "type": "FLOOR",
+            "metric": "word count",
+            "min": 30,
+            "condition": "Output at least 30 words in the summary.",
+            "assessment": "Count the words in the summary output. Must be >= 30.",
+            "measurement": {
+                "type": "FLOOR",
+                "hint": "Count words in your output and measure against min_threshold of 30.",
+                "min_threshold": 30
+            }
+        },
+        {
+            "id": "OUT-FORMAT",
+            "type": "BOOLEAN",
+            "condition": "Output is plain text without markdown headers or code blocks.",
+            "assessment": "Verify the output contains no markdown headers (##) or fenced code blocks (```).",
+            "measurement": {
+                "type": "BOOLEAN",
+                "hint": "Check that output has no markdown formatting."
+            }
+        }
+    ],
+    "context": "Write a short plain-text summary (2-3 sentences, at least 30 words) about how software systems use invariants for quality assurance. Then measure each invariant using create_measurement.",
+    "enabledTools": [
+        "create_measurement",
+        "create_artifact"
+    ]
+}

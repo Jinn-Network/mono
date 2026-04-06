@@ -1,0 +1,7 @@
+---
+description: Jinn node operator skills — setup, deploy, wallet, staking, troubleshooting
+globs: **/*
+alwaysApply: false
+---
+
+Read AGENTS.md for the full agent routing index. Skills are in `.agents/skills/`.

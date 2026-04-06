@@ -1,0 +1,4 @@
+# This file intentionally left empty.
+# It exists to prevent Railway from auto-detecting jinn-node/Dockerfile.
+# The actual build uses nixpacks (see nixpacks.toml).
+FROM scratch

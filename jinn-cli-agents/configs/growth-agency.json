@@ -1,0 +1,13 @@
+{
+    "agencyName": "Amplify² 360° Growth Agency",
+    "focusAreas": [
+        "agent-native-distribution",
+        "content-marketing",
+        "community-building",
+        "seo",
+        "analytics",
+        "distribution"
+    ],
+    "x402GatewayUrl": "https://x402-gateway-production-1b84.up.railway.app/",
+    "pricingBenchmarkMultiplier": 1.2
+}

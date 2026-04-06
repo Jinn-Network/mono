@@ -1,0 +1,35 @@
+{
+  "8453": {
+    "name": "Base Mainnet",
+    "contracts": {
+      "0x777777751622c0d3258f214f9df38e35bf45baf3": {
+        "name": "Zora Factory",
+        "allowedSelectors": [
+          "0xa423ada1",
+          {
+            "selector": "0xa27a6dce",
+            "allowed_executors": ["EOA"],
+            "notes": "createCoin() via EOA for optimal Zora SDK compatibility"
+          },
+          "0x14352ebc"
+        ]
+      }
+    }
+  },
+  "84532": {
+    "name": "Base Sepolia",
+    "contracts": {
+      "0x777777751622c0d3258f214f9df38e35bf45baf3": {
+        "name": "Zora Factory",
+        "allowedSelectors": [
+          "0xa423ada1",
+          {
+            "selector": "0xa27a6dce",
+            "allowed_executors": ["EOA"],
+            "notes": "createCoin() via EOA for testing on Sepolia"
+          }
+        ]
+      }
+    }
+  }
+}

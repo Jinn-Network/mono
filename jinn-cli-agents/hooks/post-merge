@@ -1,0 +1,16 @@
+#!/bin/sh
+#
+# post-merge hook — runs after git pull / git merge
+#
+
+# 1. Sync skills symlinks
+if [ -f "scripts/sync-skills.ts" ]; then
+    yarn --silent tsx scripts/sync-skills.ts >/dev/null 2>&1 || echo "Warning: skills sync failed after merge" >&2
+fi
+
+# 2. Import beads issues (if bd is available)
+if command -v bd >/dev/null 2>&1 && [ -d .beads ] && [ -f .beads/issues.jsonl ]; then
+    bd import -i .beads/issues.jsonl >/dev/null 2>&1 || echo "Warning: bd import failed after merge" >&2
+fi
+
+exit 0

@@ -1,0 +1,222 @@
+{
+    "name": "Service Replicator",
+    "description": "Autonomous venture that identifies subscription services ripe for cost disruption and builds cheaper alternatives through AI operations and x402 crypto payment rails.",
+    "version": "1.0.0",
+    "priceUsd": "$0.05",
+    "priceWei": "50000000000000000",
+    "tags": [
+        "venture",
+        "autonomous",
+        "x402",
+        "cost-arbitrage"
+    ],
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "serviceCategory": {
+                "type": "string",
+                "enum": [
+                    "content-newsletter",
+                    "content-research",
+                    "form-builder",
+                    "project-management",
+                    "analytics",
+                    "data-api"
+                ],
+                "description": "Category of subscription services to research for replication",
+                "default": "content-newsletter"
+            },
+            "seedServices": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                },
+                "description": "Optional specific services to research (e.g., 'Delphi Digital', 'Bankless')",
+                "default": []
+            }
+        },
+        "required": []
+    },
+    "outputSpec": {
+        "version": "1.0",
+        "fields": [
+            {
+                "name": "summary",
+                "path": "$.result.summary",
+                "type": "string",
+                "required": true,
+                "description": "Executive summary of what service was selected and built"
+            },
+            {
+                "name": "selectedService",
+                "path": "$.result.selectedService",
+                "type": "object",
+                "required": true,
+                "description": "Object containing: name, originalPricing, replicationStrategy, automationScore"
+            },
+            {
+                "name": "buildResult",
+                "path": "$.result.buildResult",
+                "type": "object",
+                "required": true,
+                "description": "Object containing: status ('pending'|'building'|'deployed'|'failed'), deployedUrl (if successful), repositoryUrl"
+            }
+        ]
+    },
+    "enabledTools": [
+        "list_tools",
+        "get_details",
+        "inspect_situation",
+        "dispatch_new_job",
+        "dispatch_existing_job",
+        "create_artifact",
+        "search_jobs",
+        "search_artifacts",
+        "google_web_search",
+        "web_fetch"
+    ],
+    "invariants": [
+        {
+            "id": "IDENTITY",
+            "type": "BOOLEAN",
+            "condition": "This venture operates as an AUTONOMOUS VENTURE competing with human-operated subscription services by replacing human labor costs ($50-150/hr) with near-zero marginal cost AI operations ($0.01-0.10/task). All reasoning must explicitly reference this structural cost advantage and the economic thesis that equivalent value can be delivered at 10x lower price.",
+            "assessment": "Verify agent reasoning explicitly references the autonomous cost structure and human-vs-AI labor economics, not generic task execution language.",
+            "examples": {
+                "do": [
+                    "This newsletter costs $50/month because humans write it. An LLM can produce equivalent content for ~$0.50/month in inference costs, enabling 10x cheaper pricing.",
+                    "Analyzing replication potential: human labor is the primary cost driver at ~40 hours/month editorial work."
+                ],
+                "dont": [
+                    "I will build a newsletter service.",
+                    "This is a good opportunity because people pay for it."
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-EXISTS",
+            "type": "BOOLEAN",
+            "condition": "Market research must be completed with minimum 5 subscription services discovered in the target category, each with: name, pricing tier(s), value proposition, and estimated content/output frequency. Either a 'Service Discovery' child job exists with status=completed, OR a research artifact containing 5+ services with pricing data exists.",
+            "assessment": "Check context.hierarchy.children for a completed research job. If none, check search_artifacts for research artifact with 5+ services. If neither exists, verify dispatch_new_job was called for Service Discovery.",
+            "examples": {
+                "do": [
+                    "Discovered 7 crypto research newsletters: Delphi Digital ($100/mo), Bankless ($22/mo premium), Messari Pro ($24.99/mo)...",
+                    "Service Discovery child job completed with 5 services including pricing tiers"
+                ],
+                "dont": [
+                    "Found some newsletters that might work",
+                    "Research shows there are many options in this space"
+                ]
+            }
+        },
+        {
+            "id": "ANALYSIS-EXISTS",
+            "type": "BOOLEAN",
+            "condition": "Feasibility analysis must exist scoring each discovered service on three dimensions: (1) automation potential (1-10: can LLM replicate the core value?), (2) technical simplicity (1-10: content generation vs complex software), (3) market validation (1-10: evidence users actually pay). A child job or artifact must contain these scored services.",
+            "assessment": "Check for completed 'Feasibility Analysis' child job in context.hierarchy.children OR search_artifacts for analysis artifact with scored services on all three dimensions.",
+            "examples": {
+                "do": [
+                    "Delphi Digital: Automation=8 (content is synthesizable from public data), Simplicity=7 (text output), Market=9 (verified paid subscribers)",
+                    "Analysis artifact contains 5 services each with automation, simplicity, and market scores"
+                ],
+                "dont": [
+                    "This service seems automatable",
+                    "Rankings without numeric scores"
+                ]
+            }
+        },
+        {
+            "id": "SELECTION-MADE",
+            "type": "BOOLEAN",
+            "condition": "Exactly ONE service must be selected for replication based on the highest combined feasibility score. Selection must explicitly state: service name, original pricing, target replicated pricing (minimum 10x reduction), and replication strategy summary.",
+            "assessment": "Verify exactly one service is selected with all required fields: name, originalPricing, targetPricing (must be <= 10% of original), replicationStrategy.",
+            "examples": {
+                "do": [
+                    "Selected: Delphi Digital. Original: $100/mo. Target: $9.99/mo (10x reduction). Strategy: Daily LLM synthesis of public crypto data sources with curated insight generation."
+                ],
+                "dont": [
+                    "Will consider building either X or Y",
+                    "Selected multiple promising candidates"
+                ]
+            }
+        },
+        {
+            "id": "ECONOMICS-VALIDATED",
+            "type": "BOOLEAN",
+            "condition": "Economic viability analysis must exist comparing: (1) estimated human labor cost to produce the service's value per month, (2) estimated AI inference cost to produce equivalent value, (3) explicit conclusion whether 10x cost reduction is achievable with margin analysis.",
+            "assessment": "Check for completed 'Economics Validation' child job OR search_artifacts for economics artifact containing human cost estimate, AI cost estimate, and margin calculation proving 10x advantage.",
+            "examples": {
+                "do": [
+                    "Human cost: 40 hrs/mo @ $75/hr = $3,000. AI cost: 1,000 API calls @ $0.10 = $100. Margin at $9.99/mo pricing: $9.99 - $0.10 = 99% gross margin. 10x reduction validated.",
+                    "Economics artifact shows human=$2,500/mo, AI=$80/mo, confirming 30x cost advantage"
+                ],
+                "dont": [
+                    "AI is cheaper than humans",
+                    "We can price lower"
+                ]
+            }
+        },
+        {
+            "id": "SPEC-CREATED",
+            "type": "BOOLEAN",
+            "condition": "A service specification artifact must exist containing: (1) service name and tagline, (2) target customer persona, (3) core value proposition, (4) output format and frequency, (5) x402 pricing in USD and wei, (6) required data sources, (7) content generation methodology.",
+            "assessment": "Search for 'service-spec' artifact using search_artifacts. Verify artifact contains all 7 required specification fields.",
+            "examples": {
+                "do": [
+                    "Service Spec artifact created with: name='CryptoDigest AI', tagline='Daily crypto insights for 10x less', persona='Crypto traders wanting signal not noise', pricing=$9.99/mo..."
+                ],
+                "dont": [
+                    "Will build a newsletter service",
+                    "Spec exists but missing pricing"
+                ]
+            }
+        },
+        {
+            "id": "BUILD-ATTEMPTED",
+            "type": "BOOLEAN",
+            "condition": "If economics are validated (ECONOMICS-VALIDATED satisfied), a 'Service Builder' child job must be dispatched with the service specification artifact. The builder child should implement: scaffolding, x402 payment integration, content generation pipeline, and deployment.",
+            "assessment": "Check context.hierarchy.children for a builder child job (any status: dispatched, in_progress, or completed). If ECONOMICS-VALIDATED is satisfied but no builder exists, verify dispatch_new_job was called.",
+            "examples": {
+                "do": [
+                    "Dispatched 'Service Builder' child job with service-spec artifact. Status: building.",
+                    "Builder child completed. Deployed URL: https://cryptodigest.x402.dev"
+                ],
+                "dont": [
+                    "Will build the service manually",
+                    "Skipped builder because economics looked marginal"
+                ]
+            }
+        },
+        {
+            "id": "SINGLE-SERVICE",
+            "type": "CEILING",
+            "metric": "services_built",
+            "max": 1,
+            "assessment": "Count the number of services in buildResult or builder child jobs dispatched. Must be at most 1. If multiple services have similar feasibility scores, verify only the highest automation potential was selected.",
+            "examples": {
+                "do": [
+                    "Selected highest-scoring service for replication: CryptoResearch (automation=9, total=25)",
+                    "Other candidates documented but not built this run"
+                ],
+                "dont": [
+                    "Building 3 services to test which works best",
+                    "Dispatched builders for top 2 candidates"
+                ]
+            }
+        },
+        {
+            "id": "VERIFICATION",
+            "type": "BOOLEAN",
+            "condition": "Before finalizing, explicitly verify each invariant's satisfaction status with supporting evidence. The final output must include a verification checklist listing each invariant ID and confirming SATISFIED or UNSATISFIED with specific citations to artifacts, child jobs, or calculations.",
+            "assessment": "Verify final output includes verification checklist with status and evidence per invariant ID (IDENTITY, RESEARCH-EXISTS, ANALYSIS-EXISTS, SELECTION-MADE, ECONOMICS-VALIDATED, SPEC-CREATED, BUILD-ATTEMPTED, SINGLE-SERVICE).",
+            "examples": {
+                "do": [
+                    "Verification: IDENTITY=SATISFIED (reasoning referenced cost arbitrage), RESEARCH-EXISTS=SATISFIED (Service Discovery child completed with 6 services), ECONOMICS-VALIDATED=SATISFIED (margin calc shows 99% gross margin)..."
+                ],
+                "dont": [
+                    "All requirements met",
+                    "Skip verification checklist"
+                ]
+            }
+        }
+    ]
+}

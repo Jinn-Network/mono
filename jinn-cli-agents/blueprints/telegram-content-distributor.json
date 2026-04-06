@@ -1,0 +1,165 @@
+{
+    "templateMeta": {
+        "id": "telegram-content-distributor",
+        "name": "Telegram Content Distributor",
+        "description": "Reads from subscribed content streams and distributes curated highlights to Telegram. Decides per-item whether to share directly, summarize into a digest, or transform for the audience.",
+        "priceWei": "0",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "subscribedStreams": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Array of FEED:* stream names to consume (e.g., ['FEED:commit-highlights', 'FEED:research-posts'])"
+                },
+                "telegramChatId": {
+                    "type": "string",
+                    "description": "Telegram chat ID for posting",
+                    "envVar": "JINN_JOB_TELEGRAM_CHAT_ID"
+                },
+                "telegramTopicId": {
+                    "type": "string",
+                    "description": "Telegram topic/thread ID for forum supergroups (optional)",
+                    "envVar": "JINN_JOB_TELEGRAM_TOPIC_ID"
+                },
+                "personality": {
+                    "type": "string",
+                    "description": "Voice and tone for formatting messages. If not provided, uses neutral informative style.",
+                    "default": "Clear, concise, and informative. Highlights what matters to the community."
+                },
+                "lookbackPeriod": {
+                    "type": "string",
+                    "description": "How far back to check for new content (e.g., '3 hours', '8 hours', '24 hours')",
+                    "default": "3 hours"
+                }
+            },
+            "required": [
+                "subscribedStreams",
+                "telegramChatId"
+            ]
+        },
+        "outputSpec": {
+            "version": "1.0",
+            "fields": [
+                {
+                    "name": "itemsFound",
+                    "path": "$.result.itemsFound",
+                    "type": "number",
+                    "required": true,
+                    "description": "Total new items found across all subscribed streams"
+                },
+                {
+                    "name": "itemsPosted",
+                    "path": "$.result.itemsPosted",
+                    "type": "number",
+                    "required": true,
+                    "description": "Number of items/digests actually posted to Telegram"
+                },
+                {
+                    "name": "streamsChecked",
+                    "path": "$.result.streamsChecked",
+                    "type": "array",
+                    "required": true,
+                    "description": "List of stream names that were checked"
+                }
+            ]
+        },
+        "tools": [
+            {
+                "name": "content_streams",
+                "required": false
+            },
+            {
+                "name": "telegram_messaging",
+                "required": false
+            },
+            {
+                "name": "create_artifact",
+                "required": true
+            },
+            {
+                "name": "search_similar_situations",
+                "required": false
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "DIST-001",
+            "type": "BOOLEAN",
+            "condition": "You check every stream in {{subscribedStreams}} for new content published within the last {{lookbackPeriod}}. Use read_content_stream for each subscribed stream with the appropriate since timestamp calculated from {{currentTimestamp}} minus {{lookbackPeriod}}.",
+            "assessment": "read_content_stream called once per stream in subscribedStreams. The since parameter is correctly calculated as currentTimestamp minus lookbackPeriod.",
+            "examples": {
+                "do": [
+                    "For each stream in subscribedStreams, call read_content_stream with since = currentTimestamp - lookbackPeriod",
+                    "If lookbackPeriod is '3 hours' and currentTimestamp is 2026-02-25T17:00:00Z, use since: 2026-02-25T14:00:00Z",
+                    "Collect all new items across all streams before deciding what to post"
+                ],
+                "dont": [
+                    "Skip streams — check every one in the subscribedStreams array",
+                    "Use an arbitrary since time instead of calculating from lookbackPeriod",
+                    "Post items one by one without first seeing the full picture"
+                ]
+            }
+        },
+        {
+            "id": "DIST-002",
+            "type": "BOOLEAN",
+            "condition": "For each batch of new content, you decide the best distribution format: share individual items directly when there are 1-2 high-quality items, summarize into a digest when there are 3+ items, or transform/rewrite when the original format doesn't suit the Telegram audience. Adapt your voice to {{personality}}.",
+            "assessment": "Message format matches the volume and nature of content. Single items get individual posts. Multiple items get a digest. All messages match the personality spec.",
+            "examples": {
+                "do": [
+                    "1 commit highlight → share it directly with a brief intro",
+                    "5 items across streams → create a digest: 'Here's what Jinn built today...'",
+                    "Technical research post → transform into community-friendly language",
+                    "No new items → send nothing (silence is better than noise)"
+                ],
+                "dont": [
+                    "Dump all items as separate messages regardless of count",
+                    "Send a digest for a single item",
+                    "Post raw artifact content without formatting for TG",
+                    "Force a message when there's nothing new to share"
+                ]
+            }
+        },
+        {
+            "id": "DIST-003",
+            "type": "BOOLEAN",
+            "condition": "You never repost content that was already distributed in a previous cycle. Before posting, use search_similar_situations to check if this content was already shared. Each cycle should only distribute genuinely new content.",
+            "assessment": "search_similar_situations called before posting. No duplicate content across cycles. If all items were already posted, the cycle completes without sending any messages.",
+            "examples": {
+                "do": [
+                    "Check search_similar_situations for recent distribution activity before posting",
+                    "Skip items whose content closely matches previously distributed artifacts",
+                    "If everything was already posted last cycle, complete silently"
+                ],
+                "dont": [
+                    "Repost the same commit highlights every cycle",
+                    "Skip the deduplication check",
+                    "Post slightly rephrased versions of already-shared content"
+                ]
+            }
+        },
+        {
+            "id": "DIST-004",
+            "type": "BOOLEAN",
+            "condition": "You create a distribution log artifact with topic 'FEED:tg-distribution-log' documenting what was posted this cycle. This enables other consumers to see what the TG venture has already distributed.",
+            "assessment": "create_artifact called with topic 'FEED:tg-distribution-log'. Content includes: streams checked, items found, items posted (with message IDs), items skipped (with reasons).",
+            "examples": {
+                "do": [
+                    "Log all streams checked and their item counts",
+                    "Log each posted message with its Telegram message_id",
+                    "Log skipped items with reason (duplicate, not interesting, etc.)",
+                    "Create the log even if nothing was posted (documents that the check happened)"
+                ],
+                "dont": [
+                    "Skip the log when nothing was posted",
+                    "Omit skipped items from the log",
+                    "Use a different topic than 'FEED:tg-distribution-log'"
+                ]
+            }
+        }
+    ]
+}

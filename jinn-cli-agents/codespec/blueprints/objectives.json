@@ -1,0 +1,71 @@
+{
+  "$schema": "../schema/invariant.schema.json",
+  "invariants": [
+    {
+      "id": "OBJ-ORTHODOXY",
+      "type": "BOOLEAN",
+      "condition": "For any given problem domain in this codebase, there is one canonical approach, and all code follows it",
+      "assessment": "Check if the same problem is solved in multiple different ways across the codebase. Look for: different error handling patterns, different property access patterns, different logging styles, different configuration access methods.",
+      "why": "Different prompts produce different solutions. Different AI models use different idioms. Different sessions cause stylistic drift. Result: the codebase becomes unlearnable.",
+      "quote": "There should be one--and preferably only one--obvious way to do it. (PEP 20, The Zen of Python)",
+      "examples": {
+        "do": [
+          "Use the same canonical error handling pattern across all files: try/catch with structured logger.error and re-throw",
+          "Normalize inconsistent external data once at the boundary, then use consistent accessors internally",
+          "When encountering multiple approaches, identify the canonical one, document as default behavior, migrate all code"
+        ],
+        "dont": [
+          "File A uses .catch() with console.log, File B uses try/catch with console.error, File C uses logger.error",
+          "Access the same data as call.input, call.arguments, call.args, or call.result in different files",
+          "Invent a new pattern when an existing canonical one exists"
+        ]
+      },
+      "enforcedBy": ["DB-CONFIG", "DB-HTTP", "DB-LOGGING", "DB-ERROR-HANDLING"]
+    },
+    {
+      "id": "OBJ-DISCOVERABILITY",
+      "type": "BOOLEAN",
+      "condition": "All code is optimized for machine discoverability, readability, and comprehension by the next AI agent",
+      "assessment": "Check if code requires human intuition, domain knowledge not in the codebase, or clever inference to understand. Look for: magic globals, implicit fallback chains, abbreviated non-greppable names, clever IIFE patterns.",
+      "why": "AI agents are the primary developers. They learn by reading code, navigate by pattern matching and search. Implicit behavior, clever tricks, and hidden context confuse AI. The ratio of code-reading to code-writing is extreme.",
+      "quote": "Explicit is better than implicit. (PEP 20, The Zen of Python)",
+      "examples": {
+        "do": [
+          "Use explicit named getters like getDatabaseUrl() that throw if missing - clear intent, greppable, self-documenting",
+          "Make intentions clear through naming, types, and structure",
+          "Prefer throwing errors over silent fallbacks - fail fast, fail explicitly"
+        ],
+        "dont": [
+          "Use magic globals from initialization files (g.db requires knowing what g is)",
+          "Use multiple env var fallbacks (process.env.DB || process.env.DATABASE_URL || process.env.DB_CONN)",
+          "Use abbreviated names (u, p, h) that aren't greppable"
+        ]
+      },
+      "enforcedBy": ["DB-CONFIG", "DB-LOGGING"]
+    },
+    {
+      "id": "OBJ-SECURITY",
+      "type": "BOOLEAN",
+      "condition": "Code does not introduce security vulnerabilities and follows secure-by-default patterns",
+      "assessment": "Ask: Could this be exploited? Could this leak data? Could this cause damage? Check for: unvalidated inputs, hardcoded secrets, fail-open patterns, excessive logging of sensitive data.",
+      "why": "AI agents may not understand all security implications. They learn from examples that might include insecure patterns. Security vulnerabilities compound across AI sessions. A single compromised secret or SQL injection can cascade through the system.",
+      "quote": "First, do no harm. (Adapted from the Hippocratic Oath)",
+      "examples": {
+        "do": [
+          "Validate all external input with schemas (Zod) before use",
+          "Read secrets from environment variables, never hardcode",
+          "Fail closed: on auth/permission error, deny access (return false)",
+          "Use parameterized queries to prevent SQL injection",
+          "Grant minimum necessary permissions (principle of least privilege)"
+        ],
+        "dont": [
+          "Use string concatenation for SQL queries (SQL injection risk)",
+          "Hardcode API keys or include secrets in comments",
+          "Fail open: grant access when permission check fails",
+          "Log passwords, SSNs, credit cards, or other PII"
+        ]
+      },
+      "enforcedBy": ["RULE-NO-SECRETS", "RULE-AUTO-GUARD", "RULE-PREFLIGHT", "RULE-NO-SILENT-CATCH"]
+    }
+  ]
+}

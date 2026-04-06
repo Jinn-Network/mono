@@ -1,0 +1,7 @@
+{
+    "name": "Commit Highlights",
+    "streamName": "commit-highlights",
+    "sources": ["https://github.com/oaksprout/jinn-gemini"],
+    "lookbackPeriod": "7 days",
+    "contentBrief": "Curate interesting features and updates from recent repository commits. Group related commits, highlight user impact, use emojis for visual appeal. Skip trivial changes (typos, formatting, dependency bumps)."
+}

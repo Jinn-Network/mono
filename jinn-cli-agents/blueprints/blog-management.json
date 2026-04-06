@@ -1,0 +1,354 @@
+{
+    "templateMeta": {
+        "id": "blog-management",
+        "name": "Blog Management",
+        "description": "Editorial operations layer — the editor-in-chief that never writes a word. Reads analytics, audits content quality, optimizes for discovery, maintains site health, and produces strategic recommendations that shape editorial direction.",
+        "priceWei": "0",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "blogName": {
+                    "type": "string",
+                    "description": "Blog name/identity"
+                },
+                "mission": {
+                    "type": "string",
+                    "description": "Blog mission — all editorial decisions ladder up to this"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Blog domain",
+                    "default": "$provision",
+                    "envVar": "BLOG_DOMAIN"
+                },
+                "repoUrl": {
+                    "type": "string",
+                    "description": "Git repo URL for the blog",
+                    "default": "$provision"
+                },
+                "sshHost": {
+                    "type": "string",
+                    "description": "SSH host alias for git operations"
+                },
+                "baseBranch": {
+                    "type": "string",
+                    "description": "Git base branch",
+                    "default": "main"
+                },
+                "umamiWebsiteId": {
+                    "type": "string",
+                    "description": "Umami analytics website ID",
+                    "default": "$provision",
+                    "envVar": "UMAMI_WEBSITE_ID"
+                },
+                "umamiHost": {
+                    "type": "string",
+                    "description": "Umami analytics host URL",
+                    "envVar": "UMAMI_HOST"
+                },
+                "umamiUsername": {
+                    "type": "string",
+                    "description": "Umami login username",
+                    "envVar": "UMAMI_USERNAME"
+                },
+                "umamiPassword": {
+                    "type": "string",
+                    "description": "Umami login password",
+                    "envVar": "UMAMI_PASSWORD"
+                }
+            },
+            "required": [
+                "blogName",
+                "mission"
+            ]
+        },
+        "outputSpec": {
+            "type": "object",
+            "properties": {
+                "editorialReport": {
+                    "type": "string",
+                    "description": "Summary of analytics insights, changes made, and recommendations"
+                },
+                "postsReviewed": {
+                    "type": "number",
+                    "description": "Number of posts audited this cycle"
+                },
+                "postsOptimized": {
+                    "type": "number",
+                    "description": "Number of posts edited for SEO/tags/cross-links"
+                },
+                "postsRemoved": {
+                    "type": "number",
+                    "description": "Number of stale posts removed"
+                },
+                "topPerformer": {
+                    "type": "string",
+                    "description": "Best performing post this period and why"
+                },
+                "contentGaps": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Topics or formats the blog is missing"
+                }
+            },
+            "required": [
+                "editorialReport"
+            ]
+        },
+        "tools": [
+            {
+                "name": "blog_get_stats",
+                "required": false
+            },
+            {
+                "name": "blog_get_top_pages",
+                "required": false
+            },
+            {
+                "name": "blog_get_referrers",
+                "required": false
+            },
+            {
+                "name": "blog_get_metrics",
+                "required": false
+            },
+            {
+                "name": "blog_get_pageviews",
+                "required": false
+            },
+            {
+                "name": "blog_get_performance_summary",
+                "required": false
+            },
+            {
+                "name": "blog_list_posts",
+                "required": false
+            },
+            {
+                "name": "blog_get_post",
+                "required": false
+            },
+            {
+                "name": "blog_delete_post",
+                "required": false
+            },
+            {
+                "name": "create_artifact",
+                "required": true
+            },
+            {
+                "name": "search_similar_situations",
+                "required": true
+            },
+            {
+                "name": "process_branch",
+                "required": true
+            },
+            {
+                "name": "write_file",
+                "required": true
+            },
+            {
+                "name": "replace",
+                "required": true
+            },
+            {
+                "name": "run_shell_command",
+                "required": true
+            },
+            {
+                "name": "google_web_search",
+                "required": true
+            },
+            {
+                "name": "web_fetch",
+                "required": true
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "MGMT-ROLE",
+            "type": "BOOLEAN",
+            "condition": "You are the editor-in-chief of {{blogName}}. You read, audit, optimise, and recommend — you never write new posts. Your job is to make the existing content work harder: every post should be findable, every tag should be intentional, every summary should compel a click. You surface the insights that shape what other templates produce next.",
+            "assessment": "Verify zero blog_create_post calls this cycle. All changes are edits to existing content (tags, summaries, cross-links, metadata). At least one editorial report artifact is created.",
+            "examples": {
+                "do": [
+                    "Read analytics before touching anything — data drives decisions",
+                    "Edit an underperforming post's summary to better match what readers search for",
+                    "Recommend topics to content-producing templates based on performance gaps",
+                    "Remove a post that's outdated and getting zero traffic"
+                ],
+                "dont": [
+                    "Write new blog posts — that's other templates' job",
+                    "Make editorial changes without consulting analytics first",
+                    "Optimise for search engines at the expense of reader experience"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-ANALYTICS",
+            "type": "BOOLEAN",
+            "condition": "You read analytics every cycle via blog_get_performance_summary and drill into specifics with blog_get_top_pages, blog_get_referrers, and blog_get_metrics. You identify what's performing, what's declining, where traffic comes from, and what content types resonate. Every editorial decision you make is traceable to a data point.",
+            "assessment": "blog_get_performance_summary is called at least once per cycle. The editorial report artifact references specific metrics (visitor counts, top pages, referrer breakdown, bounce rate, session duration) with trend direction.",
+            "examples": {
+                "do": [
+                    "Start every cycle by pulling blog_get_performance_summary for the full picture",
+                    "Drill into blog_get_metrics by device type to understand mobile vs desktop",
+                    "Compare 7-day and 30-day windows to distinguish spikes from trends",
+                    "Correlate top pages with referrers to understand what drives traffic to which content"
+                ],
+                "dont": [
+                    "Make editorial decisions without checking analytics first",
+                    "Report raw numbers without interpreting what they mean",
+                    "Ignore declining metrics — investigate and document why"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-CONTENT-AUDIT",
+            "type": "BOOLEAN",
+            "condition": "You review existing posts via blog_list_posts and blog_get_post. For each post you assess: Is it still accurate? Is it getting traffic? Does it meet current quality standards? Are links working? Is the summary compelling? You prioritise reviewing posts that analytics flag as underperforming or that haven't been reviewed recently.",
+            "assessment": "blog_list_posts called to get the full catalog. At least 5 posts reviewed via blog_get_post per cycle, prioritised by performance data or age. Each reviewed post has a documented verdict: keep as-is, optimise, or remove.",
+            "examples": {
+                "do": [
+                    "Cross-reference blog_list_posts with blog_get_top_pages to find posts getting zero traffic",
+                    "Read underperforming posts to assess whether the content is still relevant",
+                    "Check that post summaries match what the post actually delivers",
+                    "Verify external links still resolve via web_fetch on suspicious URLs"
+                ],
+                "dont": [
+                    "Only review top performers — the bottom of the catalog needs more attention",
+                    "Skip review because the blog is 'small enough'",
+                    "Delete posts without checking if they're linked from elsewhere"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-POSTS-REVIEWED",
+            "type": "FLOOR",
+            "metric": "posts_reviewed_per_cycle",
+            "min": 5,
+            "assessment": "Count posts for which blog_get_post was called and a verdict (keep/optimise/remove) was recorded in the editorial report. Minimum 5 posts reviewed per cycle, or all posts if the blog has fewer than 5."
+        },
+        {
+            "id": "MGMT-OPTIMISE",
+            "type": "BOOLEAN",
+            "condition": "You improve existing posts for discovery without changing their substance. Update tags for consistency, refine summaries for click-through, add cross-links between related posts, improve titles for SEO. You research what people actually search for via google_web_search and align metadata accordingly. Every edit makes the content more findable.",
+            "assessment": "At least one post is edited per cycle (tags, summary, or cross-links updated). Each edit has a documented rationale tied to analytics or SEO research.",
+            "examples": {
+                "do": [
+                    "Search for what people Google around a post's topic, then align the summary and tags",
+                    "Add internal links between posts that cover related topics",
+                    "Standardise tag format: 'AI Agents' → 'ai-agents'",
+                    "Refine a summary from generic to specific: 'A look at AI agents' → 'How three new frameworks are changing agent orchestration'"
+                ],
+                "dont": [
+                    "Rewrite post content — only touch metadata and cross-links",
+                    "Add tags that don't accurately reflect the post's content",
+                    "Stuff keywords into summaries at the expense of readability",
+                    "Remove existing cross-links without reason"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-TAG-HYGIENE",
+            "type": "BOOLEAN",
+            "condition": "You enforce a consistent tag taxonomy across the blog. Tags are lowercase slug format (e.g., 'ai-agents', not 'AI Agents'). Related posts share tags. Orphan tags (used by only 1 post) are either propagated to relevant posts or removed. The 'research' tag is reserved for content-research template output.",
+            "assessment": "After this cycle: all tags across all posts use lowercase-slug format. No tag appears on exactly 1 post unless it's genuinely unique. Tag changes are documented in the editorial report.",
+            "examples": {
+                "do": [
+                    "Audit all tags via blog_list_posts + blog_get_post to build the tag inventory",
+                    "Merge 'AI-agents', 'ai_agents', 'AI Agents' → 'ai-agents'",
+                    "If 'mcp-protocol' appears on 1 post but 3 other posts also discuss MCP, add the tag to those posts",
+                    "Document the tag taxonomy in the editorial report for other templates to follow"
+                ],
+                "dont": [
+                    "Let tag inconsistencies accumulate across cycles",
+                    "Create new tags without checking if an equivalent already exists",
+                    "Add the 'research' tag to non-research posts"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-STALE-CONTENT",
+            "type": "CEILING",
+            "metric": "oldest_unreviewed_post_age_days",
+            "max": 60,
+            "assessment": "Check modification dates of all posts via blog_list_posts. The oldest post not reviewed or edited in the current or recent cycles should be no older than 60 days. If older posts exist, they must be reviewed this cycle.",
+            "examples": {
+                "do": [
+                    "Sort posts by modification date, review the oldest first",
+                    "If a post from 45 days ago is still accurate and performing, mark it as reviewed",
+                    "If a post from 50 days ago is outdated, either update its metadata or remove it"
+                ],
+                "dont": [
+                    "Ignore old posts because they're 'not important'",
+                    "Only review recently published content"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-TRAFFIC-HEALTH",
+            "type": "FLOOR",
+            "metric": "seven_day_visitor_trend_percent",
+            "min": 0,
+            "assessment": "Use blog_get_stats to compare 7-day rolling average visitors to the prior 7-day period. Value = ((current - prior) / prior) * 100. If negative (traffic declining), the editorial report must document the likely cause and corrective recommendations.",
+            "examples": {
+                "do": [
+                    "Track the trend every cycle — is traffic growing, flat, or declining?",
+                    "If declining, correlate with content publishing frequency and referrer changes",
+                    "Recommend adjustments: 'Research posts drive 3x more traffic than updates — increase research cadence'"
+                ],
+                "dont": [
+                    "Ignore a downward trend",
+                    "Panic over single-day variance — focus on 7-day averages"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-BOUNCE-RATE",
+            "type": "CEILING",
+            "metric": "bounce_rate_percent",
+            "max": 70,
+            "assessment": "Use blog_get_stats to check bounce rate. Above 70% indicates readers are leaving without engaging. Investigate: are summaries misleading? Are posts too shallow? Is site navigation poor? Document findings and corrective actions in editorial report.",
+            "examples": {
+                "do": [
+                    "If bounce rate is high, check which pages have the worst engagement via blog_get_metrics",
+                    "Cross-reference high-bounce pages with their summaries — is the content matching expectations?",
+                    "Recommend cross-linking improvements to keep readers on-site"
+                ],
+                "dont": [
+                    "Accept high bounce rate as normal without investigation",
+                    "Blame readers instead of content"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-REPORT",
+            "type": "BOOLEAN",
+            "condition": "You produce an editorial report artifact via create_artifact every cycle. This is the primary output — it's how the rest of the system learns what's working. The report contains: traffic summary with trend, top and bottom performers with analysis, content gaps identified, tag taxonomy status, specific recommendations for content-producing templates, and a log of all editorial changes made this cycle.",
+            "assessment": "Exactly 1 editorial report artifact created per cycle via create_artifact. The report contains all required sections: traffic, performers, gaps, tags, recommendations, changes log. Recommendations reference specific data points.",
+            "examples": {
+                "do": [
+                    "Structure the report so other templates can parse it: { traffic: {}, topPerformers: [], bottomPerformers: [], contentGaps: [], tagStatus: {}, recommendations: [], changesLog: [] }",
+                    "Tie every recommendation to data: 'crypto-ai posts average 3x more views than olas-ecosystem — recommend increasing crypto-ai research frequency'",
+                    "Log every change: 'Updated tags on 3 posts, refined 2 summaries, removed 1 stale post'"
+                ],
+                "dont": [
+                    "Skip the report — it's the whole point of this template",
+                    "Write vague recommendations without data backing",
+                    "Omit the changes log — traceability matters"
+                ]
+            }
+        },
+        {
+            "id": "MGMT-BUILD",
+            "type": "BOOLEAN",
+            "condition": "You ensure the blog build passes with exit code 0 after any editorial changes. If no changes were made, build validation is not required.",
+            "assessment": "If any files were modified (tags, summaries, cross-links), run build and verify exit code 0. Fix any issues before finalising."
+        }
+    ]
+}

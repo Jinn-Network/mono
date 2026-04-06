@@ -1,0 +1,11 @@
+{
+    "blogName": "Jinn Network Blog",
+    "mission": "Educate developers and enthusiasts about autonomous AI agents, decentralized systems, and the future of self-sovereign computing",
+    "strategy": "Focus on: (1) Tutorials and guides for building with Jinn, (2) Technical deep-dives on agent architecture, (3) Industry analysis of AI agent ecosystems, (4) Case studies of autonomous workstreams. Target audience: Web3 developers, AI researchers, and crypto enthusiasts interested in autonomous systems.",
+    "sources": [
+        "https://github.com/Jinn-Network",
+        "https://docs.jinn.network",
+        "https://twitter.com/jinnnetwork"
+    ],
+    "domain": "blog.jinn.network"
+}

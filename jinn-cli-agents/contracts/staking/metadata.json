@@ -1,0 +1,4 @@
+{
+  "name": "Jinn Mech Marketplace Staking",
+  "description": "Custom staking contract for Jinn mechs with whitelisted activity checking. Requires 5,000 OLAS minimum deposit. Activity verified via MechMarketplace requests from whitelisted MECs only."
+}

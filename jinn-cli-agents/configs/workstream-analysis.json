@@ -1,0 +1,10 @@
+{
+  "mode": "single",
+  "workstreamId": "0x6eda06028388738e97a6ce0abd68439ce436a8591aaa90b264625436da0a23c4",
+  "rootJobName": "",
+  "maxWorkstreams": 10,
+  "statusFilter": "all",
+  "sections": ["errors", "timing", "tools", "git", "dispatch", "metrics"],
+  "maxDepth": 5,
+  "focusArea": ""
+}

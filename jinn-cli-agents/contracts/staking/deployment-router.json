@@ -1,0 +1,26 @@
+{
+  "network": "base",
+  "chainId": 8453,
+  "timestamp": "2026-03-25T17:17:05.831Z",
+  "contracts": {
+    "jinnRouterImplementation": "0xfFa7118A3D820cd4E820010837D65FAfF463181B",
+    "activityCheckerProxy": "0x477C41Cccc8bd08027e40CEF80c25918C595a24d",
+    "proxyOwnerSafe": "0x900Db2954a6c14C011dBeBE474e3397e58AE5421"
+  },
+  "config": {
+    "mechMarketplace": "0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020",
+    "livenessRatio": "230481481481481"
+  },
+  "safeTransactions": {
+    "upgrade": {
+      "to": "0x477C41Cccc8bd08027e40CEF80c25918C595a24d",
+      "data": "0x0900f010000000000000000000000000ffa7118a3d820cd4e820010837d65faff463181b",
+      "value": "0"
+    },
+    "initialize": {
+      "to": "0x477C41Cccc8bd08027e40CEF80c25918C595a24d",
+      "data": "0xcd6dc687000000000000000000000000f24ee42eda0fc9b33b7d41b06ee8ccd2ef7c50200000000000000000000000000000000000000000000000000000d19f26d4bd09",
+      "value": "0"
+    }
+  }
+}

@@ -1,0 +1,60 @@
+# Git and repo metadata
+.git/
+.gitignore
+.beads/
+.claude/
+.conductor/
+.worktrees/
+
+# Secrets
+.env
+.env.*
+!.env.example
+.operate/
+.gemini/
+
+# Frontend (not needed for backend services)
+frontend/
+
+# Documentation
+docs/
+*.md
+LICENSE
+
+# Tests
+tests/
+tests-next/
+coverage/
+test-results/
+vitest.config*
+**/*.test.ts
+**/*.spec.ts
+
+# Python
+pyproject.toml
+poetry.lock
+.venv/
+__pycache__/
+olas-operate-middleware/
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Logs and temp files
+*.log
+logs/
+*.tgz
+*.zip
+*.tar.gz
+
+# Build artifacts (rebuilt in Docker)
+**/dist/
+!jinn-node/dist/
+
+# Local node_modules in subdirectories
+services/**/node_modules/
+services/**/dist/

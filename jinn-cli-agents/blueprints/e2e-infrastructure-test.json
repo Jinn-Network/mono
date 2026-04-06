@@ -1,0 +1,82 @@
+{
+    "name": "E2E Infrastructure Test",
+    "description": "Validates full agent infrastructure: web search, GitHub operator credential, credential bridge (Umami), artifacts, measurements, credential-dependent tools, and delegation.",
+    "version": "1.2.0",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "umamiWebsiteId": {
+                "type": "string",
+                "description": "Umami website ID for blog analytics tool validation",
+                "envVar": "JINN_JOB_UMAMI_WEBSITE_ID"
+            }
+        },
+        "required": [
+            "umamiWebsiteId"
+        ]
+    },
+    "enabledTools": [
+        "google_web_search",
+        "get_file_contents",
+        "web_fetch",
+        "create_artifact",
+        "create_measurement",
+        "ventures_registry",
+        "dispatch_new_job",
+        "blog_get_stats"
+    ],
+    "invariants": [
+        {
+            "id": "GOAL-001",
+            "type": "BOOLEAN",
+            "condition": "Research the current price of OLAS token using web search. Create an artifact summarizing findings including current price, 24h change, and market cap.",
+            "assessment": "Artifact exists with OLAS price data sourced from web search results.",
+            "measurement": {
+                "type": "BOOLEAN",
+                "hint": "Measure whether the research artifact was created with OLAS price data."
+            }
+        },
+        {
+            "id": "TOOL-SEARCH",
+            "type": "BOOLEAN",
+            "condition": "You must use the google_web_search tool to find OLAS token price data.",
+            "assessment": "Check telemetry for google_web_search tool calls."
+        },
+        {
+            "id": "TOOL-CRED",
+            "type": "BOOLEAN",
+            "condition": "Use the get_file_contents tool to fetch the file 'README.md' from the GitHub repository 'Jinn-Network/jinn-node' (owner: 'Jinn-Network', repo: 'jinn-node', path: 'README.md'). The tool reads GITHUB_TOKEN from the operator's environment. Report whether the file was retrieved or an error was returned.",
+            "assessment": "Check telemetry for a get_file_contents tool call. A GitHub API 401 error with a dummy token is acceptable — the tool call itself is what is being validated."
+        },
+        {
+            "id": "TOOL-ARTIFACT",
+            "type": "BOOLEAN",
+            "condition": "You must use the create_artifact tool to store your research findings.",
+            "assessment": "Check telemetry for create_artifact tool calls."
+        },
+        {
+            "id": "TOOL-MEASURE",
+            "type": "BOOLEAN",
+            "condition": "You must measure GOAL-001 using create_measurement after completing the research.",
+            "assessment": "Check telemetry for create_measurement tool call targeting GOAL-001."
+        },
+        {
+            "id": "TOOL-REGISTRY",
+            "type": "BOOLEAN",
+            "condition": "You must use the venture_query tool to list active ventures from the registry. Call it with mode 'list' and status 'active'.",
+            "assessment": "Check telemetry for venture_query tool call with mode=list."
+        },
+        {
+            "id": "DELEGATE-001",
+            "type": "BOOLEAN",
+            "condition": "Delegate a sub-task: use dispatch_new_job to dispatch a child job. The child blueprint should have one invariant requiring it to create an artifact summarizing the OLAS token ecosystem (what it does, key protocols). Use enabledTools: ['google_web_search', 'web_fetch', 'create_artifact'].",
+            "assessment": "Check telemetry for dispatch_new_job tool call that returned a request ID."
+        },
+        {
+            "id": "TOOL-BRIDGE",
+            "type": "BOOLEAN",
+            "condition": "Use the blog_get_stats tool to fetch website analytics for the past 7 days. This tool fetches a credential from the credential bridge. Report the stats or any error returned.",
+            "assessment": "Check telemetry for a blog_get_stats tool call. The tool call itself validates the full credential bridge pipeline (agent → signing proxy → ERC-8128 → bridge → ACL → token → API)."
+        }
+    ]
+}

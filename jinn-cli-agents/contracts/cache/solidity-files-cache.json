@@ -1,0 +1,122 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "/Users/adrianobradley/jinn-gemini/contracts/staking/DeliveryActivityChecker.sol": {
+      "lastModificationDate": 1771938063886,
+      "contentHash": "4975c9ff8e45e28898aeefc40c912800",
+      "sourceName": "staking/DeliveryActivityChecker.sol",
+      "solcConfig": {
+        "version": "0.8.25",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 1000000
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.25"
+      ],
+      "artifacts": [
+        "DeliveryActivityChecker",
+        "IMechMarketplace",
+        "IMultisig"
+      ]
+    },
+    "/Users/adrianobradley/jinn-gemini/contracts/staking/interfaces/IWhitelistManager.sol": {
+      "lastModificationDate": 1771270134855,
+      "contentHash": "42c8b710ee746c0c7a796c65b12d9a04",
+      "sourceName": "staking/interfaces/IWhitelistManager.sol",
+      "solcConfig": {
+        "version": "0.8.25",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 1000000
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.25"
+      ],
+      "artifacts": [
+        "IWhitelistManager"
+      ]
+    },
+    "/Users/adrianobradley/jinn-gemini/contracts/staking/WhitelistedRequesterActivityChecker.sol": {
+      "lastModificationDate": 1771270134854,
+      "contentHash": "1503e3d9958051630bdbc49ce25c25ec",
+      "sourceName": "staking/WhitelistedRequesterActivityChecker.sol",
+      "solcConfig": {
+        "version": "0.8.25",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 1000000
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./interfaces/IWhitelistManager.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.25"
+      ],
+      "artifacts": [
+        "IMechMarketplace",
+        "IMultisig",
+        "WhitelistedRequesterActivityChecker"
+      ]
+    }
+  }
+}

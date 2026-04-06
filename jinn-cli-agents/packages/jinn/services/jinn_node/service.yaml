@@ -1,0 +1,24 @@
+name: jinn_node
+author: jinn
+version: 0.1.0
+description: "Jinn Network worker node — AI agent for the Jinn Marketplace"
+aea_version: '>=1.50.0, <2.0.0'
+license: Apache-2.0
+fingerprint:
+  README.md: bafybeiplaceholder
+fingerprint_ignore_patterns: []
+agent: jinn/jinn_node:0.1.0
+number_of_agents: 1
+deployment:
+  agent:
+    ports:
+      0:
+        8080: 8080
+---
+public_id: valory/ledger:0.19.0
+type: connection
+config:
+  ledger_apis:
+    base:
+      address: ${BASE_LEDGER_RPC}
+      chain_id: 8453

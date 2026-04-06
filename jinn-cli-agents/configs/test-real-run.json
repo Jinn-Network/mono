@@ -1,0 +1,13 @@
+{
+    "blogName": "Real Run Test",
+    "mission": "To verify the end-to-end provisioning and execution flow of the Jinn Agent System.",
+    "strategy": "TEST STRATEGY:\n- Verify repo creation\n- Verify Railway project creation\n- Verify Umami setup\n- Verify first post creation",
+    "sources": [
+        "https://jinn.network"
+    ],
+    "umamiWebsiteId": "0d9ff51b-a3e4-46de-b93d-e44713bf75fa",
+    "repoUrl": "https://github.com/Jinn-Network/real-run-test-v2",
+    "domain": "real-run-test-v2-production.up.railway.app",
+    "baseBranch": "main",
+    "railwayProjectId": "1462839e-6ec2-4660-b91b-d1822b97a16a"
+}

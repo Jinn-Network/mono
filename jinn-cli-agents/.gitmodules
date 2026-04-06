@@ -1,0 +1,6 @@
+[submodule "packages/mech-client-ts"]
+	path = packages/mech-client-ts
+	url = https://github.com/Jinn-Network/mech-client-ts.git
+[submodule "services/x402-builder"]
+	path = services/x402-builder
+	url = https://github.com/oaksprout/x402-builder.git

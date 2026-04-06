@@ -1,0 +1,47 @@
+# OLAS Operate Middleware Python Dependencies
+# These are the essential Python packages required for the olas-operate-middleware
+# to function properly with the Jinn worker system.
+
+# Core AEA Framework Dependencies
+# Note: The AEA framework has a complex dependency tree that can conflict with other packages
+# Install these in a dedicated virtual environment to avoid conflicts
+# The aea package is the core framework - must be installed first
+aea>=1.50.0,<2.0.0
+aea-ledger-ethereum>=1.50.0,<2.0.0
+autonomy>=0.14.0,<1.0.0
+
+# Web3 and Blockchain Interaction
+web3>=6.0.0,<7.0.0
+eth-account>=0.8.0,<1.0.0
+eth-utils>=2.0.0,<3.0.0
+
+# System and Process Management
+psutil>=5.9.0,<6.0.0
+
+# HTTP Requests and API Interaction
+requests>=2.28.0,<3.0.0
+urllib3>=1.26.0,<2.0.0
+
+# JSON and Data Handling
+jsonschema>=4.0.0,<5.0.0
+pydantic>=1.10.0,<2.0.0
+
+# Cryptography (required for Safe and wallet operations)
+cryptography>=3.4.8,<42.0.0
+coincurve>=17.0.0,<19.0.0
+
+# Optional: Development and Testing Dependencies
+# Uncomment these if you need development tools
+# pytest>=7.0.0,<8.0.0
+# pytest-asyncio>=0.21.0,<1.0.0
+# black>=22.0.0,<24.0.0
+# isort>=5.10.0,<6.0.0
+
+# Note: Some dependencies may require system-level packages:
+# - On Ubuntu/Debian: sudo apt-get install python3-dev libffi-dev libssl-dev
+# - On macOS: These are usually available through Xcode command line tools
+# - On Windows: Visual Studio Build Tools may be required
+
+# Version constraints are set to avoid known compatibility issues
+# If you encounter dependency conflicts, consider using Poetry instead of pip
+# for better dependency resolution.

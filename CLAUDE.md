@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jinn Network monorepo. Phase 0 implementation is complete — the client daemon, on-chain contracts, and JinnRouter are all deployed and working on Base.
+Jinn Network monorepo. Phase 0 implementation is complete — the client daemon, on-chain contracts, and JinnRouter are all deployed and working on Base. Phase 1a (JINN token + DAO + distribution on testnet) is in design — see `spec/2026-04-06-phase-1a-design.md`.
 
 Jinn is a training protocol for state restoration. It defines a loop (Creation → Restoration → Evaluation → Knowledge) where desired states are published with fees, participants attempt restoration, evaluators verify results, and knowledge accumulates to improve future attempts.
 
 ## Repository Structure
 
 ```
+jinn-cli-agents/ Git subtree — historical Jinn agent repo (IMPORTANT: see below)
+
 client/          TypeScript daemon — the main runnable component
   src/
     main.ts              Production entry point (npm start)
@@ -75,6 +77,19 @@ contracts/       Solidity smart contracts (Hardhat)
 spec/            Dated specification proposals
 docs/            Design specs and implementation plans
 ```
+
+## jinn-cli-agents Reference
+
+**Always check `jinn-cli-agents/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context:
+
+- `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
+- `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
+- `docs/context/olas-integration.md` — Wallet/key storage, service lifecycle, operating modes
+- `docs/reference/jinn-staking.md` — All deployed staking contracts (V1-V3), parameters, reward economics, veOLAS lock strategy, nominee mechanics
+- `docs/reference/olas-contracts.md` — Base mainnet contract addresses, MechMarketplace ABI
+- `docs/reference/blood-written-rules.md` — Hard-won operational lessons (RPC limits, IPFS, polling, etc.)
+- `docs/runbooks/` — Setup, deployment, recovery, troubleshooting guides
+- `CLAUDE.md` — System architecture overview for the agent orchestration layer
 
 ## Running the Client
 
@@ -224,8 +239,9 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 
 ## Phased Rollout
 
-- **Phase 0** (current): Prove on OLAS ecosystem, single chain (Base), OLAS Mech Marketplace + JinnRouter, optimistic evidence, no JINN token
-- **Phase 1**: Fair-launch JINN, deploy DAO (multisig → ve-JINN), distribution contracts, anti-farming + challenge mechanism
+- **Phase 0** (complete): Prove on OLAS ecosystem, single chain (Base), OLAS Mech Marketplace + JinnRouter, optimistic evidence, no JINN token
+- **Phase 1a** (in design): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
+- **Phase 1b**: Add ve-JINN gauge voting, anti-farming decay, challenge mechanism, fair-launch on mainnet
 - **Phase 2**: Multi-chain, ZK-requiring distribution contracts, broader governance
 - **Phase 3**: Autonomous — full ve-JINN governance, USDC revenue exceeds JINN emissions
 

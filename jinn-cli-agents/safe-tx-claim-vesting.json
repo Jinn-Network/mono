@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1770220878361,
+  "meta": {
+    "name": "Claim AMP2 Vested Tokens",
+    "description": "Claim 100M AMP2 tokens from Doppler vesting (v2 token 0x01ba54...eDccEe)",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x01ba54043262350F7776140589a5130924eDccEe",
+      "value": "0",
+      "data": "0x86d1a69f",
+      "contractMethod": {
+        "inputs": [],
+        "name": "release",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}

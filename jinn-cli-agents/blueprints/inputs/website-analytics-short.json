@@ -1,0 +1,11 @@
+{
+  "timePeriod": "2 days",
+  "websiteIds": [
+    "748fefe3-aa39-4f01-b4e4-70ccd27ecc30",
+    "00ba0400-cc63-4405-965f-650ca8e6c30e"
+  ],
+  "websiteLabels": {
+    "748fefe3-aa39-4f01-b4e4-70ccd27ecc30": "Jinn App",
+    "00ba0400-cc63-4405-965f-650ca8e6c30e": "The Long Run"
+  }
+}

@@ -1,0 +1,21 @@
+{
+    "name": "Broad Scan Stress Test",
+    "sources": [
+        "https://techcrunch.com",
+        "https://arstechnica.com",
+        "https://theverge.com",
+        "https://wired.com",
+        "AI regulation and policy developments worldwide",
+        "Open source AI model releases and benchmarks"
+    ],
+    "lookbackPeriod": "14 days",
+    "streamName": "broad-tech-scan",
+    "contentBrief": "What are the 3 biggest technology stories of the past two weeks?",
+    "formatBrief": "Conversational tone. Three sections, one per story. Include why each matters. Keep it under 1000 words.",
+    "formatRules": {
+        "maxWords": 1000,
+        "primaryStructure": "prose",
+        "requiredCitations": 3
+    },
+    "outputFormat": "markdown"
+}

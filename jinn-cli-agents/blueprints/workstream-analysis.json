@@ -1,0 +1,203 @@
+{
+    "name": "Workstream Analysis",
+    "description": "Comprehensive workstream health analysis that detects breaking issues, performance problems, anti-patterns, and resource waste. Traces root causes and suggests actionable improvements.",
+    "version": "1.0.0",
+    "tags": [
+        "analysis",
+        "debugging",
+        "monitoring"
+    ],
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": [
+                    "single",
+                    "cross"
+                ],
+                "default": "single",
+                "description": "Analysis mode: 'single' for one workstream deep-dive, 'cross' for pattern analysis across multiple workstreams"
+            },
+            "workstreamId": {
+                "type": "string",
+                "description": "For 'single' mode: The workstream ID to analyze (0x-prefixed hex, or 'current')"
+            },
+            "rootJobName": {
+                "type": "string",
+                "description": "For 'cross' mode: Root job name pattern to find related workstreams (e.g., 'blog-automation')"
+            },
+            "maxWorkstreams": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 10,
+                "description": "For 'cross' mode: Maximum number of workstreams to analyze"
+            },
+            "statusFilter": {
+                "type": "string",
+                "enum": [
+                    "all",
+                    "failed",
+                    "pending",
+                    "completed"
+                ],
+                "default": "all",
+                "description": "Filter jobs by status"
+            },
+            "sections": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "errors",
+                        "timing",
+                        "tools",
+                        "git",
+                        "dispatch",
+                        "metrics"
+                    ]
+                },
+                "default": [
+                    "errors",
+                    "timing",
+                    "tools",
+                    "git",
+                    "dispatch",
+                    "metrics"
+                ],
+                "description": "Which analysis sections to include"
+            },
+            "maxDepth": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10,
+                "default": 5,
+                "description": "Maximum hierarchy depth to examine"
+            },
+            "focusArea": {
+                "type": "string",
+                "description": "Optional: natural language guidance for analysis focus"
+            }
+        },
+        "required": []
+    },
+    "tools": [
+        {
+            "name": "workstream_analysis",
+            "required": true
+        }
+    ],
+    "outputSpec": {
+        "type": "artifact",
+        "topic": "WORKSTREAM_ANALYSIS",
+        "schema": {
+            "metadata": {
+                "mode": "string",
+                "workstreamsAnalyzed": "array",
+                "analysisTimestamp": "string"
+            },
+            "executiveSummary": {
+                "healthScore": "number",
+                "criticalIssues": "number",
+                "warnings": "number",
+                "summary": "string"
+            },
+            "findings": "array",
+            "crossWorkstreamPatterns": "array",
+            "actionItems": "array"
+        }
+    },
+    "invariants": [
+        {
+            "id": "DETECT-001",
+            "type": "FLOOR",
+            "metric": "job_inspection_coverage_percent",
+            "min": 90,
+            "assessment": "Calculate (jobs inspected / total jobs in scope) × 100. Use inspect_workstream to gather job tree, then inspect_job_run for failed/suspicious jobs"
+        },
+        {
+            "id": "DETECT-002",
+            "type": "FLOOR",
+            "metric": "section_coverage_percent",
+            "min": 100,
+            "assessment": "Calculate (sections gathered / sections requested) × 100. All of {{sections}} must have data in the analysis"
+        },
+        {
+            "id": "DETECT-003",
+            "type": "FLOOR",
+            "metric": "issue_categories_checked",
+            "min": 4,
+            "assessment": "Count categories analyzed: (1) breaking issues, (2) performance issues, (3) design anti-patterns, (4) resource waste. Each category must have explicit findings or 'none detected' statement"
+        },
+        {
+            "id": "ANALYZE-001",
+            "type": "FLOOR",
+            "metric": "root_cause_coverage_percent",
+            "min": 100,
+            "assessment": "Calculate (issues with fully traced root cause / total issues detected) × 100. A 'fully traced root cause' MUST include: (1) originating job ID, (2) specific configuration that caused failure (blueprint field, enabledTools entry, env var, dispatch param), (3) explanation of WHY that configuration led to failure, (4) dispatch chain showing how error propagated, (5) telemetry evidence. NOT acceptable: 'job failed because X happened' - must explain what CONFIGURATION caused X."
+        },
+        {
+            "id": "ANALYZE-002",
+            "type": "FLOOR",
+            "metric": "severity_assignment_coverage_percent",
+            "min": 100,
+            "assessment": "Calculate (issues with severity / total issues) × 100. Severity levels: CRITICAL (blocking), WARNING (degraded), INFO (optimization). Each must have justification"
+        },
+        {
+            "id": "ANALYZE-003",
+            "type": "RANGE",
+            "metric": "analysis_depth_score",
+            "min": 80,
+            "max": 100,
+            "assessment": "Score 0-100: job coverage (25), section coverage (15), all categories checked (20), root causes traced (20), severities assigned (10), evidence cited (10). Range prevents over-analysis"
+        },
+        {
+            "id": "ANALYZE-004",
+            "type": "FLOOR",
+            "metric": "config_source_identified_percent",
+            "min": 100,
+            "assessment": "For each issue, root cause MUST trace to specific configuration: blueprint field, enabledTools entry, environment variable, template setting, or dispatch parameter. Not just 'what failed' but 'what configuration caused it to fail'. Data comes from investigation children."
+        },
+        {
+            "id": "DELEGATE-001",
+            "type": "FLOOR",
+            "metric": "root_cause_investigations_dispatched",
+            "min": 1,
+            "assessment": "For EACH detected issue, dispatch a 'Root Cause Investigator' child job to trace the issue to its configuration source. Input: issue description, affected job IDs. Output: configuration-level explanation (blueprint, enabledTools, env vars, template). Count dispatch_new_job calls for root cause investigations."
+        },
+        {
+            "id": "DELEGATE-002",
+            "type": "BOOLEAN",
+            "condition": "Wait for investigation children to complete and synthesize their findings. You will be RE-INVOKED when children complete - context.hierarchy.children will contain their results.",
+            "assessment": "On first invocation: triage issues and dispatch investigators. On re-invocation (children present): synthesize child findings into final analysis with configuration-level root causes."
+        },
+        {
+            "id": "IMPROVE-001",
+            "type": "FLOOR",
+            "metric": "recommendations_per_critical_issue",
+            "min": 1,
+            "assessment": "Count recommendations for each CRITICAL issue. Each critical issue must have at least one actionable fix proposal"
+        },
+        {
+            "id": "IMPROVE-002",
+            "type": "FLOOR",
+            "metric": "actionable_recommendation_percent",
+            "min": 80,
+            "assessment": "Calculate (recommendations with what/where/how / total recommendations) × 100. Actionable = specifies what to change, where to change it, and how to verify"
+        },
+        {
+            "id": "OUTPUT-001",
+            "type": "BOOLEAN",
+            "condition": "You create a structured analysis artifact using create_artifact with topic 'WORKSTREAM_ANALYSIS' containing all required sections",
+            "assessment": "Verify artifact exists with: metadata, executiveSummary, findings (with symptom, rootCause, recommendation for each), actionItems"
+        },
+        {
+            "id": "OUTPUT-002",
+            "type": "FLOOR",
+            "metric": "action_items_per_workstream",
+            "min": 1,
+            "assessment": "Count action items in output divided by workstreams analyzed. Each workstream must produce at least one prioritized action item"
+        }
+    ]
+}

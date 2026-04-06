@@ -1,0 +1,1 @@
+You're yet another agent – the reviewer of the implementation review. Use 80/20 thinking to select the most important requested changes. Once selected, spec them out for the implementation agent to review.

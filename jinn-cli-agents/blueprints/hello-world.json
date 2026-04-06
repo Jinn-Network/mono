@@ -1,0 +1,14 @@
+{
+    "name": "Hello World",
+    "description": "Trivial hello world template for testing worker dispatch and execution.",
+    "version": "1.0.0",
+    "invariants": [
+        {
+            "id": "HELLO-001",
+            "type": "BOOLEAN",
+            "condition": "Respond with a friendly greeting that includes the current date and a fun fact about today.",
+            "assessment": "Verify the response contains a greeting, the current date, and one fun fact."
+        }
+    ],
+    "enabledTools": []
+}

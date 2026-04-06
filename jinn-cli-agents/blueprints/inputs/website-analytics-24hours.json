@@ -1,0 +1,11 @@
+{
+  "timePeriod": "24 hours",
+  "websiteIds": [
+    "cfa31df1-0dff-4c14-8a5b-cad39c8f12c5",
+    "748fefe3-aa39-4f01-b4e4-70ccd27ecc30"
+  ],
+  "websiteLabels": {
+    "cfa31df1-0dff-4c14-8a5b-cad39c8f12c5": "Jinn Explorer",
+    "748fefe3-aa39-4f01-b4e4-70ccd27ecc30": "Jinn App"
+  }
+}

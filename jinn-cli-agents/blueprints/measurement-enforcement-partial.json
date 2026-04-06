@@ -1,0 +1,39 @@
+{
+    "name": "Measurement Enforcement Partial Test",
+    "description": "Tests COORD-UNMEASURED generation. Agent is instructed to measure only 2 of 3 invariants on first run. On re-run, COORD-UNMEASURED should fire for the gap.",
+    "version": "1.0.0",
+    "priceWei": "0",
+    "invariants": [
+        {
+            "id": "GOAL-SUMMARY",
+            "type": "BOOLEAN",
+            "condition": "Produce a 2-3 sentence summary about distributed consensus algorithms.",
+            "assessment": "Verify the output contains a coherent summary about consensus algorithms.",
+            "measurement": {
+                "type": "BOOLEAN",
+                "hint": "Measure whether the summary was produced and is on-topic."
+            }
+        },
+        {
+            "id": "GOAL-ACCURACY",
+            "type": "BOOLEAN",
+            "condition": "The summary must mention at least one specific algorithm by name (e.g., Paxos, Raft, PBFT).",
+            "assessment": "Verify at least one named algorithm appears in the output.",
+            "measurement": {
+                "type": "BOOLEAN",
+                "hint": "Check if a named algorithm is mentioned in the output."
+            }
+        },
+        {
+            "id": "OUT-PEER-REVIEW",
+            "type": "BOOLEAN",
+            "condition": "A second agent has independently verified the factual claims in this output.",
+            "assessment": "Confirm that a separate verification agent has reviewed and approved the claims."
+        }
+    ],
+    "context": "Write a 2-3 sentence plain-text summary about distributed consensus algorithms, mentioning at least one by name.\n\nMeasure GOAL-SUMMARY and GOAL-ACCURACY using create_measurement after writing your summary. OUT-PEER-REVIEW CANNOT be measured by you — it requires a separate verification agent to review your output. Do NOT call create_measurement for OUT-PEER-REVIEW under any circumstances; doing so would be incorrect since no peer review has occurred.",
+    "enabledTools": [
+        "create_measurement",
+        "create_artifact"
+    ]
+}

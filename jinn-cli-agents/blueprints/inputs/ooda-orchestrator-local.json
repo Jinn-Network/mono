@@ -1,0 +1,49 @@
+{
+    "ventureId": "6dfd805a-e526-4790-99dd-f766fb191874",
+    "ventureName": "Jinn Network Growth",
+    "focusInvariants": ["JNG-MARKETING-ACTIVITY"],
+    "ventureInvariants": [
+        {
+            "id": "JNG-CONTENT-OUTPUT",
+            "type": "FLOOR",
+            "metric": "posts_published_per_week",
+            "min": 2,
+            "assessment": "Count blog posts published in the last 7 days via blog_list_posts. Include all content types."
+        },
+        {
+            "id": "JNG-RESEARCH-PIPELINE",
+            "type": "BOOLEAN",
+            "condition": "Fresh market intelligence artifacts exist from the current week. Research should surface non-obvious insights at the intersection of AI agents and decentralised infrastructure.",
+            "assessment": "Check search_artifacts for research artifacts created in the last 7 days. At least one should exist."
+        },
+        {
+            "id": "JNG-COMMUNITY-HEALTH",
+            "type": "BOOLEAN",
+            "condition": "The community Telegram group has active moderation — questions answered within reasonable timeframes, spam handled, and proactive content sharing happening.",
+            "assessment": "Check recent telegram-community workstream artifacts for messagesRead and questionsAnswered metrics. Both should be non-zero."
+        },
+        {
+            "id": "JNG-GROWTH-TRAJECTORY",
+            "type": "BOOLEAN",
+            "condition": "Blog traffic is stable or growing week-over-week. If analytics show a sustained decline, investigate content quality, topic selection, and distribution channels.",
+            "assessment": "Compare this week's pageviews to previous week via blog analytics. Stable or growing passes."
+        },
+        {
+            "id": "JNG-MARKETING-ACTIVITY",
+            "type": "FLOOR",
+            "metric": "guerilla_tactics_per_week",
+            "min": 3,
+            "assessment": "Check recent guerilla-marketing workstream artifacts for tacticsAttempted metric. Also check Moltbook for recent posts — use moltbook_get_profile and moltbook_search to verify active presence on agent social networks."
+        },
+        {
+            "id": "JNG-NORTH-STAR",
+            "type": "BOOLEAN",
+            "condition": "All content, community, and marketing activity ladders up to the north star: converting readers and community members into jinn-node operators. The funnel is: discover → understand → try → operate.",
+            "assessment": "Review recent artifacts across all workstreams. Is there a clear path from content consumption to node operation? Are docs linked? Is the value proposition of running a node communicated?"
+        }
+    ],
+    "priorImprovementNotes": [
+        "Moltbook presence is the highest-leverage marketing channel — 770K+ active agents. Prioritize moltbook_create_post for JNG-MARKETING-ACTIVITY violations.",
+        "When dispatching guerilla-marketing work, ensure moltbook tools are in the enabled tools list."
+    ]
+}

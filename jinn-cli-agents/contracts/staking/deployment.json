@@ -1,0 +1,33 @@
+{
+  "network": "base",
+  "chainId": 8453,
+  "timestamp": "2026-02-24T15:00:40.335Z",
+  "contracts": {
+    "activityChecker": "0xe575393b921C98288a842217AFBeDBA8197496D5",
+    "stakingContract": "0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488"
+  },
+  "config": {
+    "livenessRatio": "694444444444444",
+    "stakingParams": {
+      "maxNumServices": 100,
+      "rewardsPerSecond": "475646879756468",
+      "minStakingDeposit": "5000000000000000000000",
+      "livenessPeriod": 86400,
+      "timeForEmissions": 2592000,
+      "agentIds": [
+        103
+      ]
+    }
+  },
+  "addresses": {
+    "StakingFactory": "0x1cEe30D08943EB58EFF84DD1AB44a6ee6FEff63a",
+    "StakingToken": "0xEB5638eefE289691EcE01943f768EDBF96258a80",
+    "StakingVerifier": "0x10c5525F77F13b28f42c5626240c001c2D57CAd4",
+    "ServiceRegistryL2": "0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE",
+    "ServiceRegistryTokenUtility": "0x34C895f302D0b5cf52ec0Edd3945321EB0f83dd5",
+    "MechMarketplace": "0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020",
+    "OLASToken": "0x54330d28ca3357F294334BDC454a032e7f353416",
+    "AgentsFun1Staking": "0x2585e63df7BD9De8e058884D496658a030b5c6ce",
+    "RequesterActivityChecker": "0x87C9922A099467E5A80367553e7003349FE50106"
+  }
+}

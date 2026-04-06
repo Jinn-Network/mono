@@ -1,0 +1,185 @@
+{
+    "name": "Code Repository Audit",
+    "description": "Audits any GitHub repository for security vulnerabilities, outdated dependencies, code quality issues, and contributor health. Generates a structured health score with pre-filled GitHub issue links for one-click remediation.",
+    "version": "1.0.0",
+    "priceUsd": "$2.00",
+    "priceWei": "700000000000000",
+    "tags": [
+        "code-audit",
+        "security",
+        "dependencies",
+        "code-quality",
+        "github"
+    ],
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "repoUrl": {
+                "type": "string",
+                "description": "GitHub repository URL (e.g., https://github.com/owner/repo)",
+                "pattern": "^https://github\\.com/[\\w.-]+/[\\w.-]+$"
+            },
+            "branch": {
+                "type": "string",
+                "description": "Branch to audit",
+                "default": "main"
+            },
+            "auditScope": {
+                "type": "string",
+                "enum": [
+                    "security",
+                    "deps",
+                    "quality",
+                    "full"
+                ],
+                "description": "What to audit: security vulnerabilities, dependency health, code quality, or everything",
+                "default": "full"
+            },
+            "securityThreshold": {
+                "type": "string",
+                "enum": [
+                    "critical-only",
+                    "high",
+                    "medium",
+                    "all"
+                ],
+                "description": "Minimum severity level to report",
+                "default": "high"
+            }
+        },
+        "required": [
+            "repoUrl"
+        ]
+    },
+    "outputSpec": {
+        "version": "1.0",
+        "fields": [
+            {
+                "name": "summary",
+                "path": "$.result.summary",
+                "type": "string",
+                "required": true,
+                "description": "Executive summary of audit findings"
+            },
+            {
+                "name": "healthScore",
+                "path": "$.result.healthScore",
+                "type": "number",
+                "required": true,
+                "description": "Overall code health score (0-100)"
+            },
+            {
+                "name": "issues",
+                "path": "$.result.issues",
+                "type": "array",
+                "required": true,
+                "description": "Array of issues with title, severity, description, createIssueUrl, reasoning"
+            },
+            {
+                "name": "issueCount",
+                "path": "$.result.issueCount",
+                "type": "object",
+                "required": true,
+                "description": "Counts by severity: { critical, high, medium, low }"
+            }
+        ]
+    },
+    "enabledTools": [
+        "google_web_search",
+        "web_fetch",
+        "create_artifact",
+        "get_details",
+        "search_artifacts"
+    ],
+    "invariants": [
+        {
+            "id": "AUDIT-001",
+            "form": "directive",
+            "invariant": "PHASE 1: EXPLORE & REASON. Before generating any output, create an artifact 'audit-reasoning.md' documenting: (1) repository structure overview, (2) files examined, (3) raw findings per category, (4) filtering decisions (what was included/excluded and why).",
+            "measurement": "Verify 'audit-reasoning.md' artifact exists before any issues are reported in output.",
+            "examples": {
+                "do": [
+                    "Step 1: Create audit-reasoning.md. Step 2: Map repo structure. Step 3: Examine key files. Step 4: Document findings."
+                ],
+                "dont": [
+                    "Skip the reasoning phase and jump straight to the final JSON output."
+                ]
+            },
+            "commentary": "Forcing a reasoning phase drastically improves audit accuracy and reduces false positives."
+        },
+        {
+            "id": "SECURITY-001",
+            "form": "constraint",
+            "invariant": "When scope includes security: scan for OWASP Top 10 categories (injection, auth bypass, XSS, insecure deserialization, etc.), hardcoded secrets/API keys, unsafe dependency patterns, and missing security headers. Report >= {{securityThreshold}} severity.",
+            "measurement": "Verify security findings reference specific OWASP categories or CVE IDs where applicable.",
+            "examples": {
+                "do": [
+                    "Flag hardcoded AWS_SECRET_KEY in config.js as Critical",
+                    "Reference CVE-2024-XXXX for known vulnerability in lodash@4.17.20"
+                ],
+                "dont": [
+                    "Report theoretical vulnerabilities without evidence in the code",
+                    "Ignore hardcoded secrets because they might be test values"
+                ]
+            }
+        },
+        {
+            "id": "DEPS-001",
+            "form": "constraint",
+            "invariant": "When scope includes deps: check for outdated packages (compare against latest registry versions), known CVEs in dependencies, unused dependencies, and lockfile consistency. Cross-reference against npm/PyPI/crates.io registries.",
+            "measurement": "For each dependency issue, verify external source was checked (registry version, CVE database).",
+            "examples": {
+                "do": [
+                    "Verify 'react' version in package.json against npm registry latest",
+                    "Check snyk.io or osv.dev for known vulnerabilities"
+                ],
+                "dont": [
+                    "Assume dependency versions are current without checking external data"
+                ]
+            }
+        },
+        {
+            "id": "QUALITY-001",
+            "form": "constraint",
+            "invariant": "When scope includes quality: assess test coverage patterns, error handling completeness, code duplication, documentation quality, and contributor activity (bus factor). IGNORE: dist/, node_modules/, vendor/, build/, and auto-generated files.",
+            "measurement": "Confirm no issues reference files in dist/, node_modules/, vendor/, or .min.js files.",
+            "examples": {
+                "do": [
+                    "Flag critical path without error handling in src/api/handler.ts",
+                    "Note bus factor of 1 if only one contributor in past 6 months"
+                ],
+                "dont": [
+                    "Report lint errors in minified or third-party code"
+                ]
+            }
+        },
+        {
+            "id": "ISSUE-FORMAT-001",
+            "form": "constraint",
+            "invariant": "For each issue, generate a pre-filled GitHub issue URL: https://github.com/OWNER/REPO/issues/new?title=TITLE&body=BODY&labels=LABELS. URL-encode title and body. Group 5+ similar minor issues into single 'Cluster' issues to avoid spam.",
+            "measurement": "Each issue must have a valid createIssueUrl. If >5 similar minor issues exist, verify they are grouped.",
+            "examples": {
+                "do": [
+                    "Group 5 missing return types into one 'Fix Missing Return Types in /src' cluster issue"
+                ],
+                "dont": [
+                    "Create 5 separate issues for the same minor style violation"
+                ]
+            }
+        },
+        {
+            "id": "HEALTH-SCORE-001",
+            "form": "threshold",
+            "invariant": "Calculate healthScore (0-100) deterministically: Start at 100. Deduct: Critical (-25), High (-10), Medium (-5), Low dependency issue (-2), Quality nit (-1). Floor at 0. Show the calculation in the reasoning artifact.",
+            "measurement": "Verify healthScore = max(0, 100 - sum(deductions)). Calculation must appear in audit-reasoning.md.",
+            "examples": {
+                "do": [
+                    "100 - 25 (1 Critical) - 10 (1 High) - 5 (1 Medium) = 60"
+                ],
+                "dont": [
+                    "Assign arbitrary scores like '80 because it looks okay'"
+                ]
+            }
+        }
+    ]
+}

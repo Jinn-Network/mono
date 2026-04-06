@@ -1,0 +1,15 @@
+{
+  "timePeriod": "14 days",
+  "websiteIds": [
+    "00ba0400-cc63-4405-965f-650ca8e6c30e",
+    "0d8e685a-d498-445d-99c6-671bf3d63b1d",
+    "748fefe3-aa39-4f01-b4e4-70ccd27ecc30",
+    "deeb793f-bbd0-44e0-b628-bb7978a24626"
+  ],
+  "websiteLabels": {
+    "00ba0400-cc63-4405-965f-650ca8e6c30e": "The Long Run",
+    "0d8e685a-d498-445d-99c6-671bf3d63b1d": "The Lamp (Blog)",
+    "748fefe3-aa39-4f01-b4e4-70ccd27ecc30": "Jinn App",
+    "deeb793f-bbd0-44e0-b628-bb7978a24626": "Jinn Docs"
+  }
+}

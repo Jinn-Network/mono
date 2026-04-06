@@ -1,0 +1,55 @@
+# Build artifacts (rebuilt in Docker)
+node_modules/
+dist/
+
+# Git and repo metadata
+.git/
+.gitignore
+.beads/
+.claude/
+.conductor/
+.worktrees/
+
+# Secrets and credentials (mounted as volume)
+.env
+.env.*
+!.env.example
+.operate/
+.gemini/
+
+# Documentation (not needed in image)
+docs/
+*.md
+LICENSE
+AGENTS.md
+HUMANS.md
+
+# Tests
+tests/
+tests-next/
+coverage/
+test-results/
+vitest.config*
+**/*.test.ts
+**/*.spec.ts
+
+# Python (olas-operate-middleware not in Docker image)
+pyproject.toml
+poetry.lock
+.venv/
+__pycache__/
+olas-operate-middleware/
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Logs and temp files
+*.log
+logs/
+*.tgz
+*.zip
+*.tar.gz

@@ -1,0 +1,180 @@
+{
+    "templateMeta": {
+        "id": "vsr-crud-test",
+        "name": "VSR CRUD Integration Test",
+        "description": "Test CRUD operations for ventures and services registry via MCP tools. Verifies ventures_registry and services_registry meta-tools work in autonomous agent context.",
+        "priceWei": "0",
+        "tools": [
+            {
+                "name": "ventures_registry",
+                "required": true
+            },
+            {
+                "name": "services_registry",
+                "required": true
+            },
+            {
+                "name": "create_artifact"
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "NO-DELEGATION",
+            "type": "BOOLEAN",
+            "condition": "Complete this task DIRECTLY yourself. Do NOT use dispatch_new_job or dispatch_existing_job.",
+            "assessment": "Verify the agent did NOT dispatch any child jobs and performed all operations directly.",
+            "examples": {
+                "do": [
+                    "Call venture_mint directly",
+                    "Call service_registry directly"
+                ],
+                "dont": [
+                    "Use dispatch_new_job",
+                    "Delegate to another agent"
+                ]
+            }
+        },
+        {
+            "id": "TEST-VENTURE-CREATE",
+            "type": "BOOLEAN",
+            "condition": "Create a test venture using venture_mint with name 'VSR Test Venture', a valid owner address (use 0x0000000000000000000000000000000000000001), and a blueprint with at least one invariant.",
+            "assessment": "Verify venture_mint was called and returned a venture ID.",
+            "examples": {
+                "do": [
+                    "Call venture_mint with required fields",
+                    "Capture the returned venture ID"
+                ],
+                "dont": [
+                    "Skip venture creation",
+                    "Use invalid parameters"
+                ]
+            }
+        },
+        {
+            "id": "TEST-VENTURE-READ",
+            "type": "BOOLEAN",
+            "condition": "Query the created venture using venture_query to verify it was created correctly. Check that all fields match what was submitted.",
+            "assessment": "Verify venture_query was called with the created venture ID and returned the correct data.",
+            "examples": {
+                "do": [
+                    "Call venture_query with the venture ID",
+                    "Verify returned fields match"
+                ],
+                "dont": [
+                    "Skip reading the venture",
+                    "Assume creation succeeded without verification"
+                ]
+            }
+        },
+        {
+            "id": "TEST-VENTURE-UPDATE",
+            "type": "BOOLEAN",
+            "condition": "Update the venture using venture_update to change its description to 'Updated by VSR CRUD test'.",
+            "assessment": "Verify venture_update was called and the description was changed.",
+            "examples": {
+                "do": [
+                    "Call venture_update with new description",
+                    "Verify update succeeded"
+                ],
+                "dont": [
+                    "Skip the update test",
+                    "Update wrong venture"
+                ]
+            }
+        },
+        {
+            "id": "TEST-SERVICE-CREATE",
+            "type": "BOOLEAN",
+            "condition": "Create a test service using service_registry with action 'create_service', linked to the venture you created. Name it 'VSR Test Service'.",
+            "assessment": "Verify service_registry was called with create_service action and returned a service ID.",
+            "examples": {
+                "do": [
+                    "Call service_registry with action create_service",
+                    "Link to the test venture"
+                ],
+                "dont": [
+                    "Skip service creation",
+                    "Create service without venture link"
+                ]
+            }
+        },
+        {
+            "id": "TEST-SERVICE-READ",
+            "type": "BOOLEAN",
+            "condition": "Query the created service using service_registry with action 'get_service' or 'list_services' to verify it was created correctly.",
+            "assessment": "Verify service_registry read action was called and returned the service data.",
+            "examples": {
+                "do": [
+                    "Call service_registry with get_service or list_services",
+                    "Verify service exists"
+                ],
+                "dont": [
+                    "Skip service verification",
+                    "Assume creation succeeded"
+                ]
+            }
+        },
+        {
+            "id": "TEST-SERVICE-UPDATE",
+            "type": "BOOLEAN",
+            "condition": "Update the service using service_registry with action 'update_service' to change its description to 'Updated by VSR CRUD test'.",
+            "assessment": "Verify service_registry update action was called and description changed.",
+            "examples": {
+                "do": [
+                    "Call service_registry with update_service action",
+                    "Verify update succeeded"
+                ],
+                "dont": [
+                    "Skip service update",
+                    "Update wrong service"
+                ]
+            }
+        },
+        {
+            "id": "TEST-CLEANUP-SERVICE",
+            "type": "BOOLEAN",
+            "condition": "Delete the test service using service_registry with action 'delete_service'.",
+            "assessment": "Verify service was deleted.",
+            "examples": {
+                "do": [
+                    "Call service_registry with delete_service action"
+                ],
+                "dont": [
+                    "Leave test service in database"
+                ]
+            }
+        },
+        {
+            "id": "TEST-CLEANUP-VENTURE",
+            "type": "BOOLEAN",
+            "condition": "Delete the test venture using venture_delete with mode 'hard' and confirm: true.",
+            "assessment": "Verify venture was permanently deleted.",
+            "examples": {
+                "do": [
+                    "Call venture_delete with hard mode and confirm: true"
+                ],
+                "dont": [
+                    "Leave test venture in database",
+                    "Use soft delete"
+                ]
+            }
+        },
+        {
+            "id": "CREATE-SUMMARY-ARTIFACT",
+            "type": "BOOLEAN",
+            "condition": "Create an artifact summarizing all CRUD test results with pass/fail status for each operation.",
+            "assessment": "Verify create_artifact was called with a summary of test results.",
+            "examples": {
+                "do": [
+                    "Call create_artifact with test summary",
+                    "Include all operation results"
+                ],
+                "dont": [
+                    "Skip creating summary",
+                    "Create incomplete summary"
+                ]
+            }
+        }
+    ]
+}

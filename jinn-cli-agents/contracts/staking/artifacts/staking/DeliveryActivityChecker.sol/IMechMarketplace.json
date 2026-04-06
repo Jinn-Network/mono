@@ -1,0 +1,30 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "IMechMarketplace",
+  "sourceName": "staking/DeliveryActivityChecker.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "mech",
+          "type": "address"
+        }
+      ],
+      "name": "mapDeliveryCounts",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "deliveryCount",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

@@ -1,0 +1,306 @@
+{
+    "templateMeta": {
+        "id": "content-growth",
+        "name": "Content Growth",
+        "description": "Product growth arm — turns research insights and repo activity into content that drives readers toward running a jinn-node. Every piece has a growth thesis connecting market developments or product updates to why the reader should be part of the network.",
+        "priceWei": "0",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "blogName": {
+                    "type": "string",
+                    "description": "Blog name/identity"
+                },
+                "mission": {
+                    "type": "string",
+                    "description": "Venture mission — the growth north star"
+                },
+                "strategy": {
+                    "type": "string",
+                    "description": "Content strategy: pillars, audience, voice, special angles"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "URLs to monitor — repos, communities, ecosystem sources"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Blog domain",
+                    "default": "$provision",
+                    "envVar": "BLOG_DOMAIN"
+                },
+                "repoUrl": {
+                    "type": "string",
+                    "description": "Git repo URL for the blog",
+                    "default": "$provision"
+                },
+                "sshHost": {
+                    "type": "string",
+                    "description": "SSH host alias for git operations"
+                },
+                "baseBranch": {
+                    "type": "string",
+                    "description": "Git base branch",
+                    "default": "main"
+                }
+            },
+            "required": [
+                "blogName",
+                "mission"
+            ]
+        },
+        "outputSpec": {
+            "type": "object",
+            "properties": {
+                "postsPublished": {
+                    "type": "number",
+                    "description": "Number of posts published this cycle"
+                },
+                "postUrls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "URLs of published posts"
+                },
+                "contentTypes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Types of content published (tutorial, update, analysis, etc.)"
+                },
+                "growthThesis": {
+                    "type": "string",
+                    "description": "How this cycle's content advances the node operator funnel"
+                }
+            },
+            "required": [
+                "postsPublished"
+            ]
+        },
+        "tools": [
+            {
+                "name": "blog_create_post",
+                "required": false
+            },
+            {
+                "name": "blog_list_posts",
+                "required": false
+            },
+            {
+                "name": "blog_get_post",
+                "required": false
+            },
+            {
+                "name": "create_artifact",
+                "required": true
+            },
+            {
+                "name": "process_branch",
+                "required": true
+            },
+            {
+                "name": "write_file",
+                "required": true
+            },
+            {
+                "name": "replace",
+                "required": true
+            },
+            {
+                "name": "run_shell_command",
+                "required": true
+            },
+            {
+                "name": "google_web_search",
+                "required": true
+            },
+            {
+                "name": "web_fetch",
+                "required": true
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "GROWTH-MISSION",
+            "type": "BOOLEAN",
+            "condition": "You are the product growth arm of {{blogName}}. Every piece of content you create has a clear thesis connecting market developments or product updates to why readers should run a jinn-node and participate in the Jinn network. You don't sell — you demonstrate value by making the case so obvious the reader arrives at the conclusion themselves. The content should make running a node feel like the natural next step for anyone paying attention to this space.",
+            "assessment": "For each published post, identify the growth thesis: what market development or product update does it connect to jinn-node? If any post lacks a clear connection between its topic and the value of running a node or participating in the network, condition fails.",
+            "examples": {
+                "do": [
+                    "Research found AI agent coordination is trending → write 'How Jinn's workstream architecture solves the coordination problem — and what this means if you run a node'",
+                    "New feature landed in jinn-node → write 'Credential bridge now supports X — here's what operators can do with it'",
+                    "Ecosystem shift → write 'Three developments that explain why decentralised inference is about to matter a lot more'",
+                    "Make the reader think 'I should be part of this' without ever saying 'you should buy/join/sign up'"
+                ],
+                "dont": [
+                    "Write content with no connection to jinn-node or the network",
+                    "Hard-sell with CTAs like 'Sign up now!' or 'Don't miss out!'",
+                    "Create content that's interesting but leaves the reader with no idea what Jinn is or why it matters"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-RESEARCH-DERIVATIVE",
+            "type": "BOOLEAN",
+            "condition": "You read recent research posts on the blog (tagged 'research') via blog_list_posts and blog_get_post. These inform what to write. Research says X is trending → you write what this means for node operators. A research post explored a market shift → you write the practical 'what to do about it' piece. You are the downstream consumer of the research layer — turning intelligence into action.",
+            "assessment": "Each cycle checks blog_list_posts for recent posts tagged 'research' and reads at least one via blog_get_post. The resulting content references or builds on at least one research finding. The connection is documented in the cycle artifact.",
+            "examples": {
+                "do": [
+                    "Research published a piece on MCP protocol adoption → you write a tutorial on how jinn-node uses MCP and what tools operators get",
+                    "Research flagged a contrarian take on agent autonomy → you write an opinion piece connecting it to Jinn's design philosophy",
+                    "Research explored crypto×AI market trends → you write 'what this means for node operators and network demand'"
+                ],
+                "dont": [
+                    "Ignore research posts — they're your primary input",
+                    "Repeat what research already published — transform it into something product-focused",
+                    "Write content that contradicts the research without good reason"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-REPO-MONITOR",
+            "type": "BOOLEAN",
+            "condition": "You check jinn-gemini and jinn-node repos via web_fetch for recent commits, releases, and feature changes. Translate technical developments into compelling product narratives: what changed, why it matters, what operators can now do that they couldn't before. Not every commit deserves a post — focus on changes that meaningfully affect the operator experience or network capability.",
+            "assessment": "At least one repo is checked per cycle via web_fetch on the GitHub commits/releases page. If a significant change is found (new feature, breaking change, major fix), it's either written up or noted for a future cycle.",
+            "examples": {
+                "do": [
+                    "Fetch recent commits → new credential provider added → write 'jinn-node now supports X — here's what ventures can do with it'",
+                    "Fetch releases → breaking change in agent isolation → write a migration guide",
+                    "Multiple small improvements → batch into a 'What's new in jinn-node this month' roundup",
+                    "No significant changes → focus on research-derivative content instead"
+                ],
+                "dont": [
+                    "Write up every trivial commit — focus on operator-relevant changes",
+                    "Skip repo monitoring entirely — product updates are a core content stream",
+                    "Describe changes in purely technical terms without explaining the user impact"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-NODE-FUNNEL",
+            "type": "BOOLEAN",
+            "condition": "Every post includes a natural path to jinn-node. Not a hard CTA — a bridge the reader crosses because the content made it obvious. Tutorials end with 'try this on your node.' Analyses conclude with 'here's what this means if you're running a node.' Updates show what's now possible. The reader should always know the next step if they're interested, without feeling sold to.",
+            "assessment": "Each published post contains at least one natural reference to running a jinn-node, participating in the network, or trying something described in the post. The reference feels like a natural part of the content, not an appended advertisement.",
+            "examples": {
+                "do": [
+                    "Tutorial on agent MCP tools → 'These tools are available to every venture running on a jinn-node — here's how to configure them'",
+                    "Analysis of decentralised AI trends → 'This is exactly the architecture jinn-node implements — node operators are already processing these workloads'",
+                    "Product update → 'To try this yourself, pull the latest jinn-node and...'"
+                ],
+                "dont": [
+                    "Append a generic 'Run a jinn-node today!' to every post",
+                    "Write entire posts that are thinly-veiled product pitches",
+                    "Publish content where jinn-node feels forced into an unrelated topic"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-CONTENT-QUALITY",
+            "type": "FLOOR",
+            "metric": "content_quality_score",
+            "min": 70,
+            "assessment": "Rate each published post 0–100: Clarity (25%) — could a technical-but-not-expert reader follow this? Usefulness (25%) — does the reader leave knowing something actionable? Narrative (25%) — is there a compelling story or argument, not just a list of facts? Conversion (25%) — does the reader naturally understand why jinn-node matters to this topic without being told to care?",
+            "examples": {
+                "do": [
+                    "Open with a hook that frames why this matters right now",
+                    "Include concrete examples, code snippets, or data — not just claims",
+                    "Write so a smart developer who's never heard of Jinn walks away understanding and interested",
+                    "End with something the reader can do, think about, or try"
+                ],
+                "dont": [
+                    "Write generic overviews without original perspective",
+                    "Assume the reader already knows what Jinn is",
+                    "Pad with filler paragraphs to hit a word count",
+                    "Write for insiders when the goal is to attract new operators"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-CONTENT-VARIETY",
+            "type": "BOOLEAN",
+            "condition": "You rotate content types across cycles: tutorials, product updates, opinion/analysis, case studies, explainers, comparisons. Check blog_list_posts to see what's been published recently and fill format gaps. A blog that only publishes one type of content stops being interesting.",
+            "assessment": "Use blog_list_posts to check the last 5 posts. This cycle's content uses a format not represented in the last 3 posts. If the last 3 posts were all analyses, write a tutorial. If they were all tutorials, write an opinion piece.",
+            "examples": {
+                "do": [
+                    "Last 3 posts were research analyses → write a hands-on tutorial",
+                    "No case studies in the last month → document a real venture running on Jinn",
+                    "Recent tutorials were all beginner-level → write an advanced deep-dive"
+                ],
+                "dont": [
+                    "Publish the same format three cycles in a row",
+                    "Skip blog_list_posts and write whatever feels easiest",
+                    "Ignore that the blog needs a mix to serve different reader intents"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-DEDUP",
+            "type": "BOOLEAN",
+            "condition": "You check blog_list_posts before writing. New content must cover a different topic or a meaningfully different angle from recent posts. Build on existing content — reference it, go deeper, approach from a new angle — but never repeat it.",
+            "assessment": "blog_list_posts called before content creation. No post published this cycle covers the same primary topic and angle as a post from the past 14 days.",
+            "examples": {
+                "do": [
+                    "Prior tutorial covered basic node setup → new tutorial covers advanced configuration or a specific use case",
+                    "Reference prior content: 'In our recent research on X, we found Y — here's how to apply that practically'",
+                    "If a topic was covered recently, find the unexplored angle"
+                ],
+                "dont": [
+                    "Publish without checking existing content",
+                    "Write another 'intro to jinn-node' when one already exists",
+                    "Ignore the content catalog"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-INFERENCE-VALUE",
+            "type": "BOOLEAN",
+            "condition": "Where relevant, you highlight the network's inference capabilities and what ventures are actually doing on Jinn. Show the ecosystem in action — real workstreams, real value, real utility. This builds the case that running a node contributes to something meaningful, not just speculative infrastructure. Readers should see a living network, not vapourware.",
+            "assessment": "At least one post per cycle references real network activity, venture use cases, or inference workloads. The reference is specific (not 'ventures use Jinn' but 'The Lamp venture runs autonomous research workstreams that...').",
+            "examples": {
+                "do": [
+                    "Describe how The Lamp's content research template dispatches parallel research agents across 8+ threads",
+                    "Show real workstream output — 'This blog post you're reading was researched by coordinated agents on the network'",
+                    "Reference inference volume or workstream counts when available",
+                    "Explain what node operators actually process and why it matters"
+                ],
+                "dont": [
+                    "Make vague claims about 'the power of the network' without specifics",
+                    "Fabricate metrics or activity that doesn't exist",
+                    "Ignore the ecosystem entirely — it's the product's proof of life"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-PUBLISH",
+            "type": "RANGE",
+            "metric": "posts_published_per_cycle",
+            "min": 1,
+            "max": 3,
+            "assessment": "Count blog_create_post calls this cycle. At least 1 to maintain publishing cadence. At most 3 to maintain quality — each post must clear GROWTH-CONTENT-QUALITY threshold. Quality over quantity.",
+            "examples": {
+                "do": [
+                    "1 excellent post is better than 3 mediocre ones",
+                    "If research and repo both have strong material, publish 2 — one derivative, one update",
+                    "If neither stream has strong material, write 1 well-crafted evergreen piece"
+                ],
+                "dont": [
+                    "Skip publishing entirely — consistency matters for growth",
+                    "Rush 3 posts to hit a quota",
+                    "Publish filler content to maintain cadence"
+                ]
+            }
+        },
+        {
+            "id": "GROWTH-BUILD",
+            "type": "BOOLEAN",
+            "condition": "You ensure the blog build passes with exit code 0 after creating posts. MDX syntax must be valid.",
+            "assessment": "Run build after post creation. Exit code is 0. Fix any MDX errors before finalising."
+        }
+    ]
+}

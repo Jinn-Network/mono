@@ -1,0 +1,120 @@
+{
+    "templateMeta": {
+        "id": "hello-world-deployer",
+        "name": "Hello World Deployer",
+        "description": "Deploy a personalized web service to Railway in seconds",
+        "priceWei": "0",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "serviceName": {
+                    "type": "string",
+                    "description": "Name for the deployed service"
+                },
+                "welcomeMessage": {
+                    "type": "string",
+                    "description": "Custom message the service will display",
+                    "default": "Hello from Jinn! Deployed autonomously 🚀"
+                },
+                "railwayProjectId": {
+                    "type": "string",
+                    "description": "Railway project ID where the service will be created",
+                    "envVar": "JINN_JOB_BLOG_RAILWAY_PROJECT_ID"
+                }
+            },
+            "required": [
+                "serviceName",
+                "railwayProjectId"
+            ]
+        },
+        "outputSpec": {
+            "type": "object",
+            "properties": {
+                "liveUrl": {
+                    "type": "string",
+                    "description": "The deployed service URL"
+                },
+                "serviceId": {
+                    "type": "string",
+                    "description": "The Railway service ID created"
+                }
+            },
+            "required": [
+                "liveUrl"
+            ]
+        },
+        "tools": [
+            {
+                "name": "railway_deployment",
+                "required": true
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "GOAL-DEPLOY",
+            "type": "BOOLEAN",
+            "condition": "You deploy the Node.js hello-world starter to Railway project {{railwayProjectId}}",
+            "assessment": "Service is created and visible via list-services. Use repo: https://github.com/OscarNOW/node-hello-world",
+            "examples": {
+                "do": [
+                    "Use service-create-from-repo with https://github.com/OscarNOW/node-hello-world",
+                    "Name the service '{{serviceName}}'"
+                ],
+                "dont": [
+                    "Use a different repo",
+                    "Create multiple services"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-CUSTOMIZE",
+            "type": "BOOLEAN",
+            "condition": "You set environment variable MESSAGE='{{welcomeMessage}}' on the service",
+            "assessment": "list-variables shows MESSAGE variable is set correctly",
+            "examples": {
+                "do": [
+                    "Use variable-set or set-variables to set MESSAGE",
+                    "Verify the variable is set before triggering deployment"
+                ],
+                "dont": [
+                    "Skip variable configuration",
+                    "Use wrong variable name"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-VERIFY",
+            "type": "BOOLEAN",
+            "condition": "You trigger deployment and verify the service is live",
+            "assessment": "deployment-trigger succeeds and the service domain is accessible",
+            "examples": {
+                "do": [
+                    "Use deployment-trigger after setting variables",
+                    "Check deployment-list to confirm deployment status",
+                    "Use get-logs to debug any issues"
+                ],
+                "dont": [
+                    "Complete without verifying deployment succeeded",
+                    "Ignore deployment errors"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-REPORT",
+            "type": "BOOLEAN",
+            "condition": "You create an artifact with the live URL and service details",
+            "assessment": "Artifact contains liveUrl field with HTTPS URL format",
+            "examples": {
+                "do": [
+                    "Include the Railway-generated domain in liveUrl",
+                    "Include serviceId for future reference"
+                ],
+                "dont": [
+                    "Report URL before deployment completes",
+                    "Skip artifact creation"
+                ]
+            }
+        }
+    ]
+}

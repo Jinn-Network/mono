@@ -1,0 +1,224 @@
+{
+    "vision": {
+        "mission": "Maximize risk-adjusted returns by autonomously trading on Polymarket prediction markets in a simulated 'Paper Trading' environment.",
+        "vision": "A fully autonomous, self-improving hedge fund that demonstrates superior decision-making through transparent reasoning and rigorous benchmarking."
+    },
+    "constitution": [
+        {
+            "principle": "Probabilistic Thinking",
+            "description": "All trading decisions must be based on positive Expected Value (EV) calculations derived from probabilistic models, not binary predictions."
+        },
+        {
+            "principle": "Capital Preservation",
+            "description": "Survival is the primary objective. Risk management protocols must prevent catastrophic loss, even in a simulated environment."
+        },
+        {
+            "principle": "Radical Transparency",
+            "description": "No black boxes. Every trade must be accompanied by a human-readable 'Investment Memo' explaining the thesis, sources, and logic."
+        },
+        {
+            "principle": "Continuous Learning",
+            "description": "The system must learn from every outcome. Automated post-mortems are required to close the feedback loop between prediction and reality."
+        }
+    ],
+    "invariants": [
+        {
+            "id": "GOAL-SIM",
+            "type": "BOOLEAN",
+            "condition": "Paper trading execution must simulate real-world market conditions including liquidity, slippage, and fees",
+            "assessment": "Review trade execution logs to verify slippage calculations and fee deductions (1%) are applied to all simulated trades.",
+            "examples": {
+                "do": [
+                    "Calculate execution price based on actual order book depth; deduct 1% simulated fees"
+                ],
+                "dont": [
+                    "Assume execution at mid-market price or ignore transaction costs"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-DASHBOARD",
+            "type": "BOOLEAN",
+            "condition": "A real-time dashboard must visualize portfolio state, active positions, and agent reasoning",
+            "assessment": "Verify the dashboard displays current NAV, PnL, and includes a live feed of Investment Memos accessible without CLI.",
+            "examples": {
+                "do": [
+                    "Display current NAV, PnL, and live feed of Investment Memos for recent trades"
+                ],
+                "dont": [
+                    "Require CLI access to view fund status or hide active positions"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-MEMO",
+            "type": "BOOLEAN",
+            "condition": "Every trade execution must be justified by a generated 'Investment Memo'",
+            "assessment": "Verify that for each trade in the system, there exists a corresponding Investment Memo artifact citing data sources and EV calculation.",
+            "examples": {
+                "do": [
+                    "Generate a markdown document citing specific data sources and stating calculated EV"
+                ],
+                "dont": [
+                    "Execute trades based on undocumented signals or provide generic reasons"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-RISK",
+            "type": "BOOLEAN",
+            "condition": "Strict risk management constraints must be enforced: max 10% NAV per position, max 30% sector exposure",
+            "assessment": "Review all active and historical positions to verify no position exceeds 10% NAV and no sector exceeds 30% exposure.",
+            "examples": {
+                "do": [
+                    "Cap position size at 10% NAV; trigger re-evaluation if probability moves >15% against"
+                ],
+                "dont": [
+                    "Go 'all in' on a single trade or correlate entire portfolio to one outcome"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-POSTMORTEM",
+            "type": "BOOLEAN",
+            "condition": "Automated post-mortems must be generated upon position exit or market resolution",
+            "assessment": "Verify that for each closed position, there exists a post-mortem artifact comparing the Investment Memo thesis to actual outcome.",
+            "examples": {
+                "do": [
+                    "Compare initial Investment Memo thesis to actual outcome; update internal scoring model"
+                ],
+                "dont": [
+                    "Ignore losing trades without analysis or attribute losses solely to 'bad luck'"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-BENCHMARK",
+            "type": "BOOLEAN",
+            "condition": "Performance must be benchmarked against a 'Naive Baseline' that bets on market favorites",
+            "assessment": "Verify the dashboard displays both the fund's returns and a parallel 'Naive Baseline' portfolio with Alpha vs Baseline and Sharpe ratio calculations.",
+            "examples": {
+                "do": [
+                    "Track shadow portfolio betting on favorites; display 'Alpha vs Baseline' and Sharpe ratio"
+                ],
+                "dont": [
+                    "Report absolute returns in isolation or change benchmark methodology"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-TRADING",
+            "type": "BOOLEAN",
+            "condition": "Positions must be actively managed based on dynamic EV changes, not just held to resolution",
+            "assessment": "Review trade history to verify positions are exited or adjusted based on price movement and thesis invalidation, not only at market resolution.",
+            "examples": {
+                "do": [
+                    "Sell to capture profit if price exceeds fair value; cut losses if thesis is invalidated"
+                ],
+                "dont": [
+                    "Treat every trade as 'set and forget' or hold losing positions indefinitely"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-ESCALATION",
+            "type": "BOOLEAN",
+            "condition": "The system must have a clear protocol for escalating issues to a human supervisor",
+            "assessment": "Verify error logs and monitoring show pause/alert behavior when errors occur >3 times or when dependencies are unavailable.",
+            "examples": {
+                "do": [
+                    "Pause and alert if error occurs >3 times; request intervention for missing credentials"
+                ],
+                "dont": [
+                    "Fail silently, guess credentials, or continue trading when a dependency is down"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-GUARDRAILS",
+            "type": "BOOLEAN",
+            "condition": "Safety guardrails must prevent runaway loops and resource exhaustion: max 10 steps per trade, 5% drawdown circuit breaker",
+            "assessment": "Review system configuration and logs to verify step limits are enforced and trading halts at 5% portfolio drawdown. Verify API keys are redacted in all logs.",
+            "examples": {
+                "do": [
+                    "Enforce hard limits on steps per decision; redact all API keys from logs"
+                ],
+                "dont": [
+                    "Allow infinite retry loops or expose credentials in Investment Memos"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-DOCS",
+            "type": "BOOLEAN",
+            "condition": "The codebase must maintain living operating procedures and architectural documentation",
+            "assessment": "Verify 'docs/ops' directory exists with runbooks and that documentation is updated as part of recent PRs.",
+            "examples": {
+                "do": [
+                    "Maintain 'docs/ops' directory with runbooks; update docs as part of PR definition of done"
+                ],
+                "dont": [
+                    "Allow documentation to drift from implementation or rely on tribal knowledge"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-TESTING",
+            "type": "FLOOR",
+            "metric": "risk_module_test_coverage",
+            "min": 100,
+            "assessment": "Run test coverage report and verify risk management modules have 100% line coverage. Verify EV calculation and position sizing have unit tests.",
+            "examples": {
+                "do": [
+                    "Implement unit tests for EV calculation and position sizing; enforce 100% coverage for risk modules"
+                ],
+                "dont": [
+                    "Deploy strategy changes without backtesting or rely solely on manual testing"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-MULTISOURCE",
+            "type": "FLOOR",
+            "metric": "data_sources_for_high_conviction_trades",
+            "min": 2,
+            "assessment": "For trades >5% NAV, verify the Investment Memo cites at least 2 independent data sources. Check timestamps to ensure data is <1 hour old.",
+            "examples": {
+                "do": [
+                    "Cross-reference news API with prediction market probability; invalidate if sources conflict"
+                ],
+                "dont": [
+                    "Rely on single source or trade on stale data (>1 hour) for fast markets"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-COST",
+            "type": "BOOLEAN",
+            "condition": "The system must track 'Cost of Intelligence' (compute/LLM spend) per trade and include in Net PnL",
+            "assessment": "Verify the dashboard displays Net PnL calculated as Gross Profit minus Fees minus Compute Costs. Check for alerts when compute cost exceeds trade EV.",
+            "examples": {
+                "do": [
+                    "Calculate Net PnL = Gross Profit - Fees - Compute Costs; alert if cost exceeds expected value"
+                ],
+                "dont": [
+                    "Ignore LLM inference costs or use expensive models for trivial tasks"
+                ]
+            }
+        },
+        {
+            "id": "GOAL-ARCH",
+            "type": "BOOLEAN",
+            "condition": "The architecture must enforce strict modularity with typed interfaces, unidirectional data flow, and isolated side effects",
+            "assessment": "Review codebase architecture to verify typed interfaces exist between components, dependency injection is used, and no circular dependencies exist.",
+            "examples": {
+                "do": [
+                    "Define typed interfaces between components; use dependency injection"
+                ],
+                "dont": [
+                    "Create circular dependencies or 'god objects' handling unrelated responsibilities"
+                ]
+            }
+        }
+    ]
+}

@@ -1,0 +1,1 @@
+../../../docs/reference/ipfs-payload-structure.md

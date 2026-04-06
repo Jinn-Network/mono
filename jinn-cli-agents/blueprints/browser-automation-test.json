@@ -1,0 +1,131 @@
+{
+    "name": "Browser Automation Test",
+    "description": "E2E test for browser_automation meta-tool. Navigates to a URL and captures a screenshot.",
+    "version": "1.0.0",
+    "priceUsd": "$0.001",
+    "priceWei": "1000",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "testUrl": {
+                "type": "string",
+                "default": "https://example.com",
+                "description": "URL to navigate to and screenshot"
+            }
+        },
+        "required": []
+    },
+    "outputSpec": {
+        "version": "1.0",
+        "fields": [
+            {
+                "name": "pageTitle",
+                "path": "$.result.pageTitle",
+                "type": "string",
+                "required": true
+            },
+            {
+                "name": "screenshot",
+                "path": "$.result.screenshot",
+                "type": "string",
+                "required": false
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "NO-DELEGATION",
+            "type": "BOOLEAN",
+            "condition": "Complete this task DIRECTLY yourself. Do NOT use dispatch_new_job or dispatch_existing_job. Do NOT delegate to sub-agents. You have browser automation tools available - call them directly.",
+            "assessment": "Verify the agent did NOT dispatch any child jobs and performed all browser actions directly using the available tools.",
+            "examples": {
+                "do": [
+                    "Call navigate_page directly",
+                    "Call take_screenshot directly",
+                    "Call take_snapshot directly"
+                ],
+                "dont": [
+                    "Use dispatch_new_job",
+                    "Use dispatch_existing_job",
+                    "Delegate to another agent",
+                    "Use list_tools or search_jobs instead of acting"
+                ]
+            }
+        },
+        {
+            "id": "BROWSER-NAV",
+            "type": "BOOLEAN",
+            "condition": "Call the navigate_page tool with url={{testUrl}} to navigate the browser to that URL. This is your FIRST action.",
+            "assessment": "Verify navigate_page was called with the target URL as the first tool action.",
+            "examples": {
+                "do": [
+                    "Call navigate_page with url set to the target URL"
+                ],
+                "dont": [
+                    "Use web_fetch instead",
+                    "Skip navigation",
+                    "Plan without acting"
+                ]
+            }
+        },
+        {
+            "id": "CAPTURE-TITLE",
+            "type": "BOOLEAN",
+            "condition": "After navigation, call take_snapshot to get the page content and extract the page title from it.",
+            "assessment": "Verify take_snapshot was called and the page title was extracted from the result.",
+            "examples": {
+                "do": [
+                    "Call take_snapshot after navigation",
+                    "Extract the title from the snapshot output"
+                ],
+                "dont": [
+                    "Guess the page title",
+                    "Hardcode the expected title",
+                    "Skip this step"
+                ]
+            }
+        },
+        {
+            "id": "TAKE-SCREENSHOT",
+            "type": "BOOLEAN",
+            "condition": "Call take_screenshot to capture the page, then call create_artifact to save the screenshot.",
+            "assessment": "Verify take_screenshot was called and create_artifact was used to persist it.",
+            "examples": {
+                "do": [
+                    "Call take_screenshot",
+                    "Call create_artifact with the screenshot data"
+                ],
+                "dont": [
+                    "Skip the screenshot",
+                    "Return without saving artifact"
+                ]
+            }
+        },
+        {
+            "id": "OUTPUT-FORMAT",
+            "type": "BOOLEAN",
+            "condition": "Return output as JSON: { \"result\": { \"pageTitle\": \"<extracted title>\", \"screenshot\": \"<artifact description>\" } }",
+            "assessment": "Verify the output is valid JSON with pageTitle and screenshot fields populated from actual tool results.",
+            "examples": {
+                "do": [
+                    "Return valid JSON with result.pageTitle from take_snapshot",
+                    "Include screenshot info from create_artifact"
+                ],
+                "dont": [
+                    "Return plain text",
+                    "Use a different JSON structure",
+                    "Leave fields empty"
+                ]
+            }
+        }
+    ],
+    "tools": [
+        {
+            "name": "browser_automation",
+            "required": true
+        },
+        {
+            "name": "create_artifact"
+        }
+    ]
+}

@@ -1,0 +1,112 @@
+# jinn.yaml — Node operator configuration
+# Copy this file to jinn.yaml and edit what you need.
+# Secrets (RPC_URL, API keys, passwords) stay in .env (never committed).
+# Env vars override YAML values (see docs for mapping).
+chain:
+  chain_id: 8453
+worker:
+  poll_base_ms: 30000
+  poll_max_ms: 300000
+  poll_backoff_factor: 1.5
+  checkpoint_cycles: 60
+  heartbeat_cycles: 16
+  venture_watcher_cycles: 3
+  fund_check_cycles: 120
+  repost_check_cycles: 10
+  multi_service: false
+  activity_poll_ms: 60000
+  activity_cache_ttl_ms: 60000
+  staking_refresh_ms: 300000
+  mech_filter_mode: staking
+  auto_restake: true
+  tx_confirmations: 3
+  job_delay_ms: 0
+  max_cycles: 0
+  stuck_exit_cycles: 0
+  enable_venture_watcher: false
+  enable_auto_repost: false
+  buzz_only: false
+staking:
+  contract: "0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488"
+  program: ""
+filtering:
+  workstreams: []
+  ventures: []
+  venture_template_ids: []
+  earning_schedule: ""
+  earning_max_jobs: 0
+  mech_filter_list: ""
+  priority_mech: ""
+  target_request_id: ""
+  allowlist_config_path: ""
+agent:
+  sandbox: sandbox-exec
+  max_stdout_size: 5242880
+  max_chunk_size: 102400
+  repetition_window: 20
+  repetition_threshold: 10
+  max_identical_chunks: 10
+  max_prompt_arg_bytes: 100000
+  additional_include_dirs: ""
+  telemetry_dir: ""
+dependencies:
+  stale_ms: 7200000
+  redispatch_cooldown_ms: 3600000
+  missing_fail_ms: 7200000
+  cancel_cooldown_ms: 3600000
+  redispatch: false
+  autofail: true
+heartbeat:
+  min_interval_sec: 60
+services:
+  ponder_url: https://indexer.jinn.network/graphql
+  ponder_port: 42069
+  control_api_url: https://control-api-production-c1f5.up.railway.app/graphql
+  use_control_api: true
+  ipfs_gateway_url: https://gateway.autonolas.tech/ipfs/
+  ipfs_fetch_timeout_ms: 30000
+git:
+  default_base_branch: main
+  remote_name: origin
+  github_api_url: https://api.github.com
+  github_repository: ""
+  ssh_host_alias: ""
+  workspace_dir: ""
+  repo_root: ""
+  author_name: ""
+  author_email: ""
+logging:
+  level: info
+  format: pretty
+  mcp_level: error
+  destination: stdout
+blueprint:
+  enable_system: true
+  enable_context_assertions: true
+  enable_recognition: false
+  enable_job_context: true
+  enable_progress: false
+  enable_beads: false
+  enable_context_phases: false
+  debug: false
+  log_providers: false
+llm:
+  quota_check_model: ""
+blog:
+  umami_host: ""
+  umami_website_id: ""
+dev:
+  node_env: development
+  runtime_environment: default
+  dry_run: false
+  disable_sts_checks: false
+  mcp_debug_mech_client: false
+  use_tsx_mcp: false
+  enable_transaction_executor: false
+  worker_id: ""
+playwright:
+  channel: ""
+  fast: false
+  headless: true
+  keep_open: false
+  profile_dir: ""

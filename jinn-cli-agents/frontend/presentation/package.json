@@ -1,0 +1,16 @@
+{
+  "name": "jinn-presentation",
+  "private": true,
+  "scripts": {
+    "dev": "slidev",
+    "build": "slidev build",
+    "export": "slidev export",
+    "preview": "slidev build && slidev --port 4173"
+  },
+  "dependencies": {
+    "@slidev/cli": "0.50.0",
+    "@slidev/theme-default": "*",
+    "@slidev/theme-seriph": "*",
+    "slidev-theme-geist": "^0.8.1"
+  }
+}

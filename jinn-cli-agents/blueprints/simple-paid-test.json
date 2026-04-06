@@ -1,0 +1,113 @@
+{
+    "name": "Simple Paid Test Template",
+    "description": "Minimal template for E2E x402 payment + OutputSpec testing. Answers 2-3 simple questions without delegation.",
+    "version": "1.0.0",
+    "priceUsd": "$0.001",
+    "priceWei": "1000",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "topic": {
+                "type": "string",
+                "description": "A simple topic to answer questions about"
+            }
+        },
+        "required": []
+    },
+    "outputSpec": {
+        "version": "1.0",
+        "fields": [
+            {
+                "name": "answer1",
+                "path": "$.result.answers[0]",
+                "type": "string",
+                "required": true
+            },
+            {
+                "name": "answer2",
+                "path": "$.result.answers[1]",
+                "type": "string",
+                "required": true
+            },
+            {
+                "name": "summary",
+                "path": "$.result.summary",
+                "type": "string",
+                "required": true
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "ANSWER-Q1",
+            "type": "BOOLEAN",
+            "condition": "Answer the question: What is the most important concept to understand about {{topic}}? Keep the answer to 2-3 sentences maximum.",
+            "assessment": "Verify the answer is 2-3 sentences, focuses on a single most important concept, and uses clear language without delegation.",
+            "examples": {
+                "do": [
+                    "Provide a direct, concise answer",
+                    "Focus on the single most important concept",
+                    "Use clear, accessible language"
+                ],
+                "dont": [
+                    "Delegate to child jobs",
+                    "Write more than 3 sentences",
+                    "List multiple concepts instead of the most important one"
+                ]
+            }
+        },
+        {
+            "id": "ANSWER-Q2",
+            "type": "BOOLEAN",
+            "condition": "Answer the question: What is one common misconception about {{topic}}? Keep the answer to 2-3 sentences maximum.",
+            "assessment": "Verify the answer identifies a specific common misconception, briefly explains why it's wrong, and stays within 2-3 sentences without delegation.",
+            "examples": {
+                "do": [
+                    "Identify a specific, common misconception",
+                    "Briefly explain why it's wrong",
+                    "Keep it concise"
+                ],
+                "dont": [
+                    "Delegate to child jobs",
+                    "List multiple misconceptions",
+                    "Write an essay"
+                ]
+            }
+        },
+        {
+            "id": "SUMMARY",
+            "type": "BOOLEAN",
+            "condition": "Provide a 1-sentence summary that captures the essence of the topic based on your two answers.",
+            "assessment": "Verify exactly one sentence is provided that synthesizes the key insight from both answers.",
+            "examples": {
+                "do": [
+                    "Write exactly one sentence",
+                    "Synthesize the key insight from both answers"
+                ],
+                "dont": [
+                    "Write multiple sentences",
+                    "Repeat the answers verbatim"
+                ]
+            }
+        },
+        {
+            "id": "OUTPUT-FORMAT",
+            "type": "BOOLEAN",
+            "condition": "Structure the final output as JSON with the schema: { result: { answers: [string, string], summary: string } }",
+            "assessment": "Verify the output is valid JSON matching the schema with Q1 answer in answers[0] and Q2 answer in answers[1].",
+            "examples": {
+                "do": [
+                    "Return valid JSON matching the schema",
+                    "Put Q1 answer in answers[0], Q2 answer in answers[1]"
+                ],
+                "dont": [
+                    "Return plain text",
+                    "Use a different JSON structure"
+                ]
+            }
+        }
+    ],
+    "enabledTools": [
+        "openai-gpt-4o"
+    ]
+}

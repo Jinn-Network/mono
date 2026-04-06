@@ -282,21 +282,26 @@ When used, each domain naturally progresses: new (high emissions, diverse approa
 - Optimistic evidence — structured checkpoints, no ZK requirement
 - Goal: prove the loop works, identify gaps
 
-### Phase 1 — JINN Token and DAO
+### Phase 1a — JINN Token, DAO, and Distribution (Testnet)
 
-- Fair-launch JINN on Ethereum mainnet
-- Deploy DAO governance (multisig initially, evolving to ve-JINN)
-- Fork minimal OLAS contract surface:
-  - Treasury and dispenser (emission logic with JINN)
-  - VoteWeighting / gauge (ve-JINN allocation)
-  - Cross-chain bridge contracts
-  - Distribution contract template
-  - Deprecate: bonding, service registries, developer rewards, protocol-owned liquidity
-- Deploy first distribution contracts on Base
-- USDC in ERC-8183 escrow for marketplace settlement
-- JINN emissions on top via distribution contracts
+- Fork OLAS contracts (token, Treasury, Dispenser, bridge adapters, staking) with minimal or zero modifications — config changes over code changes
+- Deploy JINN ERC-20 on Sepolia, Treasury + Dispenser with epoch emissions
+- DAO governance as Safe multisig + TimelockController (no ve-JINN yet)
+- Multisig sets emission weights across four channels (creation, restoration, outcome, evaluation)
+- Bridge JINN from Sepolia → Base Sepolia via OP Stack canonical bridge
+- Deploy staking/distribution contract on Base Sepolia with JinnRouter-pattern activity checker
+- Client daemon generates activity and claims JINN rewards
+- Testnet iteration: redeploy full stack until solid, then move to mainnet
+- See `spec/2026-04-06-phase-1a-design.md` for full design
+
+### Phase 1b — ve-JINN Gauge Voting
+
+- Fork veOLAS as veJINN (vote-escrow locking)
+- Fork VoteWeighting (gauge contract)
+- Replace multisig-set weights with gauge-voted weights
 - Anti-farming decay active in activity checkers
 - Challenge mechanism live for evidence disputes
+- Fair-launch JINN on Ethereum mainnet
 
 ### Phase 2 — Multi-Environment
 

@@ -1,0 +1,163 @@
+{
+    "name": "Competitive Landscape",
+    "description": "Maps the competitive landscape for any product or company. Discovers competitors, builds feature comparison matrices, identifies positioning gaps, and surfaces underserved market opportunities.",
+    "version": "1.0.0",
+    "priceUsd": "$3.00",
+    "priceWei": "1000000000000000",
+    "tags": [
+        "competitive-analysis",
+        "market-research",
+        "strategy",
+        "business-intelligence"
+    ],
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "productDescription": {
+                "type": "string",
+                "description": "Description of the product or company to analyze (1-3 sentences)"
+            },
+            "productUrl": {
+                "type": "string",
+                "description": "URL of the product website (optional — helps with feature discovery)"
+            },
+            "industry": {
+                "type": "string",
+                "description": "Industry or vertical (optional — auto-detected from description)"
+            },
+            "maxCompetitors": {
+                "type": "number",
+                "description": "Maximum number of competitors to analyze",
+                "default": 5
+            }
+        },
+        "required": [
+            "productDescription"
+        ]
+    },
+    "outputSpec": {
+        "version": "1.0",
+        "fields": [
+            {
+                "name": "summary",
+                "path": "$.result.summary",
+                "type": "string",
+                "required": true,
+                "description": "Executive summary of competitive positioning"
+            },
+            {
+                "name": "competitorMap",
+                "path": "$.result.competitorMap",
+                "type": "array",
+                "required": true,
+                "description": "Array of competitors with name, url, description, funding, marketPosition"
+            },
+            {
+                "name": "featureComparison",
+                "path": "$.result.featureComparison",
+                "type": "object",
+                "required": true,
+                "description": "Feature matrix with 5+ dimensions comparing all discovered competitors"
+            },
+            {
+                "name": "positioningGaps",
+                "path": "$.result.positioningGaps",
+                "type": "array",
+                "required": true,
+                "description": "2+ underserved positioning gaps with evidence from competitor analysis"
+            },
+            {
+                "name": "opportunityAreas",
+                "path": "$.result.opportunityAreas",
+                "type": "array",
+                "required": true,
+                "description": "Market opportunities with rough sizing and entry difficulty"
+            }
+        ]
+    },
+    "enabledTools": [
+        "google_web_search",
+        "web_fetch",
+        "create_artifact",
+        "get_details",
+        "search_artifacts"
+    ],
+    "invariants": [
+        {
+            "id": "DISCOVERY-001",
+            "form": "directive",
+            "invariant": "PHASE 1: DISCOVERY. Before building the competitor map, create an artifact 'competitor-discovery.md' documenting your search strategy: queries used, sources checked, candidates found, and why each was included or excluded. This ensures the competitor list is comprehensive, not just the first 5 Google results.",
+            "measurement": "Verify 'competitor-discovery.md' artifact exists before competitorMap is populated. Must show at least 3 different search queries.",
+            "examples": {
+                "do": [
+                    "Search 'alternatives to [product]', '[industry] market leaders 2026', 'top [category] tools comparison'",
+                    "Check G2, Capterra, Product Hunt, and industry reports"
+                ],
+                "dont": [
+                    "Use a single Google search and take the first 5 results",
+                    "Skip the discovery artifact and go straight to the competitor map"
+                ]
+            }
+        },
+        {
+            "id": "COMPETITORS-001",
+            "form": "constraint",
+            "invariant": "Discover at least {{maxCompetitors}} competitors (default 5). For each competitor, provide: name, url, description (1-2 sentences), funding (if available), and marketPosition (leader/challenger/niche/emerging).",
+            "measurement": "Count items in result.competitorMap. Must be >= maxCompetitors input value (default 5). Each entry must have all 5 fields.",
+            "examples": {
+                "do": [
+                    "{ name: 'Competitor X', url: 'https://...', description: 'Enterprise-focused alternative with strong API', funding: 'Series B, $45M', marketPosition: 'challenger' }"
+                ],
+                "dont": [
+                    "List only 2 competitors",
+                    "Include competitors without URLs or descriptions"
+                ]
+            }
+        },
+        {
+            "id": "FEATURES-001",
+            "form": "constraint",
+            "invariant": "Build a feature comparison matrix with at least 5 feature dimensions. Each dimension must be relevant to the product category and scored consistently across all competitors (e.g., yes/no/partial, or 1-5 scale). Include the target product in the comparison.",
+            "measurement": "Count feature dimensions in result.featureComparison. Must be >= 5. All competitors + target product must be scored on every dimension.",
+            "examples": {
+                "do": [
+                    "Dimensions: 'API Access', 'Self-hosted Option', 'SSO/Enterprise Auth', 'Free Tier', 'Real-time Collaboration' — each competitor scored on all 5"
+                ],
+                "dont": [
+                    "Use only 3 feature dimensions",
+                    "Score some competitors on different dimensions than others"
+                ]
+            }
+        },
+        {
+            "id": "GAPS-001",
+            "form": "constraint",
+            "invariant": "Identify at least 2 underserved positioning gaps — market segments or feature combinations that no current competitor fully addresses. Each gap must include: gapDescription, evidence (what research showed this is underserved), targetAudience, and estimatedDemand (qualitative: high/medium/low with reasoning).",
+            "measurement": "Count items in result.positioningGaps. Must be >= 2. Each must have gapDescription, evidence, targetAudience, and estimatedDemand.",
+            "examples": {
+                "do": [
+                    "Gap: 'No competitor offers self-hosted + real-time collaboration'. Evidence: '3 of 5 competitors are cloud-only; the 2 self-hosted options lack real-time features. Forum threads on Reddit (linked) show demand.'"
+                ],
+                "dont": [
+                    "Identify gaps without evidence",
+                    "List gaps that existing competitors already fill well"
+                ]
+            }
+        },
+        {
+            "id": "OPPORTUNITIES-001",
+            "form": "constraint",
+            "invariant": "For each opportunity area, provide: opportunityDescription, roughMarketSize (order-of-magnitude estimate with reasoning), entryDifficulty (easy/medium/hard with explanation), and timeToMarket (estimate).",
+            "measurement": "Each item in result.opportunityAreas must have all 4 fields with substantive content (not just 'N/A').",
+            "examples": {
+                "do": [
+                    "{ opportunityDescription: 'Vertical-specific solution for healthcare compliance', roughMarketSize: '$500M-1B (healthcare SaaS growing 15% YoY, compliance segment ~10% of that)', entryDifficulty: 'hard (HIPAA certification required)', timeToMarket: '12-18 months' }"
+                ],
+                "dont": [
+                    "List opportunities without market size estimates",
+                    "Give entry difficulty without explanation"
+                ]
+            }
+        }
+    ]
+}

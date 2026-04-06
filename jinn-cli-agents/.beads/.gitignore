@@ -1,0 +1,48 @@
+# SQLite databases
+*.db
+*.db?*
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Daemon runtime files
+daemon.lock
+daemon.log
+daemon.pid
+bd.sock
+sync-state.json
+last-touched
+
+# Local version tracking (prevents upgrade notification spam after git ops)
+.local_version
+
+# Legacy database files
+db.sqlite
+bd.db
+
+# Worktree redirect file (contains relative path to main repo's .beads/)
+# Must not be committed as paths would be wrong in other clones
+redirect
+
+# Merge artifacts (temporary files from 3-way merge)
+beads.base.jsonl
+beads.base.meta.json
+beads.left.jsonl
+beads.left.meta.json
+beads.right.jsonl
+beads.right.meta.json
+
+# Sync state (local-only, per-machine)
+# These files are machine-specific and should not be shared across clones
+.sync.lock
+.jsonl.lock
+sync_base.jsonl
+export-state/
+
+# JSONL files - managed by sync-branch, not tracked on working branches
+# With sync-branch configured, bd sync commits these to the beads-sync branch
+# via a git worktree, keeping working branches clean.
+issues.jsonl
+beads.jsonl
+deletions.jsonl
+interactions.jsonl

@@ -1,0 +1,76 @@
+{
+    "templateMeta": {
+        "id": "fireflies-test",
+        "name": "Fireflies Integration Test",
+        "description": "Minimal test blueprint to verify Fireflies MCP meeting intelligence integration. Searches meetings, retrieves summaries, and produces a privacy-safe themes artifact.",
+        "priceWei": "0",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Optional topic to search for in meetings",
+                    "default": ""
+                }
+            },
+            "required": []
+        },
+        "outputSpec": {
+            "type": "object",
+            "properties": {
+                "meetingThemes": {
+                    "type": "string",
+                    "description": "Summary of themes and insights extracted from recent meetings"
+                }
+            },
+            "required": [
+                "meetingThemes"
+            ]
+        },
+        "tools": [
+            {
+                "name": "fireflies_meetings",
+                "required": true
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "GOAL-SOURCES-MEETINGS",
+            "type": "BOOLEAN",
+            "condition": "When using meeting data as a content source, you extract IDEAS and INSIGHTS only — never attribute quotes to specific speakers, never reveal who said what, never include personal details or private context from meetings",
+            "assessment": "For each piece of content derived from meeting data: (1) no speaker names appear, (2) insights are presented as team/community learnings not individual statements, (3) private business context (deals, hiring, internal metrics) is excluded. If any published content attributes a quote or idea to a named meeting participant, condition fails.",
+            "examples": {
+                "do": [
+                    "Extract themes and trends from meeting summaries",
+                    "Present insights as 'the team discussed...' or 'a recurring theme was...'",
+                    "Use meeting action items as inspiration for content topics",
+                    "Reference general ideas without attribution: 'One emerging pattern in the ecosystem is...'"
+                ],
+                "dont": [
+                    "Quote a specific speaker: 'John said that...'",
+                    "Reveal internal business discussions (revenue, hiring plans, partner deals)",
+                    "Attribute ideas to identifiable individuals",
+                    "Include private context that wasn't meant for public consumption"
+                ]
+            }
+        },
+        {
+            "id": "TEST-TOOL-COVERAGE",
+            "type": "BOOLEAN",
+            "condition": "You exercise ALL three available Fireflies tools: fireflies_get_transcripts (list meetings), fireflies_search (keyword search), and fireflies_get_summary (get structured summary for a specific meeting)",
+            "assessment": "All three tools must be called at least once. If any tool is skipped, condition fails.",
+            "examples": {
+                "do": [
+                    "Call fireflies_get_transcripts to discover available meetings",
+                    "Call fireflies_search with a relevant keyword",
+                    "Call fireflies_get_summary with a meeting ID from the results"
+                ],
+                "dont": [
+                    "Skip any of the three tools",
+                    "Only use one tool and ignore the others"
+                ]
+            }
+        }
+    ]
+}

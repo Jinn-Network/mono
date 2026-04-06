@@ -1,0 +1,204 @@
+{
+    "name": "Code Health Venture",
+    "description": "Audits any GitHub repository for security vulnerabilities, outdated dependencies, and code quality issues. Generates pre-filled GitHub issue links for one-click issue creation.",
+    "version": "1.3.0",
+    "priceUsd": "$0.005",
+    "priceWei": "5000000000000000",
+    "tags": [
+        "code-audit",
+        "security",
+        "dependencies",
+        "github",
+        "automation"
+    ],
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "repoUrl": {
+                "type": "string",
+                "description": "GitHub repository URL (e.g., https://github.com/owner/repo)",
+                "pattern": "^https://github\\.com/[\\w-]+/[\\w-]+$"
+            },
+            "branch": {
+                "type": "string",
+                "description": "Branch to audit (default: main)",
+                "default": "main"
+            },
+            "auditScope": {
+                "type": "string",
+                "enum": [
+                    "security-only",
+                    "dependencies-only",
+                    "quality-only",
+                    "full"
+                ],
+                "description": "What to audit: security vulns, outdated deps, code quality, or all",
+                "default": "full"
+            },
+            "securityThreshold": {
+                "type": "string",
+                "enum": [
+                    "critical-only",
+                    "high",
+                    "medium",
+                    "all"
+                ],
+                "description": "Minimum severity level to report (CVSS-based)",
+                "default": "high"
+            }
+        },
+        "required": [
+            "repoUrl"
+        ]
+    },
+    "outputSpec": {
+        "version": "1.0",
+        "fields": [
+            {
+                "name": "summary",
+                "path": "$.result.summary",
+                "type": "string",
+                "required": true,
+                "description": "Executive summary of audit findings"
+            },
+            {
+                "name": "healthScore",
+                "path": "$.result.healthScore",
+                "type": "number",
+                "required": true,
+                "description": "Overall code health score (0-100)"
+            },
+            {
+                "name": "issues",
+                "path": "$.result.issues",
+                "type": "array",
+                "required": true,
+                "description": "Array of issues found, each with title, severity, description, createIssueUrl, and reasoning"
+            },
+            {
+                "name": "issueCount",
+                "path": "$.result.issueCount",
+                "type": "object",
+                "required": true,
+                "description": "Counts by severity: { critical, high, medium, low }"
+            }
+        ]
+    },
+    "enabledTools": [
+        "get_file_contents",
+        "search_code",
+        "list_commits",
+        "web_fetch",
+        "google_web_search",
+        "create_artifact",
+        "search_artifacts",
+        "get_details"
+    ],
+    "invariants": [
+        {
+            "id": "GOAL-001",
+            "form": "directive",
+            "invariant": "Audit repository {{repoUrl}} on branch {{branch}}. Scope: {{auditScope}}. PHASE 1: EXPLORE & REASON. Before generating any output, you MUST create an artifact 'audit-reasoning.md' documenting your search strategy, raw findings, and filtering logic.",
+            "measurement": "Verify 'audit-reasoning.md' artifact exists before any issues are reported in output.",
+            "examples": {
+                "do": [
+                    "Step 1: Create audit-reasoning.md. Step 2: List discovered files. Step 3: Analyze each for issues."
+                ],
+                "dont": [
+                    "Skip the reasoning phase and jump straight to the final JSON output."
+                ]
+            },
+            "commentary": "Forcing a reasoning phase drastically improves the quality and accuracy of the final audit."
+        },
+        {
+            "id": "GOAL-002",
+            "form": "constraint",
+            "invariant": "For each issue found, generate a pre-filled GitHub issue creation URL. Format: https://github.com/OWNER/REPO/issues/new?title=TITLE&body=BODY&labels=LABELS. URL-encode title and body. Group related minor issues into single 'Cluster' issues to avoid spamming.",
+            "measurement": "Count minor issues. If >5 similar issues exist, verify they are grouped into cluster issues. Each issue must have valid createIssueUrl.",
+            "examples": {
+                "do": [
+                    "Group 5 missing return types into one 'Fix Missing Return Types in /src' issue."
+                ],
+                "dont": [
+                    "Create 5 separate issues for the same minor style violation."
+                ]
+            },
+            "commentary": "Cluster issues prevent notification fatigue. Pre-filled URLs enable one-click action."
+        },
+        {
+            "id": "GOAL-003",
+            "form": "threshold",
+            "invariant": "PRIORITIZE: Security (Critical > High) > Correctness (Bugs) > Dependencies > Quality. Report security vulnerabilities >= {{securityThreshold}} immediately. Include CVE ID, CVSS, and specific remediation.",
+            "measurement": "Check output order: Security issues must appear before Quality issues in the issues array.",
+            "examples": {
+                "do": [
+                    "Rank a CVSS 9.8 SQL Injection above a missing JSDoc comment."
+                ],
+                "dont": [
+                    "Bury a critical security vulnerability under a list of style nits."
+                ]
+            },
+            "commentary": "Critical issues must not be lost in the noise. Strict prioritization ensures value."
+        },
+        {
+            "id": "GOAL-004",
+            "form": "constraint",
+            "invariant": "When auditing dependencies, check: outdated packages, known vulnerabilities (CVEs), unused dependencies, and lockfile consistency. Cross-reference version numbers against the official registry.",
+            "measurement": "For each dependency issue, verify external source was checked (npm registry, CVE database).",
+            "examples": {
+                "do": [
+                    "Verify 'react' version in package.json against npm registry latest."
+                ],
+                "dont": [
+                    "Assume package versions are current without checking external data."
+                ]
+            },
+            "commentary": "Dependency auditing requires external validation, not just static file analysis."
+        },
+        {
+            "id": "GOAL-005",
+            "form": "constraint",
+            "invariant": "When auditing quality, look for: logic errors, missing tests, poor documentation, and violations of project standards (CONTRIBUTING.md/AGENTS.md). IGNORE: dist/, node_modules/, vendor/, and auto-generated files.",
+            "measurement": "Confirm no issues reference files in dist/, node_modules/, vendor/, or .min.js files.",
+            "examples": {
+                "do": [
+                    "Analyze src/lib/api.ts for error handling gaps."
+                ],
+                "dont": [
+                    "Report lint errors in minified files under dist/ or third-party code in vendor/."
+                ]
+            },
+            "commentary": "Focus on the code the developer writes and maintains. Ignore build artifacts."
+        },
+        {
+            "id": "GOAL-006",
+            "form": "threshold",
+            "invariant": "Calculate Health Score (0-100): Start at 100. Deduct: Critical Vuln (-25), High Vuln (-10), Bug (-5), Outdated Dep (-2), Quality Nit (-1). Floor at 0.",
+            "measurement": "Verify healthScore = max(0, 100 - (criticals×25 + highs×10 + bugs×5 + deps×2 + nits×1)).",
+            "examples": {
+                "do": [
+                    "100 - 25 (1 Crit) - 10 (2 Bugs) = 65 Health Score"
+                ],
+                "dont": [
+                    "Assign arbitrary scores like '80 because it looks okay'."
+                ]
+            },
+            "commentary": "A deterministic scoring rubric ensures consistency across different runs and repos."
+        },
+        {
+            "id": "GOAL-007",
+            "form": "constraint",
+            "invariant": "Output JSON 'issues' array must include: title, severity, description, createIssueUrl, and 'reasoning' (why this matters).",
+            "measurement": "For each issue in output, verify all 5 required fields are present and non-empty.",
+            "examples": {
+                "do": [
+                    "Item: { ... reasoning: 'SQL injection allows attackers to dump the database.' }"
+                ],
+                "dont": [
+                    "Omit the 'reasoning' field, leaving the user to guess why an issue is important."
+                ]
+            },
+            "commentary": "Explaining 'why' educates the user and justifies the issue report."
+        }
+    ]
+}

@@ -1,0 +1,90 @@
+{
+  "$schema": "../schema/invariant.schema.json",
+  "invariants": [
+    {
+      "id": "RULE-NO-SECRETS",
+      "type": "BOOLEAN",
+      "condition": "No secrets (private keys, API keys, passwords, tokens) exist in git history or staged files",
+      "assessment": "Scan staged files and git history for patterns matching secrets. Check: .operate/, wallet exports, *private_key* patterns, hardcoded hex strings (0x + 64 chars), API key patterns (sk-, eyJ), .env files.",
+      "why": "Secrets in git history are permanently exposed. A single leaked agent key can drain all funds from its Safe. Git history is immutable--deletion doesn't remove committed secrets. Even private repos expose keys to all collaborators.",
+      "examples": {
+        "do": [
+          "Read secrets from environment variables at runtime: const apiKey = process.env.API_KEY",
+          "Use .env.example with placeholder values for documentation",
+          "Throw Error if required secret env var is missing",
+          "Log only public addresses, never private keys",
+          "Add .env, *_private_key.txt, .operate/wallets/, .operate/keys/ to .gitignore"
+        ],
+        "dont": [
+          "Hardcode private keys: const AGENT_PRIVATE_KEY = '0x1234...'",
+          "Include secrets in comments: // Test key: 0xabcd...",
+          "Commit .env files with real credentials",
+          "Log secrets: logger.info({ privateKey: agentKey })",
+          "Include API keys in error messages: throw new Error(`Failed with key ${API_KEY}`)"
+        ]
+      }
+    },
+    {
+      "id": "RULE-AUTO-GUARD",
+      "type": "BOOLEAN",
+      "condition": "Every automated git workflow (workers, bots, CI, test harnesses) invokes the canonical secret guard before staging, committing, or pushing code",
+      "assessment": "Check all code paths that run git commit or git push. Verify gitGuard.ensureSafeStagedTree() is called immediately before. Guard must block .operate/, .operate-test/, *private_key* files.",
+      "why": "Automation is trusted to keep history clean. If the guard is skipped, leaked credentials become permanent. AI agents reuse commit helpers--one insecure path propagates everywhere. Preventing at source is cheaper than rotating wallets.",
+      "examples": {
+        "do": [
+          "Call gitGuard.ensureSafeStagedTree() immediately before git.commit()",
+          "Propagate guard errors to abort workflow with context",
+          "Update shared denylist when new secret patterns emerge"
+        ],
+        "dont": [
+          "Run git.commit() and git.push() without calling the guard first",
+          "Maintain private overrides of the denylist",
+          "Catch and suppress guard violations"
+        ]
+      }
+    },
+    {
+      "id": "RULE-PREFLIGHT",
+      "type": "BOOLEAN",
+      "condition": "Before any transaction that transfers tokens, executes a Safe transaction, or modifies on-chain state, current on-chain state is verified via view/pure functions",
+      "assessment": "Check all blockchain transaction code. Look for: mech deliveries without checking isUndelivered, token transfers without balance checks, staking without state validation, Safe transactions without configuration checks.",
+      "why": "Blockchain transactions are immutable and irreversible. Failed transactions waste gas fees (non-recoverable). Invalid operations can lock funds in contracts. Network delays make local state stale.",
+      "examples": {
+        "do": [
+          "Mech delivery: call isUndeliveredOnChain() before deliverViaSafe()",
+          "Token transfer: check balanceOf() before transfer()",
+          "Staking: verify isServiceStaked() and service state before stake()",
+          "Safe tx: validate threshold <= owners.length, signer is owner",
+          "If RPC unavailable: log warning and allow operation (best-effort)"
+        ],
+        "dont": [
+          "Call deliverViaSafe() without checking if already delivered",
+          "Transfer tokens without verifying sender balance",
+          "Execute Safe transaction without validating configuration",
+          "Stake service without checking eligibility"
+        ]
+      }
+    },
+    {
+      "id": "RULE-NO-SILENT-CATCH",
+      "type": "BOOLEAN",
+      "condition": "Errors in financial operations, blockchain transactions, or on-chain job processing are logged with full context and propagated to caller. No empty catch blocks or silent fallbacks.",
+      "assessment": "Scan for: empty catch {} blocks, .catch(() => null) patterns, .catch(() => false) without logging, returning default values on error without logging. Applies to: token transfers, Safe transactions, RPC calls, IPFS uploads, database writes for on-chain tracking.",
+      "why": "Silent failures hide critical issues (lost funds, stuck jobs). Debugging is impossible without error logs. AI may generate convenient but unsafe patterns. Incident response requires clear audit trails.",
+      "examples": {
+        "do": [
+          "Log errors with structured context: logger.error('Delivery failed', { requestId, error: serializeError(e) })",
+          "Re-throw errors after logging in critical paths",
+          "Update job status to FAILED on delivery error to prevent stuck IN_PROGRESS",
+          "Non-critical background tasks (telemetry) may degrade gracefully with warning logs"
+        ],
+        "dont": [
+          "Use empty catch blocks: try { ... } catch {}",
+          "Use silent fallbacks: .catch(() => null) or .catch(() => false)",
+          "Return default values on error without logging the cause",
+          "Swallow errors in Promise chains"
+        ]
+      }
+    }
+  ]
+}

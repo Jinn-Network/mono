@@ -1,0 +1,20 @@
+{
+    "name": "Weekly AI Agent Digest",
+    "sources": [
+        "https://news.ycombinator.com",
+        "https://github.com/trending",
+        "Recent developments in AI agent frameworks, tool use, and autonomous coding"
+    ],
+    "lookbackPeriod": "7 days",
+    "streamName": "weekly-ai-digest",
+    "contentBrief": "Summarize the most notable developments in AI agents and autonomous coding tools. Focus on what practitioners should pay attention to — new frameworks, capability breakthroughs, and emerging patterns.",
+    "formatBrief": "Professional but accessible tone. Start with a 2-sentence executive summary, then 3-4 thematic sections. Use subheadings. Keep it under 1500 words.",
+    "formatRules": {
+        "maxWords": 1500,
+        "primaryStructure": "prose",
+        "requiredSections": ["Executive Summary"],
+        "executiveSummarySentences": 2,
+        "requiredCitations": 3
+    },
+    "outputFormat": "markdown"
+}

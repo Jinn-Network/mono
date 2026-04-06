@@ -1,0 +1,50 @@
+# Shared ignore for monorepo Railway deploys
+# Services: x402-gateway, control-api, ponder
+# Workers now deploy from standalone jinn-node repo
+
+# Heavy/unused directories
+frontend/
+code-resources/
+/contracts/
+packages/
+olas-operate-middleware/
+gemini-agent/
+codespec/
+blueprints/
+
+# Test/dev
+tests-next/
+tests/
+logs/
+service-backups/
+dist/
+
+# Docs/config not needed at runtime
+docs/
+skills/
+migrations/
+configs/
+.git/
+.beads/
+.claude/
+.codex/
+.cursor/
+.gemini/
+generated/
+
+# Build artifacts
+**/node_modules/
+*.tsbuildinfo
+jinn-node/dist/
+
+# Services — exclude non-deployed services
+services/workstream-creator
+services/x402-builder
+
+# Scripts — only include shared utils + ponder patch
+scripts/*
+!scripts/shared
+!scripts/patch-dist-imports.js
+
+# Worker source (now deploys from jinn-node standalone)
+/worker/

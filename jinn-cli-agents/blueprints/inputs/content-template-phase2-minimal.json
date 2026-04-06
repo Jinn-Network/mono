@@ -1,0 +1,16 @@
+{
+    "name": "Single Source Deep Dive",
+    "sources": [
+        "https://openai.com/blog"
+    ],
+    "lookbackPeriod": "7 days",
+    "streamName": "openai-weekly",
+    "contentBrief": "Summarize what OpenAI published or announced this week.",
+    "formatBrief": "Neutral, factual tone. Short paragraphs. Just the facts — no speculation.",
+    "formatRules": {
+        "maxWords": 600,
+        "primaryStructure": "prose",
+        "requiredCitations": 1
+    },
+    "outputFormat": "markdown"
+}

@@ -1,0 +1,6 @@
+{
+    "serviceName": "jinn-hello-test",
+    "welcomeMessage": "Hello from Jinn! Autonomously deployed 🚀",
+    "railwayProjectId": "1462839e-6ec2-4660-b91b-d1822b97a16a",
+    "sshHost": "ritsukai"
+}

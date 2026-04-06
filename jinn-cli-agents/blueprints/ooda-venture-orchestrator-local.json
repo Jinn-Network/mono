@@ -1,0 +1,117 @@
+{
+    "templateMeta": {
+        "id": "ooda-venture-orchestrator",
+        "name": "OODA Venture Orchestrator",
+        "description": "Explicit OODA-loop control system for venture invariant management.",
+        "priceWei": "0",
+        "inputSchema": {
+            "type": "object",
+            "required": ["ventureId"],
+            "properties": {
+                "ventureId": { "type": "string", "description": "Venture UUID" },
+                "ventureName": { "type": "string", "description": "Human-readable venture name" },
+                "ventureInvariants": { "type": "array", "description": "The venture's blueprint invariants" },
+                "focusInvariants": { "type": "array", "items": { "type": "string" }, "description": "Optional: specific invariant IDs to focus on." },
+                "priorImprovementNotes": { "type": "array", "items": { "type": "string" } },
+                "previousCycleRequestIds": { "type": "array", "items": { "type": "string" } }
+            }
+        },
+        "outputSpec": {
+            "version": "1.0",
+            "fields": [
+                { "name": "situationReport", "path": "$.result.situationReport", "type": "object", "required": true },
+                { "name": "invariantHealthMap", "path": "$.result.invariantHealthMap", "type": "object", "required": true },
+                { "name": "actionsExecuted", "path": "$.result.actionsExecuted", "type": "array", "required": true },
+                { "name": "templateImprovementProposal", "path": "$.result.templateImprovementProposal", "type": "object", "required": true }
+            ]
+        },
+        "tools": [
+            { "name": "dispatch_new_job", "required": true },
+            { "name": "get_details", "required": true },
+            { "name": "search_artifacts", "required": true },
+            { "name": "create_artifact", "required": true },
+            { "name": "create_measurement", "required": true },
+            { "name": "google_web_search", "required": true },
+            { "name": "web_fetch", "required": true },
+            { "name": "moltbook", "required": true }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "OODA-ROLE",
+            "type": "BOOLEAN",
+            "condition": "You are the OODA-loop controller for venture {{ventureId}}. You execute exactly four phases in strict order: OBSERVE -> ORIENT -> DECIDE -> ACT. You NEVER execute goal-work directly — you only observe state, analyze context, make decisions, and act through dispatch/schedule/measurement tools. You also improve this orchestrator template every cycle by producing one concrete, testable template-improvement proposal. CRITICAL: You must complete all four phases in a single execution. Do not loop or retry within a phase. If data is unavailable, note it as UNKNOWN and move forward.",
+            "assessment": "Verify the agent followed the four-phase structure sequentially, completed all four phases, and did not execute any goal-work directly."
+        },
+        {
+            "id": "OBSERVE-STATE",
+            "type": "BOOLEAN",
+            "condition": "OBSERVE PHASE: Build a raw data picture of reality using exactly these steps. (1) Read the VENTURE INVARIANTS, DISPATCH SCHEDULE, AVAILABLE TEMPLATES, and RECENT REQUEST IDS sections below — they are ALREADY PRE-LOADED into this prompt at dispatch time. DO NOT call read_dispatch_schedule or template_query — those tools do not exist. (2) If RECENT REQUEST IDS contains entries, call get_details once using up to 5 of those request IDs (never use ventureId as an id for get_details). (3) Call search_artifacts once with query='VENTURE_OODA_SITUATION' and include_request_context=true to gather prior cycle situation evidence. (4) Call search_artifacts once with query='{{ventureId}}' to gather venture-scoped measurement/situation traces. (5) If any invariant references external signals (web metrics, social data), call google_web_search or web_fetch for current data. After gathering data, immediately move to ORIENT. Do NOT repeat identical tool calls with the same arguments. If a call fails, log the failure and proceed.",
+            "assessment": "The agent read pre-loaded context, used get_details with request IDs (not ventureId), queried prior OODA situations, and moved to ORIENT without repeated identical calls."
+        },
+        {
+            "id": "OBSERVE-COMPLETENESS",
+            "min": 3,
+            "type": "FLOOR",
+            "metric": "data_sources_queried_count",
+            "assessment": "Count the distinct data sources queried in Observe: input invariants (1), dispatch schedule (1), recent requests/deliveries (1), artifact history (1), external signals (bonus). Minimum 3."
+        },
+        {
+            "id": "ORIENT-CONTEXT",
+            "type": "BOOLEAN",
+            "condition": "ORIENT PHASE: Build structured context from raw observations. (1) For each venture invariant from the input, determine its current status: HEALTHY (evidence shows it is met), VIOLATED (evidence shows it is not met), or UNKNOWN (insufficient data to determine). (2) For violated invariants, estimate severity: how far from bounds, how long violated, trending better or worse. (3) Assess what active workstreams are doing and whether they already address any violations. (4) Build a failure ledger from prior OODA situations: list repeated failure modes and classify each as INFRASTRUCTURE, PROMPT, TOOLING, DATA, or MARKETPLACE. (5) Produce a structured current-reality summary plus a self-improvement diagnosis. Then immediately move to DECIDE.",
+            "assessment": "Every venture invariant has a status assignment. Violations include severity estimates. A failure ledger with root-cause classification from prior OODA situations is present. The agent moved to DECIDE after analysis."
+        },
+        {
+            "id": "ORIENT-COVERAGE",
+            "min": 100,
+            "type": "FLOOR",
+            "metric": "invariant_assessment_coverage_percent",
+            "assessment": "Calculate (invariants assessed / total venture invariants) * 100. Every invariant must have a status: HEALTHY, VIOLATED, or UNKNOWN."
+        },
+        {
+            "id": "DECIDE-PLAN",
+            "type": "BOOLEAN",
+            "condition": "DECIDE PHASE: Determine the best course of action. (1) Rank violated invariants by severity. (2) For each violation, choose one action: a) dispatch an immediate job via dispatch_new_job using a template from AVAILABLE TEMPLATES, b) note a schedule change recommendation for the next cycle, c) defer if active work already targets this violation. (3) Use the failure ledger to pick one concrete orchestrator-template improvement action for this cycle (instruction tightening, tool-call pattern change, or measurement schema improvement). (4) Respect guard constraints: no duplicate dispatches, max 3 concurrent workstreams. (5) Document decision rationale for each violated invariant and for the selected self-improvement action. If no invariants are violated, still produce one self-improvement action aimed at efficiency or reliability. Then move to ACT.",
+            "assessment": "Each violated invariant has a documented decision with rationale. One concrete self-improvement action is selected each cycle. Guard constraints were checked. The agent moved to ACT."
+        },
+        {
+            "id": "DECIDE-RATIONALE",
+            "min": 100,
+            "type": "FLOOR",
+            "metric": "decisions_with_rationale_percent",
+            "assessment": "Calculate (violated invariants with documented decision rationale / total violated invariants) * 100. Every violation must have an explicit decision: dispatch, schedule, adjust, or defer — with reasoning. If no violations, this is trivially 100%."
+        },
+        {
+            "id": "DECIDE-SELF-IMPROVEMENT",
+            "min": 1,
+            "type": "FLOOR",
+            "metric": "self_improvement_actions_count",
+            "assessment": "Count explicit, testable orchestrator template improvement actions selected in DECIDE. Minimum 1 every cycle."
+        },
+        {
+            "id": "ACT-EXECUTE",
+            "type": "BOOLEAN",
+            "condition": "ACT PHASE: Execute the decisions from Decide. (1) For dispatches: call dispatch_new_job with appropriate parameters including templateId and venture input config. (2) Treat a tool call as SUCCESS only when the returned payload indicates success (meta.ok=true and no EXECUTION_ERROR code). If not, record it as FAILED and create a fallback recommendation. (3) For schedule change recommendations: include them in the SITUATION artifact's nextCycleGuidance. (4) For each invariant where you gathered enough data to assess status: call create_measurement with invariant ID, current value, and status. (5) Create both the normal OODA situation artifact and a template-improvement artifact. If Decide concluded no venture action is needed, still create measurements and both artifacts.",
+            "assessment": "Planned dispatches were attempted and success/failure was reported truthfully from tool results. Measurements were created. Both situation and template-improvement artifacts were created."
+        },
+        {
+            "id": "ACT-SITUATION",
+            "type": "BOOLEAN",
+            "condition": "Create a SITUATION artifact with create_artifact (topic: 'VENTURE_OODA_SITUATION') containing: (1) invariantHealthMap — each invariant's status and measurement data, (2) violations — list with severity and decision for each, (3) actionsAttempted/actionsSucceeded/actionsFailed — explicit lists with failure reasons, (4) nextCycleGuidance — what the next OODA cycle should focus on, (5) improvementProposalRef — name or id of the template-improvement artifact created this cycle.",
+            "assessment": "A SITUATION artifact exists with topic 'VENTURE_OODA_SITUATION' containing all required sections including truthful action outcomes and improvementProposalRef."
+        },
+        {
+            "id": "ACT-TEMPLATE-IMPROVEMENT",
+            "type": "BOOLEAN",
+            "condition": "Create a template-improvement artifact with create_artifact using topic 'VENTURE_OODA_TEMPLATE_IMPROVEMENT'. Content must include: (1) diagnosedFailureMode, (2) rootCauseClass (INFRASTRUCTURE/PROMPT/TOOLING/DATA/MARKETPLACE), (3) proposedInvariantEdits array with {id,before,after}, (4) expectedImpact, (5) riskLevel, (6) validationPlan for next cycle, (7) rollbackTrigger.",
+            "assessment": "An artifact exists with topic 'VENTURE_OODA_TEMPLATE_IMPROVEMENT' and all seven required fields."
+        },
+        {
+            "id": "ACT-GUARD",
+            "type": "BOOLEAN",
+            "condition": "Never dispatch work that duplicates what is already in progress. Before dispatching, check active requests via get_details using request IDs only (not venture UUID). Never run more than 3 concurrent workstreams. Never claim a dispatch succeeded if the tool payload reports failure. When in doubt, defer — over-dispatching wastes resources. If focusInvariants is provided, only act on those specific invariants.",
+            "assessment": "No duplicate dispatches were created. Active workstream count stayed within limits. Dispatch outcome reporting matched tool payloads. focusInvariants was respected if provided."
+        }
+    ]
+}

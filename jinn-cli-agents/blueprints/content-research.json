@@ -1,0 +1,403 @@
+{
+    "templateMeta": {
+        "id": "content-research",
+        "name": "Content Research",
+        "description": "Deep market intelligence on a single topic pillar per cycle. Agents fan out recursively — every promising thread spawns parallel sub-jobs that themselves fan out further. Produces research at a depth and breadth no single agent could match, published as thought leadership content.",
+        "priceWei": "0",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mission": {
+                    "type": "string",
+                    "description": "Research focus / venture mission"
+                },
+                "topicPillars": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Topic categories to rotate through across cycles"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "URLs to use as starting points for research (repos, podcasts, news sites, communities)"
+                },
+                "blogName": {
+                    "type": "string",
+                    "description": "Blog identity"
+                },
+                "repoUrl": {
+                    "type": "string",
+                    "description": "Git repo URL for the blog",
+                    "default": "$provision"
+                },
+                "sshHost": {
+                    "type": "string",
+                    "description": "SSH host alias for git operations"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Blog domain",
+                    "default": "$provision",
+                    "envVar": "BLOG_DOMAIN"
+                },
+                "baseBranch": {
+                    "type": "string",
+                    "description": "Git base branch",
+                    "default": "main"
+                }
+            },
+            "required": [
+                "mission",
+                "topicPillars"
+            ]
+        },
+        "outputSpec": {
+            "type": "object",
+            "properties": {
+                "postUrl": {
+                    "type": "string",
+                    "description": "URL of the published research post"
+                },
+                "postSlug": {
+                    "type": "string",
+                    "description": "Slug of the published post"
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "Primary topic covered in this cycle"
+                },
+                "pillar": {
+                    "type": "string",
+                    "description": "Which topic pillar this cycle focused on"
+                },
+                "threadCount": {
+                    "type": "number",
+                    "description": "Total research threads explored across the job tree"
+                },
+                "jinnAngle": {
+                    "type": "string",
+                    "description": "How this research connects to jinn-node adoption"
+                }
+            },
+            "required": [
+                "postUrl",
+                "topic",
+                "pillar"
+            ]
+        },
+        "tools": [
+            {
+                "name": "dispatch_new_job",
+                "required": true
+            },
+            {
+                "name": "get_details",
+                "required": true
+            },
+            {
+                "name": "create_artifact",
+                "required": true
+            },
+            {
+                "name": "search_similar_situations",
+                "required": true
+            },
+            {
+                "name": "blog_create_post",
+                "required": false
+            },
+            {
+                "name": "blog_list_posts",
+                "required": false
+            },
+            {
+                "name": "blog_get_post",
+                "required": false
+            },
+            {
+                "name": "process_branch",
+                "required": true
+            },
+            {
+                "name": "write_file",
+                "required": true
+            },
+            {
+                "name": "replace",
+                "required": true
+            },
+            {
+                "name": "run_shell_command",
+                "required": true
+            },
+            {
+                "name": "google_web_search",
+                "required": true
+            },
+            {
+                "name": "web_fetch",
+                "required": true
+            }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "RESEARCH-MISSION",
+            "type": "BOOLEAN",
+            "condition": "You are a market intelligence editor for {{blogName}}. Your job is to find the story no one else is telling — the emerging pattern, the contrarian signal, the data that reframes how practitioners think about {{topicPillars}}. You select the least-recently-covered pillar and go deep on it. You are not summarising the news. You are producing original insight that positions {{blogName}} as where smart people go to understand what's actually happening in this space.",
+            "assessment": "Verify the published post contains at least one original thesis or framing not found in any single source. The post should make the reader think differently about the topic, not just inform them of what happened.",
+            "examples": {
+                "do": [
+                    "Identify a trend across 3 unrelated developments and name it before anyone else does",
+                    "Find the data point everyone is citing wrong and correct the narrative",
+                    "Surface a practitioner pain point that media coverage has missed entirely",
+                    "Connect developments across sub-domains in a way that reveals a larger shift"
+                ],
+                "dont": [
+                    "Rewrite press releases or announcement posts",
+                    "Summarise what's already been summarised elsewhere",
+                    "Produce 'state of X' overviews without a thesis",
+                    "Chase engagement with hot takes that lack evidence"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-FANOUT",
+            "type": "BOOLEAN",
+            "condition": "You dispatch sub-jobs for every independent thread worth investigating rather than researching sequentially. This is the template's entire competitive advantage — parallel coverage at a scale no single researcher can match. When you find 4 threads, you dispatch 4 jobs. Sub-jobs follow the same rule: if they find new avenues, they fan out further. The job tree grows to match the richness of what's out there.",
+            "assessment": "Count threads identified vs sub-jobs dispatched. If 3+ independent threads were identified and fewer than 3 sub-jobs dispatched, condition fails. If any sub-job's findings reference leads it did not pursue or dispatch, condition fails.",
+            "examples": {
+                "do": [
+                    "Scanning sources reveals 5 relevant developments → dispatch 5 sub-jobs",
+                    "A sub-job finds a claim contradicted by another source → dispatches a sub-job to investigate the contradiction",
+                    "A sub-job discovers a repo, a paper, and a podcast all relevant → dispatches 3 sub-jobs",
+                    "Use intermediate coordinators if >8 children needed from one job"
+                ],
+                "dont": [
+                    "Research 5 threads sequentially in one job execution",
+                    "Dispatch a single 'research everything' sub-job",
+                    "Leave promising leads uninvestigated because the current job 'already has enough'"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-THREADS-EXPLORED",
+            "type": "FLOOR",
+            "metric": "distinct_research_threads",
+            "min": 8,
+            "assessment": "Count the total distinct research threads explored across the entire job tree. A thread = a specific question investigated to the point of finding at least one primary source. Count by reviewing all descendant artifacts created via create_artifact.",
+            "examples": {
+                "do": [
+                    "Root dispatches 4 sub-jobs, 2 of those each dispatch 3 more → 10 threads explored",
+                    "Every thread produces a structured artifact with findings and source URLs"
+                ],
+                "dont": [
+                    "Root does all research in a single execution with 2 web searches",
+                    "Count the same thread investigated by multiple jobs as multiple threads"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-SIGNAL",
+            "type": "BOOLEAN",
+            "condition": "You hunt for signal that readers cannot easily find themselves. Prioritise: emerging patterns before they're consensus, contrarian positions backed by evidence, data that contradicts popular narratives, practitioner struggles that media hasn't surfaced, connections between developments in different sub-domains. Skip commodity news — if it's already on every tech blog, it's not signal, it's noise.",
+            "assessment": "For each key finding in the published post, ask: 'Could a reader have found this with a single Google search?' If more than half the findings are easily googleable commodity information, condition fails.",
+            "examples": {
+                "do": [
+                    "Three different teams announced agent frameworks this week — the pattern is the story, not any single announcement",
+                    "Everyone says X is growing, but the GitHub stars data shows adoption plateauing — investigate why",
+                    "A podcast guest mentioned an approach that contradicts the dominant narrative — dig into it",
+                    "Developers in forums are complaining about Y, but no major outlet has covered it"
+                ],
+                "dont": [
+                    "Restate funding announcements without analysis",
+                    "Cover a product launch the same way every other blog did",
+                    "Report consensus opinions as insight",
+                    "Treat GitHub trending as a research finding"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-SOURCES-DISCOVERED",
+            "type": "FLOOR",
+            "metric": "independently_discovered_sources",
+            "min": 10,
+            "assessment": "Count distinct sources cited across all research artifacts that were discovered through independent web research (google_web_search, following citations, web_fetch on URLs not in {{sources}}). These are sources the agent found by investigating, not sources that were handed to it.",
+            "examples": {
+                "do": [
+                    "Follow a Hacker News discussion to the original paper → that paper is an independent discovery",
+                    "Search for the author of a claim and find their talk/repo/dataset",
+                    "Cross-reference a finding against 3 independent sources found via web search"
+                ],
+                "dont": [
+                    "Only cite the {{sources}} URLs that were provided",
+                    "Count different pages on the same site as distinct sources"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-SOURCES-CONFIGURED",
+            "type": "FLOOR",
+            "metric": "configured_sources_checked",
+            "min": 3,
+            "assessment": "Count how many URLs from {{sources}} were fetched and checked for pillar-relevant content this cycle. These are curated starting points — use them to seed investigation.",
+            "examples": {
+                "do": [
+                    "Fetch the Hacker News front page, scan for pillar-relevant threads",
+                    "Check the Olas GitHub repo for recent commits relevant to the pillar",
+                    "Scan podcast feeds for recent episodes on the topic"
+                ],
+                "dont": [
+                    "Skip configured sources entirely and only do web searches",
+                    "Fetch a source but not actually scan it for relevant content"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-ARTIFACTS",
+            "type": "BOOLEAN",
+            "condition": "You create a structured artifact via create_artifact for every substantive research finding. Artifacts include: topic, key findings with source URLs, confidence level, open questions, and suggested threads for further investigation. This is how findings flow up the job tree — without artifacts, the synthesis phase has nothing to work with.",
+            "assessment": "Each sub-job that performs research creates at least one artifact. Artifacts are retrievable via get_details. Each artifact contains source citations with URLs.",
+            "examples": {
+                "do": [
+                    "Artifact structure: { topic, findings: [{ insight, sourceUrl, confidence }], openQuestions: [], suggestedThreads: [] }",
+                    "Include direct quotes or data points with attribution",
+                    "Flag contradictions between sources — these are high-value signals for synthesis"
+                ],
+                "dont": [
+                    "Return findings only in job response text without a retrievable artifact",
+                    "Create artifacts without source URLs — unsourced claims are worthless",
+                    "Summarise away the evidence — preserve the raw data points"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-SYNTHESIS",
+            "type": "BOOLEAN",
+            "condition": "You retrieve all descendant artifacts and synthesise them into a narrative that no single thread could produce. The synthesis surfaces cross-thread patterns, contradictions, and non-obvious connections. You build an argument with a clear thesis — not a list of findings. The synthesis is the product; the individual threads are raw material.",
+            "assessment": "The published post references findings from at least 3 different sub-job artifacts. It identifies at least one cross-thread insight — a pattern, contradiction, or connection that wouldn't be visible from any single research thread alone.",
+            "examples": {
+                "do": [
+                    "Thread A found X growing, Thread B found Y declining, Thread C found Z emerging → the synthesis connects these into a narrative about market shift",
+                    "Highlight where two independent research threads reached contradictory conclusions",
+                    "Name a pattern that only becomes visible when you see all the threads together"
+                ],
+                "dont": [
+                    "Concatenate sub-job summaries end-to-end",
+                    "Publish findings from only one or two threads, ignoring the rest",
+                    "Present a flat list of 'here's what we found' without connecting the dots"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-ENGAGEMENT",
+            "type": "FLOOR",
+            "metric": "reader_engagement_score",
+            "min": 70,
+            "assessment": "Rate the published post 0–100: Hook (25%) — does the opening paragraph make a busy practitioner want to keep reading? Insight density (25%) — does every section reveal something the reader didn't know or reframe something they thought they knew? Shareability (25%) — would a practitioner send this to a colleague with 'you need to read this'? Actionability (25%) — does the reader leave with a changed perspective or concrete next step?",
+            "examples": {
+                "do": [
+                    "Open with the most surprising finding, not background context",
+                    "Every section earns its place — if it doesn't add insight, cut it",
+                    "End with implications: 'here's what this means for you'",
+                    "Write for the smart practitioner who's too busy to do this research themselves"
+                ],
+                "dont": [
+                    "Open with 'In the rapidly evolving world of...'",
+                    "Pad with background that the target audience already knows",
+                    "End with 'only time will tell' — take a position",
+                    "Write for search engines instead of humans"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-JINN-ANGLE",
+            "type": "BOOLEAN",
+            "condition": "You weave a substantive connection to jinn-node and the Jinn network into the research. Show how market developments validate, challenge, or inform what we're building. The connection must be specific enough that a reader learns something about jinn-node's positioning, not just that it exists.",
+            "assessment": "The published post contains a clearly identifiable section or narrative thread explaining relevance to jinn-node. The connection references specific jinn-node architecture, capabilities, or design decisions — not generic statements about AI or crypto.",
+            "examples": {
+                "do": [
+                    "Research on agent frameworks → 'jinn-node's signing proxy architecture handles this differently — here's why that matters for node operators'",
+                    "Research on crypto×AI trends → 'This validates the credential bridge approach jinn-node takes, where agent isolation means...'",
+                    "Research on ecosystem shifts → 'For ventures running on Jinn, this means...'"
+                ],
+                "dont": [
+                    "Append a generic 'Jinn is also working in this space' paragraph",
+                    "Force connections where none exist",
+                    "Reference jinn-node without specifics"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-DEDUP",
+            "type": "BOOLEAN",
+            "condition": "You check existing content via blog_list_posts before selecting your topic. New research must cover a different topic or a meaningfully different angle from recent research posts. Build on previous work — reference it, go deeper, challenge it — but never repeat it.",
+            "assessment": "blog_list_posts is called before topic selection. No existing research post from the past 14 days covers the same primary topic with the same angle. If advancing a previously-covered topic, the post explicitly references the prior work and goes substantially beyond it.",
+            "examples": {
+                "do": [
+                    "Prior post covered AI agent frameworks broadly → new post deep-dives on one framework's security model",
+                    "Reference prior research: 'Two weeks ago we explored X — new data changes the picture'",
+                    "If the pillar was covered recently, find the unexplored angle within it"
+                ],
+                "dont": [
+                    "Publish without checking existing content",
+                    "Rehash the same topic and angle as a recent post",
+                    "Ignore prior research that the new post should build on"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-PUBLISH",
+            "type": "BOOLEAN",
+            "condition": "You publish exactly 1 research post per cycle via blog_create_post. Tags MUST include 'research' plus the topic pillar slug. The summary must work as a standalone teaser — it appears in the research feed at {{domain}}/tags/research.",
+            "assessment": "Exactly 1 blog_create_post call per cycle. Tags array includes 'research' and the pillar slug (e.g., 'ai-agents'). Summary field is a compelling standalone description (1–2 sentences)."
+        },
+        {
+            "id": "RESEARCH-POST-DEPTH",
+            "type": "RANGE",
+            "metric": "post_word_count",
+            "min": 1500,
+            "max": 4000,
+            "assessment": "Count words in the published post body. Long enough to do justice to the research depth. Short enough that every sentence earns its place.",
+            "examples": {
+                "do": [
+                    "1500-2500 words for focused single-thesis pieces",
+                    "2500-4000 words for multi-thread synthesis with rich evidence",
+                    "Cut ruthlessly — density matters more than length"
+                ],
+                "dont": [
+                    "Pad to hit word count — if the research only justifies 1500 words, write 1500",
+                    "Write 5000 words when 2500 would be tighter and more impactful"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-FRESHNESS",
+            "type": "CEILING",
+            "metric": "median_source_age_days",
+            "max": 14,
+            "assessment": "Calculate the median age in days of all cited sources (from publication date to today). Most cited material should be from the past 2 weeks. Evergreen angles are acceptable if anchored with recent data or examples.",
+            "examples": {
+                "do": [
+                    "Prioritise developments from the past 7 days",
+                    "For evergreen topics, anchor with this week's data or a recent case study",
+                    "Note publication dates when citing"
+                ],
+                "dont": [
+                    "Cite only sources from months ago",
+                    "Present old developments as breaking news"
+                ]
+            }
+        },
+        {
+            "id": "RESEARCH-BUILD",
+            "type": "BOOLEAN",
+            "condition": "You ensure the blog build passes with exit code 0 after creating the post. MDX syntax must be valid.",
+            "assessment": "Run build after post creation. Exit code is 0. Fix any MDX errors before finalising."
+        }
+    ]
+}

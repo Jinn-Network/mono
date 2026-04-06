@@ -1,0 +1,136 @@
+name: Sync jinn-node to Standalone
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "jinn-node/**"
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Target branch in Jinn-Network/jinn-node (defaults to current branch)"
+        required: false
+        type: string
+      source_sha:
+        description: "Monorepo commit SHA to sync (defaults to workflow commit)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jinn-node-sync-${{ github.event.inputs.target_branch || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve variables
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET_BRANCH="${{ github.event.inputs.target_branch }}"
+          SOURCE_SHA="${{ github.event.inputs.source_sha }}"
+
+          if [ -z "$TARGET_BRANCH" ]; then
+            TARGET_BRANCH="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$SOURCE_SHA" ]; then
+            SOURCE_SHA="${GITHUB_SHA}"
+          fi
+
+          echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout monorepo source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Configure SSH deploy key
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.JINN_NODE_SYNC_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_KEY:-}" ]; then
+            echo "Missing secret: JINN_NODE_SYNC_DEPLOY_KEY" >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/jinn_node_sync
+          chmod 600 ~/.ssh/jinn_node_sync
+          ssh-keyscan -t rsa,ecdsa,ed25519 -p 443 ssh.github.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          cat > ~/.ssh/config <<'EOF'
+          Host github-jinn-node-sync
+            HostName ssh.github.com
+            Port 443
+            User git
+            IdentityFile ~/.ssh/jinn_node_sync
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Clone standalone repo branch
+        id: clone
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ steps.vars.outputs.target_branch }}
+        run: |
+          set -euo pipefail
+          REMOTE="git@github-jinn-node-sync:Jinn-Network/jinn-node.git"
+
+          if git ls-remote --exit-code --heads "$REMOTE" "$TARGET_BRANCH" >/dev/null 2>&1; then
+            git clone --depth 1 --branch "$TARGET_BRANCH" "$REMOTE" /tmp/jinn-node-standalone
+          else
+            git clone --depth 1 --branch main "$REMOTE" /tmp/jinn-node-standalone
+            cd /tmp/jinn-node-standalone
+            git checkout -b "$TARGET_BRANCH"
+          fi
+
+      - name: Sync files from monorepo/jinn-node
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude 'node_modules/' \
+            --exclude 'dist/' \
+            --exclude '.env' \
+            --exclude 'jinn.yaml' \
+            --exclude '.operate/' \
+            --exclude '.operate_v0.10.21_bak/' \
+            ./jinn-node/ /tmp/jinn-node-standalone/
+
+      - name: Commit and push if changed
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ steps.vars.outputs.target_branch }}
+          SOURCE_SHA: ${{ steps.vars.outputs.source_sha }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd /tmp/jinn-node-standalone
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No standalone changes to commit"
+            exit 0
+          fi
+
+          SHORT_SHA="${SOURCE_SHA:0:12}"
+          git commit -m "sync: ${SOURCE_REPO} ${SHORT_SHA}"
+          git push origin "HEAD:${TARGET_BRANCH}"

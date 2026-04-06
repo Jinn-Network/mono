@@ -1,0 +1,13 @@
+{
+  "blogName": "Jinn Blog",
+  "mission": "Demystify AI agents for developers, showcasing real-world applications and technical deep-dives into autonomous systems",
+  "strategy": "Content pillars: (1) Agent architecture tutorials - how Jinn agents work under the hood, (2) Platform updates and roadmap, (3) AI industry analysis with agent lens. Target audience: developers building with AI, crypto-curious technologists, AI researchers. Voice: technically rigorous but accessible, opinionated with data backing. Competitors to cover: AutoGPT, LangChain agents, CrewAI. Special angles: on-chain verification of AI work, economic incentives for agents.",
+  "sources": [
+    "https://github.com/Jinn-Network",
+    "https://x.com/JinnNetwork",
+    "https://discord.gg/jinn",
+    "https://arxiv.org/list/cs.AI/recent",
+    "https://news.ycombinator.com"
+  ],
+  "referrals": "None currently - focus on organic growth first"
+}

@@ -1,0 +1,1 @@
+../../skills/local-dev-stack/SKILL.md

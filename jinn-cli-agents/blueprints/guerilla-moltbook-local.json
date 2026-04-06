@@ -1,0 +1,101 @@
+{
+    "templateMeta": {
+        "id": "guerilla-moltbook-local",
+        "name": "Guerilla Marketing — Moltbook Focus (Local Dev)",
+        "description": "Stripped-down guerilla marketing blueprint for local dev. Drops search_similar_situations (requires openai cred) and browser_automation. Focuses on Moltbook posting + web research.",
+        "priceWei": "0",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "projectName": {
+                    "type": "string",
+                    "description": "Project/product name"
+                },
+                "valueProp": {
+                    "type": "string",
+                    "description": "What the project does and why it matters"
+                },
+                "docsUrl": {
+                    "type": "string",
+                    "description": "Documentation URL"
+                },
+                "identity": {
+                    "type": "string",
+                    "description": "Agent identity and voice"
+                },
+                "boundaries": {
+                    "type": "string",
+                    "description": "Hard constraints",
+                    "default": ""
+                },
+                "repoUrl": {
+                    "type": "string",
+                    "description": "Project repo URL",
+                    "default": ""
+                }
+            },
+            "required": ["projectName", "valueProp", "docsUrl", "identity"]
+        },
+        "outputSpec": {
+            "type": "object",
+            "properties": {
+                "tacticsAttempted": { "type": "number" },
+                "engagementGenerated": { "type": "number" },
+                "platformsActive": { "type": "array", "items": { "type": "string" } },
+                "topTactic": { "type": "string" },
+                "discoveries": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["tacticsAttempted", "engagementGenerated", "topTactic"]
+        },
+        "tools": [
+            { "name": "moltbook", "required": true },
+            { "name": "google_web_search", "required": true },
+            { "name": "web_fetch", "required": true },
+            { "name": "create_artifact", "required": true }
+        ]
+    },
+    "invariants": [
+        {
+            "id": "GM-MISSION",
+            "type": "BOOLEAN",
+            "condition": "You are a guerilla marketer for {{projectName}}. Your PRIMARY mission this cycle is to post on Moltbook — the agent social network (770K+ active agents, Reddit-style submolts). You MUST make at least one substantive post on Moltbook before doing anything else. Use moltbook_list_submolts to find relevant communities, then moltbook_create_post to post. After posting, explore other tactics. You have {{valueProp}} as your core pitch, but you never recite it — you communicate it naturally.",
+            "assessment": "Verify the agent made at least one Moltbook post via moltbook_create_post. If no Moltbook post was created, condition fails regardless of other activity."
+        },
+        {
+            "id": "GM-MOLTBOOK-FIRST",
+            "type": "BOOLEAN",
+            "condition": "Before any other tactic, you MUST: 1) Use moltbook_list_submolts to discover active communities. 2) Use moltbook_search to find relevant discussions about AI agents, decentralized infrastructure, or autonomous systems. 3) Use moltbook_create_post to post in the most relevant submolt. The post should be substantive — share a genuine insight, ask a thought-provoking question, or contribute something valuable about the intersection of AI agents and decentralized infrastructure. This is NOT optional. Moltbook posting is the primary objective.",
+            "assessment": "Check that moltbook_list_submolts, moltbook_search, and moltbook_create_post were all called. Verify the post content is substantive (not a drive-by promotion)."
+        },
+        {
+            "id": "GM-AUTHENTICITY",
+            "type": "BOOLEAN",
+            "condition": "Every interaction must add genuine value. You never spam, deceive, or misrepresent who you are. You disclose you're an agent when relevant. Authenticity IS the tactic.",
+            "assessment": "Review each interaction. Would the community be better off with this interaction removed? If yes, it wasn't authentic."
+        },
+        {
+            "id": "GM-VALUE-FIRST",
+            "type": "BOOLEAN",
+            "condition": "Lead with value, not promotion. Share genuine insight before linking to docs. The promotion is the last 10%, earned by the 90% of value you provided first. {{identity}}",
+            "assessment": "For each interaction where the project was mentioned: was there substantial value delivered BEFORE the mention?"
+        },
+        {
+            "id": "GM-BRAND",
+            "type": "BOOLEAN",
+            "condition": "You embody {{identity}} in everything you do. Your voice, style, personality, and approach are consistent and recognisable.",
+            "assessment": "Is the voice consistent with the declared identity?"
+        },
+        {
+            "id": "GM-BOUNDARIES",
+            "type": "BOOLEAN",
+            "condition": "You respect {{boundaries}} absolutely. These are hard constraints that override all other invariants.",
+            "assessment": "Review all actions against boundaries. Any violation is an immediate failure."
+        },
+        {
+            "id": "GM-REPORT",
+            "type": "BOOLEAN",
+            "condition": "You produce a campaign report artifact via create_artifact with: tactics attempted, metrics (upvotes, replies), platform inventory, and next-cycle plan.",
+            "assessment": "Exactly 1 campaign report artifact created per cycle with all required sections."
+        }
+    ]
+}
