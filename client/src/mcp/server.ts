@@ -179,17 +179,20 @@ server.tool(
   'search_artifacts',
   'Search previously published knowledge artifacts',
   {
-    tags: z.array(z.string()).optional().describe('Filter by tags'),
+    tags: z.array(z.string()).optional().describe('Filter by tags (e.g. ["restoration-result", "success"])'),
     outcome: z.enum(['SUCCESS', 'FAILURE', 'UNKNOWN']).optional().describe('Filter by outcome'),
+    requestId: z.string().optional().describe('Filter by on-chain request ID'),
+    desiredStateId: z.string().optional().describe('Filter by desired state ID'),
+    since: z.string().optional().describe('Only return artifacts created after this ISO timestamp'),
     limit: z.number().optional().describe('Max results (default 50)'),
   },
-  async ({ tags, outcome, limit }) => {
+  async ({ tags, outcome, requestId, desiredStateId, since, limit }) => {
     if (!store) {
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ error: 'No store configured', results: [] }) }],
       };
     }
-    const results = store.searchArtifacts({ tags, outcome, limit });
+    const results = store.searchArtifacts({ tags, outcome, requestId, desiredStateId, since, limit });
     return {
       content: [{ type: 'text' as const, text: JSON.stringify({ results }) }],
     };

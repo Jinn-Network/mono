@@ -93,14 +93,32 @@ export class Store {
   searchArtifacts(query: {
     tags?: string[];
     outcome?: string;
+    requestId?: string;
+    desiredStateId?: string;
+    since?: string;  // ISO timestamp — only return artifacts created after this time
     limit?: number;
-  }): Array<{ id: string; title: string; content: string; tags: string[]; outcome: string; created_at: string }> {
+  }): Array<{ id: string; title: string; content: string; tags: string[]; outcome: string; request_id: string; desired_state_id: string; created_at: string }> {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
     if (query.outcome) {
       conditions.push('outcome = @outcome');
       params['outcome'] = query.outcome;
+    }
+
+    if (query.requestId) {
+      conditions.push('request_id = @requestId');
+      params['requestId'] = query.requestId;
+    }
+
+    if (query.desiredStateId) {
+      conditions.push('desired_state_id = @desiredStateId');
+      params['desiredStateId'] = query.desiredStateId;
+    }
+
+    if (query.since) {
+      conditions.push('created_at >= @since');
+      params['since'] = query.since;
     }
 
     if (query.tags && query.tags.length > 0) {
@@ -114,8 +132,8 @@ export class Store {
     const limit = query.limit ?? 50;
 
     const rows = this.db.prepare(
-      `SELECT id, title, content, tags, outcome, created_at FROM artifacts ${where} ORDER BY created_at DESC LIMIT ${limit}`
-    ).all(params) as Array<{ id: string; title: string; content: string; tags: string; outcome: string; created_at: string }>;
+      `SELECT id, title, content, tags, outcome, request_id, desired_state_id, created_at FROM artifacts ${where} ORDER BY created_at DESC LIMIT ${limit}`
+    ).all(params) as Array<{ id: string; title: string; content: string; tags: string; outcome: string; request_id: string; desired_state_id: string; created_at: string }>;
 
     return rows.map(row => ({
       ...row,

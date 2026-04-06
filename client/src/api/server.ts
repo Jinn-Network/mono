@@ -46,9 +46,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   app.get('/artifacts/search', (c) => {
     const tags = c.req.query('tags')?.split(',').filter(Boolean);
     const outcome = c.req.query('outcome') ?? undefined;
+    const requestId = c.req.query('requestId') ?? undefined;
+    const desiredStateId = c.req.query('desiredStateId') ?? undefined;
+    const since = c.req.query('since') ?? undefined;
     const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!) : undefined;
 
-    const results = store.searchArtifacts({ tags, outcome, limit });
+    const results = store.searchArtifacts({ tags, outcome, requestId, desiredStateId, since, limit });
     return c.json({ results });
   });
 
