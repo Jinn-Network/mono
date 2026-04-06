@@ -16,6 +16,10 @@ import { serve } from '@hono/node-server';
 import { randomUUID } from 'node:crypto';
 import type { Store } from '../store/store.js';
 import { addX402Routes, type X402Config } from '../x402/handler.js';
+import {
+  verifyRequestWithErc8128,
+  InMemoryNonceStore,
+} from '../auth/erc8128.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -40,6 +44,31 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   if (config.x402) {
     addX402Routes(app, store, config.x402);
     console.log(`[api] x402 artifact serving enabled`);
+  }
+
+  // ERC-8128 auth middleware for POST routes
+  const authNonceStore = config.requireAuth ? new InMemoryNonceStore() : null;
+  let pendingBody: Record<string, unknown> | null = null;
+
+  if (config.requireAuth) {
+    app.use('/artifacts', async (c, next) => {
+      if (c.req.method !== 'POST') return next();
+
+      const body = await c.req.text();
+      const request = new Request(c.req.url, {
+        method: c.req.method,
+        headers: c.req.raw.headers,
+        body,
+      });
+
+      const result = await verifyRequestWithErc8128({ request, nonceStore: authNonceStore! });
+      if (!result.ok) {
+        return c.json({ error: 'Authentication required (ERC-8128)', reason: result.reason }, 401);
+      }
+
+      pendingBody = JSON.parse(body) as Record<string, unknown>;
+      return next();
+    });
   }
 
   // GET /artifacts/search
@@ -68,7 +97,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   // POST /artifacts
   app.post('/artifacts', async (c) => {
-    const body = await c.req.json<Record<string, unknown>>();
+    const body = pendingBody ?? await c.req.json<Record<string, unknown>>();
+    pendingBody = null;
 
     const id = (body.id as string) ?? randomUUID();
     const title = body.title as string;

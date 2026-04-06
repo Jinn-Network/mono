@@ -138,6 +138,11 @@ if (isEvaluation) {
 
   process.stderr.write(`[mock-agent] Delivery data: ${deliverySummary}\n`);
 
+  // Also search for restoration results via artifacts (proves search-based discovery works)
+  const searchJson = await callTool('search_artifacts', { tags: ['restoration-result'], limit: 5 });
+  const searchResults = JSON.parse(searchJson) as { results: unknown[] };
+  process.stderr.write(`[mock-agent] Found ${searchResults.results.length} restoration-result artifacts via search\n`);
+
   const verdict = {
     protocol: 'jinn-client/v1',
     type: 'evaluation-verdict',
@@ -169,6 +174,11 @@ if (isEvaluation) {
   const priorJson = await callTool('search_artifacts', { tags: ['restoration'], limit: 5 });
   const prior = JSON.parse(priorJson) as { results: unknown[] };
   process.stderr.write(`[mock-agent] Found ${prior.results.length} prior artifacts\n`);
+
+  // Try acquiring a remote artifact (proves the tool is wired)
+  const acquireJson = await callTool('acquire_artifact', { id: 'nonexistent-remote-artifact' });
+  const acquireResult = JSON.parse(acquireJson) as { error?: string };
+  process.stderr.write(`[mock-agent] acquire_artifact: ${acquireResult.error ?? 'unexpected success'}\n`);
 
   await callTool('report_progress', {
     message: `Restoring: ${state.description}`,

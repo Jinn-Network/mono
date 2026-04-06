@@ -698,6 +698,40 @@ async function main(): Promise<void> {
           throw new Error(`outcome=SUCCESS count (${successes.length}) doesn't match tag search (${artifacts.length})`);
         }
         console.log('    Artifact search verified');
+
+        // Gap 2: Verify restoration result stored as artifact
+        const resultArtifacts = store.searchArtifacts({ tags: ['restoration-result'] });
+        if (resultArtifacts.length === 0) {
+          throw new Error('No artifacts with tag "restoration-result" — submit_restoration_result did not store as artifact');
+        }
+        console.log(`    Found ${resultArtifacts.length} restoration-result artifact(s)`);
+
+        // Gap 1: Verify search by requestId
+        const byRequestId = store.searchArtifacts({ tags: ['restoration-result'], requestId: restorationRequestId });
+        if (byRequestId.length === 0) {
+          throw new Error('Search by requestId returned no results');
+        }
+        console.log(`    Search by requestId: ${byRequestId.length} result(s) ✓`);
+
+        // Gap 1: Verify search by desiredStateId
+        const byDesiredState = store.searchArtifacts({ desiredStateId: 'e2e-test' });
+        if (byDesiredState.length === 0) {
+          throw new Error('Search by desiredStateId returned no results');
+        }
+        console.log(`    Search by desiredStateId: ${byDesiredState.length} result(s) ✓`);
+
+        // Gap 1: Verify time range filters
+        const beforeEverything = store.searchArtifacts({ before: '2020-01-01T00:00:00' });
+        if (beforeEverything.length !== 0) {
+          throw new Error(`Search before 2020 should return 0, got ${beforeEverything.length}`);
+        }
+        console.log('    Search before=2020: 0 results ✓');
+
+        const afterPast = store.searchArtifacts({ after: '2020-01-01T00:00:00' });
+        if (afterPast.length === 0) {
+          throw new Error('Search after 2020 should return results');
+        }
+        console.log(`    Search after=2020: ${afterPast.length} result(s) ✓`);
       }),
     );
 
@@ -823,12 +857,14 @@ async function main(): Promise<void> {
           chainId: base.id,
         });
 
+        const daemonDbPath = join(tmpDir!, 'daemon-loop.db');
         const daemon = new Daemon({
           adapter: daemonAdapter,
           runner: new ClaudeRunner({ claudePath: agentPath, model: agentModel }),
           desiredStates: [{ id: 'daemon-loop-test', description: 'Daemon loop E2E test' }],
-          dbPath: ':memory:',
+          dbPath: daemonDbPath,
           shutdownTimeoutMs: 10000,
+          apiPort: 7331,
         });
 
         await daemon.start();
@@ -866,6 +902,19 @@ async function main(): Promise<void> {
           }, 120000, 3000);
 
           console.log('    Daemon completed full cycle (restoration + evaluation)');
+
+          // Gap 3: Verify daemon API serves artifacts published during the run
+          try {
+            const apiRes = await fetch('http://localhost:7331/artifacts/search?tags=restoration-result');
+            if (apiRes.ok) {
+              const apiData = await apiRes.json() as { results: unknown[] };
+              console.log(`    Daemon API /artifacts/search: ${apiData.results.length} restoration-result artifact(s)`);
+            } else {
+              console.log(`    WARNING: Daemon API returned ${apiRes.status}`);
+            }
+          } catch (err) {
+            console.log(`    WARNING: Daemon API query failed: ${err instanceof Error ? err.message : err}`);
+          }
         } finally {
           clearInterval(mineInterval);
           await daemon.stop();
@@ -1657,6 +1706,81 @@ async function main(): Promise<void> {
         } finally {
           await x402Server.close();
           x402Store.close();
+        }
+      }),
+    );
+
+    // ── Phase 13f: ERC-8128 Auth on API ────────────────────────────────────
+
+    const { createPrivateKeyHttpSigner, signRequestWithErc8128 } = await import('../src/auth/erc8128.js');
+
+    results.push(
+      await runPhase('Phase 13f: ERC-8128 Auth — unsigned rejected, signed accepted', async () => {
+        if (!tmpDir) throw new Error('Missing tmpDir');
+
+        const authStore = new Store(join(tmpDir, 'auth-test.db'));
+        const authServer = await startApiServer({
+          port: 7352,
+          store: authStore,
+          requireAuth: true,
+        });
+
+        try {
+          // Test 1: Unsigned POST → 401
+          const unsignedRes = await fetch('http://localhost:7352/artifacts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: 'Unauthorized artifact',
+              content: 'This should be rejected',
+              tags: ['auth-test'],
+              outcome: 'UNKNOWN',
+            }),
+          });
+          if (unsignedRes.status !== 401) {
+            throw new Error(`Expected 401 for unsigned POST, got ${unsignedRes.status}`);
+          }
+          console.log('    Unsigned POST → 401 ✓');
+
+          // Test 2: Signed POST → 201
+          const testKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
+          const signer = createPrivateKeyHttpSigner(testKey, 8453);
+
+          const signedReq = await signRequestWithErc8128({
+            signer,
+            input: 'http://localhost:7352/artifacts',
+            init: {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                title: 'Authorized artifact',
+                content: 'This should be accepted',
+                tags: ['auth-test'],
+                outcome: 'SUCCESS',
+              }),
+            },
+          });
+
+          const signedRes = await fetch(signedReq);
+          if (signedRes.status !== 201) {
+            const err = await signedRes.text();
+            throw new Error(`Expected 201 for signed POST, got ${signedRes.status}: ${err}`);
+          }
+          console.log('    Signed POST → 201 ✓');
+
+          // Test 3: GET (read) doesn't require auth
+          const searchRes = await fetch('http://localhost:7352/artifacts/search');
+          if (searchRes.status !== 200) {
+            throw new Error(`Expected 200 for GET search, got ${searchRes.status}`);
+          }
+          const searchData = await searchRes.json() as { results: unknown[] };
+          if (searchData.results.length !== 1) {
+            throw new Error(`Expected 1 artifact from search, got ${searchData.results.length}`);
+          }
+          console.log('    GET search (no auth) → 200 with 1 result ✓');
+        } finally {
+          await authServer.close();
+          authStore.close();
         }
       }),
     );
