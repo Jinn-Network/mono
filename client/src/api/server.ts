@@ -48,10 +48,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     const outcome = c.req.query('outcome') ?? undefined;
     const requestId = c.req.query('requestId') ?? undefined;
     const desiredStateId = c.req.query('desiredStateId') ?? undefined;
-    const since = c.req.query('since') ?? undefined;
+    const after = c.req.query('after') ?? undefined;
+    const before = c.req.query('before') ?? undefined;
     const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!) : undefined;
 
-    const results = store.searchArtifacts({ tags, outcome, requestId, desiredStateId, since, limit });
+    const results = store.searchArtifacts({ tags, outcome, requestId, desiredStateId, after, before, limit });
     return c.json({ results });
   });
 

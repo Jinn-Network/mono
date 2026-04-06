@@ -183,16 +183,17 @@ server.tool(
     outcome: z.enum(['SUCCESS', 'FAILURE', 'UNKNOWN']).optional().describe('Filter by outcome'),
     requestId: z.string().optional().describe('Filter by on-chain request ID'),
     desiredStateId: z.string().optional().describe('Filter by desired state ID'),
-    since: z.string().optional().describe('Only return artifacts created after this ISO timestamp'),
+    after: z.string().optional().describe('Only return artifacts created after this ISO timestamp'),
+    before: z.string().optional().describe('Only return artifacts created before this ISO timestamp'),
     limit: z.number().optional().describe('Max results (default 50)'),
   },
-  async ({ tags, outcome, requestId, desiredStateId, since, limit }) => {
+  async ({ tags, outcome, requestId, desiredStateId, after, before, limit }) => {
     if (!store) {
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ error: 'No store configured', results: [] }) }],
       };
     }
-    const results = store.searchArtifacts({ tags, outcome, requestId, desiredStateId, since, limit });
+    const results = store.searchArtifacts({ tags, outcome, requestId, desiredStateId, after, before, limit });
     return {
       content: [{ type: 'text' as const, text: JSON.stringify({ results }) }],
     };

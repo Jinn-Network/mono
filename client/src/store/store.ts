@@ -95,7 +95,8 @@ export class Store {
     outcome?: string;
     requestId?: string;
     desiredStateId?: string;
-    since?: string;  // ISO timestamp — only return artifacts created after this time
+    after?: string;   // ISO timestamp — only return artifacts created after this time
+    before?: string;  // ISO timestamp — only return artifacts created before this time
     limit?: number;
   }): Array<{ id: string; title: string; content: string; tags: string[]; outcome: string; request_id: string; desired_state_id: string; created_at: string }> {
     const conditions: string[] = [];
@@ -116,9 +117,14 @@ export class Store {
       params['desiredStateId'] = query.desiredStateId;
     }
 
-    if (query.since) {
-      conditions.push('created_at >= @since');
-      params['since'] = query.since;
+    if (query.after) {
+      conditions.push('created_at >= @after');
+      params['after'] = query.after;
+    }
+
+    if (query.before) {
+      conditions.push('created_at <= @before');
+      params['before'] = query.before;
     }
 
     if (query.tags && query.tags.length > 0) {
