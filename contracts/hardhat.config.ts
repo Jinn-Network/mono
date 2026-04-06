@@ -6,16 +6,21 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
+const optimizerSettings = {
+  optimizer: {
+    enabled: true,
+    runs: 1000000,
+  },
+  viaIR: true,
+};
+
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.25",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 1000000,
-      },
-      viaIR: true,
-    },
+    compilers: [
+      { version: "0.8.25", settings: optimizerSettings },
+      { version: "0.8.28", settings: optimizerSettings },
+      { version: "0.8.30", settings: optimizerSettings },
+    ],
   },
   paths: {
     sources: "./src",
