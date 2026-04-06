@@ -162,13 +162,10 @@ function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, m
 
     const agentEnv = buildAgentEnv();
     const child = spawn(claudePath, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: agentEnv,
       timeout: timeoutMs,
     });
-
-    // Close stdin immediately so Claude doesn't wait for input
-    child.stdin?.end();
 
     console.log(`[runner] Agent process spawned (pid: ${child.pid})`);
 
@@ -186,8 +183,8 @@ function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, m
       if (lines) console.error(`[runner:stderr] ${lines.slice(0, 200)}`);
     });
 
-    child.on('close', (code, signal) => {
-      console.log(`[runner] Agent process closed (code: ${code}, signal: ${signal})`);
+    child.on('exit', (code, signal) => {
+      console.log(`[runner] Agent process exited (code: ${code}, signal: ${signal})`);
       if (code === 0) {
         resolve();
       } else {
