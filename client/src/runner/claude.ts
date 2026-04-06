@@ -164,14 +164,20 @@ function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, m
       timeout: timeoutMs,
     });
 
+    let stdout = '';
     let stderr = '';
-    child.stdout?.on('data', () => { /* stdout ignored — results come via store */ });
+    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
 
     child.on('close', (code) => {
       if (code === 0) {
+        if (stdout.trim()) console.log(`[runner] Agent output: ${stdout.slice(0, 500)}`);
+        if (stderr.trim()) console.error(`[runner] Agent stderr: ${stderr.slice(0, 500)}`);
         resolve();
       } else {
+        console.error(`[runner] Agent failed (code ${code})`);
+        if (stdout.trim()) console.log(`[runner] Agent output: ${stdout.slice(0, 500)}`);
+        if (stderr.trim()) console.error(`[runner] Agent stderr: ${stderr.slice(0, 500)}`);
         reject(new Error(`Agent exited with code ${code}: ${stderr.slice(0, 500)}`));
       }
     });
