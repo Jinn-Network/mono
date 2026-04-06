@@ -385,6 +385,18 @@ async function normalizeForkTimestamp(
   );
 }
 
+// ── Crash guards ─────────────────────────────────────────────────────────────
+
+process.on('uncaughtException', (err) => {
+  console.error('[e2e] UNCAUGHT EXCEPTION:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[e2e] UNHANDLED REJECTION:', reason);
+  process.exit(1);
+});
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
