@@ -16,6 +16,7 @@
  * Usage: npx tsx scripts/e2e-validate.ts
  */
 
+import 'dotenv/config';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
