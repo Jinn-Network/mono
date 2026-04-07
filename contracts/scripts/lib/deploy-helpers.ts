@@ -66,7 +66,7 @@ export interface Phase1aDeployment {
 
 /** Configurable deployment parameters. */
 export interface DeployConfig {
-  /** Epoch length in seconds. OLAS uses 2592000 (30 days). Min is 10 days (864000 in TokenomicsConstants). */
+  /** Epoch length in seconds. OLAS uses 2592000 (30 days). Testnet min overridden to 1 hour. */
   epochLen: number;
   /** Retainer bytes32 for Dispenser. Identifies the protocol-owned retainer nominee. */
   retainer: string;
@@ -84,7 +84,7 @@ export interface DeployConfig {
 
 /** Sensible defaults for local/testnet deployment. */
 export const DEFAULT_DEPLOY_CONFIG: DeployConfig = {
-  epochLen: 864000, // 10 days — minimum allowed by TokenomicsConstants
+  epochLen: 7200, // 2 hours — testnet override (MIN_EPOCH_LENGTH reduced to 1 hour)
   retainer: ethers.zeroPadValue("0x01", 32), // arbitrary non-zero bytes32
   maxNumClaimingEpochs: 10,
   maxNumStakingTargets: 100,
