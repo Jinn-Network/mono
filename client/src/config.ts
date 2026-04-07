@@ -23,8 +23,19 @@ const DesiredStateSchema = z.object({
 });
 
 export const JinnConfigSchema = z.object({
-  /** Base RPC endpoint */
-  rpcUrl: z.string().default('https://mainnet.base.org'),
+  /**
+   * Network to connect to.
+   * 'mainnet' → Base mainnet (default, unchanged behaviour).
+   * 'testnet' → Base Sepolia (uses testnet contract addresses and RPC).
+   */
+  network: z.enum(['mainnet', 'testnet']).default('mainnet'),
+
+  /**
+   * Base RPC endpoint.
+   * Defaults to https://mainnet.base.org for 'mainnet' and
+   * https://sepolia.base.org for 'testnet'. Set explicitly to override.
+   */
+  rpcUrl: z.string().optional(),
 
   /** Earning state directory */
   earningDir: z.string().default(join(homedir(), '.jinn-client', 'earning')),
@@ -71,7 +82,10 @@ export const JinnConfigSchema = z.object({
   ipfsGatewayUrl: z.string().default('https://gateway.autonolas.tech'),
 });
 
-export type JinnConfig = z.infer<typeof JinnConfigSchema>;
+/** JinnConfig with rpcUrl guaranteed to be resolved (never undefined). */
+export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl'> & {
+  rpcUrl: string;
+};
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -105,6 +119,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   const env = process.env;
   const merged: Record<string, unknown> = { ...fileValues };
 
+  if (env['JINN_NETWORK'])           merged.network = env['JINN_NETWORK'];
   if (env['BASE_RPC_URL'])           merged.rpcUrl = env['BASE_RPC_URL'];
   if (env['JINN_RPC_URL'])           merged.rpcUrl = env['JINN_RPC_URL'];
   if (env['JINN_EARNING_DIR'])       merged.earningDir = env['JINN_EARNING_DIR'];
@@ -139,7 +154,16 @@ export function loadConfig(configPath?: string): JinnConfig {
     process.exit(1);
   }
 
-  return result.data;
+  // 4. Resolve rpcUrl default based on network (if not explicitly set)
+  const parsed = result.data;
+  const defaultRpcUrl = parsed.network === 'testnet'
+    ? 'https://sepolia.base.org'
+    : 'https://mainnet.base.org';
+
+  return {
+    ...parsed,
+    rpcUrl: parsed.rpcUrl ?? defaultRpcUrl,
+  };
 }
 
 /**

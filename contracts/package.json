@@ -5,13 +5,16 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy:claim-registry": "hardhat run scripts/deploy-claim-registry.ts"
+    "deploy:claim-registry": "hardhat run scripts/deploy-claim-registry.ts",
+    "validate:phase1a": "hardhat run scripts/validate-phase1a.ts"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "hardhat": "^2.22.0"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
+    "@prb/math": "^4.0.2",
     "dotenv": "^17.3.1"
   }
 }

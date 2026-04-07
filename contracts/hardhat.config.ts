@@ -6,15 +6,40 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
+const optimizerSettings = {
+  optimizer: {
+    enabled: true,
+    runs: 1000000,
+  },
+  viaIR: true,
+};
+
+// Tokenomics and Dispenser exceed the 24KB contract size limit with high
+// optimizer runs. Use fewer runs to reduce bytecode size.
+const largeContractSettings = {
+  optimizer: {
+    enabled: true,
+    runs: 200,
+  },
+  viaIR: true,
+};
+
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.25",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 1000000,
+    compilers: [
+      { version: "0.8.25", settings: optimizerSettings },
+      { version: "0.8.28", settings: optimizerSettings },
+      { version: "0.8.30", settings: optimizerSettings },
+    ],
+    overrides: {
+      "src/vendor/tokenomics/Tokenomics.sol": {
+        version: "0.8.30",
+        settings: largeContractSettings,
       },
-      viaIR: true,
+      "src/vendor/tokenomics/Dispenser.sol": {
+        version: "0.8.25",
+        settings: largeContractSettings,
+      },
     },
   },
   paths: {
@@ -26,6 +51,13 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
       chainId: 8453,
+    },
+    sepolia: {
+      url: process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
+      chainId: 11155111,
+      accounts: process.env.DEPLOYER_PRIVATE_KEY
+        ? [process.env.DEPLOYER_PRIVATE_KEY]
+        : [],
     },
     baseSepolia: {
       url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",

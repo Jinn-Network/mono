@@ -139,11 +139,48 @@ const BASE_CONFIG: ChainConfig = {
   minEoaGasEth: 5_000_000_000_000_000n, // 0.005 ETH
 };
 
-export function getChainConfig(chain: 'base'): ChainConfig {
-  if (chain !== 'base') {
-    throw new Error(`Unsupported chain: ${chain}. V1 only supports 'base'.`);
+const BASE_SEPOLIA_CONFIG: ChainConfig = {
+  chainId: 84532,
+  rpcUrl: 'https://sepolia.base.org',
+
+  // Autonolas protocol contracts (Base Sepolia) — placeholder, fill after deployment
+  serviceRegistry: '0x0000000000000000000000000000000000000000',
+  serviceRegistryTokenUtility: '0x0000000000000000000000000000000000000000',
+  serviceManager: '0x0000000000000000000000000000000000000000',
+  gnosisSafeSameAddressMultisig: '0x0000000000000000000000000000000000000000',
+
+  // Tokens — placeholder
+  olasToken: '0x0000000000000000000000000000000000000000',
+
+  // Mech marketplace — placeholder
+  mechMarketplace: '0x0000000000000000000000000000000000000000',
+  mechFactory: '0x0000000000000000000000000000000000000000',
+  mechRequestPrice: 99n,
+
+  // Jinn staking — placeholder
+  stakingContract: '0x0000000000000000000000000000000000000000',
+
+  // Service package — placeholder
+  agentId: 1,
+  serviceHash: 'bafybeiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  serviceNft: 'bafybeiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+
+  // Bond: 5000 OLAS (same as mainnet)
+  bondAmount: 5000n * 10n ** 18n,
+
+  // Conservative gas estimate
+  minEoaGasEth: 5_000_000_000_000_000n, // 0.005 ETH
+};
+
+export function getChainConfig(chain: 'base' | 'base-sepolia'): ChainConfig {
+  switch (chain) {
+    case 'base':
+      return { ...BASE_CONFIG };
+    case 'base-sepolia':
+      return { ...BASE_SEPOLIA_CONFIG };
+    default:
+      throw new Error(`Unsupported chain: ${chain}. Supported: 'base', 'base-sepolia'.`);
   }
-  return { ...BASE_CONFIG };
 }
 
 // ---------------------------------------------------------------------------
