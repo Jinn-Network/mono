@@ -1,7 +1,7 @@
 # Real Agent E2E: Process Exits Prematurely During Phase 5
 
 **Date**: 2026-04-06
-**Status**: Open
+**Status**: Root cause identified, fix applied
 **Severity**: Medium — mock agent e2e works (23/23), only real Claude agent affected
 
 ## Summary
@@ -40,13 +40,31 @@ client %   <-- process exits here, no error, no output
 4. **Logging**: Added spawn PID, args, streaming stdout/stderr — confirms spawn succeeds then parent dies
 5. **Isolated spawn test**: Created `/tmp/test-spawn.ts` that spawns Claude with a `setInterval` keepalive — works perfectly. Claude runs, outputs, exits cleanly. Both exit and close events fire.
 
-## Likely Root Cause
+## Root Cause (2026-04-06 investigation)
+
+**Two bugs identified, sharing a common root cause:**
+
+### Bug A: EADDRINUSE crash (seen in `e2e-test-output.log`)
+
+`startApiServer()` wraps `@hono/node-server`'s `serve()` in a Promise that only resolves in the success callback — **it never rejects on error**, and the underlying HTTP server has **no `error` event handler**. When port 7339 is occupied (from a previous crashed e2e run), the server emits an unhandled `error` event, which Node.js throws as an uncaught exception, crashing the process.
+
+### Bug B: Silent exit during real agent (original symptom)
+
+The same missing error handler means ANY server error during Phase 5 (socket reset, connection error from Claude's MCP subprocess hitting the API server, etc.) would crash the process via unhandled `error` event — silently if the error propagation doesn't trigger the `uncaughtException` handler in `tsx`.
+
+### Fixes applied
+
+1. **`client/src/api/server.ts`**: Added `server.on('error')` handler + Promise rejection, and resolved actual bound port from `server.address()` (enabling port 0)
+2. **`client/scripts/e2e-validate.ts`**: Use port 0 (OS-assigned) instead of hardcoded 7339 to avoid EADDRINUSE entirely
+3. **`client/scripts/e2e-validate.ts`**: Added `process.on('beforeExit')` and `process.on('exit')` diagnostics to distinguish event-loop drain from explicit exit in any future occurrences
+
+## Previous Likely Root Cause (superseded)
 
 Something in the e2e test's execution context causes the Node event loop to drain after the spawn. Candidates:
 
 1. **The `runPhase` try/catch** may be resolving/rejecting the Phase 5 promise without waiting for `processOne()` to complete
 2. **Anvil process** — if Anvil dies, it might cascade and cause the parent to exit (Anvil is spawned with `detached: false`)
-3. **API server** (`startApiServer` on port 7339) — Hono's `serve()` might close or its keepalive might end
+3. **API server** (`startApiServer` on port 7339) — Hono's `serve()` might close or its keepalive might end ← **CONFIRMED: no error handler**
 4. **`process.exit()` at line 2532** — if the main function's flow somehow bypasses the `await` on Phase 5
 
 ## How to Debug

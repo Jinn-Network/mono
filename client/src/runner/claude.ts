@@ -154,7 +154,7 @@ function buildAgentEnv(): Record<string, string> {
 
 function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, model?: string, timeoutMs?: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = ['-p', prompt, '--mcp-config', mcpConfigPath];
+    const args = ['-p', prompt, '--mcp-config', mcpConfigPath, '--strict-mcp-config'];
     if (model) args.push('--model', model);
     args.push('--allowedTools', 'mcp__jinn-client__*');
 

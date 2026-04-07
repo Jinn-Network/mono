@@ -397,6 +397,20 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1);
 });
 
+// Diagnostic: detect whether premature exits are from event-loop drain or explicit process.exit()
+let exitExpected = false;
+process.on('beforeExit', (code) => {
+  if (!exitExpected) {
+    console.error(`[e2e] UNEXPECTED beforeExit (code=${code}) — event loop drained prematurely`);
+    console.error('[e2e] Stack:', new Error().stack);
+  }
+});
+process.on('exit', (code) => {
+  if (!exitExpected) {
+    console.error(`[e2e] UNEXPECTED exit (code=${code})`);
+  }
+});
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -702,9 +716,10 @@ async function main(): Promise<void> {
     const store = new Store(storePath);
 
     // Start API server so submit_restoration_result can POST artifacts via DAEMON_API_URL
+    // Use port 0 to let the OS assign a free port, avoiding EADDRINUSE from stale e2e runs.
     const { startApiServer } = await import('../src/api/server.js');
-    restorerApiServer = await startApiServer({ port: 7339, store });
-    const daemonApiUrl = 'http://127.0.0.1:7339';
+    restorerApiServer = await startApiServer({ port: 0, store });
+    const daemonApiUrl = `http://127.0.0.1:${restorerApiServer.port}`;
 
     const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
     const restorer = new RestorerLoop(adapter!, runner, store, '/tmp', agentTimeoutMs, daemonApiUrl);
@@ -770,7 +785,7 @@ async function main(): Promise<void> {
         try {
           delivery = await Promise.race([
             deliveryIter.next(),
-            sleep(20000).then(() => { throw new Error('watchForDeliveries timed out after 20s'); }),
+            sleep(USE_REAL_AGENT ? 120000 : 20000).then(() => { throw new Error(`watchForDeliveries timed out after ${USE_REAL_AGENT ? 120 : 20}s`); }),
           ]);
         } finally {
           clearInterval(miningInterval);
@@ -879,7 +894,7 @@ async function main(): Promise<void> {
         try {
           delivery = await Promise.race([
             deliveryIter.next(),
-            sleep(20000).then(() => { throw new Error('watchForDeliveries timed out after 20s'); }),
+            sleep(USE_REAL_AGENT ? 120000 : 20000).then(() => { throw new Error(`watchForDeliveries timed out after ${USE_REAL_AGENT ? 120 : 20}s`); }),
           ]);
         } finally {
           clearInterval(miningInterval);
@@ -1352,7 +1367,7 @@ async function main(): Promise<void> {
         try {
           const processed = await Promise.race([
             restorerB.processOne(),
-            sleep(60000).then(() => { throw new Error('Operator B restorer timed out after 60s'); }),
+            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`Operator B restorer timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
           ]);
           if (!processed) throw new Error('Operator B processOne returned false');
         } finally {
@@ -1383,18 +1398,21 @@ async function main(): Promise<void> {
         const crossDeliveryIter = creatorAdapter.watchForDeliveries()[Symbol.asyncIterator]();
         const crossDelivery = await Promise.race([
           crossDeliveryIter.next().then(r => r.value),
-          sleep(30000).then(() => { throw new Error('Cross-operator watchForDeliveries timed out'); }),
+          sleep(USE_REAL_AGENT ? 120000 : 30000).then(() => { throw new Error('Cross-operator watchForDeliveries timed out'); }),
         ]);
         console.log(`    A claimed restoration, type: ${crossDelivery?.desiredState?.type}`);
 
         // B delivers evaluation
-        await restorerB.processOne();
+        await Promise.race([
+          restorerB.processOne(),
+          sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`Operator B eval processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
+        ]);
         console.log('    B delivered evaluation');
 
         // A claims evaluation
         const crossEvalDelivery = await Promise.race([
           crossDeliveryIter.next().then(r => r.value),
-          sleep(30000).then(() => { throw new Error('Cross-operator eval watchForDeliveries timed out'); }),
+          sleep(USE_REAL_AGENT ? 120000 : 30000).then(() => { throw new Error('Cross-operator eval watchForDeliveries timed out'); }),
         ]);
         clearInterval(miningInterval2);
         console.log(`    A claimed evaluation, type: ${crossEvalDelivery?.desiredState?.type}`);
@@ -2529,10 +2547,12 @@ async function main(): Promise<void> {
 
   console.log(`\n  ${passed} passed, ${failed} failed (${totalMs}ms total)\n`);
 
+  exitExpected = true;
   process.exit(failed > 0 ? 1 : 0);
 }
 
 main().catch((err) => {
   console.error('Fatal error:', err);
+  exitExpected = true;
   process.exit(1);
 });

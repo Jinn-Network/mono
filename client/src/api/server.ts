@@ -124,17 +124,25 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     return c.json({ id, published: true }, 201);
   });
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = serve({
       fetch: app.fetch,
       port: config.port,
       hostname: '0.0.0.0',
     }, () => {
-      console.log(`[api] Listening on port ${config.port}`);
+      const addr = server.address();
+      const actualPort = (typeof addr === 'object' && addr) ? addr.port : config.port;
+      console.log(`[api] Listening on port ${actualPort}`);
       resolve({
-        port: config.port,
+        port: actualPort,
         close: () => new Promise<void>((res) => server.close(() => res())),
       });
+    });
+
+    // Handle server errors (EADDRINUSE, socket errors, etc.) so they don't
+    // crash the process as unhandled 'error' events on the EventEmitter.
+    server.on('error', (err) => {
+      reject(err);
     });
   });
 }
