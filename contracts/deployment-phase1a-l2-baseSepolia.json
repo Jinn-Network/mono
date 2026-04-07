@@ -1,21 +1,31 @@
 {
   "network": "baseSepolia",
   "chainId": 84532,
-  "deployer": "0x443ad8619a9aa37d08c5ef7846B3B0Cf66efffE7",
-  "deployedAt": "2026-04-07T03:44:48.487Z",
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-07T16:34:56.942Z",
   "config": {
+    "jinnTokenSource": "external",
+    "serviceRegistrySource": "external",
+    "serviceRegistryTokenUtilitySource": "external",
+    "proxyHash": "0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000",
+    "proxyHashSource": "external",
     "livenessRatio": "1000000000000000",
     "maxNumServices": 100,
     "rewardsPerSecond": "100000000000000",
     "minStakingDeposit": "10000000000000000000",
+    "minNumStakingPeriods": 3,
+    "maxNumInactivityPeriods": 2,
     "livenessPeriod": 86400,
-    "timeForEmissions": 2592000
+    "timeForEmissions": 2592000,
+    "numAgentInstances": 1
   },
   "contracts": {
-    "jinnToken": "0x711e893FecaD55B9734e1d0105e8f488Ee191da6",
-    "serviceRegistry": "0xDcd7350e52B2773A95038fd5981169187f0cc7a3",
-    "serviceRegistryTokenUtility": "0x2F19D1A8c19BaeAdF2587738adc5F730EABcaaF4",
-    "activityChecker": "0x54aaaa0e48B00A2e92492CcF2fEe612506F73291",
-    "stakingToken": "0xEe9bdCdfEc770Ee7dAD3d7E0Cf7919301DFA31c7"
+    "jinnToken": "0xB1341d11112fE68AF2A4b41E6decA64DDb2720fA",
+    "serviceRegistry": "0x31D3202d8744B16A120117A053459DDFAE93c855",
+    "serviceRegistryTokenUtility": "0xeB49bE5DF00F74bd240DE4535DDe6Bc89CEfb994",
+    "activityChecker": "0x6a10Ac40F7c73B340584fAEC9A0A4D86935AF41d",
+    "stakingFactory": "0xc69e06C2BF3d2e5B546Db5b75FE549750746bB83",
+    "stakingImplementation": "0x50Aab4ab6A3663D5B4252e52A278a6F9d8c4d2ca",
+    "stakingToken": "0x06a400Ea71861d44fE86de568A905e036C7A1065"
   }
 }

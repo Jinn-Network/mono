@@ -1,0 +1,38 @@
+{
+  "networks": {
+    "l1": {
+      "name": "sepolia",
+      "chainId": 11155111
+    },
+    "l2": {
+      "name": "baseSepolia",
+      "chainId": 84532
+    }
+  },
+  "deployedAt": "2026-04-07T16:53:02.165Z",
+  "deployers": {
+    "l1": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+    "l2": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+    "mode": "remote"
+  },
+  "artifacts": {
+    "l1": "deployment-phase1a-sepolia.json",
+    "l2": "deployment-phase1a-l2-baseSepolia.json",
+    "output": "deployment-phase1a-bridge-sepolia-baseSepolia.json"
+  },
+  "config": {
+    "jinnL1": "0x95A0d0E40Ea5F85968dF9eF43e9E4a37D6C8b8a0",
+    "jinnL2": "0xB1341d11112fE68AF2A4b41E6decA64DDb2720fA",
+    "dispenserL1": "0xB9485266348C49918842BF7152dbE76d36bb9A3D",
+    "stakingFactoryL2": "0xc69e06C2BF3d2e5B546Db5b75FE549750746bB83",
+    "l1TokenRelayer": "0xfd0Bf71F60660E2f608ed56e1659C450eB113120",
+    "l1MessageRelayer": "0xC34855F4De64F1840e5686e64278da901e261f20",
+    "l2MessageRelayer": "0x4200000000000000000000000000000000000007",
+    "l2ChainId": 84532,
+    "l1ChainId": 11155111
+  },
+  "contracts": {
+    "depositProcessorL1": "0x5472c1f5482F5e93740E3D3F00f46121A0f5365E",
+    "targetDispenserL2": "0x6Fb33bFC2c273DEf54a1D28Ca168faAD2d445261"
+  }
+}
