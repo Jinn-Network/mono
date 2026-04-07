@@ -327,6 +327,9 @@ export class EarningBootstrapper {
       },
     ]);
 
+    // Wait for the transaction to be mined before parsing receipt
+    await this.provider.waitForTransaction(result.hash, 1, 30000);
+
     const serviceId = await this.parseServiceIdFromTx(result.hash);
     if (serviceId === null) {
       throw new Error(`CreateService event not found in tx ${result.hash}`);
@@ -634,7 +637,6 @@ export class EarningBootstrapper {
       return null;
     }
 
-    // Log count for debugging
     if (receipt.logs.length === 0) {
       console.error(`[earning-bootstrap] Warning: receipt has no logs after all retries for tx ${txHash}`);
     }

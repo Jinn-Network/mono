@@ -238,6 +238,14 @@ export const SERVICE_MANAGER_ABI = [
 
 export const SERVICE_REGISTRY_L2_ABI = [
   {
+    type: 'event',
+    name: 'CreateService',
+    inputs: [
+      { name: 'serviceId', type: 'uint256', indexed: true },
+      { name: 'configHash', type: 'bytes32', indexed: false },
+    ],
+  },
+  {
     inputs: [{ name: 'serviceId', type: 'uint256' }],
     name: 'getService',
     outputs: [
