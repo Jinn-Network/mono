@@ -97,7 +97,8 @@ async function main() {
   console.log("── Treasury ───────────────────────────────────────────────");
   const paused = await treasury.paused();
   const ethOwned = await treasury.ETHOwned();
-  console.log(`  Paused:    ${paused === 0n ? "No ✓" : "YES ✗"}`);
+  // OLAS inverted logic: paused=1 means unpaused, paused=2 means paused
+  console.log(`  Paused:    ${paused === 1n ? "No ✓" : "YES ✗ (value=" + paused + ")"}`);
   console.log(`  ETH Owned: ${ethers.formatEther(ethOwned)} ETH`);
   console.log();
 
@@ -171,7 +172,7 @@ async function main() {
   console.log(`  Treasury:      ${TREASURY}`);
   console.log(`  Dispenser:     ${DISPENSER}`);
   console.log(`  Epoch:         ${checkpointReady ? "ADVANCED ✓" : `${epochCounter} (waiting)`}`);
-  console.log(`  Health:        ${paused === 0n ? "OK ✓" : "PAUSED ✗"}`);
+  console.log(`  Health:        ${paused === 1n ? "OK ✓" : "PAUSED ✗"}`);
   console.log();
 }
 
