@@ -1,0 +1,21 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x443ad8619a9aa37d08c5ef7846B3B0Cf66efffE7",
+  "deployedAt": "2026-04-07T03:22:46.031Z",
+  "config": {
+    "livenessRatio": "1000000000000000",
+    "maxNumServices": 100,
+    "rewardsPerSecond": "100000000000000",
+    "minStakingDeposit": "10000000000000000000",
+    "livenessPeriod": 86400,
+    "timeForEmissions": 2592000
+  },
+  "contracts": {
+    "jinnToken": "0x7E507cdc10fDb19FE4D9bD00fd925A3508A69d5f",
+    "serviceRegistry": "0x9fC4a5A35E3db21Be2CC2f6268BCe8b7A41e619c",
+    "serviceRegistryTokenUtility": "0x5dE25A73F2fE1823041A8fd2E589d2Bc003C0496",
+    "activityChecker": "0xa32fA1852E23371bF14b3c02Ba82462c8D8e249f",
+    "stakingToken": "0xE4FCBbc488fF2A51F52ba2A1A6FE52EbB6cdfa39"
+  }
+}

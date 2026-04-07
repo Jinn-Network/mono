@@ -1,0 +1,26 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployer": "0x443ad8619a9aa37d08c5ef7846B3B0Cf66efffE7",
+  "deployedAt": "2026-04-07T03:22:13.582Z",
+  "config": {
+    "epochLen": 864000,
+    "maxNumClaimingEpochs": 10,
+    "maxNumStakingTargets": 100,
+    "defaultMinStakingWeight": 100,
+    "defaultMaxStakingIncentive": "100000000000000000000"
+  },
+  "contracts": {
+    "JINN": "0x2F19D1A8c19BaeAdF2587738adc5F730EABcaaF4",
+    "veOLAS": "0x54aaaa0e48B00A2e92492CcF2fEe612506F73291",
+    "Tokenomics": "0x84d2ECe8F22d6C96e611863E4a039D36ea829EA5",
+    "Treasury": "0x0240FA3E18CD56a398e7dbe1bA5b69245D330A6D",
+    "Depository": "0x5137E87Fe3D00459A4Bdf1233a2345cab827b0Ec",
+    "Dispenser": "0xE571dA5eB182215B9ED18e2e3f893329d37398Fe",
+    "GenericBondCalculator": "0xa69832b8dCC3701544eF658493e218dab2015440",
+    "VoteWeighting": "0x358abE986d10fa1320460Ae1B71f3f481189dBBe",
+    "ComponentRegistry (stub)": "0xEe9bdCdfEc770Ee7dAD3d7E0Cf7919301DFA31c7",
+    "AgentRegistry (stub)": "0x3B15D75e5D219faa90839b673ba59f5A039BDd5F",
+    "ServiceRegistry (stub)": "0x9AC224ED17863E773bc3B166875c92537aa4De17"
+  }
+}
