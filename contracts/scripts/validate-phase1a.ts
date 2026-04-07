@@ -64,10 +64,45 @@ async function main() {
     // (we just capture the result — console.log in the helper still fires but
     //  that's acceptable for a validation script)
     l2 = await deployL2Stack(deployer);
-    const contractCount = Object.keys(l2).length;
+    const contractCount = [
+      l2.jinnToken,
+      l2.serviceRegistry,
+      l2.serviceRegistryTokenUtility,
+      l2.activityChecker,
+      l2.stakingFactory,
+      l2.stakingImplementation,
+      l2.stakingToken,
+    ].length;
     pass("", `(${contractCount} contracts)`);
   } catch (e) {
     fail("Step 2: Deploying L2 stack", e);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 2b: Verify the staking proxy is factory-backed
+  // -------------------------------------------------------------------------
+  try {
+    process.stdout.write("Step 2b: Verifying proxy...       ");
+    const proxy = await ethers.getContractAt("StakingProxy", l2.stakingToken, deployer);
+    const factory = await ethers.getContractAt("StakingFactory", l2.stakingFactory, deployer);
+
+    const [implementation, verified] = await Promise.all([
+      proxy.getImplementation() as Promise<string>,
+      factory.verifyInstance(l2.stakingToken) as Promise<boolean>,
+    ]);
+
+    if (implementation.toLowerCase() !== l2.stakingImplementation.toLowerCase()) {
+      throw new Error(
+        `Expected proxy implementation ${l2.stakingImplementation}, got ${implementation}`,
+      );
+    }
+    if (!verified) {
+      throw new Error("Factory does not recognize the deployed staking proxy");
+    }
+
+    pass("", "factory-backed proxy verified");
+  } catch (e) {
+    fail("Step 2b: Verifying proxy", e);
   }
 
   // -------------------------------------------------------------------------
@@ -236,9 +271,11 @@ async function main() {
   console.log();
 
   const l2Addrs: Record<string, string> = {
-    ActivityChecker: l2.activityChecker,
-    StakingToken:    l2.stakingToken,
-    ServiceRegistry: l2.serviceRegistry,
+    ActivityChecker:      l2.activityChecker,
+    StakingFactory:       l2.stakingFactory,
+    StakingImplementation:l2.stakingImplementation,
+    StakingToken:         l2.stakingToken,
+    ServiceRegistry:      l2.serviceRegistry,
   };
   for (const [name, addr] of Object.entries(l2Addrs)) {
     console.log(`  ${name.padEnd(20)} ${addr}`);

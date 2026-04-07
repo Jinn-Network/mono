@@ -1,40 +1,46 @@
 /**
  * Deploy the Jinn Phase 1a L2 staking infrastructure.
  *
- * This deploys the L2 side of the staking system: the StakingToken contract
- * that holds staked JINN and distributes rewards based on restoration activity.
+ * The live/testnet path must use an existing bridge-compatible L2 JINN token.
+ * Local runs may still deploy a throwaway TestERC20 for isolated validation.
  *
  * Components deployed:
- *   1. TestERC20 (JINN stand-in) — or accepts an existing token address
- *   2. ServiceRegistryStub — minimal service registry for testnet
- *   3. ServiceRegistryTokenUtilityStub — token deposit lookups
- *   4. RestorationActivityChecker — activity tracking for staking liveness
- *   5. StakingToken — initialized with JINN as the staking token
- *
- * Usage:
- *   npx hardhat run scripts/deploy-phase1a-l2.ts --network hardhat       # local
- *   npx hardhat run scripts/deploy-phase1a-l2.ts --network baseSepolia   # testnet
- *
- * Env vars:
- *   DEPLOYER_PRIVATE_KEY  - deployer wallet private key (required for live networks)
- *   JINN_TOKEN_ADDRESS    - address of bridged JINN token (optional; deploys test token if absent)
- *   LIVENESS_RATIO        - activity liveness ratio in 1e18 format (default: 1e15 = ~1 activity/1000s)
- *
- * Outputs:
- *   deployment-phase1a-l2-{network}.json  - JSON file with all contract addresses
+ *   1. Existing bridge-compatible JINN token or local TestERC20
+ *   2. ServiceRegistryStub
+ *   3. ServiceRegistryTokenUtilityStub
+ *   4. RestorationActivityChecker
+ *   5. StakingFactory
+ *   6. StakingToken implementation
+ *   7. Factory-created StakingProxy instance initialized via the implementation
  */
 
 import { ethers } from "hardhat";
+import type { ContractTransactionReceipt, Log, Signer, TransactionRequest } from "ethers";
+import { JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
+type JinnTokenSource = "external" | "test";
+type ServiceRegistrySource = "external" | "stub";
+type ProxyHashSource = "external" | "placeholder";
 
 interface L2DeployConfig {
-  /** Existing JINN token address, or empty to deploy a test token. */
+  /** Existing JINN token address, or empty to deploy a local test token. */
   jinnTokenAddress?: string;
+  /** Declares whether the token was supplied externally or deployed for local-only use. */
+  jinnTokenSource: JinnTokenSource;
+  /** Existing OLAS ServiceRegistryL2 address for live/testnet staking. */
+  serviceRegistryAddress?: string;
+  /** Records whether the service registry came from OLAS infrastructure or a local stub. */
+  serviceRegistrySource: ServiceRegistrySource;
+  /** Existing ServiceRegistryTokenUtility address for live/testnet staking. */
+  serviceRegistryTokenUtilityAddress?: string;
+  /** Records whether the token utility came from OLAS infrastructure or a local stub. */
+  serviceRegistryTokenUtilitySource: ServiceRegistrySource;
+  /** Safe proxy bytecode hash required by the staking contract. */
+  proxyHash: string;
+  /** Records whether the proxy hash is live-safe or a local placeholder. */
+  proxyHashSource: ProxyHashSource;
   /** Liveness ratio (1e18 format). Default: 1e15 (~1 activity per 1000 seconds). */
   livenessRatio: bigint;
   /** Max number of services that can stake simultaneously. */
@@ -55,94 +61,329 @@ interface L2DeployConfig {
   numAgentInstances: number;
 }
 
-const DEFAULT_L2_CONFIG: L2DeployConfig = {
-  livenessRatio: ethers.parseEther("0.001"), // 1e15
+const BASE_L2_CONFIG = {
+  livenessRatio: ethers.parseEther("0.001"),
   maxNumServices: 100,
-  rewardsPerSecond: ethers.parseEther("0.0001"), // ~8.64 JINN/day
-  minStakingDeposit: ethers.parseEther("10"), // 10 JINN minimum
+  rewardsPerSecond: ethers.parseEther("0.0001"),
+  minStakingDeposit: ethers.parseEther("10"),
   minNumStakingPeriods: 3,
   maxNumInactivityPeriods: 2,
-  livenessPeriod: 86400, // 1 day
-  timeForEmissions: 2592000, // 30 days
+  livenessPeriod: 86400,
+  timeForEmissions: 2592000,
   numAgentInstances: 1,
+} as const;
+
+export const DEFAULT_L2_CONFIG: L2DeployConfig = {
+  ...BASE_L2_CONFIG,
+  jinnTokenSource: "test",
+  serviceRegistrySource: "stub",
+  serviceRegistryTokenUtilitySource: "stub",
+  proxyHash: ethers.id("proxy-hash-placeholder"),
+  proxyHashSource: "placeholder",
 };
 
-// ---------------------------------------------------------------------------
-// Deployment types
-// ---------------------------------------------------------------------------
+const LOCAL_L2_NETWORKS = new Set(["hardhat", "localhost"]);
 
 export interface L2Deployment {
   jinnToken: string;
+  jinnTokenSource: JinnTokenSource;
   serviceRegistry: string;
   serviceRegistryTokenUtility: string;
   activityChecker: string;
+  stakingFactory: string;
+  stakingImplementation: string;
   stakingToken: string;
 }
 
-// ---------------------------------------------------------------------------
-// Deploy function (exported for tests)
-// ---------------------------------------------------------------------------
+function isLocalL2Network(networkName: string): boolean {
+  return LOCAL_L2_NETWORKS.has(networkName);
+}
+
+/**
+ * Hardhat's remote-network signer can reuse the same tx nonce across back-to-back
+ * deploys on some JSON-RPC providers. Use a plain ethers Wallet for live Base Sepolia.
+ */
+async function getL2DeployerSigner(networkName: string): Promise<Signer> {
+  if (isLocalL2Network(networkName)) {
+    const [deployer] = await ethers.getSigners();
+    return deployer;
+  }
+
+  const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error("DEPLOYER_PRIVATE_KEY is required for live L2 deployments.");
+  }
+
+  const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org";
+  return new Wallet(privateKey, new JsonRpcProvider(rpcUrl));
+}
+
+/** Fee caps only — per-step gas limits avoid balance >= hugeGas*fee on small deploys. */
+export function liveL2TxOverrides(): TransactionRequest {
+  const maxFeeGwei = process.env.BASE_SEPOLIA_MAX_FEE_GWEI ?? "2";
+  const prioGwei = process.env.BASE_SEPOLIA_PRIORITY_FEE_GWEI ?? "1";
+  return {
+    maxFeePerGas: ethers.parseUnits(maxFeeGwei, "gwei"),
+    maxPriorityFeePerGas: ethers.parseUnits(prioGwei, "gwei"),
+  };
+}
+
+function l2DeployGasLimit(kind: "standard" | "stakingTokenImpl" | "factoryCreate"): bigint {
+  if (kind === "stakingTokenImpl") {
+    const raw = process.env.BASE_SEPOLIA_STAKING_TOKEN_DEPLOY_GAS?.trim();
+    return raw ? BigInt(raw) : 7_500_000n;
+  }
+  if (kind === "factoryCreate") {
+    const raw = process.env.BASE_SEPOLIA_CREATE_INSTANCE_GAS?.trim();
+    return raw ? BigInt(raw) : 5_000_000n;
+  }
+  const raw = process.env.BASE_SEPOLIA_DEPLOY_GAS_LIMIT?.trim();
+  // Keep default modest: intrinsic check is gasLimit * maxFeePerGas (full sequence still needs ~0.05+ ETH at ~5–7 gwei base).
+  return raw ? BigInt(raw) : 2_500_000n;
+}
+
+function withGas(tx: TransactionRequest, kind: "standard" | "stakingTokenImpl" | "factoryCreate"): TransactionRequest {
+  return { ...tx, gasLimit: l2DeployGasLimit(kind) };
+}
+
+function parseOptionalBigInt(value: string | undefined): bigint | undefined {
+  if (!value || value.trim().length === 0) {
+    return undefined;
+  }
+
+  return BigInt(value);
+}
+
+function requireLiveAddress(
+  env: Record<string, string | undefined>,
+  key: string,
+): string {
+  const value = env[key]?.trim();
+  if (!value) {
+    throw new Error(`${key} is required for live/testnet L2 deployments.`);
+  }
+  if (!ethers.isAddress(value)) {
+    throw new Error(`${key} must be a valid address. Received: ${value}`);
+  }
+  return value;
+}
+
+function requireLiveProxyHash(
+  env: Record<string, string | undefined>,
+  key: string,
+): string {
+  const value = env[key]?.trim();
+  if (!value) {
+    throw new Error(`${key} is required for live/testnet L2 deployments.`);
+  }
+  if (!ethers.isHexString(value, 32)) {
+    throw new Error(`${key} must be a 32-byte hex string. Received: ${value}`);
+  }
+  return value;
+}
+
+function parseInstanceCreatedAddress(
+  receipt: ContractTransactionReceipt | null,
+  stakingFactory: any,
+): string {
+  if (!receipt) {
+    throw new Error("StakingFactory.createStakingInstance() did not return a transaction receipt.");
+  }
+
+  for (const log of receipt.logs) {
+    try {
+      const parsed = stakingFactory.interface.parseLog(log as Log);
+      if (parsed?.name === "InstanceCreated") {
+        return parsed.args.instance as string;
+      }
+    } catch {
+      // Ignore unrelated logs and keep scanning.
+    }
+  }
+
+  throw new Error("Unable to locate InstanceCreated event in staking factory receipt.");
+}
+
+export function resolveL2DeployConfig(
+  networkName: string,
+  env: Record<string, string | undefined> = process.env,
+): L2DeployConfig {
+  const config: L2DeployConfig = {
+    ...DEFAULT_L2_CONFIG,
+  };
+
+  const suppliedToken = env.JINN_TOKEN_ADDRESS?.trim();
+  if (suppliedToken) {
+    config.jinnTokenAddress = suppliedToken;
+    config.jinnTokenSource = "external";
+  } else if (!isLocalL2Network(networkName)) {
+    throw new Error(
+      `JINN_TOKEN_ADDRESS is required on ${networkName}. ` +
+        "Live/testnet L2 deployments must use an existing bridge-compatible JINN token address.",
+    );
+  }
+
+  const suppliedServiceRegistry = env.SERVICE_REGISTRY_ADDRESS?.trim();
+  if (suppliedServiceRegistry) {
+    if (!ethers.isAddress(suppliedServiceRegistry)) {
+      throw new Error(`SERVICE_REGISTRY_ADDRESS must be a valid address. Received: ${suppliedServiceRegistry}`);
+    }
+    config.serviceRegistryAddress = suppliedServiceRegistry;
+    config.serviceRegistrySource = "external";
+  } else if (!isLocalL2Network(networkName)) {
+    config.serviceRegistryAddress = requireLiveAddress(env, "SERVICE_REGISTRY_ADDRESS");
+    config.serviceRegistrySource = "external";
+  }
+
+  const suppliedTokenUtility = env.SERVICE_REGISTRY_TOKEN_UTILITY_ADDRESS?.trim();
+  if (suppliedTokenUtility) {
+    if (!ethers.isAddress(suppliedTokenUtility)) {
+      throw new Error(
+        "SERVICE_REGISTRY_TOKEN_UTILITY_ADDRESS must be a valid address. " +
+          `Received: ${suppliedTokenUtility}`,
+      );
+    }
+    config.serviceRegistryTokenUtilityAddress = suppliedTokenUtility;
+    config.serviceRegistryTokenUtilitySource = "external";
+  } else if (!isLocalL2Network(networkName)) {
+    config.serviceRegistryTokenUtilityAddress = requireLiveAddress(
+      env,
+      "SERVICE_REGISTRY_TOKEN_UTILITY_ADDRESS",
+    );
+    config.serviceRegistryTokenUtilitySource = "external";
+  }
+
+  const suppliedProxyHash = env.SAFE_PROXY_HASH?.trim();
+  if (suppliedProxyHash) {
+    config.proxyHash = requireLiveProxyHash(env, "SAFE_PROXY_HASH");
+    config.proxyHashSource = "external";
+  } else if (!isLocalL2Network(networkName)) {
+    config.proxyHash = requireLiveProxyHash(env, "SAFE_PROXY_HASH");
+    config.proxyHashSource = "external";
+  }
+
+  const livenessRatio = parseOptionalBigInt(env.LIVENESS_RATIO);
+  if (livenessRatio !== undefined) {
+    config.livenessRatio = livenessRatio;
+  }
+
+  return config;
+}
+
+export function getL2DeploymentArtifactName(networkName: string): string {
+  const normalizedNetworkName = networkName === "base-sepolia" ? "baseSepolia" : networkName;
+  return `deployment-phase1a-l2-${normalizedNetworkName}.json`;
+}
 
 export async function deployL2Stack(
-  deployer: ethers.Signer,
-  config: L2DeployConfig = DEFAULT_L2_CONFIG
+  deployer: Signer,
+  config: L2DeployConfig = DEFAULT_L2_CONFIG,
+  txOverrides: TransactionRequest = {},
 ): Promise<L2Deployment> {
   const deployerAddress = await deployer.getAddress();
+  const provider = deployer.provider;
+  let nextNonce: number | undefined;
+  /** Public RPCs + Hardhat Wallet can desync nonces; pin each tx explicitly from pending count. */
+  const withNonce = async (base: TransactionRequest): Promise<TransactionRequest> => {
+    if (!provider) {
+      return base;
+    }
+    if (nextNonce === undefined) {
+      nextNonce = await provider.getTransactionCount(deployerAddress, "pending");
+    }
+    const out = { ...base, nonce: nextNonce };
+    nextNonce += 1;
+    return out;
+  };
 
-  // -----------------------------------------------------------------------
-  // Step 1: JINN token (deploy test token or use existing)
-  // -----------------------------------------------------------------------
   let jinnTokenAddress: string;
   if (config.jinnTokenAddress) {
     jinnTokenAddress = config.jinnTokenAddress;
     console.log(`  Using existing JINN token: ${jinnTokenAddress}`);
   } else {
     const TestERC20 = await ethers.getContractFactory("TestERC20", deployer);
-    const testToken = await TestERC20.deploy("Jinn (Test)", "JINN");
+    const testToken = await TestERC20.deploy("Jinn (Test)", "JINN", await withNonce(withGas(txOverrides, "standard")));
     await testToken.waitForDeployment();
     jinnTokenAddress = await testToken.getAddress();
     console.log(`  Deployed test JINN token: ${jinnTokenAddress}`);
   }
 
-  // -----------------------------------------------------------------------
-  // Step 2: ServiceRegistryStub — minimal ERC721 service registry
-  // -----------------------------------------------------------------------
-  const ServiceRegistryStub = await ethers.getContractFactory("ServiceRegistryStub", deployer);
-  const serviceRegistry = await ServiceRegistryStub.deploy();
-  await serviceRegistry.waitForDeployment();
-  const serviceRegistryAddress = await serviceRegistry.getAddress();
-  console.log(`  Deployed ServiceRegistryStub: ${serviceRegistryAddress}`);
+  let serviceRegistryAddress: string;
+  if (config.serviceRegistryAddress) {
+    serviceRegistryAddress = config.serviceRegistryAddress;
+    console.log(`  Using existing ServiceRegistry: ${serviceRegistryAddress}`);
+  } else {
+    const ServiceRegistryStub = await ethers.getContractFactory("ServiceRegistryStub", deployer);
+    const serviceRegistry = await ServiceRegistryStub.deploy(await withNonce(withGas(txOverrides, "standard")));
+    await serviceRegistry.waitForDeployment();
+    serviceRegistryAddress = await serviceRegistry.getAddress();
+    console.log(`  Deployed ServiceRegistryStub: ${serviceRegistryAddress}`);
+  }
 
-  // -----------------------------------------------------------------------
-  // Step 3: ServiceRegistryTokenUtilityStub
-  // -----------------------------------------------------------------------
-  const TokenUtilityStub = await ethers.getContractFactory("ServiceRegistryTokenUtilityStub", deployer);
-  const tokenUtility = await TokenUtilityStub.deploy();
-  await tokenUtility.waitForDeployment();
-  const tokenUtilityAddress = await tokenUtility.getAddress();
-  console.log(`  Deployed ServiceRegistryTokenUtilityStub: ${tokenUtilityAddress}`);
+  let tokenUtilityAddress: string;
+  if (config.serviceRegistryTokenUtilityAddress) {
+    tokenUtilityAddress = config.serviceRegistryTokenUtilityAddress;
+    console.log(`  Using existing ServiceRegistryTokenUtility: ${tokenUtilityAddress}`);
+  } else {
+    const TokenUtilityStub = await ethers.getContractFactory("ServiceRegistryTokenUtilityStub", deployer);
+    const tokenUtility = await TokenUtilityStub.deploy(await withNonce(withGas(txOverrides, "standard")));
+    await tokenUtility.waitForDeployment();
+    tokenUtilityAddress = await tokenUtility.getAddress();
+    console.log(`  Deployed ServiceRegistryTokenUtilityStub: ${tokenUtilityAddress}`);
+  }
 
-  // -----------------------------------------------------------------------
-  // Step 4: RestorationActivityChecker
-  // -----------------------------------------------------------------------
   const ActivityChecker = await ethers.getContractFactory("RestorationActivityChecker", deployer);
-  const activityChecker = await ActivityChecker.deploy(config.livenessRatio, deployerAddress);
+  const activityChecker = await ActivityChecker.deploy(
+    config.livenessRatio,
+    deployerAddress,
+    await withNonce(withGas(txOverrides, "standard")),
+  );
   await activityChecker.waitForDeployment();
   const activityCheckerAddress = await activityChecker.getAddress();
   console.log(`  Deployed RestorationActivityChecker: ${activityCheckerAddress}`);
 
-  // -----------------------------------------------------------------------
-  // Step 5: StakingToken — deploy and initialize
-  // -----------------------------------------------------------------------
   const StakingToken = await ethers.getContractFactory("StakingToken", deployer);
-  const stakingToken = await StakingToken.deploy();
-  await stakingToken.waitForDeployment();
-  const stakingTokenAddress = await stakingToken.getAddress();
-  console.log(`  Deployed StakingToken: ${stakingTokenAddress}`);
+  const stakingImplementation = await StakingToken.deploy(await withNonce(withGas(txOverrides, "stakingTokenImpl")));
+  await stakingImplementation.waitForDeployment();
+  const stakingImplementationAddress = await stakingImplementation.getAddress();
+  console.log(`  Deployed StakingToken implementation: ${stakingImplementationAddress}`);
 
-  // Build StakingParams. proxyHash is set to a dummy value for testnet since
-  // we don't enforce multisig proxy verification in tests.
-  // For a real deployment, this would be the codehash of the GnosisSafe proxy.
+  const rewardsPerYear = config.rewardsPerSecond * 365n * 24n * 60n * 60n;
+  const apyLimit = (rewardsPerYear * ethers.parseEther("1")) / config.minStakingDeposit;
+
+  const StakingVerifier = await ethers.getContractFactory("StakingVerifier", deployer);
+  const stakingVerifier = await StakingVerifier.deploy(
+    jinnTokenAddress,
+    serviceRegistryAddress,
+    tokenUtilityAddress,
+    config.minStakingDeposit,
+    BigInt(config.timeForEmissions),
+    BigInt(config.maxNumServices),
+    apyLimit,
+    await withNonce(withGas(txOverrides, "standard")),
+  );
+  await stakingVerifier.waitForDeployment();
+  const stakingVerifierAddress = await stakingVerifier.getAddress();
+  console.log(`  Deployed StakingVerifier: ${stakingVerifierAddress}`);
+
+  const whitelistTx = await stakingVerifier.setImplementationsStatuses(
+    [stakingImplementationAddress],
+    [true],
+    true,
+    await withNonce(withGas(txOverrides, "standard")),
+  );
+  await whitelistTx.wait();
+  console.log("  Whitelisted StakingToken implementation in StakingVerifier");
+
+  const StakingFactory = await ethers.getContractFactory("StakingFactory", deployer);
+  const stakingFactory = await StakingFactory.deploy(
+    stakingVerifierAddress,
+    await withNonce(withGas(txOverrides, "standard")),
+  );
+  await stakingFactory.waitForDeployment();
+  const stakingFactoryAddress = await stakingFactory.getAddress();
+  console.log(`  Deployed StakingFactory: ${stakingFactoryAddress}`);
+
   const stakingParams = {
     metadataHash: ethers.id("jinn-l2-staking-v1"),
     maxNumServices: config.maxNumServices,
@@ -156,89 +397,120 @@ export async function deployL2Stack(
     agentIds: [] as number[],
     threshold: 0,
     configHash: ethers.ZeroHash,
-    proxyHash: ethers.id("proxy-hash-placeholder"),
+    proxyHash: config.proxyHash,
     serviceRegistry: serviceRegistryAddress,
     activityChecker: activityCheckerAddress,
   };
 
-  const initTx = await stakingToken.initialize(
+  const initPayload = StakingToken.interface.encodeFunctionData("initialize", [
     stakingParams,
     tokenUtilityAddress,
-    jinnTokenAddress
+    jinnTokenAddress,
+  ]);
+
+  const createTx = await stakingFactory.createStakingInstance(
+    stakingImplementationAddress,
+    initPayload,
+    await withNonce(withGas(txOverrides, "factoryCreate")),
   );
-  await initTx.wait();
-  console.log(`  StakingToken initialized`);
+  const createReceipt = await createTx.wait();
+  const stakingTokenAddress = parseInstanceCreatedAddress(createReceipt, stakingFactory);
+  console.log(`  Deployed StakingToken proxy: ${stakingTokenAddress}`);
+
+  const verified = await stakingFactory.verifyInstance(stakingTokenAddress);
+  if (!verified) {
+    throw new Error(`Factory verification failed for staking proxy ${stakingTokenAddress}.`);
+  }
+
+  const emissionsAmount = await stakingFactory.verifyInstanceAndGetEmissionsAmount(stakingTokenAddress);
+  if (emissionsAmount === 0n) {
+    throw new Error(
+      `Factory returned zero emissions for staking proxy ${stakingTokenAddress}. ` +
+        "The target dispenser would withhold rewards for this deployment.",
+    );
+  }
+
+  console.log(`  Factory verification passed with emissions amount: ${emissionsAmount}`);
 
   return {
     jinnToken: jinnTokenAddress,
+    jinnTokenSource: config.jinnTokenSource,
     serviceRegistry: serviceRegistryAddress,
     serviceRegistryTokenUtility: tokenUtilityAddress,
     activityChecker: activityCheckerAddress,
+    stakingFactory: stakingFactoryAddress,
+    stakingImplementation: stakingImplementationAddress,
     stakingToken: stakingTokenAddress,
   };
 }
 
-// ---------------------------------------------------------------------------
-// CLI entry point
-// ---------------------------------------------------------------------------
-
 async function main() {
-  const [deployer] = await ethers.getSigners();
   const network = await ethers.provider.getNetwork();
   const networkName = network.name === "unknown" ? "hardhat" : network.name;
+  const deployer = await getL2DeployerSigner(networkName);
+  const deployerAddress = await deployer.getAddress();
+  const balanceProvider =
+    deployer.provider ?? (isLocalL2Network(networkName) ? ethers.provider : undefined);
+  if (!balanceProvider) {
+    throw new Error("Deployer signer is missing a provider; cannot read ETH balance.");
+  }
 
   console.log("=== Jinn Phase 1a L2 Staking Deployment ===");
   console.log(`Network:  ${networkName} (chainId: ${network.chainId})`);
-  console.log(`Deployer: ${deployer.address}`);
+  console.log(`Deployer: ${deployerAddress}`);
   console.log(
-    `Balance:  ${ethers.formatEther(await ethers.provider.getBalance(deployer.address))} ETH`
+    `Balance:  ${ethers.formatEther(await balanceProvider.getBalance(deployerAddress))} ETH`,
   );
   console.log();
 
-  const config: L2DeployConfig = { ...DEFAULT_L2_CONFIG };
-
-  if (process.env.JINN_TOKEN_ADDRESS) {
-    config.jinnTokenAddress = process.env.JINN_TOKEN_ADDRESS;
-  }
-  if (process.env.LIVENESS_RATIO) {
-    config.livenessRatio = BigInt(process.env.LIVENESS_RATIO);
-  }
+  const config = resolveL2DeployConfig(networkName);
 
   console.log("Deploying L2 staking stack...\n");
-  const deployment = await deployL2Stack(deployer, config);
+  const txOverrides = isLocalL2Network(networkName) ? {} : liveL2TxOverrides();
+  const deployment = await deployL2Stack(deployer, config, txOverrides);
 
-  // Print summary
   console.log("\n=== Deployment Summary ===");
-  for (const [name, addr] of Object.entries(deployment)) {
-    console.log(`  ${name.padEnd(35)} ${addr}`);
+  for (const [name, value] of Object.entries(deployment)) {
+    console.log(`  ${name.padEnd(35)} ${value}`);
   }
 
-  // Write output JSON
   const output = {
     network: networkName,
     chainId: Number(network.chainId),
-    deployer: deployer.address,
+    deployer: deployerAddress,
     deployedAt: new Date().toISOString(),
     config: {
+      jinnTokenSource: config.jinnTokenSource,
+      serviceRegistrySource: config.serviceRegistrySource,
+      serviceRegistryTokenUtilitySource: config.serviceRegistryTokenUtilitySource,
+      proxyHash: config.proxyHash,
+      proxyHashSource: config.proxyHashSource,
       livenessRatio: config.livenessRatio.toString(),
       maxNumServices: config.maxNumServices,
       rewardsPerSecond: config.rewardsPerSecond.toString(),
       minStakingDeposit: config.minStakingDeposit.toString(),
+      minNumStakingPeriods: config.minNumStakingPeriods,
+      maxNumInactivityPeriods: config.maxNumInactivityPeriods,
       livenessPeriod: config.livenessPeriod,
       timeForEmissions: config.timeForEmissions,
+      numAgentInstances: config.numAgentInstances,
     },
-    contracts: deployment,
+    contracts: {
+      jinnToken: deployment.jinnToken,
+      serviceRegistry: deployment.serviceRegistry,
+      serviceRegistryTokenUtility: deployment.serviceRegistryTokenUtility,
+      activityChecker: deployment.activityChecker,
+      stakingFactory: deployment.stakingFactory,
+      stakingImplementation: deployment.stakingImplementation,
+      stakingToken: deployment.stakingToken,
+    },
   };
 
-  const outPath = path.resolve(
-    process.cwd(),
-    `deployment-phase1a-l2-${networkName}.json`
-  );
+  const outPath = path.resolve(process.cwd(), getL2DeploymentArtifactName(networkName));
   fs.writeFileSync(outPath, JSON.stringify(output, null, 2) + "\n");
   console.log(`\nDeployment written to: ${outPath}`);
 }
 
-// Only run when executed directly (not when imported by tests)
 if (require.main === module) {
   main()
     .then(() => process.exit(0))

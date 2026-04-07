@@ -79,7 +79,7 @@ describe("Bridge Deployment Configuration", function () {
       l1ChainId,
     };
 
-    deployment = await deployBridgeContracts(deployer, config);
+    deployment = await deployBridgeContracts(deployer, deployer, config);
   });
 
   // =========================================================================

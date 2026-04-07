@@ -32,9 +32,24 @@ describe("L2 Staking Distribution", function () {
 
   describe("Deployment", function () {
     it("deploys all contracts to non-zero addresses", function () {
-      for (const [name, addr] of Object.entries(deployment)) {
+      const addressFields: Array<keyof L2Deployment> = [
+        "jinnToken",
+        "serviceRegistry",
+        "serviceRegistryTokenUtility",
+        "activityChecker",
+        "stakingFactory",
+        "stakingImplementation",
+        "stakingToken",
+      ];
+
+      for (const name of addressFields) {
+        const addr = deployment[name];
         expect(addr, `${name} should be non-zero`).to.not.equal(ethers.ZeroAddress);
       }
+    });
+
+    it("records that local deployments use a test token source", function () {
+      expect(deployment.jinnTokenSource).to.equal("test");
     });
 
     it("StakingToken is initialized (serviceRegistry is set)", async function () {
@@ -53,6 +68,14 @@ describe("L2 Staking Distribution", function () {
       const staking = await ethers.getContractAt("StakingToken", deployment.stakingToken);
       const checker = await staking.activityChecker();
       expect(checker).to.equal(deployment.activityChecker);
+    });
+
+    it("StakingToken proxy points to the deployed implementation and factory", async function () {
+      const proxy = await ethers.getContractAt("StakingProxy", deployment.stakingToken);
+      expect(await proxy.getImplementation()).to.equal(deployment.stakingImplementation);
+
+      const factory = await ethers.getContractAt("StakingFactory", deployment.stakingFactory);
+      expect(await factory.verifyInstance(deployment.stakingToken)).to.equal(true);
     });
 
     it("StakingToken cannot be initialized twice", async function () {
