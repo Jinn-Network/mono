@@ -11,6 +11,14 @@ import * as recordActivityModule from "../../scripts/phase1a-record-activity";
 import * as statusModule from "../../scripts/status-phase1a-live";
 import * as swapModule from "../../scripts/swap-usdc-eth-base-sepolia";
 import { deployL1Stack, DEFAULT_DEPLOY_CONFIG } from "../../scripts/lib/deploy-helpers";
+import {
+  getBridgeDeploymentArtifactName,
+  getL1DeploymentArtifactName,
+  getL2DeploymentArtifactName as getProfileAwareL2ArtifactName,
+  getL2TokenDeploymentArtifactName,
+  resolvePhase1aArtifactPaths,
+  resolvePhase1aTimingProfile,
+} from "../../scripts/lib/phase1a-rollout-helpers";
 
 function buildStakingParams(serviceRegistry: string, activityChecker: string) {
   return {
@@ -70,6 +78,42 @@ function loadL2TokenCreationModule(): Record<string, unknown> {
 
 describe("Phase 1a rollout regressions", function () {
   this.timeout(120_000);
+
+  describe("Timing profile helpers", function () {
+    it("defaults to canonical timing and artifact names", function () {
+      expect(resolvePhase1aTimingProfile({})).to.equal("canonical");
+      expect(getL1DeploymentArtifactName("canonical", "sepolia")).to.equal("deployment-phase1a-sepolia.json");
+      expect(getL2TokenDeploymentArtifactName("canonical", "baseSepolia")).to.equal(
+        "deployment-phase1a-token-baseSepolia.json",
+      );
+      expect(getProfileAwareL2ArtifactName("canonical", "baseSepolia")).to.equal(
+        "deployment-phase1a-l2-baseSepolia.json",
+      );
+      expect(getBridgeDeploymentArtifactName("canonical")).to.equal(
+        "deployment-phase1a-bridge-sepolia-baseSepolia.json",
+      );
+    });
+
+    it("switches to fast-test artifact names when requested", function () {
+      expect(resolvePhase1aTimingProfile({ PHASE1A_TIMING_PROFILE: "fast-test" })).to.equal("fast-test");
+      expect(getL1DeploymentArtifactName("fast-test", "sepolia")).to.equal("deployment-phase1a-sepolia-fast.json");
+      expect(getL2TokenDeploymentArtifactName("fast-test", "baseSepolia")).to.equal(
+        "deployment-phase1a-token-baseSepolia-fast.json",
+      );
+      expect(getProfileAwareL2ArtifactName("fast-test", "baseSepolia")).to.equal(
+        "deployment-phase1a-l2-baseSepolia-fast.json",
+      );
+      expect(getBridgeDeploymentArtifactName("fast-test")).to.equal(
+        "deployment-phase1a-bridge-sepolia-baseSepolia-fast.json",
+      );
+      expect(resolvePhase1aArtifactPaths({ PHASE1A_TIMING_PROFILE: "fast-test" })).to.deep.equal({
+        l1: "deployment-phase1a-sepolia-fast.json",
+        l2Token: "deployment-phase1a-token-baseSepolia-fast.json",
+        l2: "deployment-phase1a-l2-baseSepolia-fast.json",
+        bridge: "deployment-phase1a-bridge-sepolia-baseSepolia-fast.json",
+      });
+    });
+  });
 
   describe("L2 deployment", function () {
     it("resolves Base Sepolia token creation inputs from the L1 artifact", function () {
@@ -219,6 +263,22 @@ describe("Phase 1a rollout regressions", function () {
       expect(artifactName("hardhat")).to.equal("deployment-phase1a-l2-hardhat.json");
       expect(artifactName("baseSepolia")).to.equal("deployment-phase1a-l2-baseSepolia.json");
       expect(artifactName("base-sepolia")).to.equal("deployment-phase1a-l2-baseSepolia.json");
+    });
+
+    it("resolves fast-test L2 timing defaults", function () {
+      const resolveConfig = (deployL2Module as any).resolveL2DeployConfig;
+
+      expect(resolveConfig).to.be.a("function");
+
+      const config = resolveConfig("hardhat", {
+        PHASE1A_TIMING_PROFILE: "fast-test",
+      });
+
+      expect(config.timingProfile).to.equal("fast-test");
+      expect(config.livenessPeriod).to.equal(300);
+      expect(config.minNumStakingPeriods).to.equal(2);
+      expect(config.maxNumInactivityPeriods).to.equal(1);
+      expect(config.timeForEmissions).to.equal(21600);
     });
 
     it("factory verification rejects rogue staking configurations", async function () {
@@ -416,6 +476,12 @@ describe("Phase 1a rollout regressions", function () {
   });
 
   describe("Status helper logic", function () {
+    it("rounds activation boundaries using the configured vote period", function () {
+      expect(statusModule.getNextActivationBoundary(1_000n, 900n)).to.equal(1_800n);
+      expect(statusModule.getNextActivationBoundary(1_800n, 900n)).to.equal(2_700n);
+      expect(statusModule.getNextActivationBoundary(604_799n, 604_800n)).to.equal(604_800n);
+    });
+
     it("flags wrong-chain status providers before contract reads", function () {
       expect(statusModule.getStatusNetworkBlockers(11155111, 84532)).to.deep.equal([]);
       expect(statusModule.getStatusNetworkBlockers(1, 84532)).to.deep.equal([

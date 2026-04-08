@@ -1,0 +1,27 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-08T15:59:07.620Z",
+  "config": {
+    "timingProfile": "fast-test",
+    "l1DeploymentPath": "deployment-phase1a-sepolia-fast.json",
+    "l1Token": "0xc3ae831f146Eabbb8095E1EDf90a187AA4E5F408",
+    "name": "Jinn",
+    "symbol": "JINN",
+    "factoryAddress": "0x4200000000000000000000000000000000000012",
+    "l2StandardBridgeAddress": "0x4200000000000000000000000000000000000010"
+  },
+  "contracts": {
+    "l1Token": "0xc3ae831f146Eabbb8095E1EDf90a187AA4E5F408",
+    "l2Token": "0xAB9a01cd4A379e36006ec6df2960CF39EF79df63",
+    "mintableFactory": "0x4200000000000000000000000000000000000012",
+    "l2StandardBridge": "0x4200000000000000000000000000000000000010"
+  },
+  "verification": {
+    "remoteToken": "0xc3ae831f146Eabbb8095E1EDf90a187AA4E5F408",
+    "bridge": "0x4200000000000000000000000000000000000010",
+    "txHash": "0x27d79a54715df4509524e0f2308809d6336e0b734002266552ce256828b1469a",
+    "reusedExisting": false
+  }
+}

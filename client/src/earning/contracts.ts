@@ -116,6 +116,12 @@ interface ChainConfigOverrides {
 
 interface DeploymentArtifact {
   contracts?: Record<string, string | undefined>;
+  config?: Record<string, unknown>;
+}
+
+function getArtifactString(config: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = config?.[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 const BASE_CONFIG: ChainConfig = {
@@ -219,6 +225,7 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     const stakingContract = l2Artifact.contracts?.stakingToken;
     const serviceRegistry = l2Artifact.contracts?.serviceRegistry;
     const serviceRegistryTokenUtility = l2Artifact.contracts?.serviceRegistryTokenUtility;
+    const minStakingDeposit = getArtifactString(l2Artifact.config, 'minStakingDeposit');
 
     if (!stakingContract) {
       throw new Error(`Testnet L2 artifact ${path.resolve(l2ArtifactPath)} is missing contracts.stakingToken`);
@@ -235,6 +242,9 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     resolved.stakingContract = stakingContract;
     resolved.serviceRegistry = serviceRegistry;
     resolved.serviceRegistryTokenUtility = serviceRegistryTokenUtility;
+    if (minStakingDeposit) {
+      resolved.bondAmount = BigInt(minStakingDeposit);
+    }
   }
 
   return resolved;

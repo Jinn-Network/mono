@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -29,6 +29,48 @@ describe('Earning bootstrap testnet support', () => {
     expect(config.olasToken).toBe('0x4F177E56bd79c169742a1BF8907dB0A5e54F5524');
     expect(config.stakingContract).toBe('0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0');
     expect(config.bondAmount).toBe(10n * 10n ** 18n);
+  });
+
+  it('loads Base Sepolia staking and token addresses from explicit artifact paths', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-artifacts-'));
+    dirs.push(dir);
+
+    const l2ArtifactPath = path.join(dir, 'deployment-phase1a-l2-baseSepolia-fast.json');
+    const tokenArtifactPath = path.join(dir, 'deployment-phase1a-token-baseSepolia-fast.json');
+
+    await writeFile(
+      l2ArtifactPath,
+      JSON.stringify({
+        config: {
+          minStakingDeposit: '25000000000000000000',
+        },
+        contracts: {
+          stakingToken: '0x00000000000000000000000000000000000000c1',
+          serviceRegistry: '0x00000000000000000000000000000000000000c2',
+          serviceRegistryTokenUtility: '0x00000000000000000000000000000000000000c3',
+        },
+      }),
+    );
+    await writeFile(
+      tokenArtifactPath,
+      JSON.stringify({
+        contracts: {
+          l2Token: '0x00000000000000000000000000000000000000c4',
+        },
+      }),
+    );
+
+    const config = getChainConfig('base-sepolia', {
+      testnetL2DeploymentPath: l2ArtifactPath,
+      testnetL2TokenDeploymentPath: tokenArtifactPath,
+    });
+
+    expect(config.olasToken).toBe('0x00000000000000000000000000000000000000c4');
+    expect(config.stakingContract).toBe('0x00000000000000000000000000000000000000c1');
+    expect(config.serviceRegistry).toBe('0x00000000000000000000000000000000000000c2');
+    expect(config.serviceRegistryTokenUtility).toBe('0x00000000000000000000000000000000000000c3');
+    expect(config.serviceManager).toBe('0x5BA58970c2Ae16Cf6218783018100aF2dCcFc915');
+    expect(config.bondAmount).toBe(25n * 10n ** 18n);
   });
 
   it('persists base-sepolia earning state and stops cleanly after service staking', async () => {

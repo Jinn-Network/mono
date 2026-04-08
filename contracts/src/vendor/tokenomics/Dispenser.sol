@@ -812,9 +812,10 @@ contract Dispenser {
         // Get the epoch length
         uint256 epochLen = ITokenomics(tokenomics).epochLen();
 
-        // Check that there is more than one week before the end of the ongoing epoch
-        // Note that epochLen cannot be smaller than one week as per specified limits
-        uint256 maxAllowedTime = endTime + epochLen - 1 weeks;
+        // Preserve the existing one-week freeze window for long epochs, but avoid
+        // underflow and nonsensical scheduling when running fast-test short epochs.
+        uint256 freezeWindow = epochLen > 1 weeks ? 1 weeks : epochLen / 2;
+        uint256 maxAllowedTime = endTime + epochLen - freezeWindow;
         if (block.timestamp >= maxAllowedTime) {
             revert Overflow(block.timestamp, maxAllowedTime);
         }

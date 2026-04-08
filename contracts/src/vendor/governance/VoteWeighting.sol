@@ -143,17 +143,6 @@ contract VoteWeighting {
     event RemoveNominee(bytes32 indexed account, uint256 chainId, uint256 newSum);
     event VotingPowerRevoked(address indexed user, bytes32 indexed nominee, uint256 chainId, uint256 powerUsed);
 
-    // 7 * 86400 seconds - all future times are rounded by week
-    uint256 public constant WEEK = 604_800;
-    // Cannot change weight votes more often than once in 10 days
-    // For explanation about the delay consult the official audit report: https://github.com/trailofbits/publications/blob/master/reviews/CurveDAO.pdf
-    uint256 public constant WEIGHT_VOTE_DELAY = 864_000;
-    // Max number of weeks for checkpoints
-    // The number corresponds to more than four years timeframe
-    // It is enough to have at least one vote while veOLAS value is greater than zero
-    // In practice it is unlikely that there is no single checkpoint for the maximum amount of weeks
-    // For gas concerns regarding checkpoint calculations, see the internal audit and the official audit report: https://github.com/trailofbits/publications/blob/master/reviews/CurveDAO.pdf
-    uint256 public constant MAX_NUM_WEEKS = 250;
     // Max weight amount
     uint256 public constant MAX_WEIGHT = 10_000;
     // Maximum chain Id as per EVM specs
@@ -212,11 +201,42 @@ contract VoteWeighting {
         // Set initial parameters
         owner = msg.sender;
         ve = _ve;
-        timeSum = block.timestamp / WEEK * WEEK;
+        uint256 period = _period();
+        timeSum = block.timestamp / period * period;
         // Push empty element to the zero-th index
         setNominees.push(Nominee(0, 0));
         // For symmetry, push empty element to the zero-th index in the removed Nominee set as well
         setRemovedNominees.push(Nominee(0, 0));
+    }
+
+    /// @dev Period used for vote activation bucket rounding and checkpoints.
+    function _period() internal pure virtual returns (uint256) {
+        return 604_800;
+    }
+
+    /// @dev Cooldown between consecutive votes for the same nominee.
+    function _voteDelay() internal pure virtual returns (uint256) {
+        return 864_000;
+    }
+
+    /// @dev Maximum number of checkpoint periods traversed in one call.
+    function _maxNumPeriods() internal pure virtual returns (uint256) {
+        return 250;
+    }
+
+    /// @dev Exposes the configured activation bucket size.
+    function WEEK() external pure returns (uint256) {
+        return _period();
+    }
+
+    /// @dev Exposes the configured vote cooldown.
+    function WEIGHT_VOTE_DELAY() external pure returns (uint256) {
+        return _voteDelay();
+    }
+
+    /// @dev Exposes the configured checkpoint horizon.
+    function MAX_NUM_WEEKS() external pure returns (uint256) {
+        return _maxNumPeriods();
     }
 
     /// @dev Fill sum of nominee weights week-over-week for missed checkins and return the sum for the future week.
@@ -225,12 +245,13 @@ contract VoteWeighting {
         // t is always > 0 as it is set in the constructor
         uint256 t = timeSum;
         Point memory pt = pointsSum[t];
-        for (uint256 i = 0; i < MAX_NUM_WEEKS; i++) {
+        uint256 period = _period();
+        for (uint256 i = 0; i < _maxNumPeriods(); i++) {
             if (t > block.timestamp) {
                 break;
             }
-            t += WEEK;
-            uint256 dBias = pt.slope * WEEK;
+            t += period;
+            uint256 dBias = pt.slope * period;
             if (pt.bias > dBias) {
                 pt.bias -= dBias;
                 uint256 dSlope = changesSum[t];
@@ -265,12 +286,13 @@ contract VoteWeighting {
         // t is always > 0 as it is set during the addNominee() call
         uint256 t = timeWeight[nomineeHash];
         Point memory pt = pointsWeight[nomineeHash][t];
-        for (uint256 i = 0; i < MAX_NUM_WEEKS; i++) {
+        uint256 period = _period();
+        for (uint256 i = 0; i < _maxNumPeriods(); i++) {
             if (t > block.timestamp) {
                 break;
             }
-            t += WEEK;
-            uint256 dBias = pt.slope * WEEK;
+            t += period;
+            uint256 dBias = pt.slope * period;
             if (pt.bias > dBias) {
                 pt.bias -= dBias;
                 uint256 dSlope = changesWeight[nomineeHash][t];
@@ -307,7 +329,8 @@ contract VoteWeighting {
         // Push the nominee into the list
         setNominees.push(nominee);
 
-        uint256 nextTime = (block.timestamp + WEEK) / WEEK * WEEK;
+        uint256 period = _period();
+        uint256 nextTime = (block.timestamp + period) / period * period;
         timeWeight[nomineeHash] = nextTime;
 
         // Enable nominee in dispenser, if applicable
@@ -422,7 +445,8 @@ contract VoteWeighting {
         uint256 chainId,
         uint256 time
     ) internal view returns (uint256 weight, uint256 totalSum) {
-        uint256 t = time / WEEK * WEEK;
+        uint256 period = _period();
+        uint256 t = time / period * period;
         totalSum = pointsSum[t].bias;
 
         Nominee memory nominee = Nominee(account, chainId);
@@ -487,7 +511,8 @@ contract VoteWeighting {
         }
 
         uint256 lockEnd = IVEOLAS(ve).lockedEnd(msg.sender);
-        uint256 nextTime = (block.timestamp + WEEK) / WEEK * WEEK;
+        uint256 period = _period();
+        uint256 nextTime = (block.timestamp + period) / period * period;
 
         // Check for the lock end expiration
         if (nextTime >= lockEnd) {
@@ -500,7 +525,7 @@ contract VoteWeighting {
         }
 
         // Check for the last voting time
-        uint256 nextAllowedVotingTime = lastUserVote[msg.sender][nomineeHash] + WEIGHT_VOTE_DELAY;
+        uint256 nextAllowedVotingTime = lastUserVote[msg.sender][nomineeHash] + _voteDelay();
         if (nextAllowedVotingTime > block.timestamp) {
             revert VoteTooOften(msg.sender, block.timestamp, nextAllowedVotingTime);
         }
@@ -603,7 +628,8 @@ contract VoteWeighting {
         // Set nominee weight to zero
         uint256 oldWeight = _getWeight(account, chainId);
         uint256 oldSum = _getSum();
-        uint256 nextTime = (block.timestamp + WEEK) / WEEK * WEEK;
+        uint256 period = _period();
+        uint256 nextTime = (block.timestamp + period) / period * period;
         pointsWeight[nomineeHash][nextTime].bias = 0;
         timeWeight[nomineeHash] = nextTime;
 
@@ -660,7 +686,8 @@ contract VoteWeighting {
             revert ZeroValue();
         }
 
-        uint256 nextTime = (block.timestamp + WEEK) / WEEK * WEEK;
+        uint256 period = _period();
+        uint256 nextTime = (block.timestamp + period) / period * period;
         // Adjust weight and sum slope changes
         if (oldSlope.end > nextTime) {
             pointsWeight[nomineeHash][nextTime].slope =
@@ -817,7 +844,7 @@ contract VoteWeighting {
             }
 
             // Calculate next allowed voting times
-            nextAllowedVotingTimes[i] = lastUserVote[voters[i]][nomineeHash] + WEIGHT_VOTE_DELAY;
+            nextAllowedVotingTimes[i] = lastUserVote[voters[i]][nomineeHash] + _voteDelay();
         }
     }
 }

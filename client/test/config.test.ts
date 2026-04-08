@@ -10,6 +10,8 @@ describe('loadConfig RPC override handling', () => {
   const originalBaseSepoliaRpcUrl = process.env['BASE_SEPOLIA_RPC_URL'];
   const originalJinnRpcUrl = process.env['JINN_RPC_URL'];
   const originalJinnNetwork = process.env['JINN_NETWORK'];
+  const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
+  const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
 
   afterEach(async () => {
     if (originalBaseRpcUrl === undefined) {
@@ -34,6 +36,18 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_NETWORK'];
     } else {
       process.env['JINN_NETWORK'] = originalJinnNetwork;
+    }
+
+    if (originalTestnetL2Deployment === undefined) {
+      delete process.env['JINN_TESTNET_L2_DEPLOYMENT'];
+    } else {
+      process.env['JINN_TESTNET_L2_DEPLOYMENT'] = originalTestnetL2Deployment;
+    }
+
+    if (originalTestnetTokenDeployment === undefined) {
+      delete process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
+    } else {
+      process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = originalTestnetTokenDeployment;
     }
 
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -115,5 +129,25 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.network).toBe('testnet');
     expect(config.rpcUrl).toBe('https://universal.env.example');
+  });
+
+  it('loads testnet artifact override paths from config and env', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      testnetL2DeploymentPath: '/tmp/from-file-l2.json',
+      testnetL2TokenDeploymentPath: '/tmp/from-file-token.json',
+    });
+
+    process.env['JINN_TESTNET_L2_DEPLOYMENT'] = '/tmp/from-env-l2.json';
+    process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = '/tmp/from-env-token.json';
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.testnetL2DeploymentPath).toBe('/tmp/from-env-l2.json');
+    expect(config.testnetL2TokenDeploymentPath).toBe('/tmp/from-env-token.json');
   });
 });

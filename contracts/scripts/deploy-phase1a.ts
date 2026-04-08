@@ -103,6 +103,12 @@ async function main() {
     config: {
       epochLen: config.epochLen,
       timingProfile: config.timingProfile,
+      rewardComponentFraction: config.rewardComponentFraction,
+      rewardAgentFraction: config.rewardAgentFraction,
+      maxBondFraction: config.maxBondFraction,
+      topUpComponentFraction: config.topUpComponentFraction,
+      topUpAgentFraction: config.topUpAgentFraction,
+      stakingFraction: config.stakingFraction,
       votePeriodSeconds: config.votePeriodSeconds,
       weightVoteDelaySeconds: config.weightVoteDelaySeconds,
       voteCheckpointHorizon: config.voteCheckpointHorizon,

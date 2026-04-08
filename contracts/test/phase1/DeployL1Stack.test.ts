@@ -5,7 +5,12 @@
 
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { deployL1Stack, DEFAULT_DEPLOY_CONFIG, Phase1aDeployment } from "../../scripts/lib/deploy-helpers";
+import {
+  deployL1Stack,
+  DEFAULT_DEPLOY_CONFIG,
+  FAST_TEST_DEPLOY_CONFIG,
+  Phase1aDeployment,
+} from "../../scripts/lib/deploy-helpers";
 
 describe("L1 Stack Deployment", function () {
   let d: Phase1aDeployment;
@@ -117,6 +122,14 @@ describe("L1 Stack Deployment", function () {
     expect(counter).to.equal(1);
   });
 
+  it("seeds next-epoch staking fractions and staking params", async function () {
+    const stakingPoint = await d.tokenomics.mapEpochStakingPoints(2);
+
+    expect(stakingPoint[1]).to.equal(BigInt(DEFAULT_DEPLOY_CONFIG.defaultMaxStakingIncentive));
+    expect(stakingPoint[2]).to.equal(DEFAULT_DEPLOY_CONFIG.defaultMinStakingWeight);
+    expect(stakingPoint[3]).to.equal(DEFAULT_DEPLOY_CONFIG.stakingFraction);
+  });
+
   // ---------------------------------------------------------------------------
   // Depository wiring
   // ---------------------------------------------------------------------------
@@ -171,6 +184,12 @@ describe("L1 Stack Deployment", function () {
     expect(disp).to.equal(await d.dispenser.getAddress());
   });
 
+  it("VoteWeighting exposes canonical governance timing", async function () {
+    expect(await d.voteWeighting.WEEK()).to.equal(DEFAULT_DEPLOY_CONFIG.votePeriodSeconds);
+    expect(await d.voteWeighting.WEIGHT_VOTE_DELAY()).to.equal(DEFAULT_DEPLOY_CONFIG.weightVoteDelaySeconds);
+    expect(await d.voteWeighting.MAX_NUM_WEEKS()).to.equal(DEFAULT_DEPLOY_CONFIG.voteCheckpointHorizon);
+  });
+
   // ---------------------------------------------------------------------------
   // GenericBondCalculator wiring
   // ---------------------------------------------------------------------------
@@ -203,5 +222,20 @@ describe("L1 Stack Deployment", function () {
         ethers.ZeroAddress
       )
     ).to.be.reverted;
+  });
+
+  it("deploys the fast-test governance timing profile when requested", async function () {
+    const [deployer] = await ethers.getSigners();
+    const fast = await deployL1Stack(deployer, FAST_TEST_DEPLOY_CONFIG);
+
+    expect(await fast.tokenomics.epochLen()).to.equal(FAST_TEST_DEPLOY_CONFIG.epochLen);
+    expect(await fast.voteWeighting.WEEK()).to.equal(FAST_TEST_DEPLOY_CONFIG.votePeriodSeconds);
+    expect(await fast.voteWeighting.WEIGHT_VOTE_DELAY()).to.equal(FAST_TEST_DEPLOY_CONFIG.weightVoteDelaySeconds);
+    expect(await fast.voteWeighting.MAX_NUM_WEEKS()).to.equal(FAST_TEST_DEPLOY_CONFIG.voteCheckpointHorizon);
+
+    const stakingPoint = await fast.tokenomics.mapEpochStakingPoints(2);
+    expect(stakingPoint[1]).to.equal(BigInt(FAST_TEST_DEPLOY_CONFIG.defaultMaxStakingIncentive));
+    expect(stakingPoint[2]).to.equal(FAST_TEST_DEPLOY_CONFIG.defaultMinStakingWeight);
+    expect(stakingPoint[3]).to.equal(FAST_TEST_DEPLOY_CONFIG.stakingFraction);
   });
 });

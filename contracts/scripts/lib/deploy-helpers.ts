@@ -71,6 +71,18 @@ export interface DeployConfig {
   timingProfile: Phase1aTimingProfile;
   /** Epoch length in seconds. OLAS uses 2592000 (30 days). Testnet min overridden to 1 hour. */
   epochLen: number;
+  /** Fraction for component owner rewards funded by ETH donations. */
+  rewardComponentFraction: number;
+  /** Fraction for agent owner rewards funded by ETH donations. */
+  rewardAgentFraction: number;
+  /** Fraction for max bond funded by token inflation. */
+  maxBondFraction: number;
+  /** Fraction for component-owner top-ups funded by token inflation. */
+  topUpComponentFraction: number;
+  /** Fraction for agent-owner top-ups funded by token inflation. */
+  topUpAgentFraction: number;
+  /** Fraction for staking funded by token inflation. */
+  stakingFraction: number;
   /** Vote activation bucket in seconds. */
   votePeriodSeconds: number;
   /** Vote cooldown in seconds. */
@@ -95,6 +107,12 @@ export interface DeployConfig {
 export const DEFAULT_DEPLOY_CONFIG: DeployConfig = {
   timingProfile: "canonical",
   epochLen: 7200, // 2 hours — testnet override (MIN_EPOCH_LENGTH reduced to 1 hour)
+  rewardComponentFraction: 0,
+  rewardAgentFraction: 0,
+  maxBondFraction: 0,
+  topUpComponentFraction: 0,
+  topUpAgentFraction: 0,
+  stakingFraction: 100,
   votePeriodSeconds: 604800,
   weightVoteDelaySeconds: 864000,
   voteCheckpointHorizon: 250,
@@ -280,6 +298,24 @@ export async function deployL1Stack(
   // 10d. VoteWeighting: set Dispenser so addNominee/removeNominee callbacks work.
   const vwTx = await voteWeighting.changeDispenser(await dispenser.getAddress());
   await vwTx.wait();
+
+  // 10e. Seed next-epoch staking fractions and staking params so the first
+  //      claimable epochs on testnet have non-zero staking allocation.
+  const incentiveFractionsTx = await tokenomics.changeIncentiveFractions(
+    config.rewardComponentFraction,
+    config.rewardAgentFraction,
+    config.maxBondFraction,
+    config.topUpComponentFraction,
+    config.topUpAgentFraction,
+    config.stakingFraction,
+  );
+  await incentiveFractionsTx.wait();
+
+  const stakingParamsTx = await tokenomics.changeStakingParams(
+    config.defaultMaxStakingIncentive,
+    config.defaultMinStakingWeight,
+  );
+  await stakingParamsTx.wait();
 
   return {
     jinn,

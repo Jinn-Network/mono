@@ -135,6 +135,13 @@ Important operational note:
 Current blockers as of 2026-04-08:
 
 - The weekly `VoteWeighting` boundary has not passed yet, so the staking nominee still has zero active relative weight even though the vote has been cast.
+- The original canonical L1 deploy path also left `Tokenomics.mapEpochStakingPoints[*]` unset for future epochs. This was repaired in place on Sepolia by the operator with:
+  - `changeIncentiveFractions(0,0,0,0,0,100)`: `0x239f86bf5663d6786ac388f6a05b908b8a2e45f4b1e533fb9b592aacd02b9674`
+  - `changeStakingParams(100 JINN, 1%)`: `0x306ba6acde17fa4cdc232b351f78b14e826db07d2fae71acfff62026c8d2a8dd`
+- As a result, canonical epoch `2` is now seeded with:
+  - `stakingFraction = 100`
+  - `maxStakingIncentive = 100 JINN`
+  - `minStakingWeight = 1%`
 - The real L1 `claimStakingIncentives` path therefore remains blocked until the next weekly activation point (`2026-04-09T00:00:00Z`).
 - Service `11` is already staked and has qualifying activity recorded; the remaining live work after the boundary is:
   - wait for positive relative weight / a claimable post-vote epoch
@@ -205,6 +212,194 @@ Current caveat:
 - `contracts/scripts/phase1a-claim-l2-rewards.ts` now supports both ownership shapes, but the operational expectation is still a 1-of-N Safe with threshold `1`.
 - If the service owner Safe threshold is raised above `1`, the helper will stop and require a manual multi-signature flow.
 
+### Fast-test timing profile (parallel stack, added 2026-04-08)
+
+The canonical Sepolia/Base Sepolia rollout above remains the source of truth for the real Phase 1a proof. In parallel, the repo now supports a separate `fast-test` timing profile for rapid operator iteration without overwriting the canonical artifacts.
+
+The profile switch is:
+
+```bash
+PHASE1A_TIMING_PROFILE=canonical|fast-test
+```
+
+`canonical` remains the default. `fast-test` changes timing semantics intentionally:
+
+- L1 tokenomics epoch: `900s`
+- L1 vote activation bucket: `900s`
+- L1 vote cooldown: `900s`
+- L2 liveness period: `300s`
+- L2 minimum staking periods: `2`
+- L2 max inactivity periods: `1`
+- L2 emissions window: `21600s`
+- default vote-lock duration in the vote helper: `7 days`
+
+What the fast profile is for:
+
+- proving the full mechanical operator loop quickly:
+  - deploy
+  - governance activate
+  - stake
+  - record activity
+  - L1 claim
+  - bridge delivery
+  - Safe-owned L2 claim
+
+What it is not for:
+
+- proving canonical weekly `VoteWeighting` behavior
+- proving canonical 24h / 72h L2 staking cadence
+- replacing the real Sepolia/Base Sepolia proof stack
+
+Fast artifacts are written to separate files and must not overwrite the canonical files:
+
+- `contracts/deployment-phase1a-sepolia-fast.json`
+- `contracts/deployment-phase1a-token-baseSepolia-fast.json`
+- `contracts/deployment-phase1a-l2-baseSepolia-fast.json`
+- `contracts/deployment-phase1a-bridge-sepolia-baseSepolia-fast.json`
+
+Fast client runs should also use a separate earning dir, for example:
+
+```bash
+JINN_EARNING_DIR=/tmp/jinn-phase1a-fast/earning
+```
+
+The client can now read testnet Base Sepolia token/staking addresses from explicit artifact paths instead of only from compiled constants. The new config/env inputs are:
+
+- config keys:
+  - `testnetL2DeploymentPath`
+  - `testnetL2TokenDeploymentPath`
+- env vars:
+  - `JINN_TESTNET_L2_DEPLOYMENT`
+  - `JINN_TESTNET_TOKEN_DEPLOYMENT`
+
+Recommended fast-stack sequence:
+
+1. Deploy the fast L1 stack
+
+   ```bash
+   cd contracts
+   PHASE1A_TIMING_PROFILE=fast-test \
+   npx hardhat run scripts/deploy-phase1a.ts --network sepolia
+   ```
+
+2. Create the fast Base Sepolia bridge-compatible token
+
+   ```bash
+   cd contracts
+   PHASE1A_TIMING_PROFILE=fast-test \
+   BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+   npx hardhat run scripts/create-phase1a-l2-token.ts --network baseSepolia
+   ```
+
+3. Deploy the fast Base Sepolia staking stack
+
+   ```bash
+   cd contracts
+   PHASE1A_TIMING_PROFILE=fast-test \
+   BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+   npx hardhat run scripts/deploy-phase1a-l2.ts --network baseSepolia
+   ```
+
+4. Deploy the fast bridge pair
+
+   ```bash
+   cd contracts
+   PHASE1A_TIMING_PROFILE=fast-test \
+   BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+   npx hardhat run scripts/deploy-phase1a-bridge.ts --network sepolia
+   ```
+
+5. Run the same operator helpers against the fast artifacts
+   - `phase1a-unpause-dispenser.ts`
+   - `phase1a-set-deposit-processor.ts`
+   - `phase1a-add-staking-nominee.ts`
+   - `phase1a-mint-jinn-for-vote.ts`
+   - `phase1a-vote-staking-weight.ts`
+   - `phase1a-bridge-jinn-to-l2.ts`
+   - `phase1a-deposit-staking-rewards.ts`
+   - `phase1a-record-activity.ts`
+   - `phase1a-claim-staking-incentives.ts`
+   - `phase1a-claim-l2-rewards.ts`
+
+6. Point the client at the fast artifacts and separate earning dir
+
+   ```bash
+   cd client
+   JINN_NETWORK=testnet \
+   JINN_EARNING_DIR=/tmp/jinn-phase1a-fast/earning \
+   JINN_TESTNET_L2_DEPLOYMENT=/Users/adrianobradley/jinn-mono/contracts/deployment-phase1a-l2-baseSepolia-fast.json \
+   JINN_TESTNET_TOKEN_DEPLOYMENT=/Users/adrianobradley/jinn-mono/contracts/deployment-phase1a-token-baseSepolia-fast.json \
+   BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+   JINN_PASSWORD=<keystore-password> \
+   npm start
+   ```
+
+Operational note:
+
+- The status and vote helpers now derive the activation period and vote cooldown from the deployed `VoteWeighting` contract instead of assuming a hardcoded week, so they work for both canonical and fast profiles.
+
+### Fast-test live proof snapshot (2026-04-08 evening)
+
+The parallel fast stack was fully exercised end to end on Sepolia + Base Sepolia on 2026-04-08.
+
+Fast artifact addresses:
+
+- `contracts/deployment-phase1a-sepolia-fast.json`
+  - `JINN`: `0xc3ae831f146Eabbb8095E1EDf90a187AA4E5F408`
+  - `Tokenomics`: `0x302cd1f188fCFcA64EA038aFa738D90951360739`
+  - `Dispenser`: `0xaFE21C6dBeF2d41A769F58CE068aa991369FB1e0`
+  - `VoteWeighting`: `0x8eF25EEC3baC74DfA12987905D1eB2cEDf40B685`
+- `contracts/deployment-phase1a-token-baseSepolia-fast.json`
+  - `l2Token`: `0xAB9a01cd4A379e36006ec6df2960CF39EF79df63`
+- `contracts/deployment-phase1a-l2-baseSepolia-fast.json`
+  - `activityChecker`: `0xdaa1529de84B429945A33744539Af6D7140BF9B6`
+  - `stakingFactory`: `0x4FaF53A13Df420D70FE337F5b77B35B6E7309C48`
+  - `stakingToken`: `0x2c286651590b4DdC6d58d1270069B43183a851D1`
+- `contracts/deployment-phase1a-bridge-sepolia-baseSepolia-fast.json`
+  - `depositProcessorL1`: `0xc03Aba7f4d4a093454452C13a9c74a7907B2e111`
+  - `targetDispenserL2`: `0x36d4f30E150Ce891279dA78fcCd32e6864Ab5630`
+
+Fast live service state:
+
+- agent EOA: `0x2d9D81AeDb5Bb3Defa2cFdbC582d3511875D5dd9`
+- service Safe: `0xfc8236EEa165913f797a5c39468141526086273C`
+- service id: `12`
+
+What failed in the first fast rollout and how it was fixed:
+
+- The fast L1 deploy path initially left `Tokenomics.mapEpochStakingPoints[*].stakingFraction == 0`, so Sepolia `claimStakingIncentives` stayed at zero even after vote activation and epoch checkpoints.
+- Root cause: the deploy flow wired the contracts but did not call `Tokenomics.changeIncentiveFractions(...)` or `Tokenomics.changeStakingParams(...)`.
+- Live fix txs on the fast tokenomics contract:
+  - `changeIncentiveFractions(0,0,0,0,0,100)`: `0x78f380ff5c01e8afca3471cbd9929751751dfd277c8aea25911bf0618a2f9e72`
+  - `changeStakingParams(100 JINN, 1%)`: `0x6ea58db0594c3e23414c17014e7903dfa249a87d88e7d43290b3020168b37242`
+- Those settings took effect in future epochs as designed, and the first non-zero Sepolia staking incentive became claimable after the subsequent fast checkpoints.
+
+Fast end-to-end proof txs:
+
+- service create: `0xb74acfa9433cdc43ebfedd009827a53ff086436b14331e01b8e292c6cd002334`
+- service activate: `0xf8b34eef99260c5a50a817f479fb26d563a9a6b67dea8add81ff69c4bd53b9e7`
+- agent register: `0xb53204063fe660cab072df0c827d0bd106edc05ea331503745eb73c52cc2aef1`
+- service deploy: `0x4fe86c6aede08501267a5ae59536078ec57bfbb6fbbd11c7865d7123b2388cfb`
+- service stake: `0x3b2e2e2b570ec7822c52f36c748605a5b60edf8fed18115a851ef480394289df`
+- initial activity proof: `0x0fff152c957a930db132a24c08d604f6a0fecc5c33601aa08e048c48145a414a`, `0x80ad7420510c89168a98f52e817cc17351616d43815589093d38dc4dafb51f15`, `0x00ddf17a6d74e5bed9d291fd7b22a422322f6e930816752e9aacc54cd6fb2ba0`
+- Sepolia fast checkpoints that advanced the claim window: `0x8e867d112763bac00880cb0a53cfde66eda7534e3b6b3411266ce4aebc57d22b`, `0xe4f0304731a0179c55f6d15ed5631c8ace5893fa76903cfa6142999125d1415b`, `0x81f93b490bf0086537c58d485556fa43b24609f3d1da07de0266e7f11fd2df87`, `0x59a911172f926ed7233d0801869f50664d9d029f607cffc5421bc1d2bb4db2a5`, `0x18c2b2cc61e649847310b01425c9682bfe700a2f4337e298442edff999719f58`
+- Sepolia staking claim: `0x1ed981315479824febac0a3b6fb2fe39f2a32e743bec903323753c50c620fd9f`
+  - claimable JINN bridged: `0.0192636986301342`
+  - return to inflation: `94.943607094011376068`
+  - bridge batch hash: `0xbd19ae745a3157e04fa1d9f06a4ea51ecbda1d2a539589c544b022d328a675d8`
+- refreshed activity before final L2 claim: `0x294d2ef3119b6fcd36716f15b3e3d0d32466b65b9896afb3aa26ebdeb5aea310`, `0x96eb0dccc3bc579c94d055abc81360becb8acf44d6cde2489620eabe241fd45e`, `0xf527281a798e66be30dcf2baf17d54835d69eadc064d650b8cc3b5c3a9a2dacd`
+- Base Sepolia Safe `checkpointAndClaim`: `0x945d768cdcb09999c0d41b718ba58de31b4502e322830546fcd7046f54005880`
+
+Observed final proof points:
+
+- Before the Sepolia claim, the fast Base staking proxy held exactly `50.0 JINN`.
+- After the bridge relay, the fast Base staking proxy held `50.0192636986301342 JINN`, matching the Sepolia claim amount exactly.
+- After refreshed activity and the Safe-owned `checkpointAndClaim`, the service Safe held `10.4536 JINN` and the staking proxy balance dropped to `49.5656636986301342 JINN`.
+
+This proves the full fast-test mechanical loop on-chain:
+
+- `deploy -> governance activate -> stake -> record activity -> L1 claim -> bridge delivery -> L2 Safe claim`
+
 ### Handoff status (2026-04-08 end of day)
 
 This is the current state another operator can pick up without replaying the full investigation.
@@ -252,6 +447,7 @@ What remains to do:
 
 1. Wait for the weekly `VoteWeighting` boundary to pass so the vote becomes active.
    - Expected boundary from the live status script: `2026-04-09T00:00:00Z`
+   - Important: do not checkpoint the canonical tokenomics contract before that boundary. Because the canonical epoch length is `7200s`, checkpointing early would cause the first newly-configured staking epoch to close before vote activation and would delay the first non-zero Sepolia claim by another full epoch.
 2. Re-run the status gate:
    - `cd contracts && BASE_SEPOLIA_RPC_URL=https://sepolia.base.org npx hardhat run scripts/status-phase1a-live.ts --network sepolia`
 3. Once relative weight is non-zero and the static incentive probe stops reverting, execute the L1 claim:
