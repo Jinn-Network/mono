@@ -2,7 +2,7 @@
   "network": "baseSepolia",
   "chainId": 84532,
   "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
-  "deployedAt": "2026-04-07T16:34:56.942Z",
+  "deployedAt": "2026-04-08T09:36:40.691Z",
   "config": {
     "jinnTokenSource": "external",
     "serviceRegistrySource": "external",
@@ -20,12 +20,12 @@
     "numAgentInstances": 1
   },
   "contracts": {
-    "jinnToken": "0xB1341d11112fE68AF2A4b41E6decA64DDb2720fA",
+    "jinnToken": "0x4F177E56bd79c169742a1BF8907dB0A5e54F5524",
     "serviceRegistry": "0x31D3202d8744B16A120117A053459DDFAE93c855",
     "serviceRegistryTokenUtility": "0xeB49bE5DF00F74bd240DE4535DDe6Bc89CEfb994",
-    "activityChecker": "0x6a10Ac40F7c73B340584fAEC9A0A4D86935AF41d",
-    "stakingFactory": "0xc69e06C2BF3d2e5B546Db5b75FE549750746bB83",
-    "stakingImplementation": "0x50Aab4ab6A3663D5B4252e52A278a6F9d8c4d2ca",
-    "stakingToken": "0x06a400Ea71861d44fE86de568A905e036C7A1065"
+    "activityChecker": "0xDB5e6cc6Fb4423e1899415D86e8f0B197673dd0b",
+    "stakingFactory": "0xaFE21C6dBeF2d41A769F58CE068aa991369FB1e0",
+    "stakingImplementation": "0x8eF25EEC3baC74DfA12987905D1eB2cEDf40B685",
+    "stakingToken": "0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0"
   }
 }

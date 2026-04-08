@@ -10,7 +10,6 @@ import {
   SEPOLIA_CHAIN_ID,
 } from "./lib/phase1a-rollout-helpers";
 
-const WEEK = 604_800n;
 const PLACEHOLDER_PROXY_HASH = ethers.id("proxy-hash-placeholder");
 
 interface DeploymentArtifact {
@@ -43,6 +42,8 @@ const DEPOSIT_PROCESSOR_ABI = [
 ];
 
 const VOTE_WEIGHTING_ABI = [
+  "function WEEK() view returns (uint256)",
+  "function WEIGHT_VOTE_DELAY() view returns (uint256)",
   "function getNomineeId(bytes32,uint256) view returns (uint256)",
   "function nomineeRelativeWeight(bytes32,uint256,uint256) view returns (uint256,uint256)",
 ];
@@ -107,6 +108,25 @@ function pauseLabel(value: bigint): string {
     default:
       return `Unknown(${value})`;
   }
+}
+
+export function targetDispenserPauseLabel(value: bigint): string {
+  switch (value) {
+    case 1n:
+      return "Unpaused";
+    case 2n:
+      return "Paused";
+    default:
+      return `Unknown(${value})`;
+  }
+}
+
+export function isTargetDispenserUnpaused(value: bigint): boolean {
+  return value === 1n;
+}
+
+export function getNextActivationBoundary(now: bigint, period: bigint): bigint {
+  return ((now + period) / period) * period;
 }
 
 function getConfigString(config: Record<string, unknown> | undefined, key: string): string | undefined {
@@ -325,6 +345,8 @@ async function main() {
     mappedTargetDispenser: depositProcessor.l2TargetDispenser() as Promise<string>,
     mappedL2Token: depositProcessor.olasL2() as Promise<string>,
     nomineeId: voteWeighting.getNomineeId(stakingTarget, BASE_SEPOLIA_CHAIN_ID) as Promise<bigint>,
+    votePeriodSeconds: voteWeighting.WEEK() as Promise<bigint>,
+    weightVoteDelaySeconds: voteWeighting.WEIGHT_VOTE_DELAY() as Promise<bigint>,
   });
   const l2Reads = await readNamedCalls({
     proxyImplementation: stakingProxy.getImplementation() as Promise<string>,
@@ -355,6 +377,8 @@ async function main() {
   const mappedTargetDispenser = asString(l1Reads.values.mappedTargetDispenser);
   const mappedL2Token = asString(l1Reads.values.mappedL2Token);
   const nomineeId = asBigInt(l1Reads.values.nomineeId);
+  const votePeriodSeconds = asBigInt(l1Reads.values.votePeriodSeconds);
+  const weightVoteDelaySeconds = asBigInt(l1Reads.values.weightVoteDelaySeconds);
   const proxyImplementation = asString(l2Reads.values.proxyImplementation);
   const factoryVerified = asBoolean(l2Reads.values.factoryVerified);
   const factoryEmissions = asBigInt(l2Reads.values.factoryEmissions);
@@ -400,7 +424,7 @@ async function main() {
     }
   }
 
-  const nextVoteBoundary = ((BigInt(l1Block!.timestamp) + WEEK) / WEEK) * WEEK;
+  const nextVoteBoundary = getNextActivationBoundary(BigInt(l1Block!.timestamp), votePeriodSeconds);
   const preflightBlockers: string[] = [];
   let probeError: string | null = null;
   let probeResult: ProbeResult | null = null;
@@ -425,8 +449,8 @@ async function main() {
   } else if (!isStakingIncentivesEnabled(treasuryPause)) {
     preflightBlockers.push(`Treasury pause state ${pauseLabel(treasuryPause)} still blocks staking incentives.`);
   }
-  if (dispenserPauseL2 !== 0n) {
-    preflightBlockers.push(`L2 target dispenser is paused (${pauseLabel(dispenserPauseL2)}).`);
+  if (!isTargetDispenserUnpaused(dispenserPauseL2)) {
+    preflightBlockers.push(`L2 target dispenser is paused (${targetDispenserPauseLabel(dispenserPauseL2)}).`);
   }
   if (depositProcessorMapping.toLowerCase() !== artifacts.depositProcessorL1.toLowerCase()) {
     preflightBlockers.push("Dispenser chain-id mapping does not point at the deployed L1 deposit processor.");
@@ -455,7 +479,7 @@ async function main() {
   if (relativeWeight === 0n) {
     preflightBlockers.push(
       "The staking nominee has zero relative weight at the latest closed epoch. " +
-        "Vote weights only become active on weekly boundaries.",
+        "Vote weights only become active on configured activation boundaries.",
     );
   }
   if (configuredServiceRegistrySource !== "external") {
@@ -487,6 +511,12 @@ async function main() {
   if (stakingProxyHash.toLowerCase() === PLACEHOLDER_PROXY_HASH.toLowerCase()) {
     preflightBlockers.push("The staking proxy still uses the placeholder Safe proxy hash.");
   }
+  if (stakingBalance === 0n) {
+    preflightBlockers.push("The staking proxy has no bridged JINN balance yet.");
+  }
+  if (availableRewards === 0n) {
+    preflightBlockers.push("The staking proxy has no available rewards yet.");
+  }
 
   console.log("── L1 Tokenomics ────────────────────────────────────────────");
   console.log(`  Epoch Counter:         ${epochCounter}`);
@@ -516,7 +546,7 @@ async function main() {
   console.log(`  Target Dispenser:      ${artifacts.targetDispenserL2}`);
   console.log(`  Staking Factory:       ${dispenserFactory}`);
   console.log(`  L1 Deposit Processor:  ${dispenserL1Processor}`);
-  console.log(`  Paused State:          ${pauseLabel(dispenserPauseL2)}`);
+  console.log(`  Paused State:          ${targetDispenserPauseLabel(dispenserPauseL2)}`);
   console.log(`  Withheld Amount:       ${formatToken(dispenserWithheldAmount)} JINN`);
   console.log();
 
@@ -544,7 +574,9 @@ async function main() {
   console.log(`  Last Claimed Epoch:    ${nomineeBookmark}`);
   console.log(`  Relative Weight:       ${relativeWeight}`);
   console.log(`  Total Weight:          ${totalWeight}`);
-  console.log(`  Next Vote Boundary:    ${formatTs(nextVoteBoundary)}`);
+  console.log(`  Vote Period:           ${votePeriodSeconds}s`);
+  console.log(`  Vote Delay:            ${weightVoteDelaySeconds}s`);
+  console.log(`  Next Activation:       ${formatTs(nextVoteBoundary)}`);
   console.log();
 
   console.log("── L2 Staking ───────────────────────────────────────────────");

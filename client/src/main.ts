@@ -6,7 +6,7 @@
  * then starts the daemon with MechAdapter + ClaudeRunner on Base.
  *
  * Config resolution (highest priority wins):
- *   1. Environment variables (JINN_*, BASE_RPC_URL)
+ *   1. Environment variables (JINN_*, BASE_RPC_URL, BASE_SEPOLIA_RPC_URL)
  *   2. Config file (~/.jinn-client/config.json or --config <path>)
  *   3. Built-in defaults
  *
@@ -17,7 +17,10 @@
  *   JINN_PASSWORD=secret npm start -- --config ./my-config.json
  */
 
+import { config as dotenvConfig } from 'dotenv';
 import { Wallet } from 'ethers';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
 import { EarningBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
@@ -25,6 +28,8 @@ import { EarningStateStore } from './earning/store.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import { Daemon } from './daemon/daemon.js';
+
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
 // ── Password (env-only — never in config files) ────────────────────────────
 
@@ -52,7 +57,7 @@ const ROUTER_ADDRESS = '0xfFa7118A3D820cd4E820010837D65FAfF463181B' as const;
 async function bootstrap(): Promise<{
   agentPrivateKey: `0x${string}`;
   safeAddress: `0x${string}`;
-  mechAddress: `0x${string}`;
+  mechAddress?: `0x${string}`;
 }> {
   console.log('[main] Running earning bootstrap...');
 
@@ -60,6 +65,9 @@ async function bootstrap(): Promise<{
     earningDir: config.earningDir,
     chain: NETWORK_CHAIN,
     rpcUrl: config.rpcUrl,
+    testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+    testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+    stopAt: config.network === 'testnet' ? 'service_staked' : 'complete',
   });
 
   const result = await bootstrapper.bootstrap(PASSWORD);
@@ -76,7 +84,7 @@ async function bootstrap(): Promise<{
   }
 
   const state = result.earning_state;
-  if (!state.safe_address || !state.mech_address || !state.agent_address) {
+  if (!state.safe_address || !state.agent_address) {
     console.error('[main] Bootstrap completed but missing addresses in state.');
     process.exit(1);
   }
@@ -89,22 +97,33 @@ async function bootstrap(): Promise<{
   console.log(`[main] Bootstrap complete.`);
   console.log(`  Agent:   ${state.agent_address}`);
   console.log(`  Safe:    ${state.safe_address}`);
-  console.log(`  Mech:    ${state.mech_address}`);
+  if (state.mech_address) {
+    console.log(`  Mech:    ${state.mech_address}`);
+  }
   console.log(`  Service: ${state.service_id}`);
 
   return {
     agentPrivateKey: wallet.privateKey as `0x${string}`,
     safeAddress: state.safe_address as `0x${string}`,
-    mechAddress: state.mech_address as `0x${string}`,
+    mechAddress: state.mech_address ? (state.mech_address as `0x${string}`) : undefined,
   };
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log('[main] jinn-client starting on Base');
+  console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
 
   const { agentPrivateKey, safeAddress, mechAddress } = await bootstrap();
+
+  if (config.network === 'testnet') {
+    console.log('[main] Testnet bootstrap stops at service_staked by design. Exiting before mech/daemon startup.');
+    return;
+  }
+
+  if (!mechAddress) {
+    throw new Error('Bootstrap completed without a mech address. Re-run to deploy the mech.');
+  }
 
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrl,

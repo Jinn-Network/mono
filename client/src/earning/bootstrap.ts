@@ -32,6 +32,7 @@ import {
 import {
   type SafeInstance,
   executeSafeTxBatch,
+  executeSafeTxDirect,
   initDeployedSafe,
   initPredictedSafe,
 } from './safe-adapter.js';
@@ -53,20 +54,113 @@ const ServiceState = {
   TerminatedBonded: 5,
 } as const;
 
+// Token-secured services consume the configured bond twice during bootstrap:
+// once as the service security deposit during activation, and once as the
+// operator bond when registering the single agent instance.
+const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
+
 export interface EarningBootstrapperOptions {
   earningDir?: string;
   chain?: 'base' | 'base-sepolia';
   rpcUrl?: string;
+  testnetL2DeploymentPath?: string;
+  testnetL2TokenDeploymentPath?: string;
+  stopAt?: 'service_staked' | 'mech_deployed' | 'complete';
+}
+
+export function reconcilePredictedSafeState(
+  state: Pick<EarningState, 'step' | 'safe_address' | 'service_id' | 'mech_address' | 'staking_address'>,
+  predictedSafeAddress: string,
+): {
+  safeAddress: string;
+  step: EarningStep;
+  changed: boolean;
+  rewound: boolean;
+} {
+  const normalizedPredictedSafeAddress = getAddress(predictedSafeAddress);
+
+  if (!state.safe_address) {
+    return {
+      safeAddress: normalizedPredictedSafeAddress,
+      step: state.step,
+      changed: true,
+      rewound: false,
+    };
+  }
+
+  const normalizedStoredSafeAddress = getAddress(state.safe_address);
+  if (normalizedStoredSafeAddress === normalizedPredictedSafeAddress) {
+    return {
+      safeAddress: normalizedPredictedSafeAddress,
+      step: state.step,
+      changed: false,
+      rewound: false,
+    };
+  }
+
+  if (state.service_id !== null || state.mech_address || state.staking_address) {
+    throw new Error(
+      `Stored Safe ${normalizedStoredSafeAddress} does not match current predicted Safe ${normalizedPredictedSafeAddress} after service bootstrap progressed beyond Safe funding.`,
+    );
+  }
+
+  return {
+    safeAddress: normalizedPredictedSafeAddress,
+    step: 'awaiting_funding',
+    changed: true,
+    rewound: true,
+  };
+}
+
+export function reconcileServiceProgressState(
+  state: Pick<EarningState, 'step' | 'service_id'>,
+  serviceState: number,
+  stakingState: number,
+): {
+  step: EarningStep;
+  changed: boolean;
+} {
+  if (state.service_id === null) {
+    return {
+      step: state.step,
+      changed: false,
+    };
+  }
+
+  let step: EarningStep;
+  if (serviceState >= ServiceState.Deployed) {
+    step = stakingState === 1 ? 'mech_deployed' : 'service_staked';
+  } else if (serviceState >= ServiceState.FinishedRegistration) {
+    step = 'service_deployed';
+  } else if (serviceState >= ServiceState.ActiveRegistration) {
+    step = 'agents_registered';
+  } else if (serviceState >= ServiceState.PreRegistration) {
+    step = 'service_activated';
+  } else {
+    step = 'service_created';
+  }
+
+  return {
+    step,
+    changed: step !== state.step,
+  };
 }
 
 export class EarningBootstrapper {
   private readonly store: EarningStateStore;
   private readonly config: ChainConfig;
   private readonly provider: JsonRpcProvider;
+  private readonly chain: 'base' | 'base-sepolia';
+  private readonly stopAt: 'service_staked' | 'mech_deployed' | 'complete';
 
   constructor(options: EarningBootstrapperOptions = {}) {
     this.store = new EarningStateStore(options.earningDir);
-    this.config = getChainConfig(options.chain ?? 'base');
+    this.chain = options.chain ?? 'base';
+    this.stopAt = options.stopAt ?? 'complete';
+    this.config = getChainConfig(this.chain, {
+      testnetL2DeploymentPath: options.testnetL2DeploymentPath,
+      testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
+    });
 
     if (options.rpcUrl) {
       this.config.rpcUrl = options.rpcUrl;
@@ -85,9 +179,14 @@ export class EarningBootstrapper {
    */
   async bootstrap(password: string): Promise<EarningBootstrapResult> {
     let state = await this.store.load();
+    if (state.chain !== this.chain) {
+      state = await this.store.patch({ chain: this.chain });
+    }
+    state = await this.refreshPredictedSafeAddress(state, password);
+    state = await this.refreshServiceProgressState(state);
 
     try {
-      while (state.step !== 'complete') {
+      while (state.step !== 'complete' && !this.hasReachedStopTarget(state.step)) {
         const prevStep = state.step;
         state = await this.runStep(state, password);
 
@@ -107,7 +206,7 @@ export class EarningBootstrapper {
         : undefined;
 
       return {
-        ok: state.step === 'complete',
+        ok: state.step === 'complete' || this.hasReachedStopTarget(state.step),
         step: state.step,
         earning_state: state,
         message: this.describeStep(state.step, funding),
@@ -138,7 +237,7 @@ export class EarningBootstrapper {
       case 'safe_predicted':
         return this.stepPredictSafe(state, password);
       case 'awaiting_funding':
-        return this.stepCheckFunding(state);
+        return this.stepCheckFunding(state, password);
       case 'safe_deployed':
         return this.stepDeploySafe(state, password);
       case 'service_created':
@@ -218,25 +317,44 @@ export class EarningBootstrapper {
   // Step 3: awaiting_funding
   // -----------------------------------------------------------------------
 
-  private async stepCheckFunding(state: EarningState): Promise<EarningState> {
+  private async stepCheckFunding(state: EarningState, password: string): Promise<EarningState> {
     const eoaAddress = state.agent_address!;
     const safeAddress = state.safe_address!;
+    const requiredSafeTokenBalance = this.getRequiredSafeTokenBalance();
 
-    const [eoaBalance, olasBalance] = await Promise.all([
+    let [eoaBalance, safeNativeBalance, olasBalance] = await Promise.all([
       this.provider.getBalance(eoaAddress),
+      this.provider.getBalance(safeAddress),
       this.getOlasBalance(safeAddress),
     ]);
 
-    const eoaFunded = eoaBalance >= this.config.minEoaGasEth;
-    const safeOlasFunded = olasBalance >= this.config.bondAmount;
+    const safeNativeShortfall = this.getFundingShortfall(this.config.minSafeEth, safeNativeBalance);
+    const eoaAvailableForSafeTopUp = eoaBalance > this.config.minEoaGasEth
+      ? eoaBalance - this.config.minEoaGasEth
+      : 0n;
 
-    if (eoaFunded && safeOlasFunded) {
+    if (safeNativeShortfall > 0n && eoaAvailableForSafeTopUp >= safeNativeShortfall) {
+      await this.transferEth(password, safeAddress, safeNativeShortfall);
+      eoaBalance -= safeNativeShortfall;
+      safeNativeBalance += safeNativeShortfall;
+      console.error(
+        `[earning-bootstrap] Auto-topped Safe ${safeAddress} with ${safeNativeShortfall} wei ETH from agent EOA`,
+      );
+    }
+
+    const eoaFunded = eoaBalance >= this.config.minEoaGasEth;
+    const safeNativeFunded = safeNativeBalance >= this.config.minSafeEth;
+    const safeOlasFunded = olasBalance >= requiredSafeTokenBalance;
+
+    if (eoaFunded && safeNativeFunded && safeOlasFunded) {
       console.error('[earning-bootstrap] Funding requirements met, proceeding');
       return this.store.patch({ step: 'safe_deployed' });
     }
 
     console.error(
-      `[earning-bootstrap] Waiting for funding: eoaBalance=${eoaBalance} (need ${this.config.minEoaGasEth}), olasBalance=${olasBalance} (need ${this.config.bondAmount})`,
+      `[earning-bootstrap] Waiting for funding: eoaBalance=${eoaBalance} (need ${this.config.minEoaGasEth}), ` +
+        `safeNativeBalance=${safeNativeBalance} (need ${this.config.minSafeEth}), ` +
+        `olasBalance=${olasBalance} (need ${requiredSafeTokenBalance})`,
     );
 
     return state;
@@ -327,8 +445,7 @@ export class EarningBootstrapper {
       },
     ]);
 
-    // Wait for the transaction to be mined before parsing receipt
-    await this.provider.waitForTransaction(result.hash, 1, 30000);
+    await this.waitForSuccessfulTx(result.hash, `create service ${safeAddress}`);
 
     const serviceId = await this.parseServiceIdFromTx(result.hash);
     if (serviceId === null) {
@@ -357,6 +474,8 @@ export class EarningBootstrapper {
       return this.store.patch({ step: 'agents_registered' });
     }
 
+    await this.ensureSafeTokenBalance(state.safe_address!, this.config.bondAmount, 'activate the service');
+
     const signerKey = await this.loadPrivateKey(password);
     const safe = await this.getSafe(state, signerKey);
 
@@ -378,6 +497,15 @@ export class EarningBootstrapper {
       { to: this.config.serviceManager, value: '1', data: activateData },
     ]);
 
+    await this.waitForSuccessfulTx(result.hash, `activate service ${serviceId}`);
+    const finalState = await this.getServiceState(serviceId);
+    if (finalState < ServiceState.ActiveRegistration) {
+      throw new Error(
+        `Service ${serviceId} activation verification failed: expected state >= ${ServiceState.ActiveRegistration} ` +
+          `but got ${finalState}. Tx: ${result.hash}`,
+      );
+    }
+
     console.error(`[earning-bootstrap] Service ${serviceId} activated (tx: ${result.hash})`);
     return this.store.patch({ step: 'agents_registered' });
   }
@@ -394,6 +522,8 @@ export class EarningBootstrapper {
       console.error(`[earning-bootstrap] Agents already registered for service ${serviceId}, skipping`);
       return this.store.patch({ step: 'service_deployed' });
     }
+
+    await this.ensureSafeTokenBalance(state.safe_address!, this.config.bondAmount, 'register the service agent');
 
     const signerKey = await this.loadPrivateKey(password);
     const safe = await this.getSafe(state, signerKey);
@@ -418,6 +548,15 @@ export class EarningBootstrapper {
       { to: this.config.olasToken, value: '0', data: approveData },
       { to: this.config.serviceManager, value: '1', data: registerData },
     ]);
+
+    await this.waitForSuccessfulTx(result.hash, `register agents for service ${serviceId}`);
+    const finalState = await this.getServiceState(serviceId);
+    if (finalState < ServiceState.FinishedRegistration) {
+      throw new Error(
+        `Service ${serviceId} agent-registration verification failed: expected state >= ${ServiceState.FinishedRegistration} ` +
+          `but got ${finalState}. Tx: ${result.hash}`,
+      );
+    }
 
     console.error(`[earning-bootstrap] Agent registered (tx: ${result.hash})`);
     return this.store.patch({ step: 'service_deployed' });
@@ -453,6 +592,15 @@ export class EarningBootstrapper {
       { to: this.config.serviceManager, value: '0', data: deployData },
     ]);
 
+    await this.waitForSuccessfulTx(result.hash, `deploy service ${serviceId}`);
+    const finalState = await this.getServiceState(serviceId);
+    if (finalState < ServiceState.Deployed) {
+      throw new Error(
+        `Service ${serviceId} deploy verification failed: expected state >= ${ServiceState.Deployed} ` +
+          `but got ${finalState}. Tx: ${result.hash}`,
+      );
+    }
+
     console.error(`[earning-bootstrap] Service ${serviceId} deployed (tx: ${result.hash})`);
     return this.store.patch({ step: 'service_staked' });
   }
@@ -464,26 +612,56 @@ export class EarningBootstrapper {
   private async stepStakeService(state: EarningState, password: string): Promise<EarningState> {
     const serviceId = state.service_id!;
 
+    // Check if already staked (idempotency on re-run)
+    const stakingState = await this.getStakingState(serviceId);
+    if (stakingState === 1) {
+      console.error(`[earning-bootstrap] Service ${serviceId} already staked, skipping`);
+      return this.store.patch({ step: 'mech_deployed' });
+    }
+
     const signerKey = await this.loadPrivateKey(password);
     const safe = await this.getSafe(state, signerKey);
 
     const serviceApproveIface = new Interface(SERVICE_REGISTRY_APPROVE_ABI);
     const stakingIface = new Interface(STAKING_ABI);
 
+    // Execute approve and stake as separate Safe transactions to avoid
+    // silent inner-call failures in MultiSend batches.
     const approveData = serviceApproveIface.encodeFunctionData('approve', [
       this.config.stakingContract,
       serviceId,
     ]);
+    console.error(`[earning-bootstrap] Approving service ${serviceId} NFT for staking contract`);
+    const approveResult = await executeSafeTxBatch(safe, [
+      { to: this.config.serviceRegistry, value: '0', data: approveData },
+    ]);
+    console.error(`[earning-bootstrap] Approve tx: ${approveResult.hash}`);
+    await this.waitForSuccessfulTx(approveResult.hash, `approve service ${serviceId} NFT for staking`);
 
     const stakeData = stakingIface.encodeFunctionData('stake', [serviceId]);
+    console.error(`[earning-bootstrap] Staking service ${serviceId}`);
+    // Safe SDK gas estimation is unreliable for stake(); execute the final
+    // call directly via the Safe contract with an explicit gas limit.
+    const stakeResult = await executeSafeTxDirect({
+      rpcUrl: this.config.rpcUrl,
+      signerKey,
+      safeAddress: state.safe_address!,
+      to: this.config.stakingContract,
+      data: stakeData,
+    });
+    console.error(`[earning-bootstrap] Stake tx: ${stakeResult.hash}`);
+    await this.waitForSuccessfulTx(stakeResult.hash, `stake service ${serviceId}`);
 
-    console.error(`[earning-bootstrap] Staking service ${serviceId} (approve + stake)`);
-    const result = await executeSafeTxBatch(safe, [
-      { to: this.config.serviceRegistry, value: '0', data: approveData },
-      { to: this.config.stakingContract, value: '0', data: stakeData },
-    ]);
+    // Verify the on-chain staking state before advancing
+    const finalState = await this.getStakingState(serviceId);
+    if (finalState !== 1) {
+      throw new Error(
+        `Service ${serviceId} staking verification failed: expected state 1 (Staked) but got ${finalState}. ` +
+          `Approve tx: ${approveResult.hash}, Stake tx: ${stakeResult.hash}`,
+      );
+    }
 
-    console.error(`[earning-bootstrap] Service ${serviceId} staked (tx: ${result.hash})`);
+    console.error(`[earning-bootstrap] Service ${serviceId} staked and verified`);
     return this.store.patch({ step: 'mech_deployed' });
   }
 
@@ -579,6 +757,77 @@ export class EarningBootstrapper {
     return wallet.privateKey;
   }
 
+  private async refreshPredictedSafeAddress(
+    state: EarningState,
+    password: string,
+  ): Promise<EarningState> {
+    if (state.step === 'wallet' || !state.agent_address || !this.store.hasKeystore()) {
+      return state;
+    }
+
+    const signerKey = await this.loadPrivateKey(password);
+    const { address } = await initPredictedSafe({
+      rpcUrl: this.config.rpcUrl,
+      signerKey,
+      owners: [state.agent_address],
+      threshold: 1,
+    });
+
+    const reconciliation = reconcilePredictedSafeState(state, address);
+    if (!reconciliation.changed) {
+      return state;
+    }
+
+    const previousSafeAddress = state.safe_address;
+    const nextState = await this.store.patch({
+      safe_address: reconciliation.safeAddress,
+      step: reconciliation.step,
+      error: null,
+    });
+
+    if (reconciliation.rewound && previousSafeAddress) {
+      console.error(
+        `[earning-bootstrap] Safe prediction changed from ${previousSafeAddress} to ${reconciliation.safeAddress}; rewinding to awaiting_funding to recheck balances on the current chain.`,
+      );
+    } else {
+      console.error(`[earning-bootstrap] Using predicted Safe ${reconciliation.safeAddress}`);
+    }
+
+    return nextState;
+  }
+
+  private async refreshServiceProgressState(state: EarningState): Promise<EarningState> {
+    if (
+      state.service_id === null ||
+      state.step === 'wallet' ||
+      state.step === 'safe_predicted' ||
+      state.step === 'awaiting_funding' ||
+      state.step === 'safe_deployed'
+    ) {
+      return state;
+    }
+
+    const serviceState = await this.getServiceState(state.service_id);
+    const stakingState = serviceState >= ServiceState.Deployed
+      ? await this.getStakingState(state.service_id)
+      : 0;
+    const reconciliation = reconcileServiceProgressState(state, serviceState, stakingState);
+    if (!reconciliation.changed) {
+      return state;
+    }
+
+    const nextState = await this.store.patch({
+      step: reconciliation.step,
+      error: null,
+    });
+
+    console.error(
+      `[earning-bootstrap] Reconciled service ${state.service_id} from local step ${state.step} to on-chain step ${reconciliation.step}.`,
+    );
+
+    return nextState;
+  }
+
   private async getSafe(state: EarningState, signerKey: string): Promise<SafeInstance> {
     const safeAddress = state.safe_address!;
 
@@ -602,8 +851,18 @@ export class EarningBootstrapper {
 
   private async getOlasBalance(address: string): Promise<bigint> {
     const olas = new Contract(this.config.olasToken, ERC20_ABI, this.provider);
-    const balance: bigint = await olas.balanceOf(address);
-    return balance;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const balance: bigint = await olas.balanceOf(address);
+        return balance;
+      } catch (error) {
+        lastError = error;
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   private async getServiceState(serviceId: number): Promise<number> {
@@ -614,6 +873,26 @@ export class EarningBootstrapper {
     );
     const service = await registry.getService(serviceId);
     return Number(service.state);
+  }
+
+  private async waitForSuccessfulTx(txHash: string, label: string): Promise<void> {
+    const receipt = await this.provider.waitForTransaction(txHash, 1, 30000);
+    if (!receipt) {
+      throw new Error(`${label} tx not confirmed: ${txHash}`);
+    }
+    if (receipt.status !== 1) {
+      throw new Error(`${label} tx reverted: ${txHash}`);
+    }
+  }
+
+  /** Returns 0=Unstaked, 1=Staked, 2=Evicted */
+  private async getStakingState(serviceId: number): Promise<number> {
+    const staking = new Contract(
+      this.config.stakingContract,
+      STAKING_ABI,
+      this.provider,
+    );
+    return Number(await staking.getStakingState(serviceId));
   }
 
   private async parseServiceIdFromTx(txHash: string): Promise<number | null> {
@@ -688,42 +967,96 @@ export class EarningBootstrapper {
   private async buildFundingRequirement(state: EarningState): Promise<FundingRequirement> {
     const eoaAddress = state.agent_address!;
     const safeAddress = state.safe_address!;
+    const requiredSafeTokenBalance = this.getRequiredSafeTokenBalance();
 
-    const [eoaBalance, olasBalance] = await Promise.all([
+    const [eoaBalance, safeNativeBalance, olasBalance] = await Promise.all([
       this.provider.getBalance(eoaAddress),
+      this.provider.getBalance(safeAddress),
       this.getOlasBalance(safeAddress),
     ]);
 
+    const safeNativeShortfall = this.getFundingShortfall(this.config.minSafeEth, safeNativeBalance);
+
     return {
       eoa_address: eoaAddress,
-      eoa_eth_required: this.config.minEoaGasEth.toString(),
+      eoa_eth_required: (this.config.minEoaGasEth + safeNativeShortfall).toString(),
       eoa_eth_balance: eoaBalance.toString(),
       safe_address: safeAddress,
-      safe_olas_required: this.config.bondAmount.toString(),
+      safe_eth_required: this.config.minSafeEth.toString(),
+      safe_eth_balance: safeNativeBalance.toString(),
+      safe_olas_required: requiredSafeTokenBalance.toString(),
       safe_olas_balance: olasBalance.toString(),
     };
   }
 
   private describeStep(step: EarningStep, funding?: FundingRequirement): string {
-    if (step === 'complete') {
+    if (step === 'complete' && this.stopAt === 'complete') {
       return 'Earning bootstrap complete. Service is staked and running.';
+    }
+
+    if (this.stopAt !== 'complete' && this.hasReachedStopTarget(step)) {
+      return `Earning bootstrap reached stop target at ${this.stopAt}.`;
     }
 
     if (step === 'awaiting_funding' && funding) {
       const lines = ['Waiting for funding:'];
       const eoaNeeded = BigInt(funding.eoa_eth_required) - BigInt(funding.eoa_eth_balance);
+      const safeEthNeeded = BigInt(funding.safe_eth_required) - BigInt(funding.safe_eth_balance);
       const olasNeeded = BigInt(funding.safe_olas_required) - BigInt(funding.safe_olas_balance);
 
       if (eoaNeeded > 0n) {
-        lines.push(`  EOA (${funding.eoa_address}): needs ${eoaNeeded} wei ETH for gas`);
+        lines.push(`  EOA (${funding.eoa_address}): needs ${eoaNeeded} wei ETH for gas and Safe top-up`);
+      }
+      if (safeEthNeeded > 0n) {
+        lines.push(`  Safe (${funding.safe_address}): needs ${safeEthNeeded} wei ETH for bootstrap/request value (or fund the EOA and it will auto-top-up the Safe)`);
       }
       if (olasNeeded > 0n) {
-        lines.push(`  Safe (${funding.safe_address}): needs ${olasNeeded} wei OLAS for bond`);
+        lines.push(`  Safe (${funding.safe_address}): needs ${olasNeeded} wei OLAS for service security deposit and agent bond`);
       }
 
       return lines.join('\n');
     }
 
     return `Bootstrap paused at step '${step}'.`;
+  }
+
+  private hasReachedStopTarget(step: EarningStep): boolean {
+    if (this.stopAt === 'service_staked') {
+      return step === 'mech_deployed' || step === 'complete';
+    }
+
+    if (this.stopAt === 'mech_deployed') {
+      return step === 'complete';
+    }
+
+    return step === 'complete';
+  }
+
+  private getFundingShortfall(required: bigint, balance: bigint): bigint {
+    return balance >= required ? 0n : required - balance;
+  }
+
+  private getRequiredSafeTokenBalance(): bigint {
+    return this.config.bondAmount * SAFE_TOKEN_BOOTSTRAP_MULTIPLIER;
+  }
+
+  private async ensureSafeTokenBalance(safeAddress: string, required: bigint, action: string): Promise<void> {
+    const balance = await this.getOlasBalance(safeAddress);
+    if (balance < required) {
+      throw new Error(
+        `Safe ${safeAddress} needs ${required} token wei to ${action} but only has ${balance}.`,
+      );
+    }
+  }
+
+  private async transferEth(password: string, to: string, amount: bigint): Promise<void> {
+    const signerKey = await this.loadPrivateKey(password);
+    const signer = new Wallet(signerKey, this.provider);
+    const txResponse = await signer.sendTransaction({ to, value: amount });
+    const receipt = await txResponse.wait();
+
+    if (!receipt || receipt.status !== 1) {
+      throw new Error(`ETH transfer failed: ${txResponse.hash}`);
+    }
   }
 }

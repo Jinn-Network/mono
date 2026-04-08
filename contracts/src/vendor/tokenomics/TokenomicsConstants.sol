@@ -14,8 +14,8 @@ abstract contract TokenomicsConstants {
     // One year in seconds
     uint256 public constant ONE_YEAR = 1 days * 365;
     // Minimum epoch length
-    // JINN TESTNET OVERRIDE: reduced from 10 days to 1 hour for fast iteration
-    uint256 public constant MIN_EPOCH_LENGTH = 1 hours;
+    // JINN TESTNET OVERRIDE: reduced from 10 days to 15 minutes for fast iteration
+    uint256 public constant MIN_EPOCH_LENGTH = 15 minutes;
     // Max epoch length
     uint256 public constant MAX_EPOCH_LENGTH = ONE_YEAR - 1 days;
     // Minimum fixed point tokenomics parameters

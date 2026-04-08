@@ -1,8 +1,8 @@
 {
   "network": "sepolia",
   "chainId": 11155111,
-  "deployer": "0x443ad8619a9aa37d08c5ef7846B3B0Cf66efffE7",
-  "deployedAt": "2026-04-07T03:44:26.169Z",
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-08T09:32:24.796Z",
   "config": {
     "epochLen": 7200,
     "maxNumClaimingEpochs": 10,
@@ -11,16 +11,16 @@
     "defaultMaxStakingIncentive": "100000000000000000000"
   },
   "contracts": {
-    "JINN": "0x95A0d0E40Ea5F85968dF9eF43e9E4a37D6C8b8a0",
-    "veOLAS": "0x8Eb289Fe784cc61c3676e91Ecc6d38a711f4952d",
-    "Tokenomics": "0xac1D01d27dcfc377656fc728222b40DCe4b203a0",
-    "Treasury": "0x0eD61f297Ae6a9B6231818EB5055bF4002Eb99bE",
-    "Depository": "0x7BF2dA77BC5dbCD6f21f1f7439d858864698a9ec",
-    "Dispenser": "0xB9485266348C49918842BF7152dbE76d36bb9A3D",
-    "GenericBondCalculator": "0x8E884e45EcCB4d9EdeBfeaF34f516F639Ea8A73E",
-    "VoteWeighting": "0x63a5603dA74AD4dFa3248D90E6BaE93668D0D5ba",
-    "ComponentRegistry (stub)": "0xBa67B25206dE5920dcB997324723198B59AfD035",
-    "AgentRegistry (stub)": "0x7e603A266f86Dd5d93ddf6127Dd8B2622f4Ec0F6",
-    "ServiceRegistry (stub)": "0xE49cFCC0Bb9e01641B66693a0B4227051DD95A8C"
+    "JINN": "0x8042063aBAce92B8BAF92C1E219D2D03DB59De45",
+    "veOLAS": "0x9515262f681B4112919D20B044AFEc5308e999f7",
+    "Tokenomics": "0xC84d81675083dD16f06016cCCF3B01Ce0b563aB6",
+    "Treasury": "0x99BAc2Df16562986f3d197A5aae05bcf1A56f3B6",
+    "Depository": "0x62A7303040880881d31BD0444f365CB3889472C5",
+    "Dispenser": "0x61Fe7eF2121F1ce62d6BB4bB476465559b59A7f3",
+    "GenericBondCalculator": "0xD7327744F11630cA075ec3B848b2453A613C02F5",
+    "VoteWeighting": "0xb737040B53eb413AE528EB45F45ED3Bbb886fAB8",
+    "ComponentRegistry (stub)": "0x8Ff2667828dDCC853d21659750Ff006389CC6A42",
+    "AgentRegistry (stub)": "0xD01961B9E11875C4fd968943EF084E9596459935",
+    "ServiceRegistry (stub)": "0x80d5197Db947E440B6E1c13777044b6Cc0f70962"
   }
 }

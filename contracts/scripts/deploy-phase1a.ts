@@ -19,8 +19,13 @@ import * as path from "path";
 import {
   deployL1Stack,
   DEFAULT_DEPLOY_CONFIG,
+  FAST_TEST_DEPLOY_CONFIG,
   DeployConfig,
 } from "./lib/deploy-helpers";
+import {
+  getL1DeploymentArtifactName,
+  resolvePhase1aTimingProfile,
+} from "./lib/phase1a-rollout-helpers";
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -36,9 +41,12 @@ async function main() {
   console.log();
 
   // Build config from env overrides
-  const config: DeployConfig = {
-    ...DEFAULT_DEPLOY_CONFIG,
-  };
+  const timingProfile = resolvePhase1aTimingProfile();
+  const config: DeployConfig = timingProfile === "fast-test"
+    ? { ...FAST_TEST_DEPLOY_CONFIG }
+    : { ...DEFAULT_DEPLOY_CONFIG };
+
+  console.log(`Timing profile: ${timingProfile}`);
 
   if (process.env.EPOCH_LENGTH) {
     config.epochLen = parseInt(process.env.EPOCH_LENGTH);
@@ -94,6 +102,10 @@ async function main() {
     deployedAt: new Date().toISOString(),
     config: {
       epochLen: config.epochLen,
+      timingProfile: config.timingProfile,
+      votePeriodSeconds: config.votePeriodSeconds,
+      weightVoteDelaySeconds: config.weightVoteDelaySeconds,
+      voteCheckpointHorizon: config.voteCheckpointHorizon,
       maxNumClaimingEpochs: config.maxNumClaimingEpochs,
       maxNumStakingTargets: config.maxNumStakingTargets,
       defaultMinStakingWeight: config.defaultMinStakingWeight,
@@ -105,7 +117,7 @@ async function main() {
   // Write to file
   const outPath = path.resolve(
     process.cwd(),
-    `deployment-phase1a-${networkName}.json`
+    getL1DeploymentArtifactName(config.timingProfile, networkName),
   );
   fs.writeFileSync(outPath, JSON.stringify(output, null, 2) + "\n");
   console.log(`\nDeployment written to: ${outPath}`);

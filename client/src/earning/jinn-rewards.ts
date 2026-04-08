@@ -1,8 +1,8 @@
 /**
- * JINN reward claiming scaffold for Phase 1a staking contract.
+ * JINN reward claiming helper for the Phase 1a staking contract.
  *
- * Mirrors the OLAS staking claim pattern used in bootstrap.ts.
- * Placeholder implementation — wired up after Phase 1a deployment.
+ * The OLAS-style staking proxy exposes `calculateStakingReward()` plus
+ * owner-authorized `claim()` / `checkpointAndClaim()` entrypoints.
  */
 
 import type { PublicClient, WalletClient } from 'viem';
@@ -16,6 +16,15 @@ export const JINN_STAKING_ABI = [
     inputs: [
       { name: 'serviceId', type: 'uint256' },
     ],
+    name: 'calculateStakingReward',
+    outputs: [{ name: 'amount', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'serviceId', type: 'uint256' },
+    ],
     name: 'claim',
     outputs: [{ name: 'amount', type: 'uint256' }],
     stateMutability: 'nonpayable',
@@ -25,9 +34,9 @@ export const JINN_STAKING_ABI = [
     inputs: [
       { name: 'serviceId', type: 'uint256' },
     ],
-    name: 'pendingRewards',
+    name: 'checkpointAndClaim',
     outputs: [{ name: 'amount', type: 'uint256' }],
-    stateMutability: 'view',
+    stateMutability: 'nonpayable',
     type: 'function',
   },
 ] as const;
@@ -53,12 +62,12 @@ export async function claimJinnRewards(
   walletClient: WalletClient,
   stakingContractAddress: `0x${string}`,
   serviceId: number,
+  options: { checkpoint?: boolean } = {},
 ): Promise<{ claimed: boolean; amount: bigint }> {
-  // Check pending rewards before attempting claim
   const pending = await publicClient.readContract({
     address: stakingContractAddress,
     abi: JINN_STAKING_ABI,
-    functionName: 'pendingRewards',
+    functionName: 'calculateStakingReward',
     args: [BigInt(serviceId)],
   });
 
@@ -71,7 +80,7 @@ export async function claimJinnRewards(
   const hash = await walletClient.writeContract({
     address: stakingContractAddress,
     abi: JINN_STAKING_ABI,
-    functionName: 'claim',
+    functionName: options.checkpoint ? 'checkpointAndClaim' : 'claim',
     args: [BigInt(serviceId)],
     account,
     chain: walletClient.chain ?? null,

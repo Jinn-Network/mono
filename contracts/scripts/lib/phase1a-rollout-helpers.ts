@@ -17,6 +17,7 @@ interface Phase1aArtifactInput {
 
 export interface Phase1aArtifactPaths {
   l1: string;
+  l2Token: string;
   l2: string;
   bridge: string;
 }
@@ -36,6 +37,44 @@ export interface Phase1aArtifacts {
 
 export const SEPOLIA_CHAIN_ID = 11155111;
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
+
+export type Phase1aTimingProfile = "canonical" | "fast-test";
+
+export function resolvePhase1aTimingProfile(env: EnvMap = process.env): Phase1aTimingProfile {
+  return env.PHASE1A_TIMING_PROFILE === "fast-test" ? "fast-test" : "canonical";
+}
+
+export function getPhase1aArtifactSuffix(profile: Phase1aTimingProfile): string {
+  return profile === "fast-test" ? "-fast" : "";
+}
+
+export function getL1DeploymentArtifactName(profile: Phase1aTimingProfile, networkName = "sepolia"): string {
+  return `deployment-phase1a-${networkName}${getPhase1aArtifactSuffix(profile)}.json`;
+}
+
+export function getL2TokenDeploymentArtifactName(
+  profile: Phase1aTimingProfile,
+  networkName: string,
+): string {
+  const normalizedNetworkName = networkName === "base-sepolia" ? "baseSepolia" : networkName;
+  return `deployment-phase1a-token-${normalizedNetworkName}${getPhase1aArtifactSuffix(profile)}.json`;
+}
+
+export function getL2DeploymentArtifactName(
+  profile: Phase1aTimingProfile,
+  networkName: string,
+): string {
+  const normalizedNetworkName = networkName === "base-sepolia" ? "baseSepolia" : networkName;
+  return `deployment-phase1a-l2-${normalizedNetworkName}${getPhase1aArtifactSuffix(profile)}.json`;
+}
+
+export function getBridgeDeploymentArtifactName(
+  profile: Phase1aTimingProfile,
+  l1NetworkName = "sepolia",
+  l2NetworkName = "baseSepolia",
+): string {
+  return `deployment-phase1a-bridge-${l1NetworkName}-${l2NetworkName}${getPhase1aArtifactSuffix(profile)}.json`;
+}
 
 export function loadJson<T>(fileName: string): T {
   const filePath = path.resolve(process.cwd(), fileName);
@@ -64,10 +103,12 @@ function requireAddress(value: string | undefined, label: string): string {
 }
 
 export function resolvePhase1aArtifactPaths(env: EnvMap = process.env): Phase1aArtifactPaths {
+  const profile = resolvePhase1aTimingProfile(env);
   return {
-    l1: env.PHASE1A_L1_DEPLOYMENT ?? "deployment-phase1a-sepolia.json",
-    l2: env.PHASE1A_L2_DEPLOYMENT ?? "deployment-phase1a-l2-baseSepolia.json",
-    bridge: env.PHASE1A_BRIDGE_DEPLOYMENT ?? "deployment-phase1a-bridge-sepolia-baseSepolia.json",
+    l1: env.PHASE1A_L1_DEPLOYMENT ?? getL1DeploymentArtifactName(profile),
+    l2Token: env.PHASE1A_L2_TOKEN_DEPLOYMENT ?? getL2TokenDeploymentArtifactName(profile, "baseSepolia"),
+    l2: env.PHASE1A_L2_DEPLOYMENT ?? getL2DeploymentArtifactName(profile, "baseSepolia"),
+    bridge: env.PHASE1A_BRIDGE_DEPLOYMENT ?? getBridgeDeploymentArtifactName(profile),
   };
 }
 

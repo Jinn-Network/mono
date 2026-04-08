@@ -44,6 +44,7 @@
 
 import { ethers } from "hardhat";
 import { Signer, Contract } from "ethers";
+import type { Phase1aTimingProfile } from "./phase1a-rollout-helpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,8 +67,16 @@ export interface Phase1aDeployment {
 
 /** Configurable deployment parameters. */
 export interface DeployConfig {
+  /** Timing profile selector. */
+  timingProfile: Phase1aTimingProfile;
   /** Epoch length in seconds. OLAS uses 2592000 (30 days). Testnet min overridden to 1 hour. */
   epochLen: number;
+  /** Vote activation bucket in seconds. */
+  votePeriodSeconds: number;
+  /** Vote cooldown in seconds. */
+  weightVoteDelaySeconds: number;
+  /** Historic checkpoint horizon. */
+  voteCheckpointHorizon: number;
   /** Retainer bytes32 for Dispenser. Identifies the protocol-owned retainer nominee. */
   retainer: string;
   /** Max number of epochs a staking target can claim in one call. */
@@ -84,7 +93,11 @@ export interface DeployConfig {
 
 /** Sensible defaults for local/testnet deployment. */
 export const DEFAULT_DEPLOY_CONFIG: DeployConfig = {
+  timingProfile: "canonical",
   epochLen: 7200, // 2 hours — testnet override (MIN_EPOCH_LENGTH reduced to 1 hour)
+  votePeriodSeconds: 604800,
+  weightVoteDelaySeconds: 864000,
+  voteCheckpointHorizon: 250,
   retainer: ethers.zeroPadValue("0x01", 32), // arbitrary non-zero bytes32
   maxNumClaimingEpochs: 10,
   maxNumStakingTargets: 100,
@@ -168,7 +181,8 @@ export async function deployL1Stack(
   // Step 6: VoteWeighting — constructor(ve)
   // ve is immutable. dispenser is set post-deploy via changeDispenser().
   // -----------------------------------------------------------------------
-  const VoteWeighting = await ethers.getContractFactory("VoteWeighting", deployer);
+  const voteWeightingContractName = config.timingProfile === "fast-test" ? "VoteWeightingFast" : "VoteWeighting";
+  const VoteWeighting = await ethers.getContractFactory(voteWeightingContractName, deployer);
   const voteWeighting = await VoteWeighting.deploy(await veOLAS.getAddress());
   await voteWeighting.waitForDeployment();
 
@@ -281,3 +295,11 @@ export async function deployL1Stack(
     serviceRegistry,
   };
 }
+export const FAST_TEST_DEPLOY_CONFIG: DeployConfig = {
+  ...DEFAULT_DEPLOY_CONFIG,
+  timingProfile: "fast-test",
+  epochLen: 900,
+  votePeriodSeconds: 900,
+  weightVoteDelaySeconds: 900,
+  voteCheckpointHorizon: 1000,
+};

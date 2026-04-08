@@ -7,7 +7,12 @@ import { ethers } from "hardhat";
 import type { ContractTransactionReceipt, Interface, Log, Signer } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
-import { loadJson } from "./lib/phase1a-rollout-helpers";
+import {
+  getL1DeploymentArtifactName,
+  getL2TokenDeploymentArtifactName as getProfileAwareL2TokenDeploymentArtifactName,
+  loadJson,
+  resolvePhase1aTimingProfile,
+} from "./lib/phase1a-rollout-helpers";
 
 type EnvMap = Record<string, string | undefined>;
 
@@ -34,6 +39,7 @@ export interface TokenCreationResult {
   remoteToken: string;
   bridge: string;
   txHash: string;
+  reusedExisting?: boolean;
 }
 
 const BASE_SEPOLIA_MINTABLE_ERC20_FACTORY = "0x4200000000000000000000000000000000000012";
@@ -50,6 +56,8 @@ const OPTIMISM_MINTABLE_ERC20_ABI = [
   "function bridge() view returns (address)",
   "function l1Token() view returns (address)",
   "function l2Bridge() view returns (address)",
+  "function REMOTE_TOKEN() view returns (address)",
+  "function BRIDGE() view returns (address)",
   "function name() view returns (string)",
   "function symbol() view returns (string)",
 ];
@@ -67,15 +75,15 @@ function requireAddress(value: string | undefined, label: string): string {
 }
 
 export function getL2TokenDeploymentArtifactName(networkName: string): string {
-  const normalizedNetworkName = networkName === "base-sepolia" ? "baseSepolia" : networkName;
-  return `deployment-phase1a-token-${normalizedNetworkName}.json`;
+  return getProfileAwareL2TokenDeploymentArtifactName(resolvePhase1aTimingProfile(), networkName);
 }
 
 export function resolveTokenCreationConfig(
   networkName: string,
   { env = process.env, l1Deployment }: TokenCreationConfigInput = {},
 ): TokenCreationConfig {
-  const l1DeploymentPath = env.PHASE1A_L1_DEPLOYMENT ?? "deployment-phase1a-sepolia.json";
+  const profile = resolvePhase1aTimingProfile(env);
+  const l1DeploymentPath = env.PHASE1A_L1_DEPLOYMENT ?? getL1DeploymentArtifactName(profile, "sepolia");
   const resolvedL1Deployment = l1Deployment ?? loadJson<DeploymentArtifact>(l1DeploymentPath);
   const name = env.JINN_TOKEN_NAME?.trim() || "Jinn";
   const symbol = env.JINN_TOKEN_SYMBOL?.trim() || "JINN";
@@ -132,19 +140,82 @@ export function parseCreatedMintableTokenAddress(
   throw new Error("Unable to locate the created L2 token in the factory receipt.");
 }
 
-async function readAddressField(contract: any, fieldNames: string[]): Promise<string> {
-  for (const fieldName of fieldNames) {
-    try {
-      const value = await contract[fieldName]();
-      if (ethers.isAddress(value)) {
-        return value;
+async function readAddressField(contract: any, fieldNames: string[], retries = 5): Promise<string> {
+  let lastError: string | null = null;
+
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    for (const fieldName of fieldNames) {
+      try {
+        const value = await contract[fieldName]();
+        if (ethers.isAddress(value)) {
+          return value;
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
       }
-    } catch {
-      // Keep trying the compatibility fallbacks.
+    }
+
+    if (attempt + 1 < retries) {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
     }
   }
 
-  throw new Error(`Unable to read any of ${fieldNames.join(", ")} from the Optimism mintable token.`);
+  const suffix = lastError ? ` Last error: ${lastError}` : "";
+  throw new Error(
+    `Unable to read any of ${fieldNames.join(", ")} from the Optimism mintable token.${suffix}`,
+  );
+}
+
+async function findExistingMintableToken(
+  provider: Signer["provider"],
+  config: TokenCreationConfig,
+  factoryInterface: Interface,
+): Promise<string | null> {
+  if (!provider) {
+    return null;
+  }
+
+  const latestBlock = await provider.getBlockNumber();
+  const topicFilter = [
+    factoryInterface.getEvent("OptimismMintableERC20Created")!.topicHash,
+    null,
+    ethers.zeroPadValue(config.l1Token, 32),
+  ];
+  const step = 10_000;
+
+  for (let fromBlock = Math.max(0, latestBlock - step); ; fromBlock = Math.max(0, fromBlock - step)) {
+    const toBlock = Math.min(latestBlock, fromBlock + step - 1);
+    const logs = await provider.getLogs({
+      address: config.factoryAddress,
+      fromBlock,
+      toBlock,
+      topics: topicFilter,
+    });
+
+    for (const log of logs.slice().reverse()) {
+      try {
+        const parsed = factoryInterface.parseLog(log);
+        if (parsed?.name !== "OptimismMintableERC20Created") {
+          continue;
+        }
+
+        const candidate = parsed.args.localToken as string;
+        const token = new ethers.Contract(candidate, OPTIMISM_MINTABLE_ERC20_ABI, provider);
+        const [name, symbol] = (await Promise.all([token.name(), token.symbol()])) as [string, string];
+        if (name === config.name && symbol === config.symbol) {
+          return candidate;
+        }
+      } catch {
+        // Ignore malformed or non-matching logs and keep scanning.
+      }
+    }
+
+    if (fromBlock === 0) {
+      break;
+    }
+  }
+
+  return null;
 }
 
 export async function createTokenRepresentation(
@@ -157,14 +228,34 @@ export async function createTokenRepresentation(
     deployer,
   );
 
-  const tx = await factory.createOptimismMintableERC20(config.l1Token, config.name, config.symbol);
-  const receipt = await tx.wait();
-  const l2Token = parseCreatedMintableTokenAddress(receipt, factory.interface);
+  let txHash = "";
+  let reusedExisting = false;
+  let l2Token: string;
+
+  try {
+    const tx = await factory.createOptimismMintableERC20(config.l1Token, config.name, config.symbol);
+    txHash = tx.hash;
+    const receipt = await tx.wait();
+    l2Token = parseCreatedMintableTokenAddress(receipt, factory.interface);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    if (!message.includes("execution reverted")) {
+      throw error;
+    }
+
+    const existingToken = await findExistingMintableToken(deployer.provider, config, factory.interface);
+    if (!existingToken) {
+      throw error;
+    }
+
+    l2Token = existingToken;
+    reusedExisting = true;
+  }
 
   // Use the signer (not deployer.provider) so HardhatEthersSigner always has a connected provider.
   const token = new ethers.Contract(l2Token, OPTIMISM_MINTABLE_ERC20_ABI, deployer);
-  const remoteToken = await readAddressField(token, ["remoteToken", "l1Token"]);
-  const bridge = await readAddressField(token, ["bridge", "l2Bridge"]);
+  const remoteToken = await readAddressField(token, ["remoteToken", "l1Token", "REMOTE_TOKEN"]);
+  const bridge = await readAddressField(token, ["bridge", "l2Bridge", "BRIDGE"]);
 
   if (remoteToken.toLowerCase() !== config.l1Token.toLowerCase()) {
     throw new Error(
@@ -182,7 +273,8 @@ export async function createTokenRepresentation(
     l2Token,
     remoteToken,
     bridge,
-    txHash: tx.hash,
+    txHash,
+    reusedExisting,
   };
 }
 
@@ -190,6 +282,7 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   const network = await ethers.provider.getNetwork();
   const networkName = network.name === "unknown" ? "hardhat" : network.name;
+  const timingProfile = resolvePhase1aTimingProfile();
 
   console.log("=== Jinn Phase 1a L2 Token Creation ===");
   console.log(`Network:  ${networkName} (chainId: ${network.chainId})`);
@@ -211,6 +304,7 @@ async function main() {
   console.log(`  bridge()                          ${result.bridge}`);
   console.log(`  factory                           ${config.factoryAddress}`);
   console.log(`  txHash                            ${result.txHash}`);
+  console.log(`  reusedExisting                    ${result.reusedExisting ? "yes" : "no"}`);
 
   const output = {
     network: networkName,
@@ -218,6 +312,7 @@ async function main() {
     deployer: deployer.address,
     deployedAt: new Date().toISOString(),
     config: {
+      timingProfile,
       l1DeploymentPath: config.l1DeploymentPath,
       l1Token: config.l1Token,
       name: config.name,
@@ -235,10 +330,14 @@ async function main() {
       remoteToken: result.remoteToken,
       bridge: result.bridge,
       txHash: result.txHash,
+      reusedExisting: result.reusedExisting ?? false,
     },
   };
 
-  const outPath = path.resolve(process.cwd(), getL2TokenDeploymentArtifactName(networkName));
+  const outPath = path.resolve(
+    process.cwd(),
+    getProfileAwareL2TokenDeploymentArtifactName(timingProfile, networkName),
+  );
   fs.writeFileSync(outPath, JSON.stringify(output, null, 2) + "\n");
   console.log(`\nDeployment written to: ${outPath}`);
 }

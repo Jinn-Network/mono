@@ -19,6 +19,8 @@ const VE_ABI = [
 ];
 
 const VOTE_WEIGHTING_ABI = [
+  "function WEEK() view returns (uint256)",
+  "function WEIGHT_VOTE_DELAY() view returns (uint256)",
   "function getNomineeId(bytes32 account, uint256 chainId) view returns (uint256)",
   "function lastUserVote(address user, bytes32 nomineeHash) view returns (uint256)",
   "function voteForNomineeWeights(bytes32 account, uint256 chainId, uint256 weight)",
@@ -26,9 +28,8 @@ const VOTE_WEIGHTING_ABI = [
 ];
 
 const MAX_WEIGHT = 10_000n;
-const WEIGHT_VOTE_DELAY = 864_000n;
-const WEEK = 604_800n;
-const DEFAULT_LOCK_DURATION_SECONDS = 28 * 24 * 60 * 60;
+const DEFAULT_CANONICAL_LOCK_DURATION_SECONDS = 28 * 24 * 60 * 60;
+const DEFAULT_FAST_TEST_LOCK_DURATION_SECONDS = 7 * 24 * 60 * 60;
 
 function parsePositiveBigInt(value: string | undefined, label: string): bigint | undefined {
   if (!value) {
@@ -77,11 +78,6 @@ async function main() {
   const signerAddress = signer.address;
   const weightBps = parsePositiveBigInt(process.env.PHASE1A_VOTE_WEIGHT_BPS, "PHASE1A_VOTE_WEIGHT_BPS");
   const lockAmount = parsePositiveBigInt(process.env.PHASE1A_VOTE_LOCK_AMOUNT, "PHASE1A_VOTE_LOCK_AMOUNT");
-  const lockDurationSeconds = parsePositiveInteger(
-    process.env.PHASE1A_VOTE_LOCK_DURATION_SECONDS,
-    "PHASE1A_VOTE_LOCK_DURATION_SECONDS",
-    DEFAULT_LOCK_DURATION_SECONDS,
-  );
 
   if (!weightBps || weightBps > MAX_WEIGHT) {
     throw new Error("Set PHASE1A_VOTE_WEIGHT_BPS to a value between 1 and 10000.");
@@ -98,7 +94,16 @@ async function main() {
 
   const latestBlock = await ethers.provider.getBlock("latest");
   const now = BigInt(latestBlock!.timestamp);
-  const nextWeekStart = ((now + WEEK) / WEEK) * WEEK;
+  const votePeriodSeconds = (await voteWeighting.WEEK()) as bigint;
+  const weightVoteDelaySeconds = (await voteWeighting.WEIGHT_VOTE_DELAY()) as bigint;
+  const defaultLockDurationSeconds =
+    votePeriodSeconds <= 900n ? DEFAULT_FAST_TEST_LOCK_DURATION_SECONDS : DEFAULT_CANONICAL_LOCK_DURATION_SECONDS;
+  const lockDurationSeconds = parsePositiveInteger(
+    process.env.PHASE1A_VOTE_LOCK_DURATION_SECONDS,
+    "PHASE1A_VOTE_LOCK_DURATION_SECONDS",
+    defaultLockDurationSeconds,
+  );
+  const nextVoteBoundary = ((now + votePeriodSeconds) / votePeriodSeconds) * votePeriodSeconds;
 
   const nomineeId = (await voteWeighting.getNomineeId(stakingTarget, BASE_SEPOLIA_CHAIN_ID)) as bigint;
   if (nomineeId === 0n) {
@@ -112,7 +117,9 @@ async function main() {
   console.log(`Staking target key:        ${stakingTarget}`);
   console.log(`Nominee hash:              ${nomineeHash}`);
   console.log(`Requested vote weight:     ${weightBps} / ${MAX_WEIGHT}`);
-  console.log(`Next vote week boundary:   ${formatTs(nextWeekStart)}`);
+  console.log(`Vote period:               ${votePeriodSeconds}s`);
+  console.log(`Vote delay:                ${weightVoteDelaySeconds}s`);
+  console.log(`Next vote boundary:        ${formatTs(nextVoteBoundary)}`);
 
   let lockEnd = (await veOLAS.lockedEnd(signerAddress)) as bigint;
   if (lockEnd <= now + 1n) {
@@ -150,15 +157,15 @@ async function main() {
   }
 
   console.log(`Active lock end:           ${formatTs(lockEnd)}`);
-  if (lockEnd <= nextWeekStart) {
+  if (lockEnd <= nextVoteBoundary) {
     throw new Error(
-      "The current veJINN lock expires before the next weekly vote boundary. " +
+      "The current veJINN lock expires before the next vote activation boundary. " +
         "Extend the lock manually before voting.",
     );
   }
 
   const lastUserVote = (await voteWeighting.lastUserVote(signerAddress, nomineeHash)) as bigint;
-  const nextAllowedVote = lastUserVote + WEIGHT_VOTE_DELAY;
+  const nextAllowedVote = lastUserVote + weightVoteDelaySeconds;
   if (lastUserVote > 0n && nextAllowedVote > now) {
     throw new Error(
       `Vote delay is still active until ${formatTs(nextAllowedVote)}. Wait before sending another vote.`,
@@ -173,21 +180,24 @@ async function main() {
   console.log(`Vote tx:                   ${voteTx.hash}`);
   await voteTx.wait();
 
-  const [scheduledRelativeWeight, scheduledTotalWeight] =
-    (await voteWeighting.nomineeRelativeWeightWrite(
-      stakingTarget,
-      BASE_SEPOLIA_CHAIN_ID,
-      nextWeekStart,
-    )) as [bigint, bigint];
+  const scheduledWeights = (await voteWeighting.nomineeRelativeWeightWrite(
+    stakingTarget,
+    BASE_SEPOLIA_CHAIN_ID,
+    nextVoteBoundary,
+  )) as { 0: bigint; 1: bigint } | [bigint, bigint];
+  const scheduledRelativeWeight = scheduledWeights[0];
+  const scheduledTotalWeight = scheduledWeights[1];
 
   console.log(`Scheduled relative weight: ${scheduledRelativeWeight}`);
   console.log(`Scheduled total weight:    ${scheduledTotalWeight}`);
-  console.log("Note: vote weights are week-rounded and do not become active immediately.");
+  console.log("Note: vote weights are boundary-rounded and do not become active immediately.");
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+if (require.main === module) {
+  main()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
+}

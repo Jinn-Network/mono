@@ -8,10 +8,16 @@
  */
 
 import type { MetaTransactionData, TransactionResult } from '@safe-global/types-kit';
+import { Contract, JsonRpcProvider, Wallet, ZeroAddress, getBytes, hexlify, concat } from 'ethers';
 
 export type { MetaTransactionData, TransactionResult };
 
 const SAFE_EXECUTION_FALLBACK_GAS_LIMIT = 2_000_000;
+const SAFE_ABI = [
+  'function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) returns (bool)',
+  'function nonce() view returns (uint256)',
+  'function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 _nonce) view returns (bytes32)',
+] as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SafeInitFn = (config: any) => Promise<SafeInstance>;
@@ -52,6 +58,29 @@ async function resolveSafeInit(): Promise<SafeInitFn> {
   }
 
   return SafeClass.init.bind(SafeClass) as SafeInitFn;
+}
+
+async function resolveSafeExecutionRpcUrl(rpcUrl: string): Promise<string> {
+  if (!rpcUrl.includes('tenderly.co')) {
+    return rpcUrl;
+  }
+
+  try {
+    const provider = new JsonRpcProvider(rpcUrl);
+    const network = await provider.getNetwork();
+
+    if (network.chainId === 8453n) {
+      return 'https://base.publicnode.com';
+    }
+
+    if (network.chainId === 84532n) {
+      return 'https://sepolia.base.org';
+    }
+  } catch {
+    // Fall back to the configured RPC if chain detection fails.
+  }
+
+  return rpcUrl;
 }
 
 export interface PredictedSafeResult {
@@ -125,4 +154,62 @@ export async function executeSafeTxBatch(
       gasLimit: SAFE_EXECUTION_FALLBACK_GAS_LIMIT,
     });
   }
+}
+
+/**
+ * Execute a single Safe transaction directly via the Safe contract, bypassing
+ * Safe SDK gas estimation for calls that are known to misbehave under viem.
+ */
+export async function executeSafeTxDirect(opts: {
+  rpcUrl: string;
+  signerKey: string;
+  safeAddress: string;
+  to: string;
+  value?: bigint;
+  data: string;
+  gasLimit?: bigint;
+}): Promise<{ hash: string }> {
+  const executionRpcUrl = await resolveSafeExecutionRpcUrl(opts.rpcUrl);
+  const provider = new JsonRpcProvider(executionRpcUrl);
+  const providerSigner = new Wallet(opts.signerKey, provider);
+  const safeRead = new Contract(opts.safeAddress, SAFE_ABI, providerSigner.provider);
+  const nonce: bigint = await safeRead.nonce();
+  const value = opts.value ?? 0n;
+
+  const safeTxHash: string = await safeRead.getTransactionHash(
+    opts.to,
+    value,
+    opts.data,
+    0,
+    0,
+    0,
+    0,
+    ZeroAddress,
+    ZeroAddress,
+    nonce,
+  );
+
+  const signature = await providerSigner.signMessage(getBytes(safeTxHash));
+  const sigBytes = getBytes(signature);
+  const r = hexlify(sigBytes.slice(0, 32));
+  const s = hexlify(sigBytes.slice(32, 64));
+  const v = sigBytes[64] + 4;
+  const adjustedSig = concat([r, s, new Uint8Array([v])]);
+
+  const safeWrite = new Contract(opts.safeAddress, SAFE_ABI, providerSigner);
+  const tx = await safeWrite.execTransaction(
+    opts.to,
+    value,
+    opts.data,
+    0,
+    0,
+    0,
+    0,
+    ZeroAddress,
+    ZeroAddress,
+    adjustedSig,
+    { gasLimit: opts.gasLimit ?? SAFE_EXECUTION_FALLBACK_GAS_LIMIT },
+  );
+
+  return { hash: tx.hash };
 }

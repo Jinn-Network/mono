@@ -48,7 +48,7 @@ export const EarningStateSchema = z
     service_id: z.number().nullable(),
     mech_address: z.string().nullable(),
     staking_address: z.string().nullable(),
-    chain: z.literal('base'),
+    chain: z.enum(['base', 'base-sepolia']),
     error: z.string().nullable(),
     updated_at: z.string(),
   })
@@ -56,7 +56,7 @@ export const EarningStateSchema = z
 
 export type EarningState = z.infer<typeof EarningStateSchema>;
 
-export function createDefaultEarningState(): EarningState {
+export function createDefaultEarningState(chain: 'base' | 'base-sepolia' = 'base'): EarningState {
   return {
     step: 'wallet',
     agent_address: null,
@@ -64,7 +64,7 @@ export function createDefaultEarningState(): EarningState {
     service_id: null,
     mech_address: null,
     staking_address: null,
-    chain: 'base',
+    chain,
     error: null,
     updated_at: new Date().toISOString(),
   };
@@ -75,6 +75,8 @@ export interface FundingRequirement {
   eoa_eth_required: string;
   eoa_eth_balance: string;
   safe_address: string;
+  safe_eth_required: string;
+  safe_eth_balance: string;
   safe_olas_required: string;
   safe_olas_balance: string;
 }

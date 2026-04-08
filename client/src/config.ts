@@ -2,7 +2,7 @@
  * Config loader for jinn-client.
  *
  * Resolution order (highest priority wins):
- *   1. Environment variables (JINN_*, BASE_RPC_URL)
+ *   1. Environment variables (JINN_*, BASE_RPC_URL, BASE_SEPOLIA_RPC_URL)
  *   2. Config file (--config flag or ~/.jinn-client/config.json)
  *   3. Built-in defaults
  *
@@ -80,6 +80,12 @@ export const JinnConfigSchema = z.object({
 
   /** IPFS read endpoint */
   ipfsGatewayUrl: z.string().default('https://gateway.autonolas.tech'),
+
+  /** Optional Base Sepolia Phase 1a staking deployment artifact path */
+  testnetL2DeploymentPath: z.string().optional(),
+
+  /** Optional Base Sepolia Phase 1a token deployment artifact path */
+  testnetL2TokenDeploymentPath: z.string().optional(),
 });
 
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined). */
@@ -120,8 +126,6 @@ export function loadConfig(configPath?: string): JinnConfig {
   const merged: Record<string, unknown> = { ...fileValues };
 
   if (env['JINN_NETWORK'])           merged.network = env['JINN_NETWORK'];
-  if (env['BASE_RPC_URL'])           merged.rpcUrl = env['BASE_RPC_URL'];
-  if (env['JINN_RPC_URL'])           merged.rpcUrl = env['JINN_RPC_URL'];
   if (env['JINN_EARNING_DIR'])       merged.earningDir = env['JINN_EARNING_DIR'];
   if (env['JINN_DB_PATH'])           merged.dbPath = env['JINN_DB_PATH'];
   if (env['JINN_POLL_INTERVAL_MS'])  merged.pollIntervalMs = parseInt(env['JINN_POLL_INTERVAL_MS'], 10);
@@ -133,6 +137,22 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_NODE_ENDPOINT'])     merged.nodeEndpoint = env['JINN_NODE_ENDPOINT'];
   if (env['JINN_IPFS_REGISTRY_URL']) merged.ipfsRegistryUrl = env['JINN_IPFS_REGISTRY_URL'];
   if (env['JINN_IPFS_GATEWAY_URL'])  merged.ipfsGatewayUrl = env['JINN_IPFS_GATEWAY_URL'];
+  if (env['JINN_TESTNET_L2_DEPLOYMENT']) merged.testnetL2DeploymentPath = env['JINN_TESTNET_L2_DEPLOYMENT'];
+  if (env['JINN_TESTNET_TOKEN_DEPLOYMENT']) merged.testnetL2TokenDeploymentPath = env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
+
+  const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
+
+  // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
+  // not silently inherit a mainnet RPC from client/.env during bootstrap.
+  if (env['JINN_RPC_URL']) {
+    merged.rpcUrl = env['JINN_RPC_URL'];
+  } else if (resolvedNetwork === 'testnet') {
+    if (env['BASE_SEPOLIA_RPC_URL']) {
+      merged.rpcUrl = env['BASE_SEPOLIA_RPC_URL'];
+    }
+  } else if (env['BASE_RPC_URL']) {
+    merged.rpcUrl = env['BASE_RPC_URL'];
+  }
 
   // desiredStates from env points to a JSON file
   if (env['JINN_DESIRED_STATES']) {

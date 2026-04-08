@@ -3,6 +3,11 @@ import { ethers } from "hardhat";
 import type { Signer } from "ethers";
 import * as deployL2Module from "../../scripts/deploy-phase1a-l2";
 import * as bridgeModule from "../../scripts/deploy-phase1a-bridge";
+import * as claimL2Module from "../../scripts/phase1a-claim-l2-rewards";
+import * as claimStakingModule from "../../scripts/phase1a-claim-staking-incentives";
+import * as maintenanceModule from "../../scripts/phase1a-process-l2-maintenance";
+import * as mintVoteModule from "../../scripts/phase1a-mint-jinn-for-vote";
+import * as recordActivityModule from "../../scripts/phase1a-record-activity";
 import * as statusModule from "../../scripts/status-phase1a-live";
 import * as swapModule from "../../scripts/swap-usdc-eth-base-sepolia";
 import { deployL1Stack, DEFAULT_DEPLOY_CONFIG } from "../../scripts/lib/deploy-helpers";
@@ -446,6 +451,170 @@ describe("Phase 1a rollout regressions", function () {
           nomineeHash: ethers.ZeroHash,
         }),
       ).to.deep.equal(["Static staking-incentive probe returned zero claimable JINN."]);
+    });
+
+    it("treats target dispenser pause state 1 as unpaused", function () {
+      expect(statusModule.isTargetDispenserUnpaused(1n)).to.equal(true);
+      expect(statusModule.isTargetDispenserUnpaused(2n)).to.equal(false);
+      expect(statusModule.targetDispenserPauseLabel(1n)).to.equal("Unpaused");
+      expect(statusModule.targetDispenserPauseLabel(2n)).to.equal("Paused");
+    });
+  });
+
+  describe("Operator script config", function () {
+    it("derives mint-for-vote defaults from the L1 artifact and signer", function () {
+      const signer = "0x00000000000000000000000000000000000000c1";
+      const config = mintVoteModule.resolveMintForVoteConfig(
+        {
+          contracts: {
+            JINN: "0x00000000000000000000000000000000000000a1",
+            Treasury: "0x00000000000000000000000000000000000000b1",
+          },
+        },
+        signer,
+        {},
+      );
+
+      expect(config.jinn).to.equal("0x00000000000000000000000000000000000000a1");
+      expect(config.treasury).to.equal("0x00000000000000000000000000000000000000b1");
+      expect(config.recipient).to.equal(signer);
+      expect(config.amount).to.equal(ethers.parseEther("100"));
+    });
+
+    it("builds staking-claim defaults and optional bridge gas payload", function () {
+      const defaultConfig = claimStakingModule.resolveClaimStakingIncentivesConfig(
+        "0x00000000000000000000000000000000000000d1",
+        {},
+      );
+      expect(defaultConfig.numClaimedEpochs).to.equal(1n);
+      expect(defaultConfig.chainId).to.equal(84532);
+      expect(defaultConfig.stakingTarget).to.equal(
+        ethers.zeroPadValue("0x00000000000000000000000000000000000000d1", 32),
+      );
+      expect(defaultConfig.bridgePayload).to.equal("0x");
+
+      const customConfig = claimStakingModule.resolveClaimStakingIncentivesConfig(
+        "0x00000000000000000000000000000000000000d1",
+        {
+          PHASE1A_NUM_CLAIMED_EPOCHS: "3",
+          PHASE1A_STAKING_CHAIN_ID: "999",
+          PHASE1A_STAKING_TARGET: "0x00000000000000000000000000000000000000e1",
+          PHASE1A_BRIDGE_MESSAGE_GAS_LIMIT: "250000",
+        },
+      );
+      expect(customConfig.numClaimedEpochs).to.equal(3n);
+      expect(customConfig.chainId).to.equal(999);
+      expect(customConfig.stakingTarget).to.equal(
+        ethers.zeroPadValue("0x00000000000000000000000000000000000000e1", 32),
+      );
+      expect(customConfig.bridgePayload).to.equal(
+        ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [250000n]),
+      );
+    });
+
+    it("parses record-activity config from service id or explicit multisig", function () {
+      expect(
+        recordActivityModule.resolveRecordActivityConfig({
+          PHASE1A_SERVICE_ID: "7",
+          PHASE1A_ACTIVITY_TYPES: "0, 2",
+        }),
+      ).to.deep.equal({
+        serviceId: 7n,
+        multisig: undefined,
+        activityTypes: [0, 2],
+      });
+
+      expect(
+        recordActivityModule.resolveRecordActivityConfig({
+          PHASE1A_MULTISIG: "0x00000000000000000000000000000000000000f1",
+        }),
+      ).to.deep.equal({
+        serviceId: undefined,
+        multisig: "0x00000000000000000000000000000000000000f1",
+        activityTypes: [0, 1, 2],
+      });
+
+      expect(() =>
+        recordActivityModule.resolveRecordActivityConfig({
+          PHASE1A_ACTIVITY_TYPES: "3",
+        }),
+      ).to.throw(/0, 1, or 2/i);
+    });
+
+    it("requires a service id for L2 claims and defaults to checkpointAndClaim", function () {
+      expect(() => claimL2Module.resolveClaimL2Config({})).to.throw(/PHASE1A_SERVICE_ID/i);
+      expect(
+        claimL2Module.resolveClaimL2Config({
+          PHASE1A_SERVICE_ID: "9",
+        }),
+      ).to.include({
+        serviceId: 9n,
+        mode: "checkpointAndClaim",
+      });
+      expect(
+        claimL2Module.resolveClaimL2Config({
+          PHASE1A_SERVICE_ID: "9",
+          PHASE1A_L2_CLAIM_MODE: "claim",
+        }),
+      ).to.include({
+        serviceId: 9n,
+        mode: "claim",
+      });
+    });
+
+    it("derives the Safe-owner keystore path from the earning dir and supports dry-run", function () {
+      expect(
+        claimL2Module.resolveClaimL2KeystorePath({
+          PHASE1A_EARNING_DIR: "/tmp/phase1a-earning",
+        }),
+      ).to.equal("/tmp/phase1a-earning/agent_keystore.json");
+
+      expect(
+        claimL2Module.resolveClaimL2KeystorePath({
+          PHASE1A_SAFE_OWNER_KEYSTORE_PATH: "/tmp/custom-owner.json",
+          PHASE1A_EARNING_DIR: "/tmp/ignored",
+        }),
+      ).to.equal("/tmp/custom-owner.json");
+
+      expect(
+        claimL2Module.resolveClaimL2Config({
+          PHASE1A_SERVICE_ID: "9",
+          PHASE1A_DRY_RUN: "true",
+          PHASE1A_EARNING_DIR: "/tmp/phase1a-earning",
+        }),
+      ).to.include({
+        serviceId: 9n,
+        mode: "checkpointAndClaim",
+        dryRun: true,
+        safeOwnerKeystorePath: "/tmp/phase1a-earning/agent_keystore.json",
+      });
+    });
+
+    it("encodes maintenance payloads from raw bytes or structured env vars", function () {
+      const rawData = "0x1234";
+      expect(
+        maintenanceModule.resolveMaintenanceConfig({
+          PHASE1A_MAINTENANCE_DATA: rawData,
+          PHASE1A_UPDATE_WITHHELD_AMOUNT: "true",
+        }),
+      ).to.deep.equal({
+        data: rawData,
+        updateWithheldAmount: true,
+      });
+
+      const target = "0x00000000000000000000000000000000000000a5";
+      const amount = "42";
+      const batchHash = ethers.keccak256(ethers.toUtf8Bytes("batch"));
+      expect(
+        maintenanceModule.resolveMaintenanceConfig({
+          PHASE1A_MAINTENANCE_TARGET: target,
+          PHASE1A_MAINTENANCE_AMOUNT: amount,
+          PHASE1A_MAINTENANCE_BATCH_HASH: batchHash,
+        }),
+      ).to.deep.equal({
+        data: buildMaintenanceData(target, 42n, batchHash),
+        updateWithheldAmount: false,
+      });
     });
   });
 

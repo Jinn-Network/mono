@@ -6,6 +6,8 @@
  * literals in business logic.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,16 @@ export interface ChainConfig {
   serviceHash: string;
   serviceNft: string;
   minEoaGasEth: bigint;
+  minSafeEth: bigint;
+}
+
+interface ChainConfigOverrides {
+  testnetL2DeploymentPath?: string;
+  testnetL2TokenDeploymentPath?: string;
+}
+
+interface DeploymentArtifact {
+  contracts?: Record<string, string | undefined>;
 }
 
 const BASE_CONFIG: ChainConfig = {
@@ -137,47 +149,106 @@ const BASE_CONFIG: ChainConfig = {
 
   // Conservative gas estimate for: Safe deploy + ~6 Safe exec txs
   minEoaGasEth: 5_000_000_000_000_000n, // 0.005 ETH
+  minSafeEth: 2_000_000_000_000_000n,   // 0.002 ETH
 };
 
 const BASE_SEPOLIA_CONFIG: ChainConfig = {
   chainId: 84532,
   rpcUrl: 'https://sepolia.base.org',
 
-  // Autonolas protocol contracts (Base Sepolia) — placeholder, fill after deployment
-  serviceRegistry: '0x0000000000000000000000000000000000000000',
-  serviceRegistryTokenUtility: '0x0000000000000000000000000000000000000000',
-  serviceManager: '0x0000000000000000000000000000000000000000',
-  gnosisSafeSameAddressMultisig: '0x0000000000000000000000000000000000000000',
+  // Autonolas protocol contracts (Base Sepolia)
+  serviceRegistry: '0x31D3202d8744B16A120117A053459DDFAE93c855',
+  serviceRegistryTokenUtility: '0xeB49bE5DF00F74bd240DE4535DDe6Bc89CEfb994',
+  serviceManager: '0x5BA58970c2Ae16Cf6218783018100aF2dCcFc915',
+  gnosisSafeSameAddressMultisig: '0x10100e74b7F706222F8A7C0be9FC7Ae1717Ad8B2',
 
-  // Tokens — placeholder
-  olasToken: '0x0000000000000000000000000000000000000000',
+  // Phase 1a uses bridged JINN as the staking/bond token on Base Sepolia.
+  olasToken: '0x4F177E56bd79c169742a1BF8907dB0A5e54F5524',
 
-  // Mech marketplace — placeholder
+  // Mech marketplace is out of scope for the staking-only Phase 1a loop.
   mechMarketplace: '0x0000000000000000000000000000000000000000',
   mechFactory: '0x0000000000000000000000000000000000000000',
   mechRequestPrice: 99n,
 
-  // Jinn staking — placeholder
-  stakingContract: '0x0000000000000000000000000000000000000000',
+  // Phase 1a staking proxy (Base Sepolia)
+  stakingContract: '0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0',
 
-  // Service package — placeholder
-  agentId: 1,
-  serviceHash: 'bafybeiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  serviceNft: 'bafybeiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  // Reuse the current service package defaults unless testnet-specific overrides are supplied.
+  agentId: 103,
+  serviceHash: 'bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae',
+  serviceNft: 'bafybeiaakdeconw7j5z76fgghfdjmsr6tzejotxcwnvmp3nroaw3glgyve',
 
-  // Bond: 5000 OLAS (same as mainnet)
-  bondAmount: 5000n * 10n ** 18n,
+  // Bond: match the live Phase 1a staking minStakingDeposit.
+  bondAmount: 10n * 10n ** 18n,
 
   // Conservative gas estimate
   minEoaGasEth: 5_000_000_000_000_000n, // 0.005 ETH
+  minSafeEth: 2_000_000_000_000_000n,   // 0.002 ETH
 };
 
-export function getChainConfig(chain: 'base' | 'base-sepolia'): ChainConfig {
+function loadArtifact(filePath: string): DeploymentArtifact {
+  const resolvedPath = path.resolve(filePath);
+  if (!existsSync(resolvedPath)) {
+    throw new Error(`Phase 1a artifact not found: ${resolvedPath}`);
+  }
+
+  return JSON.parse(readFileSync(resolvedPath, 'utf8')) as DeploymentArtifact;
+}
+
+function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainConfig {
+  const tokenArtifactPath = overrides.testnetL2TokenDeploymentPath ?? process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
+  const l2ArtifactPath = overrides.testnetL2DeploymentPath ?? process.env['JINN_TESTNET_L2_DEPLOYMENT'];
+
+  if (!tokenArtifactPath && !l2ArtifactPath) {
+    return { ...BASE_SEPOLIA_CONFIG };
+  }
+
+  const resolved: ChainConfig = { ...BASE_SEPOLIA_CONFIG };
+
+  if (tokenArtifactPath) {
+    const tokenArtifact = loadArtifact(tokenArtifactPath);
+    const l2Token = tokenArtifact.contracts?.l2Token;
+    if (!l2Token) {
+      throw new Error(`Testnet token artifact ${path.resolve(tokenArtifactPath)} is missing contracts.l2Token`);
+    }
+    resolved.olasToken = l2Token;
+  }
+
+  if (l2ArtifactPath) {
+    const l2Artifact = loadArtifact(l2ArtifactPath);
+    const stakingContract = l2Artifact.contracts?.stakingToken;
+    const serviceRegistry = l2Artifact.contracts?.serviceRegistry;
+    const serviceRegistryTokenUtility = l2Artifact.contracts?.serviceRegistryTokenUtility;
+
+    if (!stakingContract) {
+      throw new Error(`Testnet L2 artifact ${path.resolve(l2ArtifactPath)} is missing contracts.stakingToken`);
+    }
+    if (!serviceRegistry) {
+      throw new Error(`Testnet L2 artifact ${path.resolve(l2ArtifactPath)} is missing contracts.serviceRegistry`);
+    }
+    if (!serviceRegistryTokenUtility) {
+      throw new Error(
+        `Testnet L2 artifact ${path.resolve(l2ArtifactPath)} is missing contracts.serviceRegistryTokenUtility`,
+      );
+    }
+
+    resolved.stakingContract = stakingContract;
+    resolved.serviceRegistry = serviceRegistry;
+    resolved.serviceRegistryTokenUtility = serviceRegistryTokenUtility;
+  }
+
+  return resolved;
+}
+
+export function getChainConfig(
+  chain: 'base' | 'base-sepolia',
+  overrides: ChainConfigOverrides = {},
+): ChainConfig {
   switch (chain) {
     case 'base':
       return { ...BASE_CONFIG };
     case 'base-sepolia':
-      return { ...BASE_SEPOLIA_CONFIG };
+      return resolveBaseSepoliaConfig(overrides);
     default:
       throw new Error(`Unsupported chain: ${chain}. Supported: 'base', 'base-sepolia'.`);
   }
@@ -328,6 +399,20 @@ export const STAKING_ABI = [
       { name: 'nonces', type: 'uint256[]' },
       { name: 'tsStart', type: 'uint256' },
     ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'serviceId', type: 'uint256' }],
+    name: 'getStakingState',
+    outputs: [{ name: 'stakingState', type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'getServiceIds',
+    outputs: [{ name: 'serviceIds', type: 'uint256[]' }],
     stateMutability: 'view',
     type: 'function',
   },

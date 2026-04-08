@@ -19,12 +19,18 @@ import type { ContractTransactionReceipt, Log, Signer, TransactionRequest } from
 import { JsonRpcProvider, Wallet } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
+import type { Phase1aTimingProfile } from "./lib/phase1a-rollout-helpers";
+import {
+  getL2DeploymentArtifactName as getProfileAwareL2DeploymentArtifactName,
+  resolvePhase1aTimingProfile,
+} from "./lib/phase1a-rollout-helpers";
 
 type JinnTokenSource = "external" | "test";
 type ServiceRegistrySource = "external" | "stub";
 type ProxyHashSource = "external" | "placeholder";
 
 interface L2DeployConfig {
+  timingProfile: Phase1aTimingProfile;
   /** Existing JINN token address, or empty to deploy a local test token. */
   jinnTokenAddress?: string;
   /** Declares whether the token was supplied externally or deployed for local-only use. */
@@ -74,12 +80,22 @@ const BASE_L2_CONFIG = {
 } as const;
 
 export const DEFAULT_L2_CONFIG: L2DeployConfig = {
+  timingProfile: "canonical",
   ...BASE_L2_CONFIG,
   jinnTokenSource: "test",
   serviceRegistrySource: "stub",
   serviceRegistryTokenUtilitySource: "stub",
   proxyHash: ethers.id("proxy-hash-placeholder"),
   proxyHashSource: "placeholder",
+};
+
+export const FAST_TEST_L2_CONFIG: L2DeployConfig = {
+  ...DEFAULT_L2_CONFIG,
+  timingProfile: "fast-test",
+  minNumStakingPeriods: 2,
+  maxNumInactivityPeriods: 1,
+  livenessPeriod: 300,
+  timeForEmissions: 21600,
 };
 
 const LOCAL_L2_NETWORKS = new Set(["hardhat", "localhost"]);
@@ -204,13 +220,56 @@ function parseInstanceCreatedAddress(
   throw new Error("Unable to locate InstanceCreated event in staking factory receipt.");
 }
 
+async function verifyFactoryInstanceWithRetry(
+  factoryAddress: string,
+  stakingTokenAddress: string,
+  provider: Signer["provider"],
+  retries = 6,
+): Promise<{ verified: boolean; emissionsAmount: bigint }> {
+  if (!provider) {
+    throw new Error("Missing provider while verifying staking factory deployment.");
+  }
+
+  const factory = new ethers.Contract(
+    factoryAddress,
+    [
+      "function verifyInstance(address) view returns (bool)",
+      "function verifyInstanceAndGetEmissionsAmount(address) view returns (uint256)",
+    ],
+    provider,
+  );
+
+  let lastError: string | null = null;
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    try {
+      const [verified, emissionsAmount] = (await Promise.all([
+        factory.verifyInstance(stakingTokenAddress) as Promise<boolean>,
+        factory.verifyInstanceAndGetEmissionsAmount(stakingTokenAddress) as Promise<bigint>,
+      ])) as [boolean, bigint];
+
+      return { verified, emissionsAmount };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      if (attempt + 1 < retries) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    }
+  }
+
+  throw new Error(
+    `Unable to verify staking proxy ${stakingTokenAddress} via factory ${factoryAddress}.` +
+      (lastError ? ` Last error: ${lastError}` : ""),
+  );
+}
+
 export function resolveL2DeployConfig(
   networkName: string,
   env: Record<string, string | undefined> = process.env,
 ): L2DeployConfig {
-  const config: L2DeployConfig = {
-    ...DEFAULT_L2_CONFIG,
-  };
+  const timingProfile = resolvePhase1aTimingProfile(env);
+  const config: L2DeployConfig = timingProfile === "fast-test"
+    ? { ...FAST_TEST_L2_CONFIG }
+    : { ...DEFAULT_L2_CONFIG };
 
   const suppliedToken = env.JINN_TOKEN_ADDRESS?.trim();
   if (suppliedToken) {
@@ -267,12 +326,51 @@ export function resolveL2DeployConfig(
     config.livenessRatio = livenessRatio;
   }
 
+  const rewardsPerSecond = parseOptionalBigInt(env.REWARDS_PER_SECOND);
+  if (rewardsPerSecond !== undefined) {
+    config.rewardsPerSecond = rewardsPerSecond;
+  }
+
+  const minStakingDeposit = parseOptionalBigInt(env.MIN_STAKING_DEPOSIT);
+  if (minStakingDeposit !== undefined) {
+    config.minStakingDeposit = minStakingDeposit;
+  }
+
+  const maxNumServices = env.MAX_NUM_SERVICES?.trim();
+  if (maxNumServices) {
+    config.maxNumServices = Number(maxNumServices);
+  }
+
+  const minNumStakingPeriods = env.MIN_NUM_STAKING_PERIODS?.trim();
+  if (minNumStakingPeriods) {
+    config.minNumStakingPeriods = Number(minNumStakingPeriods);
+  }
+
+  const maxNumInactivityPeriods = env.MAX_NUM_INACTIVITY_PERIODS?.trim();
+  if (maxNumInactivityPeriods) {
+    config.maxNumInactivityPeriods = Number(maxNumInactivityPeriods);
+  }
+
+  const livenessPeriod = env.LIVENESS_PERIOD?.trim();
+  if (livenessPeriod) {
+    config.livenessPeriod = Number(livenessPeriod);
+  }
+
+  const timeForEmissions = env.TIME_FOR_EMISSIONS?.trim();
+  if (timeForEmissions) {
+    config.timeForEmissions = Number(timeForEmissions);
+  }
+
+  const numAgentInstances = env.NUM_AGENT_INSTANCES?.trim();
+  if (numAgentInstances) {
+    config.numAgentInstances = Number(numAgentInstances);
+  }
+
   return config;
 }
 
 export function getL2DeploymentArtifactName(networkName: string): string {
-  const normalizedNetworkName = networkName === "base-sepolia" ? "baseSepolia" : networkName;
-  return `deployment-phase1a-l2-${normalizedNetworkName}.json`;
+  return getProfileAwareL2DeploymentArtifactName(resolvePhase1aTimingProfile(), networkName);
 }
 
 export async function deployL2Stack(
@@ -417,12 +515,15 @@ export async function deployL2Stack(
   const stakingTokenAddress = parseInstanceCreatedAddress(createReceipt, stakingFactory);
   console.log(`  Deployed StakingToken proxy: ${stakingTokenAddress}`);
 
-  const verified = await stakingFactory.verifyInstance(stakingTokenAddress);
+  const { verified, emissionsAmount } = await verifyFactoryInstanceWithRetry(
+    stakingFactoryAddress,
+    stakingTokenAddress,
+    provider,
+  );
   if (!verified) {
     throw new Error(`Factory verification failed for staking proxy ${stakingTokenAddress}.`);
   }
 
-  const emissionsAmount = await stakingFactory.verifyInstanceAndGetEmissionsAmount(stakingTokenAddress);
   if (emissionsAmount === 0n) {
     throw new Error(
       `Factory returned zero emissions for staking proxy ${stakingTokenAddress}. ` +
@@ -464,6 +565,7 @@ async function main() {
   console.log();
 
   const config = resolveL2DeployConfig(networkName);
+  console.log(`Timing profile: ${config.timingProfile}`);
 
   console.log("Deploying L2 staking stack...\n");
   const txOverrides = isLocalL2Network(networkName) ? {} : liveL2TxOverrides();
@@ -485,6 +587,7 @@ async function main() {
       serviceRegistryTokenUtilitySource: config.serviceRegistryTokenUtilitySource,
       proxyHash: config.proxyHash,
       proxyHashSource: config.proxyHashSource,
+      timingProfile: config.timingProfile,
       livenessRatio: config.livenessRatio.toString(),
       maxNumServices: config.maxNumServices,
       rewardsPerSecond: config.rewardsPerSecond.toString(),

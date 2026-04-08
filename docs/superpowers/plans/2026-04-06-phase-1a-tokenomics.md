@@ -61,6 +61,238 @@ Do **not** summarize the current state as "Phase 1a is now fully deployed on tes
 - the stack is **blocked on owner/governance actions from `0x443a...`** before claim testing can begin
 - after those governance actions, the next unknown is still the real emit -> bridge -> distribute -> claim cycle over live epochs
 
+### Live rollout status snapshot (2026-04-08)
+
+What changed since the 2026-04-07 snapshot:
+
+- The split-owner Sepolia/Base Sepolia rollout was replaced with a fresh coherent deployment under the operator key `0x15e78734481bD31F6e183dad05225505a45ACd07`.
+- The canonical deployment artifacts now point at the new stack:
+  - `contracts/deployment-phase1a-sepolia.json`
+    - `JINN`: `0x8042063aBAce92B8BAF92C1E219D2D03DB59De45`
+    - `Dispenser`: `0x61Fe7eF2121F1ce62d6BB4bB476465559b59A7f3`
+    - `VoteWeighting`: `0xb737040B53eb413AE528EB45F45ED3Bbb886fAB8`
+    - `Treasury`: `0x99BAc2Df16562986f3d197A5aae05bcf1A56f3B6`
+  - `contracts/deployment-phase1a-token-baseSepolia.json`
+    - `l2Token`: `0x4F177E56bd79c169742a1BF8907dB0A5e54F5524`
+  - `contracts/deployment-phase1a-l2-baseSepolia.json`
+    - `activityChecker`: `0xDB5e6cc6Fb4423e1899415D86e8f0B197673dd0b`
+    - `stakingFactory`: `0xaFE21C6dBeF2d41A769F58CE068aa991369FB1e0`
+    - `stakingToken`: `0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0`
+  - `contracts/deployment-phase1a-bridge-sepolia-baseSepolia.json`
+    - `depositProcessorL1`: `0x89744248dCb16964Cb709429c29597A18dE11309`
+    - `targetDispenserL2`: `0x98be6DC1c90B76d187bf92b13fccD70bbEd0C29B`
+
+Operator actions completed on the new stack:
+
+- Base Sepolia was mapped to the new deposit processor.
+- The L1 dispenser was unpaused for staking incentives.
+- The Base Sepolia staking proxy was added as a nominee.
+- veJINN voting was configured from the operator-controlled wallet.
+- `100 JINN` was bridged to Base Sepolia, and the staking proxy was seeded with `50 JINN` reward liquidity.
+
+Bootstrap investigation and fixes completed:
+
+- The client bootstrap was not failing because “Base Sepolia is unreliable” in the abstract. It had two concrete bugs:
+  - `client/.env` `BASE_RPC_URL` was overriding explicit testnet config, so `network: "testnet"` runs were accidentally using a Base mainnet RPC in `client/src/config.ts`.
+  - The persisted predicted Safe address was trusted across reruns even when the chain/RPC context changed, which broke testnet because Safe CREATE2 prediction is chain-specific.
+- A third client bug made `stopAt: "service_staked"` exit one step early, immediately after service deployment and before the actual staking transaction.
+- A fourth client bug undercounted token funding: the Safe needs enough JINN for both service activation and agent registration, so the bootstrap now requires `2 * bondAmount` before it claims the service can proceed.
+- A fifth client bug relied on Safe SDK execution for `stake()`. On Base Sepolia that path still reverted even when the underlying staking call was valid. `stake()` now uses a direct Safe `execTransaction` path instead.
+- These were fixed in:
+  - `client/src/config.ts`
+  - `client/src/earning/bootstrap.ts`
+  - `client/src/earning/safe-adapter.ts`
+  - `client/src/main.ts`
+  - `client/test/config.test.ts`
+  - `client/test/earning/bootstrap.test.ts`
+
+Live Base Sepolia service state now:
+
+- Agent EOA: `0x376cAfEC9d1744b0A826409DB593a597cD436573`
+- Correct testnet Safe: `0xCE377821Ff921Cb917484C391eBFd83220470188`
+- Service id: `11`
+- Staking contract: `0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0`
+- Persisted bootstrap state: `mech_deployed` in `/tmp/jinn-phase1a/earning/earning_state.json`, meaning the service is created, activated, registered, deployed, and staked, and testnet intentionally stopped before mech deployment.
+
+Relevant live Base Sepolia transactions:
+
+- Corrected Safe bond top-up: `0xf2a002bf59eda452716fe687274ecac0d0705308f950fea6504ccfb592d5db3f`
+- Service create: `0x56837270c5a489fefa54f6a402211b552568a60ffdcc7d53c03339ee0e5d21be`
+- Service activate (successful): `0x3618f5bbc0be59c774561b157285776322b3222797370c0e0dfee4b932cf1f86`
+- Agent register (successful): `0x6e0d9dba7cfdb8b2496e9e47ce011261cb8523009199a531e2ea5591c5ee461b`
+- Service deploy (successful): `0xbbcd3df1b21888f01346a153771de5ad79c9671daf23e64039b6b6e1a462bcf9`
+- NFT approve for staking: `0xc20b53e9b0c0aa33fb182155fa4804559fbd8d1b9ffbfbcf118aa2beaeb49c2d`
+- Service stake (successful direct Safe execution): `0x5ddc3a1eb5bd543e36516d8cf1ec71ae01fab5dcd451c2db4169fcfeea82ccbf`
+- Activity checker events: `0xc9abea1d2f62ac711e37d2eb37904f22a081c3dd9a0af70c7cd337e2d4a80a57`, `0xb212d50e99c813c459776dc4d47eafe12a8cab7b91be91bb3811896c9efca0d2`, `0x926fa578c1dcf4f8d7e4d195f58b637624f46d31f26ce448cc8fcbc4ee04f07d`
+
+Important operational note:
+
+- The earlier stale predicted Safe `0x36cE9a1420c81A887CABFFE5086F958DF7403C40` was deployed on Base Sepolia and its stranded `40 JINN` was swept back to the active Safe. Recovery txs:
+  - stale Safe deploy: `0x11ab5742a07e88ab6cc2faa22393180790959630614cc51ea0b731e69dd61fed`
+  - stale Safe sweep: `0x5f36f76d567192a1efc96c7a4678288b577aebc282c0216de67c5ea4bb21b448`
+- The Base Sepolia bridge top-up to the active Safe was also submitted on Sepolia as `0xb044c3ec687c091bed760eee623bb629d612dd1f77b6f44e8b6a17831f1a0da4`; the stale-Safe recovery unblocked progress before that relay was needed.
+
+Current blockers as of 2026-04-08:
+
+- The weekly `VoteWeighting` boundary has not passed yet, so the staking nominee still has zero active relative weight even though the vote has been cast.
+- The real L1 `claimStakingIncentives` path therefore remains blocked until the next weekly activation point (`2026-04-09T00:00:00Z`).
+- Service `11` is already staked and has qualifying activity recorded; the remaining live work after the boundary is:
+  - wait for positive relative weight / a claimable post-vote epoch
+  - run the Sepolia `claimStakingIncentives` call
+  - verify bridge delivery into Base Sepolia
+  - run the owner-side L2 claim path from the Safe-owned service
+
+Accurate summary after the bootstrap fixes:
+
+- Phase 1a is no longer blocked on “someone else’s key” or on a broken staking bootstrap.
+- The stack now has a fresh one-key deployment, funded L2 reward liquidity, and a real Base Sepolia service staked through the supported client bootstrap path.
+- The remaining unknown is the real emit -> bridge -> distribute -> claim loop across live epochs after weekly vote activation.
+
+### Operator rerun checklist (validated on 2026-04-08)
+
+This is the shortest reliable sequence to reproduce the current operator-ready state from scratch under one key.
+
+1. Deploy / refresh artifacts
+   - Run `contracts/scripts/deploy-phase1a.ts` on Sepolia.
+   - Run `contracts/scripts/create-phase1a-l2-token.ts` on Base Sepolia.
+   - Run `contracts/scripts/deploy-phase1a-l2.ts` on Base Sepolia.
+   - Run `contracts/scripts/deploy-phase1a-bridge.ts` for the Sepolia + Base Sepolia pair.
+
+2. Execute L1 governance wiring
+   - Run `contracts/scripts/phase1a-unpause-dispenser.ts`.
+   - Run `contracts/scripts/phase1a-set-deposit-processor.ts`.
+   - Run `contracts/scripts/phase1a-add-staking-nominee.ts`.
+   - Run `contracts/scripts/phase1a-mint-jinn-for-vote.ts` if the operator wallet needs voting balance first.
+   - Run `contracts/scripts/phase1a-vote-staking-weight.ts`.
+
+3. Seed L2 liquidity
+   - Bridge JINN from Sepolia with `contracts/scripts/phase1a-bridge-jinn-to-l2.ts`.
+   - Seed the staking proxy with `contracts/scripts/phase1a-deposit-staking-rewards.ts`.
+
+4. Bootstrap the service
+   - Use the testnet client bootstrap (`client/src/main.ts`) with `network: "testnet"`.
+   - The testnet bootstrap intentionally stops at `service_staked`.
+   - The Safe must hold enough JINN for both activation and registration: `2 * bondAmount`.
+   - The Safe also needs native gas on Base Sepolia for payable service-manager calls.
+
+5. Prefer public Base Sepolia RPCs for write transactions
+   - Reads can work on Tenderly, but writes on Base Sepolia were materially more reliable via `https://sepolia.base.org`.
+   - This especially mattered for Safe staking execution and for consecutive activity-recording txs.
+
+6. Verify and record activity
+   - Run `contracts/scripts/status-phase1a-live.ts` as the read-only gate.
+   - Record qualifying activity with `contracts/scripts/phase1a-record-activity.ts`.
+
+7. After the weekly vote boundary
+   - Wait for non-zero relative weight.
+   - Run `contracts/scripts/phase1a-claim-staking-incentives.ts`.
+   - Verify bridge delivery on Base Sepolia.
+   - Then claim on L2 with `contracts/scripts/phase1a-claim-l2-rewards.ts`.
+   - Safe-owned services are the expected case. Point `PHASE1A_EARNING_DIR` at the bootstrap earning dir and provide `JINN_PASSWORD` so the script can decrypt `agent_keystore.json` and sign the Safe transaction as the agent EOA.
+   - For the current testnet service `11`, the practical command shape is:
+
+     ```bash
+     cd contracts
+     PHASE1A_SERVICE_ID=11 \
+     PHASE1A_EARNING_DIR=/tmp/jinn-phase1a/earning \
+     JINN_PASSWORD=phase1a-test \
+     BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+     npx hardhat run scripts/phase1a-claim-l2-rewards.ts --network baseSepolia
+     ```
+
+Current caveat:
+
+- `contracts/scripts/phase1a-claim-l2-rewards.ts` now supports both ownership shapes, but the operational expectation is still a 1-of-N Safe with threshold `1`.
+- If the service owner Safe threshold is raised above `1`, the helper will stop and require a manual multi-signature flow.
+
+### Handoff status (2026-04-08 end of day)
+
+This is the current state another operator can pick up without replaying the full investigation.
+
+What is already done:
+
+- Fresh one-key Phase 1a deployment is live and the canonical artifacts are updated:
+  - `contracts/deployment-phase1a-sepolia.json`
+  - `contracts/deployment-phase1a-token-baseSepolia.json`
+  - `contracts/deployment-phase1a-l2-baseSepolia.json`
+  - `contracts/deployment-phase1a-bridge-sepolia-baseSepolia.json`
+- L1 governance wiring is complete on Sepolia:
+  - Base Sepolia deposit processor mapping set
+  - dispenser unpaused for staking incentives
+  - staking nominee added
+  - veJINN vote cast
+- L2 is seeded and operational on Base Sepolia:
+  - `100 JINN` bridged to Base Sepolia
+  - staking proxy funded with `50 JINN`
+  - real service `11` created, activated, registered, deployed, staked
+  - qualifying activity recorded for service `11`
+- Bootstrap and operator tooling gaps found during rollout were fixed:
+  - testnet RPC override bug
+  - stale predicted Safe reuse bug
+  - stop-at-`service_staked` off-by-one bug
+  - Safe funding undercount bug
+  - Safe staking execution bug
+  - final Safe-owned L2 claim helper gap
+
+Current live addresses and identities:
+
+- Deployer / operator EOA: `0x15e78734481bD31F6e183dad05225505a45ACd07`
+- Service agent EOA: `0x376cAfEC9d1744b0A826409DB593a597cD436573`
+- Active service Safe: `0xCE377821Ff921Cb917484C391eBFd83220470188`
+- Service id: `11`
+- Sepolia JINN: `0x8042063aBAce92B8BAF92C1E219D2D03DB59De45`
+- Sepolia Dispenser: `0x61Fe7eF2121F1ce62d6BB4bB476465559b59A7f3`
+- Sepolia VoteWeighting: `0xb737040B53eb413AE528EB45F45ED3Bbb886fAB8`
+- Base Sepolia JINN L2: `0x4F177E56bd79c169742a1BF8907dB0A5e54F5524`
+- Base Sepolia staking proxy: `0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0`
+- Sepolia deposit processor: `0x89744248dCb16964Cb709429c29597A18dE11309`
+- Base Sepolia target dispenser: `0x98be6DC1c90B76d187bf92b13fccD70bbEd0C29B`
+
+What remains to do:
+
+1. Wait for the weekly `VoteWeighting` boundary to pass so the vote becomes active.
+   - Expected boundary from the live status script: `2026-04-09T00:00:00Z`
+2. Re-run the status gate:
+   - `cd contracts && BASE_SEPOLIA_RPC_URL=https://sepolia.base.org npx hardhat run scripts/status-phase1a-live.ts --network sepolia`
+3. Once relative weight is non-zero and the static incentive probe stops reverting, execute the L1 claim:
+   - `cd contracts && PHASE1A_NUM_CLAIMED_EPOCHS=1 BASE_SEPOLIA_RPC_URL=https://sepolia.base.org npx hardhat run scripts/phase1a-claim-staking-incentives.ts --network sepolia`
+4. Wait for bridge delivery to Base Sepolia and verify state again with `status-phase1a-live.ts`.
+5. Execute the final L2 claim from the Safe-owned service:
+
+   ```bash
+   cd contracts
+   PHASE1A_SERVICE_ID=11 \
+   PHASE1A_EARNING_DIR=/tmp/jinn-phase1a/earning \
+   JINN_PASSWORD=<service-keystore-password> \
+   BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+   npx hardhat run scripts/phase1a-claim-l2-rewards.ts --network baseSepolia
+   ```
+
+6. Record the final tx hashes back into this document once the loop is proven end to end.
+
+Read-only checks that should already pass:
+
+- Service `11` is actually staked (`getServiceIds()` includes `11`, staking state `1`)
+- service `11` passes the activity checker threshold
+- staking proxy has reward liquidity
+- the only expected remaining blocker before the weekly boundary is zero active relative weight
+
+Operator files and secrets needed for takeover:
+
+- Deployer key source for Sepolia/Base Sepolia scripts:
+  - file: `contracts/.env`
+  - variable name: `DEPLOYER_PRIVATE_KEY`
+  - current deployer address derived from that key: `0x15e78734481bD31F6e183dad05225505a45ACd07`
+- Service-owner signer for the final Safe claim:
+  - keystore file: `/tmp/jinn-phase1a/earning/agent_keystore.json`
+  - state file: `/tmp/jinn-phase1a/earning/earning_state.json`
+  - the password is not written into this repo and must be handed over out of band
+
+Important security note:
+
+- Do not copy the live private key or the service keystore password into git-tracked files.
+- If this rollout is going to continue beyond the immediate proof window, move `DEPLOYER_PRIVATE_KEY` out of `contracts/.env` into the team’s actual secret store and rotate it after handoff if there is any doubt about exposure.
+
 ### Official Autonolas registry constants (for live-safe L2 staking env)
 
 These are published in `valory-xyz/autonolas-registries` (not generated by this monorepo). Use them as **candidates** for `deploy-phase1a-l2.ts` on Base Sepolia; verify on-chain (contract code on BaseScan Sepolia) before treating as production truth.

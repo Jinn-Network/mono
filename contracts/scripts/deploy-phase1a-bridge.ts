@@ -7,6 +7,12 @@ import { ethers, network } from "hardhat";
 import type { Signer } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
+import {
+  getBridgeDeploymentArtifactName,
+  getL1DeploymentArtifactName,
+  getL2DeploymentArtifactName,
+  resolvePhase1aTimingProfile,
+} from "./lib/phase1a-rollout-helpers";
 
 const OP_STACK_SEPOLIA = {
   L1StandardBridgeProxy: "0xfd0Bf71F60660E2f608ed56e1659C450eB113120",
@@ -122,18 +128,38 @@ export function validateBridgeChainIds(l1ChainId: number, l2ChainId: number) {
   }
 }
 
-async function getRemoteNonceAllocator(signer: Signer) {
+async function getNonceAllocator(signer: Signer) {
   if (!signer.provider) {
-    return null;
-  }
-
-  const chainId = Number((await signer.provider.getNetwork()).chainId);
-  if (chainId === 31337) {
     return null;
   }
 
   const startNonce = await signer.provider.getTransactionCount(await signer.getAddress(), "pending");
   return createNonceAllocator(startNonce);
+}
+
+async function resolveNonceAllocators(
+  l1Deployer: Signer,
+  l2Deployer: Signer,
+): Promise<{
+  l1NonceAllocator: ReturnType<typeof createNonceAllocator> | null;
+  l2NonceAllocator: ReturnType<typeof createNonceAllocator> | null;
+}> {
+  const [l1Address, l2Address] = await Promise.all([l1Deployer.getAddress(), l2Deployer.getAddress()]);
+  const sameProvider = l1Deployer.provider !== undefined && l1Deployer.provider === l2Deployer.provider;
+
+  if (sameProvider && l1Address.toLowerCase() === l2Address.toLowerCase()) {
+    const sharedAllocator = await getNonceAllocator(l1Deployer);
+    return {
+      l1NonceAllocator: sharedAllocator,
+      l2NonceAllocator: sharedAllocator,
+    };
+  }
+
+  const [l1NonceAllocator, l2NonceAllocator] = await Promise.all([
+    getNonceAllocator(l1Deployer),
+    getNonceAllocator(l2Deployer),
+  ]);
+  return { l1NonceAllocator, l2NonceAllocator };
 }
 
 function loadJson<T>(fileName: string): T {
@@ -202,8 +228,7 @@ export async function deployBridgeContracts(
   l2Deployer: Signer,
   config: BridgeDeployConfig,
 ): Promise<BridgeDeployment> {
-  const l1NonceAllocator = await getRemoteNonceAllocator(l1Deployer);
-  const l2NonceAllocator = await getRemoteNonceAllocator(l2Deployer);
+  const { l1NonceAllocator, l2NonceAllocator } = await resolveNonceAllocators(l1Deployer, l2Deployer);
 
   const l1DeployOverrides = {
     ...bridgeTxFees("l1"),
@@ -295,11 +320,12 @@ async function getBridgeDeployers(): Promise<BridgeDeployers> {
 }
 
 async function main() {
+  const timingProfile = resolvePhase1aTimingProfile();
   const artifactPaths = {
-    l1: process.env.PHASE1A_L1_DEPLOYMENT ?? "deployment-phase1a-sepolia.json",
-    l2: process.env.PHASE1A_L2_DEPLOYMENT ?? "deployment-phase1a-l2-baseSepolia.json",
+    l1: process.env.PHASE1A_L1_DEPLOYMENT ?? getL1DeploymentArtifactName(timingProfile, "sepolia"),
+    l2: process.env.PHASE1A_L2_DEPLOYMENT ?? getL2DeploymentArtifactName(timingProfile, "baseSepolia"),
     output:
-      process.env.PHASE1A_BRIDGE_DEPLOYMENT ?? "deployment-phase1a-bridge-sepolia-baseSepolia.json",
+      process.env.PHASE1A_BRIDGE_DEPLOYMENT ?? getBridgeDeploymentArtifactName(timingProfile),
   };
 
   const l1Deployment = loadJson<DeploymentArtifact>(artifactPaths.l1);
@@ -315,6 +341,7 @@ async function main() {
   console.log("=== Jinn Phase 1a Bridge Deployment ===");
   console.log(`L1 RPC:      ${deployers.l1RpcUrl}`);
   console.log(`L2 RPC:      ${deployers.l2RpcUrl}`);
+  console.log(`Profile:     ${timingProfile}`);
   console.log(`L1 Chain ID: ${l1Network.chainId}`);
   console.log(`L2 Chain ID: ${l2Network.chainId}`);
   console.log(`L1 Deployer: ${await deployers.l1Deployer.getAddress()}`);
@@ -362,6 +389,7 @@ async function main() {
       mode: deployers.mode,
     },
     artifacts: artifactPaths,
+    timingProfile,
     config,
     contracts: deployment,
   };
