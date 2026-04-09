@@ -9,15 +9,11 @@ import {
   Contract,
   Interface,
   JsonRpcProvider,
-  Wallet,
   getAddress,
 } from 'ethers';
 import {
   type ChainConfig,
-  ERC20_ABI,
   EVENT_TOPICS,
-  SERVICE_MANAGER_ABI,
-  SERVICE_REGISTRY_APPROVE_ABI,
   SERVICE_REGISTRY_L2_ABI,
   STAKING_ABI,
   MECH_MARKETPLACE_CREATE_ABI,
@@ -28,11 +24,8 @@ import {
   getChainConfig,
 } from './contracts.js';
 import {
-  type SafeInstance,
   executeSafeTxBatch,
-  executeSafeTxDirect,
   initDeployedSafe,
-  initPredictedSafe,
 } from './safe-adapter.js';
 import { FleetStateStore } from './store.js';
 import {
