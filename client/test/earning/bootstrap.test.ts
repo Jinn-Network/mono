@@ -283,6 +283,39 @@ describe('Earning bootstrap testnet support', () => {
       expect(result.step).toBe('safe_deployed');
     });
 
+    it('routes safe_deployed through service_staked to stepStolasStake in standard mode', async () => {
+      const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-earning-'));
+      dirs.push(earningDir);
+
+      const store = new EarningStateStore(earningDir);
+
+      const bootstrapper = new EarningBootstrapper({
+        earningDir,
+        chain: 'base',
+        rpcUrl: 'http://127.0.0.1:8545',
+        stakingMode: 'standard',
+      });
+
+      for (const step of ['safe_deployed', 'service_created', 'service_activated', 'agents_registered', 'service_deployed', 'service_staked'] as const) {
+        const state = createDefaultEarningState('base');
+        state.step = step;
+        state.staking_mode = 'standard';
+        state.agent_address = '0x00000000000000000000000000000000000000a1';
+        await store.save(state);
+
+        const stolasStakeSpy = vi.spyOn(bootstrapper as any, 'stepStolasStake').mockResolvedValue({
+          ...state,
+          step: 'mech_deployed',
+          service_id: 42,
+          safe_address: '0x00000000000000000000000000000000000000b1',
+        });
+
+        await (bootstrapper as any).runStep(state, 'test-password');
+        expect(stolasStakeSpy).toHaveBeenCalled();
+        stolasStakeSpy.mockRestore();
+      }
+    });
+
     it('describes funding requirement without OLAS in standard mode', () => {
       const bootstrapper = new EarningBootstrapper({
         chain: 'base',

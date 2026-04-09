@@ -26,6 +26,9 @@ import {
   SERVICE_REGISTRY_L2_ABI,
   STAKING_ABI,
   MECH_MARKETPLACE_CREATE_ABI,
+  STOLAS_DISTRIBUTOR,
+  STOLAS_DISTRIBUTOR_ABI,
+  STOLAS_STAKING_SLOTS_ABI,
   cidToBytes32,
   getChainConfig,
 } from './contracts.js';
@@ -240,6 +243,33 @@ export class EarningBootstrapper {
   // -----------------------------------------------------------------------
 
   private async runStep(state: EarningState, password: string): Promise<EarningState> {
+    // In standard (stOLAS) mode, steps between safe_deployed and service_staked
+    // are all handled by a single distributor.stake() call
+    if (this.stakingMode === 'standard') {
+      switch (state.step) {
+        case 'wallet':
+          return this.stepCreateWallet(state, password);
+        case 'safe_predicted':
+          return this.stepPredictSafe(state, password);
+        case 'awaiting_funding':
+          return this.stepCheckFunding(state, password);
+        case 'safe_deployed':
+        case 'service_created':
+        case 'service_activated':
+        case 'agents_registered':
+        case 'service_deployed':
+        case 'service_staked':
+          return this.stepStolasStake(state, password);
+        case 'mech_deployed':
+          return this.stepDeployMech(state, password);
+        case 'complete':
+          return state;
+        default:
+          throw new Error(`Unknown step: ${state.step}`);
+      }
+    }
+
+    // Self-bond mode: existing step handlers
     switch (state.step) {
       case 'wallet':
         return this.stepCreateWallet(state, password);
@@ -694,6 +724,115 @@ export class EarningBootstrapper {
 
     console.error(`[earning-bootstrap] Service ${serviceId} staked and verified`);
     return this.store.patch({ step: 'mech_deployed' });
+  }
+
+  // -----------------------------------------------------------------------
+  // Standard mode: stOLAS stake (replaces steps 4-9)
+  // -----------------------------------------------------------------------
+
+  private async stepStolasStake(state: EarningState, password: string): Promise<EarningState> {
+    const serviceId = state.service_id;
+
+    // If we already have a service, check if it's already staked (idempotency on re-run)
+    if (serviceId !== null) {
+      const stakingState = await this.getStakingState(serviceId);
+      if (stakingState === 1) {
+        console.error(`[earning-bootstrap] Service ${serviceId} already staked via stOLAS, skipping`);
+        return this.store.patch({ step: 'mech_deployed' });
+      }
+    }
+
+    // Preflight: verify distributor is configured and slots available
+    await this.stolasPreflightCheck();
+
+    const signerKey = await this.loadPrivateKey(password);
+    const signer = new Wallet(signerKey, this.provider);
+    const agentAddress = state.agent_address!;
+
+    const configHashBytes = cidToBytes32(this.config.serviceHash);
+
+    // Encode distributor.stake() calldata
+    const distributorIface = new Interface(STOLAS_DISTRIBUTOR_ABI);
+    const stakeData = distributorIface.encodeFunctionData('stake', [
+      this.config.stakingContract,
+      0,  // serviceId=0 → create new service
+      this.config.agentId,
+      configHashBytes,
+      agentAddress,
+    ]);
+
+    console.error(`[earning-bootstrap] Calling stOLAS distributor.stake() from agent EOA ${agentAddress}`);
+    const txResponse = await signer.sendTransaction({
+      to: STOLAS_DISTRIBUTOR,
+      data: stakeData,
+      gasLimit: 2_500_000n,
+    });
+
+    const receipt = await txResponse.wait();
+    if (!receipt || receipt.status !== 1) {
+      throw new Error(`stOLAS stake() tx failed: ${txResponse.hash}`);
+    }
+
+    console.error(`[earning-bootstrap] stOLAS stake() confirmed (tx: ${txResponse.hash}, gas: ${receipt.gasUsed})`);
+
+    // Parse CreateService event to get serviceId
+    const parsedServiceId = await this.parseServiceIdFromTx(txResponse.hash);
+    if (parsedServiceId === null) {
+      throw new Error(
+        `stOLAS stake() succeeded (tx: ${txResponse.hash}) but CreateService event not found in ${receipt.logs.length} logs. Check tx on basescan.`,
+      );
+    }
+
+    // Parse CreateMultisigWithAgents event to get Safe address
+    const createMultisigTopic = EVENT_TOPICS.CreateMultisigWithAgents;
+    let safeAddress: string | null = null;
+    for (const log of receipt.logs) {
+      if (log.topics[0] === createMultisigTopic && log.topics.length >= 3) {
+        // CreateMultisigWithAgents(uint256 indexed serviceId, address indexed multisig)
+        safeAddress = getAddress('0x' + log.topics[2].slice(26));
+        break;
+      }
+    }
+
+    if (!safeAddress) {
+      throw new Error(
+        `stOLAS stake() succeeded (tx: ${txResponse.hash}) but CreateMultisigWithAgents event not found. Service ID: ${parsedServiceId}`,
+      );
+    }
+
+    console.error(`[earning-bootstrap] stOLAS service created: id=${parsedServiceId}, safe=${safeAddress}`);
+
+    return this.store.patch({
+      step: 'mech_deployed',
+      service_id: parsedServiceId,
+      safe_address: safeAddress,
+      staking_address: this.config.stakingContract,
+    });
+  }
+
+  private async stolasPreflightCheck(): Promise<void> {
+    const distributor = new Contract(STOLAS_DISTRIBUTOR, STOLAS_DISTRIBUTOR_ABI, this.provider);
+    const proxyConfig: bigint = await distributor.mapStakingProxyConfigs(this.config.stakingContract);
+    if (proxyConfig === 0n) {
+      throw new Error(
+        `stOLAS distributor is not configured for staking contract ${this.config.stakingContract}. ` +
+        `The contract may not be whitelisted yet. Use stakingMode: 'self-bond' to stake with your own OLAS.`,
+      );
+    }
+
+    const staking = new Contract(this.config.stakingContract, STOLAS_STAKING_SLOTS_ABI, this.provider);
+    const serviceIds: bigint[] = await staking.getServiceIds();
+    const maxServices: bigint = await staking.maxNumServices();
+    const slotsRemaining = Number(maxServices) - serviceIds.length;
+
+    if (slotsRemaining <= 0) {
+      throw new Error(
+        `All ${maxServices} staking slots are occupied. No slots available. ` +
+        `Try again later or use a different staking contract.`,
+      );
+    }
+
+    console.error(`[earning-bootstrap] stOLAS preflight passed: ${slotsRemaining} staking slots remaining`);
   }
 
   // -----------------------------------------------------------------------
