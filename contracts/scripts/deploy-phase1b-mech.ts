@@ -231,7 +231,7 @@ async function main() {
   const MechFactoryFactory = await ethers.getContractFactory("MechFactoryFixedPriceNative", deployer);
   const mechFactory = await MechFactoryFactory.deploy(
     marketplaceProxyAddress,
-    await withNonce(gas(txOverrides,"standard")),
+    await withNonce(gas(txOverrides,"large")),
   );
   await mechFactory.waitForDeployment();
   const mechFactoryAddress = await mechFactory.getAddress();
