@@ -9,11 +9,15 @@ import {
   Contract,
   Interface,
   JsonRpcProvider,
+  Wallet,
   getAddress,
 } from 'ethers';
 import {
   type ChainConfig,
+  ERC20_ABI,
   EVENT_TOPICS,
+  SERVICE_MANAGER_ABI,
+  SERVICE_REGISTRY_APPROVE_ABI,
   SERVICE_REGISTRY_L2_ABI,
   STAKING_ABI,
   MECH_MARKETPLACE_CREATE_ABI,
@@ -25,7 +29,9 @@ import {
 } from './contracts.js';
 import {
   executeSafeTxBatch,
+  executeSafeTxDirect,
   initDeployedSafe,
+  initPredictedSafe,
 } from './safe-adapter.js';
 import { FleetStateStore } from './store.js';
 import {
@@ -41,11 +47,14 @@ import type {
   FleetState,
   FleetBootstrapResult,
   FundingRequirement,
+  SelfBondFundingRequirement,
   ServiceState,
   ServiceStep,
   StakingMode,
 } from './types.js';
 import { createDefaultServiceState } from './types.js';
+
+const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
 
 export interface FleetBootstrapperOptions {
   earningDir?: string;
@@ -103,14 +112,17 @@ export class FleetBootstrapper {
       // Phase 1b: Check master funding
       const masterAddress = state.master_address!;
       const masterBalance = await this.provider.getBalance(masterAddress);
-      if (masterBalance < this.config.minEoaGasEth) {
+      const requiredMasterEth = this.stakingMode === 'standard'
+        ? this.config.minEoaGasEth
+        : this.config.minEoaGasEth * BigInt(this.targetServices);
+      if (masterBalance < requiredMasterEth) {
         return {
           ok: false,
           fleet_state: state,
           message: `Fund master wallet with ETH, then re-run.`,
           funding: {
             master_address: masterAddress,
-            eth_required: this.config.minEoaGasEth.toString(),
+            eth_required: requiredMasterEth.toString(),
             eth_balance: masterBalance.toString(),
           },
         };
@@ -207,6 +219,19 @@ export class FleetBootstrapper {
     if (!svc) throw new Error(`Service ${index} not found in state`);
     if (svc.step === 'complete') return state;
 
+    if (this.stakingMode === 'standard') {
+      return this.resumeServiceStandard(state, mnemonic, index);
+    }
+    return this.resumeServiceSelfBond(state, mnemonic, index);
+  }
+
+  private async resumeServiceStandard(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    const svc = state.services.find(s => s.index === index)!;
+
     if (svc.step === 'awaiting_stake') {
       state = await this.stepStolasStake(state, mnemonic, index);
     }
@@ -216,6 +241,50 @@ export class FleetBootstrapper {
     if (!updatedSvc) throw new Error(`Service ${index} disappeared from state`);
 
     if (updatedSvc.step === 'staked' || updatedSvc.step === 'mech_deployed') {
+      state = await this.stepDeployMech(state, mnemonic, index);
+    }
+
+    return this.store.load(this.chain);
+  }
+
+  private async resumeServiceSelfBond(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    let svc = state.services.find(s => s.index === index)!;
+
+    if (svc.step === 'awaiting_stake') {
+      state = await this.stepSelfBondSetup(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'service_created') {
+      state = await this.stepSelfBondCreateService(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'service_activated') {
+      state = await this.stepSelfBondActivateService(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'agents_registered') {
+      state = await this.stepSelfBondRegisterAgents(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'service_deployed') {
+      state = await this.stepSelfBondDeployService(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'service_staked') {
+      state = await this.stepSelfBondStakeService(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'staked' || svc.step === 'mech_deployed') {
       state = await this.stepDeployMech(state, mnemonic, index);
     }
 
@@ -375,7 +444,423 @@ export class FleetBootstrapper {
     });
   }
 
+  // ── Self-bond step handlers ──────────────────────────────────────────
+
+  private async stepSelfBondSetup(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    const svc = state.services.find(s => s.index === index)!;
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentKey = agentSigner.privateKey;
+    const agentAddress = svc.agent_address;
+
+    // 1. Predict Safe if not yet done
+    if (!svc.safe_address) {
+      console.error(`[fleet-bootstrap] Service ${index}: predicting Safe for agent ${agentAddress}`);
+      const { address } = await initPredictedSafe({
+        rpcUrl: this.config.rpcUrl,
+        signerKey: agentKey,
+        owners: [agentAddress],
+        threshold: 1,
+      });
+      state = await this.store.updateService(index, { safe_address: getAddress(address) });
+    }
+
+    // Reload svc to get safe_address
+    const updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    const safeAddress = updatedSvc.safe_address!;
+
+    // 2. Fund agent EOA from master if needed
+    const masterSigner = deriveMasterSigner(mnemonic);
+    const masterWithProvider = masterSigner.connect(this.provider);
+    const agentBalance = await this.provider.getBalance(agentAddress);
+
+    if (agentBalance < this.config.minEoaGasEth) {
+      const fundAmount = this.config.minEoaGasEth - agentBalance;
+      console.error(`[fleet-bootstrap] Service ${index}: funding agent with ${fundAmount} wei from master`);
+      const fundTx = await masterWithProvider.sendTransaction({
+        to: agentAddress,
+        value: fundAmount,
+      });
+      await fundTx.wait();
+    }
+
+    // 3. Check agent ETH balance
+    const agentBalanceAfter = await this.provider.getBalance(agentAddress);
+    if (agentBalanceAfter < this.config.minEoaGasEth) {
+      throw new Error(
+        `Service ${index}: agent ${agentAddress} needs ${this.config.minEoaGasEth} wei ETH but has ${agentBalanceAfter}`,
+      );
+    }
+
+    // 4. Check Safe ETH balance (agent can auto-top)
+    let safeEthBalance = await this.provider.getBalance(safeAddress);
+    if (safeEthBalance < this.config.minSafeEth) {
+      const eoaAvailable = agentBalanceAfter - this.config.minEoaGasEth;
+      const shortfall = this.config.minSafeEth - safeEthBalance;
+      if (eoaAvailable >= shortfall) {
+        console.error(`[fleet-bootstrap] Service ${index}: auto-topping Safe with ${shortfall} wei ETH`);
+        const agentWithProvider = agentSigner.connect(this.provider);
+        const topTx = await agentWithProvider.sendTransaction({
+          to: safeAddress,
+          value: shortfall,
+        });
+        await topTx.wait();
+        safeEthBalance += shortfall;
+      }
+    }
+
+    if (safeEthBalance < this.config.minSafeEth) {
+      throw new Error(
+        `Service ${index}: Safe ${safeAddress} needs ${this.config.minSafeEth} wei ETH but has ${safeEthBalance}`,
+      );
+    }
+
+    // 5. Check Safe OLAS balance
+    const requiredOlas = this.config.bondAmount * SAFE_TOKEN_BOOTSTRAP_MULTIPLIER;
+    const olasBalance = await this.getOlasBalance(safeAddress);
+    if (olasBalance < requiredOlas) {
+      throw new Error(
+        `Service ${index}: Safe ${safeAddress} needs ${requiredOlas} OLAS wei for bonding but has ${olasBalance}. ` +
+        `Send OLAS tokens to the Safe address.`,
+      );
+    }
+
+    // 6. Deploy Safe if not yet deployed
+    const code = await this.provider.getCode(safeAddress);
+    if (code === '0x') {
+      console.error(`[fleet-bootstrap] Service ${index}: deploying Safe at ${safeAddress}`);
+      const { safe } = await initPredictedSafe({
+        rpcUrl: this.config.rpcUrl,
+        signerKey: agentKey,
+        owners: [agentAddress],
+        threshold: 1,
+      });
+
+      const deployTx = await safe.createSafeDeploymentTransaction();
+      const agentWithProvider = agentSigner.connect(this.provider);
+      const txResponse = await agentWithProvider.sendTransaction({
+        to: deployTx.to,
+        value: deployTx.value,
+        data: deployTx.data,
+      });
+
+      const receipt = await txResponse.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`Safe deployment tx failed for service ${index}: ${txResponse.hash}`);
+      }
+
+      const deployedCode = await this.provider.getCode(safeAddress);
+      if (deployedCode === '0x') {
+        throw new Error(`Safe deployment succeeded but no code at ${safeAddress}`);
+      }
+
+      console.error(`[fleet-bootstrap] Service ${index}: Safe deployed (tx: ${txResponse.hash})`);
+    }
+
+    // 7. Advance to service_created
+    return this.store.updateService(index, { step: 'service_created' });
+  }
+
+  private async stepSelfBondCreateService(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    const svc = state.services.find(s => s.index === index)!;
+
+    // Idempotency: if service already exists on-chain, skip
+    if (svc.service_id !== null) {
+      const onChainState = await this.getServiceState(svc.service_id);
+      if (onChainState >= 1) { // PreRegistration or beyond
+        console.error(`[fleet-bootstrap] Service ${index}: service ${svc.service_id} already created, skipping`);
+        return this.store.updateService(index, { step: 'service_activated' });
+      }
+    }
+
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentKey = agentSigner.privateKey;
+    const safeAddress = svc.safe_address!;
+
+    const safe = await initDeployedSafe({
+      rpcUrl: this.config.rpcUrl,
+      signerKey: agentKey,
+      safeAddress,
+    });
+
+    const configHashBytes = cidToBytes32(this.config.serviceHash);
+    const serviceManagerIface = new Interface(SERVICE_MANAGER_ABI);
+
+    const createData = serviceManagerIface.encodeFunctionData('create', [
+      safeAddress,
+      this.config.olasToken,
+      configHashBytes,
+      [this.config.agentId],
+      [{ slots: 1, bond: this.config.bondAmount }],
+      1,
+    ]);
+
+    console.error(`[fleet-bootstrap] Service ${index}: creating service through Safe`);
+    const result = await executeSafeTxBatch(safe, [
+      { to: this.config.serviceManager, value: '0', data: createData },
+    ]);
+
+    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    if (!receipt || receipt.status !== 1) {
+      throw new Error(`Create service tx failed for service ${index}: ${result.hash}`);
+    }
+
+    const serviceId = await this.parseServiceIdFromReceipt(receipt);
+    if (serviceId === null) {
+      throw new Error(`CreateService event not found for service ${index} (tx: ${result.hash})`);
+    }
+
+    console.error(`[fleet-bootstrap] Service ${index}: created id=${serviceId} (tx: ${result.hash})`);
+
+    return this.store.updateService(index, {
+      service_id: serviceId,
+      staking_address: this.config.stakingContract,
+      step: 'service_activated',
+    });
+  }
+
+  private async stepSelfBondActivateService(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    const svc = state.services.find(s => s.index === index)!;
+    const serviceId = svc.service_id!;
+
+    // Idempotency
+    const onChainState = await this.getServiceState(serviceId);
+    if (onChainState >= 2) { // ActiveRegistration or beyond
+      console.error(`[fleet-bootstrap] Service ${index}: service ${serviceId} already activated, skipping`);
+      return this.store.updateService(index, { step: 'agents_registered' });
+    }
+
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentKey = agentSigner.privateKey;
+
+    const safe = await initDeployedSafe({
+      rpcUrl: this.config.rpcUrl,
+      signerKey: agentKey,
+      safeAddress: svc.safe_address!,
+    });
+
+    const erc20Iface = new Interface(ERC20_ABI);
+    const serviceManagerIface = new Interface(SERVICE_MANAGER_ABI);
+
+    const approveData = erc20Iface.encodeFunctionData('approve', [
+      this.config.serviceRegistryTokenUtility,
+      this.config.bondAmount,
+    ]);
+
+    const activateData = serviceManagerIface.encodeFunctionData('activateRegistration', [
+      serviceId,
+    ]);
+
+    console.error(`[fleet-bootstrap] Service ${index}: activating service ${serviceId}`);
+    const result = await executeSafeTxBatch(safe, [
+      { to: this.config.olasToken, value: '0', data: approveData },
+      { to: this.config.serviceManager, value: '1', data: activateData },
+    ]);
+
+    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    if (!receipt || receipt.status !== 1) {
+      throw new Error(`Activate service tx failed for service ${index}: ${result.hash}`);
+    }
+
+    console.error(`[fleet-bootstrap] Service ${index}: activated (tx: ${result.hash})`);
+    return this.store.updateService(index, { step: 'agents_registered' });
+  }
+
+  private async stepSelfBondRegisterAgents(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    const svc = state.services.find(s => s.index === index)!;
+    const serviceId = svc.service_id!;
+
+    // Idempotency
+    const onChainState = await this.getServiceState(serviceId);
+    if (onChainState >= 3) { // FinishedRegistration or beyond
+      console.error(`[fleet-bootstrap] Service ${index}: agents already registered for service ${serviceId}, skipping`);
+      return this.store.updateService(index, { step: 'service_deployed' });
+    }
+
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentKey = agentSigner.privateKey;
+
+    const safe = await initDeployedSafe({
+      rpcUrl: this.config.rpcUrl,
+      signerKey: agentKey,
+      safeAddress: svc.safe_address!,
+    });
+
+    const erc20Iface = new Interface(ERC20_ABI);
+    const serviceManagerIface = new Interface(SERVICE_MANAGER_ABI);
+
+    const approveData = erc20Iface.encodeFunctionData('approve', [
+      this.config.serviceRegistryTokenUtility,
+      this.config.bondAmount,
+    ]);
+
+    const registerData = serviceManagerIface.encodeFunctionData('registerAgents', [
+      serviceId,
+      [svc.agent_address],
+      [this.config.agentId],
+    ]);
+
+    console.error(`[fleet-bootstrap] Service ${index}: registering agent ${svc.agent_address} for service ${serviceId}`);
+    const result = await executeSafeTxBatch(safe, [
+      { to: this.config.olasToken, value: '0', data: approveData },
+      { to: this.config.serviceManager, value: '1', data: registerData },
+    ]);
+
+    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    if (!receipt || receipt.status !== 1) {
+      throw new Error(`Register agents tx failed for service ${index}: ${result.hash}`);
+    }
+
+    console.error(`[fleet-bootstrap] Service ${index}: agents registered (tx: ${result.hash})`);
+    return this.store.updateService(index, { step: 'service_deployed' });
+  }
+
+  private async stepSelfBondDeployService(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    const svc = state.services.find(s => s.index === index)!;
+    const serviceId = svc.service_id!;
+
+    // Idempotency
+    const onChainState = await this.getServiceState(serviceId);
+    if (onChainState >= 4) { // Deployed or beyond
+      console.error(`[fleet-bootstrap] Service ${index}: service ${serviceId} already deployed, skipping`);
+      return this.store.updateService(index, { step: 'service_staked' });
+    }
+
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentKey = agentSigner.privateKey;
+    const safeAddress = svc.safe_address!;
+
+    const safe = await initDeployedSafe({
+      rpcUrl: this.config.rpcUrl,
+      signerKey: agentKey,
+      safeAddress,
+    });
+
+    const serviceManagerIface = new Interface(SERVICE_MANAGER_ABI);
+    const deployData = serviceManagerIface.encodeFunctionData('deploy', [
+      serviceId,
+      this.config.gnosisSafeSameAddressMultisig,
+      safeAddress,
+    ]);
+
+    console.error(`[fleet-bootstrap] Service ${index}: deploying service ${serviceId}`);
+    const result = await executeSafeTxBatch(safe, [
+      { to: this.config.serviceManager, value: '0', data: deployData },
+    ]);
+
+    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    if (!receipt || receipt.status !== 1) {
+      throw new Error(`Deploy service tx failed for service ${index}: ${result.hash}`);
+    }
+
+    console.error(`[fleet-bootstrap] Service ${index}: service deployed (tx: ${result.hash})`);
+    return this.store.updateService(index, { step: 'service_staked' });
+  }
+
+  private async stepSelfBondStakeService(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    const svc = state.services.find(s => s.index === index)!;
+    const serviceId = svc.service_id!;
+
+    // Idempotency: check if already staked
+    const stakingState = await this.getStakingState(serviceId);
+    if (stakingState === 1) {
+      console.error(`[fleet-bootstrap] Service ${index}: service ${serviceId} already staked, skipping`);
+      return this.store.updateService(index, { step: 'staked' });
+    }
+
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentKey = agentSigner.privateKey;
+    const safeAddress = svc.safe_address!;
+
+    const safe = await initDeployedSafe({
+      rpcUrl: this.config.rpcUrl,
+      signerKey: agentKey,
+      safeAddress,
+    });
+
+    // Transaction 1: Approve service NFT for staking contract
+    const serviceApproveIface = new Interface(SERVICE_REGISTRY_APPROVE_ABI);
+    const approveData = serviceApproveIface.encodeFunctionData('approve', [
+      this.config.stakingContract,
+      serviceId,
+    ]);
+
+    console.error(`[fleet-bootstrap] Service ${index}: approving service ${serviceId} NFT for staking`);
+    const approveResult = await executeSafeTxBatch(safe, [
+      { to: this.config.serviceRegistry, value: '0', data: approveData },
+    ]);
+
+    await this.waitForSuccessfulTx(approveResult.hash, `approve service ${serviceId} NFT`);
+    console.error(`[fleet-bootstrap] Service ${index}: approve tx confirmed (${approveResult.hash})`);
+
+    // Transaction 2: Stake via executeSafeTxDirect (bypasses Safe SDK gas estimation)
+    const stakingIface = new Interface(STAKING_ABI);
+    const stakeData = stakingIface.encodeFunctionData('stake', [serviceId]);
+
+    console.error(`[fleet-bootstrap] Service ${index}: staking service ${serviceId}`);
+    const stakeResult = await executeSafeTxDirect({
+      rpcUrl: this.config.rpcUrl,
+      signerKey: agentKey,
+      safeAddress,
+      to: this.config.stakingContract,
+      data: stakeData,
+    });
+
+    await this.waitForSuccessfulTx(stakeResult.hash, `stake service ${serviceId}`);
+
+    // Verify staking state
+    const finalState = await this.getStakingState(serviceId);
+    if (finalState !== 1) {
+      throw new Error(
+        `Service ${index}: staking verification failed for service ${serviceId}: expected state 1 (Staked) but got ${finalState}`,
+      );
+    }
+
+    console.error(`[fleet-bootstrap] Service ${index}: service ${serviceId} staked and verified`);
+    return this.store.updateService(index, { step: 'staked' });
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────
+
+  private async getOlasBalance(address: string): Promise<bigint> {
+    const olas = new Contract(this.config.olasToken, ERC20_ABI, this.provider);
+    return await olas.balanceOf(address);
+  }
+
+  private async getServiceState(serviceId: number): Promise<number> {
+    const registry = new Contract(this.config.serviceRegistry, SERVICE_REGISTRY_L2_ABI, this.provider);
+    const service = await registry.getService(serviceId);
+    return Number(service.state);
+  }
+
+  private async waitForSuccessfulTx(txHash: string, label: string): Promise<void> {
+    const receipt = await this.provider.waitForTransaction(txHash, 1, 30000);
+    if (!receipt) throw new Error(`${label} tx not confirmed: ${txHash}`);
+    if (receipt.status !== 1) throw new Error(`${label} tx reverted: ${txHash}`);
+  }
 
   private async stolasPreflightCheck(): Promise<void> {
     const distributor = new Contract(STOLAS_DISTRIBUTOR, STOLAS_DISTRIBUTOR_ABI, this.provider);
