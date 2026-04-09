@@ -131,6 +131,18 @@ describe('loadConfig RPC override handling', () => {
     expect(config.rpcUrl).toBe('https://universal.env.example');
   });
 
+  it('defaults stakingMode to standard', () => {
+    const config = loadConfig();
+    expect(config.stakingMode).toBe('standard');
+  });
+
+  it('accepts self-bond stakingMode from env', () => {
+    process.env['JINN_STAKING_MODE'] = 'self-bond';
+    const config = loadConfig();
+    expect(config.stakingMode).toBe('self-bond');
+    delete process.env['JINN_STAKING_MODE'];
+  });
+
   it('loads testnet artifact override paths from config and env', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',

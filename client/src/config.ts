@@ -89,6 +89,9 @@ export const JinnConfigSchema = z.object({
 
   /** Optional Base Sepolia mech marketplace deployment artifact path */
   testnetMechDeploymentPath: z.string().optional(),
+
+  /** Staking mode: 'standard' uses stOLAS (no OLAS needed), 'self-bond' uses operator-provided OLAS. */
+  stakingMode: z.enum(['standard', 'self-bond']).default('standard'),
 });
 
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined). */
@@ -143,6 +146,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TESTNET_L2_DEPLOYMENT']) merged.testnetL2DeploymentPath = env['JINN_TESTNET_L2_DEPLOYMENT'];
   if (env['JINN_TESTNET_TOKEN_DEPLOYMENT']) merged.testnetL2TokenDeploymentPath = env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   if (env['JINN_TESTNET_MECH_DEPLOYMENT']) merged.testnetMechDeploymentPath = env['JINN_TESTNET_MECH_DEPLOYMENT'];
+  if (env['JINN_STAKING_MODE'])           merged.stakingMode = env['JINN_STAKING_MODE'];
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
 
