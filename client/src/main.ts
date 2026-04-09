@@ -18,13 +18,13 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
-import { Wallet } from 'ethers';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
-import { EarningBootstrapper } from './earning/bootstrap.js';
+import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
-import { EarningStateStore } from './earning/store.js';
+import { FleetStateStore } from './earning/store.js';
+import { decryptMnemonic, deriveAgentSigner } from './earning/wallet.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import { Daemon } from './daemon/daemon.js';
@@ -63,26 +63,26 @@ async function bootstrap(): Promise<{
   safeAddress: `0x${string}`;
   mechAddress?: `0x${string}`;
 }> {
-  console.log('[main] Running earning bootstrap...');
+  console.log('[main] Running fleet bootstrap...');
 
-  const bootstrapper = new EarningBootstrapper({
+  const bootstrapper = new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: NETWORK_CHAIN,
     rpcUrl: config.rpcUrl,
     stakingMode: config.stakingMode,
+    targetServices: config.targetServices,
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
-    stopAt: (config.network === 'testnet' && CHAIN_CONFIG.mechMarketplace === '0x0000000000000000000000000000000000000000')
-      ? 'service_staked'
-      : 'complete',
   });
 
   const result = await bootstrapper.bootstrap(PASSWORD);
 
-  if (result.step === 'awaiting_funding') {
-    console.log('\n' + result.message);
-    console.log('\nFund the addresses above, then re-run.');
+  if (result.funding) {
+    console.log(`\nFund master wallet: ${result.funding.master_address}`);
+    console.log(`  ETH required: ${result.funding.eth_required} wei`);
+    console.log(`  ETH balance:  ${result.funding.eth_balance} wei`);
+    console.log('\nFund the address above, then re-run.');
     process.exit(0);
   }
 
@@ -91,29 +91,34 @@ async function bootstrap(): Promise<{
     process.exit(1);
   }
 
-  const state = result.earning_state;
-  if (!state.safe_address || !state.agent_address) {
-    console.error('[main] Bootstrap completed but missing addresses in state.');
+  // Use the first complete service for the daemon
+  const state = result.fleet_state;
+  const firstComplete = state.services.find(s => s.step === 'complete');
+  if (!firstComplete || !firstComplete.safe_address) {
+    console.error('[main] Bootstrap completed but no service is ready.');
     process.exit(1);
   }
 
-  // Load the private key from the keystore
-  const store = new EarningStateStore(config.earningDir);
-  const keystoreJson = await store.loadKeystore();
-  const wallet = await Wallet.fromEncryptedJson(keystoreJson, PASSWORD);
+  // Derive agent private key from mnemonic
+  const store = new FleetStateStore(config.earningDir);
+  const mnemonic = await decryptMnemonic(
+    await store.loadMnemonicKeystore(),
+    PASSWORD,
+  );
+  const agentSigner = deriveAgentSigner(mnemonic, firstComplete.index);
 
-  console.log(`[main] Bootstrap complete.`);
-  console.log(`  Agent:   ${state.agent_address}`);
-  console.log(`  Safe:    ${state.safe_address}`);
-  if (state.mech_address) {
-    console.log(`  Mech:    ${state.mech_address}`);
+  console.log(`[main] Fleet bootstrap complete.`);
+  console.log(`  Master:  ${state.master_address}`);
+  console.log(`  Services: ${state.services.filter(s => s.step === 'complete').length}/${config.targetServices}`);
+  console.log(`  Active:  service ${firstComplete.service_id} (agent ${firstComplete.agent_address})`);
+  if (firstComplete.mech_address) {
+    console.log(`  Mech:    ${firstComplete.mech_address}`);
   }
-  console.log(`  Service: ${state.service_id}`);
 
   return {
-    agentPrivateKey: wallet.privateKey as `0x${string}`,
-    safeAddress: state.safe_address as `0x${string}`,
-    mechAddress: state.mech_address ? (state.mech_address as `0x${string}`) : undefined,
+    agentPrivateKey: agentSigner.privateKey as `0x${string}`,
+    safeAddress: firstComplete.safe_address as `0x${string}`,
+    mechAddress: firstComplete.mech_address ? (firstComplete.mech_address as `0x${string}`) : undefined,
   };
 }
 
