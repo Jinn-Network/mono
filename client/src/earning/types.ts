@@ -88,9 +88,21 @@ export interface FundingRequirement {
   eth_balance: string;
 }
 
+export interface SelfBondFundingRequirement {
+  agent_address: string;
+  agent_eth_required: string;
+  agent_eth_balance: string;
+  safe_address: string;
+  safe_eth_required: string;
+  safe_eth_balance: string;
+  safe_olas_required: string;
+  safe_olas_balance: string;
+}
+
 export interface FleetBootstrapResult {
   ok: boolean;
   fleet_state: FleetState;
   message: string;
   funding?: FundingRequirement;
+  self_bond_funding?: SelfBondFundingRequirement;
 }
