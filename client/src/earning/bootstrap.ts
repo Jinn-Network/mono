@@ -134,6 +134,15 @@ export class FleetBootstrapper {
         password,
       );
 
+      // Resume any incomplete services first
+      for (const svc of state.services) {
+        if (svc.step !== 'complete') {
+          console.error(`[fleet-bootstrap] Resuming service ${svc.index} at step '${svc.step}'`);
+          state = await this.resumeService(state, mnemonic, svc.index);
+        }
+      }
+
+      // Then create new services if needed
       const completedCount = state.services.filter(s => s.step === 'complete').length;
       const needed = this.targetServices - completedCount;
 
@@ -144,13 +153,6 @@ export class FleetBootstrapper {
       for (let i = 0; i < needed; i++) {
         const nextIndex = state.services.length + 1;
         state = await this.bootstrapService(state, mnemonic, nextIndex);
-      }
-
-      // Also resume any incomplete services
-      for (const svc of state.services) {
-        if (svc.step !== 'complete') {
-          state = await this.resumeService(state, mnemonic, svc.index);
-        }
       }
 
       return {

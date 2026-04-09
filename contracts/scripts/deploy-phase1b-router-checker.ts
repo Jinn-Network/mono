@@ -357,7 +357,7 @@ async function main() {
         agentIds: [] as number[],
         threshold: 0,
         configHash: ethers.ZeroHash,
-        proxyHash: ethers.id("proxy-hash-placeholder"),
+        proxyHash: process.env.SAFE_PROXY_HASH ?? "0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000",
         serviceRegistry: serviceRegistryAddress,
         // Critical: activityChecker points to the V2 checker, NOT the router
         activityChecker: checkerAddress,

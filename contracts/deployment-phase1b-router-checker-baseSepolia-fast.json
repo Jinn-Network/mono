@@ -2,7 +2,7 @@
   "network": "baseSepolia",
   "chainId": 84532,
   "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
-  "deployedAt": "2026-04-09T15:10:18.550Z",
+  "deployedAt": "2026-04-09T17:10:39.257Z",
   "config": {
     "timingProfile": "fast-test",
     "livenessRatio": "1000000000000000",
@@ -11,10 +11,9 @@
     "comparisonWindow": 20
   },
   "contracts": {
-    "activityChecker": "0xd5f8E39e667017f64c6541dDA9F8F1ee7075809b",
-    "jinnRouterV2Impl": "0x0C5a5DC573Fb5dD8d8D0D0d800D634eD178647a9",
-    "jinnRouterProxy": "0x5C96F02535DFE7b562D8D38763B63A59D5F988BF",
-    "mechMarketplace": "0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7",
-    "stakingToken": "0x861Fff7e8ac71B2A7772221D8096cF234A241127"
+    "activityChecker": "0x44758e009353BfD24e3962e6Da702c13E5a36368",
+    "jinnRouterV2Impl": "0x3f1F4420E040C6667CDae0F7b77B71692f698938",
+    "jinnRouterProxy": "0x7c502a4288C4f4279edbb363d692f530200e22dC",
+    "mechMarketplace": "0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7"
   }
 }
