@@ -268,6 +268,12 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     if (jinnRouter) {
       resolved.jinnRouter = jinnRouter;
     }
+    // Mech artifact can also override the staking contract (e.g., Phase 1b staking proxy
+    // with JinnRouterV2 as activity checker)
+    const stakingToken = mechArtifact.contracts?.stakingToken;
+    if (stakingToken) {
+      resolved.stakingContract = stakingToken;
+    }
   }
 
   return resolved;
