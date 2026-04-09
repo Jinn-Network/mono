@@ -15,7 +15,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Contract, JsonRpcProvider } from 'ethers';
-import { EarningBootstrapper } from '../src/earning/bootstrap.js';
+import { FleetBootstrapper } from '../src/earning/bootstrap.js';
 import {
   SERVICE_REGISTRY_L2_ABI,
   STOLAS_DISTRIBUTOR,
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
   let tmpDir: string | null = null;
   const results: PhaseResult[] = [];
 
-  let bootstrapper: EarningBootstrapper | undefined;
+  let bootstrapper: FleetBootstrapper | undefined;
   let eoaAddress: string | undefined;
   let serviceId: number | undefined;
   let safeAddress: string | undefined;
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
       await runPhase('Phase 3: Bootstrap to awaiting_funding (ETH only)', async () => {
         if (!tmpDir) throw new Error('No temp dir from Phase 1');
 
-        bootstrapper = new EarningBootstrapper({
+        bootstrapper = new FleetBootstrapper({
           earningDir: tmpDir,
           chain: 'base',
           rpcUrl: ANVIL_RPC,
@@ -184,23 +184,15 @@ async function main(): Promise<void> {
 
         const result = await bootstrapper.bootstrap(PASSWORD);
 
-        if (result.step !== 'awaiting_funding') {
-          throw new Error(`Expected step 'awaiting_funding', got '${result.step}'`);
-        }
-
+        // Fleet bootstrap returns funding requirement when master needs ETH
         if (!result.funding) {
-          throw new Error('Expected funding requirement in result');
+          throw new Error(`Expected funding requirement, got ok=${result.ok}`);
         }
 
-        eoaAddress = result.funding.eoa_address;
+        eoaAddress = result.funding.master_address;
 
-        console.log(`    Agent EOA: ${eoaAddress}`);
-        console.log(`    ETH required: ${result.funding.eoa_eth_required} wei`);
-        console.log(`    OLAS required: ${result.funding.safe_olas_required} (should be 0)`);
-
-        if (result.funding.safe_olas_required !== '0') {
-          throw new Error('Standard mode should NOT require OLAS');
-        }
+        console.log(`    Master EOA: ${eoaAddress}`);
+        console.log(`    ETH required: ${result.funding.eth_required} wei`);
       }),
     );
 
@@ -235,7 +227,7 @@ async function main(): Promise<void> {
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Re-create bootstrapper with fresh provider
-        bootstrapper = new EarningBootstrapper({
+        bootstrapper = new FleetBootstrapper({
           earningDir: tmpDir,
           chain: 'base',
           rpcUrl: ANVIL_RPC,
@@ -244,20 +236,21 @@ async function main(): Promise<void> {
 
         const result = await bootstrapper.bootstrap(PASSWORD);
 
-        if (!result.ok || result.step !== 'complete') {
+        if (!result.ok) {
           throw new Error(
-            `Expected step 'complete', got '${result.step}': ${result.message}`,
+            `Expected bootstrap complete, got: ${result.message}`,
           );
         }
 
-        serviceId = result.earning_state.service_id ?? undefined;
-        safeAddress = result.earning_state.safe_address ?? undefined;
+        const firstService = result.fleet_state.services[0];
+        serviceId = firstService?.service_id ?? undefined;
+        safeAddress = firstService?.safe_address ?? undefined;
 
         console.log(`    Bootstrap complete!`);
         console.log(`    Service ID: ${serviceId}`);
         console.log(`    Safe address: ${safeAddress}`);
-        console.log(`    Mech address: ${result.earning_state.mech_address}`);
-        console.log(`    Staking mode: ${result.earning_state.staking_mode}`);
+        console.log(`    Mech address: ${firstService?.mech_address}`);
+        console.log(`    Staking mode: ${result.fleet_state.staking_mode}`);
       }),
     );
 

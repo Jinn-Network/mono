@@ -16,11 +16,10 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Contract, JsonRpcProvider, Interface, keccak256, AbiCoder, zeroPadValue, toBeHex } from 'ethers';
-import { EarningBootstrapper } from '../src/earning/bootstrap.js';
+import { Contract, JsonRpcProvider } from 'ethers';
+import { FleetBootstrapper } from '../src/earning/bootstrap.js';
 import {
   SERVICE_REGISTRY_L2_ABI,
-  STAKING_ABI,
   getChainConfig,
 } from '../src/earning/contracts.js';
 
@@ -32,7 +31,6 @@ const ANVIL_RPC = `http://127.0.0.1:${ANVIL_PORT}`;
 const PASSWORD = 'test-password';
 
 const CHAIN_CONFIG = getChainConfig('base');
-const OLAS_TOKEN = CHAIN_CONFIG.olasToken;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -89,20 +87,6 @@ async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseRes
   }
 }
 
-/**
- * Compute the ERC-20 balanceOf storage slot for a given address.
- *
- * Standard Solidity: balances mapping is at slot 0.
- *   slot = keccak256(abi.encode(address, uint256(0)))
- */
-function erc20BalanceSlot(holder: string, mappingSlot: bigint = 0n): string {
-  const encoded = AbiCoder.defaultAbiCoder().encode(
-    ['address', 'uint256'],
-    [holder, mappingSlot],
-  );
-  return keccak256(encoded);
-}
-
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -113,7 +97,7 @@ async function main(): Promise<void> {
   const results: PhaseResult[] = [];
 
   // Shared state populated across phases
-  let bootstrapper: EarningBootstrapper | undefined;
+  let bootstrapper: FleetBootstrapper | undefined;
   let eoaAddress: string | undefined;
   let safeAddress: string | undefined;
   let serviceId: number | undefined;
@@ -163,7 +147,7 @@ async function main(): Promise<void> {
       await runPhase('Phase 2: Bootstrap to awaiting_funding', async () => {
         if (!tmpDir) throw new Error('No temp dir from Phase 1');
 
-        bootstrapper = new EarningBootstrapper({
+        bootstrapper = new FleetBootstrapper({
           earningDir: tmpDir,
           chain: 'base',
           rpcUrl: ANVIL_RPC,
@@ -171,21 +155,17 @@ async function main(): Promise<void> {
 
         const result = await bootstrapper.bootstrap(PASSWORD);
 
-        if (result.step !== 'awaiting_funding') {
-          throw new Error(`Expected step 'awaiting_funding', got '${result.step}'`);
-        }
-
         if (!result.funding) {
-          throw new Error('Expected funding requirement in result');
+          throw new Error(`Expected funding requirement, got ok=${result.ok}`);
         }
 
-        eoaAddress = result.funding.eoa_address;
-        safeAddress = result.funding.safe_address;
+        eoaAddress = result.funding.master_address;
+        // Safe address is predicted but not yet deployed — get from fleet state if available
+        safeAddress = result.fleet_state.services[0]?.safe_address ?? undefined;
 
-        console.log(`    EOA address: ${eoaAddress}`);
+        console.log(`    Master EOA: ${eoaAddress}`);
         console.log(`    Safe address (predicted): ${safeAddress}`);
-        console.log(`    ETH required: ${result.funding.eoa_eth_required} wei`);
-        console.log(`    OLAS required: ${result.funding.safe_olas_required} wei`);
+        console.log(`    ETH required: ${result.funding.eth_required} wei`);
       }),
     );
 
@@ -193,9 +173,9 @@ async function main(): Promise<void> {
 
     results.push(
       await runPhase('Phase 3: Fund accounts on Anvil', async () => {
-        if (!eoaAddress || !safeAddress) throw new Error('Missing addresses from Phase 2');
+        if (!eoaAddress) throw new Error('Missing master EOA address from Phase 2');
 
-        // Fund EOA with 100 ETH
+        // Fund EOA with 100 ETH — stOLAS mode, OLAS bond is funded by distributor
         await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
           eoaAddress,
           '0x56BC75E2D63100000', // 100 ETH in hex
@@ -203,68 +183,10 @@ async function main(): Promise<void> {
         // Verify ETH balance
         const ethCheckProvider = new JsonRpcProvider(ANVIL_RPC);
         const eoaEthBalance = await ethCheckProvider.getBalance(eoaAddress);
-        console.log(`    Funded EOA (${eoaAddress}) with 100 ETH — balance: ${eoaEthBalance}`);
+        console.log(`    Funded master EOA (${eoaAddress}) with 100 ETH — balance: ${eoaEthBalance}`);
         if (eoaEthBalance === 0n) {
-          throw new Error('EOA ETH balance is still 0 after anvil_setBalance');
+          throw new Error('Master EOA ETH balance is still 0 after anvil_setBalance');
         }
-
-        // Fund Safe with ETH (needed for payable calls like activateRegistration)
-        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
-          safeAddress,
-          '0x56BC75E2D63100000', // 100 ETH
-        ]);
-        console.log(`    Funded Safe (${safeAddress}) with 100 ETH`);
-
-        // Fund Safe with OLAS using anvil_setStorageAt
-        // OLAS on Base uses standard ERC-20 layout: balances mapping at slot 0
-        const olasAmount = 10000n * 10n ** 18n; // 10,000 OLAS (2x the bond)
-        const slot = erc20BalanceSlot(safeAddress);
-        const value = zeroPadValue(toBeHex(olasAmount), 32);
-
-        await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [OLAS_TOKEN, slot, value]);
-
-        // Fund staking contract with OLAS for rewards via deposit()
-        // First: give the EOA OLAS tokens
-        const eoaOlasSlot = erc20BalanceSlot(eoaAddress);
-        const eoaOlasAmount = 100000n * 10n ** 18n;
-        await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [OLAS_TOKEN, eoaOlasSlot, zeroPadValue(toBeHex(eoaOlasAmount), 32)]);
-
-        // Approve + deposit OLAS into the staking contract (impersonated EOA)
-        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [eoaAddress]);
-
-        const olasApprove = new Interface(['function approve(address spender, uint256 amount) returns (bool)']).encodeFunctionData('approve', [CHAIN_CONFIG.stakingContract, eoaOlasAmount]);
-        await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: eoaAddress, to: OLAS_TOKEN, data: olasApprove }]);
-        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
-
-        const depositData = new Interface(['function deposit(uint256 amount)']).encodeFunctionData('deposit', [eoaOlasAmount]);
-        await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: eoaAddress, to: CHAIN_CONFIG.stakingContract, data: depositData }]);
-
-        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [eoaAddress]);
-        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
-
-        // Verify availableRewards
-        const stakingContract = new Contract(CHAIN_CONFIG.stakingContract, ['function availableRewards() view returns (uint256)'], new JsonRpcProvider(ANVIL_RPC));
-        const rewards = await stakingContract.availableRewards();
-        console.log(`    Staking contract availableRewards: ${rewards} (${Number(rewards) / 1e18} OLAS)`);
-
-        // Verify OLAS balance
-        const provider = new JsonRpcProvider(ANVIL_RPC);
-        const olas = new Contract(OLAS_TOKEN, [
-          'function balanceOf(address) view returns (uint256)',
-        ], provider);
-        const balance: bigint = await olas.balanceOf(safeAddress);
-
-        if (balance < CHAIN_CONFIG.bondAmount) {
-          throw new Error(
-            `OLAS balance ${balance} is less than required bond ${CHAIN_CONFIG.bondAmount}. ` +
-            `Storage slot may be wrong — try slot 1 or 2.`,
-          );
-        }
-        console.log(`    Funded Safe (${safeAddress}) with ${balance / 10n ** 18n} OLAS`);
-
-        // Verify EOA ETH balance
-        const ethBalance = await provider.getBalance(eoaAddress);
-        console.log(`    EOA ETH balance: ${ethBalance / 10n ** 18n} ETH`);
       }),
     );
 
@@ -278,7 +200,7 @@ async function main(): Promise<void> {
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Re-create bootstrapper with fresh provider to avoid caching
-        bootstrapper = new EarningBootstrapper({
+        bootstrapper = new FleetBootstrapper({
           earningDir: tmpDir!,
           chain: 'base',
           rpcUrl: ANVIL_RPC,
@@ -286,19 +208,20 @@ async function main(): Promise<void> {
 
         const result = await bootstrapper.bootstrap(PASSWORD);
 
-        if (!result.ok || result.step !== 'complete') {
+        if (!result.ok) {
           throw new Error(
-            `Expected step 'complete', got '${result.step}': ${result.message}`,
+            `Expected bootstrap complete, got: ${result.message}`,
           );
         }
 
-        serviceId = result.earning_state.service_id ?? undefined;
-        safeAddress = result.earning_state.safe_address ?? safeAddress;
+        const firstService = result.fleet_state.services[0];
+        serviceId = firstService?.service_id ?? undefined;
+        safeAddress = firstService?.safe_address ?? safeAddress;
 
         console.log(`    Bootstrap complete!`);
         console.log(`    Service ID: ${serviceId}`);
         console.log(`    Safe address: ${safeAddress}`);
-        console.log(`    Staking contract: ${result.earning_state.staking_address}`);
+        console.log(`    Staking contract: ${firstService?.staking_address}`);
       }),
     );
 
