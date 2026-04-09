@@ -69,6 +69,7 @@ async function bootstrap(): Promise<{
     earningDir: config.earningDir,
     chain: NETWORK_CHAIN,
     rpcUrl: config.rpcUrl,
+    stakingMode: config.stakingMode,
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,

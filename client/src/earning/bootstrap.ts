@@ -42,6 +42,7 @@ import type {
   EarningState,
   EarningStep,
   FundingRequirement,
+  StakingMode,
 } from './types.js';
 
 // On-chain ServiceState enum
@@ -67,6 +68,7 @@ export interface EarningBootstrapperOptions {
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
   stopAt?: 'service_staked' | 'mech_deployed' | 'complete';
+  stakingMode?: 'standard' | 'self-bond';
 }
 
 export function reconcilePredictedSafeState(
@@ -153,11 +155,13 @@ export class EarningBootstrapper {
   private readonly provider: JsonRpcProvider;
   private readonly chain: 'base' | 'base-sepolia';
   private readonly stopAt: 'service_staked' | 'mech_deployed' | 'complete';
+  private readonly stakingMode: StakingMode;
 
   constructor(options: EarningBootstrapperOptions = {}) {
     this.store = new EarningStateStore(options.earningDir);
     this.chain = options.chain ?? 'base';
     this.stopAt = options.stopAt ?? 'complete';
+    this.stakingMode = options.stakingMode ?? 'standard';
     this.config = getChainConfig(this.chain, {
       testnetL2DeploymentPath: options.testnetL2DeploymentPath,
       testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
@@ -183,6 +187,9 @@ export class EarningBootstrapper {
     let state = await this.store.load();
     if (state.chain !== this.chain) {
       state = await this.store.patch({ chain: this.chain });
+    }
+    if (state.staking_mode !== this.stakingMode && state.service_id === null) {
+      state = await this.store.patch({ staking_mode: this.stakingMode });
     }
     state = await this.refreshPredictedSafeAddress(state, password);
     state = await this.refreshServiceProgressState(state);
