@@ -28,6 +28,7 @@ import {
 type JinnTokenSource = "external" | "test";
 type ServiceRegistrySource = "external" | "stub";
 type ProxyHashSource = "external" | "placeholder";
+type ActivityCheckerVersion = "v1" | "v2";
 
 interface L2DeployConfig {
   timingProfile: Phase1aTimingProfile;
@@ -65,6 +66,14 @@ interface L2DeployConfig {
   timeForEmissions: number;
   /** Number of agent instances per service. */
   numAgentInstances: number;
+  /** Activity checker version: "v1" (simple counter) or "v2" (SimHash anti-farming). */
+  activityCheckerVersion: ActivityCheckerVersion;
+  /** V2 only: Hamming distance threshold (0-256). Default: 64. */
+  similarityThreshold: number;
+  /** V2 only: Weight for similar evidence (1e18 scale). Default: 0 (binary). */
+  similarDecayMultiplier: bigint;
+  /** V2 only: Recent hashes to compare against. Default: 20. */
+  comparisonWindow: number;
 }
 
 const BASE_L2_CONFIG = {
@@ -87,6 +96,10 @@ export const DEFAULT_L2_CONFIG: L2DeployConfig = {
   serviceRegistryTokenUtilitySource: "stub",
   proxyHash: ethers.id("proxy-hash-placeholder"),
   proxyHashSource: "placeholder",
+  activityCheckerVersion: "v1",
+  similarityThreshold: 64,
+  similarDecayMultiplier: 0n,
+  comparisonWindow: 20,
 };
 
 export const FAST_TEST_L2_CONFIG: L2DeployConfig = {
@@ -366,6 +379,26 @@ export function resolveL2DeployConfig(
     config.numAgentInstances = Number(numAgentInstances);
   }
 
+  const activityCheckerVersion = env.ACTIVITY_CHECKER_VERSION?.trim()?.toLowerCase();
+  if (activityCheckerVersion === "v2") {
+    config.activityCheckerVersion = "v2";
+  }
+
+  const simThreshold = env.SIMILARITY_THRESHOLD?.trim();
+  if (simThreshold) {
+    config.similarityThreshold = Number(simThreshold);
+  }
+
+  const simDecay = parseOptionalBigInt(env.SIMILAR_DECAY_MULTIPLIER);
+  if (simDecay !== undefined) {
+    config.similarDecayMultiplier = simDecay;
+  }
+
+  const compWindow = env.COMPARISON_WINDOW?.trim();
+  if (compWindow) {
+    config.comparisonWindow = Number(compWindow);
+  }
+
   return config;
 }
 
@@ -430,15 +463,34 @@ export async function deployL2Stack(
     console.log(`  Deployed ServiceRegistryTokenUtilityStub: ${tokenUtilityAddress}`);
   }
 
-  const ActivityChecker = await ethers.getContractFactory("RestorationActivityChecker", deployer);
-  const activityChecker = await ActivityChecker.deploy(
-    config.livenessRatio,
-    deployerAddress,
-    await withNonce(withGas(txOverrides, "standard")),
-  );
-  await activityChecker.waitForDeployment();
-  const activityCheckerAddress = await activityChecker.getAddress();
-  console.log(`  Deployed RestorationActivityChecker: ${activityCheckerAddress}`);
+  let activityCheckerAddress: string;
+  if (config.activityCheckerVersion === "v2") {
+    const ActivityCheckerV2 = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
+    const activityChecker = await ActivityCheckerV2.deploy(
+      config.livenessRatio,
+      deployerAddress,
+      config.similarityThreshold,
+      config.similarDecayMultiplier,
+      config.comparisonWindow,
+      await withNonce(withGas(txOverrides, "standard")),
+    );
+    await activityChecker.waitForDeployment();
+    activityCheckerAddress = await activityChecker.getAddress();
+    console.log(`  Deployed RestorationActivityCheckerV2: ${activityCheckerAddress}`);
+    console.log(`    similarityThreshold: ${config.similarityThreshold}`);
+    console.log(`    similarDecayMultiplier: ${config.similarDecayMultiplier}`);
+    console.log(`    comparisonWindow: ${config.comparisonWindow}`);
+  } else {
+    const ActivityChecker = await ethers.getContractFactory("RestorationActivityChecker", deployer);
+    const activityChecker = await ActivityChecker.deploy(
+      config.livenessRatio,
+      deployerAddress,
+      await withNonce(withGas(txOverrides, "standard")),
+    );
+    await activityChecker.waitForDeployment();
+    activityCheckerAddress = await activityChecker.getAddress();
+    console.log(`  Deployed RestorationActivityChecker: ${activityCheckerAddress}`);
+  }
 
   const StakingToken = await ethers.getContractFactory("StakingToken", deployer);
   const stakingImplementation = await StakingToken.deploy(await withNonce(withGas(txOverrides, "stakingTokenImpl")));
@@ -597,6 +649,12 @@ async function main() {
       livenessPeriod: config.livenessPeriod,
       timeForEmissions: config.timeForEmissions,
       numAgentInstances: config.numAgentInstances,
+      activityCheckerVersion: config.activityCheckerVersion,
+      ...(config.activityCheckerVersion === "v2" ? {
+        similarityThreshold: config.similarityThreshold,
+        similarDecayMultiplier: config.similarDecayMultiplier.toString(),
+        comparisonWindow: config.comparisonWindow,
+      } : {}),
     },
     contracts: {
       jinnToken: deployment.jinnToken,

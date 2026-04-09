@@ -294,22 +294,24 @@ When used, each domain naturally progresses: new (high emissions, diverse approa
 - Testnet iteration: redeploy full stack until solid, then move to mainnet
 - See `spec/2026-04-06-phase-1a-design.md` for full design
 
-### Phase 1b — ve-JINN Gauge Voting
+### Phase 1b — Protocol Hardening (Testnet)
 
-- Fork veOLAS as veJINN (vote-escrow locking)
-- Fork VoteWeighting (gauge contract)
-- Replace multisig-set weights with gauge-voted weights
-- Anti-farming decay active in activity checkers
-- Challenge mechanism live for evidence disputes
+- Anti-farming decay active in activity checkers (SimHash-based evidence novelty)
+- Challenge mechanism live for evidence disputes (optimistic with bonds)
+- Evidence schema standardization — canonical checkpoint format for LSH
+- ve-JINN gauge voting replaces multisig-set weights
+- Client daemon fully integrated — auto-submit evidence, auto-claim rewards
+- Extended testnet operation with real operators running the full loop continuously
+- Goal: battle-test every protocol mechanism on Sepolia/Base Sepolia before mainnet
+
+### Phase 2 — Mainnet Launch
+
 - Fair-launch JINN on Ethereum mainnet
-
-### Phase 2 — Multi-Environment
-
-- Additional execution environments (Arbitrum, others)
+- Deploy production tokenomics stack (Treasury, Dispenser, bridge) on mainnet
+- Multi-chain execution environments (Base mainnet, Arbitrum, others)
 - New distribution contracts with environment-specific qualifying criteria
 - Gauge voting becomes meaningful as environments and contract types compete for emissions
 - External demand grows: entities beyond the DAO posting desired states with USDC
-- ve-JINN governance broadens as token distribution widens
 - ZK-requiring distribution contracts deployed — gauge determines adoption
 
 ### Phase 3 — Autonomous

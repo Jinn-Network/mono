@@ -138,8 +138,8 @@ Client Daemon (points at testnet addresses)
 - **Anti-farming LSH decay** — deferred. Activity checker uses simple liveness ratio (same as Phase 0).
 - **Challenge mechanism** — deferred. Optimistic evidence continues.
 - **Evidence schema standardization** — deferred.
-- **Fair-launch token distribution** — testnet tokens are free. Mainnet launch mechanics designed separately.
-- **Multi-chain beyond Base** — single L2 (Base Sepolia) for Phase 1a.
+- **Fair-launch token distribution** — deferred to Phase 2 (mainnet launch). Testnet tokens are free.
+- **Multi-chain beyond Base** — single L2 (Base Sepolia) for Phase 1. Multi-chain is Phase 2.
 
 ## 6. Deployment Script
 

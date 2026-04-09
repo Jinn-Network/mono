@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jinn Network monorepo. Phase 0 implementation is complete — the client daemon, on-chain contracts, and JinnRouter are all deployed and working on Base. Phase 1a (JINN token + DAO + distribution on testnet) is in design — see `spec/2026-04-06-phase-1a-design.md`.
+Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a (JINN token + DAO + distribution on testnet) is deployed and proven on Sepolia/Base Sepolia. Phase 1b (protocol hardening on testnet) is in progress — see `spec/2026-04-06-phase-1a-design.md` and `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`.
 
 Jinn is a training protocol for agentic intents. It defines a loop (Creation → Execution → Evaluation → Knowledge) where intents are published with fees, participants attempt fulfillment, evaluators verify results, and knowledge accumulates to improve future attempts.
 
@@ -240,9 +240,9 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 ## Phased Rollout
 
 - **Phase 0** (complete): Prove on OLAS ecosystem, single chain (Base), OLAS Mech Marketplace + JinnRouter, optimistic evidence, no JINN token
-- **Phase 1a** (in design): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
-- **Phase 1b**: Add ve-JINN gauge voting, anti-farming decay, challenge mechanism, fair-launch on mainnet
-- **Phase 2**: Multi-chain, ZK-requiring distribution contracts, broader governance
+- **Phase 1a** (complete): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
+- **Phase 1b** (in progress): Protocol hardening on testnet — anti-farming decay, challenge mechanism, ve-JINN gauge voting, evidence schema, full client integration, extended testnet operation
+- **Phase 2**: Mainnet launch — fair-launch JINN, multi-chain (Base, Arbitrum), ZK-requiring distribution contracts
 - **Phase 3**: Autonomous — full ve-JINN governance, USDC revenue exceeds JINN emissions
 
 ## Development Commands

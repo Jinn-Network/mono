@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-Jinn Network monorepo. Phase 0 implementation is complete — the client daemon, on-chain contracts, and JinnRouter are all deployed and working on Base. Phase 1a (JINN token + DAO + distribution on testnet) is in design — see `spec/2026-04-06-phase-1a-design.md`.
+Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a (JINN token + DAO + distribution on testnet) is deployed and proven on Sepolia/Base Sepolia. Phase 1b (protocol hardening on testnet) is in progress — see `spec/2026-04-06-phase-1a-design.md` and `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`.
 
 Jinn is a training protocol for state restoration. It defines a loop (Creation → Restoration → Evaluation → Knowledge) where desired states are published with fees, participants attempt restoration, evaluators verify results, and knowledge accumulates to improve future attempts.
 
@@ -125,6 +125,7 @@ JINN_PASSWORD=secret npm start -- --config ./my-config.json
 ```
 
 The daemon will:
+
 1. Run the earning bootstrap (wallet → Safe → service → staking → mech)
 2. Pause at `awaiting_funding` if the wallet needs ETH/OLAS — fund and re-run
 3. Start the daemon with 3 loops (creator, restorer, delivery-watcher)
@@ -152,6 +153,7 @@ JINN_PASSWORD=test npm start
 ```
 
 Funding on Anvil (use pre-funded account):
+
 ```bash
 # Fund EOA with ETH
 cast send <EOA_ADDRESS> --value 0.01ether \
@@ -169,32 +171,36 @@ cast send 0x54330d28ca3357F294334BDC454a032e7f353416 \
 
 Config file first, env var override. File at `~/.jinn-client/config.json` or `--config <path>`.
 
-| Config key       | Env override             | Default                           |
-|------------------|--------------------------|-----------------------------------|
-| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| https://mainnet.base.org          |
-| claudeModel      | JINN_CLAUDE_MODEL        | Codex-haiku-4-5-20251001         |
-| claudePath       | JINN_CLAUDE_PATH         | Codex                            |
-| pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
-| apiPort          | JINN_API_PORT            | 7331                              |
-| dbPath           | JINN_DB_PATH             | ~/.jinn-client/jinn.db            |
-| earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
-| peers            | JINN_PEERS               | []                                |
-| subgraphUrl      | JINN_SUBGRAPH_URL        | (none)                            |
-| desiredStates    | JINN_DESIRED_STATES      | [health-check]                    |
-| ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
-| ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
+
+| Config key      | Env override              | Default                                                            |
+| --------------- | ------------------------- | ------------------------------------------------------------------ |
+| rpcUrl          | BASE_RPC_URL/JINN_RPC_URL | [https://mainnet.base.org](https://mainnet.base.org)               |
+| claudeModel     | JINN_CLAUDE_MODEL         | Codex-haiku-4-5-20251001                                           |
+| claudePath      | JINN_CLAUDE_PATH          | Codex                                                              |
+| pollIntervalMs  | JINN_POLL_INTERVAL_MS     | 5000                                                               |
+| apiPort         | JINN_API_PORT             | 7331                                                               |
+| dbPath          | JINN_DB_PATH              | ~/.jinn-client/jinn.db                                             |
+| earningDir      | JINN_EARNING_DIR          | ~/.jinn-client/earning                                             |
+| peers           | JINN_PEERS                | []                                                                 |
+| subgraphUrl     | JINN_SUBGRAPH_URL         | (none)                                                             |
+| desiredStates   | JINN_DESIRED_STATES       | [health-check]                                                     |
+| ipfsRegistryUrl | JINN_IPFS_REGISTRY_URL    | [https://registry.autonolas.tech](https://registry.autonolas.tech) |
+| ipfsGatewayUrl  | JINN_IPFS_GATEWAY_URL     | [https://gateway.autonolas.tech](https://gateway.autonolas.tech)   |
+
 
 `JINN_PASSWORD` is env-only — never in config files.
 
 ## On-Chain Addresses (Base)
 
+
 | Component              | Address                                      |
-|------------------------|----------------------------------------------|
+| ---------------------- | -------------------------------------------- |
 | JinnRouter             | `0xfFa7118A3D820cd4E820010837D65FAfF463181B` |
 | Activity checker proxy | `0x477C41Cccc8bd08027e40CEF80c25918C595a24d` |
 | Mech marketplace       | `0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020` |
 | Staking contract       | `0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54` |
 | OLAS token             | `0x54330d28ca3357F294334BDC454a032e7f353416` |
+
 
 ## Architecture
 
@@ -217,6 +223,7 @@ Each JinnRouter call increments activity counters for the Safe multisig. The OLA
 ### Earning bootstrap
 
 The `EarningBootstrapper` walks through 11 idempotent steps:
+
 1. wallet — create agent EOA + encrypted keystore
 2. safe_predicted — predict Safe address
 3. awaiting_funding — gate until EOA has ETH + Safe has OLAS
@@ -240,9 +247,9 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 ## Phased Rollout
 
 - **Phase 0** (complete): Prove on OLAS ecosystem, single chain (Base), OLAS Mech Marketplace + JinnRouter, optimistic evidence, no JINN token
-- **Phase 1a** (in design): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
-- **Phase 1b**: Add ve-JINN gauge voting, anti-farming decay, challenge mechanism, fair-launch on mainnet
-- **Phase 2**: Multi-chain, ZK-requiring distribution contracts, broader governance
+- **Phase 1a** (complete): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
+- **Phase 1b** (in progress): Protocol hardening on testnet — anti-farming decay, challenge mechanism, ve-JINN gauge voting, evidence schema, full client integration, extended testnet operation
+- **Phase 2**: Mainnet launch — fair-launch JINN, multi-chain (Base, Arbitrum), ZK-requiring distribution contracts
 - **Phase 3**: Autonomous — full ve-JINN governance, USDC revenue exceeds JINN emissions
 
 ## Development Commands

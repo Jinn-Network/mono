@@ -1834,3 +1834,94 @@ git commit -m "chore: record Phase 1a testnet deployment addresses"
 | 13 | Deploy to live testnets (L1 stack → L2 mintable JINN → L2 factory staking → bridge → governance → preflight) | Task 12 |
 
 Tasks 1-3 can be parallelized. Tasks 5-8 are sequential (each builds on the last). Task 13 is the final manual deployment.
+
+---
+
+## Phase 1b: Anti-Farming LSH Decay (added 2026-04-09)
+
+### What was implemented
+
+The first Phase 1b slice: **SimHash-based anti-farming decay** in the activity checker. This prevents operators from farming rewards by submitting identical or near-identical evidence repeatedly.
+
+### Architecture
+
+The anti-farming mechanism lives entirely within a new activity checker contract (`RestorationActivityCheckerV2`). No changes to the staking contract architecture. The V2 checker implements the same `IActivityChecker` interface (`getMultisigNonces` + `isRatioPass`) — the staking contract treats it as a drop-in replacement.
+
+How it works:
+
+1. Client computes a 256-bit **SimHash** of evidence checkpoints (tool calls, interactions, outcome)
+2. Client calls `recordActivityWithEvidence(multisig, activityType, evidenceHash)` on the V2 checker
+3. The checker compares the new hash against the operator's recent hashes (sliding window)
+4. **Novel evidence** (Hamming distance ≥ threshold): full weight (1e18) added to novelty-weighted count
+5. **Similar evidence** (Hamming distance < threshold): zero weight (or configurable decay) added
+6. `isRatioPass` uses novelty-weighted counts — farming operators accumulate zero effective activity and fail liveness
+
+### Files added
+
+| File | Purpose |
+|------|---------|
+| `contracts/src/staking/RestorationActivityCheckerV2.sol` | V2 activity checker with SimHash anti-farming |
+| `contracts/test/phase1/Antifarming.test.ts` | 35 tests covering novelty, decay, thresholds, admin |
+| `client/src/earning/evidence-simhash.ts` | Client-side SimHash computation |
+| `client/test/earning/evidence-simhash.test.ts` | 14 tests for SimHash determinism and similarity |
+| `contracts/scripts/phase1b-record-activity-with-evidence.ts` | Operator script for V2 activity recording |
+| `docs/phase1a-operator-runbook.md` | Standalone operator runbook for Phase 1a + 1b |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `contracts/scripts/deploy-phase1a-l2.ts` | Added `ACTIVITY_CHECKER_VERSION=v2` support with V2-specific config |
+
+### Default V2 parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `similarityThreshold` | 64 | Hamming distance threshold (0-256). Below = similar |
+| `similarDecayMultiplier` | 0 | Weight for similar evidence (0 = zero reward) |
+| `comparisonWindow` | 20 | Recent hashes to compare against |
+
+### Deploy V2 on the fast-test stack
+
+```bash
+cd contracts
+PHASE1A_TIMING_PROFILE=fast-test \
+ACTIVITY_CHECKER_VERSION=v2 \
+BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+npx hardhat run scripts/deploy-phase1a-l2.ts --network baseSepolia
+```
+
+Then record activity with evidence:
+
+```bash
+# Novel evidence (earns full rewards)
+PHASE1A_TIMING_PROFILE=fast-test \
+PHASE1A_MULTISIG=<safe-address> \
+EVIDENCE_MODE=novel \
+BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+npx hardhat run scripts/phase1b-record-activity-with-evidence.ts --network baseSepolia
+
+# Duplicate evidence (earns zero — anti-farming in action)
+PHASE1A_TIMING_PROFILE=fast-test \
+PHASE1A_MULTISIG=<safe-address> \
+EVIDENCE_MODE=duplicate \
+BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+npx hardhat run scripts/phase1b-record-activity-with-evidence.ts --network baseSepolia
+```
+
+### Test results
+
+- `npx hardhat test test/phase1/Antifarming.test.ts` — 35 passing
+- `npx vitest run test/earning/evidence-simhash.test.ts` — 14 passing
+- All existing tests still pass (226 Hardhat, 64 Vitest)
+
+### Remaining Phase 1b work
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Anti-farming LSH decay | **Implemented** | V2 checker + client SimHash + tests + deploy support |
+| ve-JINN gauge voting | Already exercised | veOLAS + VoteWeighting deployed, scripts exist for lock + vote |
+| Challenge mechanism | Not started | Open design questions: bond size, window, challenger rewards |
+| Evidence schema v2 | Not started | Current v1 schema is minimal but functional |
+| Mainnet fair-launch | Not started | Requires tokenomics finalization |
+| Client integration | Partial | SimHash module ready; daemon loop doesn't auto-submit evidence yet |
