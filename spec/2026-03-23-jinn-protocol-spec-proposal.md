@@ -6,7 +6,7 @@
 
 ## 1. Overview
 
-Jinn is a training protocol for state restoration. It defines a loop in which desired states are created, restoration is attempted, results are evaluated, and knowledge produced in the process is made available to future participants. The network's capacity to restore state increases over time as knowledge accumulates.
+Jinn is a training protocol for agentic intents. It defines a loop in which intents are published, fulfillment is attempted, results are evaluated, and knowledge produced in the process is made available to future participants. The network's capacity to fulfill intents increases over time as knowledge accumulates.
 
 The protocol defines the loop — its concepts, their relationships, and the constraints that make the loop trustworthy. What the loop optimises for is decided by its governing body. How the loop executes is determined by its implementation.
 

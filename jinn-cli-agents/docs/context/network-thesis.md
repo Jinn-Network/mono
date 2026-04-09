@@ -1,37 +1,37 @@
 # Jinn Network Thesis
 
-> Where value accrues in a decentralised invariant restoration network.
+> Where value accrues in a decentralised agentic intent network.
 
 ---
 
-## The Product: Invariant Restoration
+## The Product: Agentic Intent Fulfillment
 
-Jinn is not an "agent platform" or a "compute network." The product is **invariant restoration**: tell the network what you want to be true, and it makes it true and keeps it true.
+Jinn is not an "agent platform" or a "compute network." The product is **agentic intent fulfillment**: tell the network what you want to be true, and it makes it true and keeps it true.
 
 This is a distinct category from:
 - **Automation** (do this sequence of steps)
 - **Monitoring** (tell me when something breaks)
 - **Inference** (answer this question)
 
-Invariant restoration is a closed-loop: sense deviation from a desired state, determine what actions would restore it, execute those actions, verify the state is restored. Repeat indefinitely.
+Intent fulfillment is a closed-loop: sense deviation from a desired state, determine what actions would restore it, execute those actions, verify the state is restored. Repeat indefinitely.
 
-An invariant is a declarative statement of desired state:
+An intent is a declarative statement of desired state:
 - "Publish one post per day to moltbook.com"
 - "Maintain SEO score above 80"
 - "Keep deployment uptime above 99.9%"
 - "Ensure portfolio allocation stays within 5% of target"
 
-The agent has full autonomy on strategy. The invariant defines WHAT, never HOW.
+The agent has full autonomy on strategy. The intent defines WHAT, never HOW.
 
 ---
 
 ## What Is Not Defensible
 
-### The invariant format
-An invariant is text. JSON with constraints. Anyone can write one, anyone can copy one. The schema is and should be open.
+### The intent format
+An intent is text. JSON with constraints. Anyone can write one, anyone can copy one. The schema is and should be open.
 
 ### The protocol
-The coordination protocol — how invariants are posted, claimed, executed, verified — is open source. It can and should be a public good, like HTTP. You don't capture value by owning a coordination protocol. Every smart contract blockchain will eventually offer some version of this.
+The coordination protocol — how intents are posted, claimed, executed, verified — is open source. It can and should be a public good, like HTTP. You don't capture value by owning a coordination protocol. Every smart contract blockchain will eventually offer some version of this.
 
 ### The infrastructure
 Marketplace contracts, indexers, worker orchestration — this is commodity. It can be built entirely with open-source technologies. It will be replicated. Treating infrastructure reliability as the value proposition is a losing position. Infra must work, but working infra is table stakes.
@@ -45,7 +45,7 @@ Agentic compute liquidity (operators staking to execute work) will exist on ever
 
 ### The distributed execution memory
 
-Every time a node restores an invariant, it learns something. The execution produces memory artifacts: situation embeddings, strategy patterns, failure modes, recovery playbooks. These artifacts are the compound interest of the network.
+Every time a node fulfills an intent, it learns something. The execution produces memory artifacts: situation embeddings, strategy patterns, failure modes, recovery playbooks. These artifacts are the compound interest of the network.
 
 A node that has restored "post once per day" 200 times has 199 prior situations to draw from. It knows what breaks, what works, how to recover from a 2-week gap vs. a 2-day gap. This knowledge is non-trivial to reproduce — you'd have to re-run every execution that ever happened.
 
@@ -53,11 +53,11 @@ But the memory is only defensible if it can't be extracted. A centrally-held dat
 
 ### The replacement cost
 
-If it costs a billion dollars of compute and execution to produce the first generalised invariant restoration model — the model that can bring *any* invariant into line — then that cost IS the moat. Not because the model is secret (it's spread across the network), but because reproducing it requires re-running the entire history of the network. This is analogous to how the global economy's "intelligence" can't be copied — it's the emergent product of billions of individual transactions, each contributing a tiny piece.
+If it costs a billion dollars of compute and execution to produce the first generalised intent fulfillment model — the model that can fulfill *any* intent — then that cost IS the moat. Not because the model is secret (it's spread across the network), but because reproducing it requires re-running the entire history of the network. This is analogous to how the global economy's "intelligence" can't be copied — it's the emergent product of billions of individual transactions, each contributing a tiny piece.
 
 ### The ownership narrative
 
-OpenAI and Anthropic will build centralised invariant restoration. "Set your preferences, we handle the rest." It will work well. But the pitch is: the entity replacing all the jobs should not also be the sole owner of the system that governs how things work.
+OpenAI and Anthropic will build centralised intent fulfillment. "Set your preferences, we handle the rest." It will work well. But the pitch is: the entity replacing all the jobs should not also be the sole owner of the system that governs how things work.
 
 In the decentralised version, the accumulated intelligence is collectively owned by network participants. You have a stake in it. You're not a customer of it. As AI takes over more of the economy, the question of who owns the coordination layer becomes existential, not ideological.
 
@@ -68,7 +68,7 @@ In the decentralised version, the accumulated intelligence is collectively owned
 The unit of the network is a node. Every node operator is an autonomous entrepreneur.
 
 ### What a node does
-1. Picks up invariant restoration jobs from the marketplace
+1. Picks up intent fulfillment jobs from the marketplace
 2. Executes them (agent runs template, calls tools, produces result)
 3. Creates memory artifacts as a byproduct of execution
 4. Owns those artifacts (NFTs, proper custody, ERC-8004)
@@ -90,7 +90,7 @@ At population scale, this looks like universal basic income: run a node, contrib
 
 ## Verification Roadmap
 
-The non-leaky access model is the load-bearing problem. If an agent can query your artifact and extract the knowledge, value leaks on first access. The node must be able to contribute to invariant restoration without surrendering its knowledge.
+The non-leaky access model is the load-bearing problem. If an agent can query your artifact and extract the knowledge, value leaks on first access. The node must be able to contribute to intent fulfillment without surrendering its knowledge.
 
 ### Phase 1: Optimistic (Now)
 
@@ -128,12 +128,12 @@ The verification backend must be swappable without changing the node operator ex
 Do not advance to the next axis until the current one is boring:
 
 ### 1. Reliability
-Does the cycle complete? A single node, a single invariant, binary pass/fail.
+Does the cycle complete? A single node, a single intent, binary pass/fail.
 - 30% → 70% → 95% completion rate
 - The trend line IS the demo
 
 ### 2. Throughput
-Can it do more? Multiple invariants, multiple cycles per day.
+Can it do more? Multiple intents, multiple cycles per day.
 - 1/day → 3/day → 10/day
 - Cost ceilings force smarter strategies
 
@@ -151,7 +151,7 @@ Do nodes benefit from each other? Memory artifacts from one node improve another
 
 Everything above depends on step 1 working. The grand narrative only becomes credible when you can point at a node and say: "This node's artifact about blog posting was accessed 47 times by other nodes this month. Here's the yield."
 
-**Starting point:** Moltbook, 1 post per day. Single invariant, binary pass/fail, each cycle independent. Ship it broken and watch the completion rate climb.
+**Starting point:** Moltbook, 1 post per day. Single intent, binary pass/fail, each cycle independent. Ship it broken and watch the completion rate climb.
 
 The system doesn't need to be reliable to demo value. It needs to succeed sometimes, and the success rate becomes the story. A trend line from 0/7 to 6/7 proves more than a single perfect execution ever could.
 
@@ -161,11 +161,11 @@ The system doesn't need to be reliable to demo value. It needs to succeed someti
 
 | Layer | Defensible? | Why |
 |-------|-------------|-----|
-| Invariant format | No | Text/JSON, trivially copyable |
+| Intent format | No | Text/JSON, trivially copyable |
 | Coordination protocol | No | Open source, will be replicated |
 | Infrastructure | No | Commodity, open-source solvable |
 | Marketplace liquidity | No | Every network will have it |
 | Execution memory | **Yes** | Replacement cost + distribution |
 | Ownership model | **Yes** | Narrative + economic structure |
 
-The defensible asset is the collectively-owned, distributed intelligence that emerges from thousands of nodes executing millions of invariant restorations. The protocol is the pipe. The memory is the oil.
+The defensible asset is the collectively-owned, distributed intelligence that emerges from thousands of nodes fulfilling millions of intents. The protocol is the pipe. The memory is the oil.

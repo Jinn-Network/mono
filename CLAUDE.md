@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Jinn Network monorepo. Phase 0 implementation is complete — the client daemon, on-chain contracts, and JinnRouter are all deployed and working on Base. Phase 1a (JINN token + DAO + distribution on testnet) is in design — see `spec/2026-04-06-phase-1a-design.md`.
 
-Jinn is a training protocol for state restoration. It defines a loop (Creation → Restoration → Evaluation → Knowledge) where desired states are published with fees, participants attempt restoration, evaluators verify results, and knowledge accumulates to improve future attempts.
+Jinn is a training protocol for agentic intents. It defines a loop (Creation → Execution → Evaluation → Knowledge) where intents are published with fees, participants attempt fulfillment, evaluators verify results, and knowledge accumulates to improve future attempts.
 
 ## Repository Structure
 
