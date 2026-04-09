@@ -143,6 +143,11 @@ describe('loadConfig RPC override handling', () => {
     delete process.env['JINN_STAKING_MODE'];
   });
 
+  it('defaults targetServices to 1', () => {
+    const config = loadConfig();
+    expect(config.targetServices).toBe(1);
+  });
+
   it('loads testnet artifact override paths from config and env', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',

@@ -92,6 +92,9 @@ export const JinnConfigSchema = z.object({
 
   /** Staking mode: 'standard' uses stOLAS (no OLAS needed), 'self-bond' uses operator-provided OLAS. */
   stakingMode: z.enum(['standard', 'self-bond']).default('standard'),
+
+  /** Number of services to bootstrap and run. */
+  targetServices: z.number().int().positive().default(1),
 });
 
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined). */
@@ -147,6 +150,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TESTNET_TOKEN_DEPLOYMENT']) merged.testnetL2TokenDeploymentPath = env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   if (env['JINN_TESTNET_MECH_DEPLOYMENT']) merged.testnetMechDeploymentPath = env['JINN_TESTNET_MECH_DEPLOYMENT'];
   if (env['JINN_STAKING_MODE'])           merged.stakingMode = env['JINN_STAKING_MODE'];
+  if (env['JINN_TARGET_SERVICES'])    merged.targetServices = parseInt(env['JINN_TARGET_SERVICES'], 10);
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
 
