@@ -300,6 +300,12 @@ export class EarningBootstrapper {
   // -----------------------------------------------------------------------
 
   private async stepPredictSafe(state: EarningState, password: string): Promise<EarningState> {
+    // In standard mode, the distributor creates the Safe — nothing to predict
+    if (this.stakingMode === 'standard') {
+      console.error('[earning-bootstrap] Standard (stOLAS) mode — skipping Safe prediction');
+      return this.store.patch({ step: 'awaiting_funding' });
+    }
+
     if (state.safe_address) {
       console.error('[earning-bootstrap] Safe address already predicted, skipping');
       return this.store.patch({ step: 'awaiting_funding' });
@@ -327,6 +333,22 @@ export class EarningBootstrapper {
   // -----------------------------------------------------------------------
 
   private async stepCheckFunding(state: EarningState, password: string): Promise<EarningState> {
+    if (this.stakingMode === 'standard') {
+      // Standard (stOLAS) mode: only need ETH on the agent EOA for gas
+      const eoaAddress = state.agent_address!;
+      const eoaBalance = await this.provider.getBalance(eoaAddress);
+
+      if (eoaBalance >= this.config.minEoaGasEth) {
+        console.error('[earning-bootstrap] Standard mode: ETH funding sufficient, proceeding');
+        return this.store.patch({ step: 'safe_deployed' });
+      }
+
+      console.error(
+        `[earning-bootstrap] Standard mode: waiting for ETH funding: eoaBalance=${eoaBalance} (need ${this.config.minEoaGasEth})`,
+      );
+      return state;
+    }
+
     const eoaAddress = state.agent_address!;
     const safeAddress = state.safe_address!;
     const requiredSafeTokenBalance = this.getRequiredSafeTokenBalance();
@@ -770,6 +792,10 @@ export class EarningBootstrapper {
     state: EarningState,
     password: string,
   ): Promise<EarningState> {
+    if (this.stakingMode === 'standard') {
+      return state;
+    }
+
     if (state.step === 'wallet' || !state.agent_address || !this.store.hasKeystore()) {
       return state;
     }
@@ -974,6 +1000,22 @@ export class EarningBootstrapper {
   }
 
   private async buildFundingRequirement(state: EarningState): Promise<FundingRequirement> {
+    if (this.stakingMode === 'standard') {
+      const eoaAddress = state.agent_address!;
+      const eoaBalance = await this.provider.getBalance(eoaAddress);
+
+      return {
+        eoa_address: eoaAddress,
+        eoa_eth_required: this.config.minEoaGasEth.toString(),
+        eoa_eth_balance: eoaBalance.toString(),
+        safe_address: '',
+        safe_eth_required: '0',
+        safe_eth_balance: '0',
+        safe_olas_required: '0',
+        safe_olas_balance: '0',
+      };
+    }
+
     const eoaAddress = state.agent_address!;
     const safeAddress = state.safe_address!;
     const requiredSafeTokenBalance = this.getRequiredSafeTokenBalance();
@@ -1016,7 +1058,7 @@ export class EarningBootstrapper {
       if (eoaNeeded > 0n) {
         lines.push(`  EOA (${funding.eoa_address}): needs ${eoaNeeded} wei ETH for gas and Safe top-up`);
       }
-      if (safeEthNeeded > 0n) {
+      if (safeEthNeeded > 0n && funding.safe_address) {
         lines.push(`  Safe (${funding.safe_address}): needs ${safeEthNeeded} wei ETH for bootstrap/request value (or fund the EOA and it will auto-top-up the Safe)`);
       }
       if (olasNeeded > 0n) {

@@ -172,6 +172,7 @@ describe('Earning bootstrap testnet support', () => {
     const bootstrapper = new EarningBootstrapper({
       chain: 'base',
       rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'self-bond',
     });
 
     const state = {
@@ -226,10 +227,90 @@ describe('Earning bootstrap testnet support', () => {
     expect(STOLAS_DISTRIBUTOR_ABI.length).toBeGreaterThanOrEqual(2);
   });
 
+  describe('standard (stOLAS) mode', () => {
+    it('skips safe_predicted step in standard mode', async () => {
+      const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-earning-'));
+      dirs.push(earningDir);
+
+      const store = new EarningStateStore(earningDir);
+      const state = createDefaultEarningState('base');
+      state.step = 'safe_predicted';
+      state.staking_mode = 'standard';
+      state.agent_address = '0x00000000000000000000000000000000000000a1';
+      await store.save(state);
+
+      const bootstrapper = new EarningBootstrapper({
+        earningDir,
+        chain: 'base',
+        rpcUrl: 'http://127.0.0.1:8545',
+        stakingMode: 'standard',
+      });
+
+      vi.spyOn(bootstrapper as any, 'refreshPredictedSafeAddress').mockImplementation(async (s: any) => s);
+      vi.spyOn(bootstrapper as any, 'refreshServiceProgressState').mockImplementation(async (s: any) => s);
+
+      const result = await (bootstrapper as any).stepPredictSafe(state, 'test-password');
+      expect(result.step).toBe('awaiting_funding');
+      expect(result.safe_address).toBeNull();
+    });
+
+    it('checks only ETH balance in standard mode awaiting_funding', async () => {
+      const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-earning-'));
+      dirs.push(earningDir);
+
+      const store = new EarningStateStore(earningDir);
+      const state = createDefaultEarningState('base');
+      state.step = 'awaiting_funding';
+      state.staking_mode = 'standard';
+      state.agent_address = '0x00000000000000000000000000000000000000a1';
+      await store.save(state);
+
+      const bootstrapper = new EarningBootstrapper({
+        earningDir,
+        chain: 'base',
+        rpcUrl: 'http://127.0.0.1:8545',
+        stakingMode: 'standard',
+      });
+
+      vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+      vi.spyOn((bootstrapper as any).store, 'patch').mockImplementation(async (patch: Record<string, unknown>) => ({
+        ...state,
+        ...patch,
+        updated_at: new Date().toISOString(),
+      }));
+
+      const result = await (bootstrapper as any).stepCheckFunding(state, 'test-password');
+      expect(result.step).toBe('safe_deployed');
+    });
+
+    it('describes funding requirement without OLAS in standard mode', () => {
+      const bootstrapper = new EarningBootstrapper({
+        chain: 'base',
+        rpcUrl: 'http://127.0.0.1:8545',
+        stakingMode: 'standard',
+      });
+
+      const message = (bootstrapper as any).describeStep('awaiting_funding', {
+        eoa_address: '0x00000000000000000000000000000000000000a1',
+        eoa_eth_required: '5000000000000000',
+        eoa_eth_balance: '0',
+        safe_address: '',
+        safe_eth_required: '0',
+        safe_eth_balance: '0',
+        safe_olas_required: '0',
+        safe_olas_balance: '0',
+      });
+
+      expect(message).toContain('EOA');
+      expect(message).not.toContain('OLAS');
+    });
+  });
+
   it('describes Safe ETH as part of the EOA funding requirement', () => {
     const bootstrapper = new EarningBootstrapper({
       chain: 'base',
       rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'self-bond',
     });
 
     const message = (bootstrapper as any).describeStep('awaiting_funding', {
