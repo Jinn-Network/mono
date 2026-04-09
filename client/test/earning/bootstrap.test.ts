@@ -1,364 +1,171 @@
-import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  EarningBootstrapper,
-  reconcilePredictedSafeState,
-  reconcileServiceProgressState,
-} from '../../src/earning/bootstrap.js';
-import { getChainConfig, STOLAS_DISTRIBUTOR, STOLAS_DISTRIBUTOR_ABI, STOLAS_STAKING_SLOTS_ABI } from '../../src/earning/contracts.js';
-import { EarningStateStore } from '../../src/earning/store.js';
-import { EarningStateSchema, createDefaultEarningState } from '../../src/earning/types.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { FleetStateStore } from '../../src/earning/store.js';
+import { generateMnemonic, encryptMnemonic, deriveMasterAddress } from '../../src/earning/wallet.js';
+import { createDefaultFleetState } from '../../src/earning/types.js';
 
-describe('Earning bootstrap testnet support', () => {
+describe('Fleet bootstrap', () => {
   const dirs: string[] = [];
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
-  it('exposes the committed Base Sepolia staking constants', () => {
-    const config = getChainConfig('base-sepolia');
-
-    expect(config.chainId).toBe(84532);
-    expect(config.serviceRegistry).toBe('0x31D3202d8744B16A120117A053459DDFAE93c855');
-    expect(config.serviceRegistryTokenUtility).toBe('0xeB49bE5DF00F74bd240DE4535DDe6Bc89CEfb994');
-    expect(config.serviceManager).toBe('0x5BA58970c2Ae16Cf6218783018100aF2dCcFc915');
-    expect(config.gnosisSafeSameAddressMultisig).toBe('0x10100e74b7F706222F8A7C0be9FC7Ae1717Ad8B2');
-    expect(config.olasToken).toBe('0x4F177E56bd79c169742a1BF8907dB0A5e54F5524');
-    expect(config.stakingContract).toBe('0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0');
-    expect(config.bondAmount).toBe(10n * 10n ** 18n);
-  });
-
-  it('loads Base Sepolia staking and token addresses from explicit artifact paths', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-artifacts-'));
-    dirs.push(dir);
-
-    const l2ArtifactPath = path.join(dir, 'deployment-phase1a-l2-baseSepolia-fast.json');
-    const tokenArtifactPath = path.join(dir, 'deployment-phase1a-token-baseSepolia-fast.json');
-
-    await writeFile(
-      l2ArtifactPath,
-      JSON.stringify({
-        config: {
-          minStakingDeposit: '25000000000000000000',
-        },
-        contracts: {
-          stakingToken: '0x00000000000000000000000000000000000000c1',
-          serviceRegistry: '0x00000000000000000000000000000000000000c2',
-          serviceRegistryTokenUtility: '0x00000000000000000000000000000000000000c3',
-        },
-      }),
-    );
-    await writeFile(
-      tokenArtifactPath,
-      JSON.stringify({
-        contracts: {
-          l2Token: '0x00000000000000000000000000000000000000c4',
-        },
-      }),
-    );
-
-    const config = getChainConfig('base-sepolia', {
-      testnetL2DeploymentPath: l2ArtifactPath,
-      testnetL2TokenDeploymentPath: tokenArtifactPath,
-    });
-
-    expect(config.olasToken).toBe('0x00000000000000000000000000000000000000c4');
-    expect(config.stakingContract).toBe('0x00000000000000000000000000000000000000c1');
-    expect(config.serviceRegistry).toBe('0x00000000000000000000000000000000000000c2');
-    expect(config.serviceRegistryTokenUtility).toBe('0x00000000000000000000000000000000000000c3');
-    expect(config.serviceManager).toBe('0x5BA58970c2Ae16Cf6218783018100aF2dCcFc915');
-    expect(config.bondAmount).toBe(25n * 10n ** 18n);
-  });
-
-  it('persists base-sepolia earning state and stops cleanly after service staking', async () => {
-    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-earning-'));
+  it('generates mnemonic and pauses at funding on first run', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);
 
-    const store = new EarningStateStore(earningDir);
-    const state = createDefaultEarningState('base-sepolia');
-    state.step = 'mech_deployed';
-    state.agent_address = '0x00000000000000000000000000000000000000a1';
-    state.safe_address = '0x00000000000000000000000000000000000000a2';
-    state.service_id = null;
-    await store.save(state);
-
-    const bootstrapper = new EarningBootstrapper({
+    const bootstrapper = new FleetBootstrapper({
       earningDir,
-      chain: 'base-sepolia',
-      stopAt: 'service_staked',
+      chain: 'base',
       rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    // Mock provider to return 0 balance
+    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(0n);
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.funding).toBeDefined();
+    expect(result.funding!.master_address).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(result.funding!.eth_balance).toBe('0');
+
+    // Verify mnemonic keystore was created
+    const store = new FleetStateStore(earningDir);
+    expect(store.hasMnemonicKeystore()).toBe(true);
+
+    // Verify state has master address
+    const state = await store.load();
+    expect(state.master_address).toBe(result.funding!.master_address);
+    expect(state.services).toEqual([]);
+  });
+
+  it('detects legacy keystore and migrates', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    // Create a fake legacy keystore
+    await mkdir(earningDir, { recursive: true });
+    await writeFile(path.join(earningDir, 'agent_keystore.json'), '{"fake":"legacy"}');
+
+    const store = new FleetStateStore(earningDir);
+    expect(store.hasLegacyKeystore()).toBe(true);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+    });
+
+    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(0n);
+
+    await bootstrapper.bootstrap('test-password');
+
+    // Legacy file should be renamed
+    expect(store.hasLegacyKeystore()).toBe(false);
+    // New mnemonic keystore should exist
+    expect(store.hasMnemonicKeystore()).toBe(true);
+  });
+
+  it('resumes from existing state without regenerating mnemonic', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    // Pre-create mnemonic keystore
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    // Pre-create state with master address
+    const masterAddr = deriveMasterAddress(mnemonic);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+    });
+
+    // Master is funded
+    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+
+    // Mock the service bootstrap steps.
+    // bootstrapService() adds a service with step='awaiting_stake' first, then calls resumeService().
+    // stepStolasStake is called for services in 'awaiting_stake' step — update the existing service.
+    vi.spyOn(bootstrapper as any, 'stepStolasStake').mockImplementation(async (_state: any, _m: any, index: number) => {
+      return store.updateService(index, {
+        agent_address: '0x0000000000000000000000000000000000000001',
+        safe_address: '0x0000000000000000000000000000000000000002',
+        service_id: 99,
+        staking_address: '0x0000000000000000000000000000000000000003',
+        step: 'staked',
+      });
+    });
+    vi.spyOn(bootstrapper as any, 'stepDeployMech').mockImplementation(async (_s: any, _m: any, index: number) => {
+      return store.updateService(index, { mech_address: '0x0000000000000000000000000000000000000004', step: 'complete' });
     });
 
     const result = await bootstrapper.bootstrap('test-password');
-    const persisted = await bootstrapper.getStatus();
 
     expect(result.ok).toBe(true);
-    expect(result.step).toBe('mech_deployed');
-    expect(result.message).toBe('Earning bootstrap reached stop target at service_staked.');
-    expect(result.earning_state.chain).toBe('base-sepolia');
-    expect(persisted.chain).toBe('base-sepolia');
-    expect(persisted.step).toBe('mech_deployed');
+    expect(result.fleet_state.services).toHaveLength(1);
+    expect(result.fleet_state.services[0].step).toBe('complete');
+    expect(result.fleet_state.master_address).toBe(masterAddr);
   });
 
-  it('rewinds to awaiting_funding when a stale Safe prediction no longer matches the current chain', () => {
-    const result = reconcilePredictedSafeState(
-      {
-        step: 'safe_deployed',
-        safe_address: '0x36cE9a1420c81A887CABFFE5086F958DF7403C40',
-        service_id: null,
-        mech_address: null,
-        staking_address: null,
-      },
-      '0xCE377821Ff921Cb917484C391eBFd83220470188',
-    );
+  it('creates multiple services when targetServices > 1', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
 
-    expect(result).toEqual({
-      safeAddress: '0xCE377821Ff921Cb917484C391eBFd83220470188',
-      step: 'awaiting_funding',
-      changed: true,
-      rewound: true,
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
     });
-  });
 
-  it('fails loudly if the Safe prediction changes after service creation', () => {
-    expect(() => reconcilePredictedSafeState(
-      {
-        step: 'service_activated',
-        safe_address: '0x36cE9a1420c81A887CABFFE5086F958DF7403C40',
-        service_id: 7,
-        mech_address: null,
-        staking_address: null,
-      },
-      '0xCE377821Ff921Cb917484C391eBFd83220470188',
-    )).toThrow('Stored Safe 0x36cE9a1420c81A887CABFFE5086F958DF7403C40 does not match current predicted Safe 0xCE377821Ff921Cb917484C391eBFd83220470188');
-  });
-
-  it('rewinds local service progress when on-chain service state lags behind', () => {
-    const result = reconcileServiceProgressState(
-      {
-        step: 'service_staked',
-        service_id: 11,
-      },
-      1,
-      0,
-    );
-
-    expect(result).toEqual({
-      step: 'service_activated',
-      changed: true,
-    });
-  });
-
-  it('advances to mech_deployed when the service is already staked on chain', () => {
-    const result = reconcileServiceProgressState(
-      {
-        step: 'service_staked',
-        service_id: 11,
-      },
-      4,
-      1,
-    );
-
-    expect(result).toEqual({
-      step: 'mech_deployed',
-      changed: true,
-    });
-  });
-
-  it('auto-tops the Safe from the EOA when the EOA has enough excess ETH', async () => {
-    const bootstrapper = new EarningBootstrapper({
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
       chain: 'base',
       rpcUrl: 'http://127.0.0.1:8545',
-      stakingMode: 'self-bond',
+      targetServices: 3,
     });
 
-    const state = {
-      ...createDefaultEarningState('base'),
-      step: 'awaiting_funding' as const,
-      agent_address: '0x00000000000000000000000000000000000000a1',
-      safe_address: '0x00000000000000000000000000000000000000a2',
-    };
+    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
 
-    let eoaBalance = 7_000_000_000_000_000n;
-    let safeBalance = 0n;
-
-    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockImplementation(async (address: string) => {
-      if (address.toLowerCase() === state.agent_address.toLowerCase()) return eoaBalance;
-      if (address.toLowerCase() === state.safe_address.toLowerCase()) return safeBalance;
-      return 0n;
-    });
-    vi.spyOn(bootstrapper as any, 'getOlasBalance').mockResolvedValue((bootstrapper as any).config.bondAmount * 2n);
-    vi.spyOn(bootstrapper as any, 'transferEth').mockImplementation(async (_password: string, to: string, amount: bigint) => {
-      expect(to).toBe(state.safe_address);
-      eoaBalance -= amount;
-      safeBalance += amount;
-    });
-    vi.spyOn((bootstrapper as any).store, 'patch').mockImplementation(async (patch: Record<string, unknown>) => ({
-      ...state,
-      ...patch,
-      updated_at: new Date().toISOString(),
-    }));
-
-    const result = await (bootstrapper as any).stepCheckFunding(state, 'test-password');
-
-    expect((bootstrapper as any).transferEth).toHaveBeenCalledOnce();
-    expect(safeBalance).toBe((bootstrapper as any).config.minSafeEth);
-    expect(result.step).toBe('safe_deployed');
-  });
-
-  it('creates default earning state with standard staking mode', () => {
-    const state = createDefaultEarningState('base');
-    expect(state.staking_mode).toBe('standard');
-  });
-
-  it('accepts self-bond staking mode in state schema', () => {
-    const state = createDefaultEarningState('base');
-    state.staking_mode = 'self-bond';
-    const result = EarningStateSchema.safeParse(state);
-    expect(result.success).toBe(true);
-  });
-
-  it('exports stOLAS distributor address and ABI', () => {
-    expect(STOLAS_DISTRIBUTOR).toBe('0x40abf47B926181148000DbCC7c8DE76A3a61a66f');
-    expect(STOLAS_DISTRIBUTOR_ABI).toBeDefined();
-    expect(STOLAS_DISTRIBUTOR_ABI.length).toBeGreaterThanOrEqual(2);
-  });
-
-  describe('standard (stOLAS) mode', () => {
-    it('skips safe_predicted step in standard mode', async () => {
-      const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-earning-'));
-      dirs.push(earningDir);
-
-      const store = new EarningStateStore(earningDir);
-      const state = createDefaultEarningState('base');
-      state.step = 'safe_predicted';
-      state.staking_mode = 'standard';
-      state.agent_address = '0x00000000000000000000000000000000000000a1';
-      await store.save(state);
-
-      const bootstrapper = new EarningBootstrapper({
-        earningDir,
-        chain: 'base',
-        rpcUrl: 'http://127.0.0.1:8545',
-        stakingMode: 'standard',
+    let serviceCounter = 100;
+    vi.spyOn(bootstrapper as any, 'stepStolasStake').mockImplementation(async (_s: any, _m: any, index: number) => {
+      return store.updateService(index, {
+        safe_address: `0x000000000000000000000000000000000000100${index}`,
+        service_id: serviceCounter++,
+        staking_address: '0x0000000000000000000000000000000000000003',
+        step: 'staked',
       });
-
-      vi.spyOn(bootstrapper as any, 'refreshPredictedSafeAddress').mockImplementation(async (s: any) => s);
-      vi.spyOn(bootstrapper as any, 'refreshServiceProgressState').mockImplementation(async (s: any) => s);
-
-      const result = await (bootstrapper as any).stepPredictSafe(state, 'test-password');
-      expect(result.step).toBe('awaiting_funding');
-      expect(result.safe_address).toBeNull();
+    });
+    vi.spyOn(bootstrapper as any, 'stepDeployMech').mockImplementation(async (_s: any, _m: any, index: number) => {
+      return store.updateService(index, { mech_address: `0x000000000000000000000000000000000000200${index}`, step: 'complete' });
     });
 
-    it('checks only ETH balance in standard mode awaiting_funding', async () => {
-      const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-earning-'));
-      dirs.push(earningDir);
+    const result = await bootstrapper.bootstrap('test-password');
 
-      const store = new EarningStateStore(earningDir);
-      const state = createDefaultEarningState('base');
-      state.step = 'awaiting_funding';
-      state.staking_mode = 'standard';
-      state.agent_address = '0x00000000000000000000000000000000000000a1';
-      await store.save(state);
-
-      const bootstrapper = new EarningBootstrapper({
-        earningDir,
-        chain: 'base',
-        rpcUrl: 'http://127.0.0.1:8545',
-        stakingMode: 'standard',
-      });
-
-      vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
-      vi.spyOn((bootstrapper as any).store, 'patch').mockImplementation(async (patch: Record<string, unknown>) => ({
-        ...state,
-        ...patch,
-        updated_at: new Date().toISOString(),
-      }));
-
-      const result = await (bootstrapper as any).stepCheckFunding(state, 'test-password');
-      expect(result.step).toBe('safe_deployed');
-    });
-
-    it('routes safe_deployed through service_staked to stepStolasStake in standard mode', async () => {
-      const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-earning-'));
-      dirs.push(earningDir);
-
-      const store = new EarningStateStore(earningDir);
-
-      const bootstrapper = new EarningBootstrapper({
-        earningDir,
-        chain: 'base',
-        rpcUrl: 'http://127.0.0.1:8545',
-        stakingMode: 'standard',
-      });
-
-      for (const step of ['safe_deployed', 'service_created', 'service_activated', 'agents_registered', 'service_deployed', 'service_staked'] as const) {
-        const state = createDefaultEarningState('base');
-        state.step = step;
-        state.staking_mode = 'standard';
-        state.agent_address = '0x00000000000000000000000000000000000000a1';
-        await store.save(state);
-
-        const stolasStakeSpy = vi.spyOn(bootstrapper as any, 'stepStolasStake').mockResolvedValue({
-          ...state,
-          step: 'mech_deployed',
-          service_id: 42,
-          safe_address: '0x00000000000000000000000000000000000000b1',
-        });
-
-        await (bootstrapper as any).runStep(state, 'test-password');
-        expect(stolasStakeSpy).toHaveBeenCalled();
-        stolasStakeSpy.mockRestore();
-      }
-    });
-
-    it('describes funding requirement without OLAS in standard mode', () => {
-      const bootstrapper = new EarningBootstrapper({
-        chain: 'base',
-        rpcUrl: 'http://127.0.0.1:8545',
-        stakingMode: 'standard',
-      });
-
-      const message = (bootstrapper as any).describeStep('awaiting_funding', {
-        eoa_address: '0x00000000000000000000000000000000000000a1',
-        eoa_eth_required: '5000000000000000',
-        eoa_eth_balance: '0',
-        safe_address: '',
-        safe_eth_required: '0',
-        safe_eth_balance: '0',
-        safe_olas_required: '0',
-        safe_olas_balance: '0',
-      });
-
-      expect(message).toContain('EOA');
-      expect(message).not.toContain('OLAS');
-    });
-  });
-
-  it('describes Safe ETH as part of the EOA funding requirement', () => {
-    const bootstrapper = new EarningBootstrapper({
-      chain: 'base',
-      rpcUrl: 'http://127.0.0.1:8545',
-      stakingMode: 'self-bond',
-    });
-
-    const message = (bootstrapper as any).describeStep('awaiting_funding', {
-      eoa_address: '0x00000000000000000000000000000000000000a1',
-      eoa_eth_required: '7000000000000000',
-      eoa_eth_balance: '0',
-      safe_address: '0x00000000000000000000000000000000000000a2',
-      safe_eth_required: '2000000000000000',
-      safe_eth_balance: '0',
-      safe_olas_required: '10000000000000000000000',
-      safe_olas_balance: '0',
-    });
-
-    expect(message).toContain('gas and Safe top-up');
-    expect(message).toContain('auto-top-up the Safe');
-    expect(message).toContain('service security deposit and agent bond');
+    expect(result.ok).toBe(true);
+    expect(result.fleet_state.services).toHaveLength(3);
+    expect(result.fleet_state.services.every(s => s.step === 'complete')).toBe(true);
+    // Services should have distinct indices 1, 2, 3
+    expect(result.fleet_state.services.map(s => s.index)).toEqual([1, 2, 3]);
   });
 });
