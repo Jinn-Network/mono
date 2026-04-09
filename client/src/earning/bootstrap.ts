@@ -303,7 +303,7 @@ export class EarningBootstrapper {
     // In standard mode, the distributor creates the Safe — nothing to predict
     if (this.stakingMode === 'standard') {
       console.error('[earning-bootstrap] Standard (stOLAS) mode — skipping Safe prediction');
-      return this.store.patch({ step: 'awaiting_funding' });
+      return this.store.patch({ step: 'awaiting_funding', safe_address: null });
     }
 
     if (state.safe_address) {
