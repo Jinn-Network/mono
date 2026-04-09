@@ -1,101 +1,96 @@
 import { z } from 'zod';
 
+// ── Staking mode ─────────────────────────────────────────────────────────────
+
 export const StakingModeSchema = z.enum(['standard', 'self-bond']);
 export type StakingMode = z.infer<typeof StakingModeSchema>;
 
-/**
- * Earning bootstrap step progression:
- *   wallet -> safe_predicted -> awaiting_funding -> safe_deployed ->
- *   service_created -> service_activated -> agents_registered ->
- *   service_deployed -> service_staked -> mech_deployed -> complete
- */
-export const EarningStepSchema = z.enum([
-  'wallet',
-  'safe_predicted',
-  'awaiting_funding',
-  'safe_deployed',
+// ── Service step progression ─────────────────────────────────────────────────
+//
+// Standard (stOLAS) mode:
+//   awaiting_stake -> staked -> mech_deployed -> complete
+//
+// Self-bond mode (legacy):
+//   awaiting_stake -> service_created -> service_activated -> agents_registered ->
+//   service_deployed -> service_staked -> mech_deployed -> complete
+
+export const ServiceStepSchema = z.enum([
+  'awaiting_stake',
   'service_created',
   'service_activated',
   'agents_registered',
   'service_deployed',
   'service_staked',
+  'staked',
   'mech_deployed',
   'complete',
 ]);
 
-export type EarningStep = z.infer<typeof EarningStepSchema>;
+export type ServiceStep = z.infer<typeof ServiceStepSchema>;
 
-/**
- * Ordered list for state machine progression.
- * Index determines which steps have been completed.
- */
-export const EARNING_STEP_ORDER: readonly EarningStep[] = [
-  'wallet',
-  'safe_predicted',
-  'awaiting_funding',
-  'safe_deployed',
-  'service_created',
-  'service_activated',
-  'agents_registered',
-  'service_deployed',
-  'service_staked',
-  'mech_deployed',
-  'complete',
-] as const;
+// ── Per-service state ────────────────────────────────────────────────────────
 
-export const EarningStateSchema = z
-  .object({
-    step: EarningStepSchema,
-    agent_address: z.string().nullable(),
-    safe_address: z.string().nullable(),
-    service_id: z.number().nullable(),
-    mech_address: z.string().nullable(),
-    staking_address: z.string().nullable(),
-    chain: z.enum(['base', 'base-sepolia']),
-    staking_mode: StakingModeSchema.default('standard'),
-    error: z.string().nullable(),
-    updated_at: z.string(),
-  })
-  .strict();
+export const ServiceStateSchema = z.object({
+  index: z.number().int().min(1),
+  agent_address: z.string(),
+  safe_address: z.string().nullable(),
+  service_id: z.number().nullable(),
+  mech_address: z.string().nullable(),
+  staking_address: z.string().nullable(),
+  step: ServiceStepSchema,
+  error: z.string().nullable(),
+});
 
-export type EarningState = z.infer<typeof EarningStateSchema>;
+export type ServiceState = z.infer<typeof ServiceStateSchema>;
 
-export function createDefaultEarningState(chain: 'base' | 'base-sepolia' = 'base'): EarningState {
+// ── Fleet state (top-level) ──────────────────────────────────────────────────
+
+export const FleetStateSchema = z.object({
+  master_address: z.string().nullable(),
+  chain: z.enum(['base', 'base-sepolia']),
+  staking_mode: StakingModeSchema.default('standard'),
+  services: z.array(ServiceStateSchema),
+  updated_at: z.string(),
+});
+
+export type FleetState = z.infer<typeof FleetStateSchema>;
+
+// ── Factories ────────────────────────────────────────────────────────────────
+
+export function createDefaultFleetState(chain: 'base' | 'base-sepolia' = 'base'): FleetState {
   return {
-    step: 'wallet',
-    agent_address: null,
-    safe_address: null,
-    service_id: null,
-    mech_address: null,
-    staking_address: null,
+    master_address: null,
     chain,
-    staking_mode: 'standard' as StakingMode,
-    error: null,
+    staking_mode: 'standard',
+    services: [],
     updated_at: new Date().toISOString(),
   };
 }
 
-export interface FundingRequirement {
-  eoa_address: string;
-  eoa_eth_required: string;
-  eoa_eth_balance: string;
-  safe_address: string;
-  safe_eth_required: string;
-  safe_eth_balance: string;
-  safe_olas_required: string;
-  safe_olas_balance: string;
+export function createDefaultServiceState(index: number, agentAddress: string): ServiceState {
+  return {
+    index,
+    agent_address: agentAddress,
+    safe_address: null,
+    service_id: null,
+    mech_address: null,
+    staking_address: null,
+    step: 'awaiting_stake',
+    error: null,
+  };
 }
 
-export interface EarningBootstrapResult {
+// ── Result types ─────────────────────────────────────────────────────────────
+
+export interface FundingRequirement {
+  master_address: string;
+  eth_required: string;
+  eth_balance: string;
+}
+
+export interface FleetBootstrapResult {
   ok: boolean;
-  step: EarningStep;
-  earning_state: EarningState;
+  fleet_state: FleetState;
   message: string;
   funding?: FundingRequirement;
-}
-
-export interface EarningStepChangedEvent {
-  from: EarningStep;
-  to: EarningStep;
-  at: string;
 }
