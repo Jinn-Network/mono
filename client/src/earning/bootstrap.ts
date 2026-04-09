@@ -65,6 +65,7 @@ export interface EarningBootstrapperOptions {
   rpcUrl?: string;
   testnetL2DeploymentPath?: string;
   testnetL2TokenDeploymentPath?: string;
+  testnetMechDeploymentPath?: string;
   stopAt?: 'service_staked' | 'mech_deployed' | 'complete';
 }
 
@@ -160,6 +161,7 @@ export class EarningBootstrapper {
     this.config = getChainConfig(this.chain, {
       testnetL2DeploymentPath: options.testnetL2DeploymentPath,
       testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
+      testnetMechDeploymentPath: options.testnetMechDeploymentPath,
     });
 
     if (options.rpcUrl) {

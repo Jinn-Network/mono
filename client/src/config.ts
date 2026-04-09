@@ -86,6 +86,9 @@ export const JinnConfigSchema = z.object({
 
   /** Optional Base Sepolia Phase 1a token deployment artifact path */
   testnetL2TokenDeploymentPath: z.string().optional(),
+
+  /** Optional Base Sepolia mech marketplace deployment artifact path */
+  testnetMechDeploymentPath: z.string().optional(),
 });
 
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined). */
@@ -139,6 +142,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_IPFS_GATEWAY_URL'])  merged.ipfsGatewayUrl = env['JINN_IPFS_GATEWAY_URL'];
   if (env['JINN_TESTNET_L2_DEPLOYMENT']) merged.testnetL2DeploymentPath = env['JINN_TESTNET_L2_DEPLOYMENT'];
   if (env['JINN_TESTNET_TOKEN_DEPLOYMENT']) merged.testnetL2TokenDeploymentPath = env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
+  if (env['JINN_TESTNET_MECH_DEPLOYMENT']) merged.testnetMechDeploymentPath = env['JINN_TESTNET_MECH_DEPLOYMENT'];
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
 

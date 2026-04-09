@@ -48,9 +48,13 @@ const PASSWORD: string = (() => {
 const config = loadConfig(getConfigPathFromArgs());
 
 const NETWORK_CHAIN = config.network === 'testnet' ? 'base-sepolia' : 'base';
-const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN);
+const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN, {
+  testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+  testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+  testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+});
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
-const ROUTER_ADDRESS = '0xfFa7118A3D820cd4E820010837D65FAfF463181B' as const;
+const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -67,7 +71,10 @@ async function bootstrap(): Promise<{
     rpcUrl: config.rpcUrl,
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
-    stopAt: config.network === 'testnet' ? 'service_staked' : 'complete',
+    testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+    stopAt: (config.network === 'testnet' && CHAIN_CONFIG.mechMarketplace === '0x0000000000000000000000000000000000000000')
+      ? 'service_staked'
+      : 'complete',
   });
 
   const result = await bootstrapper.bootstrap(PASSWORD);
@@ -116,12 +123,12 @@ async function main(): Promise<void> {
 
   const { agentPrivateKey, safeAddress, mechAddress } = await bootstrap();
 
-  if (config.network === 'testnet') {
-    console.log('[main] Testnet bootstrap stops at service_staked by design. Exiting before mech/daemon startup.');
-    return;
-  }
-
   if (!mechAddress) {
+    if (config.network === 'testnet') {
+      console.log('[main] No mech marketplace configured for testnet. Bootstrap complete, daemon not started.');
+      console.log('[main] To run the daemon, deploy the mech marketplace and set JINN_TESTNET_MECH_DEPLOYMENT.');
+      return;
+    }
     throw new Error('Bootstrap completed without a mech address. Re-run to deploy the mech.');
   }
 
@@ -135,7 +142,7 @@ async function main(): Promise<void> {
     ipfsRegistryUrl: config.ipfsRegistryUrl,
     ipfsGatewayUrl: config.ipfsGatewayUrl,
     pollIntervalMs: config.pollIntervalMs,
-    chainId: 8453,
+    chainId: config.network === 'testnet' ? 84532 : 8453,
   });
 
   const runner = new ClaudeRunner({

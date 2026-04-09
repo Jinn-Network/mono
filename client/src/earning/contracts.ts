@@ -107,11 +107,13 @@ export interface ChainConfig {
   serviceNft: string;
   minEoaGasEth: bigint;
   minSafeEth: bigint;
+  jinnRouter?: string;
 }
 
 interface ChainConfigOverrides {
   testnetL2DeploymentPath?: string;
   testnetL2TokenDeploymentPath?: string;
+  testnetMechDeploymentPath?: string;
 }
 
 interface DeploymentArtifact {
@@ -204,8 +206,9 @@ function loadArtifact(filePath: string): DeploymentArtifact {
 function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainConfig {
   const tokenArtifactPath = overrides.testnetL2TokenDeploymentPath ?? process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   const l2ArtifactPath = overrides.testnetL2DeploymentPath ?? process.env['JINN_TESTNET_L2_DEPLOYMENT'];
+  const mechArtifactPath = overrides.testnetMechDeploymentPath ?? process.env['JINN_TESTNET_MECH_DEPLOYMENT'];
 
-  if (!tokenArtifactPath && !l2ArtifactPath) {
+  if (!tokenArtifactPath && !l2ArtifactPath && !mechArtifactPath) {
     return { ...BASE_SEPOLIA_CONFIG };
   }
 
@@ -244,6 +247,26 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     resolved.serviceRegistryTokenUtility = serviceRegistryTokenUtility;
     if (minStakingDeposit) {
       resolved.bondAmount = BigInt(minStakingDeposit);
+    }
+  }
+
+  if (mechArtifactPath) {
+    const mechArtifact = loadArtifact(mechArtifactPath);
+    const mechMarketplace = mechArtifact.contracts?.mechMarketplace;
+    const mechFactory = mechArtifact.contracts?.mechFactory;
+    const jinnRouter = mechArtifact.contracts?.jinnRouter;
+
+    if (!mechMarketplace) {
+      throw new Error(`Testnet mech artifact ${path.resolve(mechArtifactPath)} is missing contracts.mechMarketplace`);
+    }
+    if (!mechFactory) {
+      throw new Error(`Testnet mech artifact ${path.resolve(mechArtifactPath)} is missing contracts.mechFactory`);
+    }
+
+    resolved.mechMarketplace = mechMarketplace;
+    resolved.mechFactory = mechFactory;
+    if (jinnRouter) {
+      resolved.jinnRouter = jinnRouter;
     }
   }
 
