@@ -484,4 +484,51 @@ export const MECH_MARKETPLACE_CREATE_ABI = [
 
 export const EVENT_TOPICS = {
   CreateService: keccak256(toUtf8Bytes('CreateService(uint256,bytes32)')),
+  CreateMultisigWithAgents: keccak256(toUtf8Bytes('CreateMultisigWithAgents(uint256,address)')),
 } as const;
+
+// ---------------------------------------------------------------------------
+// stOLAS ExternalStakingDistributor (Base mainnet)
+// ---------------------------------------------------------------------------
+
+export const STOLAS_DISTRIBUTOR = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f';
+
+export const STOLAS_DISTRIBUTOR_ABI = [
+  {
+    inputs: [{ name: 'stakingProxy', type: 'address' }],
+    name: 'mapStakingProxyConfigs',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'stakingProxy', type: 'address' },
+      { name: 'serviceId', type: 'uint256' },
+      { name: 'agentId', type: 'uint256' },
+      { name: 'configHash', type: 'bytes32' },
+      { name: 'agentInstance', type: 'address' },
+    ],
+    name: 'stake',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+export const STOLAS_STAKING_SLOTS_ABI = [
+  {
+    inputs: [],
+    name: 'getServiceIds',
+    outputs: [{ name: 'serviceIds', type: 'uint256[]' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'maxNumServices',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;

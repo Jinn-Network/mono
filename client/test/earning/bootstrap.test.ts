@@ -7,7 +7,7 @@ import {
   reconcilePredictedSafeState,
   reconcileServiceProgressState,
 } from '../../src/earning/bootstrap.js';
-import { getChainConfig } from '../../src/earning/contracts.js';
+import { getChainConfig, STOLAS_DISTRIBUTOR, STOLAS_DISTRIBUTOR_ABI, STOLAS_STAKING_SLOTS_ABI } from '../../src/earning/contracts.js';
 import { EarningStateStore } from '../../src/earning/store.js';
 import { EarningStateSchema, createDefaultEarningState } from '../../src/earning/types.js';
 
@@ -218,6 +218,12 @@ describe('Earning bootstrap testnet support', () => {
     state.staking_mode = 'self-bond';
     const result = EarningStateSchema.safeParse(state);
     expect(result.success).toBe(true);
+  });
+
+  it('exports stOLAS distributor address and ABI', () => {
+    expect(STOLAS_DISTRIBUTOR).toBe('0x40abf47B926181148000DbCC7c8DE76A3a61a66f');
+    expect(STOLAS_DISTRIBUTOR_ABI).toBeDefined();
+    expect(STOLAS_DISTRIBUTOR_ABI.length).toBeGreaterThanOrEqual(2);
   });
 
   it('describes Safe ETH as part of the EOA funding requirement', () => {
