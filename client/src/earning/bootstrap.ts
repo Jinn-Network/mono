@@ -311,8 +311,10 @@ export class FleetBootstrapper {
     const masterWithProvider = masterSigner.connect(this.provider);
     const agentBalance = await this.provider.getBalance(svc.agent_address);
 
-    if (agentBalance < this.config.minSafeEth) {
-      const fundAmount = this.config.minSafeEth - agentBalance;
+    // Agent needs enough gas for mech deployment Safe tx (~2.6M gas)
+    const minAgentGas = this.config.minEoaGasEth;
+    if (agentBalance < minAgentGas) {
+      const fundAmount = minAgentGas - agentBalance;
       console.error(`[fleet-bootstrap] Service ${index}: funding agent with ${fundAmount} wei`);
       const fundTx = await masterWithProvider.sendTransaction({
         to: svc.agent_address,
