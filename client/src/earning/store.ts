@@ -1,9 +1,9 @@
 /**
- * Earning state persistence.
+ * Fleet state persistence.
  *
- * Follows the same atomic-write + Zod-validation pattern as profile-store.ts.
  * State lives at ~/.jinn-client/earning/earning_state.json.
- * Keystore lives at ~/.jinn-client/earning/agent_keystore.json.
+ * Mnemonic keystore lives at ~/.jinn-client/earning/master_keystore.json.
+ * Legacy keystore (if present) at ~/.jinn-client/earning/agent_keystore.json.
  */
 
 import { existsSync } from 'fs';
@@ -11,14 +11,17 @@ import { mkdir, readFile, rename, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import {
-  type EarningState,
-  EarningStateSchema,
-  createDefaultEarningState,
+  type FleetState,
+  type ServiceState,
+  FleetStateSchema,
+  createDefaultFleetState,
 } from './types.js';
 
 export const DEFAULT_EARNING_DIR = path.join(os.homedir(), '.jinn-client', 'earning');
-export const DEFAULT_EARNING_STATE_PATH = path.join(DEFAULT_EARNING_DIR, 'earning_state.json');
-export const DEFAULT_KEYSTORE_PATH = path.join(DEFAULT_EARNING_DIR, 'agent_keystore.json');
+
+const STATE_FILE = 'earning_state.json';
+const MNEMONIC_KEYSTORE_FILE = 'master_keystore.json';
+const LEGACY_KEYSTORE_FILE = 'agent_keystore.json';
 
 async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   const dir = path.dirname(filePath);
@@ -29,69 +32,85 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   await rename(tmpPath, filePath);
 }
 
-function parseStateOrNull(raw: string): EarningState | null {
+function parseFleetStateOrNull(raw: string): FleetState | null {
   try {
     const parsed = JSON.parse(raw);
-    const result = EarningStateSchema.safeParse(parsed);
+    const result = FleetStateSchema.safeParse(parsed);
     if (result.success) {
       return result.data;
     }
-
     console.error(
-      '[earning-store] Invalid earning_state.json schema; resetting state. Issues:',
+      '[earning-store] Invalid state schema; resetting. Issues:',
       result.error.issues.map((issue) => issue.path.join('.')),
     );
     return null;
   } catch (error) {
-    console.error('[earning-store] Failed to parse earning_state.json; resetting state:', error);
+    console.error('[earning-store] Failed to parse state; resetting:', error);
     return null;
   }
 }
 
-export class EarningStateStore {
+export class FleetStateStore {
   private readonly statePath: string;
-  private readonly keystorePath: string;
+  private readonly mnemonicKeystorePath: string;
+  private readonly legacyKeystorePath: string;
   private readonly earningDir: string;
 
   constructor(earningDir: string = DEFAULT_EARNING_DIR) {
     this.earningDir = earningDir;
-    this.statePath = path.join(earningDir, 'earning_state.json');
-    this.keystorePath = path.join(earningDir, 'agent_keystore.json');
+    this.statePath = path.join(earningDir, STATE_FILE);
+    this.mnemonicKeystorePath = path.join(earningDir, MNEMONIC_KEYSTORE_FILE);
+    this.legacyKeystorePath = path.join(earningDir, LEGACY_KEYSTORE_FILE);
   }
 
   get dir(): string {
     return this.earningDir;
   }
 
-  getStatePath(): string {
-    return this.statePath;
+  // ── Mnemonic keystore ──────────────────────────────────────────────────
+
+  hasMnemonicKeystore(): boolean {
+    return existsSync(this.mnemonicKeystorePath);
   }
 
-  getKeystorePath(): string {
-    return this.keystorePath;
+  async loadMnemonicKeystore(): Promise<string> {
+    return readFile(this.mnemonicKeystorePath, 'utf8');
   }
 
-  hasKeystore(): boolean {
-    return existsSync(this.keystorePath);
+  async saveMnemonicKeystore(encryptedJson: string): Promise<void> {
+    await writeJsonAtomic(this.mnemonicKeystorePath, JSON.parse(encryptedJson));
   }
 
-  async loadKeystore(): Promise<string> {
-    return readFile(this.keystorePath, 'utf8');
+  // ── Legacy detection ───────────────────────────────────────────────────
+
+  hasLegacyKeystore(): boolean {
+    return existsSync(this.legacyKeystorePath);
   }
 
-  async saveKeystore(json: string): Promise<void> {
-    await writeJsonAtomic(this.keystorePath, JSON.parse(json));
+  async migrateLegacyFiles(): Promise<void> {
+    if (existsSync(this.legacyKeystorePath)) {
+      await rename(this.legacyKeystorePath, `${this.legacyKeystorePath}.legacy`);
+    }
+    if (existsSync(this.statePath)) {
+      await rename(this.statePath, `${this.statePath}.legacy`);
+    }
+    console.error(
+      '[earning-store] Legacy keystore detected. Old files renamed with .legacy suffix. ' +
+      'A new mnemonic wallet will be generated.',
+    );
   }
 
-  async load(): Promise<EarningState> {
+  // ── Fleet state ────────────────────────────────────────────────────────
+
+  async load(chain: 'base' | 'base-sepolia' = 'base'): Promise<FleetState> {
     if (!existsSync(this.statePath)) {
-      const state = createDefaultEarningState();
+      const state = createDefaultFleetState(chain);
       await writeJsonAtomic(this.statePath, state);
       return state;
     }
 
     const raw = await readFile(this.statePath, 'utf8');
-    const parsed = parseStateOrNull(raw);
+    const parsed = parseFleetStateOrNull(raw);
 
     if (parsed) {
       return parsed;
@@ -100,25 +119,40 @@ export class EarningStateStore {
     const backupPath = `${this.statePath}.invalid-${Date.now()}`;
     await rename(this.statePath, backupPath);
 
-    const state = createDefaultEarningState();
+    const state = createDefaultFleetState(chain);
     await writeJsonAtomic(this.statePath, state);
-    console.error(`[earning-store] Backed up invalid earning state to ${backupPath} and created a fresh one`);
+    console.error(`[earning-store] Backed up invalid state to ${backupPath}`);
     return state;
   }
 
-  async save(state: EarningState): Promise<EarningState> {
-    const next: EarningState = {
+  async save(state: FleetState): Promise<FleetState> {
+    const next: FleetState = {
       ...state,
       updated_at: new Date().toISOString(),
     };
-
-    const validated = EarningStateSchema.parse(next);
+    const validated = FleetStateSchema.parse(next);
     await writeJsonAtomic(this.statePath, validated);
     return validated;
   }
 
-  async patch(patch: Partial<EarningState>): Promise<EarningState> {
+  async patchFleet(patch: Partial<Omit<FleetState, 'services'>>): Promise<FleetState> {
     const current = await this.load();
     return this.save({ ...current, ...patch });
+  }
+
+  async updateService(index: number, patch: Partial<ServiceState>): Promise<FleetState> {
+    const current = await this.load();
+    const svcIdx = current.services.findIndex(s => s.index === index);
+    if (svcIdx === -1) {
+      throw new Error(`Service at index ${index} not found in state`);
+    }
+    current.services[svcIdx] = { ...current.services[svcIdx], ...patch };
+    return this.save(current);
+  }
+
+  async addService(service: ServiceState): Promise<FleetState> {
+    const current = await this.load();
+    current.services.push(service);
+    return this.save(current);
   }
 }
