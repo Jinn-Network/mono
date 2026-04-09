@@ -74,6 +74,28 @@ contract ServiceRegistryStub {
         return _services[serviceId];
     }
 
+    /// @dev Required by OlasMech / MechMarketplace (IServiceRegistry.mapServices).
+    function mapServices(uint256 serviceId) external view returns (
+        uint96 securityDeposit,
+        address multisig,
+        bytes32 configHash,
+        uint32 threshold,
+        uint32 maxNumAgentInstances,
+        uint32 numAgentInstances,
+        ServiceState state
+    ) {
+        Service storage s = _services[serviceId];
+        return (
+            s.securityDeposit,
+            s.multisig,
+            s.configHash,
+            s.threshold,
+            s.maxNumAgentInstances,
+            s.numAgentInstances,
+            s.state
+        );
+    }
+
     /// @dev Required by StakingBase._checkTokenStakingDeposit() default implementation.
     function getAgentParams(uint256 serviceId)
         external
