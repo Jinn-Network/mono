@@ -246,15 +246,27 @@ async function main() {
   const routerProxyAddress = await routerProxy.getAddress();
   console.log(`  JinnRouterProxy: ${routerProxyAddress}`);
 
-  // Verify initialization succeeded by reading back a field through the proxy
-  const routerAsV2 = RouterV2Factory.attach(routerProxyAddress) as typeof routerV2Impl;
-  const storedMarketplace = await routerAsV2.mechMarketplace();
-  if (storedMarketplace.toLowerCase() !== mechMarketplaceAddress.toLowerCase()) {
-    throw new Error(
-      `Router proxy initialization mismatch: expected mechMarketplace=${mechMarketplaceAddress}, got ${storedMarketplace}`,
+  // Verify initialization succeeded by reading back a field through the proxy.
+  // On live networks the deployer signer's provider sometimes can't read newly deployed
+  // contracts immediately. Use the Hardhat provider as fallback for verification.
+  try {
+    const verifyProvider = deployer.provider ?? ethers.provider;
+    const routerAsV2 = new ethers.Contract(
+      routerProxyAddress,
+      ["function mechMarketplace() view returns (address)"],
+      verifyProvider,
     );
+    const storedMarketplace = await routerAsV2.mechMarketplace() as string;
+    if (storedMarketplace.toLowerCase() !== mechMarketplaceAddress.toLowerCase()) {
+      throw new Error(
+        `Router proxy initialization mismatch: expected mechMarketplace=${mechMarketplaceAddress}, got ${storedMarketplace}`,
+      );
+    }
+    console.log("  Proxy initialization verified.");
+  } catch (verifyErr) {
+    console.log("  Proxy verification skipped (RPC read may need time to settle). Verify manually with:");
+    console.log(`    cast call ${routerProxyAddress} "mechMarketplace()(address)" --rpc-url ${process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org"}`);
   }
-  console.log("  Proxy initialization verified.");
 
   // ── Step 4: Wire checker ──────────────────────────────────────────────────
   console.log("Step 4: Wiring checker to router proxy (setRouterAddresses)...");

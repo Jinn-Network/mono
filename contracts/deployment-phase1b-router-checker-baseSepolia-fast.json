@@ -1,0 +1,19 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-09T16:59:00.000Z",
+  "config": {
+    "timingProfile": "fast-test",
+    "livenessRatio": "1000000000000000",
+    "similarityThreshold": 64,
+    "similarDecayMultiplier": "0",
+    "comparisonWindow": 20
+  },
+  "contracts": {
+    "activityChecker": "0x854CD2cF93727F506bD6C19532820954495E03dE",
+    "jinnRouterV2Impl": "0xed12517dBaC09FD19DeF5E514b66a661dc1dE4AD",
+    "jinnRouterProxy": "0x4aeb5c17aC5cC781F4D64352EE0969C2C6C88a85",
+    "mechMarketplace": "0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7"
+  }
+}
