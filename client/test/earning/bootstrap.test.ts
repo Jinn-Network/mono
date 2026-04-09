@@ -9,7 +9,7 @@ import {
 } from '../../src/earning/bootstrap.js';
 import { getChainConfig } from '../../src/earning/contracts.js';
 import { EarningStateStore } from '../../src/earning/store.js';
-import { createDefaultEarningState } from '../../src/earning/types.js';
+import { EarningStateSchema, createDefaultEarningState } from '../../src/earning/types.js';
 
 describe('Earning bootstrap testnet support', () => {
   const dirs: string[] = [];
@@ -206,6 +206,18 @@ describe('Earning bootstrap testnet support', () => {
     expect((bootstrapper as any).transferEth).toHaveBeenCalledOnce();
     expect(safeBalance).toBe((bootstrapper as any).config.minSafeEth);
     expect(result.step).toBe('safe_deployed');
+  });
+
+  it('creates default earning state with standard staking mode', () => {
+    const state = createDefaultEarningState('base');
+    expect(state.staking_mode).toBe('standard');
+  });
+
+  it('accepts self-bond staking mode in state schema', () => {
+    const state = createDefaultEarningState('base');
+    state.staking_mode = 'self-bond';
+    const result = EarningStateSchema.safeParse(state);
+    expect(result.success).toBe(true);
   });
 
   it('describes Safe ETH as part of the EOA funding requirement', () => {

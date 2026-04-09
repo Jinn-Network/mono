@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+export const StakingModeSchema = z.enum(['standard', 'self-bond']);
+export type StakingMode = z.infer<typeof StakingModeSchema>;
+
 /**
  * Earning bootstrap step progression:
  *   wallet -> safe_predicted -> awaiting_funding -> safe_deployed ->
@@ -49,6 +52,7 @@ export const EarningStateSchema = z
     mech_address: z.string().nullable(),
     staking_address: z.string().nullable(),
     chain: z.enum(['base', 'base-sepolia']),
+    staking_mode: StakingModeSchema.default('standard'),
     error: z.string().nullable(),
     updated_at: z.string(),
   })
@@ -65,6 +69,7 @@ export function createDefaultEarningState(chain: 'base' | 'base-sepolia' = 'base
     mech_address: null,
     staking_address: null,
     chain,
+    staking_mode: 'standard' as StakingMode,
     error: null,
     updated_at: new Date().toISOString(),
   };
