@@ -110,11 +110,12 @@ export async function claimDelivery(
   safeAddress: Address,
   routerAddress: Address,
   requestId: Hex,
+  evidenceHash: Hex = '0x0000000000000000000000000000000000000000000000000000000000000000',
 ): Promise<Hex> {
   const calldata = encodeFunctionData({
     abi: JINN_ROUTER_ABI,
     functionName: 'claimDelivery',
-    args: [requestId],
+    args: [requestId, evidenceHash],
   });
 
   for (let attempt = 1; attempt <= CLAIM_RETRY_ATTEMPTS; attempt++) {

@@ -33,6 +33,7 @@ import {
 import { type MechAdapterConfig, MECH_MARKETPLACE_ABI } from './types.js';
 import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
+import { computeEvidenceSimHash, type EvidenceCheckpointV1 } from '../../earning/evidence-simhash.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -281,6 +282,25 @@ export class MechAdapter implements ExecutionAdapter {
             if (!isOurs) continue;
 
             try {
+              // Compute evidence hash for restoration deliveries (anti-farming)
+              let evidenceHash: `0x${string}` = '0x0000000000000000000000000000000000000000000000000000000000000000';
+              const isRestorationDelivery = this.pendingEvaluations.has(requestId);
+
+              if (isRestorationDelivery) {
+                try {
+                  const checkpoint: EvidenceCheckpointV1 = {
+                    version: 1,
+                    desiredStateHash: requestId,
+                    toolCalls: [],
+                    externalInteractions: [],
+                    outcome: 'success',
+                  };
+                  evidenceHash = computeEvidenceSimHash(checkpoint);
+                } catch (err) {
+                  console.error(`[mech] Failed to compute evidence SimHash for ${requestId}:`, err);
+                }
+              }
+
               // Claim the delivery on the router
               await claimDelivery(
                 this.publicClient,
@@ -288,6 +308,7 @@ export class MechAdapter implements ExecutionAdapter {
                 this.config.safeAddress,
                 this.config.routerAddress,
                 requestId as `0x${string}`,
+                evidenceHash,
               );
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);

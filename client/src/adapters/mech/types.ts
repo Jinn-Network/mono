@@ -170,7 +170,10 @@ export const JINN_ROUTER_ABI = [
     name: 'claimDelivery',
     type: 'function',
     stateMutability: 'nonpayable',
-    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    inputs: [
+      { name: 'requestId', type: 'bytes32' },
+      { name: 'evidenceHash', type: 'bytes32' },
+    ],
     outputs: [],
   },
   {

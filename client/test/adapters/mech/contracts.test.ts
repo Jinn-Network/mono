@@ -51,10 +51,11 @@ describe('JinnRouter contract encoding', () => {
 
   it('encodes claimDelivery calldata', () => {
     const requestId = ('0x' + 'bb'.repeat(32)) as `0x${string}`;
+    const evidenceHash = ('0x' + '00'.repeat(32)) as `0x${string}`;
     const calldata = encodeFunctionData({
       abi: JINN_ROUTER_ABI,
       functionName: 'claimDelivery',
-      args: [requestId],
+      args: [requestId, evidenceHash],
     });
 
     const decoded = decodeFunctionData({
@@ -63,5 +64,6 @@ describe('JinnRouter contract encoding', () => {
     });
     expect(decoded.functionName).toBe('claimDelivery');
     expect((decoded.args as unknown[])[0]).toBe(requestId);
+    expect((decoded.args as unknown[])[1]).toBe(evidenceHash);
   });
 });

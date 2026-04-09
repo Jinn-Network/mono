@@ -8,6 +8,14 @@ interface IMultisig {
     function nonce() external view returns (uint256);
 }
 
+/// @dev JinnRouter interface for reading activity counters
+interface IJinnRouter {
+    function creationCount(address multisig) external view returns (uint256);
+    function restorationDeliveryCount(address multisig) external view returns (uint256);
+    function evaluationCreationCount(address multisig) external view returns (uint256);
+    function evaluationDeliveryCount(address multisig) external view returns (uint256);
+}
+
 /// @dev Provided zero address.
 error ZeroAddress();
 
@@ -23,6 +31,11 @@ error OwnerOnly(address sender, address owner);
 /// @param value Provided value.
 /// @param max Maximum allowed.
 error Overflow(uint256 value, uint256 max);
+
+/// @dev Unauthorized router caller.
+/// @param sender Sender address.
+/// @param authorizedRouter Required authorized router address.
+error UnauthorizedRouter(address sender, address authorizedRouter);
 
 /// @title RestorationActivityCheckerV2 - Activity checker with SimHash-based anti-farming decay
 /// @author JIN Network
@@ -75,6 +88,12 @@ contract RestorationActivityCheckerV2 {
     /// @dev Number of recent hashes to compare against per multisig.
     ///      Bounds gas cost of recordActivityWithEvidence.
     uint256 public comparisonWindow;
+
+    /// @dev JinnRouter address (to read raw activity counters for non-delivery activities)
+    address public jinnRouter;
+
+    /// @dev Only this address can call recordRestorationEvidence
+    address public authorizedRouter;
 
     // ============ Events ============
 
@@ -154,6 +173,21 @@ contract RestorationActivityCheckerV2 {
         emit ActivityRecordedWithEvidence(multisig, activityType, evidenceHash, weight);
     }
 
+    /// @notice Called by the JinnRouter when a restoration delivery is claimed with evidence.
+    ///         Only the authorized router can call this.
+    /// @param multisig The service multisig (Safe) address
+    /// @param evidenceHash SimHash of the restoration evidence
+    function recordRestorationEvidence(address multisig, bytes32 evidenceHash) external {
+        if (msg.sender != authorizedRouter) revert UnauthorizedRouter(msg.sender, authorizedRouter);
+        require(multisig != address(0), "RestorationActivityCheckerV2: zero multisig");
+
+        uint256 weight = _computeNoveltyWeight(multisig, evidenceHash);
+        evidenceHashes[multisig].push(evidenceHash);
+        noveltyWeightedCounts[multisig] += weight;
+
+        emit ActivityRecordedWithEvidence(multisig, uint8(ActivityType.DELIVER), evidenceHash, weight);
+    }
+
     /// @notice Record activity without evidence (backward compatible with V1).
     ///         Full weight is granted since we cannot assess novelty without evidence.
     /// @param multisig The service multisig (Safe) address
@@ -171,14 +205,30 @@ contract RestorationActivityCheckerV2 {
 
     // ============ OLAS Activity Checker Interface ============
 
-    /// @dev Gets service multisig nonces. Returns novelty-weighted count (not raw count)
-    ///      so that the staking contract's isRatioPass check accounts for anti-farming.
+    /// @dev Gets service multisig nonces. When a JinnRouter is configured, combines the router's
+    ///      raw activity counts (creation, eval creation, eval delivery — full weight) with this
+    ///      checker's novelty-weighted restoration delivery count.
+    ///      If no jinnRouter is set, falls back to standalone mode (noveltyWeightedCounts only).
     /// @param multisig Service multisig address.
-    /// @return nonces [Safe nonce, novelty-weighted activity count (1e18 scale)]
+    /// @return nonces [Safe nonce, total weighted activity (1e18 scale)]
     function getMultisigNonces(address multisig) external view returns (uint256[] memory nonces) {
         nonces = new uint256[](2);
         nonces[0] = IMultisig(multisig).nonce();
-        nonces[1] = noveltyWeightedCounts[multisig];
+
+        if (jinnRouter != address(0)) {
+            // Read raw counts from router — full weight (1e18 each)
+            // Note: restorationDeliveryCount is NOT included here — it's tracked via
+            // noveltyWeightedCounts through recordRestorationEvidence instead
+            uint256 routerActivity =
+                (IJinnRouter(jinnRouter).creationCount(multisig) +
+                 IJinnRouter(jinnRouter).evaluationCreationCount(multisig) +
+                 IJinnRouter(jinnRouter).evaluationDeliveryCount(multisig)) * 1e18;
+            // Add novelty-weighted restoration delivery count
+            nonces[1] = routerActivity + noveltyWeightedCounts[multisig];
+        } else {
+            // Standalone mode (backward compat — direct recordActivity/recordActivityWithEvidence calls)
+            nonces[1] = noveltyWeightedCounts[multisig];
+        }
     }
 
     /// @dev Checks if the service multisig liveness ratio passes the defined liveness threshold.
@@ -291,6 +341,15 @@ contract RestorationActivityCheckerV2 {
         comparisonWindow = _comparisonWindow;
 
         emit AntifarmingParametersUpdated(_similarityThreshold, _similarDecayMultiplier, _comparisonWindow);
+    }
+
+    /// @notice Set JinnRouter and authorized router addresses.
+    function setRouterAddresses(address _jinnRouter, address _authorizedRouter) external {
+        if (msg.sender != owner) revert OwnerOnly(msg.sender, owner);
+        if (_jinnRouter == address(0)) revert ZeroAddress();
+        if (_authorizedRouter == address(0)) revert ZeroAddress();
+        jinnRouter = _jinnRouter;
+        authorizedRouter = _authorizedRouter;
     }
 
     /// @notice Transfer ownership.
