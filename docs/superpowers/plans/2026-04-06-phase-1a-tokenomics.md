@@ -1915,13 +1915,116 @@ npx hardhat run scripts/phase1b-record-activity-with-evidence.ts --network baseS
 - `npx vitest run test/earning/evidence-simhash.test.ts` — 14 passing
 - All existing tests still pass (226 Hardhat, 64 Vitest)
 
+---
+
+## Phase 1b: MechMarketplace + JinnRouterV2 + Full Daemon (added 2026-04-09/10)
+
+### What was implemented
+
+Deployed the full OLAS MechMarketplace on Base Sepolia and wired the client daemon to run the complete training loop on testnet: create → restore (Claude) → deliver → evaluate (Claude).
+
+### Architecture
+
+```
+Client Daemon
+    │
+    │ createRestorationJob / claimDelivery(requestId, evidenceHash)
+    │
+    ▼
+JinnRouterV2 (behind UUPS proxy)
+    │
+    ├── routes request to MechMarketplace
+    ├── increments activity counters
+    └── forwards evidence hash to checker on restoration delivery
+         │
+         ▼
+RestorationActivityCheckerV2
+    │
+    ├── novelty-weighted restoration delivery count
+    ├── reads router counters for creation/eval activities
+    └── implements getMultisigNonces + isRatioPass for staking
+         │
+         ▼
+StakingToken proxy → distributes JINN rewards
+```
+
+### Deployed contracts (Base Sepolia fast-test)
+
+| Contract | Address |
+|----------|---------|
+| MechMarketplace (proxy) | `0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7` |
+| MechFactory | `0x206183F35B2450Ca15A906BB923E74d945F78d67` |
+| Karma (proxy) | `0x61434dAFf652FF0654684482Ab11736E96a7ba3A` |
+| JinnRouterV2 (proxy) | `0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675` |
+| ActivityCheckerV2 | `0xF4Ca4943Eb0b0927d754A6A95206364f017D45f6` |
+| StakingToken (proxy) | `0xf358b5c1ac4ddc4e807b5baf008826bf193eab3b` |
+
+### Live service (proven 2026-04-10)
+
+| Component | Value |
+|-----------|-------|
+| Service ID | 15 |
+| Agent EOA | `0xc41463b5038b348A2271ad7a6c038AaCE6efD3d8` |
+| Service Safe | `0xc6E2c28D4F9e867a20e43AB5D7a66215DF09ED34` |
+| Mech | `0x6B06c96315Acf6207BC5F87549637adf78806472` |
+
+Full training loop proven on-chain: creator posted desired state → restorer ran Claude → mech delivered → delivery watcher claimed on JinnRouterV2 → evaluation job created → Claude evaluated.
+
+### Files added
+
+| File | Purpose |
+|------|---------|
+| `contracts/src/vendor/mech/` | Vendored OLAS MechMarketplace contracts (24 files) |
+| `contracts/src/staking/JinnRouter.sol` | V1 router (copied from jinn-cli-agents) |
+| `contracts/src/staking/JinnRouterV2.sol` | V2 router with evidence forwarding |
+| `contracts/src/staking/ActivityCheckerProxy.sol` | UUPS proxy for activity checker |
+| `contracts/src/staking/JinnRouterProxy.sol` | UUPS proxy for JinnRouter |
+| `contracts/scripts/deploy-phase1b-mech.ts` | Deploy marketplace stack |
+| `contracts/scripts/deploy-phase1b-router-checker.ts` | Deploy router V2 + checker + staking proxy |
+| `contracts/scripts/create-staking-proxy.ts` | Standalone staking proxy creation |
+| `contracts/test/phase1/MechMarketplace.test.ts` | 28 marketplace integration tests |
+| `contracts/test/phase1/JinnRouterV2Integration.test.ts` | 22 router + checker integration tests |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `contracts/src/staking/RestorationActivityCheckerV2.sol` | Added router integration (recordRestorationEvidence, getMultisigNonces reads router counters) |
+| `client/src/main.ts` | Removed testnet early-exit, configurable router address and chain ID |
+| `client/src/adapters/mech/adapter.ts` | Correct chain for testnet, compute evidence SimHash on restoration delivery |
+| `client/src/adapters/mech/contracts.ts` | claimDelivery accepts evidenceHash |
+| `client/src/adapters/mech/types.ts` | Updated JINN_ROUTER_ABI with evidenceHash param |
+| `client/src/earning/contracts.ts` | Load mech/router/staking addresses from deployment artifact |
+| `client/src/earning/bootstrap.ts` | Self-bond ETH budget fix, service resume ordering, RPC retry |
+| `client/src/config.ts` | Added testnetMechDeploymentPath config |
+
+### Bugs fixed during deployment
+
+| Bug | Impact | Fix |
+|-----|--------|-----|
+| MechAdapter chain ID hardcoded to mainnet | All daemon txs rejected with "invalid chain ID" | Pass correct chain to viem createClients |
+| proxyHash placeholder in staking deploy | Staking always reverted at codehash check | Default to real Safe codehash |
+| Bootstrap creates duplicate services | Services orphaned, JINN wasted | Resume incomplete services before creating new |
+| ETH budget underestimation | Bootstrap asks for 0.005 ETH, needs 0.03 | Request 0.03 per service for self-bond |
+| Funding gate too strict on re-runs | Re-runs fail even when agents already funded | Sum ETH across master + agents + safes |
+| RPC read-after-write lag | Agent balance shows 0 right after funding tx | Retry balance check up to 5 times with 2s delay |
+| MechFactory gas limit too low | Factory deploy reverted (2.5M not enough for CREATE2) | Use 5M gas for factory deploys |
+
+### Test results
+
+- 276 Hardhat tests passing (including 28 marketplace + 22 router integration)
+- 72 Vitest tests passing (including 14 evidence SimHash)
+- Zero TypeScript errors
+
 ### Remaining Phase 1b work
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Anti-farming LSH decay | **Implemented** | V2 checker + client SimHash + tests + deploy support |
-| ve-JINN gauge voting | Already exercised | veOLAS + VoteWeighting deployed, scripts exist for lock + vote |
+| Anti-farming LSH decay | **Implemented + deployed** | V2 checker with SimHash, integrated with JinnRouterV2 |
+| MechMarketplace on testnet | **Deployed + proven** | Full training loop running with Claude |
+| Client daemon on testnet | **Running** | All three loops operational on Base Sepolia |
+| ve-JINN gauge voting | Already exercised | veOLAS + VoteWeighting deployed, scripts exist |
 | Challenge mechanism | Not started | Open design questions: bond size, window, challenger rewards |
-| Evidence schema v2 | Not started | Current v1 schema is minimal but functional |
-| Mainnet fair-launch | Not started | Requires tokenomics finalization |
-| Client integration | Partial | SimHash module ready; daemon loop doesn't auto-submit evidence yet |
+| Evidence schema v2 | Not started | Current v1 schema is minimal (uses requestId as desiredStateHash) |
+| Full evidence from Claude runner | Not started | Runner captures tool calls but doesn't pass structured data to SimHash yet |
+| Extended testnet operation | **Next** | Let the daemon run, monitor staking rewards, iterate |
