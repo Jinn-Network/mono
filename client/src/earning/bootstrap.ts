@@ -116,18 +116,30 @@ export class FleetBootstrapper {
       // funds the agent which then pays for: Safe deploy, 5 service registry txs
       // (create, activate, register, deploy, stake), and mech deploy. Roughly
       // 15 txs at varying gas costs. 0.03 ETH per service is a safe estimate.
+      // On re-runs, include ETH already held by funded agents/safes in the total.
       const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
+      let systemEth = masterBalance;
+      if (this.stakingMode === 'self-bond') {
+        for (const svc of state.services) {
+          if (svc.agent_address) {
+            systemEth += await this.provider.getBalance(svc.agent_address);
+          }
+          if (svc.safe_address) {
+            systemEth += await this.provider.getBalance(svc.safe_address);
+          }
+        }
+      }
       const requiredMasterEth = this.stakingMode === 'standard'
         ? this.config.minEoaGasEth
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
-      if (masterBalance < requiredMasterEth) {
+      if (systemEth < requiredMasterEth) {
         return {
           ok: false,
           fleet_state: state,
           message: `Fund master wallet with ETH, then re-run.`,
           funding: {
             master_address: masterAddress,
-            eth_required: requiredMasterEth.toString(),
+            eth_required: (requiredMasterEth - systemEth).toString(),
             eth_balance: masterBalance.toString(),
           },
         };
@@ -497,8 +509,13 @@ export class FleetBootstrapper {
       await fundTx.wait();
     }
 
-    // 3. Check agent ETH balance
-    const agentBalanceAfter = await this.provider.getBalance(agentAddress);
+    // 3. Check agent ETH balance (retry — public RPCs can lag after a write)
+    let agentBalanceAfter = 0n;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      agentBalanceAfter = await this.provider.getBalance(agentAddress);
+      if (agentBalanceAfter >= requiredAgentEth) break;
+      if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
+    }
     if (agentBalanceAfter < requiredAgentEth) {
       throw new Error(
         `Service ${index}: agent ${agentAddress} needs ${requiredAgentEth} wei ETH but has ${agentBalanceAfter}`,
