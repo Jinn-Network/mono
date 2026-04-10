@@ -261,9 +261,6 @@ The client will:
 
 ## Known Operational Gotchas (Phase 1b)
 
-**ETH budget**
-- The bootstrap doesn't estimate total ETH needed upfront. It asks for ~0.005 ETH but the full flow (Safe deploy + service create/activate/register/deploy + staking + mech deploy) costs ~0.03-0.05 ETH on Base Sepolia. Fund generously.
-
 **JINN must be pre-positioned**
 - The operator must mint JINN on L1 (Sepolia), bridge to L2 (Base Sepolia, takes 5-10 min), send to the predicted Safe, and deposit into the staking proxy. There's no single automated script for this flow.
 

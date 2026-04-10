@@ -112,9 +112,14 @@ export class FleetBootstrapper {
       // Phase 1b: Check master funding
       const masterAddress = state.master_address!;
       const masterBalance = await this.provider.getBalance(masterAddress);
+      // Self-bond mode needs much more ETH than standard mode because the master
+      // funds the agent which then pays for: Safe deploy, 5 service registry txs
+      // (create, activate, register, deploy, stake), and mech deploy. Roughly
+      // 15 txs at varying gas costs. 0.03 ETH per service is a safe estimate.
+      const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
       const requiredMasterEth = this.stakingMode === 'standard'
         ? this.config.minEoaGasEth
-        : this.config.minEoaGasEth * BigInt(this.targetServices);
+        : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
       if (masterBalance < requiredMasterEth) {
         return {
           ok: false,
@@ -475,12 +480,15 @@ export class FleetBootstrapper {
     const safeAddress = updatedSvc.safe_address!;
 
     // 2. Fund agent EOA from master if needed
+    // The agent pays for: Safe deploy + Safe top-up + ~8 Safe txs (service lifecycle + staking + mech)
+    const SELF_BOND_AGENT_ETH = 25_000_000_000_000_000n; // 0.025 ETH
+    const requiredAgentEth = SELF_BOND_AGENT_ETH;
     const masterSigner = deriveMasterSigner(mnemonic);
     const masterWithProvider = masterSigner.connect(this.provider);
     const agentBalance = await this.provider.getBalance(agentAddress);
 
-    if (agentBalance < this.config.minEoaGasEth) {
-      const fundAmount = this.config.minEoaGasEth - agentBalance;
+    if (agentBalance < requiredAgentEth) {
+      const fundAmount = requiredAgentEth - agentBalance;
       console.error(`[fleet-bootstrap] Service ${index}: funding agent with ${fundAmount} wei from master`);
       const fundTx = await masterWithProvider.sendTransaction({
         to: agentAddress,
@@ -491,9 +499,9 @@ export class FleetBootstrapper {
 
     // 3. Check agent ETH balance
     const agentBalanceAfter = await this.provider.getBalance(agentAddress);
-    if (agentBalanceAfter < this.config.minEoaGasEth) {
+    if (agentBalanceAfter < requiredAgentEth) {
       throw new Error(
-        `Service ${index}: agent ${agentAddress} needs ${this.config.minEoaGasEth} wei ETH but has ${agentBalanceAfter}`,
+        `Service ${index}: agent ${agentAddress} needs ${requiredAgentEth} wei ETH but has ${agentBalanceAfter}`,
       );
     }
 
