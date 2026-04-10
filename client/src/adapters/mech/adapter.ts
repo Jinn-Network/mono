@@ -1,4 +1,5 @@
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
 import type { ExecutionAdapter } from '../adapter.js';
 import type {
   DesiredState,
@@ -62,9 +63,11 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   async initialize(): Promise<void> {
+    const chain = this.config.chainId === 84532 ? baseSepolia : base;
     const clients = createClients(
       this.config.rpcUrl,
       this.config.agentEoaPrivateKey,
+      chain,
     );
     this.publicClient = clients.publicClient;
     this.walletClient = clients.walletClient;

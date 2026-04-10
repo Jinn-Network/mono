@@ -258,3 +258,20 @@ The client will:
 **Nonce desync during consecutive deploys**
 - The deploy scripts pin nonces explicitly to avoid this
 - If it happens, wait a few seconds and retry
+
+## Known Operational Gotchas (Phase 1b)
+
+**ETH budget**
+- The bootstrap doesn't estimate total ETH needed upfront. It asks for ~0.005 ETH but the full flow (Safe deploy + service create/activate/register/deploy + staking + mech deploy) costs ~0.03-0.05 ETH on Base Sepolia. Fund generously.
+
+**JINN must be pre-positioned**
+- The operator must mint JINN on L1 (Sepolia), bridge to L2 (Base Sepolia, takes 5-10 min), send to the predicted Safe, and deposit into the staking proxy. There's no single automated script for this flow.
+
+**proxyHash must match the Safe bytecode**
+- The staking proxy's `proxyHash` must match the codehash of the deployed Safe proxy. The default in the deploy script is the correct hash for Base Sepolia's Safe proxy factory (`0xb89c1b3b...`). If deploying on a different chain, compute it with `cast keccak $(cast code <deployed-safe-address>)` and pass via `SAFE_PROXY_HASH`.
+
+**Multiple deployment artifacts**
+- The client needs three artifact paths: `JINN_TESTNET_L2_DEPLOYMENT`, `JINN_TESTNET_TOKEN_DEPLOYMENT`, and `JINN_TESTNET_MECH_DEPLOYMENT`. All paths are relative to the working directory. Recommend setting them in the client `.env` file.
+
+**Bridge timing**
+- The OP Stack bridge from Sepolia to Base Sepolia takes 5-15 minutes. The `phase1a-bridge-jinn-to-l2.ts` script submits the tx but doesn't wait for relay. Check L2 balance with `cast call <L2_JINN> "balanceOf(address)" <address>` before proceeding.
