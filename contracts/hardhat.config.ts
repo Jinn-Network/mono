@@ -29,7 +29,7 @@ const config: HardhatUserConfig = {
     compilers: [
       { version: "0.8.25", settings: optimizerSettings },
       { version: "0.8.28", settings: optimizerSettings },
-      { version: "0.8.30", settings: optimizerSettings },
+      { version: "0.8.30", settings: { ...optimizerSettings, evmVersion: "cancun" } },
     ],
     overrides: {
       "src/vendor/tokenomics/Tokenomics.sol": {

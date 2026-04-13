@@ -1,0 +1,30 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-10T16:41:16.056Z",
+  "config": {
+    "l1Jinn": "0xc3ae831f146Eabbb8095E1EDf90a187AA4E5F408",
+    "l2Jinn": "0xAB9a01cd4A379e36006ec6df2960CF39EF79df63",
+    "veJinn": "0x22092213247BFbFC934dAF7D531fcc50820DCc7A",
+    "lockFactor": 0,
+    "withdrawDelay": 3600,
+    "l1StandardBridge": "0xfd0Bf71F60660E2f608ed56e1659C450eB113120",
+    "l1CrossDomainMessenger": "0xC34855F4De64F1840e5686e64278da901e261f20",
+    "baseSepoliaChainId": 84532
+  },
+  "contracts": {
+    "stJINN": "0x16F35EF27d4A0a8b49B77BfB65e668dB43311133",
+    "lockImpl": "0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7",
+    "lockProxy": "0xDbeEF1947F7BB3657f984aA6b230a0ca6578229D",
+    "unstakeRelayerImpl": "0x206183F35B2450Ca15A906BB923E74d945F78d67",
+    "unstakeRelayerProxy": "0xe69aa4d6F3ABc51F48ba64eCa0359502c626F663",
+    "distributorImpl": "0xA7Ff7084C4aE6De4C13050A1Ba6eA69BfC3A032A",
+    "distributorProxy": "0x12F14eF5b4881a932BE3F334599cB9473aBE987A",
+    "depositoryImpl": "0x3930ff75C54A38C3Dd298649360Cf1439e4A8dCd",
+    "depositoryProxy": "0xd29Da51699BBbDFEb8E07429fAccFcF2D33D3623",
+    "treasuryImpl": "0xDE3040e22Bf3f1DcDE6F9a3F364378aCC92633EF",
+    "treasuryProxy": "0xa87c117cB54d9C6C8a8e0aA0b336a1125E485Cb7",
+    "baseDepositProcessorL1": "0x494FBcd686C895fD6265e852086B53Abf15cb076"
+  }
+}
