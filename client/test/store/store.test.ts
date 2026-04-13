@@ -23,4 +23,13 @@ describe('Store', () => {
     store.setShutdownState('clean');
     expect(store.getShutdownState()).toBe('clean');
   });
+
+  it('aggregates own activity and config rows', () => {
+    store.recordOwnActivity('r1', 'delivered');
+    store.recordOwnActivity('r2', 'evaluated');
+    store.setConfigValue('last_reward_claim_tick_at', '2026-01-02T00:00:00.000Z');
+    expect(store.getOwnActivityCounts()).toEqual({ delivered: 1, evaluated: 1 });
+    expect(store.getRecentOwnActivity(5)).toHaveLength(2);
+    expect(store.getConfigValue('last_reward_claim_tick_at')).toBe('2026-01-02T00:00:00.000Z');
+  });
 });

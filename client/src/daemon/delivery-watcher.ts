@@ -1,4 +1,5 @@
 import type { ExecutionAdapter } from '../adapters/adapter.js';
+import { isRecoverableTransactionError } from '../tx-retry.js';
 
 export class DeliveryWatcherLoop {
   private stopped = false;
@@ -23,7 +24,8 @@ export class DeliveryWatcherLoop {
         }
       } catch (err) {
         console.error('[delivery-watcher] Error:', err);
-        await Promise.race([new Promise(r => setTimeout(r, 5000)), this.stopPromise]);
+        const delayMs = isRecoverableTransactionError(err) ? 12_000 : 5000;
+        await Promise.race([new Promise(r => setTimeout(r, delayMs)), this.stopPromise]);
       }
     }
   }

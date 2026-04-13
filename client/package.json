@@ -10,9 +10,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "tsx src/main.ts",
+    "status": "tsx scripts/status.ts",
     "e2e": "tsx scripts/e2e-validate.ts",
     "staking": "tsx scripts/staking-validate.ts",
-    "stolas": "tsx scripts/stolas-validate.ts"
+    "stolas": "tsx scripts/stolas-validate.ts",
+    "withdraw": "tsx scripts/withdraw.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.12",

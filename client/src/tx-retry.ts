@@ -3,7 +3,12 @@
  */
 
 import type { Hex, PublicClient, TransactionReceipt } from 'viem';
-import type { ContractTransactionResponse, JsonRpcProvider, TransactionReceipt as EthersTransactionReceipt } from 'ethers';
+import type {
+  JsonRpcProvider,
+  Provider,
+  TransactionReceipt as EthersTransactionReceipt,
+  TransactionResponse,
+} from 'ethers';
 
 export const TX_RETRY_DEFAULTS = {
   maxAttempts: 6,
@@ -52,6 +57,7 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   if (lower.includes('user rejected') || lower.includes('user denied')) return false;
   if (lower.includes('rejected the request')) return false;
 
+  if (msg.includes('GS013')) return false;
   if (msg.includes('GS026')) return true;
 
   if (
@@ -223,18 +229,21 @@ export async function waitForTransactionReceiptWithRetry(
 
 /** Ethers: broadcast with fee escalation on recoverable failures. */
 export async function ethersSendTransactionWithRetry(
-  signer: { sendTransaction: (tx: object) => Promise<ContractTransactionResponse>; provider: JsonRpcProvider | null },
+  signer: {
+    sendTransaction: (tx: object) => Promise<TransactionResponse>;
+    provider: Provider | null;
+  },
   txRequest: {
     to?: string;
     data?: string;
-    value?: bigint;
+    value?: bigint | string;
     gasLimit?: bigint;
     maxFeePerGas?: bigint;
     maxPriorityFeePerGas?: bigint;
     gasPrice?: bigint;
   },
   options: TxRetryOptions = {},
-): Promise<ContractTransactionResponse> {
+): Promise<TransactionResponse> {
   const maxAttempts = options.maxAttempts ?? TX_RETRY_DEFAULTS.maxAttempts;
   const baseDelayMs = options.baseDelayMs ?? TX_RETRY_DEFAULTS.baseDelayMs;
   const maxDelayMs = options.maxDelayMs ?? TX_RETRY_DEFAULTS.maxDelayMs;

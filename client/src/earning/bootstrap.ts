@@ -9,7 +9,7 @@ import {
   Contract,
   Interface,
   JsonRpcProvider,
-  Wallet,
+  ZeroAddress,
   formatEther,
   getAddress,
 } from 'ethers';
@@ -58,9 +58,18 @@ import {
   isJinnDebug,
 } from '../operator-errors.js';
 import {
+  reconcileServiceAgainstChain,
+  type ServiceChainSignals,
+} from './reconcile.js';
+import {
+  previousSafeBeingAbandoned,
+  sweepOrphanedServiceFunds,
+} from './orphan-sweep.js';
+import {
   ethersSendTransactionWithRetry,
   ethersWaitForTransactionHashWithRetry,
 } from '../tx-retry.js';
+import { isTransientEthReadError } from '../chain-read-errors.js';
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
 
@@ -200,6 +209,8 @@ export class FleetBootstrapper {
         password,
       );
 
+      state = await this.reconcileFleetWithChain(state, mnemonic);
+
       // Resume all services. For incomplete services, this picks up where they
       // left off. For "complete" services in standard mode, this also runs the
       // eviction recovery check (since on-chain state may have changed since
@@ -308,6 +319,131 @@ export class FleetBootstrapper {
     return this.resumeService(state, mnemonic, index);
   }
 
+  /**
+   * Compare persisted per-service state to registry/staking/Safe bytecode and patch store
+   * when local JSON is ahead, behind, or stale (idempotent; safe to repeat).
+   */
+  private async reconcileFleetWithChain(
+    state: FleetState,
+    mnemonic: string,
+  ): Promise<FleetState> {
+    const ctx = { stakingContract: this.config.stakingContract };
+    let next = state;
+    for (const svc of state.services) {
+      const signals = await this.gatherChainSignals(svc);
+      const result = reconcileServiceAgainstChain(this.stakingMode, svc, signals, ctx);
+      if (result) {
+        const abandoned = previousSafeBeingAbandoned(svc, result.patch);
+        if (abandoned && state.master_address) {
+          await this.sweepAbandonedSafeForService(
+            state,
+            mnemonic,
+            svc.index,
+            abandoned,
+          );
+        }
+        console.error(result.message);
+        next = await this.store.updateService(svc.index, result.patch);
+      }
+    }
+    return next;
+  }
+
+  /** Best-effort ETH recovery before persisted Safe address is cleared or replaced. */
+  private async sweepAbandonedSafeForService(
+    state: FleetState,
+    mnemonic: string,
+    serviceIndex: number,
+    abandonedSafeAddress: string,
+  ): Promise<void> {
+    if (!state.master_address) return;
+    const masterSigner = deriveMasterSigner(mnemonic);
+    const agentSigner = deriveAgentSigner(mnemonic, serviceIndex);
+    await sweepOrphanedServiceFunds({
+      rpcUrl: this.config.rpcUrl,
+      provider: this.provider,
+      masterAddress: state.master_address,
+      masterSigner,
+      serviceIndex,
+      agentPrivateKey: agentSigner.privateKey,
+      agentAddress: agentSigner.address,
+      abandonedSafeAddress,
+      minAgentReserveWei: this.config.minEoaGasEth,
+    });
+  }
+
+  private async gatherChainSignals(svc: ServiceState): Promise<ServiceChainSignals> {
+    let safeDeployed: boolean | null = null;
+    if (svc.safe_address) {
+      try {
+        const code = await this.provider.getCode(svc.safe_address);
+        safeDeployed = code !== '0x';
+      } catch {
+        safeDeployed = null;
+      }
+    }
+
+    if (svc.service_id === null) {
+      return {
+        stakingState: 0,
+        stakingMultisig: null,
+        registryState: 0,
+        registryMultisig: null,
+        safeDeployed,
+      };
+    }
+
+    const id = svc.service_id;
+    const staking = new Contract(this.config.stakingContract, STAKING_ABI, this.provider);
+
+    let stakingState: number | 'revert' | 'inconclusive' = 0;
+    try {
+      stakingState = Number(await staking.getStakingState(id));
+    } catch (e) {
+      stakingState = isTransientEthReadError(e) ? 'inconclusive' : 'revert';
+    }
+
+    let stakingMultisig: string | null = null;
+    if (stakingState !== 'revert' && stakingState !== 'inconclusive') {
+      try {
+        const info = await staking.getServiceInfo(id);
+        const m = info.multisig as string;
+        stakingMultisig =
+          m && getAddress(m) !== getAddress(ZeroAddress) ? getAddress(m) : null;
+      } catch {
+        stakingMultisig = null;
+      }
+    }
+
+    let registryState: number | 'revert' | 'inconclusive' = 0;
+    let registryMultisig: string | null = null;
+    try {
+      const registry = new Contract(this.config.serviceRegistry, SERVICE_REGISTRY_L2_ABI, this.provider);
+      const s = await registry.getService(id);
+      registryState = Number(s.state);
+      const m = s.multisig as string;
+      registryMultisig =
+        m && getAddress(m) !== getAddress(ZeroAddress) ? getAddress(m) : null;
+    } catch (e) {
+      registryState = isTransientEthReadError(e) ? 'inconclusive' : 'revert';
+      registryMultisig = null;
+    }
+
+    if (stakingState === 'inconclusive' || registryState === 'inconclusive') {
+      console.error(
+        `[fleet-bootstrap] Service ${svc.index}: chain read inconclusive (likely RPC). Skipping reconcile for this run; persisted state unchanged.`,
+      );
+    }
+
+    return {
+      stakingState,
+      stakingMultisig,
+      registryState,
+      registryMultisig,
+      safeDeployed,
+    };
+  }
+
   private async resumeService(
     state: FleetState,
     mnemonic: string,
@@ -326,7 +462,9 @@ export class FleetBootstrapper {
     ) {
       const onChainState = await this.getStakingState(svc.service_id);
       if (onChainState === 2) {
-        console.error(`[fleet-bootstrap] Service ${index}: detected eviction (id=${svc.service_id}), recovering...`);
+        console.error(
+          `[jinn-earning] Noticed service ${svc.service_id} (fleet index ${index}) evicted on-chain; running distributor reStake to restake.`,
+        );
         state = await this.recoverEvictedService(state, mnemonic, index);
         svc = state.services.find(s => s.index === index)!;
       }
@@ -419,6 +557,17 @@ export class FleetBootstrapper {
       if (stakingState === 1) {
         console.error(`[fleet-bootstrap] Service ${index} already staked, skipping`);
         return this.store.updateService(index, { step: 'staked' });
+      }
+    }
+
+    // Fresh distributor stake() creates a new on-chain service. If state still
+    // references an old Safe (e.g. hand-edited JSON), sweep it before replacing.
+    if (svc.service_id === null && svc.safe_address && state.master_address) {
+      try {
+        const oldSafe = getAddress(svc.safe_address);
+        await this.sweepAbandonedSafeForService(state, mnemonic, index, oldSafe);
+      } catch {
+        // Ignore invalid persisted safe_address; later steps will surface errors if needed.
       }
     }
 
@@ -728,7 +877,7 @@ export class FleetBootstrapper {
       const agentWithProvider = agentSigner.connect(this.provider);
       const txResponse = await ethersSendTransactionWithRetry(agentWithProvider, {
         to: deployTx.to,
-        value: BigInt(deployTx.value),
+        value: deployTx.value,
         data: deployTx.data,
       });
 
@@ -797,7 +946,12 @@ export class FleetBootstrapper {
       { to: this.config.serviceManager, value: '0', data: createData },
     ]);
 
-    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    const receipt = await ethersWaitForTransactionHashWithRetry(
+      this.provider,
+      result.hash,
+      1,
+      30000,
+    );
     if (!receipt || receipt.status !== 1) {
       throw new Error(`Create service tx failed for service ${index}: ${result.hash}`);
     }
@@ -858,7 +1012,12 @@ export class FleetBootstrapper {
       { to: this.config.serviceManager, value: '1', data: activateData },
     ]);
 
-    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    const receipt = await ethersWaitForTransactionHashWithRetry(
+      this.provider,
+      result.hash,
+      1,
+      30000,
+    );
     if (!receipt || receipt.status !== 1) {
       throw new Error(`Activate service tx failed for service ${index}: ${result.hash}`);
     }
@@ -911,7 +1070,12 @@ export class FleetBootstrapper {
       { to: this.config.serviceManager, value: '1', data: registerData },
     ]);
 
-    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    const receipt = await ethersWaitForTransactionHashWithRetry(
+      this.provider,
+      result.hash,
+      1,
+      30000,
+    );
     if (!receipt || receipt.status !== 1) {
       throw new Error(`Register agents tx failed for service ${index}: ${result.hash}`);
     }
@@ -957,7 +1121,12 @@ export class FleetBootstrapper {
       { to: this.config.serviceManager, value: '0', data: deployData },
     ]);
 
-    const receipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    const receipt = await ethersWaitForTransactionHashWithRetry(
+      this.provider,
+      result.hash,
+      1,
+      30000,
+    );
     if (!receipt || receipt.status !== 1) {
       throw new Error(`Deploy service tx failed for service ${index}: ${result.hash}`);
     }
@@ -1047,7 +1216,12 @@ export class FleetBootstrapper {
   }
 
   private async waitForSuccessfulTx(txHash: string, label: string): Promise<void> {
-    const receipt = await this.provider.waitForTransaction(txHash, 1, 30000);
+    const receipt = await ethersWaitForTransactionHashWithRetry(
+      this.provider,
+      txHash,
+      1,
+      30000,
+    );
     if (!receipt) throw new Error(`${label} tx not confirmed: ${txHash}`);
     if (receipt.status !== 1) throw new Error(`${label} tx reverted: ${txHash}`);
   }

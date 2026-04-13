@@ -32,22 +32,30 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   await rename(tmpPath, filePath);
 }
 
-function parseFleetStateOrNull(raw: string): FleetState | null {
+/** Parse fleet JSON without side effects (for status / read-only tools). */
+export function parseFleetStateJson(raw: string): FleetState | null {
   try {
     const parsed = JSON.parse(raw);
     const result = FleetStateSchema.safeParse(parsed);
     if (result.success) {
       return result.data;
     }
-    console.error(
-      '[earning-store] Invalid state schema; resetting. Issues:',
-      result.error.issues.map((issue) => issue.path.join('.')),
-    );
     return null;
-  } catch (error) {
-    console.error('[earning-store] Failed to parse state; resetting:', error);
+  } catch {
     return null;
   }
+}
+
+function parseFleetStateOrNull(raw: string): FleetState | null {
+  const data = parseFleetStateJson(raw);
+  if (data) return data;
+  try {
+    JSON.parse(raw);
+    console.error('[earning-store] Invalid state schema; resetting.');
+  } catch (error) {
+    console.error('[earning-store] Failed to parse state; resetting:', error);
+  }
+  return null;
 }
 
 export class FleetStateStore {
@@ -101,6 +109,18 @@ export class FleetStateStore {
   }
 
   // ── Fleet state ────────────────────────────────────────────────────────
+
+  /**
+   * Read persisted fleet state if the file exists and validates.
+   * Does not create a default file (unlike load()).
+   */
+  async tryLoadExisting(): Promise<FleetState | null> {
+    if (!existsSync(this.statePath)) {
+      return null;
+    }
+    const raw = await readFile(this.statePath, 'utf8');
+    return parseFleetStateJson(raw);
+  }
 
   async load(chain: 'base' | 'base-sepolia' = 'base'): Promise<FleetState> {
     if (!existsSync(this.statePath)) {

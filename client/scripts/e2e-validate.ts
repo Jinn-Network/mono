@@ -38,6 +38,7 @@ import {
   createPublicClient,
   decodeEventLog,
   encodeFunctionData,
+  getAddress,
   http,
   type Address,
   type Hex,
@@ -424,10 +425,14 @@ async function main(): Promise<void> {
   let adapter: MechAdapter | undefined;
   let publicClient: PublicClient;
   let agentEoaPrivateKey: Hex | undefined;
+  /** Operator A agent EOA — funded again before Phase 12+ after heavy earlier txs deplete bootstrap top-up. */
+  let agentAddressA: Address | undefined;
   let safeAddress: Address | undefined;
   let mechAddress: Address | undefined;
   let serviceId: number | undefined;
   let restorationRequestId: string | undefined;
+  /** Baseline multisig nonces after Phase 3 (for Phase 15 isRatioPass). */
+  let baselineMultisigNonces: bigint[] | undefined;
 
   // Phase 12 cross-operator state
   let tmpDir2: string | null = null;
@@ -589,6 +594,7 @@ async function main(): Promise<void> {
         );
         const agentSigner = deriveAgentSigner(mnemonic, firstComplete!.index);
         agentEoaPrivateKey = agentSigner.privateKey as Hex;
+        agentAddressA = getAddress(firstComplete!.agent_address) as Address;
 
         console.log(`    Bootstrap complete!`);
         console.log(`    Service ID: ${serviceId}`);
@@ -616,9 +622,18 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         });
         await adapter.initialize();
         console.log('    MechAdapter initialized');
+
+        // warmCreateRestorationJobPath eth_call uses `from: safeAddress` with msg.value = deliveryRate;
+        // fund the Safe on the fork so the simulation does not fail with insufficient funds.
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
+          safeAddress,
+          '0x56BC75E2D63100000', // 100 ETH
+        ]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Verify getMultisigNonces returns valid nonces
         const provider = new JsonRpcProvider(ANVIL_RPC);
@@ -634,6 +649,7 @@ async function main(): Promise<void> {
           provider,
         );
         const nonces: bigint[] = await checker.getMultisigNonces(safeAddress);
+        baselineMultisigNonces = [...nonces];
         console.log(`    Activity checker: ${activityChecker}`);
         console.log(`    Initial nonces: [${nonces.map(String).join(', ')}]`);
 
@@ -1149,6 +1165,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         });
 
         const daemonDbPath = join(tmpDir!, 'daemon-loop.db');
@@ -1232,6 +1249,14 @@ async function main(): Promise<void> {
           throw new Error('Missing credentials from Phase 2');
         }
 
+        if (agentAddressA) {
+          await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
+            agentAddressA,
+            '0x56BC75E2D63100000',
+          ]);
+          await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        }
+
         // Bootstrap a second operator
         tmpDir2 = await mkdtemp(join(tmpdir(), 'jinn-e2e-op2-'));
         console.log(`    Operator B temp dir: ${tmpDir2}`);
@@ -1243,36 +1268,44 @@ async function main(): Promise<void> {
         });
 
         const initialResult2 = await bootstrapper2.bootstrap('test-password-2');
-        if (initialResult2.step !== 'awaiting_funding') {
-          throw new Error(`Expected step 'awaiting_funding', got '${initialResult2.step}'`);
-        }
         if (!initialResult2.funding) {
-          throw new Error('Expected funding requirement in result');
+          throw new Error(
+            `Expected funding requirement in result (fleet bootstrap returns funding gate, not top-level step); ok=${initialResult2.ok}`,
+          );
         }
 
-        const eoaAddressB = initialResult2.funding.eoa_address;
-        const predictedSafeB = initialResult2.funding.safe_address;
-        console.log(`    Operator B EOA: ${eoaAddressB}`);
-        console.log(`    Operator B Predicted Safe: ${predictedSafeB}`);
+        const masterAddressB = initialResult2.funding.master_address;
+        console.log(`    Operator B master: ${masterAddressB}`);
 
-        // Fund operator B's EOA with ETH
         await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
-          eoaAddressB,
+          masterAddressB,
           '0x56BC75E2D63100000', // 100 ETH
         ]);
 
-        // Fund operator B's Safe with ETH
-        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
-          predictedSafeB,
-          '0x56BC75E2D63100000', // 100 ETH
+        const eoaOlasSlotB = erc20BalanceSlot(masterAddressB);
+        const eoaOlasAmountB = 100000n * 10n ** 18n;
+        await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [
+          OLAS_TOKEN,
+          eoaOlasSlotB,
+          zeroPadValue(toBeHex(eoaOlasAmountB), 32),
         ]);
 
-        // Fund operator B's Safe with OLAS
-        const olasAmountB = 10000n * 10n ** 18n;
-        const slotB = erc20BalanceSlot(predictedSafeB);
-        const valueB = zeroPadValue(toBeHex(olasAmountB), 32);
-        await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [OLAS_TOKEN, slotB, valueB]);
+        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddressB]);
+        const olasApproveB = new Interface([
+          'function approve(address spender, uint256 amount) returns (bool)',
+        ]).encodeFunctionData('approve', [CHAIN_CONFIG.stakingContract, eoaOlasAmountB]);
+        await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
+          { from: masterAddressB, to: OLAS_TOKEN, data: olasApproveB },
+        ]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
+        const depositDataB = new Interface([
+          'function deposit(uint256 amount)',
+        ]).encodeFunctionData('deposit', [eoaOlasAmountB]);
+        await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
+          { from: masterAddressB, to: CHAIN_CONFIG.stakingContract, data: depositDataB },
+        ]);
+        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [masterAddressB]);
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Re-bootstrap operator B to completion
@@ -1283,26 +1316,37 @@ async function main(): Promise<void> {
         });
 
         const finalResult2 = await bootstrapper2.bootstrap('test-password-2');
-        if (!finalResult2.ok || finalResult2.step !== 'complete') {
+        const bComplete = finalResult2.fleet_state.services.find(s => s.step === 'complete');
+        if (!finalResult2.ok || !bComplete) {
           throw new Error(
-            `Expected step 'complete', got '${finalResult2.step}': ${finalResult2.message}`,
+            `Expected a service at step 'complete', got ok=${finalResult2.ok}: ${finalResult2.message}`,
           );
         }
 
-        safeAddressB = (finalResult2.earning_state.safe_address ?? predictedSafeB) as Address;
-        mechAddressB = finalResult2.earning_state.mech_address as Address | undefined;
+        safeAddressB = bComplete.safe_address as Address;
+        mechAddressB = bComplete.mech_address as Address | undefined;
 
-        if (!mechAddressB) {
-          throw new Error('Operator B bootstrap completed but no mech_address');
+        if (!safeAddressB || !mechAddressB) {
+          throw new Error('Operator B bootstrap completed but missing safe or mech_address');
         }
 
-        // Decrypt operator B's keystore
-        const keystoreB = await readFile(join(tmpDir2, 'agent_keystore.json'), 'utf8');
-        const walletB = await Wallet.fromEncryptedJson(keystoreB, 'test-password-2');
-        agentEoaPrivateKeyB = walletB.privateKey as Hex;
+        const { FleetStateStore } = await import('../src/earning/store.js');
+        const { decryptMnemonic, deriveAgentSigner } = await import('../src/earning/wallet.js');
+        const storeFleetB = new FleetStateStore(tmpDir2);
+        const mnemonicB = await decryptMnemonic(
+          await storeFleetB.loadMnemonicKeystore(),
+          'test-password-2',
+        );
+        agentEoaPrivateKeyB = deriveAgentSigner(mnemonicB, bComplete.index).privateKey as Hex;
 
         console.log(`    Operator B Safe: ${safeAddressB}`);
         console.log(`    Operator B Mech: ${mechAddressB}`);
+
+        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
+          safeAddressB,
+          '0x56BC75E2D63100000', // 100 ETH — same as Phase 3 warm path for createRestorationJob eth_call
+        ]);
+        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Stabilize B's mech on the marketplace
         await stabilizeForkedMarketplaceState(publicClient as unknown as import('viem').PublicClient, safeAddressB as Address, mechAddressB as Address);
@@ -1319,6 +1363,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         });
         await creatorAdapter.initialize();
 
@@ -1334,6 +1379,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         });
         await restorerAdapterB.initialize();
 
@@ -1445,6 +1491,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         });
         await windowAdapter.initialize();
 
@@ -1617,6 +1664,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         });
         await claimTestAdapter.initialize();
 
@@ -2173,6 +2221,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         });
         await compAdapter.initialize();
 
@@ -2254,6 +2303,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         });
         await failAdapter.initialize();
 
@@ -2346,6 +2396,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         }, crashStore);
         await crashAdapter.initialize();
 
@@ -2412,6 +2463,7 @@ async function main(): Promise<void> {
           ipfsGatewayUrl: 'https://gateway.autonolas.tech',
           pollIntervalMs: 500,
           chainId: base.id,
+          routerClaimDeliveryVariant: 'v1',
         }, recoveredStore);
         await recoveredAdapter.initialize();
 
@@ -2470,18 +2522,19 @@ async function main(): Promise<void> {
         const livenessRatio: bigint = await checker.livenessRatio();
         console.log(`    Liveness ratio: ${livenessRatio}`);
 
-        // Use initial nonces from Phase 3 (known to be [6, 0, 0, 0, 0]) and
-        // the time advanced in Phase 9 (86401s) to avoid calling getServiceInfo,
-        // which returns a struct that ethers can't decode with a simplified ABI.
-        const initialNonces = [6n, 0n, 0n, 0n, 0n];
-        // Use actual elapsed time since staking (not the full 86401s we advanced)
-        // The activity happened BEFORE the time advancement, so the effective
-        // window is the time between staking and when activity occurred (~seconds)
-        // For isRatioPass to pass: activityDiff * 1e18 / ts >= livenessRatio
-        // With 5 activities and livenessRatio=230481481481481, max ts = ~21693s
-        const timeDiff = 20000n;
-        console.log(`    Initial nonces (Phase 3): [${initialNonces.map(String).join(', ')}]`);
-        console.log(`    Time diff: ${timeDiff}s`);
+        if (!baselineMultisigNonces) {
+          throw new Error('Missing baselineMultisigNonces from Phase 3');
+        }
+        const initialNonces = baselineMultisigNonces;
+        // For isRatioPass: sum of activity deltas vs Safe nonce delta must clear livenessRatio
+        // within ts. After the full E2E suite, use the Safe nonce delta as ts lower bound
+        // so the ratio is evaluated on a window that fits the actual on-chain progression.
+        const nonceDelta = currentNonces[0]! > initialNonces[0]!
+          ? currentNonces[0]! - initialNonces[0]!
+          : 1n;
+        const timeDiff = nonceDelta > 20000n ? nonceDelta : 20000n;
+        console.log(`    Baseline nonces (Phase 3): [${initialNonces.map(String).join(', ')}]`);
+        console.log(`    Time diff (for ratio check): ${timeDiff}s`);
 
         // Call isRatioPass (spread to mutable arrays — ethers returns readonly tuples)
         const passes: boolean = await checker.isRatioPass([...currentNonces], [...initialNonces], timeDiff);

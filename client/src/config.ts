@@ -10,6 +10,8 @@
  *
  * Operator UX: JINN_DEBUG=1 enables full stack traces. JINN_MASTER_ETH_DAILY_WEI
  * (wei, integer string) tunes master wallet low-ETH runway warnings.
+ * Router claims: JINN_ROUTER_CLAIM_DELIVERY_VERSION=v1|v2 overrides chain default
+ * (mainnet V1, testnet V2) for JinnRouter claimDelivery encoding.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -48,6 +50,14 @@ export const JinnConfigSchema = z.object({
 
   /** Chain poll interval in ms */
   pollIntervalMs: z.number().int().positive().default(5000),
+
+  /**
+   * How often the daemon attempts stOLAS ExternalStakingDistributor.claim for each staked
+   * fleet service (ms). Default 600000 (10 min) — well under typical checkpoint liveness windows
+   * on Base while limiting RPC/gas churn. Set to 0 to disable auto-claim.
+   * Env: JINN_REWARD_CLAIM_INTERVAL_MS
+   */
+  rewardClaimIntervalMs: z.number().int().min(0).default(600_000),
 
   /** HTTP API port */
   apiPort: z.number().int().positive().default(7331),
@@ -159,6 +169,9 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_EARNING_DIR'])       merged.earningDir = env['JINN_EARNING_DIR'];
   if (env['JINN_DB_PATH'])           merged.dbPath = env['JINN_DB_PATH'];
   if (env['JINN_POLL_INTERVAL_MS'])  merged.pollIntervalMs = parseInt(env['JINN_POLL_INTERVAL_MS'], 10);
+  if (env['JINN_REWARD_CLAIM_INTERVAL_MS'] !== undefined) {
+    merged.rewardClaimIntervalMs = parseInt(env['JINN_REWARD_CLAIM_INTERVAL_MS'], 10);
+  }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];

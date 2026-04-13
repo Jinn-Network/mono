@@ -7,7 +7,15 @@ import {
   type WalletClient,
   type Log,
 } from 'viem';
-import { MECH_MARKETPLACE_ABI, MECH_ABI, JINN_ROUTER_ABI, CLAIM_REGISTRY_ABI, NATIVE_PAYMENT_TYPE } from './types.js';
+import {
+  MECH_MARKETPLACE_ABI,
+  MECH_ABI,
+  JINN_ROUTER_ABI,
+  JINN_ROUTER_CLAIM_DELIVERY_V1_ABI,
+  JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
+  CLAIM_REGISTRY_ABI,
+  NATIVE_PAYMENT_TYPE,
+} from './types.js';
 import { executeSafeTransaction } from './safe.js';
 import {
   isRecoverableTransactionError,
@@ -117,19 +125,34 @@ export async function submitEvaluationJob(
 const CLAIM_RETRY_ATTEMPTS = 6;
 const CLAIM_RETRY_DELAY_MS = 2000;
 
+const ZERO_EVIDENCE: Hex = '0x0000000000000000000000000000000000000000000000000000000000000000';
+
+export interface ClaimDeliveryOptions {
+  variant: 'v1' | 'v2';
+  /** V2 only; ignored for V1. */
+  evidenceHash?: Hex;
+}
+
 export async function claimDelivery(
   publicClient: PublicClient,
   walletClient: WalletClient,
   safeAddress: Address,
   routerAddress: Address,
   requestId: Hex,
-  evidenceHash: Hex = '0x0000000000000000000000000000000000000000000000000000000000000000',
+  options: ClaimDeliveryOptions,
 ): Promise<Hex> {
-  const calldata = encodeFunctionData({
-    abi: JINN_ROUTER_ABI,
-    functionName: 'claimDelivery',
-    args: [requestId, evidenceHash],
-  });
+  const calldata =
+    options.variant === 'v2'
+      ? encodeFunctionData({
+          abi: JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
+          functionName: 'claimDelivery',
+          args: [requestId, options.evidenceHash ?? ZERO_EVIDENCE],
+        })
+      : encodeFunctionData({
+          abi: JINN_ROUTER_CLAIM_DELIVERY_V1_ABI,
+          functionName: 'claimDelivery',
+          args: [requestId],
+        });
 
   for (let attempt = 1; attempt <= CLAIM_RETRY_ATTEMPTS; attempt++) {
     try {

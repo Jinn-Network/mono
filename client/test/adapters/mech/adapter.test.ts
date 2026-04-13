@@ -48,6 +48,7 @@ const TEST_CONFIG: MechAdapterConfig = {
   ipfsGatewayUrl: 'http://localhost:8080',
   pollIntervalMs: 1000,
   chainId: 8453,
+  routerClaimDeliveryVariant: 'v1',
 };
 
 describe('MechAdapter with JinnRouter', () => {

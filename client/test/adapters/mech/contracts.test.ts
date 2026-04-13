@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { encodeFunctionData, decodeFunctionData } from 'viem';
-import { JINN_ROUTER_ABI, NATIVE_PAYMENT_TYPE } from '../../../src/adapters/mech/types.js';
+import {
+  JINN_ROUTER_ABI,
+  JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
+  NATIVE_PAYMENT_TYPE,
+} from '../../../src/adapters/mech/types.js';
 
 describe('JinnRouter contract encoding', () => {
   it('encodes createRestorationJob calldata', () => {
@@ -51,15 +55,31 @@ describe('JinnRouter contract encoding', () => {
 
   it('encodes claimDelivery calldata', () => {
     const requestId = ('0x' + 'bb'.repeat(32)) as `0x${string}`;
-    const evidenceHash = ('0x' + '00'.repeat(32)) as `0x${string}`;
     const calldata = encodeFunctionData({
       abi: JINN_ROUTER_ABI,
+      functionName: 'claimDelivery',
+      args: [requestId],
+    });
+
+    const decoded = decodeFunctionData({
+      abi: JINN_ROUTER_ABI,
+      data: calldata,
+    });
+    expect(decoded.functionName).toBe('claimDelivery');
+    expect((decoded.args as unknown[])[0]).toBe(requestId);
+  });
+
+  it('encodes V2 claimDelivery calldata with evidence hash', () => {
+    const requestId = ('0x' + 'bb'.repeat(32)) as `0x${string}`;
+    const evidenceHash = ('0x' + 'cc'.repeat(32)) as `0x${string}`;
+    const calldata = encodeFunctionData({
+      abi: JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
       functionName: 'claimDelivery',
       args: [requestId, evidenceHash],
     });
 
     const decoded = decodeFunctionData({
-      abi: JINN_ROUTER_ABI,
+      abi: JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
       data: calldata,
     });
     expect(decoded.functionName).toBe('claimDelivery');

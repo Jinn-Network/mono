@@ -63,6 +63,36 @@ export class Store {
     return row?.value ?? null;
   }
 
+  /** Generic config row (e.g. last_reward_claim_tick_at). */
+  getConfigValue(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM config WHERE key = ?').get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setConfigValue(key: string, value: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
+  }
+
+  /** Counts of protocol roles recorded for this node (best-effort activity hints). */
+  getOwnActivityCounts(): Record<string, number> {
+    const rows = this.db.prepare(
+      `SELECT role, COUNT(*) as c FROM own_activity GROUP BY role`,
+    ).all() as Array<{ role: string; c: number }>;
+    const out: Record<string, number> = {};
+    for (const r of rows) {
+      out[r.role] = r.c;
+    }
+    return out;
+  }
+
+  /** Latest own_activity rows by insertion order (approximate). */
+  getRecentOwnActivity(limit: number): Array<{ requestId: string; role: string }> {
+    const rows = this.db.prepare(
+      `SELECT request_id, role FROM own_activity ORDER BY rowid DESC LIMIT ?`,
+    ).all(Math.max(0, Math.min(limit, 200))) as Array<{ request_id: string; role: string }>;
+    return rows.map(r => ({ requestId: r.request_id, role: r.role }));
+  }
+
   getLastProcessedBlock(): bigint | null {
     const row = this.db.prepare('SELECT value FROM config WHERE key = ?').get('last_processed_block') as { value: string } | undefined;
     return row?.value ? BigInt(row.value) : null;

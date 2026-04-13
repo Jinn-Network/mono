@@ -109,6 +109,11 @@ export interface ChainConfig {
   minSafeEth: bigint;
   jinnRouter?: string;
   distributorAddress?: string;
+  /**
+   * JinnRouter claimDelivery ABI: V1 single arg (Base mainnet), V2 + evidenceHash (testnet / Phase 1b).
+   * Override with JINN_ROUTER_CLAIM_DELIVERY_VERSION=v1|v2.
+   */
+  routerClaimDeliveryVersion: 'v1' | 'v2';
 }
 
 interface ChainConfigOverrides {
@@ -163,6 +168,8 @@ const BASE_CONFIG: ChainConfig = {
   // Conservative gas estimate for: Safe deploy + ~6 Safe exec txs
   minEoaGasEth: 5_000_000_000_000_000n, // 0.005 ETH
   minSafeEth: 2_000_000_000_000_000n,   // 0.002 ETH
+
+  routerClaimDeliveryVersion: 'v1',
 };
 
 const BASE_SEPOLIA_CONFIG: ChainConfig = {
@@ -197,6 +204,9 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   // Conservative gas estimate
   minEoaGasEth: 5_000_000_000_000_000n, // 0.005 ETH
   minSafeEth: 2_000_000_000_000_000n,   // 0.002 ETH
+
+  /** Phase 1b routers use V2 claimDelivery(bytes32,bytes32). */
+  routerClaimDeliveryVersion: 'v2',
 };
 
 function loadArtifact(filePath: string): DeploymentArtifact {
@@ -294,15 +304,23 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
   return resolved;
 }
 
+function applyRouterClaimDeliveryEnvOverride(config: ChainConfig): ChainConfig {
+  const raw = process.env['JINN_ROUTER_CLAIM_DELIVERY_VERSION']?.trim().toLowerCase();
+  if (raw === 'v1' || raw === 'v2') {
+    return { ...config, routerClaimDeliveryVersion: raw };
+  }
+  return config;
+}
+
 export function getChainConfig(
   chain: 'base' | 'base-sepolia',
   overrides: ChainConfigOverrides = {},
 ): ChainConfig {
   switch (chain) {
     case 'base':
-      return { ...BASE_CONFIG };
+      return applyRouterClaimDeliveryEnvOverride({ ...BASE_CONFIG });
     case 'base-sepolia':
-      return resolveBaseSepoliaConfig(overrides);
+      return applyRouterClaimDeliveryEnvOverride(resolveBaseSepoliaConfig(overrides));
     default:
       throw new Error(`Unsupported chain: ${chain}. Supported: 'base', 'base-sepolia'.`);
   }
@@ -553,6 +571,16 @@ export const STOLAS_DISTRIBUTOR_ABI = [
     ],
     name: 'reStake',
     outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'stakingProxies', type: 'address[]' },
+      { name: 'serviceIds', type: 'uint256[]' },
+    ],
+    name: 'claim',
+    outputs: [{ name: 'rewards', type: 'uint256[]' }],
     stateMutability: 'nonpayable',
     type: 'function',
   },

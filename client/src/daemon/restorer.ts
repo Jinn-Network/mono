@@ -2,6 +2,7 @@ import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import type { Store } from '../store/store.js';
 import { PermanentError, TransientError } from '../types/index.js';
+import { isRecoverableTransactionError } from '../tx-retry.js';
 import type { RestorationRequest } from '../types/index.js';
 
 export class RestorerLoop {
@@ -71,7 +72,8 @@ export class RestorerLoop {
           await Promise.race([new Promise(r => setTimeout(r, 5000)), this.stopPromise]);
         } else {
           console.error('[restorer] Error:', err);
-          await Promise.race([new Promise(r => setTimeout(r, 10000)), this.stopPromise]);
+          const delayMs = isRecoverableTransactionError(err) ? 15_000 : 10_000;
+          await Promise.race([new Promise(r => setTimeout(r, delayMs)), this.stopPromise]);
         }
       }
     }

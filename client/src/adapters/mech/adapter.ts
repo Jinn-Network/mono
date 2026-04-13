@@ -34,6 +34,7 @@ import {
 import { type MechAdapterConfig, MECH_MARKETPLACE_ABI } from './types.js';
 import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
+import { withRecoverableRetry } from '../../tx-retry.js';
 import { computeEvidenceSimHash, type EvidenceCheckpointV1 } from '../../earning/evidence-simhash.js';
 
 export class MechAdapter implements ExecutionAdapter {
@@ -72,7 +73,14 @@ export class MechAdapter implements ExecutionAdapter {
     this.publicClient = clients.publicClient;
     this.walletClient = clients.walletClient;
 
-    const blockNumber = await this.publicClient.getBlockNumber();
+    const blockNumber = await withRecoverableRetry(
+      async () => this.publicClient.getBlockNumber(),
+      {
+        onRetry: ({ attempt, message }) => {
+          console.error(`[mech] getBlockNumber retry ${attempt}: ${message}`);
+        },
+      },
+    );
     this.requestBlockCursor = blockNumber;
     this.deliveryBlockCursor = blockNumber;
 
@@ -285,11 +293,9 @@ export class MechAdapter implements ExecutionAdapter {
             if (!isOurs) continue;
 
             try {
-              // Compute evidence hash for restoration deliveries (anti-farming)
-              let evidenceHash: `0x${string}` = '0x0000000000000000000000000000000000000000000000000000000000000000';
-              const isRestorationDelivery = this.pendingEvaluations.has(requestId);
-
-              if (isRestorationDelivery) {
+              const variant = this.config.routerClaimDeliveryVariant;
+              let evidenceHash: `0x${string}` | undefined;
+              if (variant === 'v2' && this.pendingEvaluations.has(requestId)) {
                 try {
                   const checkpoint: EvidenceCheckpointV1 = {
                     version: 1,
@@ -304,14 +310,16 @@ export class MechAdapter implements ExecutionAdapter {
                 }
               }
 
-              // Claim the delivery on the router
               await claimDelivery(
                 this.publicClient,
                 this.walletClient,
                 this.config.safeAddress,
                 this.config.routerAddress,
                 requestId as `0x${string}`,
-                evidenceHash,
+                {
+                  variant,
+                  evidenceHash,
+                },
               );
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);

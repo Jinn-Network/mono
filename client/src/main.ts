@@ -18,6 +18,7 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
+import { JsonRpcProvider } from 'ethers';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
@@ -25,7 +26,7 @@ import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { FleetStateStore } from './earning/store.js';
-import { decryptMnemonic, deriveAgentSigner } from './earning/wallet.js';
+import { decryptMnemonic, deriveAgentSigner, deriveMasterSigner } from './earning/wallet.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import { Daemon } from './daemon/daemon.js';
@@ -152,12 +153,22 @@ async function main(): Promise<void> {
     ipfsGatewayUrl: config.ipfsGatewayUrl,
     pollIntervalMs: config.pollIntervalMs,
     chainId: config.network === 'testnet' ? 84532 : 8453,
+    routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
   });
 
   const runner = new ClaudeRunner({
     claudePath: config.claudePath,
     model: config.claudeModel,
   });
+
+  const earningStore = new FleetStateStore(config.earningDir);
+  const mnemonicForMaster = await decryptMnemonic(
+    await earningStore.loadMnemonicKeystore(),
+    PASSWORD,
+  );
+  const masterSigner = deriveMasterSigner(mnemonicForMaster).connect(
+    new JsonRpcProvider(config.rpcUrl),
+  );
 
   const daemon = new Daemon({
     adapter,
@@ -168,6 +179,29 @@ async function main(): Promise<void> {
     peers: config.peers.length > 0 ? config.peers : undefined,
     subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
+    status: {
+      earningDir: config.earningDir,
+      rpcUrl: config.rpcUrl,
+      network: config.network,
+      pollIntervalMs: config.pollIntervalMs,
+      masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
+      rewardClaimIntervalMs: config.rewardClaimIntervalMs,
+      testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+      testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+      testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+      testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    },
+    rewardClaim:
+      config.rewardClaimIntervalMs > 0
+        ? {
+            intervalMs: config.rewardClaimIntervalMs,
+            provider: masterSigner.provider as JsonRpcProvider,
+            masterSigner,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            distributorAddress: CHAIN_CONFIG.distributorAddress,
+          }
+        : undefined,
   });
 
   // Graceful shutdown

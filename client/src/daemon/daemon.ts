@@ -6,11 +6,13 @@ import { CreatorLoop } from './creator.js';
 import { RestorerLoop } from './restorer.js';
 import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
+import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import { Registry8004, type RegistryConfig } from '../discovery/registry.js';
 import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../discovery/subgraph.js';
 import type { X402Config } from '../x402/handler.js';
+import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -28,6 +30,15 @@ export interface DaemonConfig {
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint?: string;
   x402?: X402Config;
+
+  /**
+   * Periodic stOLAS distributor reward claims (master EOA pays gas).
+   * Omitted or interval 0 → loop not started.
+   */
+  rewardClaim?: RewardClaimLoopConfig;
+
+  /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
+  status?: StatusGatherConfig;
 }
 
 export class Daemon {
@@ -42,6 +53,7 @@ export class Daemon {
   private peerSync?: PeerSync;
   private registry?: Registry8004;
   private readonly apiPort: number;
+  private rewardClaimLoop?: RewardClaimLoop;
 
   constructor(private readonly config: DaemonConfig) {
     this.store = new Store(config.dbPath);
@@ -50,6 +62,12 @@ export class Daemon {
     this.creatorLoop = new CreatorLoop(this.adapter, config.desiredStates, this.store);
     this.restorerLoop = new RestorerLoop(this.adapter, config.runner, this.store, '/tmp', 300000, `http://127.0.0.1:${this.apiPort}`);
     this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter);
+    if (config.rewardClaim && config.rewardClaim.intervalMs > 0) {
+      this.rewardClaimLoop = new RewardClaimLoop({
+        ...config.rewardClaim,
+        jinnStore: this.store,
+      });
+    }
   }
 
   async start(): Promise<void> {
@@ -63,6 +81,7 @@ export class Daemon {
       store: this.store,
       onArtifactPublished: (artifact) => this.registerArtifact(artifact),
       x402: this.config.x402,
+      status: this.config.status,
     });
 
     // Initialize 8004 registry if configured
@@ -99,12 +118,19 @@ export class Daemon {
       this.restorerLoop.run().catch(err => console.error('[daemon] restorer crashed:', err)),
       this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
     );
+
+    if (this.rewardClaimLoop) {
+      this.loopPromises.push(
+        this.rewardClaimLoop.run().catch(err => console.error('[daemon] reward-claim crashed:', err)),
+      );
+    }
   }
 
   async stop(): Promise<void> {
     this.creatorLoop.stop();
     this.restorerLoop.stop();
     this.deliveryWatcherLoop.stop();
+    this.rewardClaimLoop?.stop();
     this.peerSync?.stop();
 
     // Stop the adapter to unblock any pending async iterators

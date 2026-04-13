@@ -1,10 +1,16 @@
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { getAddress } from 'ethers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';
-import { generateMnemonic, encryptMnemonic, deriveMasterAddress } from '../../src/earning/wallet.js';
+import {
+  generateMnemonic,
+  encryptMnemonic,
+  deriveMasterAddress,
+  deriveAgentAddress,
+} from '../../src/earning/wallet.js';
 import { createDefaultFleetState } from '../../src/earning/types.js';
 
 describe('Fleet bootstrap', () => {
@@ -169,5 +175,141 @@ describe('Fleet bootstrap', () => {
     expect(result.fleet_state.services.every(s => s.step === 'complete')).toBe(true);
     // Services should have distinct indices 1, 2, 3
     expect(result.fleet_state.services.map(s => s.index)).toEqual([1, 2, 3]);
+  });
+
+  it('reconciles standard service unstaked on-chain before resume (mocked chain reads)', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'complete',
+          error: null,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(1);
+
+    const sweepSpy = vi
+      .spyOn(bootstrapper as any, 'sweepAbandonedSafeForService')
+      .mockResolvedValue(undefined);
+
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: 0,
+      stakingMultisig: null,
+      registryState: 4,
+      registryMultisig: '0x2222222222222222222222222222222222222222',
+      safeDeployed: true,
+    });
+    vi.spyOn(bootstrapper as any, 'stepStolasStake').mockImplementation(async (_s: any, _m: any, index: number) => {
+      return store.updateService(index, {
+        safe_address: '0x2222222222222222222222222222222222222222',
+        service_id: 100,
+        staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+        step: 'staked',
+      });
+    });
+    vi.spyOn(bootstrapper as any, 'stepDeployMech').mockImplementation(async (_s: any, _m: any, index: number) => {
+      return store.updateService(index, { mech_address: '0x4444444444444444444444444444444444444444', step: 'complete' });
+    });
+
+    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+
+    const result = await bootstrapper.bootstrap('test-password');
+    expect(result.ok).toBe(true);
+    const svc = result.fleet_state.services[0];
+    expect(svc.step).toBe('complete');
+    expect(svc.service_id).toBe(100);
+
+    expect(sweepSpy).toHaveBeenCalledTimes(1);
+    expect(sweepSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ master_address: masterAddr }),
+      expect.any(String),
+      1,
+      getAddress('0x2222222222222222222222222222222222222222'),
+    );
+  });
+
+  it('does not sweep abandoned Safe when standard service is only evicted (reStake path)', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'complete',
+          error: null,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    const sweepSpy = vi
+      .spyOn(bootstrapper as any, 'sweepAbandonedSafeForService')
+      .mockResolvedValue(undefined);
+
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: 2,
+      stakingMultisig: '0x2222222222222222222222222222222222222222',
+      registryState: 4,
+      registryMultisig: '0x2222222222222222222222222222222222222222',
+      safeDeployed: true,
+    });
+
+    vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(2);
+    vi.spyOn(bootstrapper as any, 'recoverEvictedService').mockImplementation(async (s: any, _m: string, index: number) => {
+      return store.updateService(index, { step: 'complete' });
+    });
+
+    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+
+    const result = await bootstrapper.bootstrap('test-password');
+    expect(result.ok).toBe(true);
+    expect(sweepSpy).not.toHaveBeenCalled();
   });
 });

@@ -11,6 +11,8 @@ export interface MechAdapterConfig {
   ipfsGatewayUrl: string;   // Read endpoint (e.g., https://gateway.autonolas.tech)
   pollIntervalMs: number;
   chainId: number;
+  /** Base mainnet V1 vs Phase 1b V2 `claimDelivery` — align with `ChainConfig.routerClaimDeliveryVersion`. */
+  routerClaimDeliveryVariant: 'v1' | 'v2';
   claimPolicy?: ClaimPolicy;
   claimRegistryAddress?: `0x${string}`;
 }
@@ -136,6 +138,31 @@ export const MECH_MARKETPLACE_DELIVER_ABI = [
   },
 ] as const;
 
+/** JinnRouter V1 (Base mainnet deployment). */
+export const JINN_ROUTER_CLAIM_DELIVERY_V1_ABI = [
+  {
+    name: 'claimDelivery',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    outputs: [],
+  },
+] as const;
+
+/** JinnRouter V2 (testnet / evidence hash). */
+export const JINN_ROUTER_CLAIM_DELIVERY_V2_ABI = [
+  {
+    name: 'claimDelivery',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'requestId', type: 'bytes32' },
+      { name: 'evidenceHash', type: 'bytes32' },
+    ],
+    outputs: [],
+  },
+] as const;
+
 export const JINN_ROUTER_ABI = [
   {
     name: 'createRestorationJob',
@@ -170,10 +197,7 @@ export const JINN_ROUTER_ABI = [
     name: 'claimDelivery',
     type: 'function',
     stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'requestId', type: 'bytes32' },
-      { name: 'evidenceHash', type: 'bytes32' },
-    ],
+    inputs: [{ name: 'requestId', type: 'bytes32' }],
     outputs: [],
   },
   {

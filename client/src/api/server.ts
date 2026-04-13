@@ -4,6 +4,7 @@
  * Uses Hono for routing (enables x402 payment middleware).
  *
  * Routes:
+ *   GET  /v1/status  (daemon health, fleet hints, RPC — best-effort)
  *   GET  /artifacts/search?tags=a,b&outcome=SUCCESS&limit=50
  *   GET  /artifacts/:id/content
  *   POST /artifacts  { id, desiredStateId, requestId, title, content, tags, outcome }
@@ -20,6 +21,7 @@ import {
   verifyRequestWithErc8128,
   InMemoryNonceStore,
 } from '../auth/erc8128.js';
+import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -27,6 +29,8 @@ export interface ApiServerConfig {
   requireAuth?: boolean;
   onArtifactPublished?: (artifact: { id: string; title: string; tags: string[]; outcome: string }) => void;
   x402?: X402Config;
+  /** When set, GET /v1/status includes fleet file + RPC reads. */
+  status?: StatusGatherConfig;
 }
 
 export interface ApiServer {
@@ -39,6 +43,23 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   const app = new Hono();
 
   app.use(cors());
+
+  app.get('/v1/status', async (c) => {
+    try {
+      const body = await gatherStatusForApi(store, config.status);
+      return c.json(body);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json(
+        {
+          error: 'status_gather_failed',
+          message,
+          daemon: { shutdownState: store.getShutdownState(), dbPath: store.path },
+        },
+        500,
+      );
+    }
+  });
 
   // x402 payment-gated routes (if configured)
   if (config.x402) {

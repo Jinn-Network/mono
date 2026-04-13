@@ -2,6 +2,7 @@ import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { DesiredState, RequestId } from '../types/index.js';
 import type { Store } from '../store/store.js';
 import { TransientError } from '../types/index.js';
+import { isRecoverableTransactionError } from '../tx-retry.js';
 
 export interface ActiveAttempt {
   desiredState: DesiredState;
@@ -68,13 +69,15 @@ export class CreatorLoop {
 
   async run(): Promise<void> {
     while (!this.stopped) {
+      let delayMs = 5000;
       try {
         await this.tick();
       } catch (err) {
         console.error('[creator] Error:', err);
+        delayMs = isRecoverableTransactionError(err) ? 12_000 : 8000;
       }
       await Promise.race([
-        new Promise(r => setTimeout(r, 5000)),
+        new Promise(r => setTimeout(r, delayMs)),
         this.stopPromise,
       ]);
     }
