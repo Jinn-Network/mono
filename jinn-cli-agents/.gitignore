@@ -271,3 +271,7 @@ logs/security/
 
 # Operator-specific config (copy from jinn.yaml.example)
 jinn.yaml
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+.beads-credential-key
