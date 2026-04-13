@@ -10,6 +10,7 @@ import {
   Interface,
   JsonRpcProvider,
   Wallet,
+  formatEther,
   getAddress,
 } from 'ethers';
 import {
@@ -21,7 +22,6 @@ import {
   SERVICE_REGISTRY_L2_ABI,
   STAKING_ABI,
   MECH_MARKETPLACE_CREATE_ABI,
-  STOLAS_DISTRIBUTOR,
   STOLAS_DISTRIBUTOR_ABI,
   STOLAS_STAKING_SLOTS_ABI,
   cidToBytes32,
@@ -53,8 +53,21 @@ import type {
   StakingMode,
 } from './types.js';
 import { createDefaultServiceState } from './types.js';
+import {
+  formatBootstrapOperatorMessage,
+  isJinnDebug,
+} from '../operator-errors.js';
+import {
+  ethersSendTransactionWithRetry,
+  ethersWaitForTransactionHashWithRetry,
+} from '../tx-retry.js';
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
+
+/** Conservative default: ~0.001 ETH/day master gas if not configured. */
+const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
+/** Warn when ETH above the minimum would last fewer than this many days at the daily estimate. */
+const MASTER_ETH_RUNWAY_WARN_DAYS = 7n;
 
 export interface FleetBootstrapperOptions {
   earningDir?: string;
@@ -65,6 +78,16 @@ export interface FleetBootstrapperOptions {
   testnetL2DeploymentPath?: string;
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
+  testnetStolasDeploymentPath?: string;
+  /** Verbose errors (default: JINN_DEBUG env or false). */
+  debug?: boolean;
+  /** Estimated master gas per day (wei) for runway warnings. */
+  masterEthDailyEstimateWei?: bigint | string;
+  /**
+   * When `masterEthDailyEstimateWei` is unset, blends a conservative daily estimate
+   * from poll frequency (config.pollIntervalMs).
+   */
+  pollIntervalMs?: number;
 }
 
 export class FleetBootstrapper {
@@ -74,16 +97,25 @@ export class FleetBootstrapper {
   private readonly chain: 'base' | 'base-sepolia';
   private readonly stakingMode: StakingMode;
   private readonly targetServices: number;
+  private readonly debug: boolean;
+  private readonly masterEthDailyEstimateWei: bigint;
 
   constructor(options: FleetBootstrapperOptions = {}) {
     this.store = new FleetStateStore(options.earningDir);
     this.chain = options.chain ?? 'base';
     this.stakingMode = options.stakingMode ?? 'standard';
     this.targetServices = options.targetServices ?? 1;
+    this.debug = options.debug ?? isJinnDebug();
+    const dailyOpt = options.masterEthDailyEstimateWei;
+    this.masterEthDailyEstimateWei =
+      dailyOpt !== undefined
+        ? BigInt(dailyOpt)
+        : this.estimateMasterDailyGasWei(options.pollIntervalMs);
     this.config = getChainConfig(this.chain, {
       testnetL2DeploymentPath: options.testnetL2DeploymentPath,
       testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: options.testnetMechDeploymentPath,
+      testnetStolasDeploymentPath: options.testnetStolasDeploymentPath,
     });
 
     if (options.rpcUrl) {
@@ -95,6 +127,19 @@ export class FleetBootstrapper {
 
   async getStatus(): Promise<FleetState> {
     return this.store.load(this.chain);
+  }
+
+  /**
+   * Conservative daily master gas (wei): max(DEFAULT, rough tx count from poll interval × cost).
+   */
+  private estimateMasterDailyGasWei(pollIntervalMs?: number): bigint {
+    const interval = Math.max(pollIntervalMs ?? 5000, 1000);
+    const pollsPerDay = 86400000 / interval;
+    // Assume at most one funding-sized tx per ~600 polls (~50 min at 5s), capped at 12/day
+    const txsPerDay = Math.min(Math.ceil(pollsPerDay / 600), 12);
+    const txCostWei = 150_000n * 2_000_000_000n; // ~150k gas @ 2 gwei
+    const fromPoll = BigInt(txsPerDay) * txCostWei;
+    return fromPoll > DEFAULT_MASTER_ETH_DAILY_WEI ? fromPoll : DEFAULT_MASTER_ETH_DAILY_WEI;
   }
 
   async bootstrap(password: string): Promise<FleetBootstrapResult> {
@@ -133,17 +178,21 @@ export class FleetBootstrapper {
         ? this.config.minEoaGasEth
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
       if (systemEth < requiredMasterEth) {
+        const shortfall = requiredMasterEth - systemEth;
+        const friendly = `Your master wallet needs more ETH (currently ${formatEther(masterBalance)} ETH, need ${formatEther(shortfall)} ETH more). Please send ETH to: ${masterAddress}`;
         return {
           ok: false,
           fleet_state: state,
-          message: `Fund master wallet with ETH, then re-run.`,
+          message: friendly,
           funding: {
             master_address: masterAddress,
-            eth_required: (requiredMasterEth - systemEth).toString(),
+            eth_required: shortfall.toString(),
             eth_balance: masterBalance.toString(),
           },
         };
       }
+
+      this.warnMasterEthRunway(masterAddress, masterBalance, requiredMasterEth);
 
       // Phase 2: Bootstrap services up to target
       const mnemonic = await decryptMnemonic(
@@ -151,12 +200,15 @@ export class FleetBootstrapper {
         password,
       );
 
-      // Resume any incomplete services first
+      // Resume all services. For incomplete services, this picks up where they
+      // left off. For "complete" services in standard mode, this also runs the
+      // eviction recovery check (since on-chain state may have changed since
+      // the daemon was last running — e.g., evicted due to inactivity).
       for (const svc of state.services) {
         if (svc.step !== 'complete') {
           console.error(`[fleet-bootstrap] Resuming service ${svc.index} at step '${svc.step}'`);
-          state = await this.resumeService(state, mnemonic, svc.index);
         }
+        state = await this.resumeService(state, mnemonic, svc.index);
       }
 
       // Then create new services if needed
@@ -178,14 +230,41 @@ export class FleetBootstrapper {
         message: `Fleet bootstrap complete. ${state.services.filter(s => s.step === 'complete').length}/${this.targetServices} services running.`,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[fleet-bootstrap] Bootstrap failed:`, error);
+      const { summary, hint } = formatBootstrapOperatorMessage(error);
+      const userMessage = hint !== undefined ? `${summary}\nHint: ${hint}` : summary;
+      if (this.debug) {
+        console.error(`[fleet-bootstrap] Bootstrap failed:`, error);
+      } else {
+        console.error(`[fleet-bootstrap] ${summary}`);
+        if (hint !== undefined) console.error(`Hint: ${hint}`);
+      }
       return {
         ok: false,
         fleet_state: state,
-        message: `Fleet bootstrap failed: ${message}`,
+        message: userMessage,
       };
     }
+  }
+
+  /**
+   * If the master is only slightly above the minimum, warn about gas runway (heuristic days).
+   */
+  private warnMasterEthRunway(
+    masterAddress: string,
+    masterBalance: bigint,
+    requiredMasterEth: bigint,
+  ): void {
+    const daily = this.masterEthDailyEstimateWei;
+    if (daily === 0n) return;
+    const excess = masterBalance > requiredMasterEth ? masterBalance - requiredMasterEth : 0n;
+    const threshold = daily * MASTER_ETH_RUNWAY_WARN_DAYS;
+    if (excess >= threshold) return;
+
+    const days = excess / daily;
+    console.error(
+      `[fleet-bootstrap] Warning: Master wallet ETH headroom is low (~${days} day(s) at estimated daily usage). ` +
+        `Consider sending more ETH to: ${masterAddress}`,
+    );
   }
 
   // ── Phase 1: Master wallet ───────────────────────────────────────────
@@ -234,8 +313,25 @@ export class FleetBootstrapper {
     mnemonic: string,
     index: number,
   ): Promise<FleetState> {
-    const svc = state.services.find(s => s.index === index);
+    let svc = state.services.find(s => s.index === index);
     if (!svc) throw new Error(`Service ${index} not found in state`);
+
+    // Eviction recovery: even for "complete" services, check if on-chain shows
+    // evicted (state=2). If so, unstake and reset to awaiting_stake so the
+    // bootstrap restakes fresh. Only applies to standard mode (distributor-managed).
+    if (
+      this.stakingMode === 'standard' &&
+      svc.service_id !== null &&
+      (svc.step === 'complete' || svc.step === 'mech_deployed' || svc.step === 'staked')
+    ) {
+      const onChainState = await this.getStakingState(svc.service_id);
+      if (onChainState === 2) {
+        console.error(`[fleet-bootstrap] Service ${index}: detected eviction (id=${svc.service_id}), recovering...`);
+        state = await this.recoverEvictedService(state, mnemonic, index);
+        svc = state.services.find(s => s.index === index)!;
+      }
+    }
+
     if (svc.step === 'complete') return state;
 
     if (this.stakingMode === 'standard') {
@@ -317,7 +413,7 @@ export class FleetBootstrapper {
   ): Promise<FleetState> {
     const svc = state.services.find(s => s.index === index)!;
 
-    // Idempotency: if service already has a service_id, check if staked
+    // Idempotency: if this service already has an id and is already staked, skip
     if (svc.service_id !== null) {
       const stakingState = await this.getStakingState(svc.service_id);
       if (stakingState === 1) {
@@ -338,20 +434,25 @@ export class FleetBootstrapper {
     const distributorIface = new Interface(STOLAS_DISTRIBUTOR_ABI);
     const stakeData = distributorIface.encodeFunctionData('stake', [
       this.config.stakingContract,
-      0,
+      0, // Always 0: create a new service. Eviction recovery is handled separately via distributor.reStake().
       this.config.agentId,
       configHashBytes,
       agentAddress,
     ]);
 
     console.error(`[fleet-bootstrap] Service ${index}: calling distributor.stake() from master`);
-    const txResponse = await masterWithProvider.sendTransaction({
-      to: STOLAS_DISTRIBUTOR,
+    const txResponse = await ethersSendTransactionWithRetry(masterWithProvider, {
+      to: this.config.distributorAddress!,
       data: stakeData,
       gasLimit: 2_500_000n,
     });
 
-    const receipt = await txResponse.wait();
+    const receipt = await ethersWaitForTransactionHashWithRetry(
+      this.provider,
+      txResponse.hash,
+      1,
+      30000,
+    );
     if (!receipt || receipt.status !== 1) {
       throw new Error(`stOLAS stake() tx failed for service ${index}: ${txResponse.hash}`);
     }
@@ -376,6 +477,58 @@ export class FleetBootstrapper {
       safe_address: safeAddress,
       staking_address: this.config.stakingContract,
       step: 'staked',
+    });
+  }
+
+  private async recoverEvictedService(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    if (!this.config.distributorAddress) {
+      throw new Error('distributorAddress not configured');
+    }
+
+    const svc = state.services.find(s => s.index === index)!;
+    const serviceId = svc.service_id!;
+
+    // Master EOA is the curating agent for this service and pays gas
+    const masterSigner = deriveMasterSigner(mnemonic);
+    const masterWithProvider = masterSigner.connect(this.provider);
+
+    // Use distributor.reStake() — a purpose-built entry point for evicted services.
+    // It calls IStaking.unstake() → IStaking.stake() on the staking proxy without
+    // touching the service lifecycle (no terminate/unbond/recoverAccess). The service
+    // stays in Deployed state, the Safe owners are untouched, and the same service
+    // ID, Safe address, and mech address are preserved across the eviction.
+    // Authorization: master EOA is a curating agent (recorded when it called stake()).
+    const distributorIface = new Interface(STOLAS_DISTRIBUTOR_ABI);
+    const reStakeData = distributorIface.encodeFunctionData('reStake', [
+      this.config.stakingContract,
+      serviceId,
+    ]);
+
+    console.error(`[fleet-bootstrap] Service ${index}: calling distributor.reStake() for evicted service ${serviceId}`);
+    const tx = await ethersSendTransactionWithRetry(masterWithProvider, {
+      to: this.config.distributorAddress,
+      data: reStakeData,
+      gasLimit: 1_500_000n,
+    });
+    const receipt = await ethersWaitForTransactionHashWithRetry(
+      this.provider,
+      tx.hash,
+      1,
+      30000,
+    );
+    if (!receipt || receipt.status !== 1) {
+      throw new Error(`reStake failed for service ${index}: ${tx.hash}`);
+    }
+    console.error(`[fleet-bootstrap] Service ${index}: reStake confirmed (tx: ${tx.hash})`);
+
+    // Service is now Staked again with the same service_id, safe_address, and mech_address.
+    // Mark the step as complete so the bootstrap doesn't try to re-stake or re-deploy mech.
+    return this.store.updateService(index, {
+      step: 'complete',
     });
   }
 
@@ -404,11 +557,11 @@ export class FleetBootstrapper {
     if (agentBalance < minAgentGas) {
       const fundAmount = minAgentGas - agentBalance;
       console.error(`[fleet-bootstrap] Service ${index}: funding agent with ${fundAmount} wei`);
-      const fundTx = await masterWithProvider.sendTransaction({
+      const fundTx = await ethersSendTransactionWithRetry(masterWithProvider, {
         to: svc.agent_address,
         value: fundAmount,
       });
-      await fundTx.wait();
+      await ethersWaitForTransactionHashWithRetry(this.provider, fundTx.hash, 1, 30000);
     }
 
     // Deploy mech via the service Safe (agent is Safe owner)
@@ -436,7 +589,12 @@ export class FleetBootstrapper {
       { to: this.config.mechMarketplace, value: '0', data: createData },
     ]);
 
-    const mechReceipt = await this.provider.waitForTransaction(result.hash, 1, 30000);
+    const mechReceipt = await ethersWaitForTransactionHashWithRetry(
+      this.provider,
+      result.hash,
+      1,
+      30000,
+    );
     if (!mechReceipt || mechReceipt.status === 0) {
       throw new Error(`Mech deployment tx failed for service ${index}: ${result.hash}`);
     }
@@ -502,11 +660,11 @@ export class FleetBootstrapper {
     if (agentBalance < requiredAgentEth) {
       const fundAmount = requiredAgentEth - agentBalance;
       console.error(`[fleet-bootstrap] Service ${index}: funding agent with ${fundAmount} wei from master`);
-      const fundTx = await masterWithProvider.sendTransaction({
+      const fundTx = await ethersSendTransactionWithRetry(masterWithProvider, {
         to: agentAddress,
         value: fundAmount,
       });
-      await fundTx.wait();
+      await ethersWaitForTransactionHashWithRetry(this.provider, fundTx.hash, 1, 30000);
     }
 
     // 3. Check agent ETH balance (retry — public RPCs can lag after a write)
@@ -530,11 +688,11 @@ export class FleetBootstrapper {
       if (eoaAvailable >= shortfall) {
         console.error(`[fleet-bootstrap] Service ${index}: auto-topping Safe with ${shortfall} wei ETH`);
         const agentWithProvider = agentSigner.connect(this.provider);
-        const topTx = await agentWithProvider.sendTransaction({
+        const topTx = await ethersSendTransactionWithRetry(agentWithProvider, {
           to: safeAddress,
           value: shortfall,
         });
-        await topTx.wait();
+        await ethersWaitForTransactionHashWithRetry(this.provider, topTx.hash, 1, 30000);
         safeEthBalance += shortfall;
       }
     }
@@ -568,13 +726,18 @@ export class FleetBootstrapper {
 
       const deployTx = await safe.createSafeDeploymentTransaction();
       const agentWithProvider = agentSigner.connect(this.provider);
-      const txResponse = await agentWithProvider.sendTransaction({
+      const txResponse = await ethersSendTransactionWithRetry(agentWithProvider, {
         to: deployTx.to,
-        value: deployTx.value,
+        value: BigInt(deployTx.value),
         data: deployTx.data,
       });
 
-      const receipt = await txResponse.wait();
+      const receipt = await ethersWaitForTransactionHashWithRetry(
+        this.provider,
+        txResponse.hash,
+        1,
+        30000,
+      );
       if (!receipt || receipt.status !== 1) {
         throw new Error(`Safe deployment tx failed for service ${index}: ${txResponse.hash}`);
       }
@@ -890,7 +1053,13 @@ export class FleetBootstrapper {
   }
 
   private async stolasPreflightCheck(): Promise<void> {
-    const distributor = new Contract(STOLAS_DISTRIBUTOR, STOLAS_DISTRIBUTOR_ABI, this.provider);
+    if (!this.config.distributorAddress) {
+      throw new Error(
+        'distributorAddress not configured. Set JINN_TESTNET_STOLAS_DEPLOYMENT or use stakingMode: self-bond.',
+      );
+    }
+
+    const distributor = new Contract(this.config.distributorAddress, STOLAS_DISTRIBUTOR_ABI, this.provider);
     const proxyConfig: bigint = await distributor.mapStakingProxyConfigs(this.config.stakingContract);
     if (proxyConfig === 0n) {
       throw new Error(

@@ -21,6 +21,7 @@ import { config as dotenvConfig } from 'dotenv';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
+import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { FleetStateStore } from './earning/store.js';
@@ -52,6 +53,7 @@ const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN, {
   testnetL2DeploymentPath: config.testnetL2DeploymentPath,
   testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
   testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+  testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
 });
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
@@ -74,20 +76,21 @@ async function bootstrap(): Promise<{
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+    testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    debug: config.debug,
+    masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
+    pollIntervalMs: config.pollIntervalMs,
   });
 
   const result = await bootstrapper.bootstrap(PASSWORD);
 
   if (result.funding) {
-    console.log(`\nFund master wallet: ${result.funding.master_address}`);
-    console.log(`  ETH required: ${result.funding.eth_required} wei`);
-    console.log(`  ETH balance:  ${result.funding.eth_balance} wei`);
-    console.log('\nFund the address above, then re-run.');
+    console.error(`\n${result.message}\n`);
     process.exit(0);
   }
 
   if (!result.ok) {
-    console.error(`[main] Bootstrap failed: ${result.message}`);
+    console.error(`[main] ${result.message}`);
     process.exit(1);
   }
 
@@ -183,6 +186,12 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('[main] Fatal error:', err);
+  if (config.debug) {
+    console.error('[main] Fatal error:', err);
+  } else {
+    const { summary, hint } = formatBootstrapOperatorMessage(err);
+    console.error(`[main] ${summary}`);
+    if (hint !== undefined) console.error(`Hint: ${hint}`);
+  }
   process.exit(1);
 });

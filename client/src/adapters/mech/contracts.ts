@@ -9,6 +9,11 @@ import {
 } from 'viem';
 import { MECH_MARKETPLACE_ABI, MECH_ABI, JINN_ROUTER_ABI, CLAIM_REGISTRY_ABI, NATIVE_PAYMENT_TYPE } from './types.js';
 import { executeSafeTransaction } from './safe.js';
+import {
+  isRecoverableTransactionError,
+  waitForTransactionReceiptWithRetry,
+  backoffDelay,
+} from '../../tx-retry.js';
 
 export async function submitRestorationJob(
   publicClient: PublicClient,
@@ -33,7 +38,11 @@ export async function submitRestorationJob(
     data: calldata,
   });
 
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
+    onRetry: ({ attempt, message }) => {
+      console.error(`[router] wait restoration receipt retry ${attempt}: ${message}`);
+    },
+  });
 
   const requestIds: string[] = [];
   for (const log of receipt.logs) {
@@ -79,7 +88,11 @@ export async function submitEvaluationJob(
     data: calldata,
   });
 
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
+    onRetry: ({ attempt, message }) => {
+      console.error(`[router] wait evaluation receipt retry ${attempt}: ${message}`);
+    },
+  });
 
   const requestIds: string[] = [];
   for (const log of receipt.logs) {
@@ -101,7 +114,7 @@ export async function submitEvaluationJob(
   return requestIds;
 }
 
-const CLAIM_RETRY_ATTEMPTS = 3;
+const CLAIM_RETRY_ATTEMPTS = 6;
 const CLAIM_RETRY_DELAY_MS = 2000;
 
 export async function claimDelivery(
@@ -147,6 +160,12 @@ export async function claimDelivery(
         continue;
       }
 
+      if (isRecoverableTransactionError(err) && attempt < CLAIM_RETRY_ATTEMPTS) {
+        console.error(`[router] claimDelivery: transient error, retry ${attempt}/${CLAIM_RETRY_ATTEMPTS}`);
+        await backoffDelay(attempt - 1, CLAIM_RETRY_DELAY_MS, 10_000);
+        continue;
+      }
+
       throw err;
     }
   }
@@ -174,7 +193,11 @@ export async function claimJob(
       publicClient, walletClient,
       { safeAddress, to: claimRegistryAddress, value: 0n, data },
     );
-    await publicClient.waitForTransactionReceipt({ hash: txHash as Hex });
+    await waitForTransactionReceiptWithRetry(publicClient, txHash as Hex, {
+      onRetry: ({ attempt, message }) => {
+        console.error(`[claim-registry] wait receipt retry ${attempt}: ${message}`);
+      },
+    });
     return txHash;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

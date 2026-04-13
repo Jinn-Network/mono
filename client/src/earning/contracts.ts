@@ -108,12 +108,14 @@ export interface ChainConfig {
   minEoaGasEth: bigint;
   minSafeEth: bigint;
   jinnRouter?: string;
+  distributorAddress?: string;
 }
 
 interface ChainConfigOverrides {
   testnetL2DeploymentPath?: string;
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
+  testnetStolasDeploymentPath?: string;
 }
 
 interface DeploymentArtifact {
@@ -146,6 +148,9 @@ const BASE_CONFIG: ChainConfig = {
 
   // Jinn staking (JinnRouter activity checker)
   stakingContract: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+
+  // stOLAS ExternalStakingDistributor (LemonTree, Base mainnet)
+  distributorAddress: '0x40abf47B926181148000DbCC7c8DE76A3a61a66f',
 
   // Service package
   agentId: 103,
@@ -274,6 +279,16 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     if (stakingToken) {
       resolved.stakingContract = stakingToken;
     }
+  }
+
+  const stolasArtifactPath = overrides.testnetStolasDeploymentPath ?? process.env['JINN_TESTNET_STOLAS_DEPLOYMENT'];
+  if (stolasArtifactPath) {
+    const stolasArtifact = loadArtifact(stolasArtifactPath);
+    const distributor = stolasArtifact.contracts?.distributor;
+    if (!distributor) {
+      throw new Error(`stOLAS artifact ${path.resolve(stolasArtifactPath)} is missing contracts.distributor`);
+    }
+    resolved.distributorAddress = distributor;
   }
 
   return resolved;
@@ -516,6 +531,27 @@ export const STOLAS_DISTRIBUTOR_ABI = [
       { name: 'agentInstance', type: 'address' },
     ],
     name: 'stake',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'stakingProxy', type: 'address' },
+      { name: 'serviceId', type: 'uint256' },
+      { name: 'operation', type: 'bytes32' },
+    ],
+    name: 'unstakeAndWithdraw',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'stakingProxy', type: 'address' },
+      { name: 'serviceId', type: 'uint256' },
+    ],
+    name: 'reStake',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',

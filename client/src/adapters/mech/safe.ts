@@ -11,6 +11,10 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { SAFE_ABI } from './types.js';
+import {
+  withRecoverableRetry,
+  viemFeeOverridesForAttempt,
+} from '../../tx-retry.js';
 
 export function buildSafeSignature(signerAddress: string): Hex {
   const r = signerAddress.toLowerCase().replace('0x', '').padStart(64, '0');
@@ -47,7 +51,13 @@ export async function executeSafeTransaction(
   await pending;
 
   try {
-    return await executeSafeTransactionInner(publicClient, walletClient, params);
+    const hash = await executeSafeTransactionInner(publicClient, walletClient, params);
+    // Wait for the tx to mine before releasing the lock so the next caller sees
+    // the updated Safe nonce. Without this, the next signer reads a stale nonce
+    // (the broadcast tx is still pending) and the resulting signature recovers
+    // a different address at execution time, causing GS026 (invalid owner).
+    await publicClient.waitForTransactionReceipt({ hash });
+    return hash;
   } finally {
     releaseLock();
   }
@@ -62,38 +72,71 @@ async function executeSafeTransactionInner(
   const account = walletClient.account;
   if (!account) throw new Error('Wallet client has no account');
 
-  const nonce = await publicClient.readContract({
-    address: safeAddress,
-    abi: SAFE_ABI,
-    functionName: 'nonce',
-  });
+  return withRecoverableRetry(
+    async (attemptIndex) => {
+      const nonce = await publicClient.readContract({
+        address: safeAddress,
+        abi: SAFE_ABI,
+        functionName: 'nonce',
+      });
 
-  const txHash = await publicClient.readContract({
-    address: safeAddress,
-    abi: SAFE_ABI,
-    functionName: 'getTransactionHash',
-    args: [to, value, data, 0, 0n, 0n, 0n, '0x0000000000000000000000000000000000000000' as Address, '0x0000000000000000000000000000000000000000' as Address, nonce],
-  });
+      const txHash = await publicClient.readContract({
+        address: safeAddress,
+        abi: SAFE_ABI,
+        functionName: 'getTransactionHash',
+        args: [
+          to,
+          value,
+          data,
+          0,
+          0n,
+          0n,
+          0n,
+          '0x0000000000000000000000000000000000000000' as Address,
+          '0x0000000000000000000000000000000000000000' as Address,
+          nonce,
+        ],
+      });
 
-  const ethSignature = await walletClient.signMessage({
-    account,
-    message: { raw: txHash as Hex },
-  });
+      const ethSignature = await walletClient.signMessage({
+        account,
+        message: { raw: txHash as Hex },
+      });
 
-  const sigBytes = Buffer.from((ethSignature as string).slice(2), 'hex');
-  sigBytes[64] = sigBytes[64] + 4;
-  const safeSignature = `0x${sigBytes.toString('hex')}` as Hex;
+      const sigBytes = Buffer.from((ethSignature as string).slice(2), 'hex');
+      sigBytes[64] = sigBytes[64] + 4;
+      const safeSignature = `0x${sigBytes.toString('hex')}` as Hex;
 
-  const hash = await walletClient.writeContract({
-    address: safeAddress,
-    abi: SAFE_ABI,
-    functionName: 'execTransaction',
-    args: [to, value, data, 0, 0n, 0n, 0n, '0x0000000000000000000000000000000000000000' as Address, '0x0000000000000000000000000000000000000000' as Address, safeSignature],
-    account,
-    chain: walletClient.chain,
-  });
+      const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex);
 
-  return hash;
+      return walletClient.writeContract({
+        address: safeAddress,
+        abi: SAFE_ABI,
+        functionName: 'execTransaction',
+        args: [
+          to,
+          value,
+          data,
+          0,
+          0n,
+          0n,
+          0n,
+          '0x0000000000000000000000000000000000000000' as Address,
+          '0x0000000000000000000000000000000000000000' as Address,
+          safeSignature,
+        ],
+        account,
+        chain: walletClient.chain,
+        value: params.value,
+        ...feeOverrides,
+      });
+    },
+    {
+      onRetry: ({ attempt, message }) => {
+        console.error(`[safe/viem] execTransaction retry ${attempt}: ${message}`);
+      },
+    },
+  );
 }
 
 export function createClients(rpcUrl: string, privateKey: Hex, chain?: Chain): { publicClient: PublicClient; walletClient: WalletClient; account: ReturnType<typeof privateKeyToAccount> } {

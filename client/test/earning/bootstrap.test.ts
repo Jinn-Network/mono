@@ -33,6 +33,8 @@ describe('Fleet bootstrap', () => {
 
     expect(result.ok).toBe(false);
     expect(result.funding).toBeDefined();
+    expect(result.message).toContain('Your master wallet needs more ETH');
+    expect(result.message).toContain(result.funding!.master_address);
     expect(result.funding!.master_address).toMatch(/^0x[0-9a-fA-F]{40}$/);
     expect(result.funding!.eth_balance).toBe('0');
 

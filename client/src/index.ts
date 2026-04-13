@@ -22,5 +22,11 @@ export { Store } from './store/store.js';
 // Config
 export { loadConfig, getConfigPathFromArgs, JinnConfigSchema, type JinnConfig } from './config.js';
 
+// Operator-facing errors
+export {
+  formatBootstrapOperatorMessage,
+  isJinnDebug,
+} from './operator-errors.js';
+
 // Earning
 export { FleetBootstrapper, type FleetBootstrapperOptions } from './earning/bootstrap.js';

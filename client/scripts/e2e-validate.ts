@@ -501,40 +501,25 @@ async function main(): Promise<void> {
         });
 
         const initialResult = await bootstrapper.bootstrap(PASSWORD);
-        if (initialResult.step !== 'awaiting_funding') {
-          throw new Error(`Expected step 'awaiting_funding', got '${initialResult.step}'`);
-        }
         if (!initialResult.funding) {
-          throw new Error('Expected funding requirement in result');
+          throw new Error(`Expected funding requirement in result, but bootstrap returned ok=${initialResult.ok}`);
         }
 
-        const eoaAddress = initialResult.funding.eoa_address;
-        const predictedSafe = initialResult.funding.safe_address;
-        console.log(`    EOA: ${eoaAddress}`);
-        console.log(`    Predicted Safe: ${predictedSafe}`);
+        const masterAddress = initialResult.funding.master_address;
+        console.log(`    Master: ${masterAddress}`);
 
         // Step 2: Fund accounts on Anvil
 
-        // Fund EOA with 100 ETH
+        // Fund Master with enough ETH for bootstrap
         await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
-          eoaAddress,
+          masterAddress,
           '0x56BC75E2D63100000', // 100 ETH
         ]);
 
-        // Fund Safe with ETH
-        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
-          predictedSafe,
-          '0x56BC75E2D63100000', // 100 ETH
-        ]);
+        // Note: Safe OLAS funding will be handled after Safe creation in bootstrap
 
-        // Fund Safe with OLAS via storage slot
-        const olasAmount = 10000n * 10n ** 18n;
-        const slot = erc20BalanceSlot(predictedSafe);
-        const value = zeroPadValue(toBeHex(olasAmount), 32);
-        await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [OLAS_TOKEN, slot, value]);
-
-        // Fund staking contract with OLAS rewards via deposit()
-        const eoaOlasSlot = erc20BalanceSlot(eoaAddress);
+        // Fund staking contract with OLAS rewards via deposit() using master address
+        const eoaOlasSlot = erc20BalanceSlot(masterAddress);
         const eoaOlasAmount = 100000n * 10n ** 18n;
         await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [
           OLAS_TOKEN,
@@ -542,12 +527,12 @@ async function main(): Promise<void> {
           zeroPadValue(toBeHex(eoaOlasAmount), 32),
         ]);
 
-        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [eoaAddress]);
+        await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddress]);
         const olasApprove = new Interface([
           'function approve(address spender, uint256 amount) returns (bool)',
         ]).encodeFunctionData('approve', [CHAIN_CONFIG.stakingContract, eoaOlasAmount]);
         await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
-          { from: eoaAddress, to: OLAS_TOKEN, data: olasApprove },
+          { from: masterAddress, to: OLAS_TOKEN, data: olasApprove },
         ]);
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
@@ -555,9 +540,9 @@ async function main(): Promise<void> {
           'function deposit(uint256 amount)',
         ]).encodeFunctionData('deposit', [eoaOlasAmount]);
         await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
-          { from: eoaAddress, to: CHAIN_CONFIG.stakingContract, data: depositData },
+          { from: masterAddress, to: CHAIN_CONFIG.stakingContract, data: depositData },
         ]);
-        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [eoaAddress]);
+        await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [masterAddress]);
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Verify staking rewards
@@ -579,24 +564,31 @@ async function main(): Promise<void> {
         });
 
         const finalResult = await bootstrapper.bootstrap(PASSWORD);
-        if (!finalResult.ok || finalResult.step !== 'complete') {
+        if (!finalResult.ok) {
           throw new Error(
-            `Expected step 'complete', got '${finalResult.step}': ${finalResult.message}`,
+            `Bootstrap failed: ${finalResult.message}`,
           );
         }
 
-        serviceId = finalResult.earning_state.service_id ?? undefined;
-        safeAddress = (finalResult.earning_state.safe_address ?? predictedSafe) as Address;
-        mechAddress = finalResult.earning_state.mech_address as Address | undefined;
+        const firstComplete = finalResult.fleet_state.services.find(s => s.step === 'complete');
+        serviceId = firstComplete?.service_id ?? undefined;
+        safeAddress = firstComplete?.safe_address as Address | undefined;
+        mechAddress = firstComplete?.mech_address as Address | undefined;
 
         if (!mechAddress) {
           throw new Error('Bootstrap completed but no mech_address in state');
         }
 
-        // Step 4: Decrypt keystore to get agent EOA private key
-        const keystoreJson = await readFile(join(tmpDir, 'agent_keystore.json'), 'utf8');
-        const wallet = await Wallet.fromEncryptedJson(keystoreJson, PASSWORD);
-        agentEoaPrivateKey = wallet.privateKey as Hex;
+        // Step 4: Decrypt mnemonic keystore to derive agent EOA private key
+        const { FleetStateStore } = await import('../src/earning/store.js');
+        const { decryptMnemonic, deriveAgentSigner } = await import('../src/earning/wallet.js');
+        const store = new FleetStateStore(tmpDir);
+        const mnemonic = await decryptMnemonic(
+          await store.loadMnemonicKeystore(),
+          PASSWORD,
+        );
+        const agentSigner = deriveAgentSigner(mnemonic, firstComplete!.index);
+        agentEoaPrivateKey = agentSigner.privateKey as Hex;
 
         console.log(`    Bootstrap complete!`);
         console.log(`    Service ID: ${serviceId}`);

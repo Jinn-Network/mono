@@ -9,6 +9,7 @@
 
 import type { MetaTransactionData, TransactionResult } from '@safe-global/types-kit';
 import { Contract, JsonRpcProvider, Wallet, ZeroAddress, getBytes, hexlify, concat } from 'ethers';
+import { withRecoverableRetry } from '../tx-retry.js';
 
 export type { MetaTransactionData, TransactionResult };
 
@@ -137,23 +138,32 @@ export async function executeSafeTxBatch(
   safe: SafeInstance,
   transactions: MetaTransactionData[],
 ): Promise<TransactionResult> {
-  const safeTx = await safe.createTransaction({ transactions });
-  const signedTx = await safe.signTransaction(safeTx);
+  return withRecoverableRetry(
+    async () => {
+      const safeTx = await safe.createTransaction({ transactions });
+      const signedTx = await safe.signTransaction(safeTx);
 
-  try {
-    return await safe.executeTransaction(signedTx);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!message.includes('GS013')) {
-      throw err;
-    }
+      try {
+        return await safe.executeTransaction(signedTx);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('GS013')) {
+          throw err;
+        }
 
-    // Safe SDK gas estimation intermittently fails on certain inner calls
-    // (notably staking approve+stake batches) even when the transaction itself succeeds.
-    return safe.executeTransaction(signedTx, {
-      gasLimit: SAFE_EXECUTION_FALLBACK_GAS_LIMIT,
-    });
-  }
+        // Safe SDK gas estimation intermittently fails on certain inner calls
+        // (notably staking approve+stake batches) even when the transaction itself succeeds.
+        return safe.executeTransaction(signedTx, {
+          gasLimit: SAFE_EXECUTION_FALLBACK_GAS_LIMIT,
+        });
+      }
+    },
+    {
+      onRetry: ({ attempt, message }) => {
+        console.error(`[safe-adapter] executeSafeTxBatch retry ${attempt}: ${message}`);
+      },
+    },
+  );
 }
 
 /**
@@ -173,42 +183,75 @@ export async function executeSafeTxDirect(opts: {
   const provider = new JsonRpcProvider(executionRpcUrl);
   const providerSigner = new Wallet(opts.signerKey, provider);
   const safeRead = new Contract(opts.safeAddress, SAFE_ABI, providerSigner.provider);
-  const nonce: bigint = await safeRead.nonce();
-  const value = opts.value ?? 0n;
-
-  const safeTxHash: string = await safeRead.getTransactionHash(
-    opts.to,
-    value,
-    opts.data,
-    0,
-    0,
-    0,
-    0,
-    ZeroAddress,
-    ZeroAddress,
-    nonce,
-  );
-
-  const signature = await providerSigner.signMessage(getBytes(safeTxHash));
-  const sigBytes = getBytes(signature);
-  const r = hexlify(sigBytes.slice(0, 32));
-  const s = hexlify(sigBytes.slice(32, 64));
-  const v = sigBytes[64] + 4;
-  const adjustedSig = concat([r, s, new Uint8Array([v])]);
-
   const safeWrite = new Contract(opts.safeAddress, SAFE_ABI, providerSigner);
-  const tx = await safeWrite.execTransaction(
-    opts.to,
-    value,
-    opts.data,
-    0,
-    0,
-    0,
-    0,
-    ZeroAddress,
-    ZeroAddress,
-    adjustedSig,
-    { gasLimit: opts.gasLimit ?? SAFE_EXECUTION_FALLBACK_GAS_LIMIT },
+  const value = opts.value ?? 0n;
+  const baseGas = opts.gasLimit ?? BigInt(SAFE_EXECUTION_FALLBACK_GAS_LIMIT);
+
+  const tx = await withRecoverableRetry(
+    async (attemptIndex) => {
+      const nonce: bigint = await safeRead.nonce();
+      const safeTxHash: string = await safeRead.getTransactionHash(
+        opts.to,
+        value,
+        opts.data,
+        0,
+        0,
+        0,
+        0,
+        ZeroAddress,
+        ZeroAddress,
+        nonce,
+      );
+
+      const signature = await providerSigner.signMessage(getBytes(safeTxHash));
+      const sigBytes = getBytes(signature);
+      const r = hexlify(sigBytes.slice(0, 32));
+      const s = hexlify(sigBytes.slice(32, 64));
+      const v = sigBytes[64] + 4;
+      const adjustedSig = concat([r, s, new Uint8Array([v])]);
+
+      const feeData = await provider.getFeeData();
+      const bumpBps = BigInt(attemptIndex) * 1500n;
+      const mult = 10000n + bumpBps;
+      const bump = (v: bigint | null) => (v === null ? undefined : (v * mult) / 10000n);
+
+      const gasLimit = baseGas + BigInt(attemptIndex) * 50_000n;
+
+      const txOpts: {
+        gasLimit: bigint;
+        maxFeePerGas?: bigint;
+        maxPriorityFeePerGas?: bigint;
+        gasPrice?: bigint;
+      } = { gasLimit };
+
+      if (attemptIndex > 0) {
+        if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
+          txOpts.maxFeePerGas = bump(feeData.maxFeePerGas);
+          txOpts.maxPriorityFeePerGas = bump(feeData.maxPriorityFeePerGas);
+        } else if (feeData.gasPrice != null) {
+          txOpts.gasPrice = bump(feeData.gasPrice);
+        }
+      }
+
+      return safeWrite.execTransaction(
+        opts.to,
+        value,
+        opts.data,
+        0,
+        0,
+        0,
+        0,
+        ZeroAddress,
+        ZeroAddress,
+        adjustedSig,
+        txOpts,
+      );
+    },
+    {
+      onRetry: ({ attempt, message }) => {
+        console.error(`[safe-adapter] executeSafeTxDirect retry ${attempt}: ${message}`);
+      },
+    },
   );
 
   return { hash: tx.hash };

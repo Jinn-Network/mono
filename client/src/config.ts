@@ -7,6 +7,9 @@
  *   3. Built-in defaults
  *
  * JINN_PASSWORD is always env-only — never written to config files.
+ *
+ * Operator UX: JINN_DEBUG=1 enables full stack traces. JINN_MASTER_ETH_DAILY_WEI
+ * (wei, integer string) tunes master wallet low-ETH runway warnings.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -90,11 +93,29 @@ export const JinnConfigSchema = z.object({
   /** Optional Base Sepolia mech marketplace deployment artifact path */
   testnetMechDeploymentPath: z.string().optional(),
 
+  /** Optional Base Sepolia stOLAS deployment artifact path */
+  testnetStolasDeploymentPath: z.string().optional(),
+
   /** Staking mode: 'standard' uses stOLAS (no OLAS needed), 'self-bond' uses operator-provided OLAS. */
   stakingMode: z.enum(['standard', 'self-bond']).default('standard'),
 
   /** Number of services to bootstrap and run. */
   targetServices: z.number().int().positive().default(1),
+
+  /**
+   * When true, log full error objects and stack traces from bootstrap / main.
+   * Env: JINN_DEBUG=1|true|yes
+   */
+  debug: z.boolean().default(false),
+
+  /**
+   * Estimated master wallet gas usage per day (wei string), for low-ETH runway warnings.
+   * Default is applied in bootstrap when unset. Env: JINN_MASTER_ETH_DAILY_WEI
+   */
+  masterEthDailyEstimateWei: z
+    .string()
+    .regex(/^\d+$/, 'must be a non-negative integer string')
+    .optional(),
 });
 
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined). */
@@ -151,6 +172,15 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TESTNET_MECH_DEPLOYMENT']) merged.testnetMechDeploymentPath = env['JINN_TESTNET_MECH_DEPLOYMENT'];
   if (env['JINN_STAKING_MODE'])           merged.stakingMode = env['JINN_STAKING_MODE'];
   if (env['JINN_TARGET_SERVICES'])    merged.targetServices = parseInt(env['JINN_TARGET_SERVICES'], 10);
+
+  if (env['JINN_DEBUG'] !== undefined) {
+    const v = env['JINN_DEBUG'].trim().toLowerCase();
+    merged.debug = v === '1' || v === 'true' || v === 'yes';
+  }
+
+  if (env['JINN_MASTER_ETH_DAILY_WEI']) {
+    merged.masterEthDailyEstimateWei = env['JINN_MASTER_ETH_DAILY_WEI'].trim();
+  }
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
 
