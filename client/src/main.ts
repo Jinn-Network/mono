@@ -19,7 +19,8 @@
 
 import { config as dotenvConfig } from 'dotenv';
 import { JsonRpcProvider } from 'ethers';
-import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
@@ -106,6 +107,27 @@ function bootstrapIncompleteSteps(state: FleetState): { currentStep: string; nex
     return { currentStep: focus.step, nextStep: progression[i + 1]! };
   }
   return { currentStep: focus.step, nextStep: 'bootstrap' };
+}
+
+/** §7.6 — omit forbidden absolute paths from envelope `details`. */
+const ENVELOPE_INSTALL_ROOT = normalize(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+const ENVELOPE_JINN_CLIENT_HOME = normalize(resolve(join(homedir(), '.jinn-client')));
+
+function envelopePathUnderRoot(absPath: string, root: string): boolean {
+  const p = normalize(resolve(absPath));
+  const r = normalize(resolve(root));
+  if (p === r) return true;
+  const prefix = r.endsWith(sep) ? r : r + sep;
+  return p.startsWith(prefix);
+}
+
+function sanitizedClaudeAttemptedForEnvelope(claudePath: string): string {
+  const t = claudePath.trim();
+  if (!t) return 'configured path';
+  if (isAbsolute(t) && (envelopePathUnderRoot(t, ENVELOPE_JINN_CLIENT_HOME) || envelopePathUnderRoot(t, ENVELOPE_INSTALL_ROOT))) {
+    return 'configured path';
+  }
+  return t;
 }
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
@@ -230,12 +252,12 @@ async function main(): Promise<void> {
     emitEnvelope({
       code: 'invalid_invocation',
       message: preflight.detail,
-      hint: 'Install Claude Code CLI or set JINN_CLAUDE_PATH to the absolute path of the claude binary.',
+      hint: 'Install Claude Code CLI on your PATH, or set the CLI binary path in your configuration file.',
       exampleCli: 'command -v claude',
       details: {
         field: 'claude_binary',
         expected: 'executable claude binary',
-        attempted: config.claudePath,
+        attempted: sanitizedClaudeAttemptedForEnvelope(config.claudePath),
       },
     });
   }
