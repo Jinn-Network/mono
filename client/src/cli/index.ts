@@ -13,9 +13,11 @@ import { emitEnvelope } from '../errors/envelope.js';
 import { renderTopLevelHelp, renderCommandHelp } from './help.js';
 
 import versionCommand from './commands/version.js';
+import doctorCommand from './commands/doctor.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
+  doctorCommand,
 ];
 
 export interface RunCliOptions {
