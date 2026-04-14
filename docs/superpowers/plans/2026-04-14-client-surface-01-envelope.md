@@ -1,4 +1,4 @@
-# Client Surface v1 — Error Envelope + Exit Codes + Claude Preflight Implementation Plan
+# Client Surface 01 — Error Envelope Foundation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
