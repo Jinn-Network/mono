@@ -281,18 +281,42 @@ surface a well-designed CLI or JSON-RPC wrapper would expose.
 
 ### Verbs (what the agent calls)
 
+Grouped by purpose. Every verb prints JSON to stdout when `--json` is set
+(and should probably default to JSON when stdout is not a TTY).
+
+**Lifecycle — setup and teardown**
+
 | Client verb | Shape | Today's binding | What can change underneath |
 |---|---|---|---|
 | `jinn init` | One-shot; generates wallet + password, prints fleet addresses as JSON | `FleetBootstrapper.ensureMasterWallet` | Wallet derivation scheme (BIP-39 word count, HD path); keystore file layout |
-| `jinn status` | JSON; bootstrap step, funding requirements, activity counters, pending rewards | `scripts/status.ts` + `GET /v1/status` | Which contracts are read; how rewards are computed; whether state comes from chain or cache |
-| `jinn fund-requirements` | JSON; `{ address, asset, amountWei, reason }[]` — exhaustive list of what must be funded before the next step | `client/src/earning/bootstrap.ts:168-204` funding branch | Asset set (ETH only / ETH+OLAS / ETH+stOLAS / JINN); which wallet each requirement targets |
+| `jinn doctor` | Preflight; checks `claude` on PATH, RPC reachable, keystore decryptable, deployment artifacts present, disk writable. Does not start anything. | (not implemented) | Which dependencies are preflight-checked; whether it touches the network |
 | `jinn bootstrap` | Idempotent; advances the state machine one or more steps and prints the new step | `FleetBootstrapper.bootstrap` | The 11-step list; per-step contract calls; orphan-sweep triggering |
+| `jinn fund-requirements` | JSON; `{ address, asset, amountWei, reason }[]` — exhaustive list of what must be funded before the next step | `client/src/earning/bootstrap.ts:168-204` funding branch | Asset set (ETH only / ETH+OLAS / ETH+stOLAS / JINN); which wallet each requirement targets |
 | `jinn run` | Foreground; starts the daemon loops and exits only on SIGINT/SIGTERM | `Daemon.start()` in `client/src/daemon/daemon.ts` | Loop count, loop names, which substrate hosts the loops |
-| `jinn submit-intent` | One-shot; publishes a desired state | `CreatorLoop.tick` → `JinnRouter.createRestorationJob` | Router contract name/address; intent encoding; whether it's one contract or several |
-| `jinn claim-rewards` | One-shot; pulls any pending protocol rewards for the fleet to the master wallet | `client/src/earning/stolas-claim.ts`, `client/src/earning/jinn-rewards.ts` | Whether rewards are OLAS, stOLAS, JINN, or a mix; which distributor contract; which mint function |
-| `jinn withdraw` | Interactive/confirmed; sweeps wallets back to an external address | `client/scripts/withdraw.ts` | Which wallets exist; in what order they can be swept |
 | `jinn stop` | Signals a running `jinn run` process to shut down gracefully | SIGINT/SIGTERM handler `client/src/main.ts:208-215` | Loop shutdown order; DB flush semantics |
-| `jinn logs` | Streams structured events | (not implemented — `console.log` only today) | Log transport, format, retention |
+| `jinn version` | Client version + protocol phase + which deployment artifact hashes are loaded | `client/package.json` + `getChainConfig` | Artifact digest surface; phase label |
+
+**Introspection — "what is happening"**
+
+| Client verb | Shape | Today's binding | What can change underneath |
+|---|---|---|---|
+| `jinn status` | Daemon liveness + summary counters only. Does not include per-service or recent-activity detail — those have their own verbs. | subset of `GET /v1/status` (`client/src/api/status-build.ts`) | What the top-level summary rolls up; whether status comes from HTTP or direct read |
+| `jinn fleet` | Per-service table: index, step, balances (native + bond + reward), staked/evicted flag, last activity timestamp, pending rewards | `FleetStateStore.load` + on-chain reads from `client/src/earning/reconcile.ts` | Wallet kinds, asset list, staking primitive, eviction semantics |
+| `jinn balance` | Flat map of `{ wallet → {asset → amountWei} }` across master + every service EOA + every service multisig | `provider.getBalance` + ERC20 reads | Asset set; which wallets exist |
+| `jinn history` | Recent protocol activity (requests claimed, deliveries submitted, evaluations created), bounded by `--since` or `--limit` | `body.activity.recent` from status API + SQLite `activity` table (`client/src/store/store.ts`) | Event schema; role names; whether events come from chain logs, local DB, or a subgraph |
+| `jinn rewards` | What has been earned vs claimed per service, per asset; next checkpoint time if known | `client/src/earning/jinn-rewards.ts`, `stolas-claim.ts` | Reward asset mix; distributor contract; checkpoint semantics |
+| `jinn logs` | Streams structured events (JSON per line) since a given cursor | (not implemented — `console.log` only today) | Log transport, format, retention, cursor type |
+
+**Actions — "do something"**
+
+| Client verb | Shape | Today's binding | What can change underneath |
+|---|---|---|---|
+| `jinn submit-intent` | One-shot; publishes a desired state | `CreatorLoop.tick` → `JinnRouter.createRestorationJob` | Router contract name/address; intent encoding; whether it's one contract or several |
+| `jinn claim-rewards` | One-shot; pulls any pending protocol rewards for the fleet to the master wallet | `client/src/earning/stolas-claim.ts`, `jinn-rewards.ts` | Whether rewards are OLAS, stOLAS, JINN, or a mix; which distributor contract; which mint function |
+| `jinn fleet scale --to N` | Grows or shrinks the fleet to N services (growth via bootstrap, shrink via retire) | `targetServices` config + `FleetBootstrapper` | How shrinkage works; whether it's one transaction or many |
+| `jinn fleet retire <index>` | Retires one service (unstake, unbond, drain) without touching the rest | `unstakeAndWithdraw` + `sweepOrphanedServiceFunds` (`client/src/earning/orphan-sweep.ts`) | Retire order; which wallets get drained; whether the index is reusable afterward |
+| `jinn withdraw` | Interactive/confirmed; sweeps wallets back to an external address | `client/scripts/withdraw.ts` | Which wallets exist; in what order they can be swept |
+| `jinn keys backup` | Prompts for password, writes mnemonic to a caller-chosen path; zero other side effects | `decryptMnemonic` in `client/src/earning/wallet.ts` | Keystore format; mnemonic length; whether a second factor is ever added |
 
 ### Nouns (the JSON shapes the agent reads)
 
@@ -308,6 +332,11 @@ surface a well-designed CLI or JSON-RPC wrapper would expose.
 | **Bootstrap step** | 11-value enum from `ServiceStep` | Steps renamed/merged/split across phases |
 | **Network** | `mainnet | testnet` at `client/src/config.ts:36` | Adding `anvil-fork`, `arbitrum`, `base-sepolia-phase-1b`, etc. |
 | **Deployment** | A JSON artifact path env var per contract family | Replaced by a single manifest, or by on-chain discovery |
+| **Wallet role** | Implicit today — `master` / agent EOA / Safe multisig are named differently per file | A stable role enum: `master`, `service.<i>.agent`, `service.<i>.multisig` |
+| **Asset role** | `OLAS`/`stOLAS`/`JINN`/`ETH` leak through logs | A role enum: `native`, `bond`, `reward`. Token identity lives in `jinn version`, not in every response |
+| **Event kind** | `activity` rows in SQLite, free-form strings | A closed enum: `intent_posted`, `request_claimed`, `delivery_submitted`, `evaluation_submitted`, `reward_claimed`, `other` |
+| **Attention kind** | Implicit in error messages | A closed enum: `low_gas`, `evicted`, `stake_missing`, `bond_insufficient`, `reconcile_needed`, `none` |
+| **Preflight check name** | None | Stable check names: `node_version`, `claude_binary`, `rpc_reachable`, `keystore_readable`, `deployment_loaded`, `disk_writable`, `fleet_coherent` |
 
 ### Exit codes (what the agent greps for)
 
@@ -323,6 +352,188 @@ throw). Propose:
 | `30` | Chain state conflict — reconcile recommended | Currently `1` |
 | `40` | Transient RPC / network error — caller should retry | Currently `1` |
 | `50` | Fatal, unrecoverable | Currently `1` |
+
+### JSON shape sketches — the introspection verbs
+
+Illustrative only. Field names are the stable part; inner values are
+examples. Every response includes `{ schemaVersion, generatedAt }` so
+agents can pin to a version and detect drift.
+
+**`jinn status`** — daemon liveness and roll-up only. No per-service
+detail; no activity history. Cheap to poll.
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-14T12:30:00Z",
+  "daemon": {
+    "state": "running",
+    "startedAt": "2026-04-14T09:12:04Z",
+    "phase": "phase-1b",
+    "network": "testnet"
+  },
+  "rpc": { "ok": true, "chainId": 84532, "blockNumber": 12345678 },
+  "fleet": { "size": 3, "complete": 3, "needsAttention": 0 },
+  "earnings": { "pendingTotal": "4200000000000000000", "asset": "stOLAS" },
+  "exit": { "blocking": false, "hint": null }
+}
+```
+
+`fleet.needsAttention` is the only field an agent's happy-path monitor
+needs to look at: if it's zero and `rpc.ok` is true, the daemon is fine.
+`exit.blocking` + `exit.hint` is where "you need to fund the master
+wallet" surfaces; the detail goes to `jinn fund-requirements`.
+
+**`jinn fleet`** — per-service detail.
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-14T12:30:00Z",
+  "network": "testnet",
+  "master": {
+    "address": "0xabc...",
+    "balances": [{ "asset": "native", "amountWei": "50000000000000000" }]
+  },
+  "services": [
+    {
+      "index": 0,
+      "step": "running",
+      "serviceId": 42,
+      "wallets": {
+        "agent":  { "address": "0x...", "balances": [{ "asset": "native", "amountWei": "3000000000000000" }] },
+        "multisig": { "address": "0x...", "balances": [
+          { "asset": "native", "amountWei": "1800000000000000" },
+          { "asset": "bond",   "amountWei": "10000000000000000000" }
+        ]}
+      },
+      "staking": { "staked": true, "evicted": false, "sinceBlock": 12300000 },
+      "activity": {
+        "lastEventAt": "2026-04-14T12:27:11Z",
+        "counts": { "create": 14, "deliver": 12, "evaluate": 11 }
+      },
+      "rewards": { "pending": "1400000000000000000", "asset": "stOLAS" },
+      "attention": null
+    }
+  ]
+}
+```
+
+`attention` is either `null` or `{ kind, hint, exit }` naming the one
+next thing to fix for that service: `"low_gas"`, `"evicted"`,
+`"stake_missing"`, `"bond_insufficient"`, etc. The kinds are enumerable
+and finite so an agent can switch on them. The `asset` values (`native`,
+`bond`, `reward`, `stOLAS`, etc.) are **protocol-role names, not
+token names** — `bond` might be OLAS today and something else tomorrow.
+
+**`jinn balance`** — a cheaper subset of `fleet` with only the wallet
+rows, for high-frequency polling.
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-14T12:30:00Z",
+  "wallets": [
+    { "role": "master",             "address": "0x...", "balances": [{ "asset": "native", "amountWei": "..." }] },
+    { "role": "service.0.agent",    "address": "0x...", "balances": [{ "asset": "native", "amountWei": "..." }] },
+    { "role": "service.0.multisig", "address": "0x...", "balances": [
+        { "asset": "native", "amountWei": "..." },
+        { "asset": "bond",   "amountWei": "..." }
+    ]}
+  ]
+}
+```
+
+`role` is the stable identifier. `address` may rotate across phases
+(e.g., Safe replaced by a different AA primitive); `role` will not.
+
+**`jinn history --since <ts> --limit N`** — recent protocol activity.
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-14T12:30:00Z",
+  "cursor": { "next": "2026-04-14T12:27:11Z:evt_00042" },
+  "events": [
+    {
+      "id": "evt_00042",
+      "at": "2026-04-14T12:27:11Z",
+      "serviceIndex": 0,
+      "kind": "delivery_submitted",
+      "intentId": "req_0x1234...",
+      "txHash": "0xabcd...",
+      "outcome": "ok"
+    },
+    {
+      "id": "evt_00041",
+      "at": "2026-04-14T12:21:03Z",
+      "serviceIndex": 0,
+      "kind": "request_claimed",
+      "intentId": "req_0x1234...",
+      "txHash": "0xbeef...",
+      "outcome": "ok"
+    }
+  ]
+}
+```
+
+`kind` is the agent's switch variable. The stable set is the four loop
+verbs: `intent_posted`, `request_claimed`, `delivery_submitted`,
+`evaluation_submitted`, plus `reward_claimed`. Anything else is
+protocol-version-specific and goes under `kind: "other"` with a
+free-form `subkind` the agent can ignore.
+
+**`jinn doctor`** — preflight checks, no side effects, no network
+mutation. Answers "would `jinn run` work?" without running.
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-14T12:30:00Z",
+  "checks": [
+    { "name": "node_version",      "ok": true,  "detail": "v20.14.0" },
+    { "name": "claude_binary",     "ok": true,  "detail": "/usr/local/bin/claude" },
+    { "name": "rpc_reachable",     "ok": true,  "detail": "chainId=84532 block=12345678" },
+    { "name": "keystore_readable", "ok": true,  "detail": "mnemonic decrypts" },
+    { "name": "deployment_loaded", "ok": true,  "detail": "4 artifacts, digest=0xa1b2..." },
+    { "name": "disk_writable",     "ok": true,  "detail": "/home/agent/.jinn-client" },
+    { "name": "fleet_coherent",    "ok": false, "detail": "service 0 step=service_staked but on-chain shows unstaked", "remedy": "run `jinn bootstrap` to reconcile" }
+  ],
+  "ok": false,
+  "blockingCount": 1
+}
+```
+
+Every check is a `{ name, ok, detail, remedy? }` row. `blockingCount`
+is the only field an automation needs to branch on. The `name` set is
+stable; individual checks may come and go as the backend evolves.
+
+**`jinn fund-requirements`** — what has to be funded *right now* for
+bootstrap/run to make progress.
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-14T12:30:00Z",
+  "requirements": [
+    {
+      "role": "master",
+      "address": "0x...",
+      "asset": "native",
+      "haveWei": "5000000000000000",
+      "needWei": "50000000000000000",
+      "reason": "master wallet must fund N service deploys",
+      "blocks": "bootstrap"
+    }
+  ],
+  "satisfied": false
+}
+```
+
+When `satisfied: true` the array is empty. Asset names are role names
+(`native`, `bond`, `reward`), not token symbols — the mapping to a
+real token lives in `jinn version` output and can shift across
+networks.
 
 ### Log line shape
 
@@ -373,8 +584,34 @@ gaps and locks the vocabulary in. Each is one item.
 3. **Introduce a `jinn` CLI binary** — a single entrypoint in
    `client/bin/jinn` that dispatches the verbs from the vocabulary
    table. Each verb is a thin wrapper over existing code; no
-   behavior changes yet, just the surface. *Multi-session.
-   Not blocked on Oak's review.*
+   behavior changes yet, just the surface. Start with the
+   lifecycle verbs (`init`, `doctor`, `bootstrap`, `run`, `stop`,
+   `version`) so the happy path works before introspection lands.
+   *Multi-session. Not blocked on Oak's review.*
+
+3a. **Split `status` into `status` + `fleet` + `history`.**
+   Today `GET /v1/status` is one 40-field mega-response; agents
+   polling liveness re-fetch per-service detail they don't need.
+   Define the three shapes from the sketch section as `/v1/status`,
+   `/v1/fleet`, `/v1/history`, wire each CLI verb to its endpoint.
+   `status.fleet.needsAttention` and `status.exit.blocking` become
+   the only two fields a monitor loop has to read. *One session.
+   Depends on item 3 landing first.*
+
+3b. **Add `jinn doctor` as a standalone preflight.** Runs the
+   checks from the sketch with no network mutation. Strictly
+   additive — no existing code paths change. Unblocks "why is
+   this broken" diagnosis for agent operators. *One session.
+   Depends on item 3.*
+
+3c. **Add `jinn fleet scale` / `jinn fleet retire <i>`.** Today
+   the only way to shrink is to hand-edit `earning_state.json`
+   and sweep; `orphan-sweep.ts` already knows how to drain a
+   retired service's wallets, this would expose it as a verb.
+   *Multi-session; retire logic needs care around in-flight
+   rewards and unstake windows. Not blocked on Oak's review, but
+   should wait until the claim semantics Oak proposes are settled
+   since retire-and-drain touches the same codepath.*
 
 4. **Distinct exit codes + JSON progress output** from `bootstrap`
    and `run`. Make `awaiting_funding` exit `10`, print funding
