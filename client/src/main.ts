@@ -198,7 +198,7 @@ async function bootstrap(): Promise<{
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
 
   const { agentPrivateKey, safeAddress, mechAddress } = await bootstrap();
