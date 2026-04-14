@@ -1,26 +1,77 @@
 import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
+import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import { formatBootstrapOperatorMessage } from '../../operator-errors.js';
 
+function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
+  return (
+    env['JINN_DEBUG'] === '1' ||
+    env['JINN_DEBUG'] === 'true' ||
+    env['DEBUG'] === '1'
+  );
+}
+
+function humanBootstrapSuccess(payload: {
+  master: string;
+  services: Array<{ index: number; step: string; serviceId: number | null }>;
+}): string {
+  const lines = [`Bootstrap complete.`, `Master: ${payload.master}`];
+  if (payload.services.length === 0) {
+    lines.push('Services: (none)');
+  } else {
+    lines.push('Services:');
+    for (const s of payload.services) {
+      const id = s.serviceId != null ? ` (id ${s.serviceId})` : '';
+      lines.push(`  #${s.index} ${s.step}${id}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 async function run(ctx: CommandContext): Promise<void> {
-  const password = ctx.env['JINN_PASSWORD'];
-  if (!password) {
+  let json = false;
+  let configPath: string | undefined;
+  try {
+    const parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS });
+    json = Boolean(parsed.values.json);
+    configPath =
+      typeof parsed.values.config === 'string' && parsed.values.config.length > 0
+        ? parsed.values.config
+        : undefined;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'JINN_PASSWORD is required to encrypt/decrypt the keystore.',
-        hint: 'Set JINN_PASSWORD in the environment before running jinn bootstrap.',
-        exampleCli: 'JINN_PASSWORD=... jinn bootstrap',
-        details: { field: 'JINN_PASSWORD', expected: 'non-empty string' },
+        message: 'Invalid command-line arguments.',
+        hint: 'Run `jinn bootstrap --help` for supported flags.',
+        exampleCli: 'jinn bootstrap --json',
+        details: { field: 'argv', expected: message },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
   }
 
-  const config = loadConfig();
+  const password = ctx.env['JINN_PASSWORD'];
+  if (!password) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: 'A password is required to encrypt or decrypt the keystore.',
+        hint: 'Set the password environment variable required by the client, then re-run.',
+        exampleCli: 'jinn bootstrap --json',
+        details: { field: 'keystore password', expected: 'non-empty string via environment' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const config = loadConfig(configPath);
   const bootstrapper = new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: config.network === 'testnet' ? 'base-sepolia' : 'base',
@@ -40,13 +91,17 @@ async function run(ctx: CommandContext): Promise<void> {
     result = await bootstrapper.bootstrap(password);
   } catch (err) {
     const { summary, hint } = formatBootstrapOperatorMessage(err);
-    const cause = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    const cause = err instanceof Error ? err.message : String(err);
+    const details: Record<string, unknown> = { cause };
+    if (envelopeDebug(ctx.env) && err instanceof Error && err.stack) {
+      details.stack = err.stack;
+    }
     emitEnvelope(
       {
         code: 'fatal',
         message: summary,
         ...(hint !== undefined ? { hint } : {}),
-        details: { stage: 'bootstrap', cause },
+        details,
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -61,7 +116,8 @@ async function run(ctx: CommandContext): Promise<void> {
         hint: 'Fund the listed address and re-run jinn bootstrap.',
         exampleCli: 'jinn fund-requirements --json',
         details: {
-          masterAddress: result.funding.master_address,
+          role: 'master',
+          address: result.funding.master_address,
           asset: 'native',
           needWei: result.funding.eth_required,
           haveWei: result.funding.eth_balance,
@@ -78,45 +134,53 @@ async function run(ctx: CommandContext): Promise<void> {
         code: 'fatal',
         message: result.message,
         hint: 'Bootstrap failed before the fleet reached a runnable state.',
-        details: { stage: 'bootstrap' },
+        details: { cause: result.message },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
   }
 
-  // Success — emit a minimal JSON result and exit 0.
   const state = result.fleet_state;
-  ctx.writer.write(JSON.stringify({
-    schemaVersion: 1,
+  const payload = {
+    schemaVersion: 1 as const,
     generatedAt: new Date().toISOString(),
-    master: state.master_address,
+    master: state.master_address ?? '',
     services: state.services.map((s) => ({
       index: s.index,
       step: s.step,
       serviceId: s.service_id ?? null,
     })),
-  }) + '\n');
+  };
+
+  emitResult(payload, (v) => humanBootstrapSuccess(v as typeof payload), {
+    json,
+    writer: ctx.writer,
+    stdoutIsTty: ctx.stdoutIsTty,
+    noColor: Boolean(ctx.env['NO_COLOR']),
+  });
+  ctx.exit(0);
 }
 
 const command: CommandModule = {
   name: 'bootstrap',
   summary: 'Advance the fleet state machine toward a running daemon',
-  helpText: `Usage: JINN_PASSWORD=... jinn bootstrap [--json]
+  helpText: `Usage: jinn bootstrap [--json] [--config <path>]
 
 Idempotent. Walks the fleet state machine from wherever it is toward
 a complete, running state. Re-run as many times as needed; the
 machine picks up where it left off. On funding gates, exits 10 with
 a funding_required envelope.
 
-Requires JINN_PASSWORD in the environment (never as a flag).
+Requires the password environment variable required by the client
+(never as a flag).
 
 Examples:
-  JINN_PASSWORD=secret jinn bootstrap
-  JINN_PASSWORD=secret jinn bootstrap --json
+  jinn bootstrap
+  jinn bootstrap --json
 
 Failure example (funding gate):
-  $ JINN_PASSWORD=secret jinn bootstrap
+  $ jinn bootstrap
   {"schemaVersion":1,"code":"funding_required","exitCode":10,...}
   $ echo $?
   10
