@@ -19,8 +19,8 @@
 
 import { config as dotenvConfig } from 'dotenv';
 import { JsonRpcProvider } from 'ethers';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { emitEnvelope } from './errors/envelope.js';
@@ -307,17 +307,31 @@ export async function main(): Promise<void> {
   console.log('[main] Daemon running. Press Ctrl+C to stop.');
 }
 
-main().catch((err) => {
-  const { summary, hint } = formatBootstrapOperatorMessage(err);
-  const cause = err instanceof Error ? err.message : String(err);
-  const details: Record<string, unknown> = { cause };
-  if (config.debug && err instanceof Error && err.stack) {
-    details.stack = err.stack;
+function isMainScriptEntry(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined || entry === '') return false;
+  try {
+    const here = pathToFileURL(fileURLToPath(import.meta.url)).href;
+    const invoked = pathToFileURL(resolve(entry)).href;
+    return here === invoked;
+  } catch {
+    return false;
   }
-  emitEnvelope({
-    code: 'fatal',
-    message: summary,
-    ...(hint !== undefined ? { hint } : {}),
-    details,
+}
+
+if (isMainScriptEntry()) {
+  main().catch((err) => {
+    const { summary, hint } = formatBootstrapOperatorMessage(err);
+    const cause = err instanceof Error ? err.message : String(err);
+    const details: Record<string, unknown> = { cause };
+    if (config.debug && err instanceof Error && err.stack) {
+      details.stack = err.stack;
+    }
+    emitEnvelope({
+      code: 'fatal',
+      message: summary,
+      ...(hint !== undefined ? { hint } : {}),
+      details,
+    });
   });
-});
+}
