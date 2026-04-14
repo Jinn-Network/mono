@@ -25,6 +25,11 @@ import balanceCommand from './commands/balance.js';
 import historyCommand from './commands/history.js';
 import rewardsCommand from './commands/rewards.js';
 import logsCommand from './commands/logs.js';
+import fleetManageCommand from './commands/fleet-scale.js';
+import submitIntentCommand from './commands/submit-intent.js';
+import claimRewardsCommand from './commands/claim-rewards.js';
+import withdrawCommand from './commands/withdraw.js';
+import keysCommand from './commands/keys-backup.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -40,6 +45,11 @@ const COMMANDS: CommandModule[] = [
   historyCommand,
   rewardsCommand,
   logsCommand,
+  fleetManageCommand,
+  submitIntentCommand,
+  claimRewardsCommand,
+  withdrawCommand,
+  keysCommand,
 ];
 
 export interface RunCliOptions {
@@ -60,6 +70,22 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
   }
 
   const [verb, ...rest] = argv;
+
+  // `jinn fleet scale|retire` → fleet-manage (not introspection `fleet`).
+  if (verb === 'fleet' && rest.length > 0 && (rest[0] === 'scale' || rest[0] === 'retire')) {
+    const fleetManage = COMMANDS.find(c => c.name === 'fleet-manage');
+    if (fleetManage) {
+      const ctx: CommandContext = {
+        argv: rest,
+        stdoutIsTty,
+        writer,
+        exit,
+        env: process.env,
+      };
+      await fleetManage.run(ctx);
+      return;
+    }
+  }
 
   // --help at the top level
   if (verb === '--help' || verb === '-h') {
