@@ -290,6 +290,19 @@ export async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+  // Write pidfile so `jinn stop` can find us.
+  const pidPath = join(config.earningDir, 'daemon.pid');
+  const { writeFileSync, unlinkSync } = await import('node:fs');
+  writeFileSync(pidPath, String(process.pid) + '\n', 'utf-8');
+  const removePidfile = () => {
+    try {
+      unlinkSync(pidPath);
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('exit', removePidfile);
+
   await daemon.start();
   console.log('[main] Daemon running. Press Ctrl+C to stop.');
 }

@@ -18,6 +18,7 @@ import initCommand from './commands/init.js';
 import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
 import runCommand from './commands/run.js';
+import stopCommand from './commands/stop.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -26,6 +27,7 @@ const COMMANDS: CommandModule[] = [
   bootstrapCommand,
   fundRequirementsCommand,
   runCommand,
+  stopCommand,
 ];
 
 export interface RunCliOptions {
