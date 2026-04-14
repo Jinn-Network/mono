@@ -14,12 +14,14 @@ import { renderTopLevelHelp, renderCommandHelp } from './help.js';
 
 import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
+import initCommand from './commands/init.js';
 import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
   doctorCommand,
+  initCommand,
   bootstrapCommand,
   fundRequirementsCommand,
 ];
