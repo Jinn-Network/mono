@@ -14,10 +14,12 @@ import { renderTopLevelHelp, renderCommandHelp } from './help.js';
 
 import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
+import bootstrapCommand from './commands/bootstrap.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
   doctorCommand,
+  bootstrapCommand,
 ];
 
 export interface RunCliOptions {
