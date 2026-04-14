@@ -55,3 +55,25 @@ export function buildEnvelope(input: BuildEnvelopeInput): ErrorEnvelope {
   if (input.details !== undefined) env.details = input.details;
   return env;
 }
+
+export interface EnvelopeSinks {
+  writer?: { write: (s: string) => boolean };
+  exit?: (code: number) => void;
+}
+
+/**
+ * Build the envelope, write it as a single JSON line to stdout, and exit
+ * with its `exitCode`. Injectable sinks exist purely for tests; production
+ * callers pass no second argument.
+ *
+ * This function does not return.
+ */
+export function emitEnvelope(input: BuildEnvelopeInput, sinks: EnvelopeSinks = {}): never {
+  const envelope = buildEnvelope(input);
+  const writer = sinks.writer ?? process.stdout;
+  const exit = sinks.exit ?? ((c: number) => process.exit(c));
+  writer.write(JSON.stringify(envelope) + '\n');
+  exit(envelope.exitCode);
+  // Unreachable when using real `process.exit`; tests inject a no-op exit.
+  return undefined as never;
+}

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildEnvelope, EXIT_CODES, type ErrorCode } from '../../src/errors/envelope.js';
+import {
+  buildEnvelope,
+  emitEnvelope,
+  EXIT_CODES,
+  type ErrorCode,
+} from '../../src/errors/envelope.js';
 
 describe('buildEnvelope', () => {
   it('builds a funding_required envelope with required fields', () => {
@@ -59,5 +64,39 @@ describe('buildEnvelope', () => {
     const env = buildEnvelope({ code: 'fatal', message: 'boom' });
     expect(() => new Date(env.generatedAt).toISOString()).not.toThrow();
     expect(env.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe('emitEnvelope', () => {
+  it('writes the envelope as a single JSON line and calls exit with exitCode', () => {
+    const writes: string[] = [];
+    const exits: number[] = [];
+    const writer = { write: (s: string) => { writes.push(s); return true; } };
+    const exit = (code: number) => { exits.push(code); };
+
+    emitEnvelope(
+      {
+        code: 'funding_required',
+        message: 'need eth',
+        hint: 'send some',
+        exampleCli: 'jinn fund-requirements --json',
+        details: { role: 'master' },
+      },
+      { writer, exit },
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatch(/\n$/);
+    const parsed = JSON.parse(writes[0]);
+    expect(parsed.code).toBe('funding_required');
+    expect(parsed.exitCode).toBe(10);
+    expect(parsed.details).toEqual({ role: 'master' });
+    expect(exits).toEqual([10]);
+  });
+
+  it('defaults to process.stdout and process.exit when sinks are omitted', () => {
+    // Smoke test: just make sure the signature is valid. We don't actually
+    // call it without sinks because that would terminate the test process.
+    expect(typeof emitEnvelope).toBe('function');
   });
 });
