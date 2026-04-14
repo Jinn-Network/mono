@@ -84,10 +84,7 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const details: Record<string, unknown> = { cause: message, verb };
-    const debug =
-      process.env['JINN_DEBUG'] === '1' ||
-      process.env['JINN_DEBUG'] === 'true' ||
-      process.env['DEBUG'] === '1';
+    const debug = process.env['JINN_DEBUG'] === '1';
     if (debug && err instanceof Error && err.stack) {
       details.stack = err.stack;
     }

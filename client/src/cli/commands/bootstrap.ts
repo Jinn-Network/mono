@@ -4,14 +4,10 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
-import { formatBootstrapOperatorMessage } from '../../operator-errors.js';
 
+/** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
 function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
-  return (
-    env['JINN_DEBUG'] === '1' ||
-    env['JINN_DEBUG'] === 'true' ||
-    env['DEBUG'] === '1'
-  );
+  return env['JINN_DEBUG'] === '1';
 }
 
 function humanBootstrapSuccess(payload: {
@@ -90,8 +86,11 @@ async function run(ctx: CommandContext): Promise<void> {
   try {
     result = await bootstrapper.bootstrap(password);
   } catch (err) {
-    const { summary, hint } = formatBootstrapOperatorMessage(err);
     const cause = err instanceof Error ? err.message : String(err);
+    const message =
+      err instanceof Error && err.message.trim().length > 0
+        ? err.message
+        : 'Bootstrap failed with an unexpected error.';
     const details: Record<string, unknown> = { cause };
     if (envelopeDebug(ctx.env) && err instanceof Error && err.stack) {
       details.stack = err.stack;
@@ -99,8 +98,7 @@ async function run(ctx: CommandContext): Promise<void> {
     emitEnvelope(
       {
         code: 'fatal',
-        message: summary,
-        ...(hint !== undefined ? { hint } : {}),
+        message,
         details,
       },
       { writer: ctx.writer, exit: ctx.exit },
