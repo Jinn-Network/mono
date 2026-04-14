@@ -130,6 +130,30 @@ function sanitizedClaudeAttemptedForEnvelope(claudePath: string): string {
   return t;
 }
 
+/** §7.6 — `invalid_invocation.message` must not echo forbidden absolute paths. */
+function sanitizedClaudePreflightMessageForEnvelope(detail: string, claudePath: string): string {
+  let out = detail;
+  const t = claudePath.trim();
+
+  const replaceAll = (s: string, find: string, rep: string) => (find ? s.split(find).join(rep) : s);
+
+  if (isAbsolute(t) && (envelopePathUnderRoot(t, ENVELOPE_JINN_CLIENT_HOME) || envelopePathUnderRoot(t, ENVELOPE_INSTALL_ROOT))) {
+    const variants = new Set<string>([t, normalize(t)]);
+    try {
+      variants.add(normalize(resolve(t)));
+    } catch {
+      /* ignore */
+    }
+    for (const v of [...variants].filter(Boolean).sort((a, b) => b.length - a.length)) {
+      out = replaceAll(out, v, 'configured path');
+    }
+  }
+
+  out = replaceAll(out, ENVELOPE_JINN_CLIENT_HOME, 'configured path');
+  out = replaceAll(out, ENVELOPE_INSTALL_ROOT, 'configured path');
+  return out;
+}
+
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 
 async function bootstrap(): Promise<{
@@ -251,7 +275,7 @@ async function main(): Promise<void> {
   if (!preflight.ok) {
     emitEnvelope({
       code: 'invalid_invocation',
-      message: preflight.detail,
+      message: sanitizedClaudePreflightMessageForEnvelope(preflight.detail, config.claudePath),
       hint: 'Install Claude Code CLI on your PATH, or set the CLI binary path in your configuration file.',
       exampleCli: 'command -v claude',
       details: {
