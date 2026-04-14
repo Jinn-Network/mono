@@ -23,6 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
+import { emitEnvelope } from './errors/envelope.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { FleetStateStore } from './earning/store.js';
@@ -86,21 +87,41 @@ async function bootstrap(): Promise<{
   const result = await bootstrapper.bootstrap(PASSWORD);
 
   if (result.funding) {
-    console.error(`\n${result.message}\n`);
-    process.exit(0);
+    emitEnvelope({
+      code: 'funding_required',
+      message: result.message,
+      hint: 'Fund the listed address and re-run this command.',
+      exampleCli: 'npm start',
+      details: {
+        role: 'master',
+        address: result.funding.master_address,
+        asset: 'native',
+        needWei: result.funding.eth_required,
+        haveWei: result.funding.eth_balance,
+      },
+    });
   }
 
   if (!result.ok) {
-    console.error(`[main] ${result.message}`);
-    process.exit(1);
+    emitEnvelope({
+      code: 'fatal',
+      message: result.message,
+      hint: 'Bootstrap failed before the fleet reached a runnable state.',
+      details: { stage: 'bootstrap' },
+    });
   }
 
   // Use the first complete service for the daemon
   const state = result.fleet_state;
   const firstComplete = state.services.find(s => s.step === 'complete');
   if (!firstComplete || !firstComplete.safe_address) {
-    console.error('[main] Bootstrap completed but no service is ready.');
-    process.exit(1);
+    emitEnvelope({
+      code: 'bootstrap_incomplete',
+      message: 'Bootstrap completed but no service is ready.',
+      hint: 'Re-run to continue the state machine toward a running fleet.',
+      exampleCli: 'npm start',
+      details: { completeCount: state.services.filter(s => s.step === 'complete').length },
+    });
   }
 
   // Derive agent private key from mnemonic
@@ -220,12 +241,12 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  if (config.debug) {
-    console.error('[main] Fatal error:', err);
-  } else {
-    const { summary, hint } = formatBootstrapOperatorMessage(err);
-    console.error(`[main] ${summary}`);
-    if (hint !== undefined) console.error(`Hint: ${hint}`);
-  }
-  process.exit(1);
+  const { summary, hint } = formatBootstrapOperatorMessage(err);
+  const cause = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  emitEnvelope({
+    code: 'fatal',
+    message: summary,
+    ...(hint !== undefined ? { hint } : {}),
+    details: { cause },
+  });
 });
