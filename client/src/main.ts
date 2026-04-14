@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { emitEnvelope } from './errors/envelope.js';
+import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { FleetStateStore } from './earning/store.js';
@@ -223,6 +224,21 @@ async function main(): Promise<void> {
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
   });
+
+  const preflight = await checkClaudeBinary(config.claudePath);
+  if (!preflight.ok) {
+    emitEnvelope({
+      code: 'invalid_invocation',
+      message: preflight.detail,
+      hint: 'Install Claude Code CLI or set JINN_CLAUDE_PATH to the absolute path of the claude binary.',
+      exampleCli: 'command -v claude',
+      details: {
+        field: 'claude_binary',
+        expected: 'executable claude binary',
+        attempted: config.claudePath,
+      },
+    });
+  }
 
   const runner = new ClaudeRunner({
     claudePath: config.claudePath,
