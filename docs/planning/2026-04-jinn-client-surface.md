@@ -309,14 +309,20 @@ Grouped by purpose. Every verb prints JSON to stdout when `--json` is set
 
 **Actions — "do something"**
 
-| Client verb | Shape | Today's binding | What can change underneath |
-|---|---|---|---|
-| `jinn submit-intent` | One-shot; publishes a desired state | `CreatorLoop.tick` → `JinnRouter.createRestorationJob` | Router contract name/address; intent encoding; whether it's one contract or several |
-| `jinn claim-rewards` | One-shot; pulls any pending protocol rewards for the fleet to the master wallet | `client/src/earning/stolas-claim.ts`, `jinn-rewards.ts` | Whether rewards are OLAS, stOLAS, JINN, or a mix; which distributor contract; which mint function |
-| `jinn fleet scale --to N` | Grows or shrinks the fleet to N services (growth via bootstrap, shrink via retire) | `targetServices` config + `FleetBootstrapper` | How shrinkage works; whether it's one transaction or many |
-| `jinn fleet retire <index>` | Retires one service (unstake, unbond, drain) without touching the rest | `unstakeAndWithdraw` + `sweepOrphanedServiceFunds` (`client/src/earning/orphan-sweep.ts`) | Retire order; which wallets get drained; whether the index is reusable afterward |
-| `jinn withdraw` | Interactive/confirmed; sweeps wallets back to an external address | `client/scripts/withdraw.ts` | Which wallets exist; in what order they can be swept |
-| `jinn keys backup` | Prompts for password, writes mnemonic to a caller-chosen path; zero other side effects | `decryptMnemonic` in `client/src/earning/wallet.ts` | Keystore format; mnemonic length; whether a second factor is ever added |
+Every verb in this group emits at least one on-chain tx or touches a
+wallet. They all support `--dry-run` (print the tx/effect that would
+happen as JSON and exit `0`, no network mutation) and `--yes` (skip
+confirmation). On a non-TTY without `--yes`, they error rather than
+prompt.
+
+| Client verb | Shape | Idempotent? | Today's binding | What can change underneath |
+|---|---|---|---|---|
+| `jinn submit-intent` | One-shot; publishes a desired state | **Yes** — keyed on `(creatorMultisig, desiredStateId)`. Re-posting the same id is a no-op that returns the existing on-chain intent id. | `CreatorLoop.tick` → `JinnRouter.createRestorationJob` | Router contract name/address; intent encoding; whether it's one contract or several |
+| `jinn claim-rewards` | One-shot; pulls any pending protocol rewards for the fleet to the master wallet | **Yes** — zero-delta is success, not error. Second consecutive call is a no-op. | `client/src/earning/stolas-claim.ts`, `jinn-rewards.ts` | Whether rewards are OLAS, stOLAS, JINN, or a mix; which distributor contract; which mint function |
+| `jinn fleet scale --to N` | Grows or shrinks the fleet to N services (growth via bootstrap, shrink via retire) | **Yes** — `--to N` is target-state; running it twice is a no-op. | `targetServices` config + `FleetBootstrapper` | How shrinkage works; whether it's one transaction or many |
+| `jinn fleet retire <index>` | Retires one service (unstake, unbond, drain) without touching the rest | **Yes** — already-retired is a no-op that returns the existing drained state. | `unstakeAndWithdraw` + `sweepOrphanedServiceFunds` (`client/src/earning/orphan-sweep.ts`) | Retire order; which wallets get drained; whether the index is reusable afterward |
+| `jinn withdraw --to <addr>` | Sweeps wallets back to an external address | **No** — destination address may differ per call; each invocation emits a tx. Requires `--yes` (or TTY confirmation); `--dry-run` prints the sweep plan as JSON. | `client/scripts/withdraw.ts` | Which wallets exist; in what order they can be swept |
+| `jinn keys backup --output <path>` | Writes mnemonic to a caller-chosen path; zero other side effects. Password via `--password-fd 0` or `JINN_PASSWORD` env. | **Yes** — mnemonic is stable; writing it twice produces identical output. | `decryptMnemonic` in `client/src/earning/wallet.ts` | Keystore format; mnemonic length; whether a second factor is ever added |
 
 ### Nouns (the JSON shapes the agent reads)
 
@@ -352,6 +358,30 @@ throw). Propose:
 | `30` | Chain state conflict — reconcile recommended | Currently `1` |
 | `40` | Transient RPC / network error — caller should retry | Currently `1` |
 | `50` | Fatal, unrecoverable | Currently `1` |
+
+### Error envelope (what every non-zero exit writes to stdout)
+
+Every non-zero exit prints a single JSON object to stdout (not stderr
+— stderr is for logs) with this shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "code": "funding_required",
+  "exitCode": 10,
+  "message": "Master wallet needs 0.045 ETH more on Base Sepolia",
+  "hint": "Send ETH to 0xabc... then re-run.",
+  "exampleCli": "jinn fund-requirements --json",
+  "details": { "address": "0xabc...", "asset": "native", "needWei": "45000000000000000" }
+}
+```
+
+The `exampleCli` field is the single highest-leverage field for agent
+retry loops: it names the exact command the agent should invoke next.
+An agent parser that reads `exampleCli` and re-invokes is more robust
+than any amount of prose in `message` or `hint`. `code` is a stable
+enum drawn from the exit-code table; `message` and `hint` are human
+strings that may change wording.
 
 ### JSON shape sketches — the introspection verbs
 
@@ -562,81 +592,117 @@ The bindings inside that object are free to change. The shape isn't.
 5. **Env vars are private.** `JINN_TESTNET_*_DEPLOYMENT` should be
    internal knobs, not the primary interface. The primary interface
    is a command and a config file.
+6. **Token resolution lives only in `jinn version` and the
+   `details` field of `jinn fund-requirements`.** Every other verb
+   uses role names (`native`, `bond`, `reward`). An agent that
+   needs to know "what token is `bond` on this network right now"
+   reads exactly one place. This is the escape hatch that prevents
+   `OLAS`/`stOLAS`/`JINN` from leaking back into `jinn fleet` or
+   `jinn history` the first time someone needs to debug a funding
+   issue. Without it, principle (1) becomes a footgun.
+7. **Headless by default.** Every verb must run to completion
+   given flags and env vars alone; prompts are only permitted when
+   a required value is missing *and* stdin is a TTY. On a non-TTY
+   with a missing required value, the verb errors with exit code
+   `11` and an `exampleCli` naming the flag that would have
+   satisfied it. No "press Y to continue" gates on non-TTY.
+   Secrets come from env vars or `--password-fd N` (never flags),
+   config can come from stdin (`jinn bootstrap --config -`).
+8. **JSON by default when not a TTY.** `process.stdout.isTTY ===
+   false` ⇒ `--json` is implicit; `NO_COLOR` is respected
+   otherwise. This matches `gh`, `kubectl`, `op`. Agents piping
+   through `jq` or reading from subprocess stdout get structured
+   output automatically; humans at a terminal still get colored
+   text.
 
 ---
 
 ## Step 3 — Recommendation
 
 Smallest sequence of follow-ups that closes the highest-leverage
-gaps and locks the vocabulary in. Each is one item.
+gaps and locks the vocabulary in. Items 1 and 2 already landed in
+this branch (`c8990bff`); the rest are in order of blast radius.
 
-1. **Ship a testnet start path in `client/README.md`** — concrete
-   command + required env vars + a checked-in example of each of
-   the four deployment artifact shapes. *One session. Not blocked on
-   Oak's review.*
+1. **Ship a zero-config start path in `client/README.md`.** Already
+   landed. *Done.*
 
-2. **Check testnet deployment artifacts into the repo** (or publish
-   them somewhere the client can fetch by default) so that
-   `JINN_NETWORK=testnet npm start` works with no extra env vars.
-   *One session. Not blocked on Oak's review, but Oak should weigh
-   in on whether the Phase 1b artifacts are the right ones to ship.*
+2. **Bundle testnet deployment artifacts and default to them.**
+   Already landed. *Done.*
 
-3. **Introduce a `jinn` CLI binary** — a single entrypoint in
-   `client/bin/jinn` that dispatches the verbs from the vocabulary
-   table. Each verb is a thin wrapper over existing code; no
-   behavior changes yet, just the surface. Start with the
-   lifecycle verbs (`init`, `doctor`, `bootstrap`, `run`, `stop`,
-   `version`) so the happy path works before introspection lands.
-   *Multi-session. Not blocked on Oak's review.*
+3. **Distinct exit codes + JSON progress/error envelopes** from
+   `bootstrap` and `run`. Make `awaiting_funding` exit `10`, print
+   the funding JSON shape on stdout, populate the full error
+   envelope (`code`, `message`, `hint`, `exampleCli`, `details`).
+   This is a one-session change inside the existing `main.ts` +
+   `operator-errors.ts` and unblocks every agent integration
+   downstream. *One session. Not blocked.*
 
-3a. **Split `status` into `status` + `fleet` + `history`.**
-   Today `GET /v1/status` is one 40-field mega-response; agents
-   polling liveness re-fetch per-service detail they don't need.
-   Define the three shapes from the sketch section as `/v1/status`,
-   `/v1/fleet`, `/v1/history`, wire each CLI verb to its endpoint.
-   `status.fleet.needsAttention` and `status.exit.blocking` become
-   the only two fields a monitor loop has to read. *One session.
-   Depends on item 3 landing first.*
+4. **Preflight check for the `claude` binary** at daemon start —
+   error early with `code: "claude_binary_missing"` and an
+   `exampleCli` pointing at `jinn doctor`. *One session. Not
+   blocked.*
 
-3b. **Add `jinn doctor` as a standalone preflight.** Runs the
+5. **Turn `JINN_DEBUG=1` errors into the default.** Keep the
+   friendly message, always append the full cause chain. Agents
+   need the cause; humans can ignore trailing lines. *One
+   session. Not blocked.*
+
+6. **Introduce a `jinn` CLI binary** — a single entrypoint in
+   `client/bin/jinn` that dispatches the verbs from the
+   vocabulary table. Each verb is a thin wrapper over existing
+   code; no behavior changes, just the surface. Non-negotiable
+   implementation rules:
+   - Every verb ships `--help` with two happy-path Examples
+     (default testnet + mainnet opt-in) and one failure-path
+     Example (funding required, showing the exit-10 envelope).
+   - Every verb supports `--json`; `--json` is implicit when
+     stdout is not a TTY.
+   - Every tx-emitting verb supports `--dry-run` and `--yes`; on
+     a non-TTY without `--yes` it errors rather than prompts.
+   - Secrets come via `--password-fd N` or `JINN_PASSWORD`;
+     config can come via `--config -` reading stdin.
+   - Non-zero exits write the error envelope from Step 2 to
+     stdout, not stderr.
+   Start with the lifecycle verbs (`init`, `doctor`, `bootstrap`,
+   `fund-requirements`, `run`, `stop`, `version`) so the happy
+   path works before introspection lands. *Multi-session. Not
+   blocked.*
+
+7. **Split `status` into `status` + `fleet` + `history`.** Today
+   `GET /v1/status` is one 40-field mega-response; agents polling
+   liveness re-fetch per-service detail they don't need. Define
+   the three shapes from the sketch section as `/v1/status`,
+   `/v1/fleet`, `/v1/history`; wire each CLI verb to its
+   endpoint. `status.fleet.needsAttention` and
+   `status.exit.blocking` become the only two fields a monitor
+   loop has to read. *One session. Depends on item 6.*
+
+8. **Add `jinn doctor` as a standalone preflight.** Runs the
    checks from the sketch with no network mutation. Strictly
    additive — no existing code paths change. Unblocks "why is
    this broken" diagnosis for agent operators. *One session.
-   Depends on item 3.*
+   Depends on item 6.*
 
-3c. **Add `jinn fleet scale` / `jinn fleet retire <i>`.** Today
-   the only way to shrink is to hand-edit `earning_state.json`
-   and sweep; `orphan-sweep.ts` already knows how to drain a
-   retired service's wallets, this would expose it as a verb.
-   *Multi-session; retire logic needs care around in-flight
-   rewards and unstake windows. Not blocked on Oak's review, but
-   should wait until the claim semantics Oak proposes are settled
-   since retire-and-drain touches the same codepath.*
+9. **Add `jinn fleet scale --to N` / `jinn fleet retire <i>`.**
+   Today the only way to shrink is to hand-edit
+   `earning_state.json` and sweep; `orphan-sweep.ts` already
+   knows how to drain a retired service's wallets, this would
+   expose it as a verb. *Multi-session; retire logic needs care
+   around in-flight rewards and unstake windows. Should wait
+   until the claim semantics Oak proposes are settled since
+   retire-and-drain touches the same codepath.*
 
-4. **Distinct exit codes + JSON progress output** from `bootstrap`
-   and `run`. Make `awaiting_funding` exit `10`, print funding
-   requirements as JSON on stdout. *One session. Not blocked.*
+10. **Document the vocabulary from Step 2 as a spec** in
+    `spec/YYYY-MM-DD-client-surface.md` so future refactors treat
+    it as a compatibility contract. *One session. Depends on
+    Oak's MVL-on-OLAS review — the vocabulary should align with
+    whatever operator verbs Oak's proposal eventually blesses
+    (notably `claim(serviceId)`).*
 
-5. **Preflight check for the `claude` binary** at daemon start —
-   error early with a clear message if the subprocess can't be
-   located. *One session. Not blocked.*
-
-6. **Turn `JINN_DEBUG=1` errors into the default.** Keep the
-   friendly message, but always append the full cause chain. Agents
-   need the cause; humans can ignore the trailing lines. *One
-   session. Not blocked.*
-
-7. **Document the vocabulary from Step 2 as a spec** in
-   `spec/YYYY-MM-DD-client-surface.md` so future refactors treat it
-   as a compatibility contract. *One session. Depends on Oak's
-   MVL-on-OLAS review — the vocabulary should align with whatever
-   operator verbs Oak's proposal eventually blesses (notably
-   `claim(serviceId)`).* 
-
-8. **Stretch: a `watch` mode that polls for funding and continues
-   the state machine without requiring a re-invocation.** Removes
-   the two-shot dance entirely. *Unknown size; touches the funding
-   branch of `FleetBootstrapper.bootstrap`.*
+11. **Stretch: a `watch` mode** that polls for funding and
+    continues the state machine without requiring a re-invocation.
+    Removes the two-shot dance entirely. *Unknown size; touches
+    the funding branch of `FleetBootstrapper.bootstrap`.*
 
 ---
 
