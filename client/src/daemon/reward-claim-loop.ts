@@ -29,7 +29,10 @@ export interface RewardClaimLoopConfig {
   jinnStore?: Store;
 }
 
-export type RewardClaimTickConfig = Omit<RewardClaimLoopConfig, 'intervalMs'>;
+export type RewardClaimTickConfig = Omit<RewardClaimLoopConfig, 'intervalMs'> & {
+  /** When true, per-service claim failures can throw (CLI); daemon omits. */
+  strict?: boolean;
+};
 
 export async function runRewardClaimOnce(cfg: RewardClaimTickConfig): Promise<StolasClaimTickResult> {
   const state = await cfg.store.load(cfg.chain);
@@ -38,6 +41,7 @@ export async function runRewardClaimOnce(cfg: RewardClaimTickConfig): Promise<St
     distributorAddress: cfg.distributorAddress,
     stakingMode: state.staking_mode,
     targets,
+    strict: cfg.strict,
   });
 }
 

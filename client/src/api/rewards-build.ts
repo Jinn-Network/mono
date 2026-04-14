@@ -6,6 +6,7 @@
 
 import type { GatheredStatusRaw } from './status-build.js';
 import type { ServiceState } from '../earning/types.js';
+import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 
 const STAKED_LIKE_STEPS = new Set([
   'staked',
@@ -29,10 +30,6 @@ export interface RewardsV1Response {
   services: RewardsV1ServiceEntry[];
 }
 
-function displayServiceIndex(s: ServiceState): number {
-  return Math.max(0, s.index - 1);
-}
-
 export function assembleRewardsV1(raw: GatheredStatusRaw): RewardsV1Response {
   const total = raw.pendingStakingRewardsWei ?? '0';
   const list = raw.fleet?.services ?? [];
@@ -50,7 +47,7 @@ export function assembleRewardsV1(raw: GatheredStatusRaw): RewardsV1Response {
           ? total
           : '0';
     return {
-      index: displayServiceIndex(svc),
+      index: displayFleetServiceIndex(svc),
       pending,
       claimed: '0',
       asset: 'reward' as const,

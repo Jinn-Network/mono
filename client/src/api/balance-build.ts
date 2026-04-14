@@ -6,6 +6,7 @@
 
 import type { GatheredStatusRaw } from './status-build.js';
 import type { ServiceState } from '../earning/types.js';
+import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 
 interface BalanceEntry {
   asset: 'native' | 'bond' | 'reward';
@@ -24,10 +25,6 @@ export interface BalanceV1Response {
   wallets: WalletEntry[];
 }
 
-function displayServiceIndex(s: ServiceState): number {
-  return Math.max(0, s.index - 1);
-}
-
 export function assembleBalanceV1(raw: GatheredStatusRaw): BalanceV1Response {
   const wallets: WalletEntry[] = [];
   const masterAddr = raw.fleet?.master_address ?? raw.master.address ?? '0x';
@@ -39,7 +36,7 @@ export function assembleBalanceV1(raw: GatheredStatusRaw): BalanceV1Response {
   });
 
   for (const svc of raw.fleet?.services ?? []) {
-    const di = displayServiceIndex(svc);
+    const di = displayFleetServiceIndex(svc);
     wallets.push({
       role: `service.${di}.agent`,
       address: svc.agent_address || '0x',

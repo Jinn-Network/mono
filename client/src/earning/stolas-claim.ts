@@ -16,7 +16,9 @@ import { JINN_STAKING_ABI } from './jinn-rewards.js';
 import {
   ethersSendTransactionWithRetry,
   ethersWaitForTransactionHashWithRetry,
+  isRecoverableTransactionError,
 } from '../tx-retry.js';
+import { TransientError } from '../types/errors.js';
 
 /** Steps where the service is staked and may accrue staking rewards. */
 const STEPS_WITH_STAKING_REWARDS: ReadonlySet<ServiceStep> = new Set([
@@ -49,6 +51,11 @@ export interface StolasClaimTickResult {
   skippedNoPending: number;
   skippedNoDistributor: boolean;
   skippedWrongMode: boolean;
+  /** Services where pending reward was non-zero and a claim tx was attempted (send path). */
+  claimAttempted: number;
+  failedRecoverable: number;
+  /** Non-recoverable send errors, bad/missing receipts, etc. */
+  failedPermanent: number;
 }
 
 /**
@@ -62,6 +69,11 @@ export async function tickStolasDistributorClaims(
     distributorAddress: string | undefined;
     stakingMode: StakingMode;
     targets: StolasClaimTarget[];
+    /**
+     * When true (CLI), all claim sends failing recoverably surfaces {@link TransientError};
+     * any permanent/receipt failure surfaces a normal Error. Daemon callers omit this.
+     */
+    strict?: boolean;
   },
 ): Promise<StolasClaimTickResult> {
   const result: StolasClaimTickResult = {
@@ -70,6 +82,9 @@ export async function tickStolasDistributorClaims(
     skippedNoPending: 0,
     skippedNoDistributor: false,
     skippedWrongMode: false,
+    claimAttempted: 0,
+    failedRecoverable: 0,
+    failedPermanent: 0,
   };
 
   if (options.stakingMode !== 'standard') {
@@ -95,6 +110,7 @@ export async function tickStolasDistributorClaims(
         continue;
       }
 
+      result.claimAttempted += 1;
       const data = distributorIface.encodeFunctionData('claim', [[stakingProxy], [BigInt(serviceId)]]);
       const txResponse = await ethersSendTransactionWithRetry(masterSigner, {
         to: distributor,
@@ -108,6 +124,7 @@ export async function tickStolasDistributorClaims(
         30000,
       );
       if (!receipt || receipt.status !== 1) {
+        result.failedPermanent += 1;
         console.error(
           `[reward-claim] claim tx failed for service ${serviceId} (hash=${(txResponse as { hash: string }).hash})`,
         );
@@ -118,9 +135,28 @@ export async function tickStolasDistributorClaims(
         `[reward-claim] Submitted distributor.claim for service ${serviceId} (~${pending.toString()} wei pending before tx)`,
       );
     } catch (err) {
+      if (isRecoverableTransactionError(err)) {
+        result.failedRecoverable += 1;
+      } else {
+        result.failedPermanent += 1;
+      }
       console.error(
         `[reward-claim] Skipped service ${serviceId}:`,
         err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  if (options.strict) {
+    const totalFailed = result.failedRecoverable + result.failedPermanent;
+    if (result.submitted === 0 && totalFailed > 0 && result.failedPermanent === 0) {
+      throw new TransientError(
+        `Distributor claim: all ${totalFailed} failed service check(s) / claim attempt(s) hit recoverable errors.`,
+      );
+    }
+    if (result.submitted === 0 && result.failedPermanent > 0) {
+      throw new Error(
+        `Distributor claim: all ${totalFailed} failed service check(s) / claim attempt(s) were non-recoverable or had bad receipts.`,
       );
     }
   }

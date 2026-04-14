@@ -79,6 +79,19 @@ describe('parseWithdrawArgv', () => {
     expect(p.drainJinn).toBe(true);
   });
 
+  it('accepts --password-fd (stripped so it does not trip unexpected-args)', () => {
+    const p = parseWithdrawArgv([
+      '--to',
+      '0x000000000000000000000000000000000000dEaD',
+      '--eth-amount',
+      '0.01',
+      '--password-fd',
+      '3',
+    ]);
+    expect(p.to).toBe('0x000000000000000000000000000000000000dEaD');
+    expect(p.ethWei).toBeGreaterThan(0n);
+  });
+
   it('rejects conflicting jinn flags', () => {
     expect(() =>
       parseWithdrawArgv(['--to', '0x000000000000000000000000000000000000dEaD', '--drain-jinn', '--jinn-amount', '1']),

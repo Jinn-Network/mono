@@ -48,4 +48,6 @@ export const COMMON_FLAGS = {
   json: { type: 'boolean' as const, default: false },
   help: { type: 'boolean' as const, default: false },
   config: { type: 'string' as const },
+  /** Parsed value is the fd number as string; read via resolveCliPassword / readPasswordFromFd. */
+  'password-fd': { type: 'string' as const },
 };

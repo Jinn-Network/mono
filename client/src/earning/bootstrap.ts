@@ -70,6 +70,7 @@ import {
   ethersWaitForTransactionHashWithRetry,
 } from '../tx-retry.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
+import { nextFleetServiceIndex } from './next-service-index.js';
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
 
@@ -231,7 +232,7 @@ export class FleetBootstrapper {
       }
 
       for (let i = 0; i < needed; i++) {
-        const nextIndex = state.services.length + 1;
+        const nextIndex = nextFleetServiceIndex(state.services);
         state = await this.bootstrapService(state, mnemonic, nextIndex);
       }
 

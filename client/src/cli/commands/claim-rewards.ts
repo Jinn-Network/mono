@@ -1,10 +1,11 @@
 import { parseArgs } from 'node:util';
-import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { createCliSignerContext } from '../execution-context.js';
 import { runRewardClaimOnce } from '../../daemon/reward-claim-loop.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
+import { TransientError } from '../../types/errors.js';
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -12,9 +13,9 @@ async function run(ctx: CommandContext): Promise<void> {
     parsed = parseArgs({
       args: ctx.argv,
       options: {
+        ...COMMON_FLAGS,
         'dry-run': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
-        json: { type: 'boolean', default: false },
       },
       allowPositionals: false,
     });
@@ -60,6 +61,7 @@ async function run(ctx: CommandContext): Promise<void> {
       store: fleetStore,
       chain: networkChain,
       distributorAddress: chainConfig.distributorAddress,
+      strict: true,
     });
     ctx.writer.write(
       JSON.stringify({
@@ -71,10 +73,13 @@ async function run(ctx: CommandContext): Promise<void> {
         skippedNoPending: tick.skippedNoPending,
         skippedNoDistributor: tick.skippedNoDistributor,
         skippedWrongMode: tick.skippedWrongMode,
+        claimAttempted: tick.claimAttempted,
+        failedRecoverable: tick.failedRecoverable,
+        failedPermanent: tick.failedPermanent,
       }) + '\n',
     );
   } catch (e) {
-    if (isRecoverableTransactionError(e)) {
+    if (e instanceof TransientError || isRecoverableTransactionError(e)) {
       emitEnvelope(
         {
           code: 'transient_error',

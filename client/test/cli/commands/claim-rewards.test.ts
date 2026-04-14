@@ -15,6 +15,21 @@ function makeCtx(argv: string[], tty = false): { ctx: CommandContext; writes: st
 }
 
 describe('claim-rewards command', () => {
+  it('--dry-run accepts --config and --password-fd without parse errors', async () => {
+    const { default: cmd } = await import('../../../src/cli/commands/claim-rewards.js');
+    const { ctx, writes } = makeCtx([
+      '--dry-run',
+      '--config',
+      '/tmp/jinn-config-test.json',
+      '--password-fd',
+      '4',
+    ]);
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.verb).toBe('claim-rewards');
+  });
+
   it('--dry-run emits a plan without executing', async () => {
     const { default: cmd } = await import('../../../src/cli/commands/claim-rewards.js');
     const { ctx, writes } = makeCtx(['--dry-run']);

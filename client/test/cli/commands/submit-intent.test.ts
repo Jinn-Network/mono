@@ -76,6 +76,25 @@ describe('submit-intent command', () => {
     expect(exits).toEqual([11]);
   });
 
+  it('accepts --config and --password-fd on --dry-run (parse path)', async () => {
+    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const { ctx, writes } = makeCtx([
+      '--id',
+      'test-1',
+      '--description',
+      'The service is healthy',
+      '--dry-run',
+      '--config',
+      '/nonexistent-config-path.json',
+      '--password-fd',
+      '9',
+    ]);
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.verb).toBe('submit-intent');
+  });
+
   it('missing --id emits invalid_invocation', async () => {
     const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
     const { ctx, writes, exits } = makeCtx(['--dry-run', '--description', 'x']);

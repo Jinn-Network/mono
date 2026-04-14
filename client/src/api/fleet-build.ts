@@ -7,6 +7,7 @@
 
 import type { GatheredStatusRaw } from './status-build.js';
 import type { ServiceState } from '../earning/types.js';
+import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 
 const STAKED_LIKE_STEPS = new Set([
   'staked',
@@ -48,10 +49,6 @@ export interface FleetV1Response {
   services: FleetV1Service[];
 }
 
-function displayServiceIndex(s: ServiceState): number {
-  return Math.max(0, s.index - 1);
-}
-
 function activityCountsSurface(raw: GatheredStatusRaw): Record<string, number> {
   const c = raw.activityCounts;
   return {
@@ -81,7 +78,7 @@ function computeAttention(
   if (svc.step !== 'complete') {
     return {
       kind: 'reconcile_needed',
-      hint: `Service ${displayServiceIndex(svc)} is at step ${svc.step}. Run jinn bootstrap to advance.`,
+      hint: `Service ${displayFleetServiceIndex(svc)} is at step ${svc.step}. Run jinn bootstrap to advance.`,
       exampleCli: 'jinn bootstrap --json',
     };
   }
@@ -97,7 +94,7 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
   const counts = activityCountsSurface(raw);
 
   const services = (fleet?.services ?? []).map((svc, i) => ({
-    index: displayServiceIndex(svc),
+    index: displayFleetServiceIndex(svc),
     step: svc.step,
     serviceId: svc.service_id,
     wallets: {

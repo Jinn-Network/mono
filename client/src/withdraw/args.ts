@@ -175,6 +175,15 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
     args.splice(configIdx, 2);
   }
 
+  const passwordFdIdx = args.indexOf('--password-fd');
+  if (passwordFdIdx !== -1) {
+    const fdVal = args[passwordFdIdx + 1];
+    if (fdVal === undefined || fdVal.startsWith('--')) {
+      throw new Error('Missing value for --password-fd');
+    }
+    args.splice(passwordFdIdx, 2);
+  }
+
   if (args.length > 0) {
     throw new Error(`Unexpected arguments: ${args.join(' ')}`);
   }

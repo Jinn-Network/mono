@@ -51,6 +51,23 @@ function makeCtx(argv: string[]): { ctx: CommandContext; writes: string[]; exits
 }
 
 describe('fleet compound command', () => {
+  it('scale --dry-run accepts --config and --password-fd', async () => {
+    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
+    const { ctx, writes } = makeCtx([
+      'scale',
+      '--to',
+      '3',
+      '--dry-run',
+      '--config',
+      '/tmp/fleet-scale-config.json',
+      '--password-fd',
+      '5',
+    ]);
+    await fleet.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.dryRun).toBe(true);
+  });
+
   it('scale --to 3 --dry-run emits a growth plan', async () => {
     const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
     const { ctx, writes } = makeCtx(['scale', '--to', '3', '--dry-run']);

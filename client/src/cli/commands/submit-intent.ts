@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { getAddress } from 'ethers';
-import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
@@ -17,11 +17,11 @@ async function run(ctx: CommandContext): Promise<void> {
     parsed = parseArgs({
       args: ctx.argv,
       options: {
+        ...COMMON_FLAGS,
         id: { type: 'string' },
         description: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
-        json: { type: 'boolean', default: false },
       },
       allowPositionals: false,
     });

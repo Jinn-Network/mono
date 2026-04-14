@@ -1,12 +1,13 @@
 import { parseArgs } from 'node:util';
-import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { resolveCliPassword } from '../password.js';
 import { createCliSignerContext } from '../execution-context.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
-import { retireFleetServiceOnChain, findFleetService } from '../../earning/fleet-retire.js';
+import { retireFleetServiceOnChain } from '../../earning/fleet-retire.js';
+import { findServiceByDisplayIndex } from '../../earning/fleet-display-index.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 
 async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
@@ -15,10 +16,10 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
     parsed = parseArgs({
       args: rest,
       options: {
+        ...COMMON_FLAGS,
         to: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
-        json: { type: 'boolean', default: false },
       },
       allowPositionals: false,
     });
@@ -66,7 +67,7 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
   } else {
     const indices = sorted.slice(to).map(s => s.index);
     plan = [{ action: 'retire', from: current, to, indices }];
-    description = `Would retire services ${indices.join(', ')} (fleet index field) to shrink fleet from ${current} to ${to}.`;
+    description = `Would retire services with HD service.index ${indices.join(', ')} (on-chain slot; shrink path) to shrink fleet from ${current} to ${to}.`;
   }
 
   if (dryRun) {
@@ -277,20 +278,26 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
         code: 'invalid_invocation',
         message: 'jinn fleet retire requires a service index',
         exampleCli: 'jinn fleet retire 2 --dry-run',
-        details: { field: '<index>', expected: 'non-negative integer (service.index from fleet JSON)' },
+        details: {
+          field: '<index>',
+          expected: 'non-negative display index (same as services[].index in jinn fleet JSON)',
+        },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
   }
-  const index = parseInt(indexArg, 10);
-  if (!Number.isFinite(index) || index < 0) {
+  const displayIndex = parseInt(indexArg, 10);
+  if (!Number.isFinite(displayIndex) || displayIndex < 0) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
         message: `Invalid service index: ${indexArg}`,
         exampleCli: 'jinn fleet retire 2 --dry-run',
-        details: { field: '<index>', expected: 'non-negative integer (service.index from fleet JSON)' },
+        details: {
+          field: '<index>',
+          expected: 'non-negative display index (same as services[].index in jinn fleet JSON)',
+        },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -302,9 +309,9 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
     parsed = parseArgs({
       args: flagArgs,
       options: {
+        ...COMMON_FLAGS,
         'dry-run': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
-        json: { type: 'boolean', default: false },
       },
       allowPositionals: false,
     });
@@ -323,18 +330,18 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
 
   const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
   const fleet = raw.fleet;
-  const svc = fleet ? findFleetService(fleet, index) : undefined;
+  const svc = fleet ? findServiceByDisplayIndex(fleet.services, displayIndex) : undefined;
   const dryRun = parsed.values['dry-run'] as boolean;
   const yes = parsed.values.yes as boolean;
 
-  let plan: Array<{ action: 'retire'; index: number; txCount: number }>;
+  let plan: Array<{ action: 'retire'; index: number; chainIndex: number; txCount: number }>;
   let description: string;
   if (!svc) {
     plan = [];
-    description = `Service index ${index} is not in fleet state (already retired or never existed). No action.`;
+    description = `Display index ${displayIndex} is not in fleet state (already retired or never existed). No action.`;
   } else {
-    plan = [{ action: 'retire', index, txCount: 1 }];
-    description = `Would call distributor.unstakeAndWithdraw for service.index=${index}, then remove the row from earning_state.json.`;
+    plan = [{ action: 'retire', index: displayIndex, chainIndex: svc.index, txCount: 1 }];
+    description = `Would retire display index ${displayIndex} (HD service.index=${svc.index}): distributor.unstakeAndWithdraw, then remove row from earning_state.json.`;
   }
 
   if (dryRun) {
@@ -350,7 +357,7 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'fleet retire',
-        index,
+        index: displayIndex,
         action: 'none',
       }) + '\n',
     );
@@ -386,14 +393,14 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
       distributorAddress: chainConfig.distributorAddress,
       fleetStore,
       chain: networkChain,
-      serviceIndex: index,
+      serviceIndex: svc.index,
     });
     if (!r.ok) {
       emitEnvelope(
         {
           code: 'fatal',
           message: r.message,
-          details: { index },
+          details: { displayIndex, chainIndex: svc.index },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
@@ -404,7 +411,8 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'fleet retire',
-        index,
+        index: displayIndex,
+        chainIndex: svc.index,
         ok: r.ok,
         txHash: r.txHash ?? null,
         message: r.message,
@@ -416,7 +424,7 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
         {
           code: 'transient_error',
           message: e instanceof Error ? e.message : String(e),
-          details: { index },
+          details: { displayIndex, chainIndex: svc.index },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
@@ -426,7 +434,7 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
       {
         code: 'fatal',
         message: e instanceof Error ? e.message : String(e),
-        details: { index },
+        details: { displayIndex, chainIndex: svc.index },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -469,13 +477,13 @@ Subverbs:
   scale --to N [--dry-run] [--yes]       Grow or shrink the fleet to N services (idempotent)
   retire <index> [--dry-run] [--yes]     Retire one service (standard mode: unstake via distributor)
 
-Index: use the persisted fleet field service.index (see \`jinn status --json\` → fleet.services[].index),
-not an array offset.
+For \`fleet retire\`, <index> is the display index — the same \`index\` field as \`jinn fleet\` / status fleet JSON
+(\`services[].index\`), not the HD derivation slot (\`service.index\` in store).
 
 Examples:
   jinn fleet scale --to 3 --dry-run
   jinn fleet scale --to 3 --yes
-  jinn fleet retire 2 --dry-run
+  jinn fleet retire 1 --dry-run
 `,
   run,
 };

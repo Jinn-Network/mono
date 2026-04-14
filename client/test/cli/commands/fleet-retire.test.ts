@@ -48,7 +48,7 @@ vi.mock('../../../src/cli/introspection-context.js', () => ({
 }));
 
 describe('fleet retire subverb', () => {
-  it('retire 1 --dry-run emits a retire plan', async () => {
+  it('retire 1 --dry-run emits a retire plan for display index 1 (HD slot 2)', async () => {
     const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
     const writes: string[] = [];
     const ctx: CommandContext = {
@@ -61,7 +61,22 @@ describe('fleet retire subverb', () => {
     await fleet.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
-    expect(parsed.plan[0]).toMatchObject({ action: 'retire', index: 1 });
+    expect(parsed.plan[0]).toMatchObject({ action: 'retire', index: 1, chainIndex: 2 });
+  });
+
+  it('retire 0 --dry-run targets display index 0 (HD slot 1)', async () => {
+    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
+    const writes: string[] = [];
+    const ctx: CommandContext = {
+      argv: ['retire', '0', '--dry-run'],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { writes.push(s); return true; } },
+      exit: () => {},
+      env: { JINN_PASSWORD: 'test' },
+    };
+    await fleet.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.plan[0]).toMatchObject({ action: 'retire', index: 0, chainIndex: 1 });
   });
 
   it('retire 99 --dry-run on non-existent index is a no-op', async () => {
