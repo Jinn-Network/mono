@@ -67,10 +67,11 @@ async function sumPendingStakingRewards(
   }
 }
 
-export async function gatherStatusForApi(
+/** Collect status inputs without assembling the legacy mega-response. */
+export async function gatherGatheredStatusRaw(
   store: Store,
   status: StatusGatherConfig | undefined,
-): Promise<StatusV1Response> {
+): Promise<GatheredStatusRaw> {
   const shutdownState = store.getShutdownState();
   const activityCounts = store.getOwnActivityCounts();
   const recentActivity = store.getRecentOwnActivity(12);
@@ -95,7 +96,7 @@ export async function gatherStatusForApi(
   };
 
   if (!status) {
-    return assembleStatusV1({ ...baseRaw, hintsScope: 'sqlite_only' });
+    return { ...baseRaw, hintsScope: 'sqlite_only' };
   }
 
   const earningStore = new FleetStateStore(status.earningDir);
@@ -169,5 +170,13 @@ export async function gatherStatusForApi(
     }
   }
 
+  return raw;
+}
+
+export async function gatherStatusForApi(
+  store: Store,
+  status: StatusGatherConfig | undefined,
+): Promise<StatusV1Response> {
+  const raw = await gatherGatheredStatusRaw(store, status);
   return assembleStatusV1(raw);
 }

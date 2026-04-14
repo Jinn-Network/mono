@@ -1,0 +1,142 @@
+/**
+ * Fleet response assembler.
+ *
+ * Contract: spec/2026-04-14-client-surface.md §4.2.
+ * Slices GatheredStatusRaw (same source as /v1/status) into per-service detail.
+ */
+
+import type { GatheredStatusRaw } from './status-build.js';
+import type { ServiceState } from '../earning/types.js';
+
+const STAKED_LIKE_STEPS = new Set([
+  'staked',
+  'mech_deployed',
+  'complete',
+  'service_staked',
+]);
+
+type AttentionKind =
+  | 'none'
+  | 'low_gas'
+  | 'evicted'
+  | 'stake_missing'
+  | 'bond_insufficient'
+  | 'reconcile_needed';
+
+export interface FleetV1Service {
+  index: number;
+  step: string;
+  serviceId: number | null;
+  wallets: {
+    agent: { address: string; balances: Array<{ asset: string; amountWei: string }> };
+    multisig: { address: string; balances: Array<{ asset: string; amountWei: string }> };
+  };
+  staking: { staked: boolean; evicted: boolean; sinceBlock: number | null };
+  activity: { lastEventAt: string | null; counts: Record<string, number> };
+  rewards: { pending: string; asset: 'reward' };
+  attention: null | { kind: AttentionKind; hint: string; exampleCli: string };
+}
+
+export interface FleetV1Response {
+  schemaVersion: 1;
+  generatedAt: string;
+  network: 'testnet' | 'mainnet';
+  master: {
+    address: string;
+    balances: Array<{ asset: string; amountWei: string }>;
+  };
+  services: FleetV1Service[];
+}
+
+function displayServiceIndex(s: ServiceState): number {
+  return Math.max(0, s.index - 1);
+}
+
+function activityCountsSurface(raw: GatheredStatusRaw): Record<string, number> {
+  const c = raw.activityCounts;
+  return {
+    create: c['created'] ?? 0,
+    deliver: c['delivered'] ?? 0,
+    evaluate: c['evaluated'] ?? 0,
+  };
+}
+
+function computeAttention(
+  svc: ServiceState,
+  raw: GatheredStatusRaw,
+  isFirstService: boolean,
+): FleetV1Service['attention'] {
+  if (
+    isFirstService &&
+    raw.minMasterEthWei &&
+    raw.master.balanceWei !== undefined &&
+    BigInt(raw.master.balanceWei) < BigInt(raw.minMasterEthWei)
+  ) {
+    return {
+      kind: 'low_gas',
+      hint: 'Master wallet ETH below minimum. Top it up to continue.',
+      exampleCli: 'jinn fund-requirements --json',
+    };
+  }
+  if (svc.step !== 'complete') {
+    return {
+      kind: 'reconcile_needed',
+      hint: `Service ${displayServiceIndex(svc)} is at step ${svc.step}. Run jinn bootstrap to advance.`,
+      exampleCli: 'jinn bootstrap --json',
+    };
+  }
+  return null;
+}
+
+export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
+  const fleet = raw.fleet;
+  const network: 'testnet' | 'mainnet' =
+    fleet?.chain === 'base' ? 'mainnet' : 'testnet';
+  const masterAddress = fleet?.master_address ?? raw.master.address ?? '0x';
+  const pending = raw.pendingStakingRewardsWei ?? '0';
+  const counts = activityCountsSurface(raw);
+
+  const services = (fleet?.services ?? []).map((svc, i) => ({
+    index: displayServiceIndex(svc),
+    step: svc.step,
+    serviceId: svc.service_id,
+    wallets: {
+      agent: {
+        address: svc.agent_address || '0x',
+        balances: [{ asset: 'native', amountWei: '0' }],
+      },
+      multisig: {
+        address: svc.safe_address || '0x',
+        balances: [
+          { asset: 'native', amountWei: '0' },
+          { asset: 'bond', amountWei: '0' },
+        ],
+      },
+    },
+    staking: {
+      staked: STAKED_LIKE_STEPS.has(svc.step),
+      evicted: false,
+      sinceBlock: null,
+    },
+    activity: {
+      lastEventAt: null,
+      counts,
+    },
+    rewards: {
+      pending,
+      asset: 'reward' as const,
+    },
+    attention: computeAttention(svc, raw, i === 0),
+  }));
+
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    network,
+    master: {
+      address: masterAddress,
+      balances: [{ asset: 'native', amountWei: raw.master.balanceWei ?? '0' }],
+    },
+    services,
+  };
+}

@@ -19,6 +19,12 @@ import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
 import runCommand from './commands/run.js';
 import stopCommand from './commands/stop.js';
+import statusCommand from './commands/status.js';
+import fleetCommand from './commands/fleet.js';
+import balanceCommand from './commands/balance.js';
+import historyCommand from './commands/history.js';
+import rewardsCommand from './commands/rewards.js';
+import logsCommand from './commands/logs.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -28,6 +34,12 @@ const COMMANDS: CommandModule[] = [
   fundRequirementsCommand,
   runCommand,
   stopCommand,
+  statusCommand,
+  fleetCommand,
+  balanceCommand,
+  historyCommand,
+  rewardsCommand,
+  logsCommand,
 ];
 
 export interface RunCliOptions {

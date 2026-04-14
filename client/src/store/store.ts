@@ -89,7 +89,7 @@ export class Store {
   getRecentOwnActivity(limit: number): Array<{ requestId: string; role: string }> {
     const rows = this.db.prepare(
       `SELECT request_id, role FROM own_activity ORDER BY rowid DESC LIMIT ?`,
-    ).all(Math.max(0, Math.min(limit, 200))) as Array<{ request_id: string; role: string }>;
+    ).all(Math.max(0, Math.min(limit, 1000))) as Array<{ request_id: string; role: string }>;
     return rows.map(r => ({ requestId: r.request_id, role: r.role }));
   }
 
