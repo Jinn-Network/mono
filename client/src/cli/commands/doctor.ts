@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
-import { checkClaudeBinary } from '../../preflight/claude-binary.js';
+import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../../preflight/claude-binary.js';
 import { loadConfig, type JinnConfig } from '../../config.js';
 import { getChainConfig } from '../../earning/contracts.js';
 
@@ -28,7 +28,11 @@ async function checkNodeVersion(): Promise<CheckResult> {
 async function checkKeystoreReadable(earningDir: string): Promise<CheckResult> {
   const keystorePath = join(earningDir, 'mnemonic.keystore.json');
   if (existsSync(keystorePath)) {
-    return { name: 'keystore_readable', ok: true, detail: `present at ${earningDir}` };
+    return {
+      name: 'keystore_readable',
+      ok: true,
+      detail: 'mnemonic keystore present in configured earning directory',
+    };
   }
   return {
     name: 'keystore_readable',
@@ -50,17 +54,44 @@ async function checkDeploymentLoaded(config: JinnConfig): Promise<CheckResult> {
     return {
       name: 'deployment_loaded',
       ok: hasMech,
-      detail: hasMech ? `resolved on ${chain}` : 'mechMarketplace is zero address',
-      ...(hasMech ? {} : { remedy: 'Set JINN_TESTNET_MECH_DEPLOYMENT or run on a network with a deployed mech.' }),
+      detail: hasMech ? `resolved on ${chain}` : 'resolved deployment has no usable routing address',
+      ...(hasMech
+        ? {}
+        : {
+            remedy:
+              'Update testnet deployment settings in your configuration file, or use a network with bundled deployment data.',
+          }),
     };
-  } catch (err) {
+  } catch {
     return {
       name: 'deployment_loaded',
       ok: false,
-      detail: err instanceof Error ? err.message : String(err),
-      remedy: 'Check deployment artifact paths in config.',
+      detail: 'deployment configuration could not be loaded',
+      remedy: 'Verify deployment-related settings in your configuration file.',
     };
   }
+}
+
+function claudeBinaryCheckForDoctor(claudePath: string, result: ClaudeBinaryCheckResult): CheckResult {
+  const configuredAsPath = isAbsolute(claudePath) || claudePath.includes('/');
+  const detail = result.ok
+    ? configuredAsPath
+      ? 'configured CLI path is present and executable'
+      : 'CLI resolved on PATH'
+    : configuredAsPath
+      ? 'configured CLI path is missing or not executable'
+      : 'CLI not found on PATH';
+  return {
+    name: 'claude_binary',
+    ok: result.ok,
+    detail,
+    ...(result.ok
+      ? {}
+      : {
+          remedy:
+            'Install Claude Code or set an absolute path to the CLI in your configuration file.',
+        }),
+  };
 }
 
 async function run(ctx: CommandContext): Promise<void> {
@@ -70,12 +101,7 @@ async function run(ctx: CommandContext): Promise<void> {
   checks.push(await checkNodeVersion());
 
   const claudeResult = await checkClaudeBinary(config.claudePath);
-  checks.push({
-    name: 'claude_binary',
-    ok: claudeResult.ok,
-    detail: claudeResult.detail,
-    ...(claudeResult.ok ? {} : { remedy: 'Install Claude Code or set JINN_CLAUDE_PATH to an absolute path.' }),
-  });
+  checks.push(claudeBinaryCheckForDoctor(config.claudePath, claudeResult));
 
   checks.push(await checkKeystoreReadable(config.earningDir));
   checks.push(await checkDeploymentLoaded(config));
@@ -105,7 +131,7 @@ Runs a set of non-mutating checks against the local environment and
 configuration:
   - node_version        Node.js >= 20
   - claude_binary       claude CLI resolvable on PATH
-  - keystore_readable   ~/.jinn-client/earning keystore present (optional)
+  - keystore_readable   mnemonic keystore in configured earning directory (optional)
   - deployment_loaded   testnet/mainnet contract addresses resolved
 
 Emits a JSON object with a checks array, an overall ok flag, and a
