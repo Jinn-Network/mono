@@ -26,7 +26,7 @@ async function run(ctx: CommandContext): Promise<void> {
   });
 
   /** Human-readable ERC-20 ticker; `address` is always `chainConfig.olasToken` (bond + reward role). */
-  const bondRewardSymbol = chain === 'base' ? 'OLAS' : 'JINN';
+  const bondRewardSymbol = chain === 'base' ? 'OLAS' : 'stOLAS';
 
   const payload = {
     schemaVersion: 1 as const,

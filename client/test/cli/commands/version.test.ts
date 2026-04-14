@@ -43,6 +43,7 @@ describe('version command', () => {
     const bond = parsed.tokens.bond as { symbol: string; address: string; decimals: number };
     expect(bond.symbol).not.toMatch(/^0x/i);
     expect(bond.symbol).not.toBe(bond.address);
+    expect(bond.symbol).toBe(chain === 'base' ? 'OLAS' : 'stOLAS');
     expect(bond.address.toLowerCase()).toBe(chainConfig.olasToken.toLowerCase());
     expect(bond.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
   });
