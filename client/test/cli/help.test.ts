@@ -14,7 +14,7 @@ const fakeCommand: CommandModule = {
 describe('renderTopLevelHelp', () => {
   it('lists every registered command with its summary', () => {
     const out = renderTopLevelHelp([fakeCommand]);
-    expect(out).toContain('test-verb');
+    expect(out).toContain('jinn test-verb');
     expect(out).toContain('a fake verb for tests');
     expect(out).toContain('Usage: jinn <verb>');
   });

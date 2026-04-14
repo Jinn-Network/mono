@@ -5,9 +5,11 @@ export function renderTopLevelHelp(commands: CommandModule[]): string {
   lines.push('Usage: jinn <verb> [flags...]');
   lines.push('');
   lines.push('Verbs:');
-  const maxNameLen = Math.max(...commands.map((c) => c.name.length));
+  const invocations = commands.map((c) => `jinn ${c.name}`);
+  const maxInvocationLen = Math.max(...invocations.map((s) => s.length));
   for (const cmd of commands) {
-    lines.push(`  ${cmd.name.padEnd(maxNameLen)}  ${cmd.summary}`);
+    const invocation = `jinn ${cmd.name}`;
+    lines.push(`  ${invocation.padEnd(maxInvocationLen)}  ${cmd.summary}`);
   }
   lines.push('');
   lines.push('Run `jinn <verb> --help` for verb-specific flags and examples.');
