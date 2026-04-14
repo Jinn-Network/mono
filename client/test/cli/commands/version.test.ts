@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import version from '../../../src/cli/commands/version.js';
 import type { CommandContext } from '../../../src/cli/command.js';
+import { loadConfig } from '../../../src/config.js';
+import { getChainConfig } from '../../../src/earning/contracts.js';
 
 function makeCtx(argv: string[] = []): { ctx: CommandContext; writes: string[]; exits: number[] } {
   const writes: string[] = [];
@@ -29,6 +31,20 @@ describe('version command', () => {
     expect(parsed.network).toMatch(/^(testnet|mainnet)$/);
     expect(parsed.tokens).toBeDefined();
     expect(parsed.tokens.native).toBeDefined();
+
+    const config = loadConfig();
+    const chain = config.network === 'testnet' ? 'base-sepolia' : 'base';
+    const chainConfig = getChainConfig(chain, {
+      testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+      testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+      testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+      testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    });
+    const bond = parsed.tokens.bond as { symbol: string; address: string; decimals: number };
+    expect(bond.symbol).not.toMatch(/^0x/i);
+    expect(bond.symbol).not.toBe(bond.address);
+    expect(bond.address.toLowerCase()).toBe(chainConfig.olasToken.toLowerCase());
+    expect(bond.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
   });
 
   it('exits 0 and writes nothing else on success', async () => {

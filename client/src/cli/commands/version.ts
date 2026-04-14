@@ -25,6 +25,9 @@ async function run(ctx: CommandContext): Promise<void> {
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
   });
 
+  /** Human-readable ERC-20 ticker; `address` is always `chainConfig.olasToken` (bond + reward role). */
+  const bondRewardSymbol = chain === 'base' ? 'OLAS' : 'JINN';
+
   const payload = {
     schemaVersion: 1 as const,
     generatedAt: new Date().toISOString(),
@@ -43,8 +46,8 @@ async function run(ctx: CommandContext): Promise<void> {
     },
     tokens: {
       native: { symbol: 'ETH', decimals: 18 },
-      bond: { symbol: chainConfig.olasToken, address: chainConfig.olasToken, decimals: 18 },
-      reward: { symbol: chainConfig.olasToken, address: chainConfig.olasToken, decimals: 18 },
+      bond: { symbol: bondRewardSymbol, address: chainConfig.olasToken, decimals: 18 },
+      reward: { symbol: bondRewardSymbol, address: chainConfig.olasToken, decimals: 18 },
     },
   };
 
