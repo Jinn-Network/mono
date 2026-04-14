@@ -8,7 +8,25 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { keccak256, toUtf8Bytes } from 'ethers';
+
+// Monorepo root, resolved from this file's location. Works identically from
+// src (tsx) and dist (tsc output) because both are 3 dirs below client/.
+const MONOREPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const BUNDLED_CONTRACTS_DIR = path.join(MONOREPO_ROOT, 'contracts');
+
+/**
+ * Default Phase 1b deployment artifacts shipped in the monorepo. These let the
+ * client run against Base Sepolia with zero env vars. Callers can still override
+ * individual paths via ChainConfigOverrides or JINN_TESTNET_*_DEPLOYMENT env vars.
+ */
+const DEFAULT_TESTNET_ARTIFACTS = {
+  token: path.join(BUNDLED_CONTRACTS_DIR, 'deployment-phase1a-token-baseSepolia-fast.json'),
+  l2: path.join(BUNDLED_CONTRACTS_DIR, 'deployment-phase1a-l2-baseSepolia-fast.json'),
+  mech: path.join(BUNDLED_CONTRACTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),
+  stolas: path.join(BUNDLED_CONTRACTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
+} as const;
 
 // ---------------------------------------------------------------------------
 // CID utilities
@@ -219,13 +237,18 @@ function loadArtifact(filePath: string): DeploymentArtifact {
 }
 
 function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainConfig {
-  const tokenArtifactPath = overrides.testnetL2TokenDeploymentPath ?? process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
-  const l2ArtifactPath = overrides.testnetL2DeploymentPath ?? process.env['JINN_TESTNET_L2_DEPLOYMENT'];
-  const mechArtifactPath = overrides.testnetMechDeploymentPath ?? process.env['JINN_TESTNET_MECH_DEPLOYMENT'];
-
-  if (!tokenArtifactPath && !l2ArtifactPath && !mechArtifactPath) {
-    return { ...BASE_SEPOLIA_CONFIG };
-  }
+  const tokenArtifactPath =
+    overrides.testnetL2TokenDeploymentPath
+    ?? process.env['JINN_TESTNET_TOKEN_DEPLOYMENT']
+    ?? DEFAULT_TESTNET_ARTIFACTS.token;
+  const l2ArtifactPath =
+    overrides.testnetL2DeploymentPath
+    ?? process.env['JINN_TESTNET_L2_DEPLOYMENT']
+    ?? DEFAULT_TESTNET_ARTIFACTS.l2;
+  const mechArtifactPath =
+    overrides.testnetMechDeploymentPath
+    ?? process.env['JINN_TESTNET_MECH_DEPLOYMENT']
+    ?? DEFAULT_TESTNET_ARTIFACTS.mech;
 
   const resolved: ChainConfig = { ...BASE_SEPOLIA_CONFIG };
 
@@ -291,7 +314,10 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     }
   }
 
-  const stolasArtifactPath = overrides.testnetStolasDeploymentPath ?? process.env['JINN_TESTNET_STOLAS_DEPLOYMENT'];
+  const stolasArtifactPath =
+    overrides.testnetStolasDeploymentPath
+    ?? process.env['JINN_TESTNET_STOLAS_DEPLOYMENT']
+    ?? DEFAULT_TESTNET_ARTIFACTS.stolas;
   if (stolasArtifactPath) {
     const stolasArtifact = loadArtifact(stolasArtifactPath);
     const distributor = stolasArtifact.contracts?.distributor;

@@ -30,10 +30,12 @@ const DesiredStateSchema = z.object({
 export const JinnConfigSchema = z.object({
   /**
    * Network to connect to.
-   * 'mainnet' → Base mainnet (default, unchanged behaviour).
-   * 'testnet' → Base Sepolia (uses testnet contract addresses and RPC).
+   * 'testnet' → Base Sepolia (default during Phase 1b; fast epochs, free funds).
+   * 'mainnet' → Base mainnet (flipped on at Phase 2 launch).
+   * Operators should not normally need to set this — the default tracks whatever
+   * phase the protocol is in.
    */
-  network: z.enum(['mainnet', 'testnet']).default('mainnet'),
+  network: z.enum(['mainnet', 'testnet']).default('testnet'),
 
   /**
    * Base RPC endpoint.

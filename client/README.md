@@ -1,75 +1,63 @@
 # jinn-client
 
-Phase 0 Jinn protocol client. Runs a daemon that participates in the Jinn training loop on Base via the OLAS Mech Marketplace and JinnRouter.
+Jinn protocol client. Runs a daemon that participates in the Jinn training loop: create, restore, and evaluate desired states, and earn rewards for measured work.
+
+The default network is whatever network the protocol is currently launching on. Today that is **Base Sepolia** (Phase 1b — fast epochs, free testnet funds). At Phase 2 launch it will flip to **Base mainnet**. Operators should not normally need to choose.
 
 ## What it does
 
 1. **Creates** desired states (posts restoration jobs to the marketplace)
 2. **Restores** desired states (claims requests, runs Claude to attempt restoration)
 3. **Evaluates** restorations (claims deliveries, creates evaluation jobs)
-4. **Earns** OLAS staking rewards (activity tracked on-chain by JinnRouter)
+4. **Earns** staking rewards (activity tracked on-chain)
 
 ## Prerequisites
 
 - Node.js >= 20
-- [Foundry](https://book.getfoundry.sh/) (`anvil` for local fork, `cast` for funding)
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` in PATH)
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` in PATH — the daemon spawns it as a subprocess)
+- [Foundry](https://book.getfoundry.sh/) (only needed for `npm run e2e` against an Anvil fork)
 
 ## Quick start
 
 ```bash
 npm install
-npm test              # 33 tests, all pass
-npm run e2e           # full loop on Anvil fork (no real funds needed)
-```
-
-## Running
-
-### Production (Base mainnet)
-
-```bash
+npm test              # vitest suite
 JINN_PASSWORD=your-keystore-password npm start
 ```
 
-On first run, the earning bootstrap creates a wallet, Safe, service, stakes it, and deploys a mech. It will pause at `awaiting_funding` — fund the printed addresses with ETH (gas) and OLAS (bond), then re-run.
+On first run, the bootstrap generates a master wallet and prints a funding address. Send testnet ETH to it, then re-run. The bootstrap is idempotent — it picks up where it left off.
 
-### Local development (Anvil fork)
+`JINN_PASSWORD` encrypts the local keystore and is env-only; never put it in a config file.
+
+## Switching to mainnet
+
+When Phase 2 launches, the default will flip. Until then, an explicit opt-in:
+
+```bash
+JINN_NETWORK=mainnet JINN_PASSWORD=secret npm start
+```
+
+or in `~/.jinn-client/config.json`:
+
+```json
+{ "network": "mainnet" }
+```
+
+Everything else in this README applies to both networks.
+
+## Running against an Anvil fork
+
+For offline validation without touching real funds:
 
 ```bash
 # Terminal 1
-anvil --fork-url https://mainnet.base.org --port 8545
+anvil --fork-url https://sepolia.base.org --port 8545
 
 # Terminal 2
-mkdir -p ~/.jinn-client
-cat > ~/.jinn-client/config.json << 'EOF'
-{
-  "rpcUrl": "http://127.0.0.1:8545",
-  "claudeModel": "claude-haiku-4-5-20251001",
-  "desiredStates": [
-    { "id": "test-1", "description": "The service is healthy and responding." }
-  ]
-}
-EOF
-
-JINN_PASSWORD=test npm start
+JINN_RPC_URL=http://127.0.0.1:8545 JINN_PASSWORD=test npm start
 ```
 
-Fund on Anvil after the bootstrap prints addresses:
-
-```bash
-# ETH for gas (from Anvil's pre-funded account)
-cast send <EOA_ADDRESS> --value 0.01ether \
-  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-  --rpc-url http://127.0.0.1:8545
-
-# OLAS for staking bond (impersonate a whale)
-cast rpc anvil_impersonateAccount <OLAS_WHALE> --rpc-url http://127.0.0.1:8545
-cast send 0x54330d28ca3357F294334BDC454a032e7f353416 \
-  "transfer(address,uint256)" <SAFE_ADDRESS> 5000000000000000000000 \
-  --from <OLAS_WHALE> --rpc-url http://127.0.0.1:8545 --unlocked
-```
-
-Then re-run `JINN_PASSWORD=test npm start`.
+The bootstrap will pause at the funding gate. Fund the printed master address from one of Anvil's pre-funded keys with `cast send`, then re-run.
 
 ## Config
 
@@ -82,7 +70,8 @@ JINN_PASSWORD=secret npm start -- --config ./my-config.json
 
 | Config key       | Env override             | Default                           |
 |------------------|--------------------------|-----------------------------------|
-| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| https://mainnet.base.org          |
+| network          | JINN_NETWORK             | testnet (flips to mainnet at launch) |
+| rpcUrl           | BASE_RPC_URL/BASE_SEPOLIA_RPC_URL/JINN_RPC_URL | network-appropriate public RPC |
 | claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
 | claudePath       | JINN_CLAUDE_PATH         | claude                            |
 | pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
@@ -127,7 +116,15 @@ On first run, the `EarningBootstrapper` walks through 11 idempotent steps:
 
 State persists to `~/.jinn-client/earning/`. Safe to interrupt and re-run at any point.
 
-## On-chain addresses (Base)
+## On-chain addresses
+
+The client resolves contract addresses automatically from deployment artifacts
+shipped in `contracts/deployment-*.json` (testnet) and hardcoded (mainnet).
+Operators do not need to set any `JINN_TESTNET_*_DEPLOYMENT` env var — those
+exist only as overrides for protocol developers running against a custom
+deploy.
+
+Base mainnet reference addresses (used when `network: mainnet`):
 
 | Component              | Address                                      |
 |------------------------|----------------------------------------------|
