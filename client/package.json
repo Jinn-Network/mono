@@ -5,7 +5,11 @@
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "jinn": "./bin/jinn"
+  },
   "scripts": {
+    "jinn": "tsx bin/jinn.ts",
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
