@@ -53,7 +53,13 @@ function makeCtx(argv: string[], tty = false): { ctx: CommandContext; writes: st
 describe('withdraw command', () => {
   it('--dry-run emits a sweep plan', async () => {
     const { default: cmd } = await import('../../../src/cli/commands/withdraw.js');
-    const { ctx, writes } = makeCtx(['--to', '0xDEST', '--dry-run']);
+    const { ctx, writes } = makeCtx([
+      '--to',
+      '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+      '--eth-amount',
+      '0.01',
+      '--dry-run',
+    ]);
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
@@ -62,7 +68,7 @@ describe('withdraw command', () => {
 
   it('missing --to emits invalid_invocation', async () => {
     const { default: cmd } = await import('../../../src/cli/commands/withdraw.js');
-    const { ctx, writes, exits } = makeCtx(['--dry-run']);
+    const { ctx, writes, exits } = makeCtx(['--drain-eth', '--yes']);
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
@@ -72,7 +78,12 @@ describe('withdraw command', () => {
 
   it('non-TTY without --yes or --dry-run refuses', async () => {
     const { default: cmd } = await import('../../../src/cli/commands/withdraw.js');
-    const { ctx, writes, exits } = makeCtx(['--to', '0xDEST']);
+    const { ctx, writes, exits } = makeCtx([
+      '--to',
+      '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+      '--eth-amount',
+      '0.01',
+    ]);
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');

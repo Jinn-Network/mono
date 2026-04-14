@@ -1,8 +1,21 @@
-import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
+import { resolveCliPassword } from '../password.js';
+import { loadConfig, getConfigPathFromArgs } from '../../config.js';
+import {
+  parseWithdrawArgv,
+  validateWithdrawArgs,
+} from '../../withdraw/args.js';
+import {
+  computeSweepWouldSend,
+  runWithdrawPlan,
+  withdrawNeedsInteractiveConfirm,
+} from '../../withdraw/run-withdraw-plan.js';
+import { decryptMnemonic } from '../../earning/wallet.js';
+import { FleetStateStore } from '../../earning/store.js';
+import { JsonRpcProvider } from 'ethers';
 
 interface SweepEntry {
   from: string;
@@ -18,16 +31,7 @@ function displayServiceIndex(chainIndex: number): number {
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
   try {
-    parsed = parseArgs({
-      args: ctx.argv,
-      options: {
-        to: { type: 'string' },
-        'dry-run': { type: 'boolean', default: false },
-        yes: { type: 'boolean', default: false },
-        json: { type: 'boolean', default: false },
-      },
-      allowPositionals: false,
-    });
+    parsed = parseWithdrawArgv(ctx.argv);
   } catch (err) {
     emitEnvelope(
       {
@@ -41,14 +45,27 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const to = parsed.values.to as string | undefined;
-  if (!to) {
+  if (parsed.help) {
+    ctx.writer.write(
+      `See \`jinn withdraw --help\` in the command module helpText, or \`npm run withdraw -- --help\` for the full operator script help.\n`,
+    );
+    return;
+  }
+
+  try {
+    validateWithdrawArgs(parsed);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const details =
+      message.includes('--to') && message.includes('required')
+        ? { field: '--to' as const, expected: 'Ethereum address' }
+        : { field: 'flags' as const, expected: message };
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: '--to is required (destination address)',
-        exampleCli: 'jinn withdraw --to 0xDEST --dry-run',
-        details: { field: '--to', expected: 'Ethereum address' },
+        message,
+        exampleCli: 'jinn withdraw --to 0xDEST --drain-eth --yes',
+        details,
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -86,44 +103,117 @@ async function run(ctx: CommandContext): Promise<void> {
     }
   }
 
-  const dryRun = parsed.values['dry-run'] as boolean;
-  const yes = parsed.values.yes as boolean;
+  const dryRun = parsed.dryRun;
+  const yes = parsed.yes;
 
   if (dryRun) {
     emitDryRun(ctx, {
       verb: 'withdraw',
-      description: `Would sweep ${sweep.length} wallet(s) to ${to}`,
-      plan: sweep.map(s => ({ ...s, to })),
+      description: `Would run withdraw plan (${sweep.length} wallet hint rows) to ${parsed.to}`,
+      plan: sweep.map(s => ({ ...s, to: parsed.to })),
     });
     return;
   }
 
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
-  ctx.writer.write(
-    JSON.stringify({
-      schemaVersion: 1,
-      generatedAt: new Date().toISOString(),
-      verb: 'withdraw',
+  const pw = resolveCliPassword(ctx.argv, ctx.env);
+  if (!pw.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: pw.message,
+        exampleCli: 'jinn withdraw --to 0xDEST --yes',
+        details: { field: 'keystore password' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const configPath =
+    getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
+  const config = loadConfig(configPath);
+  const provider = new JsonRpcProvider(config.rpcUrl);
+  const store = new FleetStateStore(config.earningDir);
+  let sweepWouldSend = false;
+  try {
+    const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), pw.password);
+    const fleet = await store.tryLoadExisting();
+    const to = parsed.to as string;
+    sweepWouldSend = await computeSweepWouldSend(
+      provider,
+      mnemonic,
+      fleet,
       to,
-      swept: sweep.length,
-      note: 'withdraw execution pending in a follow-up commit',
-    }) + '\n',
-  );
+      parsed.minSweepWei,
+    );
+  } catch {
+    // best-effort; withdraw will surface decrypt errors
+  }
+
+  if (withdrawNeedsInteractiveConfirm(parsed, { sweepWouldSend }) && !parsed.yes) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message:
+          'Large or drain-style withdraw requires explicit --yes (non-interactive CLI has no confirmation prompt).',
+        exampleCli: 'jinn withdraw --to 0xDEST --drain-eth --yes',
+        details: { field: 'confirmation' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  try {
+    await runWithdrawPlan({
+      password: pw.password,
+      config,
+      parsed,
+      log: () => {},
+      warn: (s: string) => {
+        ctx.writer.write(s + '\n');
+      },
+    });
+    ctx.writer.write(
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'withdraw',
+        to: parsed.to,
+        dryRun: false,
+        status: 'complete',
+      }) + '\n',
+    );
+  } catch (e) {
+    emitEnvelope(
+      {
+        code: 'fatal',
+        message: e instanceof Error ? e.message : String(e),
+        details: { cause: e instanceof Error ? e.message : String(e) },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+  }
 }
 
 const command: CommandModule = {
   name: 'withdraw',
-  summary: 'Sweep all fleet wallets to an external destination address',
-  helpText: `Usage: jinn withdraw --to <address> [--dry-run | --yes]
+  summary: 'Sweep master / agents per withdraw flags (see npm run withdraw)',
+  helpText: `Usage: jinn withdraw --to <address> [amount flags] [--dry-run | --yes]
 
-NOT idempotent. Each invocation emits a fresh sweep transaction.
-Requires --yes to run on a non-TTY. --dry-run prints the sweep plan
-as JSON and exits 0 without emitting any transaction.
+Supports the same amount flags as \`npm run withdraw\`:
+  --jinn-amount / --amount / --jinn-wei / --drain-jinn
+  --eth-amount / --eth-wei / --drain-eth
+  --sweep-agents / --min-sweep-wei / --master-gas-reserve-wei
+  --password-fd N
+
+Large or drain operations require --yes (no TTY prompt).
 
 Examples:
   jinn withdraw --to 0xDEST --dry-run
-  jinn withdraw --to 0xDEST --yes
+  jinn withdraw --to 0xDEST --eth-amount 0.01 --yes
 `,
   run,
 };

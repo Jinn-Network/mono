@@ -2,6 +2,9 @@ import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
+import { createCliSignerContext } from '../execution-context.js';
+import { runRewardClaimOnce } from '../../daemon/reward-claim-loop.js';
+import { isRecoverableTransactionError } from '../../tx-retry.js';
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -42,15 +45,57 @@ async function run(ctx: CommandContext): Promise<void> {
 
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
-  ctx.writer.write(
-    JSON.stringify({
-      schemaVersion: 1,
-      generatedAt: new Date().toISOString(),
-      verb: 'claim-rewards',
-      claimedWei: '0',
-      note: 'distributor integration pending in a follow-up commit',
-    }) + '\n',
-  );
+  const built = await createCliSignerContext({ argv: ctx.argv, env: ctx.env });
+  if (!built.ok) {
+    emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
+    return;
+  }
+
+  const { networkChain, chainConfig, fleetStore, masterSigner, provider } = built.ctx;
+
+  try {
+    const tick = await runRewardClaimOnce({
+      provider,
+      masterSigner,
+      store: fleetStore,
+      chain: networkChain,
+      distributorAddress: chainConfig.distributorAddress,
+    });
+    ctx.writer.write(
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'claim-rewards',
+        attempted: tick.attempted,
+        submitted: tick.submitted,
+        skippedNoPending: tick.skippedNoPending,
+        skippedNoDistributor: tick.skippedNoDistributor,
+        skippedWrongMode: tick.skippedWrongMode,
+      }) + '\n',
+    );
+  } catch (e) {
+    if (isRecoverableTransactionError(e)) {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: e instanceof Error ? e.message : String(e),
+          hint: 'Retry when the RPC endpoint is healthy.',
+          exampleCli: 'jinn claim-rewards --yes',
+          details: { cause: e instanceof Error ? e.message : String(e) },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    emitEnvelope(
+      {
+        code: 'fatal',
+        message: e instanceof Error ? e.message : String(e),
+        details: { cause: e instanceof Error ? e.message : String(e) },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+  }
 }
 
 const command: CommandModule = {
@@ -59,7 +104,7 @@ const command: CommandModule = {
   helpText: `Usage: jinn claim-rewards [--dry-run] [--yes]
 
 Idempotent: zero-delta is success, not error. Second consecutive call
-returns claimedWei:"0" and exits 0.
+may show submitted:0 and exits 0.
 
 Examples:
   jinn claim-rewards --dry-run

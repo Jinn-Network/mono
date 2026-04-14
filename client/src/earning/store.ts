@@ -175,4 +175,14 @@ export class FleetStateStore {
     current.services.push(service);
     return this.save(current);
   }
+
+  /** Remove one service row by its persisted `index` (not array offset). */
+  async removeService(index: number): Promise<FleetState> {
+    const current = await this.load();
+    const next = current.services.filter(s => s.index !== index);
+    if (next.length === current.services.length) {
+      throw new Error(`Service at index ${index} not found in state`);
+    }
+    return this.save({ ...current, services: next });
+  }
 }

@@ -71,6 +71,7 @@ describe('status command', () => {
     expect(parsed.fleet.needsAttention).toBe(1);
     expect(parsed.earnings.pendingTotal).toBe('42');
     expect(parsed.earnings.asset).toBe('reward');
-    expect(parsed.exit.blocking).toBe(false);
+    expect(parsed.exit.blocking).toBe(true);
+    expect(parsed.exit.hint).toContain('fleet');
   });
 });

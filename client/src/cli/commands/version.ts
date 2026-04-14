@@ -3,8 +3,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
-import { loadConfig } from '../../config.js';
+import { loadConfig, getConfigPathFromArgs } from '../../config.js';
 import { getChainConfig } from '../../earning/contracts.js';
+import { computeDeploymentDigest } from '../deployment-digest.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_JSON_PATH = join(HERE, '..', '..', '..', 'package.json');
@@ -16,7 +17,9 @@ function readClientVersion(): string {
 }
 
 async function run(ctx: CommandContext): Promise<void> {
-  const config = loadConfig();
+  const configPath =
+    getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
+  const config = loadConfig(configPath);
   const chain = config.network === 'testnet' ? 'base-sepolia' : 'base';
   const chainConfig = getChainConfig(chain, {
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
@@ -27,6 +30,8 @@ async function run(ctx: CommandContext): Promise<void> {
 
   /** Human-readable ERC-20 ticker; `address` is always `chainConfig.olasToken` (bond + reward role). */
   const bondRewardSymbol = chain === 'base' ? 'OLAS' : 'stOLAS';
+
+  const { digest, artifacts } = computeDeploymentDigest(config);
 
   const payload = {
     schemaVersion: 1 as const,
@@ -41,8 +46,8 @@ async function run(ctx: CommandContext): Promise<void> {
     },
     network: config.network,
     deployments: {
-      digest: 'unknown',
-      artifacts: [] as Array<{ name: string; path: string; sha256: string }>,
+      digest,
+      artifacts,
     },
     tokens: {
       native: { symbol: 'ETH', decimals: 18 },

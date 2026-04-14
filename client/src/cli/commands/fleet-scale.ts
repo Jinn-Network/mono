@@ -3,6 +3,11 @@ import type { CommandContext, CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
+import { resolveCliPassword } from '../password.js';
+import { createCliSignerContext } from '../execution-context.js';
+import { FleetBootstrapper } from '../../earning/bootstrap.js';
+import { retireFleetServiceOnChain, findFleetService } from '../../earning/fleet-retire.js';
+import { isRecoverableTransactionError } from '../../tx-retry.js';
 
 async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
   let parsed;
@@ -45,7 +50,8 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 
   const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-  const current = raw.fleet?.services.length ?? 0;
+  const sorted = [...(raw.fleet?.services ?? [])].sort((a, b) => a.index - b.index);
+  const current = sorted.length;
   const dryRun = parsed.values['dry-run'] as boolean;
   const yes = parsed.values.yes as boolean;
 
@@ -56,11 +62,11 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
     description = `Fleet is already at size ${current}. No action.`;
   } else if (to > current) {
     plan = [{ action: 'grow', from: current, to }];
-    description = `Would grow fleet from ${current} to ${to} via jinn bootstrap with targetServices=${to}.`;
+    description = `Would grow fleet from ${current} to ${to} via bootstrap with targetServices=${to}.`;
   } else {
-    const indices = (raw.fleet?.services ?? []).slice(to).map(s => s.index);
+    const indices = sorted.slice(to).map(s => s.index);
     plan = [{ action: 'retire', from: current, to, indices }];
-    description = `Would retire services ${indices.join(', ')} to shrink fleet from ${current} to ${to}.`;
+    description = `Would retire services ${indices.join(', ')} (fleet index field) to shrink fleet from ${current} to ${to}.`;
   }
 
   if (dryRun) {
@@ -70,14 +76,195 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
 
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
+  if (to === current) {
+    ctx.writer.write(
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'fleet scale',
+        from: current,
+        to,
+        action: 'none',
+      }) + '\n',
+    );
+    return;
+  }
+
+  const pw = resolveCliPassword(ctx.argv, ctx.env);
+  if (!pw.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: pw.message,
+        exampleCli: 'jinn fleet scale --to 3 --yes',
+        details: { field: 'keystore password' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const built = await createCliSignerContext({ argv: ctx.argv, env: ctx.env });
+  if (!built.ok) {
+    emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
+    return;
+  }
+
+  const { config, networkChain, chainConfig, fleetStore, masterSigner, provider } = built.ctx;
+
+  if (to > current) {
+    const bootstrapper = new FleetBootstrapper({
+      earningDir: config.earningDir,
+      chain: networkChain,
+      rpcUrl: config.rpcUrl,
+      stakingMode: config.stakingMode,
+      targetServices: to,
+      testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+      testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+      testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+      testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+      debug: config.debug,
+      masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
+      pollIntervalMs: config.pollIntervalMs,
+    });
+
+    let result: Awaited<ReturnType<FleetBootstrapper['bootstrap']>>;
+    try {
+      result = await bootstrapper.bootstrap(pw.password);
+    } catch (e) {
+      if (isRecoverableTransactionError(e)) {
+        emitEnvelope(
+          {
+            code: 'transient_error',
+            message: e instanceof Error ? e.message : String(e),
+            exampleCli: 'jinn fleet scale --to 3 --yes',
+            details: { cause: e instanceof Error ? e.message : String(e) },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      emitEnvelope(
+        {
+          code: 'fatal',
+          message: e instanceof Error ? e.message : String(e),
+          details: { cause: e instanceof Error ? e.message : String(e) },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    if (result.funding) {
+      emitEnvelope(
+        {
+          code: 'funding_required',
+          message: result.message,
+          hint: 'Fund the listed address and re-run.',
+          exampleCli: 'jinn fund-requirements --json',
+          details: {
+            role: 'master',
+            address: result.funding.master_address,
+            asset: 'native',
+            needWei: result.funding.eth_required,
+            haveWei: result.funding.eth_balance,
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    if (!result.ok) {
+      emitEnvelope(
+        {
+          code: 'fatal',
+          message: result.message,
+          hint: 'Bootstrap failed before the fleet reached the target size.',
+          details: { cause: result.message },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const state = result.fleet_state;
+    ctx.writer.write(
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'fleet scale',
+        action: 'grow',
+        from: current,
+        to,
+        servicesComplete: state.services.filter(s => s.step === 'complete').length,
+        message: result.message,
+      }) + '\n',
+    );
+    return;
+  }
+
+  const indices = sorted
+    .slice(to)
+    .map(s => s.index)
+    .sort((a, b) => b - a);
+  const retired: Array<{ index: number; txHash?: string; message: string }> = [];
+  for (const index of indices) {
+    try {
+      const r = await retireFleetServiceOnChain({
+        provider,
+        masterSigner,
+        distributorAddress: chainConfig.distributorAddress,
+        fleetStore,
+        chain: networkChain,
+        serviceIndex: index,
+      });
+      retired.push({ index, txHash: r.txHash, message: r.message });
+      if (!r.ok) {
+        emitEnvelope(
+          {
+            code: 'fatal',
+            message: r.message,
+            hint: 'Fix the on-chain or fleet state issue, then retry shrink.',
+            details: { index, partialRetire: retired },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+    } catch (e) {
+      if (isRecoverableTransactionError(e)) {
+        emitEnvelope(
+          {
+            code: 'transient_error',
+            message: e instanceof Error ? e.message : String(e),
+            details: { index, partialRetire: retired },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      emitEnvelope(
+        {
+          code: 'fatal',
+          message: e instanceof Error ? e.message : String(e),
+          details: { index, partialRetire: retired },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+  }
+
   ctx.writer.write(
     JSON.stringify({
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       verb: 'fleet scale',
+      action: 'shrink',
       from: current,
       to,
-      note: 'scale execution pending in a follow-up commit',
+      retired,
     }) + '\n',
   );
 }
@@ -90,7 +277,7 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
         code: 'invalid_invocation',
         message: 'jinn fleet retire requires a service index',
         exampleCli: 'jinn fleet retire 2 --dry-run',
-        details: { field: '<index>', expected: 'non-negative integer' },
+        details: { field: '<index>', expected: 'non-negative integer (service.index from fleet JSON)' },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -103,7 +290,7 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
         code: 'invalid_invocation',
         message: `Invalid service index: ${indexArg}`,
         exampleCli: 'jinn fleet retire 2 --dry-run',
-        details: { field: '<index>', expected: 'non-negative integer' },
+        details: { field: '<index>', expected: 'non-negative integer (service.index from fleet JSON)' },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -135,7 +322,8 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 
   const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-  const svc = (raw.fleet?.services ?? []).find(s => s.index === index);
+  const fleet = raw.fleet;
+  const svc = fleet ? findFleetService(fleet, index) : undefined;
   const dryRun = parsed.values['dry-run'] as boolean;
   const yes = parsed.values.yes as boolean;
 
@@ -143,10 +331,10 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
   let description: string;
   if (!svc) {
     plan = [];
-    description = `Service ${index} is already retired (or never existed). No action.`;
+    description = `Service index ${index} is not in fleet state (already retired or never existed). No action.`;
   } else {
-    plan = [{ action: 'retire', index, txCount: 3 }];
-    description = `Would unstake, unbond, and drain wallets for service ${index}.`;
+    plan = [{ action: 'retire', index, txCount: 1 }];
+    description = `Would call distributor.unstakeAndWithdraw for service.index=${index}, then remove the row from earning_state.json.`;
   }
 
   if (dryRun) {
@@ -156,15 +344,93 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
 
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
-  ctx.writer.write(
-    JSON.stringify({
-      schemaVersion: 1,
-      generatedAt: new Date().toISOString(),
-      verb: 'fleet retire',
-      index,
-      note: 'retire execution pending in a follow-up commit',
-    }) + '\n',
-  );
+  if (!svc) {
+    ctx.writer.write(
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'fleet retire',
+        index,
+        action: 'none',
+      }) + '\n',
+    );
+    return;
+  }
+
+  const pw = resolveCliPassword(ctx.argv, ctx.env);
+  if (!pw.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: pw.message,
+        exampleCli: 'jinn fleet retire 2 --yes',
+        details: { field: 'keystore password' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const built = await createCliSignerContext({ argv: ctx.argv, env: ctx.env });
+  if (!built.ok) {
+    emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
+    return;
+  }
+
+  const { networkChain, chainConfig, fleetStore, masterSigner, provider } = built.ctx;
+
+  try {
+    const r = await retireFleetServiceOnChain({
+      provider,
+      masterSigner,
+      distributorAddress: chainConfig.distributorAddress,
+      fleetStore,
+      chain: networkChain,
+      serviceIndex: index,
+    });
+    if (!r.ok) {
+      emitEnvelope(
+        {
+          code: 'fatal',
+          message: r.message,
+          details: { index },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    ctx.writer.write(
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'fleet retire',
+        index,
+        ok: r.ok,
+        txHash: r.txHash ?? null,
+        message: r.message,
+      }) + '\n',
+    );
+  } catch (e) {
+    if (isRecoverableTransactionError(e)) {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: e instanceof Error ? e.message : String(e),
+          details: { index },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    emitEnvelope(
+      {
+        code: 'fatal',
+        message: e instanceof Error ? e.message : String(e),
+        details: { index },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+  }
 }
 
 async function run(ctx: CommandContext): Promise<void> {
@@ -201,7 +467,10 @@ const command: CommandModule = {
 
 Subverbs:
   scale --to N [--dry-run] [--yes]       Grow or shrink the fleet to N services (idempotent)
-  retire <index> [--dry-run] [--yes]     Retire one service (unstake, unbond, drain)
+  retire <index> [--dry-run] [--yes]     Retire one service (standard mode: unstake via distributor)
+
+Index: use the persisted fleet field service.index (see \`jinn status --json\` → fleet.services[].index),
+not an array offset.
 
 Examples:
   jinn fleet scale --to 3 --dry-run

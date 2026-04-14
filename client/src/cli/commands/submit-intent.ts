@@ -1,8 +1,15 @@
 import { parseArgs } from 'node:util';
+import { getAddress } from 'ethers';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
+import { createCliExecutionContext } from '../execution-context.js';
+import { isRecoverableTransactionError } from '../../tx-retry.js';
+
+function intentCacheKey(safe: string, intentId: string): string {
+  return `cli_intent:${getAddress(safe)}:${intentId}`;
+}
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -74,37 +81,82 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-  const service = raw.fleet?.services.find(s => s.step === 'complete');
-  if (!service) {
-    emitEnvelope(
-      {
-        code: 'bootstrap_incomplete',
-        message: 'No complete service in the fleet to post an intent from.',
-        hint: 'Run `jinn bootstrap` to advance the state machine first.',
-        exampleCli: 'jinn bootstrap',
-        details: { field: 'fleet' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
+  if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
+
+  const built = await createCliExecutionContext({ argv: ctx.argv, env: ctx.env });
+  if (!built.ok) {
+    emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
+    return;
+  }
+
+  const { adapter, jinnStore, primaryService } = built.ctx;
+  const safe = primaryService.safe_address!;
+  const cacheKey = intentCacheKey(safe, id);
+  const cached = jinnStore.getConfigValue(cacheKey);
+  if (cached) {
+    ctx.writer.write(
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'submit-intent',
+        id,
+        creatorMultisig: getAddress(safe),
+        requestId: cached,
+        status: 'already_submitted',
+        idempotent: true,
+      }) + '\n',
     );
     return;
   }
 
-  const creatorMultisig = service.safe_address ?? '0x';
-
-  if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
-
-  ctx.writer.write(
-    JSON.stringify({
-      schemaVersion: 1,
-      generatedAt: new Date().toISOString(),
-      verb: 'submit-intent',
+  const attemptNumber = 1;
+  const attemptId = `${id}/${attemptNumber}`;
+  try {
+    const requestId = await adapter.postDesiredState({
       id,
-      creatorMultisig,
-      status: 'submitted',
-      note: 'adapter integration pending in a follow-up commit',
-    }) + '\n',
-  );
+      description,
+      type: 'restoration',
+      attemptId,
+      attemptNumber,
+    });
+    jinnStore.recordOwnActivity(requestId, 'created');
+    jinnStore.setConfigValue(cacheKey, requestId);
+    ctx.writer.write(
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'submit-intent',
+        id,
+        creatorMultisig: getAddress(safe),
+        requestId,
+        status: 'submitted',
+        attemptId,
+        attemptNumber,
+      }) + '\n',
+    );
+  } catch (e) {
+    if (isRecoverableTransactionError(e)) {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: e instanceof Error ? e.message : String(e),
+          hint: 'Retry when the RPC endpoint is healthy or fees clear.',
+          exampleCli: 'jinn submit-intent --id my-intent --description "..." --yes',
+          details: { cause: e instanceof Error ? e.message : String(e) },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    emitEnvelope(
+      {
+        code: 'fatal',
+        message: e instanceof Error ? e.message : String(e),
+        details: { cause: e instanceof Error ? e.message : String(e) },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+  }
 }
 
 const command: CommandModule = {
@@ -112,8 +164,8 @@ const command: CommandModule = {
   summary: 'Post a desired state (restoration job) to the protocol',
   helpText: `Usage: jinn submit-intent --id <id> --description <text> [--dry-run] [--yes]
 
-Idempotent: keyed on (creator multisig, id). Re-posting the same id is
-a no-op that returns the existing on-chain intent id and exits 0.
+Idempotent: re-posting the same (--id) from the same creator Safe returns the
+cached request id (local SQLite) without sending a new transaction.
 
 Examples:
   jinn submit-intent --id health-check --description "The service is running" --dry-run

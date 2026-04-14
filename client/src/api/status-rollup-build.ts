@@ -26,6 +26,31 @@ function daemonState(shutdown: string | null): 'running' | 'stopped' | 'starting
   return 'stopped';
 }
 
+function buildExitRollup(
+  raw: GatheredStatusRaw,
+  needsAttention: number,
+): { blocking: boolean; hint: string | null } {
+  if (!raw.rpc.ok) {
+    return { blocking: true, hint: raw.rpc.error ?? 'RPC unhealthy.' };
+  }
+  if (needsAttention > 0) {
+    return { blocking: true, hint: 'Run `jinn fleet` for per-service detail.' };
+  }
+  if (raw.minMasterEthWei && raw.master.balanceWei) {
+    try {
+      if (BigInt(raw.master.balanceWei) < BigInt(raw.minMasterEthWei)) {
+        return {
+          blocking: true,
+          hint: 'Master ETH is below the configured minimum runway threshold.',
+        };
+      }
+    } catch {
+      /* ignore parse errors */
+    }
+  }
+  return { blocking: false, hint: null };
+}
+
 export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Response {
   const services = raw.fleet?.services ?? [];
   const complete = services.filter(s => s.step === 'complete').length;
@@ -36,6 +61,7 @@ export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Re
 
   const blockStr = raw.rpc.blockNumber ?? '0';
   const blockNumber = Number(blockStr);
+  const exit = buildExitRollup(raw, needsAttention);
 
   return {
     schemaVersion: 1,
@@ -61,9 +87,6 @@ export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Re
       pendingTotal: raw.pendingStakingRewardsWei ?? '0',
       asset: 'reward',
     },
-    exit: {
-      blocking: false,
-      hint: needsAttention > 0 ? 'Run `jinn fleet` for per-service detail.' : null,
-    },
+    exit,
   };
 }

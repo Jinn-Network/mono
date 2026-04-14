@@ -59,6 +59,24 @@ describe('assembleStatusRollupV1', () => {
     expect(parsed.fleet.needsAttention).toBe(1);
     expect(parsed.earnings.pendingTotal).toBe('42');
     expect(parsed.earnings.asset).toBe('reward');
+    expect(parsed.exit.blocking).toBe(true);
+    expect(parsed.exit.hint).toContain('fleet');
+  });
+
+  it('exit.blocking when rpc is not ok', () => {
+    const raw = makeRaw();
+    raw.rpc = { ok: false, error: 'rpc down' };
+    const parsed = assembleStatusRollupV1(raw);
+    expect(parsed.exit.blocking).toBe(true);
+    expect(parsed.exit.hint).toContain('rpc');
+  });
+
+  it('exit not blocking when fleet is fully complete and master above minimum', () => {
+    const raw = makeRaw();
+    raw.fleet!.services = raw.fleet!.services.map(s => ({ ...s, step: 'complete' as const }));
+    raw.minMasterEthWei = '1';
+    raw.master.balanceWei = '100';
+    const parsed = assembleStatusRollupV1(raw);
     expect(parsed.exit.blocking).toBe(false);
   });
 });

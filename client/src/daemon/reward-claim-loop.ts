@@ -9,7 +9,11 @@
 
 import type { JsonRpcProvider, Signer } from 'ethers';
 import { FleetStateStore } from '../earning/store.js';
-import { listStolasClaimTargets, tickStolasDistributorClaims } from '../earning/stolas-claim.js';
+import {
+  listStolasClaimTargets,
+  tickStolasDistributorClaims,
+  type StolasClaimTickResult,
+} from '../earning/stolas-claim.js';
 import type { Store } from '../store/store.js';
 
 export interface RewardClaimLoopConfig {
@@ -25,6 +29,18 @@ export interface RewardClaimLoopConfig {
   jinnStore?: Store;
 }
 
+export type RewardClaimTickConfig = Omit<RewardClaimLoopConfig, 'intervalMs'>;
+
+export async function runRewardClaimOnce(cfg: RewardClaimTickConfig): Promise<StolasClaimTickResult> {
+  const state = await cfg.store.load(cfg.chain);
+  const targets = listStolasClaimTargets(state.services);
+  return tickStolasDistributorClaims(cfg.provider, cfg.masterSigner, {
+    distributorAddress: cfg.distributorAddress,
+    stakingMode: state.staking_mode,
+    targets,
+  });
+}
+
 export class RewardClaimLoop {
   private stopped = false;
 
@@ -35,13 +51,7 @@ export class RewardClaimLoop {
   }
 
   async runOnce(): Promise<void> {
-    const state = await this.config.store.load(this.config.chain);
-    const targets = listStolasClaimTargets(state.services);
-    await tickStolasDistributorClaims(this.config.provider, this.config.masterSigner, {
-      distributorAddress: this.config.distributorAddress,
-      stakingMode: state.staking_mode,
-      targets,
-    });
+    await runRewardClaimOnce(this.config);
   }
 
   async run(): Promise<void> {
