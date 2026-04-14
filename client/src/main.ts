@@ -27,6 +27,7 @@ import { emitEnvelope } from './errors/envelope.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { FleetStateStore } from './earning/store.js';
+import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveAgentSigner, deriveMasterSigner } from './earning/wallet.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
@@ -60,6 +61,52 @@ const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN, {
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
 
+const STANDARD_SERVICE_PROGRESSION: readonly ServiceStep[] = [
+  'awaiting_stake',
+  'staked',
+  'mech_deployed',
+  'complete',
+];
+
+const SELF_BOND_SERVICE_PROGRESSION: readonly ServiceStep[] = [
+  'awaiting_stake',
+  'service_created',
+  'service_activated',
+  'agents_registered',
+  'service_deployed',
+  'service_staked',
+  'mech_deployed',
+  'complete',
+];
+
+/** §6.2 `bootstrap_incomplete` — `{ currentStep, nextStep }` from persisted fleet state. */
+function bootstrapIncompleteSteps(state: FleetState): { currentStep: string; nextStep: string } {
+  const progression =
+    state.staking_mode === 'self-bond'
+      ? SELF_BOND_SERVICE_PROGRESSION
+      : STANDARD_SERVICE_PROGRESSION;
+  const byIndex = [...state.services].sort((a, b) => a.index - b.index);
+  const focus: ServiceState | undefined =
+    byIndex.find(s => s.step === 'complete' && !s.safe_address) ??
+    byIndex.find(s => s.step !== 'complete') ??
+    byIndex[0];
+
+  if (!focus) {
+    return { currentStep: 'awaiting_service', nextStep: 'awaiting_stake' };
+  }
+  if (focus.step === 'complete' && !focus.safe_address) {
+    return { currentStep: 'complete', nextStep: 'bootstrap' };
+  }
+  const i = progression.indexOf(focus.step);
+  if (i === -1) {
+    return { currentStep: focus.step, nextStep: 'bootstrap' };
+  }
+  if (i < progression.length - 1) {
+    return { currentStep: focus.step, nextStep: progression[i + 1]! };
+  }
+  return { currentStep: focus.step, nextStep: 'bootstrap' };
+}
+
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 
 async function bootstrap(): Promise<{
@@ -91,7 +138,7 @@ async function bootstrap(): Promise<{
       code: 'funding_required',
       message: result.message,
       hint: 'Fund the listed address and re-run this command.',
-      exampleCli: 'npm start',
+      exampleCli: 'jinn fund-requirements --json',
       details: {
         role: 'master',
         address: result.funding.master_address,
@@ -107,7 +154,7 @@ async function bootstrap(): Promise<{
       code: 'fatal',
       message: result.message,
       hint: 'Bootstrap failed before the fleet reached a runnable state.',
-      details: { stage: 'bootstrap' },
+      details: { cause: result.message },
     });
   }
 
@@ -119,8 +166,8 @@ async function bootstrap(): Promise<{
       code: 'bootstrap_incomplete',
       message: 'Bootstrap completed but no service is ready.',
       hint: 'Re-run to continue the state machine toward a running fleet.',
-      exampleCli: 'npm start',
-      details: { completeCount: state.services.filter(s => s.step === 'complete').length },
+      exampleCli: 'jinn bootstrap --json',
+      details: bootstrapIncompleteSteps(state),
     });
   }
 
@@ -242,11 +289,15 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   const { summary, hint } = formatBootstrapOperatorMessage(err);
-  const cause = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  const cause = err instanceof Error ? err.message : String(err);
+  const details: Record<string, unknown> = { cause };
+  if (config.debug && err instanceof Error && err.stack) {
+    details.stack = err.stack;
+  }
   emitEnvelope({
     code: 'fatal',
     message: summary,
     ...(hint !== undefined ? { hint } : {}),
-    details: { cause },
+    details,
   });
 });
