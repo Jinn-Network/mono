@@ -51,7 +51,10 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
         message: `Unknown verb: ${verb}`,
         hint: 'Run `jinn --help` for the list of verbs.',
         exampleCli: 'jinn --help',
-        details: { field: 'verb', expected: COMMANDS.map((c) => c.name).join('|') },
+        details: {
+          field: 'subcommand',
+          expected: COMMANDS.map((c) => c.name).join('|'),
+        },
       },
       { writer, exit },
     );
@@ -76,12 +79,19 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
     await command.run(ctx);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const cause = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    const details: Record<string, unknown> = { cause: message, verb };
+    const debug =
+      process.env['JINN_DEBUG'] === '1' ||
+      process.env['JINN_DEBUG'] === 'true' ||
+      process.env['DEBUG'] === '1';
+    if (debug && err instanceof Error && err.stack) {
+      details.stack = err.stack;
+    }
     emitEnvelope(
       {
         code: 'fatal',
         message,
-        details: { verb, cause },
+        details,
       },
       { writer, exit },
     );
