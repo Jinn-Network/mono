@@ -19,13 +19,13 @@
 
 import { config as dotenvConfig } from 'dotenv';
 import { JsonRpcProvider } from 'ethers';
-import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { emitEnvelope } from './errors/envelope.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
+import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { FleetStateStore } from './earning/store.js';
@@ -107,51 +107,6 @@ function bootstrapIncompleteSteps(state: FleetState): { currentStep: string; nex
     return { currentStep: focus.step, nextStep: progression[i + 1]! };
   }
   return { currentStep: focus.step, nextStep: 'bootstrap' };
-}
-
-/** §7.6 — omit forbidden absolute paths from envelope `details`. */
-const ENVELOPE_INSTALL_ROOT = normalize(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
-const ENVELOPE_JINN_CLIENT_HOME = normalize(resolve(join(homedir(), '.jinn-client')));
-
-function envelopePathUnderRoot(absPath: string, root: string): boolean {
-  const p = normalize(resolve(absPath));
-  const r = normalize(resolve(root));
-  if (p === r) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  return p.startsWith(prefix);
-}
-
-function sanitizedClaudeAttemptedForEnvelope(claudePath: string): string {
-  const t = claudePath.trim();
-  if (!t) return 'configured path';
-  if (isAbsolute(t) && (envelopePathUnderRoot(t, ENVELOPE_JINN_CLIENT_HOME) || envelopePathUnderRoot(t, ENVELOPE_INSTALL_ROOT))) {
-    return 'configured path';
-  }
-  return t;
-}
-
-/** §7.6 — `invalid_invocation.message` must not echo forbidden absolute paths. */
-function sanitizedClaudePreflightMessageForEnvelope(detail: string, claudePath: string): string {
-  let out = detail;
-  const t = claudePath.trim();
-
-  const replaceAll = (s: string, find: string, rep: string) => (find ? s.split(find).join(rep) : s);
-
-  if (isAbsolute(t) && (envelopePathUnderRoot(t, ENVELOPE_JINN_CLIENT_HOME) || envelopePathUnderRoot(t, ENVELOPE_INSTALL_ROOT))) {
-    const variants = new Set<string>([t, normalize(t)]);
-    try {
-      variants.add(normalize(resolve(t)));
-    } catch {
-      /* ignore */
-    }
-    for (const v of [...variants].filter(Boolean).sort((a, b) => b.length - a.length)) {
-      out = replaceAll(out, v, 'configured path');
-    }
-  }
-
-  out = replaceAll(out, ENVELOPE_JINN_CLIENT_HOME, 'configured path');
-  out = replaceAll(out, ENVELOPE_INSTALL_ROOT, 'configured path');
-  return out;
 }
 
 // ── Bootstrap ───────────────────────────────────────────────────────────────
@@ -273,17 +228,7 @@ async function main(): Promise<void> {
 
   const preflight = await checkClaudeBinary(config.claudePath);
   if (!preflight.ok) {
-    emitEnvelope({
-      code: 'invalid_invocation',
-      message: sanitizedClaudePreflightMessageForEnvelope(preflight.detail, config.claudePath),
-      hint: 'Install Claude Code CLI on your PATH, or set the CLI binary path in your configuration file.',
-      exampleCli: 'command -v claude',
-      details: {
-        field: 'claude_binary',
-        expected: 'executable claude binary',
-        attempted: sanitizedClaudeAttemptedForEnvelope(config.claudePath),
-      },
-    });
+    emitClaudeBinaryPreflightFailure(preflight.detail, config.claudePath);
   }
 
   const runner = new ClaudeRunner({

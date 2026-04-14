@@ -170,8 +170,8 @@ The whole track is complete when all of the following are true:
 1. All four plans have run their Final Verification task
    successfully.
 2. `cd client && npx tsc --noEmit` is clean.
-3. `cd client && npx vitest run` is green with ≥ 146 + 6 (plan 01)
-   + ~26 (plan 02) + ~16 (plan 03) + ~20 (plan 04) = **≥ 214 tests**.
+3. `cd client && npx vitest run` is green with ≥ 146 + 6 + 4 + 2 (plan 01)
+   + ~26 (plan 02) + ~16 (plan 03) + ~20 (plan 04) = **≥ 216 tests**.
 4. `cd client && ./bin/jinn --help` lists every verb from the spec.
 5. `cd client && ./bin/jinn version --json | jq '.schemaVersion'`
    returns `1`.

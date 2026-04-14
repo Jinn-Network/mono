@@ -807,7 +807,7 @@ Expected: zero errors.
 cd client && npx vitest run
 ```
 
-Expected: all tests pass. Count should be the current 146 + 6 (envelope) + 4 (preflight) = 156.
+Expected: all tests pass. Count should be the current 146 + 6 (envelope) + 4 (preflight) + 2 (claude preflight envelope integration) = **158**.
 
 - [ ] **Step 3: Manual smoke — funding envelope on stdout**
 
@@ -823,18 +823,33 @@ Expected: a single JSON line on stdout with `"code":"funding_required"` and `"ex
 
 If the exit code is 0 (the old behavior), Task 3 Step 1 did not land correctly.
 
-- [ ] **Step 4: Manual smoke — claude preflight envelope**
+- [ ] **Step 4a: Claude preflight envelope (automated)**
 
-With `claude` not on PATH:
+Runs the same `invalid_invocation` envelope path `main.ts` uses (via `emitClaudeBinaryPreflightFailure`), without requiring a funded bootstrap or Anvil.
 
 ```bash
-PATH=/usr/bin:/bin JINN_PASSWORD=smoke JINN_CLAUDE_PATH=claude npm start 2>/dev/null
+cd client && npx vitest run test/preflight/claude-invocation-envelope.test.ts
+```
+
+Expected: PASS (2 tests).
+
+- [ ] **Step 4b: Manual smoke — full `npm start` stack (optional)**
+
+`checkClaudeBinary` runs **only after** bootstrap returns a complete service **with a mech address** (`client/src/main.ts`). A fresh `JINN_EARNING_DIR` therefore exits **`funding_required` (10)** before preflight — that is expected; it does not mean Step 4a failed.
+
+To hit exit **11** on the real entrypoint, point `JINN_EARNING_DIR` at a directory that has already completed bootstrap with a mech (for example, copy the `Temp dir:` path printed during `npm run e2e` **before** the script removes it, or reuse any local workspace that has reached `complete`). Ensure `claude` does not resolve on `PATH`:
+
+```bash
+NODE_BIN="$(command -v node)"
+export PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin"
+command -v claude >/dev/null && echo "SKIP: claude is on this PATH" && exit 0
+JINN_PASSWORD=… JINN_EARNING_DIR=… JINN_CLAUDE_PATH=claude npm start 2>/dev/null
 echo "exit=$?"
 ```
 
-(Only run this if your shell's `/usr/bin:/bin` truly lacks a `claude` binary.)
+`PATH` **must** include the directory that contains `node` and `npm` (typically `$(dirname "$(command -v node)")`). Using **`PATH=/usr/bin:/bin` alone is not portable** — many installs put `npm` outside those directories (symptom: exit **127**).
 
-Expected: exit code 11, envelope on stdout with `"code":"invalid_invocation"` and `"details":{"field":"claude_binary",...}`.
+Expected when `claude` is not resolved: exit **11**, last line of stdout JSON with `"code":"invalid_invocation"` and `"details":{"field":"claude_binary",...}`.
 
 - [ ] **Step 5: Final commit if any fixups needed**
 
