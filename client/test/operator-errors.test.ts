@@ -36,11 +36,15 @@ describe('formatBootstrapOperatorMessage', () => {
     expect(r.summary).toContain('GS013');
   });
 
-  it('truncates very long messages with hint', () => {
+  it('truncates very long messages without referencing JINN_DEBUG', () => {
     const long = 'x'.repeat(300);
     const r = formatBootstrapOperatorMessage(new Error(long));
     expect(r.summary.length).toBeLessThanOrEqual(221);
-    expect(r.hint).toContain('JINN_DEBUG');
+    // Hint (if any) must not reference JINN_DEBUG — the envelope's
+    // details.cause already carries the full error.
+    if (r.hint !== undefined) {
+      expect(r.hint).not.toContain('JINN_DEBUG');
+    }
   });
 });
 

@@ -59,7 +59,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
     return {
       summary:
         'Gnosis Safe could not execute or estimate this transaction (GS013: inner call may have reverted or gas estimation failed).',
-      hint: 'Retry after a few blocks, switch RPC, or run with JINN_DEBUG=1 for the full error.',
+      hint: 'Retry after a few blocks or switch RPC. Full cause chain is in the error envelope details.',
     };
   }
 
@@ -95,10 +95,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
 
   const firstLine = msg.split('\n')[0]?.trim() ?? msg;
   if (firstLine.length > 220) {
-    return {
-      summary: `${firstLine.slice(0, 220)}…`,
-      hint: 'Run with JINN_DEBUG=1 for the full error.',
-    };
+    return { summary: `${firstLine.slice(0, 220)}…` };
   }
 
   return { summary: firstLine };
