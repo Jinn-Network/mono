@@ -142,3 +142,9 @@ Base mainnet reference addresses (used when `network: mainnet`):
 | `npm run build`  | TypeScript compile                               |
 | `npm run e2e`    | End-to-end validation on Anvil fork              |
 | `npm run staking`| Earning bootstrap validation on Anvil fork       |
+
+## Spec
+
+The stable command-line and JSON surface this client exposes is
+defined in [`spec/2026-04-14-client-surface.md`](../spec/2026-04-14-client-surface.md).
+Error envelopes emitted on non-zero exits conform to §6 of that spec.
