@@ -375,7 +375,16 @@ async function main() {
     process.exit(1);
   } else {
     console.log('✅ JINN-233 validation passed!\n');
-    console.log(`🔗 View transactions: https://dashboard.tenderly.co/tannedoaksprout/project/vnets/${process.env.TENDERLY_VNET_ID}\n`);
+    const acct = process.env.TENDERLY_ACCOUNT_SLUG;
+    const proj = process.env.TENDERLY_PROJECT_SLUG;
+    const vnet = process.env.TENDERLY_VNET_ID;
+    if (acct && proj && vnet) {
+      console.log(`🔗 View transactions: https://dashboard.tenderly.co/${acct}/${proj}/project/vnets/${vnet}\n`);
+    } else {
+      console.log(
+        '🔗 Set TENDERLY_ACCOUNT_SLUG, TENDERLY_PROJECT_SLUG, TENDERLY_VNET_ID to print the Tenderly dashboard link.\n',
+      );
+    }
   }
 }
 

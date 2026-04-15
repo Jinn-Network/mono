@@ -4,7 +4,7 @@
  *
  * Usage:
  *   OPERATE_PASSWORD=12345678 OPERATE_PROFILE_DIR=/Users/gcd/Repositories/main/jinn-node/.operate \
- *     RPC_URL=https://base.gateway.tenderly.co/6g74EyOoSgvpbSiU9h4mzl \
+ *     RPC_URL=https://base.gateway.tenderly.co/<YOUR_TENDERLY_ACCESS_KEY> \
  *     tsx scripts/blast-heartbeats.ts [--dry-run]
  *
  * Reads service config from the .operate profile (venture-test-worker / service 359).

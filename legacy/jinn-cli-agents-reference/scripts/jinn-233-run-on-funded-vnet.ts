@@ -1,24 +1,49 @@
 #!/usr/bin/env tsx
 /**
  * Run worker on already-funded Tenderly VNet
- * Uses the VNet and address from the previous funding attempt
+ *
+ * Required env:
+ *   TENDERLY_ADMIN_RPC — virtual network RPC URL (sensitive; do not commit)
+ *   TENDERLY_VNET_ID — VNet UUID for dashboard links
+ *   WORKER_PRIVATE_KEY — EOA key the worker signs with (or set TEST_PRIVATE_KEY)
+ *
+ * Optional:
+ *   TENDERLY_ACCOUNT_SLUG, TENDERLY_PROJECT_SLUG — for dashboard URLs (default: generic link without slugs)
+ *   TEST_ADDRESS — logged only; defaults to a placeholder if unset
  */
 
 import { execa } from 'execa';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-const VNET_ID = '72faaa5c-83f4-4761-86fb-91b30c00d4a4';
-const ADMIN_RPC = 'https://virtual.base.eu.rpc.tenderly.co/d645bc78-0fd2-4d11-9ebd-9946a5df9c7f';
-const TEST_PRIVATE_KEY = '0xa76e1a89cf97bb6c3f81e7c70b3c2e5b6a8c7f8b2a5c8e9f1a7b6c8d9e0f1a2b'; // Replace with actual key if you have it
-const TEST_ADDRESS = '0x35112e83a5a4fA93bdFDdb16364d2eb69DAec075';
+function requireEnv(name: string): string {
+  const v = process.env[name]?.trim();
+  if (!v) {
+    console.error(`Missing required environment variable: ${name}`);
+    process.exit(1);
+  }
+  return v;
+}
 
 async function main() {
+  const VNET_ID = requireEnv('TENDERLY_VNET_ID');
+  const ADMIN_RPC = requireEnv('TENDERLY_ADMIN_RPC');
+  const TEST_PRIVATE_KEY =
+    process.env.WORKER_PRIVATE_KEY?.trim() || requireEnv('TEST_PRIVATE_KEY');
+  const TEST_ADDRESS =
+    process.env.TEST_ADDRESS?.trim() || '0x0000000000000000000000000000000000000001';
+  const acct = process.env.TENDERLY_ACCOUNT_SLUG?.trim();
+  const proj = process.env.TENDERLY_PROJECT_SLUG?.trim();
+  const dashboard =
+    acct && proj
+      ? `https://dashboard.tenderly.co/${acct}/${proj}/project/vnets/${VNET_ID}`
+      : `(set TENDERLY_ACCOUNT_SLUG + TENDERLY_PROJECT_SLUG for dashboard URL; VNet ${VNET_ID})`;
+
   console.log('🚀 Running worker on funded Tenderly VNet\n');
   console.log(`VNet ID: ${VNET_ID}`);
   console.log(`Admin RPC: ${ADMIN_RPC}`);
   console.log(`Test Address: ${TEST_ADDRESS}`);
-  console.log(`Dashboard: https://dashboard.tenderly.co/tannedoaksprout/project/vnets/${VNET_ID}\n`);
+  console.log(`Dashboard: ${dashboard}\n`);
 
   const tempDir = path.join('/tmp', `jinn-proof-funded-${Date.now()}`);
   await fs.mkdir(tempDir, { recursive: true });
@@ -63,11 +88,17 @@ async function main() {
       console.log(`\n💰 Found ${uniqueTxs.length} transaction hash(es):`);
       for (const txHash of uniqueTxs) {
         console.log(`   - ${txHash}`);
-        console.log(`     Explorer: https://dashboard.tenderly.co/tannedoaksprout/project/vnets/${VNET_ID}/tx/${txHash}`);
+        const explorer =
+          acct && proj
+            ? `https://dashboard.tenderly.co/${acct}/${proj}/project/vnets/${VNET_ID}/tx/${txHash}`
+            : `tx ${txHash} (set TENDERLY_ACCOUNT_SLUG + TENDERLY_PROJECT_SLUG for explorer URL)`;
+        console.log(`     Explorer: ${explorer}`);
       }
     }
 
-    console.log(`\n📊 View full VNet state: https://dashboard.tenderly.co/tannedoaksprout/project/vnets/${VNET_ID}`);
+    console.log(
+      `\n📊 View full VNet state: ${acct && proj ? `https://dashboard.tenderly.co/${acct}/${proj}/project/vnets/${VNET_ID}` : `VNet ${VNET_ID} (set TENDERLY_ACCOUNT_SLUG + TENDERLY_PROJECT_SLUG)`}`,
+    );
     console.log(`⚠️  VNet NOT deleted - kept for inspection`);
 
   } catch (error: any) {

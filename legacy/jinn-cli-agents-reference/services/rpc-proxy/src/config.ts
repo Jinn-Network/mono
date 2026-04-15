@@ -1,8 +1,5 @@
-const DEFAULT_UPSTREAMS = [
-  'https://base.gateway.tenderly.co/6g74EyOoSgvpbSiU9h4mzl',
-  'https://lb.drpc.live/base/AqIPPjb6i02njkMtTVCNr_73pTBmFIsR8ZsZtuZZzRRv',
-  'https://mainnet.base.org',
-];
+/** Public RPCs only — never commit gateway URLs with embedded access keys. */
+const DEFAULT_UPSTREAMS = ['https://mainnet.base.org'];
 
 export interface ProxyConfig {
   port: number;
@@ -21,7 +18,7 @@ export function loadConfig(): ProxyConfig {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // Fall back to free public RPCs if no upstreams configured
+  // Fall back to public RPCs if no upstreams configured (set RPC_UPSTREAM_URLS for Tenderly/dRPC/etc.)
   if (upstreamUrls.length === 0) {
     upstreamUrls.push(...DEFAULT_UPSTREAMS);
   }

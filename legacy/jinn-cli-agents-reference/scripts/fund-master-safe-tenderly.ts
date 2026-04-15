@@ -1,6 +1,12 @@
 import { ethers } from 'ethers';
 
-const RPC_URL = process.argv[2] || 'https://virtual.base.eu.rpc.tenderly.co/65f2bb50-f25e-42ac-b0e3-36e552e9b672';
+const RPC_URL = process.argv[2]?.trim() || process.env.TENDERLY_RPC_URL?.trim() || process.env.RPC_URL?.trim();
+if (!RPC_URL) {
+  console.error(
+    'Missing RPC URL. Pass as the first argument after the script, or set TENDERLY_RPC_URL or RPC_URL (e.g. your Tenderly virtual network RPC).',
+  );
+  process.exit(1);
+}
 const OLAS_TOKEN = '0x54330d28ca3357F294334BDC454a032e7f353416';
 const MASTER_SAFE = '0x15aDF0eD29b6D76DB365670DfEeD8F9C5dAD4645';
 

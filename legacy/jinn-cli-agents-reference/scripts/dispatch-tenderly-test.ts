@@ -22,7 +22,18 @@ async function main() {
 
   if (result.requestId) {
     console.log(`\n📋 Request ID: ${result.requestId}`);
-    console.log(`🔗 Tenderly Explorer: https://dashboard.tenderly.co/tannedoaksprout/project/vnets/72faaa5c-83f4-4761-86fb-91b30c00d4a4/tx/${result.requestId}`);
+    const acct = process.env.TENDERLY_ACCOUNT_SLUG;
+    const proj = process.env.TENDERLY_PROJECT_SLUG;
+    const vnet = process.env.TENDERLY_VNET_ID;
+    if (acct && proj && vnet) {
+      console.log(
+        `🔗 Tenderly Explorer: https://dashboard.tenderly.co/${acct}/${proj}/project/vnets/${vnet}/tx/${result.requestId}`,
+      );
+    } else {
+      console.log(
+        '🔗 Set TENDERLY_ACCOUNT_SLUG, TENDERLY_PROJECT_SLUG, TENDERLY_VNET_ID to print a dashboard link.',
+      );
+    }
   }
 }
 
