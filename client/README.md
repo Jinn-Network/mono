@@ -13,16 +13,16 @@ The default network is whatever network the protocol is currently launching on. 
 
 ## Prerequisites
 
-- Node.js >= 20
+- Node.js >= 20 (`corepack enable` once so Yarn matches this package’s `packageManager` field)
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` in PATH — the daemon spawns it as a subprocess)
-- [Foundry](https://book.getfoundry.sh/) (only needed for `npm run e2e` against an Anvil fork)
+- [Foundry](https://book.getfoundry.sh/) (only needed for `yarn e2e` against an Anvil fork)
 
 ## Quick start
 
 ```bash
-npm install
-npm test              # vitest suite
-JINN_PASSWORD=your-keystore-password npm start
+yarn install
+yarn test              # vitest suite
+JINN_PASSWORD=your-keystore-password yarn start
 ```
 
 On first run, the bootstrap generates a master wallet and prints a funding address. Send testnet ETH to it, then re-run. The bootstrap is idempotent — it picks up where it left off.
@@ -34,7 +34,7 @@ On first run, the bootstrap generates a master wallet and prints a funding addre
 When Phase 2 launches, the default will flip. Until then, an explicit opt-in:
 
 ```bash
-JINN_NETWORK=mainnet JINN_PASSWORD=secret npm start
+JINN_NETWORK=mainnet JINN_PASSWORD=secret yarn start
 ```
 
 or in `~/.jinn-client/config.json`:
@@ -54,7 +54,7 @@ For offline validation without touching real funds:
 anvil --fork-url https://sepolia.base.org --port 8545
 
 # Terminal 2
-JINN_RPC_URL=http://127.0.0.1:8545 JINN_PASSWORD=test npm start
+JINN_RPC_URL=http://127.0.0.1:8545 JINN_PASSWORD=test yarn start
 ```
 
 The bootstrap will pause at the funding gate. Fund the printed master address from one of Anvil's pre-funded keys with `cast send`, then re-run.
@@ -65,7 +65,7 @@ Config file first, env var override. Default location: `~/.jinn-client/config.js
 
 Override with `--config`:
 ```bash
-JINN_PASSWORD=secret npm start -- --config ./my-config.json
+JINN_PASSWORD=secret yarn start -- --config ./my-config.json
 ```
 
 | Config key       | Env override             | Default                           |
@@ -135,13 +135,16 @@ Base mainnet reference addresses (used when `network: mainnet`):
 
 ## Scripts
 
-| Command          | Description                                     |
-|------------------|-------------------------------------------------|
-| `npm start`      | Production daemon (requires JINN_PASSWORD)       |
-| `npm test`       | Run vitest (33 tests)                            |
-| `npm run build`  | TypeScript compile                               |
-| `npm run e2e`    | End-to-end validation on Anvil fork              |
-| `npm run staking`| Earning bootstrap validation on Anvil fork       |
+| Command           | Description                                     |
+|-------------------|-------------------------------------------------|
+| `yarn start`      | Production daemon (requires JINN_PASSWORD)    |
+| `yarn test`       | Run vitest suite                                |
+| `yarn build`      | TypeScript compile                              |
+| `yarn typecheck`  | Typecheck without emitting (`tsc --noEmit`)     |
+| `yarn e2e`        | End-to-end validation on Anvil fork             |
+| `yarn staking`    | Earning bootstrap validation on Anvil fork      |
+
+In CI, use `yarn install --immutable` after checking out `yarn.lock` (equivalent to a clean `npm ci`).
 
 ## Spec
 

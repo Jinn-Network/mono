@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Thin launcher: exec tsx on the TypeScript entry living next to this file.
-# Works when the client is installed via `npm install` (the package.json `bin`
-# field creates a symlink to this script).
+# Works when the client is installed via `yarn install` or `npm install` (the
+# package.json `bin` field creates a symlink to this script).
 DIR="$(cd "$(dirname "$0")" && pwd)"
 exec tsx "$DIR/jinn.ts" "$@"

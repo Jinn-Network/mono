@@ -2,6 +2,7 @@
   "name": "jinn-client",
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "yarn@4.13.0",
   "engines": {
     "node": ">=20"
   },
@@ -11,6 +12,7 @@
   "scripts": {
     "jinn": "tsx bin/jinn.ts",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "tsx src/main.ts",

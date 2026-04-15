@@ -15,7 +15,7 @@ jinn-cli-agents/ Git subtree — historical Jinn agent repo (IMPORTANT: see belo
 
 client/          TypeScript daemon — the main runnable component
   src/
-    main.ts              Production entry point (npm start)
+    main.ts              Production entry point (yarn start)
     config.ts            Config loader (file > env > defaults)
     index.ts             Library exports
     adapters/
@@ -95,7 +95,7 @@ docs/            Design specs and implementation plans
 
 ### Prerequisites
 
-- Node.js >= 20
+- Node.js >= 20 (`corepack enable` once so Yarn matches each package’s `packageManager` field)
 - Foundry (`anvil` for local fork, `cast` for funding)
 - Codex CLI (`Codex` in PATH — the daemon spawns it as a subprocess)
 
@@ -103,10 +103,10 @@ docs/            Design specs and implementation plans
 
 ```bash
 cd client
-npm install
-npx tsc --noEmit   # should be zero errors
-npx vitest run      # 33 tests, all pass
-npm run e2e         # full loop on Anvil fork of Base
+yarn install
+yarn typecheck   # should be zero errors
+yarn test        # vitest suite, all pass
+yarn e2e         # full loop on Anvil fork of Base
 ```
 
 The e2e script spawns Anvil, bootstraps from scratch, runs create → restore → evaluate, and verifies staking rewards. Needs internet (Base RPC + IPFS).
@@ -115,13 +115,13 @@ The e2e script spawns Anvil, bootstraps from scratch, runs create → restore �
 
 ```bash
 cd client
-JINN_PASSWORD=your-keystore-password npm start
+JINN_PASSWORD=your-keystore-password yarn start
 ```
 
 Or with a config file:
 
 ```bash
-JINN_PASSWORD=secret npm start -- --config ./my-config.json
+JINN_PASSWORD=secret yarn start -- --config ./my-config.json
 ```
 
 The daemon will:
@@ -148,7 +148,7 @@ cat > ~/.jinn-client/config.json << 'EOF'
 }
 EOF
 
-JINN_PASSWORD=test npm start
+JINN_PASSWORD=test yarn start
 # Will pause at awaiting_funding — fund via cast, then re-run
 ```
 
@@ -257,17 +257,17 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 ```bash
 # Client
 cd client
-npm install          # install deps
-npm run build        # tsc compile
-npm test             # vitest run (33 tests)
-npm run e2e          # end-to-end on Anvil fork
-npm run staking      # earning bootstrap validation on Anvil
-npm start            # production daemon (requires JINN_PASSWORD)
+yarn install         # install deps (CI: yarn install --immutable)
+yarn build           # tsc compile
+yarn test            # vitest run
+yarn e2e             # end-to-end on Anvil fork
+yarn staking         # earning bootstrap validation on Anvil
+yarn start           # production daemon (requires JINN_PASSWORD)
 
 # Contracts
 cd contracts
-npm install
-npx hardhat test     # Hardhat tests
+yarn install
+yarn test            # Hardhat tests
 ```
 
 ## Spec Conventions

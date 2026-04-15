@@ -6,8 +6,8 @@
  * Uses the same config resolution as the daemon (file > env > defaults).
  *
  * Usage:
- *   npm run status
- *   npm run status -- --config ./my-config.json
+ *   yarn status
+ *   yarn status -- --config ./my-config.json
  */
 
 import { config as dotenvConfig } from 'dotenv';
@@ -101,7 +101,7 @@ async function printOfflineFleetSummary(earningDir: string): Promise<void> {
   for (const s of fleet.services) {
     console.log(`  service ${s.index}: ${s.step}  id=${s.service_id ?? '—'}`);
   }
-  console.log('Start the daemon (npm start) or fix JINN_API_PORT / firewall for full status.');
+  console.log('Start the daemon (yarn start) or fix JINN_API_PORT / firewall for full status.');
 }
 
 async function main(): Promise<void> {

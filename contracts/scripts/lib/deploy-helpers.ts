@@ -216,7 +216,10 @@ export async function deployL1Stack(
   // placeholder. After deploying the real Depository and Dispenser, we
   // call Treasury.changeManagers() to swap in the real addresses.
   // -----------------------------------------------------------------------
-  const Treasury = await ethers.getContractFactory("Treasury", deployer);
+  const Treasury = await ethers.getContractFactory(
+    "src/vendor/tokenomics/Treasury.sol:Treasury",
+    deployer
+  );
   const treasury = await Treasury.deploy(
     await jinn.getAddress(),
     await tokenomics.getAddress(),
@@ -230,7 +233,10 @@ export async function deployL1Stack(
   // olas is immutable; tokenomics, treasury, bondCalculator are mutable storage.
   // All addresses are now available.
   // -----------------------------------------------------------------------
-  const Depository = await ethers.getContractFactory("Depository", deployer);
+  const Depository = await ethers.getContractFactory(
+    "src/vendor/tokenomics/Depository.sol:Depository",
+    deployer
+  );
   const depository = await Depository.deploy(
     await jinn.getAddress(),
     await tokenomics.getAddress(),

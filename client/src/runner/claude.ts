@@ -36,8 +36,8 @@ export class ClaudeRunner implements Runner {
     writeFileSync(mcpConfigPath, JSON.stringify({
       mcpServers: {
         'jinn-client': {
-          command: 'npx',
-          args: ['tsx', this.mcpServerPath],
+          command: 'yarn',
+          args: ['exec', 'tsx', this.mcpServerPath],
           env: {
             DESIRED_STATE_ID: desiredState.id,
             DESIRED_STATE_DESCRIPTION: desiredState.description,

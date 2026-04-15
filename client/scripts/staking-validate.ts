@@ -9,7 +9,7 @@
  * Funds the EOA (ETH) and Safe (OLAS) on Anvil to unblock the funding gate,
  * then verifies on-chain state after the bootstrap completes.
  *
- * Usage: npx tsx scripts/staking-validate.ts
+ * Usage: yarn staking   (or `yarn exec tsx scripts/staking-validate.ts`)
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';

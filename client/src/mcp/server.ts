@@ -9,7 +9,7 @@
  *   REQUEST_ID                — On-chain request ID
  *   RESTORATION_DELIVERY_DATA — JSON delivery data (evaluation requests only)
  *
- * Usage: npx tsx src/mcp/server.ts
+ * Usage: yarn exec tsx src/mcp/server.ts
  */
 
 import { randomUUID } from 'node:crypto';

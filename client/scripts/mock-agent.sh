@@ -1,2 +1,2 @@
 #!/bin/bash
-exec npx tsx "$(dirname "$0")/mock-agent.ts" "$@"
+exec yarn exec tsx "$(dirname "$0")/mock-agent.ts" "$@"

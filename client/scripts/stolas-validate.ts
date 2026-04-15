@@ -7,7 +7,7 @@
  * The stOLAS ExternalStakingDistributor funds the OLAS bond from LemonTree
  * capital — the operator only needs ETH for gas.
  *
- * Usage: npx tsx scripts/stolas-validate.ts
+ * Usage: yarn stolas   (or `yarn exec tsx scripts/stolas-validate.ts`)
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';

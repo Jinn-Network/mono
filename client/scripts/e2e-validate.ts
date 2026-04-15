@@ -12,8 +12,10 @@
  *   Restorer picks up evaluation -> delivers
  *   Creator claims evaluation -> done
  *   Checkpoint -> verify staking rewards
+ *   CLI smoke: jinn subprocess with --config + --password-fd (parse + dry-run paths),
+ *   fleet retire display index vs chain index, nextFleetServiceIndex helper, empty strict claim tick
  *
- * Usage: npx tsx scripts/e2e-validate.ts
+ * Usage: yarn e2e   (or `yarn exec tsx scripts/e2e-validate.ts`)
  */
 
 import { config as dotenvConfig } from 'dotenv';
@@ -22,7 +24,8 @@ import { fileURLToPath } from 'node:url';
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { closeSync, openSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import {
   Contract,
@@ -140,6 +143,68 @@ interface PhaseResult {
   ok: boolean;
   ms: number;
   error?: string;
+}
+
+/** Last line of stdout that looks like a JSON object (config may log to stderr only). */
+function parseLastStdoutJsonObject(stdout: string): Record<string, unknown> {
+  const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (line.startsWith('{')) {
+      return JSON.parse(line) as Record<string, unknown>;
+    }
+  }
+  throw new Error(`No JSON object in CLI stdout (last 400 chars): ${stdout.slice(-400)}`);
+}
+
+/**
+ * Run `yarn exec tsx bin/jinn.ts ...` from the client package root.
+ * When `passwordFdContent` is set, appends `--password-fd <n>` where `n` is an open read fd shared
+ * with the child via `stdio` (same fd number in parent and child on Unix).
+ */
+async function runJinnCliSubprocess(
+  cliArgs: string[],
+  options: { passwordFdContent?: string; tmpDirForPw: string },
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  /** `e2e-validate.ts` lives in `client/scripts/`; package root is one level up. */
+  const clientRoot = join(__dirname, '..');
+  const jinnBin = join(clientRoot, 'bin', 'jinn.ts');
+  let pwFd: number | undefined;
+  let finalArgs = cliArgs;
+  const stdio: Array<'ignore' | 'pipe' | number> = ['ignore', 'pipe', 'pipe'];
+  if (options.passwordFdContent !== undefined) {
+    const pwPath = join(options.tmpDirForPw, 'e2e-cli-password-fd.txt');
+    await writeFile(pwPath, options.passwordFdContent, 'utf8');
+    pwFd = openSync(pwPath, 'r');
+    stdio.push(pwFd);
+    finalArgs = [...cliArgs, '--password-fd', String(pwFd)];
+  }
+
+  const child = spawn('yarn', ['exec', 'tsx', jinnBin, ...finalArgs], {
+    cwd: clientRoot,
+    stdio: stdio as ('ignore' | 'pipe' | number)[],
+    env: { ...process.env },
+  });
+
+  const out: Buffer[] = [];
+  const err: Buffer[] = [];
+  child.stdout?.on('data', (c: Buffer) => { out.push(c); });
+  child.stderr?.on('data', (c: Buffer) => { err.push(c); });
+
+  const code = await new Promise<number | null>((resolve) => {
+    child.on('close', resolve);
+    child.on('error', () => resolve(1));
+  });
+
+  if (pwFd !== undefined) {
+    closeSync(pwFd);
+  }
+
+  return {
+    code,
+    stdout: Buffer.concat(out).toString('utf8'),
+    stderr: Buffer.concat(err).toString('utf8'),
+  };
 }
 
 async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseResult> {
@@ -2545,6 +2610,135 @@ async function main(): Promise<void> {
         }
         console.log('    Operator passes liveness check');
       }),
+    );
+
+    // ── Phase 15b: CLI post-review surface (subprocess + small in-process checks) ─
+
+    results.push(
+      await runPhase(
+        'Phase 15b: CLI — --config/--password-fd, fleet retire display index, claim helpers',
+        async () => {
+          if (!tmpDir) throw new Error('No temp dir');
+          const configPath = join(tmpDir, 'e2e-cli-config.json');
+          await writeFile(
+            configPath,
+            `${JSON.stringify(
+              {
+                network: 'mainnet',
+                rpcUrl: ANVIL_RPC,
+                earningDir: tmpDir,
+                dbPath: join(tmpDir, 'cli-e2e.sqlite.db'),
+                apiPort: 17331,
+                stakingMode: 'standard',
+                targetServices: 1,
+              },
+              null,
+              2,
+            )}\n`,
+            'utf8',
+          );
+
+          const cfg = ['--config', configPath];
+          const pw = { passwordFdContent: PASSWORD, tmpDirForPw: tmpDir };
+
+          const claim = await runJinnCliSubprocess(['claim-rewards', '--dry-run', ...cfg], pw);
+          if (claim.code !== 0) {
+            throw new Error(`claim-rewards --dry-run exit ${claim.code} stderr=${claim.stderr}`);
+          }
+          const jClaim = parseLastStdoutJsonObject(claim.stdout);
+          if (jClaim['dryRun'] !== true) {
+            throw new Error(`expected claim-rewards dryRun, got ${JSON.stringify(jClaim)}`);
+          }
+
+          const intent = await runJinnCliSubprocess(
+            [
+              'submit-intent',
+              '--dry-run',
+              '--id',
+              'e2e-cli',
+              '--description',
+              'E2E CLI config + password-fd',
+              ...cfg,
+            ],
+            pw,
+          );
+          if (intent.code !== 0) {
+            throw new Error(`submit-intent --dry-run exit ${intent.code} stderr=${intent.stderr}`);
+          }
+          const jIntent = parseLastStdoutJsonObject(intent.stdout);
+          if (jIntent['dryRun'] !== true) {
+            throw new Error(`expected submit-intent dryRun, got ${JSON.stringify(jIntent)}`);
+          }
+
+          const scale = await runJinnCliSubprocess(['fleet', 'scale', '--to', '1', '--dry-run', ...cfg], pw);
+          if (scale.code !== 0) {
+            throw new Error(`fleet scale --dry-run exit ${scale.code} stderr=${scale.stderr}`);
+          }
+          const jScale = parseLastStdoutJsonObject(scale.stdout);
+          if (jScale['dryRun'] !== true) {
+            throw new Error(`expected fleet scale dryRun, got ${JSON.stringify(jScale)}`);
+          }
+
+          const retire = await runJinnCliSubprocess(['fleet', 'retire', '0', '--dry-run', ...cfg], pw);
+          if (retire.code !== 0) {
+            throw new Error(`fleet retire --dry-run exit ${retire.code} stderr=${retire.stderr}`);
+          }
+          const jRetire = parseLastStdoutJsonObject(retire.stdout);
+          const plan = jRetire['plan'] as Array<Record<string, unknown>> | undefined;
+          if (!plan?.[0]) {
+            throw new Error(`expected fleet retire plan, got ${JSON.stringify(jRetire)}`);
+          }
+          if (plan[0]!['chainIndex'] !== 1 || plan[0]!['index'] !== 0) {
+            throw new Error(
+              `fleet retire display 0 should map to index 0 / chainIndex 1, plan=${JSON.stringify(plan[0])}`,
+            );
+          }
+
+          const wdr = await runJinnCliSubprocess(
+            [
+              'withdraw',
+              '--to',
+              '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+              '--drain-eth',
+              '--dry-run',
+              ...cfg,
+            ],
+            pw,
+          );
+          if (wdr.code !== 0) {
+            throw new Error(`withdraw --dry-run exit ${wdr.code} stderr=${wdr.stderr}`);
+          }
+          const jWdr = parseLastStdoutJsonObject(wdr.stdout);
+          if (jWdr['dryRun'] !== true) {
+            throw new Error(`expected withdraw dryRun, got ${JSON.stringify(jWdr)}`);
+          }
+
+          const { nextFleetServiceIndex } = await import('../src/earning/next-service-index.js');
+          if (nextFleetServiceIndex([{ index: 1 }, { index: 3 }]) !== 4) {
+            throw new Error('nextFleetServiceIndex([1,3]) expected 4');
+          }
+
+          const { tickStolasDistributorClaims } = await import('../src/earning/stolas-claim.js');
+          const chainCfg = getChainConfig('base');
+          const tickEmpty = await tickStolasDistributorClaims(
+            {} as JsonRpcProvider,
+            {} as import('ethers').Signer,
+            {
+              distributorAddress: chainCfg.distributorAddress,
+              stakingMode: 'standard',
+              targets: [],
+              strict: true,
+            },
+          );
+          if (tickEmpty.attempted !== 0 || tickEmpty.claimAttempted !== 0) {
+            throw new Error(`expected empty stolas tick, got ${JSON.stringify(tickEmpty)}`);
+          }
+
+          console.log('    claim-rewards, submit-intent, fleet scale/retire, withdraw (dry-run + flags)');
+          console.log('    fleet retire display 0 -> chainIndex 1 (matches jinn fleet JSON index)');
+          console.log('    nextFleetServiceIndex + tickStolasDistributorClaims(strict, []) OK');
+        },
+      ),
     );
 
   } finally {
