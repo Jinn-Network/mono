@@ -4,7 +4,7 @@ Development happens in the [jinn-mono](https://github.com/Jinn-Network/mono) mon
 
 ## Prerequisites
 
-- Node.js >= 20 (`corepack enable` once so Yarn matches this package's `packageManager` field)
+- Node.js 22 (`corepack enable` once so Yarn matches this package's `packageManager` field)
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` in PATH — the daemon spawns it as a subprocess)
 - [Foundry](https://book.getfoundry.sh/) (only needed for `yarn e2e` against an Anvil fork)
 

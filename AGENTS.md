@@ -95,7 +95,7 @@ docs/            Design specs and implementation plans
 
 ### Prerequisites
 
-- Node.js >= 20 (`corepack enable` once so Yarn matches each package’s `packageManager` field)
+- Node.js 22 (`corepack enable` once so Yarn matches each package’s `packageManager` field)
 - Foundry (`anvil` for local fork, `cast` for funding)
 - Codex CLI (`Codex` in PATH — the daemon spawns it as a subprocess)
 
