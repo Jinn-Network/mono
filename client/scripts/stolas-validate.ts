@@ -14,7 +14,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Contract, JsonRpcProvider } from 'ethers';
+import { createPublicClient, http, parseAbi, type Address } from 'viem';
+import { base } from 'viem/chains';
 import { FleetBootstrapper } from '../src/earning/bootstrap.js';
 import {
   SERVICE_REGISTRY_L2_ABI,
@@ -142,11 +143,15 @@ async function main(): Promise<void> {
 
     results.push(
       await runPhase('Phase 2: stOLAS preflight check', async () => {
-        const provider = new JsonRpcProvider(ANVIL_RPC);
+        const publicClient = createPublicClient({ chain: base, transport: http(ANVIL_RPC) });
 
         // Check distributor is configured for our staking contract
-        const distributor = new Contract(STOLAS_DISTRIBUTOR, STOLAS_DISTRIBUTOR_ABI, provider);
-        const proxyConfig: bigint = await distributor.mapStakingProxyConfigs(CHAIN_CONFIG.stakingContract);
+        const proxyConfig = await publicClient.readContract({
+          address: STOLAS_DISTRIBUTOR as Address,
+          abi: STOLAS_DISTRIBUTOR_ABI,
+          functionName: 'mapStakingProxyConfigs',
+          args: [CHAIN_CONFIG.stakingContract as Address],
+        });
         console.log(`    Distributor config for ${CHAIN_CONFIG.stakingContract}: ${proxyConfig}`);
 
         if (proxyConfig === 0n) {
@@ -157,9 +162,16 @@ async function main(): Promise<void> {
         }
 
         // Check staking slots
-        const staking = new Contract(CHAIN_CONFIG.stakingContract, STOLAS_STAKING_SLOTS_ABI, provider);
-        const serviceIds: bigint[] = await staking.getServiceIds();
-        const maxServices: bigint = await staking.maxNumServices();
+        const serviceIds = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: STOLAS_STAKING_SLOTS_ABI,
+          functionName: 'getServiceIds',
+        });
+        const maxServices = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: STOLAS_STAKING_SLOTS_ABI,
+          functionName: 'maxNumServices',
+        });
         const slotsRemaining = Number(maxServices) - serviceIds.length;
         console.log(`    Staking slots: ${serviceIds.length}/${maxServices} used, ${slotsRemaining} remaining`);
 
@@ -208,8 +220,8 @@ async function main(): Promise<void> {
           '0xDE0B6B3A7640000', // 1 ETH in hex
         ]);
 
-        const provider = new JsonRpcProvider(ANVIL_RPC);
-        const balance = await provider.getBalance(eoaAddress);
+        const fundClient = createPublicClient({ chain: base, transport: http(ANVIL_RPC) });
+        const balance = await fundClient.getBalance({ address: eoaAddress as Address });
         console.log(`    Funded EOA with 1 ETH — balance: ${balance}`);
 
         if (balance === 0n) {
@@ -262,15 +274,15 @@ async function main(): Promise<void> {
           throw new Error('Missing serviceId or safeAddress from Phase 5');
         }
 
-        const provider = new JsonRpcProvider(ANVIL_RPC);
+        const publicClient = createPublicClient({ chain: base, transport: http(ANVIL_RPC) });
 
         // Service state should be Deployed (4)
-        const registry = new Contract(
-          CHAIN_CONFIG.serviceRegistry,
-          SERVICE_REGISTRY_L2_ABI,
-          provider,
-        );
-        const service = await registry.getService(serviceId);
+        const service = await publicClient.readContract({
+          address: CHAIN_CONFIG.serviceRegistry as Address,
+          abi: SERVICE_REGISTRY_L2_ABI,
+          functionName: 'getService',
+          args: [BigInt(serviceId)],
+        });
         const serviceState = Number(service.state);
         console.log(`    Service state: ${serviceState} (expected 4 = Deployed)`);
 
@@ -279,13 +291,15 @@ async function main(): Promise<void> {
         }
 
         // Service should be staked
-        const staking = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          ['function getServiceIds() view returns (uint256[])',
-           'function getStakingState(uint256 serviceId) view returns (uint8)'],
-          provider,
-        );
-        const stakedIds: bigint[] = await staking.getServiceIds();
+        const stakingAbi = parseAbi([
+          'function getServiceIds() view returns (uint256[])',
+          'function getStakingState(uint256) view returns (uint8)',
+        ]);
+        const stakedIds = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: stakingAbi,
+          functionName: 'getServiceIds',
+        });
         const isStaked = stakedIds.map(Number).includes(serviceId);
         console.log(`    Staked services: [${stakedIds.join(', ')}]`);
         console.log(`    Our service ${serviceId} is staked: ${isStaked}`);
@@ -294,7 +308,12 @@ async function main(): Promise<void> {
           throw new Error(`Service ${serviceId} not found in staked services`);
         }
 
-        const stakingState = await staking.getStakingState(serviceId);
+        const stakingState = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: stakingAbi,
+          functionName: 'getStakingState',
+          args: [BigInt(serviceId)],
+        });
         console.log(`    Staking state: ${stakingState} (1=Staked)`);
 
         if (Number(stakingState) !== 1) {

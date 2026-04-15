@@ -57,8 +57,8 @@ event has a stable \`kind\` enum (intent_posted, request_claimed,
 delivery_submitted, evaluation_submitted, reward_claimed, other).
 
 Examples:
-  npx jinn history --limit 20
-  npx jinn history --human
+  jinn history --limit 20
+  jinn history --human
 `,
   run,
 };

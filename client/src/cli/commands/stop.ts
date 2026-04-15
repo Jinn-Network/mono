@@ -88,8 +88,8 @@ Idempotent: if the daemon is already stopped, returns killed=false
 with exit 0.
 
 Examples:
-  npx jinn stop
-  npx jinn stop --human
+  jinn stop
+  jinn stop --human
 `,
   run,
 };

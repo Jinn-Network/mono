@@ -68,8 +68,8 @@ emits one JSON object per line matching the spec §8 log line shape
 (\`ts\`, \`level\`, \`component\`, \`msg\`).
 
 Examples:
-  npx jinn logs --limit 50
-  npx jinn logs --human
+  jinn logs --limit 50
+  jinn logs --human
 `,
   run,
 };

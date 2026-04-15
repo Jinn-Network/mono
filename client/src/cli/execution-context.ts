@@ -3,12 +3,14 @@
  * Mirrors {@link ../main.ts} bootstrap assumptions.
  */
 
-import { JsonRpcProvider } from 'ethers';
+import type { PublicClient } from 'viem';
+import type { WalletClient } from 'viem';
 import { loadConfig, getConfigPathFromArgs, type JinnConfig } from '../config.js';
 import { getChainConfig, type ChainConfig } from '../earning/contracts.js';
 import { FleetStateStore } from '../earning/store.js';
 import type { FleetState, ServiceState } from '../earning/types.js';
-import { decryptMnemonic, deriveAgentSigner, deriveMasterSigner } from '../earning/wallet.js';
+import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from '../earning/wallet.js';
+import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
 import { MechAdapter } from '../adapters/mech/adapter.js';
 import { Store } from '../store/store.js';
 import type { BuildEnvelopeInput } from '../errors/envelope.js';
@@ -23,8 +25,8 @@ export interface CliSignerContext {
   fleetStore: FleetStateStore;
   mnemonic: string;
   fleetState: FleetState;
-  provider: JsonRpcProvider;
-  masterSigner: ReturnType<typeof deriveMasterSigner> & { provider: JsonRpcProvider };
+  publicClient: PublicClient;
+  masterWallet: WalletClient;
 }
 
 export interface CliExecutionContext extends CliSignerContext {
@@ -104,10 +106,9 @@ async function buildCliSignerContext(
   }
 
   const fleetState = await fleetStore.load(networkChain);
-  const provider = new JsonRpcProvider(config.rpcUrl);
-  const masterSigner = deriveMasterSigner(mnemonic).connect(provider) as ReturnType<
-    typeof deriveMasterSigner
-  > & { provider: JsonRpcProvider };
+  const publicClient = createJinnPublicClient(config.rpcUrl, networkChain);
+  const masterAccount = deriveMasterSigner(mnemonic);
+  const masterWallet = createJinnWalletClient(config.rpcUrl, networkChain, masterAccount);
 
   return {
     ok: true,
@@ -118,8 +119,8 @@ async function buildCliSignerContext(
       fleetStore,
       mnemonic,
       fleetState,
-      provider,
-      masterSigner,
+      publicClient,
+      masterWallet,
     },
   };
 }
@@ -137,7 +138,7 @@ export async function createCliExecutionContext(
   const base = await buildCliSignerContext(opts);
   if (!base.ok) return base;
 
-  const { config, chainConfig, mnemonic, fleetState, provider, masterSigner } = base.ctx;
+  const { config, chainConfig, mnemonic, fleetState, publicClient, masterWallet } = base.ctx;
 
   const primaryService = pickPrimaryMechService(fleetState.services);
   if (!primaryService?.safe_address || !primaryService.mech_address) {
@@ -154,7 +155,7 @@ export async function createCliExecutionContext(
   }
 
   const jinnStore = new Store(config.dbPath);
-  const agentSigner = deriveAgentSigner(mnemonic, primaryService.index);
+  const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
   const marketplaceAddress = chainConfig.mechMarketplace as `0x${string}`;
   const routerAddress = (chainConfig.jinnRouter ??
     '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
@@ -166,7 +167,7 @@ export async function createCliExecutionContext(
       routerAddress,
       mechContractAddress: primaryService.mech_address as `0x${string}`,
       safeAddress: primaryService.safe_address as `0x${string}`,
-      agentEoaPrivateKey: agentSigner.privateKey as `0x${string}`,
+      agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
       ipfsRegistryUrl: config.ipfsRegistryUrl,
       ipfsGatewayUrl: config.ipfsGatewayUrl,
       pollIntervalMs: config.pollIntervalMs,

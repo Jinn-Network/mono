@@ -3,7 +3,7 @@
  * Used by FleetBootstrapper so operators need not hand-edit earning_state.json.
  */
 
-import { getAddress } from 'ethers';
+import { getAddress } from 'viem';
 import type { ServiceState, ServiceStep } from './types.js';
 
 const ZERO = '0x0000000000000000000000000000000000000000';

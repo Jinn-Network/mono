@@ -3,19 +3,20 @@
  * then drop the row from local fleet JSON.
  */
 
-import { Interface, JsonRpcProvider, getAddress, zeroPadValue } from 'ethers';
-import type { Signer } from 'ethers';
+import { encodeFunctionData, getAddress, pad, type Address, type Hex } from 'viem';
+import type { PublicClient } from 'viem';
+import type { WalletClient } from 'viem';
 import { STOLAS_DISTRIBUTOR_ABI } from './contracts.js';
 import type { FleetStateStore } from './store.js';
 import type { FleetState, ServiceState, StakingMode } from './types.js';
 import {
-  ethersSendTransactionWithRetry,
-  ethersWaitForTransactionHashWithRetry,
+  viemSendTransactionWithRetry,
+  waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
 
 export interface RetireFleetServiceParams {
-  provider: JsonRpcProvider;
-  masterSigner: Signer;
+  publicClient: PublicClient;
+  masterWallet: WalletClient;
   distributorAddress: string | undefined;
   fleetStore: FleetStateStore;
   chain: 'base' | 'base-sepolia';
@@ -35,7 +36,7 @@ export interface RetireFleetServiceResult {
 export async function retireFleetServiceOnChain(
   params: RetireFleetServiceParams,
 ): Promise<RetireFleetServiceResult> {
-  const { provider, masterSigner, distributorAddress, fleetStore, chain, serviceIndex } = params;
+  const { publicClient, masterWallet, distributorAddress, fleetStore, chain, serviceIndex } = params;
   const state: FleetState = await fleetStore.load(chain);
   const stakingMode: StakingMode = state.staking_mode;
   if (stakingMode !== 'standard') {
@@ -63,33 +64,32 @@ export async function retireFleetServiceOnChain(
     };
   }
 
-  const stakingProxy = getAddress(svc.staking_address);
-  const iface = new Interface(STOLAS_DISTRIBUTOR_ABI);
-  const operation = zeroPadValue(stakingProxy, 32);
-  const data = iface.encodeFunctionData('unstakeAndWithdraw', [
-    stakingProxy,
-    BigInt(svc.service_id),
-    operation,
-  ]);
+  const stakingProxy = getAddress(svc.staking_address) as Address;
+  const operation = pad(stakingProxy as Hex, { size: 32 });
+  const data = encodeFunctionData({
+    abi: STOLAS_DISTRIBUTOR_ABI,
+    functionName: 'unstakeAndWithdraw',
+    args: [stakingProxy, BigInt(svc.service_id), operation],
+  }) as Hex;
 
   try {
-    const txResponse = await ethersSendTransactionWithRetry(masterSigner, {
-      to: getAddress(distributorAddress),
+    const txHash = await viemSendTransactionWithRetry(masterWallet, publicClient, {
+      account: masterWallet.account!,
+      to: getAddress(distributorAddress) as Address,
       data,
-      gasLimit: 2_500_000n,
+      gas: 2_500_000n,
     });
-    const hash = (txResponse as { hash: string }).hash;
-    const receipt = await ethersWaitForTransactionHashWithRetry(provider, hash, 1, 120_000);
-    if (!receipt || receipt.status !== 1) {
+    const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash as Hex);
+    if (receipt.status !== 'success') {
       return {
         ok: false,
-        message: `unstakeAndWithdraw tx failed or timed out (hash=${hash}).`,
+        message: `unstakeAndWithdraw tx failed or timed out (hash=${txHash}).`,
       };
     }
     await fleetStore.removeService(serviceIndex);
     return {
       ok: true,
-      txHash: hash,
+      txHash,
       message: `Retired service ${serviceIndex} (service_id=${svc.service_id}).`,
     };
   } catch (e) {

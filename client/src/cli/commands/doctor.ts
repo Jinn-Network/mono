@@ -165,8 +165,8 @@ an overall ok flag, and a blockingCount. Exit code is 0 even when
 checks fail — callers read the result to decide whether to proceed.
 
 Examples:
-  npx jinn doctor
-  npx jinn doctor --human
+  jinn doctor
+  jinn doctor --human
 `,
   run,
 };

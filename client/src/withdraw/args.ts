@@ -2,7 +2,7 @@
  * CLI argument and amount parsing for operator withdraw script.
  */
 
-import { getAddress, isAddress } from 'ethers';
+import { getAddress, isAddress } from 'viem';
 
 export type WithdrawParsedArgs = {
   help: boolean;

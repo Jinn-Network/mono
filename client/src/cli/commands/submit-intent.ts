@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { getAddress } from 'ethers';
+import { getAddress } from 'viem';
 import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
@@ -191,8 +191,8 @@ Idempotent: re-posting the same (--id) from the same creator Safe returns the
 cached request id (local SQLite) without sending a new transaction.
 
 Examples:
-  npx jinn submit-intent --id health-check --description "The service is running" --dry-run
-  npx jinn submit-intent --id health-check --description "The service is running" --yes
+  jinn submit-intent --id health-check --description "The service is running" --dry-run
+  jinn submit-intent --id health-check --description "The service is running" --yes
 `,
   run,
 };

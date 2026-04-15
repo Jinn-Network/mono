@@ -42,8 +42,8 @@ balances. Each wallet is identified by its stable role name
 (master, service.<i>.agent, service.<i>.multisig).
 
 Examples:
-  npx jinn balance
-  npx jinn balance --human
+  jinn balance
+  jinn balance --human
 `,
   run,
 };

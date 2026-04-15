@@ -28,25 +28,22 @@ import { closeSync, openSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import {
-  Contract,
-  Interface,
-  JsonRpcProvider,
-  Wallet,
-  AbiCoder,
-  keccak256,
-  zeroPadValue,
-  toBeHex,
-} from 'ethers';
-import {
   createPublicClient,
   decodeEventLog,
+  encodeAbiParameters,
   encodeFunctionData,
   getAddress,
   http,
+  keccak256,
+  numberToHex,
+  pad,
+  parseAbi,
+  toHex,
   type Address,
   type Hex,
   type PublicClient,
 } from 'viem';
+import type { WalletClient } from 'viem';
 import { base } from 'viem/chains';
 import {
   decodeMarketplaceRequestLogs,
@@ -58,7 +55,7 @@ import {
   NATIVE_PAYMENT_TYPE,
 } from '../src/adapters/mech/types.js';
 import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import { EarningBootstrapper } from '../src/earning/bootstrap.js';
+import { FleetBootstrapper } from '../src/earning/bootstrap.js';
 import { getChainConfig } from '../src/earning/contracts.js';
 
 const __dirname = join(fileURLToPath(import.meta.url), '..');
@@ -181,7 +178,6 @@ async function runJinnCliSubprocess(
   }
 
   const child = spawn('yarn', ['exec', 'tsx', jinnBin, ...finalArgs], {
-  const child = spawn('yarn', ['exec', 'tsx', jinnBin, ...finalArgs], {
     cwd: clientRoot,
     stdio: stdio as ('ignore' | 'pipe' | number)[],
     env: { ...process.env },
@@ -229,24 +225,26 @@ async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseRes
  * Standard Solidity: balances mapping is at slot 0.
  *   slot = keccak256(abi.encode(address, uint256(0)))
  */
-function erc20BalanceSlot(holder: string, mappingSlot: bigint = 0n): string {
-  const encoded = AbiCoder.defaultAbiCoder().encode(
-    ['address', 'uint256'],
-    [holder, mappingSlot],
+function erc20BalanceSlot(holder: string, mappingSlot: bigint = 0n): Hex {
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'address' }, { type: 'uint256' }],
+      [getAddress(holder) as Address, mappingSlot],
+    ),
   );
-  return keccak256(encoded);
 }
 
 function addressMappingSlot(holder: Address, mappingSlot: bigint): Hex {
-  const encoded = AbiCoder.defaultAbiCoder().encode(
-    ['address', 'uint256'],
-    [holder, mappingSlot],
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'address' }, { type: 'uint256' }],
+      [holder, mappingSlot],
+    ),
   );
-  return keccak256(encoded) as Hex;
 }
 
 function addressStorageWord(address: Address): Hex {
-  return zeroPadValue(address, 32) as Hex;
+  return pad(address, { size: 32 });
 }
 
 function sameAddress(a: string, b: string): boolean {
@@ -335,7 +333,7 @@ async function warmCreateRestorationJobPath(
     {
       from: safeAddress,
       to: ROUTER_ADDRESS,
-      value: toBeHex(deliveryRate),
+      value: numberToHex(deliveryRate),
       data,
     },
     'latest',
@@ -409,7 +407,7 @@ async function stabilizeForkedMarketplaceState(
 async function resolveForkTimestamp(forkBlock?: string): Promise<bigint> {
   try {
     const upstreamBlock = await jsonRpc(BASE_RPC_URL, 'eth_getBlockByNumber', [
-      forkBlock ? toBeHex(BigInt(forkBlock)) : 'latest',
+      forkBlock ? numberToHex(BigInt(forkBlock)) : 'latest',
       false,
     ]) as { timestamp?: string } | null;
     if (upstreamBlock?.timestamp) {
@@ -565,7 +563,7 @@ async function main(): Promise<void> {
         if (!tmpDir) throw new Error('No temp dir from Phase 1');
 
         // Step 1: Run bootstrap to get awaiting_funding (creates wallet + predicts safe)
-        let bootstrapper = new EarningBootstrapper({
+        let bootstrapper = new FleetBootstrapper({
           earningDir: tmpDir,
           chain: 'base',
           rpcUrl: ANVIL_RPC,
@@ -595,21 +593,25 @@ async function main(): Promise<void> {
         await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [
           OLAS_TOKEN,
           eoaOlasSlot,
-          zeroPadValue(toBeHex(eoaOlasAmount), 32),
+          pad(toHex(eoaOlasAmount), { size: 32 }),
         ]);
 
         await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddress]);
-        const olasApprove = new Interface([
-          'function approve(address spender, uint256 amount) returns (bool)',
-        ]).encodeFunctionData('approve', [CHAIN_CONFIG.stakingContract, eoaOlasAmount]);
+        const olasApprove = encodeFunctionData({
+          abi: parseAbi(['function approve(address,uint256) returns (bool)']),
+          functionName: 'approve',
+          args: [CHAIN_CONFIG.stakingContract as Address, eoaOlasAmount],
+        });
         await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
           { from: masterAddress, to: OLAS_TOKEN, data: olasApprove },
         ]);
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-        const depositData = new Interface([
-          'function deposit(uint256 amount)',
-        ]).encodeFunctionData('deposit', [eoaOlasAmount]);
+        const depositData = encodeFunctionData({
+          abi: parseAbi(['function deposit(uint256)']),
+          functionName: 'deposit',
+          args: [eoaOlasAmount],
+        });
         await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
           { from: masterAddress, to: CHAIN_CONFIG.stakingContract, data: depositData },
         ]);
@@ -617,18 +619,17 @@ async function main(): Promise<void> {
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Verify staking rewards
-        const stakingContract = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          ['function availableRewards() view returns (uint256)'],
-          new JsonRpcProvider(ANVIL_RPC),
-        );
-        const rewards = await stakingContract.availableRewards();
+        const rewards = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: parseAbi(['function availableRewards() view returns (uint256)']),
+          functionName: 'availableRewards',
+        });
         console.log(`    Staking rewards: ${Number(rewards) / 1e18} OLAS`);
 
         // Step 3: Re-run bootstrap to completion
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-        bootstrapper = new EarningBootstrapper({
+        bootstrapper = new FleetBootstrapper({
           earningDir: tmpDir,
           chain: 'base',
           rpcUrl: ANVIL_RPC,
@@ -652,14 +653,13 @@ async function main(): Promise<void> {
 
         // Step 4: Decrypt mnemonic keystore to derive agent EOA private key
         const { FleetStateStore } = await import('../src/earning/store.js');
-        const { decryptMnemonic, deriveAgentSigner } = await import('../src/earning/wallet.js');
+        const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
         const store = new FleetStateStore(tmpDir);
         const mnemonic = await decryptMnemonic(
           await store.loadMnemonicKeystore(),
           PASSWORD,
         );
-        const agentSigner = deriveAgentSigner(mnemonic, firstComplete!.index);
-        agentEoaPrivateKey = agentSigner.privateKey as Hex;
+        agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, firstComplete!.index);
         agentAddressA = getAddress(firstComplete!.agent_address) as Address;
 
         console.log(`    Bootstrap complete!`);
@@ -702,19 +702,17 @@ async function main(): Promise<void> {
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Verify getMultisigNonces returns valid nonces
-        const provider = new JsonRpcProvider(ANVIL_RPC);
-        const stakingFull = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          ['function activityChecker() view returns (address)'],
-          provider,
-        );
-        const activityChecker: string = await stakingFull.activityChecker();
-        const checker = new Contract(
-          activityChecker,
-          ['function getMultisigNonces(address) view returns (uint256[])'],
-          provider,
-        );
-        const nonces: bigint[] = await checker.getMultisigNonces(safeAddress);
+        const activityChecker = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: parseAbi(['function activityChecker() view returns (address)']),
+          functionName: 'activityChecker',
+        });
+        const nonces = await publicClient.readContract({
+          address: activityChecker,
+          abi: parseAbi(['function getMultisigNonces(address) view returns (uint256[])']),
+          functionName: 'getMultisigNonces',
+          args: [safeAddress],
+        });
         baselineMultisigNonces = [...nonces];
         console.log(`    Activity checker: ${activityChecker}`);
         console.log(`    Initial nonces: [${nonces.map(String).join(', ')}]`);
@@ -1119,21 +1117,17 @@ async function main(): Promise<void> {
           throw new Error('Missing safeAddress or serviceId from Phase 2');
         }
 
-        const provider = new JsonRpcProvider(ANVIL_RPC);
-
-        // Read initial nonces
-        const stakingFull = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          ['function activityChecker() view returns (address)'],
-          provider,
-        );
-        const activityChecker: string = await stakingFull.activityChecker();
-        const checker = new Contract(
-          activityChecker,
-          ['function getMultisigNonces(address) view returns (uint256[])'],
-          provider,
-        );
-        const nonces: bigint[] = await checker.getMultisigNonces(safeAddress);
+        const activityChecker = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: parseAbi(['function activityChecker() view returns (address)']),
+          functionName: 'activityChecker',
+        });
+        const nonces = await publicClient.readContract({
+          address: activityChecker,
+          abi: parseAbi(['function getMultisigNonces(address) view returns (uint256[])']),
+          functionName: 'getMultisigNonces',
+          args: [safeAddress],
+        });
         console.log(`    Multisig nonces after activity: [${nonces.map(String).join(', ')}]`);
 
         // Verify nonces are non-zero (JinnRouter calls incremented the Safe nonce)
@@ -1152,9 +1146,12 @@ async function main(): Promise<void> {
         await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [anvilAccount]);
         await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [anvilAccount, '0x56BC75E2D63100000']);
 
-        const checkpointData = new Interface([
-          'function checkpoint() returns (uint256[], uint256[], uint256[], uint256[])',
-        ]).encodeFunctionData('checkpoint', []);
+        const checkpointData = encodeFunctionData({
+          abi: parseAbi([
+            'function checkpoint() returns (uint256[],uint256[],uint256[],uint256[])',
+          ]),
+          functionName: 'checkpoint',
+        });
 
         await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
           { from: anvilAccount, to: CHAIN_CONFIG.stakingContract, data: checkpointData },
@@ -1164,41 +1161,48 @@ async function main(): Promise<void> {
 
         console.log('    Checkpoint called successfully');
 
-        // Verify service info after checkpoint
-        const staking = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          [
-            'function getServiceInfo(uint256 serviceId) view returns (uint256, address, uint256[], uint256)',
-            'function getStakingState(uint256 serviceId) view returns (uint8)',
-            'function availableRewards() view returns (uint256)',
-          ],
-          provider,
-        );
-
-        const stakingState = await staking.getStakingState(serviceId);
+        const stakingState = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: parseAbi(['function getStakingState(uint256) view returns (uint8)']),
+          functionName: 'getStakingState',
+          args: [BigInt(serviceId)],
+        });
         console.log(`    Staking state after checkpoint: ${stakingState} (1=Staked)`);
 
-        const remainingRewards = await staking.availableRewards();
+        const remainingRewards = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: parseAbi(['function availableRewards() view returns (uint256)']),
+          functionName: 'availableRewards',
+        });
         console.log(`    Remaining rewards: ${Number(remainingRewards) / 1e18} OLAS`);
 
         // Verify reward claiming works
         // claim() can be called by anyone — returns rewards to the service owner
-        const olasContract = new Contract(
-          CHAIN_CONFIG.olasToken,
-          ['function balanceOf(address) view returns (uint256)'],
-          provider,
-        );
-        const olasBalanceBefore = await olasContract.balanceOf(safeAddress);
+        const olasBalanceBefore = await publicClient.readContract({
+          address: CHAIN_CONFIG.olasToken as Address,
+          abi: parseAbi(['function balanceOf(address) view returns (uint256)']),
+          functionName: 'balanceOf',
+          args: [safeAddress],
+        });
 
         // Impersonate anyone to call claim (it credits the service owner, not the caller)
         const claimCaller = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
         await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [claimCaller]);
-        const claimData = new Interface(['function claim(uint256 serviceId) returns (uint256)']).encodeFunctionData('claim', [serviceId]);
+        const claimData = encodeFunctionData({
+          abi: parseAbi(['function claim(uint256) returns (uint256)']),
+          functionName: 'claim',
+          args: [BigInt(serviceId)],
+        });
         await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: claimCaller, to: CHAIN_CONFIG.stakingContract, data: claimData }]);
         await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [claimCaller]);
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-        const olasBalanceAfter = await olasContract.balanceOf(safeAddress);
+        const olasBalanceAfter = await publicClient.readContract({
+          address: CHAIN_CONFIG.olasToken as Address,
+          abi: parseAbi(['function balanceOf(address) view returns (uint256)']),
+          functionName: 'balanceOf',
+          args: [safeAddress],
+        });
         const rewardsClaimed = olasBalanceAfter - olasBalanceBefore;
         console.log(`    OLAS rewards claimed: ${Number(rewardsClaimed) / 1e18} OLAS`);
 
@@ -1327,7 +1331,7 @@ async function main(): Promise<void> {
         tmpDir2 = await mkdtemp(join(tmpdir(), 'jinn-e2e-op2-'));
         console.log(`    Operator B temp dir: ${tmpDir2}`);
 
-        let bootstrapper2 = new EarningBootstrapper({
+        let bootstrapper2 = new FleetBootstrapper({
           earningDir: tmpDir2,
           chain: 'base',
           rpcUrl: ANVIL_RPC,
@@ -1353,21 +1357,25 @@ async function main(): Promise<void> {
         await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [
           OLAS_TOKEN,
           eoaOlasSlotB,
-          zeroPadValue(toBeHex(eoaOlasAmountB), 32),
+          pad(toHex(eoaOlasAmountB), { size: 32 }),
         ]);
 
         await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddressB]);
-        const olasApproveB = new Interface([
-          'function approve(address spender, uint256 amount) returns (bool)',
-        ]).encodeFunctionData('approve', [CHAIN_CONFIG.stakingContract, eoaOlasAmountB]);
+        const olasApproveB = encodeFunctionData({
+          abi: parseAbi(['function approve(address,uint256) returns (bool)']),
+          functionName: 'approve',
+          args: [CHAIN_CONFIG.stakingContract as Address, eoaOlasAmountB],
+        });
         await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
           { from: masterAddressB, to: OLAS_TOKEN, data: olasApproveB },
         ]);
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-        const depositDataB = new Interface([
-          'function deposit(uint256 amount)',
-        ]).encodeFunctionData('deposit', [eoaOlasAmountB]);
+        const depositDataB = encodeFunctionData({
+          abi: parseAbi(['function deposit(uint256)']),
+          functionName: 'deposit',
+          args: [eoaOlasAmountB],
+        });
         await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [
           { from: masterAddressB, to: CHAIN_CONFIG.stakingContract, data: depositDataB },
         ]);
@@ -1375,7 +1383,7 @@ async function main(): Promise<void> {
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Re-bootstrap operator B to completion
-        bootstrapper2 = new EarningBootstrapper({
+        bootstrapper2 = new FleetBootstrapper({
           earningDir: tmpDir2,
           chain: 'base',
           rpcUrl: ANVIL_RPC,
@@ -1397,13 +1405,13 @@ async function main(): Promise<void> {
         }
 
         const { FleetStateStore } = await import('../src/earning/store.js');
-        const { decryptMnemonic, deriveAgentSigner } = await import('../src/earning/wallet.js');
+        const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
         const storeFleetB = new FleetStateStore(tmpDir2);
         const mnemonicB = await decryptMnemonic(
           await storeFleetB.loadMnemonicKeystore(),
           'test-password-2',
         );
-        agentEoaPrivateKeyB = deriveAgentSigner(mnemonicB, bComplete.index).privateKey as Hex;
+        agentEoaPrivateKeyB = walletPrivateKeyAtIndex(mnemonicB, bComplete.index);
 
         console.log(`    Operator B Safe: ${safeAddressB}`);
         console.log(`    Operator B Mech: ${mechAddressB}`);
@@ -1694,9 +1702,9 @@ async function main(): Promise<void> {
 
         // Deploy with 60s TTL (short for testing)
         const CLAIM_TTL = 60;
-        const constructorArgs = AbiCoder.defaultAbiCoder().encode(
-          ['uint256', 'address'],
-          [CLAIM_TTL, deployerAccount.address],
+        const constructorArgs = encodeAbiParameters(
+          [{ type: 'uint256' }, { type: 'address' }],
+          [BigInt(CLAIM_TTL), deployerAccount.address],
         );
         const deployData = (artifact.bytecode + constructorArgs.slice(2)) as Hex;
 
@@ -2560,32 +2568,33 @@ async function main(): Promise<void> {
           throw new Error('Missing safeAddress or serviceId from Phase 2');
         }
 
-        const provider = new JsonRpcProvider(ANVIL_RPC);
+        const activityChecker = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: parseAbi(['function activityChecker() view returns (address)']),
+          functionName: 'activityChecker',
+        });
 
-        // Get activity checker address
-        const stakingFull = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          ['function activityChecker() view returns (address)'],
-          provider,
-        );
-        const activityChecker: string = await stakingFull.activityChecker();
-
-        const checker = new Contract(
-          activityChecker,
-          [
-            'function getMultisigNonces(address) view returns (uint256[])',
-            'function isRatioPass(uint256[], uint256[], uint256) view returns (bool)',
-            'function livenessRatio() view returns (uint256)',
-          ],
-          provider,
-        );
+        const checkerAbi = parseAbi([
+          'function getMultisigNonces(address) view returns (uint256[])',
+          'function isRatioPass(uint256[],uint256[],uint256) view returns (bool)',
+          'function livenessRatio() view returns (uint256)',
+        ]);
 
         // Current nonces (after all activity)
-        const currentNonces: bigint[] = await checker.getMultisigNonces(safeAddress);
+        const currentNonces = await publicClient.readContract({
+          address: activityChecker,
+          abi: checkerAbi,
+          functionName: 'getMultisigNonces',
+          args: [safeAddress],
+        });
         console.log(`    Current nonces: [${currentNonces.map(String).join(', ')}]`);
 
         // Get liveness ratio
-        const livenessRatio: bigint = await checker.livenessRatio();
+        const livenessRatio = await publicClient.readContract({
+          address: activityChecker,
+          abi: checkerAbi,
+          functionName: 'livenessRatio',
+        });
         console.log(`    Liveness ratio: ${livenessRatio}`);
 
         if (!baselineMultisigNonces) {
@@ -2602,8 +2611,12 @@ async function main(): Promise<void> {
         console.log(`    Baseline nonces (Phase 3): [${initialNonces.map(String).join(', ')}]`);
         console.log(`    Time diff (for ratio check): ${timeDiff}s`);
 
-        // Call isRatioPass (spread to mutable arrays — ethers returns readonly tuples)
-        const passes: boolean = await checker.isRatioPass([...currentNonces], [...initialNonces], timeDiff);
+        const passes = await publicClient.readContract({
+          address: activityChecker,
+          abi: checkerAbi,
+          functionName: 'isRatioPass',
+          args: [[...currentNonces], [...initialNonces], timeDiff],
+        });
         console.log(`    isRatioPass: ${passes}`);
 
         if (!passes) {
@@ -2722,8 +2735,8 @@ async function main(): Promise<void> {
           const { tickStolasDistributorClaims } = await import('../src/earning/stolas-claim.js');
           const chainCfg = getChainConfig('base');
           const tickEmpty = await tickStolasDistributorClaims(
-            {} as JsonRpcProvider,
-            {} as import('ethers').Signer,
+            publicClient,
+            {} as WalletClient,
             {
               distributorAddress: chainCfg.distributorAddress,
               stakingMode: 'standard',

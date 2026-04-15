@@ -2,13 +2,8 @@
  * Shared retry policy for transient RPC / transaction submission failures.
  */
 
-import type { Hex, PublicClient, TransactionReceipt } from 'viem';
-import type {
-  JsonRpcProvider,
-  Provider,
-  TransactionReceipt as EthersTransactionReceipt,
-  TransactionResponse,
-} from 'ethers';
+import type { Address, Hex, PublicClient, TransactionReceipt } from 'viem';
+
 
 export const TX_RETRY_DEFAULTS = {
   maxAttempts: 6,
@@ -227,50 +222,38 @@ export async function waitForTransactionReceiptWithRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-/** Ethers: broadcast with fee escalation on recoverable failures. */
-export async function ethersSendTransactionWithRetry(
-  signer: {
-    sendTransaction: (tx: object) => Promise<TransactionResponse>;
-    provider: Provider | null;
-  },
+export async function viemSendTransactionWithRetry(
+  walletClient: { sendTransaction: (tx: any) => Promise<Hex> },
+  publicClient: PublicClient,
   txRequest: {
-    to?: string;
-    data?: string;
-    value?: bigint | string;
-    gasLimit?: bigint;
+    account: any;
+    to?: Address;
+    data?: Hex;
+    value?: bigint;
+    gas?: bigint;
     maxFeePerGas?: bigint;
     maxPriorityFeePerGas?: bigint;
     gasPrice?: bigint;
+    [key: string]: any;
   },
   options: TxRetryOptions = {},
-): Promise<TransactionResponse> {
+): Promise<Hex> {
   const maxAttempts = options.maxAttempts ?? TX_RETRY_DEFAULTS.maxAttempts;
   const baseDelayMs = options.baseDelayMs ?? TX_RETRY_DEFAULTS.baseDelayMs;
   const maxDelayMs = options.maxDelayMs ?? TX_RETRY_DEFAULTS.maxDelayMs;
-  const provider = signer.provider;
-  if (!provider) {
-    return signer.sendTransaction(txRequest);
-  }
 
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const req = { ...txRequest };
-      if (attempt > 0) {
-        const feeData = await provider.getFeeData();
-        const bps = BigInt(TX_RETRY_DEFAULTS.feeBumpBpsPerAttempt) * BigInt(attempt);
-        const mult = 10000n + bps;
-        const bump = (v: bigint | null) => (v === null ? null : (v * mult) / 10000n);
-
-        if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
-          req.maxFeePerGas = bump(feeData.maxFeePerGas) ?? undefined;
-          req.maxPriorityFeePerGas = bump(feeData.maxPriorityFeePerGas) ?? undefined;
-          delete (req as { gasPrice?: bigint }).gasPrice;
-        } else if (feeData.gasPrice != null) {
-          req.gasPrice = bump(feeData.gasPrice) ?? undefined;
-        }
+      const overrides = await viemFeeOverridesForAttempt(publicClient, attempt);
+      const req = { ...txRequest, ...overrides };
+      
+      // If we provided maxFeePerGas, ensure gasPrice is not somehow inherited
+      if ('maxFeePerGas' in req && 'maxPriorityFeePerGas' in req) {
+        delete (req as any).gasPrice;
       }
-      return await signer.sendTransaction(req);
+
+      return await walletClient.sendTransaction(req);
     } catch (err) {
       lastError = err;
       if (!isRecoverableTransactionError(err) || attempt >= maxAttempts - 1) {
@@ -285,17 +268,4 @@ export async function ethersSendTransactionWithRetry(
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
-export async function ethersWaitForTransactionHashWithRetry(
-  provider: JsonRpcProvider,
-  hash: string,
-  confirms = 1,
-  timeout = 60_000,
-  options: TxRetryOptions = {},
-): Promise<EthersTransactionReceipt | null> {
-  return withRecoverableRetry(
-    async () => provider.waitForTransaction(hash, confirms, timeout),
-    options,
-  );
 }

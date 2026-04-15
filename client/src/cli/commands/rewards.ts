@@ -50,8 +50,8 @@ role. Uses \`reward\` as the asset name; look up the concrete token
 in \`jinn version\`.
 
 Examples:
-  npx jinn rewards
-  npx jinn rewards --human
+  jinn rewards
+  jinn rewards --human
 `,
   run,
 };

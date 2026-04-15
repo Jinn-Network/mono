@@ -5,19 +5,21 @@
  * ERC-20 balances on the old Safe are not swept yet — see TODO below.
  */
 
-import { Wallet, formatEther, getAddress, ZeroAddress } from 'ethers';
-import type { HDNodeWallet, JsonRpcProvider } from 'ethers';
+import { formatEther, getAddress, zeroAddress, type Address, type Hex } from 'viem';
 import { executeSafeTxDirect } from './safe-adapter.js';
 import type { ServiceState } from './types.js';
+import { createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
+import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
+import type { PublicClient } from 'viem';
 import {
-  ethersSendTransactionWithRetry,
-  ethersWaitForTransactionHashWithRetry,
+  viemSendTransactionWithRetry,
+  waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
 
 function isZeroishAddress(addr: string | null | undefined): boolean {
   if (!addr) return true;
   try {
-    return getAddress(addr) === getAddress(ZeroAddress);
+    return getAddress(addr) === getAddress(zeroAddress);
   } catch {
     return true;
   }
@@ -56,11 +58,12 @@ export function previousSafeBeingAbandoned(
 
 export interface SweepOrphanedServiceFundsParams {
   rpcUrl: string;
-  provider: JsonRpcProvider;
+  network: JinnOnchainNetwork;
+  publicClient: PublicClient;
   masterAddress: string;
-  masterSigner: HDNodeWallet;
+  masterAccount: PrivateKeyAccount;
   serviceIndex: number;
-  agentPrivateKey: string;
+  agentPrivateKey: Hex;
   agentAddress: string;
   abandonedSafeAddress: string;
   minAgentReserveWei: bigint;
@@ -105,9 +108,10 @@ interface OrphanSweepBodyParams extends SweepOrphanedServiceFundsParams {
 async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> {
   const {
     rpcUrl,
-    provider,
+    network,
+    publicClient,
     masterNorm,
-    masterSigner,
+    masterAccount,
     serviceIndex,
     agentPrivateKey,
     agentAddress,
@@ -115,30 +119,27 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
     minAgentReserveWei,
   } = params;
 
-  const code = await provider.getCode(abandonedSafeAddress);
-  const safeBal = await provider.getBalance(abandonedSafeAddress);
+  const code = await publicClient.getCode({ address: getAddress(abandonedSafeAddress) as Address });
+  const safeBal = await publicClient.getBalance({ address: getAddress(abandonedSafeAddress) as Address });
 
-  if (code !== '0x' && safeBal > 0n) {
-    let agentBal = await provider.getBalance(agentAddress);
+  if (code !== undefined && code !== '0x' && safeBal > 0n) {
+    let agentBal = await publicClient.getBalance({ address: getAddress(agentAddress) as Address });
     if (agentBal < minAgentReserveWei) {
       const need = minAgentReserveWei - agentBal;
-      const masterBal = await provider.getBalance(masterNorm);
+      const masterBal = await publicClient.getBalance({ address: masterNorm as Address });
       if (masterBal > need) {
         try {
           console.error(
             `[jinn-earning] Service ${serviceIndex}: funding agent ${agentAddress} with ${need} wei so the Safe owner can exec orphan sweep from ${abandonedSafeAddress}.`,
           );
-          const fundTx = await ethersSendTransactionWithRetry(
-            masterSigner.connect(provider),
-            { to: agentAddress, value: need },
-          );
-          await ethersWaitForTransactionHashWithRetry(
-            provider,
-            fundTx.hash,
-            1,
-            30000,
-          );
-          agentBal = await provider.getBalance(agentAddress);
+          const masterWallet = createJinnWalletClient(rpcUrl, network, masterAccount);
+          const fundHash = await viemSendTransactionWithRetry(masterWallet, publicClient, {
+            account: masterAccount,
+            to: getAddress(agentAddress) as Address,
+            value: need,
+          });
+          await waitForTransactionReceiptWithRetry(publicClient, fundHash);
+          agentBal = await publicClient.getBalance({ address: getAddress(agentAddress) as Address });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           console.error(
@@ -152,24 +153,19 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
       }
     }
 
-    agentBal = await provider.getBalance(agentAddress);
+    agentBal = await publicClient.getBalance({ address: getAddress(agentAddress) as Address });
     if (agentBal >= minAgentReserveWei) {
       try {
         const { hash } = await executeSafeTxDirect({
           rpcUrl,
           signerKey: agentPrivateKey,
           safeAddress: abandonedSafeAddress,
-          to: masterNorm,
+          to: getAddress(masterNorm) as Address,
           value: safeBal,
-          data: '0x',
+          data: '0x' as Hex,
         });
-        const receipt = await ethersWaitForTransactionHashWithRetry(
-          provider,
-          hash,
-          1,
-          30000,
-        );
-        if (!receipt || receipt.status !== 1) {
+        const receipt = await waitForTransactionReceiptWithRetry(publicClient, hash as Hex);
+        if (receipt.status !== 'success') {
           console.error(
             `[jinn-earning] Service ${serviceIndex}: orphan Safe sweep tx failed or timed out (safe=${abandonedSafeAddress}, tx=${hash}). Re-run bootstrap to retry.`,
           );
@@ -189,29 +185,26 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
 
   // TODO: sweep ERC-20 (e.g. OLAS) from abandoned Safe via Safe.execTransaction(transfer).
 
-  const agentConnected = new Wallet(agentPrivateKey, provider);
-  const finalAgentBal = await provider.getBalance(agentAddress);
+  const agentAccount = privateKeyToAccount(agentPrivateKey);
+  const agentWallet = createJinnWalletClient(rpcUrl, network, agentAccount);
+  const finalAgentBal = await publicClient.getBalance({ address: getAddress(agentAddress) as Address });
   const transferable =
     finalAgentBal > minAgentReserveWei ? finalAgentBal - minAgentReserveWei : 0n;
   if (transferable > 0n) {
     try {
-      const tx = await ethersSendTransactionWithRetry(agentConnected, {
-        to: masterNorm,
+      const txHash = await viemSendTransactionWithRetry(agentWallet, publicClient, {
+        account: agentAccount,
+        to: getAddress(masterNorm) as Address,
         value: transferable,
       });
-      const receipt = await ethersWaitForTransactionHashWithRetry(
-        provider,
-        tx.hash,
-        1,
-        30000,
-      );
-      if (!receipt || receipt.status !== 1) {
+      const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash);
+      if (receipt.status !== 'success') {
         console.error(
-          `[jinn-earning] Service ${serviceIndex}: agent EOA sweep tx failed (tx=${tx.hash}). Re-run bootstrap to retry.`,
+          `[jinn-earning] Service ${serviceIndex}: agent EOA sweep tx failed (tx=${txHash}). Re-run bootstrap to retry.`,
         );
       } else {
         console.error(
-          `[jinn-earning] Service ${serviceIndex}: swept ${transferable} wei from agent ${agentAddress} to master (tx: ${tx.hash}).`,
+          `[jinn-earning] Service ${serviceIndex}: swept ${transferable} wei from agent ${agentAddress} to master (tx: ${txHash}).`,
         );
       }
     } catch (e) {
@@ -222,4 +215,3 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
     }
   }
 }
-

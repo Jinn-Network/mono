@@ -9,17 +9,18 @@
  * checkpointAndClaim when staking_mode is self-bond (not distributor-mediated).
  */
 
-import { Contract, Interface, type JsonRpcProvider, type Signer } from 'ethers';
+import { encodeFunctionData, getAddress, type Address, type Hex } from 'viem';
+import type { PublicClient } from 'viem';
+import type { WalletClient } from 'viem';
 import type { ServiceState, ServiceStep, StakingMode } from './types.js';
 import { STOLAS_DISTRIBUTOR_ABI } from './contracts.js';
 import { JINN_STAKING_ABI } from './jinn-rewards.js';
 import {
-  ethersSendTransactionWithRetry,
-  ethersWaitForTransactionHashWithRetry,
   isRecoverableTransactionError,
+  viemSendTransactionWithRetry,
+  waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
 import { TransientError } from '../types/errors.js';
-
 /** Steps where the service is staked and may accrue staking rewards. */
 const STEPS_WITH_STAKING_REWARDS: ReadonlySet<ServiceStep> = new Set([
   'staked',
@@ -63,8 +64,8 @@ export interface StolasClaimTickResult {
  * Errors on individual services are logged and swallowed so the daemon loop stays healthy.
  */
 export async function tickStolasDistributorClaims(
-  provider: JsonRpcProvider,
-  masterSigner: Signer,
+  publicClient: PublicClient,
+  masterWallet: WalletClient,
   options: {
     distributorAddress: string | undefined;
     stakingMode: StakingMode;
@@ -98,35 +99,37 @@ export async function tickStolasDistributorClaims(
     return result;
   }
 
-  const distributorIface = new Interface(STOLAS_DISTRIBUTOR_ABI);
-
   for (const { stakingProxy, serviceId } of options.targets) {
     result.attempted += 1;
     try {
-      const stakingRead = new Contract(stakingProxy, JINN_STAKING_ABI, provider);
-      const pending: bigint = await stakingRead.calculateStakingReward(serviceId);
+      const pending = await publicClient.readContract({
+        address: getAddress(stakingProxy) as Address,
+        abi: JINN_STAKING_ABI,
+        functionName: 'calculateStakingReward',
+        args: [BigInt(serviceId)],
+      });
       if (pending === 0n) {
         result.skippedNoPending += 1;
         continue;
       }
 
       result.claimAttempted += 1;
-      const data = distributorIface.encodeFunctionData('claim', [[stakingProxy], [BigInt(serviceId)]]);
-      const txResponse = await ethersSendTransactionWithRetry(masterSigner, {
-        to: distributor,
+      const data = encodeFunctionData({
+        abi: STOLAS_DISTRIBUTOR_ABI,
+        functionName: 'claim',
+        args: [[getAddress(stakingProxy) as Address], [BigInt(serviceId)]],
+      }) as Hex;
+      const txHash = await viemSendTransactionWithRetry(masterWallet, publicClient, {
+        account: masterWallet.account!,
+        to: getAddress(distributor) as Address,
         data,
-        gasLimit: 1_200_000n,
+        gas: 1_200_000n,
       });
-      const receipt = await ethersWaitForTransactionHashWithRetry(
-        provider,
-        (txResponse as { hash: string }).hash,
-        1,
-        30000,
-      );
-      if (!receipt || receipt.status !== 1) {
+      const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash as Hex);
+      if (receipt.status !== 'success') {
         result.failedPermanent += 1;
         console.error(
-          `[reward-claim] claim tx failed for service ${serviceId} (hash=${(txResponse as { hash: string }).hash})`,
+          `[reward-claim] claim tx failed for service ${serviceId} (hash=${txHash})`,
         );
         continue;
       }

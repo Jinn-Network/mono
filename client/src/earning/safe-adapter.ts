@@ -8,16 +8,72 @@
  */
 
 import type { MetaTransactionData, TransactionResult } from '@safe-global/types-kit';
-import { Contract, JsonRpcProvider, Wallet, ZeroAddress, getBytes, hexlify, concat } from 'ethers';
-import { withRecoverableRetry } from '../tx-retry.js';
+import {
+  bytesToHex,
+  concat,
+  createPublicClient,
+  createWalletClient,
+  encodeFunctionData,
+  hexToBytes,
+  http,
+  toHex,
+  zeroAddress,
+  type Address,
+  type Chain,
+  type Hex,
+} from 'viem';
+import { base, baseSepolia } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
+import { viemFeeOverridesForAttempt, withRecoverableRetry } from '../tx-retry.js';
 
 export type { MetaTransactionData, TransactionResult };
 
 const SAFE_EXECUTION_FALLBACK_GAS_LIMIT = 2_000_000;
+
 const SAFE_ABI = [
-  'function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) returns (bool)',
-  'function nonce() view returns (uint256)',
-  'function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 _nonce) view returns (bytes32)',
+  {
+    type: 'function',
+    name: 'execTransaction',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'data', type: 'bytes' },
+      { name: 'operation', type: 'uint8' },
+      { name: 'safeTxGas', type: 'uint256' },
+      { name: 'baseGas', type: 'uint256' },
+      { name: 'gasPrice', type: 'uint256' },
+      { name: 'gasToken', type: 'address' },
+      { name: 'refundReceiver', type: 'address' },
+      { name: 'signatures', type: 'bytes' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'nonce',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'getTransactionHash',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'data', type: 'bytes' },
+      { name: 'operation', type: 'uint8' },
+      { name: 'safeTxGas', type: 'uint256' },
+      { name: 'baseGas', type: 'uint256' },
+      { name: 'gasPrice', type: 'uint256' },
+      { name: 'gasToken', type: 'address' },
+      { name: 'refundReceiver', type: 'address' },
+      { name: '_nonce', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bytes32' }],
+  },
 ] as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,27 +117,29 @@ async function resolveSafeInit(): Promise<SafeInitFn> {
   return SafeClass.init.bind(SafeClass) as SafeInitFn;
 }
 
-async function resolveSafeExecutionRpcUrl(rpcUrl: string): Promise<string> {
+async function resolveExecutionRpcUrl(rpcUrl: string): Promise<string> {
   if (!rpcUrl.includes('tenderly.co')) {
     return rpcUrl;
   }
-
   try {
-    const provider = new JsonRpcProvider(rpcUrl);
-    const network = await provider.getNetwork();
-
-    if (network.chainId === 8453n) {
-      return 'https://base.publicnode.com';
-    }
-
-    if (network.chainId === 84532n) {
-      return 'https://sepolia.base.org';
-    }
+    const id = await createPublicClient({ transport: http(rpcUrl) }).getChainId();
+    if (id === 8453) return 'https://base.publicnode.com';
+    if (id === 84532) return 'https://sepolia.base.org';
   } catch {
-    // Fall back to the configured RPC if chain detection fails.
+    /* fall through */
   }
-
   return rpcUrl;
+}
+
+function chainForId(chainId: number, rpcUrl: string): Chain {
+  if (chainId === 8453) return base;
+  if (chainId === 84532) return baseSepolia;
+  return {
+    id: chainId,
+    name: 'Custom',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    rpcUrls: { default: { http: [rpcUrl] } },
+  };
 }
 
 export interface PredictedSafeResult {
@@ -172,80 +230,80 @@ export async function executeSafeTxBatch(
  */
 export async function executeSafeTxDirect(opts: {
   rpcUrl: string;
-  signerKey: string;
+  signerKey: Hex;
   safeAddress: string;
   to: string;
   value?: bigint;
-  data: string;
+  data: Hex;
   gasLimit?: bigint;
 }): Promise<{ hash: string }> {
-  const executionRpcUrl = await resolveSafeExecutionRpcUrl(opts.rpcUrl);
-  const provider = new JsonRpcProvider(executionRpcUrl);
-  const providerSigner = new Wallet(opts.signerKey, provider);
-  const safeRead = new Contract(opts.safeAddress, SAFE_ABI, providerSigner.provider);
-  const safeWrite = new Contract(opts.safeAddress, SAFE_ABI, providerSigner);
+  const executionRpcUrl = await resolveExecutionRpcUrl(opts.rpcUrl);
+  const chainId = await createPublicClient({ transport: http(executionRpcUrl) }).getChainId();
+  const chain = chainForId(chainId, executionRpcUrl);
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(executionRpcUrl),
+  });
+  const account = privateKeyToAccount(opts.signerKey);
+  const walletClient = createWalletClient({
+    account,
+    chain,
+    transport: http(executionRpcUrl),
+  });
+
+  const safeAddress = opts.safeAddress as Address;
+  const to = opts.to as Address;
   const value = opts.value ?? 0n;
   const baseGas = opts.gasLimit ?? BigInt(SAFE_EXECUTION_FALLBACK_GAS_LIMIT);
 
-  const tx = await withRecoverableRetry(
+  const hash = await withRecoverableRetry(
     async (attemptIndex) => {
-      const nonce: bigint = await safeRead.nonce();
-      const safeTxHash: string = await safeRead.getTransactionHash(
-        opts.to,
-        value,
-        opts.data,
-        0,
-        0,
-        0,
-        0,
-        ZeroAddress,
-        ZeroAddress,
-        nonce,
-      );
+      const nonce = await publicClient.readContract({
+        address: safeAddress,
+        abi: SAFE_ABI,
+        functionName: 'nonce',
+      });
 
-      const signature = await providerSigner.signMessage(getBytes(safeTxHash));
-      const sigBytes = getBytes(signature);
-      const r = hexlify(sigBytes.slice(0, 32));
-      const s = hexlify(sigBytes.slice(32, 64));
-      const v = sigBytes[64] + 4;
-      const adjustedSig = concat([r, s, new Uint8Array([v])]);
+      const safeTxHash = await publicClient.readContract({
+        address: safeAddress,
+        abi: SAFE_ABI,
+        functionName: 'getTransactionHash',
+        args: [to, value, opts.data, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, nonce],
+      });
 
-      const feeData = await provider.getFeeData();
-      const bumpBps = BigInt(attemptIndex) * 1500n;
-      const mult = 10000n + bumpBps;
-      const bump = (v: bigint | null) => (v === null ? undefined : (v * mult) / 10000n);
+      const sigHex = await walletClient.signMessage({
+        account,
+        message: { raw: hexToBytes(safeTxHash) },
+      });
+      const sigBytes = hexToBytes(sigHex);
+      const r = bytesToHex(sigBytes.slice(0, 32)) as Hex;
+      const s = bytesToHex(sigBytes.slice(32, 64)) as Hex;
+      const v = sigBytes[64]! + 4;
+      const adjustedSig = concat([r, s, toHex(v, { size: 1 })]);
 
-      const gasLimit = baseGas + BigInt(attemptIndex) * 50_000n;
+      const data = encodeFunctionData({
+        abi: SAFE_ABI,
+        functionName: 'execTransaction',
+        args: [to, value, opts.data, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, adjustedSig],
+      });
 
-      const txOpts: {
-        gasLimit: bigint;
-        maxFeePerGas?: bigint;
-        maxPriorityFeePerGas?: bigint;
-        gasPrice?: bigint;
-      } = { gasLimit };
-
-      if (attemptIndex > 0) {
-        if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
-          txOpts.maxFeePerGas = bump(feeData.maxFeePerGas);
-          txOpts.maxPriorityFeePerGas = bump(feeData.maxPriorityFeePerGas);
-        } else if (feeData.gasPrice != null) {
-          txOpts.gasPrice = bump(feeData.gasPrice);
-        }
+      const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex);
+      const txParams: Parameters<typeof walletClient.sendTransaction>[0] = {
+        account,
+        to: safeAddress,
+        data,
+        gas: baseGas + BigInt(attemptIndex) * 50_000n,
+        ...feeOverrides,
+      };
+      if (
+        'maxFeePerGas' in txParams &&
+        txParams.maxFeePerGas !== undefined &&
+        'maxPriorityFeePerGas' in txParams &&
+        txParams.maxPriorityFeePerGas !== undefined
+      ) {
+        delete (txParams as { gasPrice?: bigint }).gasPrice;
       }
-
-      return safeWrite.execTransaction(
-        opts.to,
-        value,
-        opts.data,
-        0,
-        0,
-        0,
-        0,
-        ZeroAddress,
-        ZeroAddress,
-        adjustedSig,
-        txOpts,
-      );
+      return walletClient.sendTransaction(txParams);
     },
     {
       onRetry: ({ attempt, message }) => {
@@ -254,5 +312,5 @@ export async function executeSafeTxDirect(opts: {
     },
   );
 
-  return { hash: tx.hash };
+  return { hash };
 }

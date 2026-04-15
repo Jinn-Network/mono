@@ -53,12 +53,12 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const { networkChain, chainConfig, fleetStore, masterSigner, provider } = built.ctx;
+  const { networkChain, chainConfig, fleetStore, masterWallet, publicClient } = built.ctx;
 
   try {
     const tick = await runRewardClaimOnce({
-      provider,
-      masterSigner,
+      publicClient,
+      masterWallet,
       store: fleetStore,
       chain: networkChain,
       distributorAddress: chainConfig.distributorAddress,
@@ -130,8 +130,8 @@ Idempotent: zero-delta is success, not error. Second consecutive call
 may show submitted:0 and exits 0.
 
 Examples:
-  npx jinn claim-rewards --dry-run
-  npx jinn claim-rewards --yes
+  jinn claim-rewards --dry-run
+  jinn claim-rewards --yes
 `,
   run,
 };

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AbiCoder, type JsonRpcProvider, type Signer } from 'ethers';
+import type { PublicClient } from 'viem';
+import type { WalletClient } from 'viem';
 import {
   listStolasClaimTargets,
   tickStolasDistributorClaims,
@@ -12,23 +13,24 @@ vi.mock('../../src/tx-retry.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../src/tx-retry.js')>();
   return {
     ...actual,
-    ethersSendTransactionWithRetry: vi.fn(),
-    ethersWaitForTransactionHashWithRetry: vi.fn(),
+    viemSendTransactionWithRetry: vi.fn(),
+    waitForTransactionReceiptWithRetry: vi.fn(),
   };
 });
 
-function providerWithPendingReward(pendingWei = 1n): JsonRpcProvider {
-  const coder = AbiCoder.defaultAbiCoder();
+function publicClientWithPendingReward(pendingWei = 1n): PublicClient {
   return {
-    call: vi.fn().mockResolvedValue(coder.encode(['uint256'], [pendingWei])),
-  } as unknown as JsonRpcProvider;
+    readContract: vi.fn().mockResolvedValue(pendingWei),
+  } as unknown as PublicClient;
 }
 
-function providerWithReadFailure(message: string): JsonRpcProvider {
+function publicClientWithReadFailure(message: string): PublicClient {
   return {
-    call: vi.fn().mockRejectedValue(new Error(message)),
-  } as unknown as JsonRpcProvider;
+    readContract: vi.fn().mockRejectedValue(new Error(message)),
+  } as unknown as PublicClient;
 }
+
+const noopWallet = {} as WalletClient;
 
 describe('listStolasClaimTargets', () => {
   it('returns staking proxy and service id for post-stake steps only', () => {
@@ -100,48 +102,45 @@ describe('listStolasClaimTargets', () => {
 
 describe('tickStolasDistributorClaims', () => {
   it('skips when staking mode is not standard', async () => {
-    const provider = {} as import('ethers').JsonRpcProvider;
-    const signer = { sendTransaction: vi.fn() } as unknown as import('ethers').Signer;
+    const publicClient = {} as PublicClient;
 
-    const r = await tickStolasDistributorClaims(provider, signer, {
+    const r = await tickStolasDistributorClaims(publicClient, noopWallet, {
       distributorAddress: '0xdist',
       stakingMode: 'self-bond',
       targets: [{ stakingProxy: '0xstake', serviceId: 1 }],
     });
 
     expect(r.skippedWrongMode).toBe(true);
-    expect(signer.sendTransaction).not.toHaveBeenCalled();
+    expect(vi.mocked(txRetry.viemSendTransactionWithRetry)).not.toHaveBeenCalled();
   });
 
   it('skips when distributor is not configured', async () => {
-    const provider = {} as import('ethers').JsonRpcProvider;
-    const signer = { sendTransaction: vi.fn() } as unknown as import('ethers').Signer;
+    const publicClient = {} as PublicClient;
 
-    const r = await tickStolasDistributorClaims(provider, signer, {
+    const r = await tickStolasDistributorClaims(publicClient, noopWallet, {
       distributorAddress: undefined,
       stakingMode: 'standard',
       targets: [{ stakingProxy: '0xstake', serviceId: 1 }],
     });
 
     expect(r.skippedNoDistributor).toBe(true);
-    expect(signer.sendTransaction).not.toHaveBeenCalled();
+    expect(vi.mocked(txRetry.viemSendTransactionWithRetry)).not.toHaveBeenCalled();
   });
 });
 
 describe('tickStolasDistributorClaims failure accounting / strict', () => {
   const dist = '0x0000000000000000000000000000000000000001';
-  const signer = {} as Signer;
 
   beforeEach(() => {
-    vi.mocked(txRetry.ethersSendTransactionWithRetry).mockReset();
-    vi.mocked(txRetry.ethersWaitForTransactionHashWithRetry).mockReset();
+    vi.mocked(txRetry.viemSendTransactionWithRetry).mockReset();
+    vi.mocked(txRetry.waitForTransactionReceiptWithRetry).mockReset();
   });
 
   it('default mode does not throw on recoverable send failure', async () => {
-    const provider = providerWithPendingReward();
-    vi.mocked(txRetry.ethersSendTransactionWithRetry).mockRejectedValue(new Error('nonce too low'));
+    const publicClient = publicClientWithPendingReward();
+    vi.mocked(txRetry.viemSendTransactionWithRetry).mockRejectedValue(new Error('nonce too low'));
 
-    const r = await tickStolasDistributorClaims(provider, signer, {
+    const r = await tickStolasDistributorClaims(publicClient, noopWallet, {
       distributorAddress: dist,
       stakingMode: 'standard',
       targets: [{ stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 }],
@@ -154,11 +153,11 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
   });
 
   it('strict mode throws TransientError when every claim send fails recoverably', async () => {
-    const provider = providerWithPendingReward();
-    vi.mocked(txRetry.ethersSendTransactionWithRetry).mockRejectedValue(new Error('nonce too low'));
+    const publicClient = publicClientWithPendingReward();
+    vi.mocked(txRetry.viemSendTransactionWithRetry).mockRejectedValue(new Error('nonce too low'));
 
     await expect(
-      tickStolasDistributorClaims(provider, signer, {
+      tickStolasDistributorClaims(publicClient, noopWallet, {
         distributorAddress: dist,
         stakingMode: 'standard',
         targets: [{ stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 }],
@@ -168,10 +167,10 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
   });
 
   it('strict mode throws TransientError when every pending-reward read fails recoverably', async () => {
-    const provider = providerWithReadFailure('timeout');
+    const publicClient = publicClientWithReadFailure('timeout');
 
     await expect(
-      tickStolasDistributorClaims(provider, signer, {
+      tickStolasDistributorClaims(publicClient, noopWallet, {
         distributorAddress: dist,
         stakingMode: 'standard',
         targets: [{ stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 }],
@@ -181,11 +180,11 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
   });
 
   it('strict mode throws Error on insufficient funds (non-recoverable)', async () => {
-    const provider = providerWithPendingReward();
-    vi.mocked(txRetry.ethersSendTransactionWithRetry).mockRejectedValue(new Error('insufficient funds'));
+    const publicClient = publicClientWithPendingReward();
+    vi.mocked(txRetry.viemSendTransactionWithRetry).mockRejectedValue(new Error('insufficient funds'));
 
     await expect(
-      tickStolasDistributorClaims(provider, signer, {
+      tickStolasDistributorClaims(publicClient, noopWallet, {
         distributorAddress: dist,
         stakingMode: 'standard',
         targets: [{ stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 }],
@@ -195,13 +194,13 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
   });
 
   it('strict mode does not throw when at least one claim succeeds (partial failure)', async () => {
-    const provider = providerWithPendingReward();
-    vi.mocked(txRetry.ethersSendTransactionWithRetry)
-      .mockResolvedValueOnce({ hash: '0xabc' } as never)
+    const publicClient = publicClientWithPendingReward();
+    vi.mocked(txRetry.viemSendTransactionWithRetry)
+      .mockResolvedValueOnce('0xabc' as `0x${string}`)
       .mockRejectedValueOnce(new Error('nonce too low'));
-    vi.mocked(txRetry.ethersWaitForTransactionHashWithRetry).mockResolvedValue({ status: 1 } as never);
+    vi.mocked(txRetry.waitForTransactionReceiptWithRetry).mockResolvedValue({ status: 'success' } as never);
 
-    const r = await tickStolasDistributorClaims(provider, signer, {
+    const r = await tickStolasDistributorClaims(publicClient, noopWallet, {
       distributorAddress: dist,
       stakingMode: 'standard',
       targets: [

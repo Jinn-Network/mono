@@ -167,8 +167,8 @@ When \`satisfied\` is true, the \`requirements\` array is empty and
 no funding is needed right now.
 
 Examples:
-  npx jinn fund-requirements
-  npx jinn fund-requirements --human
+  jinn fund-requirements
+  jinn fund-requirements --human
 `,
   run,
 };

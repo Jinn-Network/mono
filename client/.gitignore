@@ -1,5 +1,6 @@
 node_modules/
 dist/
+jinn-client.tgz
 *.db
 .env
 *.log

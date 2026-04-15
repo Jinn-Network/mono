@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { getAddress } from 'ethers';
+import { getAddress } from 'viem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';
@@ -33,7 +33,7 @@ describe('Fleet bootstrap', () => {
     });
 
     // Mock provider to return 0 balance
-    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(0n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
 
     const result = await bootstrapper.bootstrap('test-password');
 
@@ -71,7 +71,7 @@ describe('Fleet bootstrap', () => {
       rpcUrl: 'http://127.0.0.1:8545',
     });
 
-    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(0n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
 
     await bootstrapper.bootstrap('test-password');
 
@@ -105,7 +105,7 @@ describe('Fleet bootstrap', () => {
     });
 
     // Master is funded
-    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
 
     // Mock the service bootstrap steps.
     // bootstrapService() adds a service with step='awaiting_stake' first, then calls resumeService().
@@ -153,7 +153,7 @@ describe('Fleet bootstrap', () => {
       targetServices: 3,
     });
 
-    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
 
     let serviceCounter = 100;
     vi.spyOn(bootstrapper as any, 'stepStolasStake').mockImplementation(async (_s: any, _m: any, index: number) => {
@@ -237,7 +237,7 @@ describe('Fleet bootstrap', () => {
       return store.updateService(index, { mech_address: '0x4444444444444444444444444444444444444444', step: 'complete' });
     });
 
-    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
 
     const result = await bootstrapper.bootstrap('test-password');
     expect(result.ok).toBe(true);
@@ -306,7 +306,7 @@ describe('Fleet bootstrap', () => {
       return store.updateService(index, { step: 'complete' });
     });
 
-    vi.spyOn((bootstrapper as any).provider, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
 
     const result = await bootstrapper.bootstrap('test-password');
     expect(result.ok).toBe(true);

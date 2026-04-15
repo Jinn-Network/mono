@@ -1,4 +1,4 @@
-import { JsonRpcProvider, getAddress } from 'ethers';
+import { getAddress, type Address, type Hex, type PublicClient } from 'viem';
 import { describe, expect, it, vi } from 'vitest';
 import {
   previousSafeBeingAbandoned,
@@ -7,7 +7,7 @@ import {
 import type { ServiceState } from '../../src/earning/types.js';
 import * as safeAdapter from '../../src/earning/safe-adapter.js';
 import * as txRetry from '../../src/tx-retry.js';
-import { deriveMasterSigner, deriveAgentSigner } from '../../src/earning/wallet.js';
+import { deriveMasterSigner, walletPrivateKeyAtIndex } from '../../src/earning/wallet.js';
 
 const MNEMONIC = 'test test test test test test test test test test test junk';
 
@@ -54,31 +54,29 @@ describe('previousSafeBeingAbandoned', () => {
 describe('sweepOrphanedServiceFunds', () => {
   it('calls executeSafeTxDirect when Safe is deployed and has ETH', async () => {
     vi.spyOn(safeAdapter, 'executeSafeTxDirect').mockResolvedValue({ hash: '0x' + 'aa'.repeat(32) });
-    vi.spyOn(txRetry, 'ethersWaitForTransactionHashWithRetry').mockResolvedValue({ status: 1 } as never);
-    vi.spyOn(txRetry, 'ethersSendTransactionWithRetry').mockResolvedValue({
-      hash: '0x' + 'bb'.repeat(32),
-    } as never);
+    vi.spyOn(txRetry, 'waitForTransactionReceiptWithRetry').mockResolvedValue({ status: 'success' } as never);
+    vi.spyOn(txRetry, 'viemSendTransactionWithRetry').mockResolvedValue('0x' + 'bb'.repeat(32) as Hex);
 
     const masterSigner = deriveMasterSigner(MNEMONIC);
-    const agentSigner = deriveAgentSigner(MNEMONIC, 1);
     const abandonedSafe = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
-    const provider = {
+    const publicClient = {
       getCode: vi.fn().mockResolvedValue('0x6000'),
       getBalance: vi
         .fn()
         .mockResolvedValueOnce(5_000_000_000_000_000_000n) // safe
         .mockResolvedValue(6_000_000_000_000_000_000n), // agent repeated
-    } as unknown as JsonRpcProvider;
+    } as unknown as PublicClient;
 
     await sweepOrphanedServiceFunds({
       rpcUrl: 'http://127.0.0.1:8545',
-      provider,
+      network: 'base',
+      publicClient,
       masterAddress: masterSigner.address,
-      masterSigner,
+      masterAccount: masterSigner,
       serviceIndex: 1,
-      agentPrivateKey: agentSigner.privateKey,
-      agentAddress: agentSigner.address,
+      agentPrivateKey: walletPrivateKeyAtIndex(MNEMONIC, 1),
+      agentAddress: getAddress('0x3333333333333333333333333333333333333333'),
       abandonedSafeAddress: abandonedSafe,
       minAgentReserveWei: 5_000_000_000_000_000_000n,
     });
@@ -86,7 +84,7 @@ describe('sweepOrphanedServiceFunds', () => {
     expect(safeAdapter.executeSafeTxDirect).toHaveBeenCalledWith(
       expect.objectContaining({
         safeAddress: abandonedSafe,
-        to: masterSigner.address,
+        to: getAddress(masterSigner.address) as Address,
         value: 5_000_000_000_000_000_000n,
       }),
     );
@@ -95,31 +93,29 @@ describe('sweepOrphanedServiceFunds', () => {
 
   it('does not throw when executeSafeTxDirect fails', async () => {
     vi.spyOn(safeAdapter, 'executeSafeTxDirect').mockRejectedValue(new Error('rpc down'));
-    vi.spyOn(txRetry, 'ethersWaitForTransactionHashWithRetry').mockResolvedValue(null);
-    vi.spyOn(txRetry, 'ethersSendTransactionWithRetry').mockResolvedValue({
-      hash: '0x' + 'cc'.repeat(32),
-    } as never);
+    vi.spyOn(txRetry, 'waitForTransactionReceiptWithRetry').mockResolvedValue({ status: 'reverted' } as never);
+    vi.spyOn(txRetry, 'viemSendTransactionWithRetry').mockResolvedValue('0x' + 'cc'.repeat(32) as Hex);
 
     const masterSigner = deriveMasterSigner(MNEMONIC);
-    const agentSigner = deriveAgentSigner(MNEMONIC, 1);
 
-    const provider = {
+    const publicClient = {
       getCode: vi.fn().mockResolvedValue('0x6000'),
       getBalance: vi
         .fn()
         .mockResolvedValueOnce(1n)
         .mockResolvedValue(6_000_000_000_000_000_000n),
-    } as unknown as JsonRpcProvider;
+    } as unknown as PublicClient;
 
     await expect(
       sweepOrphanedServiceFunds({
         rpcUrl: 'http://127.0.0.1:8545',
-        provider,
+        network: 'base',
+        publicClient,
         masterAddress: masterSigner.address,
-        masterSigner,
+        masterAccount: masterSigner,
         serviceIndex: 1,
-        agentPrivateKey: agentSigner.privateKey,
-        agentAddress: agentSigner.address,
+        agentPrivateKey: walletPrivateKeyAtIndex(MNEMONIC, 1),
+        agentAddress: getAddress('0x3333333333333333333333333333333333333333'),
         abandonedSafeAddress: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         minAgentReserveWei: 5_000_000_000_000_000_000n,
       }),

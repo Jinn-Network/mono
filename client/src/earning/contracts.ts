@@ -9,23 +9,27 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { keccak256, toUtf8Bytes } from 'ethers';
+import { keccak256, stringToBytes } from 'viem';
 
-// Monorepo root, resolved from this file's location. Works identically from
-// src (tsx) and dist (tsc output) because both are 3 dirs below client/.
-const MONOREPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const BUNDLED_CONTRACTS_DIR = path.join(MONOREPO_ROOT, 'contracts');
+// Package root, resolved from this file's location. Works identically from
+// src/earning/ (tsx) and dist/earning/ (tsc output) — both are 2 dirs below client/.
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const BUNDLED_DEPLOYMENTS_DIR = path.join(PACKAGE_ROOT, 'deployments');
 
 /**
- * Default Phase 1b deployment artifacts shipped in the monorepo. These let the
- * client run against Base Sepolia with zero env vars. Callers can still override
- * individual paths via ChainConfigOverrides or JINN_TESTNET_*_DEPLOYMENT env vars.
+ * Default Phase 1b deployment artifacts bundled in the client package. These let
+ * the client run against Base Sepolia with zero env vars. Callers can still
+ * override individual paths via ChainConfigOverrides or JINN_TESTNET_*_DEPLOYMENT
+ * env vars.
+ *
+ * After a contract redeploy, run `scripts/sync-deployments.sh` to refresh these
+ * from the contracts/ directory.
  */
 const DEFAULT_TESTNET_ARTIFACTS = {
-  token: path.join(BUNDLED_CONTRACTS_DIR, 'deployment-phase1a-token-baseSepolia-fast.json'),
-  l2: path.join(BUNDLED_CONTRACTS_DIR, 'deployment-phase1a-l2-baseSepolia-fast.json'),
-  mech: path.join(BUNDLED_CONTRACTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),
-  stolas: path.join(BUNDLED_CONTRACTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
+  token: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1a-token-baseSepolia-fast.json'),
+  l2: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1a-l2-baseSepolia-fast.json'),
+  mech: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),
+  stolas: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -548,8 +552,8 @@ export const MECH_MARKETPLACE_CREATE_ABI = [
 // ---------------------------------------------------------------------------
 
 export const EVENT_TOPICS = {
-  CreateService: keccak256(toUtf8Bytes('CreateService(uint256,bytes32)')),
-  CreateMultisigWithAgents: keccak256(toUtf8Bytes('CreateMultisigWithAgents(uint256,address)')),
+  CreateService: keccak256(stringToBytes('CreateService(uint256,bytes32)')),
+  CreateMultisigWithAgents: keccak256(stringToBytes('CreateMultisigWithAgents(uint256,address)')),
 } as const;
 
 // ---------------------------------------------------------------------------

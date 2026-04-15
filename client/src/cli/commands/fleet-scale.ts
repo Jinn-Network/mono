@@ -123,7 +123,7 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
 
-  const { config, networkChain, chainConfig, fleetStore, masterSigner, provider } = built.ctx;
+  const { config, networkChain, chainConfig, fleetStore, masterWallet, publicClient } = built.ctx;
 
   if (to > current) {
     const bootstrapper = new FleetBootstrapper({
@@ -236,8 +236,8 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
   for (const index of indices) {
     try {
       const r = await retireFleetServiceOnChain({
-        provider,
-        masterSigner,
+        publicClient,
+        masterWallet,
         distributorAddress: chainConfig.distributorAddress,
         fleetStore,
         chain: networkChain,
@@ -426,12 +426,12 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
 
-  const { networkChain, chainConfig, fleetStore, masterSigner, provider } = built.ctx;
+  const { networkChain, chainConfig, fleetStore, masterWallet, publicClient } = built.ctx;
 
   try {
     const r = await retireFleetServiceOnChain({
-      provider,
-      masterSigner,
+      publicClient,
+      masterWallet,
       distributorAddress: chainConfig.distributorAddress,
       fleetStore,
       chain: networkChain,

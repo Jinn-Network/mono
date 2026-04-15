@@ -49,7 +49,7 @@ async function run(ctx: CommandContext): Promise<void> {
         code: 'invalid_invocation',
         message: err instanceof Error ? err.message : String(err),
         hint: 'Run `jinn run --help` for supported flags.',
-        exampleCli: 'npx jinn run',
+        exampleCli: 'jinn run',
         details: { field: 'argv' },
       },
       { writer: ctx.writer, exit: ctx.exit },
@@ -64,7 +64,7 @@ async function run(ctx: CommandContext): Promise<void> {
         code: 'invalid_invocation',
         message: password.message,
         hint: 'Set JINN_PASSWORD or pass --password-fd N, then re-run.',
-        exampleCli: 'npx jinn run',
+        exampleCli: 'jinn run',
         details: { field: 'keystore password', expected: 'non-empty string via environment' },
       },
       { writer: ctx.writer, exit: ctx.exit },
@@ -103,9 +103,9 @@ all progress / runtime logs go to stderr. Use \`--human\` for a concise
 terminal summary instead.
 
 Examples:
-  npx jinn run
-  npx jinn run --human
-  printf '%s\n' secret | npx jinn run --password-fd 0
+  jinn run
+  jinn run --human
+  printf '%s\n' secret | jinn run --password-fd 0
 `,
   run,
 };

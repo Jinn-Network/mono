@@ -54,8 +54,8 @@ All of (rpc.ok === true && fleet.needsAttention === 0 && exit.blocking === false
 means healthy. Pull \`jinn fleet\` or \`jinn history\` for detail.
 
 Examples:
-  npx jinn status
-  npx jinn status --human
+  jinn status
+  jinn status --human
 `,
   run,
 };

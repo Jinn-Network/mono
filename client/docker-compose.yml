@@ -1,0 +1,39 @@
+version: '3.8'
+
+# Jinn Client - Docker Operator Environment
+#
+# QUICK START:
+# 1. Create a .env file in this directory with your password:
+#    echo "JINN_PASSWORD=your-secure-password" > .env
+#
+# 2. (REQUIRED ONCE) Authenticate Claude (entrypoint must be `claude`, not `jinn`):
+#    docker compose run --rm -it --entrypoint claude jinn-daemon auth login
+#
+# 3. Start the daemon in the background:
+#    docker compose up -d
+
+services:
+  jinn-daemon:
+    image: ghcr.io/jinn-network/client:latest
+    container_name: jinn-daemon
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Optional explicitly defined defaults if .env is missing them
+    environment:
+      - JINN_NETWORK=${JINN_NETWORK:-testnet}
+      - JINN_POLL_INTERVAL_MS=${JINN_POLL_INTERVAL_MS:-5000}
+    ports:
+      - "7331:7331"
+    volumes:
+      # Persistent daemon state: database, keystore, and earning progress
+      - jinn-data:/data
+      # Persistent authentication state: stores Claude's OAuth token
+      - jinn-claude-state:/root/.claude
+    command: ["run"]
+
+volumes:
+  jinn-data:
+    name: jinn-data-volume
+  jinn-claude-state:
+    name: jinn-claude-auth-volume

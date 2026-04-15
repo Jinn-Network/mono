@@ -124,7 +124,7 @@ mnemonic to <path> with mode 0600. Idempotent: same mnemonic →
 same output. No other side effects.
 
 Examples:
-  JINN_PASSWORD=secret npx jinn keys backup --output ~/backup/jinn.txt
+  JINN_PASSWORD=secret jinn keys backup --output ~/backup/jinn.txt
 `,
   run,
 };

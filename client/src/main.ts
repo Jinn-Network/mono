@@ -13,11 +13,10 @@
  * JINN_PASSWORD (env-only) is required for keystore encryption.
  *
  * Canonical operator command:
- *   npx jinn run
+ *   jinn run
  */
 
 import { config as dotenvConfig } from 'dotenv';
-import { JsonRpcProvider } from 'ethers';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
@@ -29,10 +28,11 @@ import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { FleetStateStore } from './earning/store.js';
 import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
-import { decryptMnemonic, deriveAgentSigner, deriveMasterSigner } from './earning/wallet.js';
+import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from './earning/wallet.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import { Daemon } from './daemon/daemon.js';
+import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -181,7 +181,7 @@ async function bootstrap(): Promise<{
     await store.loadMnemonicKeystore(),
     PASSWORD,
   );
-  const agentSigner = deriveAgentSigner(mnemonic, firstComplete.index);
+  const agentPrivateKey = walletPrivateKeyAtIndex(mnemonic, firstComplete.index);
 
   console.log(`[main] Fleet bootstrap complete.`);
   console.log(`  Master:  ${state.master_address}`);
@@ -195,7 +195,7 @@ async function bootstrap(): Promise<{
     masterAddress: state.master_address as `0x${string}`,
     serviceIndex: firstComplete.index,
     serviceId: firstComplete.service_id ?? null,
-    agentPrivateKey: agentSigner.privateKey as `0x${string}`,
+    agentPrivateKey: agentPrivateKey as `0x${string}`,
     safeAddress: firstComplete.safe_address as `0x${string}`,
     mechAddress: firstComplete.mech_address ? (firstComplete.mech_address as `0x${string}`) : undefined,
   };
@@ -228,8 +228,8 @@ export async function main(): Promise<DaemonStartupInfo> {
     emitEnvelope({
       code: 'fatal',
       message: 'Bootstrap completed without a runnable mech deployment.',
-      hint: 'Set a valid mech deployment and re-run `npx jinn run`.',
-      exampleCli: 'npx jinn doctor',
+      hint: 'Set a valid mech deployment and re-run `jinn run`.',
+      exampleCli: 'jinn doctor',
       details: {
         network: config.network,
         expected: 'configured mech deployment with a non-zero mech marketplace address',
@@ -266,9 +266,9 @@ export async function main(): Promise<DaemonStartupInfo> {
     await earningStore.loadMnemonicKeystore(),
     PASSWORD,
   );
-  const masterSigner = deriveMasterSigner(mnemonicForMaster).connect(
-    new JsonRpcProvider(config.rpcUrl),
-  );
+  const masterAccount = deriveMasterSigner(mnemonicForMaster);
+  const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
+  const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
 
   const daemon = new Daemon({
     adapter,
@@ -295,8 +295,8 @@ export async function main(): Promise<DaemonStartupInfo> {
       config.rewardClaimIntervalMs > 0
         ? {
             intervalMs: config.rewardClaimIntervalMs,
-            provider: masterSigner.provider as JsonRpcProvider,
-            masterSigner,
+            publicClient,
+            masterWallet,
             store: earningStore,
             chain: NETWORK_CHAIN,
             distributorAddress: CHAIN_CONFIG.distributorAddress,
@@ -346,31 +346,4 @@ export async function main(): Promise<DaemonStartupInfo> {
   };
 }
 
-function isMainScriptEntry(): boolean {
-  const entry = process.argv[1];
-  if (entry === undefined || entry === '') return false;
-  try {
-    const here = pathToFileURL(fileURLToPath(import.meta.url)).href;
-    const invoked = pathToFileURL(resolve(entry)).href;
-    return here === invoked;
-  } catch {
-    return false;
-  }
-}
 
-if (isMainScriptEntry()) {
-  main().catch((err) => {
-    const { summary, hint } = formatBootstrapOperatorMessage(err);
-    const cause = err instanceof Error ? err.message : String(err);
-    const details: Record<string, unknown> = { cause };
-    if (config.debug && err instanceof Error && err.stack) {
-      details.stack = err.stack;
-    }
-    emitEnvelope({
-      code: 'fatal',
-      message: summary,
-      ...(hint !== undefined ? { hint } : {}),
-      details,
-    });
-  });
-}

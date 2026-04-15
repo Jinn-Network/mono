@@ -1,0 +1,26 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-09T13:21:20.747Z",
+  "config": {
+    "timingProfile": "fast-test",
+    "fee": 0,
+    "minResponseTimeout": 60,
+    "maxResponseTimeout": 300,
+    "livenessRatio": "1000000000000000",
+    "nativePaymentType": "0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1"
+  },
+  "contracts": {
+    "karmaImpl": "0x5FFD663593Cea8dedF19fD314b13E392F5b64FC1",
+    "karma": "0x61434dAFf652FF0654684482Ab11736E96a7ba3A",
+    "mechMarketplaceImpl": "0x16F35EF27d4A0a8b49B77BfB65e668dB43311133",
+    "mechMarketplace": "0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7",
+    "balanceTracker": "0xDbeEF1947F7BB3657f984aA6b230a0ca6578229D",
+    "mechFactory": "0x206183F35B2450Ca15A906BB923E74d945F78d67",
+    "jinnRouter": "0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675",
+    "serviceRegistry": "0x31D3202d8744B16A120117A053459DDFAE93c855",
+    "activityChecker": "0xF4Ca4943Eb0b0927d754A6A95206364f017D45f6",
+    "stakingToken": "0xf358b5c1ac4ddc4e807b5baf008826bf193eab3b"
+  }
+}

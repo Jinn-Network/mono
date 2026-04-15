@@ -41,8 +41,8 @@ Emits the §4.2 fleet shape: master wallet, each service’s agent and
 multisig addresses, staking flags, activity counts, and attention hints.
 
 Examples:
-  npx jinn fleet
-  npx jinn fleet --human
+  jinn fleet
+  jinn fleet --human
 `,
   run,
 };

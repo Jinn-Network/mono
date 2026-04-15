@@ -1,0 +1,35 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-10T16:46:00.888Z",
+  "config": {
+    "l2Jinn": "0xAB9a01cd4A379e36006ec6df2960CF39EF79df63",
+    "stakingContract": "0xf358b5c1ac4ddc4e807b5baf008826bf193eab3b",
+    "l1DepositProcessor": "0x494FBcd686C895fD6265e852086B53Abf15cb076",
+    "l1DistributorProxy": "0x12F14eF5b4881a932BE3F334599cB9473aBE987A",
+    "l1TreasuryProxy": "0xa87c117cB54d9C6C8a8e0aA0b336a1125E485Cb7",
+    "stakingType": 1,
+    "collectorRewardFactor": 10000,
+    "protocolRewardFactor": 0,
+    "curatingAgentRewardFactor": 0,
+    "agentId": 103,
+    "livenessRatio": "1000000000000000"
+  },
+  "contracts": {
+    "recoveryModule": "0x5E3327C73834502f14e93e6b7D74742De1f9F3FD",
+    "safeMultisigWithRecoveryModule": "0x20F7b9b55a88e3b2561fe83B076DE52916C7eaf0",
+    "collectorImpl": "0x6A7a3aBdbfF301A6212ebA1523E579399833C718",
+    "collector": "0x21c52Be4F656435F97d0335B37e21B417c8b6DFa",
+    "distributorImpl": "0xf734551289f11431486D60621F4BDB0081887B34",
+    "distributor": "0x20951FBDb4F9cB1f051ef416BCB11A9Cfe3CEf81",
+    "multisigGuardImpl": "0xD6229A8b3D1b5824e824E6589469F85987379183",
+    "multisigGuard": "0x77aE56B2B745b3e81002090749Ef59B72B688D5F",
+    "moduleActivityChecker": "0x4B7F3539cAb410C7b56ad6158DB4197F02942a0F",
+    "activityModule": "0x73e2713B535540A3378ddA3DC62F1e75b35469c3",
+    "beacon": "0xB73Be5348C09FD95e4Fc64cc5fCb2b4B4F932b10",
+    "stakingManagerImpl": "0xFb0B086D3f7C03f1F671C6ccD5D16CC779B25Af9",
+    "stakingManager": "0x5edCd012C581b946E06a74e1906a5f29D588403e",
+    "baseStakingProcessorL2": "0x23a063f600e9938405D0367a137f1bE2F0B4D0D2"
+  }
+}

@@ -23,9 +23,9 @@ import {
   withdrawNeedsInteractiveConfirm,
 } from '../src/withdraw/run-withdraw-plan.js';
 import { resolveCliPassword } from '../src/cli/password.js';
-import { JsonRpcProvider } from 'ethers';
 import { decryptMnemonic } from '../src/earning/wallet.js';
 import { FleetStateStore } from '../src/earning/store.js';
+import { createJinnPublicClient } from '../src/earning/viem-clients.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -115,13 +115,14 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig(getConfigPathFromArgs(process.argv.slice(2)));
-  const provider = new JsonRpcProvider(config.rpcUrl);
+  const networkChain = config.network === 'testnet' ? 'base-sepolia' : 'base';
+  const publicClient = createJinnPublicClient(config.rpcUrl, networkChain);
   const store = new FleetStateStore(config.earningDir);
   const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), pw.password);
   const fleet = await store.tryLoadExisting();
   const to = parsed.to as string;
   const sweepWouldSend = await computeSweepWouldSend(
-    provider,
+    publicClient,
     mnemonic,
     fleet,
     to,

@@ -16,7 +16,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Contract, JsonRpcProvider } from 'ethers';
+import { createPublicClient, http, parseAbi, type Address } from 'viem';
+import { base } from 'viem/chains';
 import { FleetBootstrapper } from '../src/earning/bootstrap.js';
 import {
   SERVICE_REGISTRY_L2_ABI,
@@ -181,8 +182,8 @@ async function main(): Promise<void> {
           '0x56BC75E2D63100000', // 100 ETH in hex
         ]);
         // Verify ETH balance
-        const ethCheckProvider = new JsonRpcProvider(ANVIL_RPC);
-        const eoaEthBalance = await ethCheckProvider.getBalance(eoaAddress);
+        const ethCheckClient = createPublicClient({ chain: base, transport: http(ANVIL_RPC) });
+        const eoaEthBalance = await ethCheckClient.getBalance({ address: eoaAddress as Address });
         console.log(`    Funded master EOA (${eoaAddress}) with 100 ETH — balance: ${eoaEthBalance}`);
         if (eoaEthBalance === 0n) {
           throw new Error('Master EOA ETH balance is still 0 after anvil_setBalance');
@@ -233,15 +234,15 @@ async function main(): Promise<void> {
           throw new Error('Missing serviceId or safeAddress from Phase 4');
         }
 
-        const provider = new JsonRpcProvider(ANVIL_RPC);
+        const publicClient = createPublicClient({ chain: base, transport: http(ANVIL_RPC) });
 
         // 5a: Service state should be Deployed (4)
-        const registry = new Contract(
-          CHAIN_CONFIG.serviceRegistry,
-          SERVICE_REGISTRY_L2_ABI,
-          provider,
-        );
-        const service = await registry.getService(serviceId);
+        const service = await publicClient.readContract({
+          address: CHAIN_CONFIG.serviceRegistry as Address,
+          abi: SERVICE_REGISTRY_L2_ABI,
+          functionName: 'getService',
+          args: [BigInt(serviceId)],
+        });
         const serviceState = Number(service.state);
         console.log(`    Service state: ${serviceState} (expected 4 = Deployed)`);
 
@@ -250,13 +251,15 @@ async function main(): Promise<void> {
         }
 
         // 5b: Service should be staked — getServiceIds includes our service
-        const staking = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          ['function getServiceIds() view returns (uint256[])',
-           'function getStakingState(uint256 serviceId) view returns (uint8)'],
-          provider,
-        );
-        const serviceIds: bigint[] = await staking.getServiceIds();
+        const stakingAbi = parseAbi([
+          'function getServiceIds() view returns (uint256[])',
+          'function getStakingState(uint256) view returns (uint8)',
+        ]);
+        const serviceIds = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: stakingAbi,
+          functionName: 'getServiceIds',
+        });
         const isStaked = serviceIds.map(Number).includes(serviceId);
         console.log(`    Staked services: [${serviceIds.join(', ')}]`);
         console.log(`    Our service ${serviceId} is staked: ${isStaked}`);
@@ -266,25 +269,29 @@ async function main(): Promise<void> {
         }
 
         // 5c: Check staking state
-        const stakingState = await staking.getStakingState(serviceId);
+        const stakingState = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: stakingAbi,
+          functionName: 'getStakingState',
+          args: [BigInt(serviceId)],
+        });
         console.log(`    Staking state: ${stakingState} (1=Staked)`);
 
         // 5d: Read activity checker getMultisigNonces
         // First, get the activity checker address from the staking contract
-        const stakingFull = new Contract(
-          CHAIN_CONFIG.stakingContract,
-          ['function activityChecker() view returns (address)'],
-          provider,
-        );
-        const activityChecker: string = await stakingFull.activityChecker();
+        const activityChecker = await publicClient.readContract({
+          address: CHAIN_CONFIG.stakingContract as Address,
+          abi: parseAbi(['function activityChecker() view returns (address)']),
+          functionName: 'activityChecker',
+        });
         console.log(`    Activity checker: ${activityChecker}`);
 
-        const checker = new Contract(
-          activityChecker,
-          ['function getMultisigNonces(address) view returns (uint256[])'],
-          provider,
-        );
-        const nonces: bigint[] = await checker.getMultisigNonces(safeAddress);
+        const nonces = await publicClient.readContract({
+          address: activityChecker,
+          abi: parseAbi(['function getMultisigNonces(address) view returns (uint256[])']),
+          functionName: 'getMultisigNonces',
+          args: [safeAddress as Address],
+        });
         console.log(`    Multisig nonces: [${nonces.map(String).join(', ')}]`);
       }),
     );

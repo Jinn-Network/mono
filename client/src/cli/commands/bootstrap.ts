@@ -178,11 +178,11 @@ Requires the password environment variable required by the client
 (never as a flag).
 
 Examples:
-  npx jinn bootstrap
-  npx jinn bootstrap --human
+  jinn bootstrap
+  jinn bootstrap --human
 
 Failure example (funding gate):
-  $ npx jinn bootstrap
+  $ jinn bootstrap
   {"schemaVersion":1,"code":"funding_required","exitCode":10,...}
   $ echo $?
   10

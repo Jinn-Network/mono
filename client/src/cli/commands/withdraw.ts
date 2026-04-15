@@ -16,7 +16,7 @@ import {
 } from '../../withdraw/run-withdraw-plan.js';
 import { decryptMnemonic } from '../../earning/wallet.js';
 import { FleetStateStore } from '../../earning/store.js';
-import { JsonRpcProvider } from 'ethers';
+import { createJinnPublicClient } from '../../earning/viem-clients.js';
 
 interface SweepEntry {
   from: string;
@@ -48,7 +48,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
   if (parsed.help) {
     ctx.writer.write(
-      `See \`jinn withdraw --help\` in the command module helpText, or \`npx jinn withdraw --human\` for the readable terminal form.\n`,
+      `See \`jinn withdraw --help\` in the command module helpText, or \`jinn withdraw --human\` for the readable terminal form.\n`,
     );
     return;
   }
@@ -135,7 +135,8 @@ async function run(ctx: CommandContext): Promise<void> {
   const configPath =
     getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
   const config = loadConfig(configPath);
-  const provider = new JsonRpcProvider(config.rpcUrl);
+  const networkChain = config.network === 'testnet' ? 'base-sepolia' : 'base';
+  const publicClient = createJinnPublicClient(config.rpcUrl, networkChain);
   const store = new FleetStateStore(config.earningDir);
   let sweepWouldSend = false;
   try {
@@ -143,7 +144,7 @@ async function run(ctx: CommandContext): Promise<void> {
     const fleet = await store.tryLoadExisting();
     const to = parsed.to as string;
     sweepWouldSend = await computeSweepWouldSend(
-      provider,
+      publicClient,
       mnemonic,
       fleet,
       to,
@@ -224,8 +225,8 @@ Supports the same amount flags as the standalone withdraw helper:
 Large or drain operations require --yes (no TTY prompt).
 
 Examples:
-  npx jinn withdraw --to 0xDEST --dry-run
-  npx jinn withdraw --to 0xDEST --eth-amount 0.01 --yes
+  jinn withdraw --to 0xDEST --dry-run
+  jinn withdraw --to 0xDEST --eth-amount 0.01 --yes
 `,
   run,
 };

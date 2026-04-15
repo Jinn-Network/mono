@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
-# Thin launcher: exec tsx on the TypeScript entry living next to this file.
-# Works when the client is installed via `yarn install` or `npm install` (the
-# package.json `bin` field creates a symlink to this script).
+# Dev-only thin launcher: exec tsx on the TypeScript entry under src/.
+# This file is NOT shipped in the published package (excluded by the
+# `files` whitelist in package.json). Published installs use
+# dist/bin/jinn.js via the `bin` field instead.
 SCRIPT="$0"
 while [ -L "$SCRIPT" ]; do
   LINK="$(readlink "$SCRIPT")"
@@ -11,4 +12,4 @@ while [ -L "$SCRIPT" ]; do
   esac
 done
 DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
-exec tsx "$DIR/jinn.ts" "$@"
+exec tsx "$DIR/../src/bin/jinn.ts" "$@"

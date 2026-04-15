@@ -12,6 +12,24 @@ import { computeDeploymentDigest } from '../deployment-digest.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_JSON_PATH = join(HERE, '..', '..', '..', 'package.json');
+const BUILD_META_PATH = join(HERE, '..', '..', 'build-meta.json');
+
+function readEmbeddedCommit(): string | undefined {
+  try {
+    const raw = readFileSync(BUILD_META_PATH, 'utf-8');
+    const meta = JSON.parse(raw) as { commit?: string };
+    const c = meta.commit?.trim();
+    return c || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveBuildCommit(env: NodeJS.ProcessEnv): string {
+  const fromEnv = env['JINN_BUILD_COMMIT']?.trim();
+  if (fromEnv) return fromEnv;
+  return readEmbeddedCommit() ?? 'unknown';
+}
 
 function readClientVersion(): string {
   const raw = readFileSync(PACKAGE_JSON_PATH, 'utf-8');
@@ -60,7 +78,7 @@ async function run(ctx: CommandContext): Promise<void> {
     generatedAt: new Date().toISOString(),
     client: {
       version: readClientVersion(),
-      commit: ctx.env['JINN_BUILD_COMMIT'] ?? 'unknown',
+      commit: resolveBuildCommit(ctx.env),
     },
     protocol: {
       phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
@@ -99,8 +117,8 @@ emits concrete token symbols and addresses — everywhere else uses role
 names (native / bond / reward).
 
 Examples:
-  npx jinn version
-  npx jinn version --human
+  jinn version
+  jinn version --human
 `,
   run,
 };

@@ -1,8 +1,12 @@
 /**
  * CLI output helpers.
  *
- * Contract: spec/2026-04-14-client-surface.md §7.2.
- * - JSON is the default for operational verbs.
+ * Operational verbs emit JSON unless `--human` is set (TTY does not change
+ * the default). `stdoutIsTty` is kept for callers/tests; `isJsonMode` only
+ * keys off `human`.
+ *
+ * Spec note: `spec/2026-04-14-client-surface.md` §7.2 still describes a
+ * TTY-based default; implementation and packaged README follow this module.
  * - NO_COLOR strips ANSI in human mode.
  */
 

@@ -6,13 +6,16 @@
  */
 
 import {
-  Contract,
-  Interface,
-  JsonRpcProvider,
-  ZeroAddress,
+  decodeEventLog,
+  encodeAbiParameters,
+  encodeFunctionData,
   formatEther,
   getAddress,
-} from 'ethers';
+  zeroAddress,
+  type Address,
+  type Hex,
+  type TransactionReceipt,
+} from 'viem';
 import {
   type ChainConfig,
   ERC20_ABI,
@@ -42,6 +45,7 @@ import {
   deriveMasterSigner,
   deriveAgentAddress,
   deriveAgentSigner,
+  walletPrivateKeyAtIndex,
 } from './wallet.js';
 import type {
   FleetState,
@@ -66,11 +70,15 @@ import {
   sweepOrphanedServiceFunds,
 } from './orphan-sweep.js';
 import {
-  ethersSendTransactionWithRetry,
-  ethersWaitForTransactionHashWithRetry,
+  viemSendTransactionWithRetry,
+  waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
+import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
+import type { Account } from 'viem/accounts';
+
+const addr = (value: string): Address => getAddress(value) as Address;
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
 
@@ -103,8 +111,8 @@ export interface FleetBootstrapperOptions {
 export class FleetBootstrapper {
   private readonly store: FleetStateStore;
   private readonly config: ChainConfig;
-  private readonly provider: JsonRpcProvider;
-  private readonly chain: 'base' | 'base-sepolia';
+  private readonly publicClient: ReturnType<typeof createJinnPublicClient>;
+  private readonly chain: JinnOnchainNetwork;
   private readonly stakingMode: StakingMode;
   private readonly targetServices: number;
   private readonly debug: boolean;
@@ -132,7 +140,7 @@ export class FleetBootstrapper {
       this.config.rpcUrl = options.rpcUrl;
     }
 
-    this.provider = new JsonRpcProvider(this.config.rpcUrl);
+    this.publicClient = createJinnPublicClient(this.config.rpcUrl, this.chain);
   }
 
   async getStatus(): Promise<FleetState> {
@@ -166,7 +174,7 @@ export class FleetBootstrapper {
 
       // Phase 1b: Check master funding
       const masterAddress = state.master_address!;
-      const masterBalance = await this.provider.getBalance(masterAddress);
+      const masterBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
       // Self-bond mode needs much more ETH than standard mode because the master
       // funds the agent which then pays for: Safe deploy, 5 service registry txs
       // (create, activate, register, deploy, stake), and mech deploy. Roughly
@@ -177,10 +185,14 @@ export class FleetBootstrapper {
       if (this.stakingMode === 'self-bond') {
         for (const svc of state.services) {
           if (svc.agent_address) {
-            systemEth += await this.provider.getBalance(svc.agent_address);
+            systemEth += await this.publicClient.getBalance({
+              address: getAddress(svc.agent_address) as Address,
+            });
           }
           if (svc.safe_address) {
-            systemEth += await this.provider.getBalance(svc.safe_address);
+            systemEth += await this.publicClient.getBalance({
+              address: getAddress(svc.safe_address) as Address,
+            });
           }
         }
       }
@@ -362,11 +374,12 @@ export class FleetBootstrapper {
     const agentSigner = deriveAgentSigner(mnemonic, serviceIndex);
     await sweepOrphanedServiceFunds({
       rpcUrl: this.config.rpcUrl,
-      provider: this.provider,
+      network: this.chain,
+      publicClient: this.publicClient,
       masterAddress: state.master_address,
-      masterSigner,
+      masterAccount: masterSigner,
       serviceIndex,
-      agentPrivateKey: agentSigner.privateKey,
+      agentPrivateKey: walletPrivateKeyAtIndex(mnemonic, serviceIndex),
       agentAddress: agentSigner.address,
       abandonedSafeAddress,
       minAgentReserveWei: this.config.minEoaGasEth,
@@ -377,7 +390,7 @@ export class FleetBootstrapper {
     let safeDeployed: boolean | null = null;
     if (svc.safe_address) {
       try {
-        const code = await this.provider.getCode(svc.safe_address);
+        const code = await this.publicClient.getCode({ address: getAddress(svc.safe_address) as Address });
         safeDeployed = code !== '0x';
       } catch {
         safeDeployed = null;
@@ -395,11 +408,19 @@ export class FleetBootstrapper {
     }
 
     const id = svc.service_id;
-    const staking = new Contract(this.config.stakingContract, STAKING_ABI, this.provider);
+    const stakingAddr = this.config.stakingContract as Address;
+    const registryAddr = this.config.serviceRegistry as Address;
 
     let stakingState: number | 'revert' | 'inconclusive' = 0;
     try {
-      stakingState = Number(await staking.getStakingState(id));
+      stakingState = Number(
+        await this.publicClient.readContract({
+          address: stakingAddr,
+          abi: STAKING_ABI,
+          functionName: 'getStakingState',
+          args: [BigInt(id)],
+        }),
+      );
     } catch (e) {
       stakingState = isTransientEthReadError(e) ? 'inconclusive' : 'revert';
     }
@@ -407,10 +428,15 @@ export class FleetBootstrapper {
     let stakingMultisig: string | null = null;
     if (stakingState !== 'revert' && stakingState !== 'inconclusive') {
       try {
-        const info = await staking.getServiceInfo(id);
-        const m = info.multisig as string;
+        const info = await this.publicClient.readContract({
+          address: stakingAddr,
+          abi: STAKING_ABI,
+          functionName: 'getServiceInfo',
+          args: [BigInt(id)],
+        });
+        const m = info[1] as string;
         stakingMultisig =
-          m && getAddress(m) !== getAddress(ZeroAddress) ? getAddress(m) : null;
+          m && getAddress(m) !== getAddress(zeroAddress) ? getAddress(m) : null;
       } catch {
         stakingMultisig = null;
       }
@@ -419,12 +445,16 @@ export class FleetBootstrapper {
     let registryState: number | 'revert' | 'inconclusive' = 0;
     let registryMultisig: string | null = null;
     try {
-      const registry = new Contract(this.config.serviceRegistry, SERVICE_REGISTRY_L2_ABI, this.provider);
-      const s = await registry.getService(id);
+      const s = await this.publicClient.readContract({
+        address: registryAddr,
+        abi: SERVICE_REGISTRY_L2_ABI,
+        functionName: 'getService',
+        args: [BigInt(id)],
+      });
       registryState = Number(s.state);
       const m = s.multisig as string;
       registryMultisig =
-        m && getAddress(m) !== getAddress(ZeroAddress) ? getAddress(m) : null;
+        m && getAddress(m) !== getAddress(zeroAddress) ? getAddress(m) : null;
     } catch (e) {
       registryState = isTransientEthReadError(e) ? 'inconclusive' : 'revert';
       registryMultisig = null;
@@ -576,48 +606,51 @@ export class FleetBootstrapper {
     await this.stolasPreflightCheck();
 
     // Master EOA signs the stake() call
-    const masterSigner = deriveMasterSigner(mnemonic);
-    const masterWithProvider = masterSigner.connect(this.provider);
-    const agentAddress = svc.agent_address;
+    const masterAccount = deriveMasterSigner(mnemonic);
+    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const agentAddress = svc.agent_address as Address;
 
-    const configHashBytes = cidToBytes32(this.config.serviceHash);
-    const distributorIface = new Interface(STOLAS_DISTRIBUTOR_ABI);
-    const stakeData = distributorIface.encodeFunctionData('stake', [
-      this.config.stakingContract,
-      0, // Always 0: create a new service. Eviction recovery is handled separately via distributor.reStake().
-      this.config.agentId,
-      configHashBytes,
-      agentAddress,
-    ]);
+    const configHashBytes = cidToBytes32(this.config.serviceHash) as Hex;
+    const stakeData = encodeFunctionData({
+      abi: STOLAS_DISTRIBUTOR_ABI,
+      functionName: 'stake',
+      args: [
+        this.config.stakingContract as Address,
+        0n,
+        BigInt(this.config.agentId),
+        configHashBytes,
+        agentAddress,
+      ],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: calling distributor.stake() from master`);
-    const txResponse = await ethersSendTransactionWithRetry(masterWithProvider, {
-      to: this.config.distributorAddress!,
-      data: stakeData,
-      gasLimit: 2_500_000n,
-    });
-
-    const receipt = await ethersWaitForTransactionHashWithRetry(
-      this.provider,
-      txResponse.hash,
-      1,
-      30000,
+    const txHash = await viemSendTransactionWithRetry(
+      masterWallet,
+      this.publicClient,
+      {
+        account: masterAccount as Account,
+        to: addr(this.config.distributorAddress!),
+        data: stakeData,
+        gas: 2_500_000n,
+      },
     );
-    if (!receipt || receipt.status !== 1) {
-      throw new Error(`stOLAS stake() tx failed for service ${index}: ${txResponse.hash}`);
+
+    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, txHash);
+    if (receipt.status !== 'success') {
+      throw new Error(`stOLAS stake() tx failed for service ${index}: ${txHash}`);
     }
 
-    console.error(`[fleet-bootstrap] Service ${index}: stake() confirmed (tx: ${txResponse.hash})`);
+    console.error(`[fleet-bootstrap] Service ${index}: stake() confirmed (tx: ${txHash})`);
 
     // Parse events
     const serviceId = await this.parseServiceIdFromReceipt(receipt);
     if (serviceId === null) {
-      throw new Error(`stake() succeeded but CreateService event not found (tx: ${txResponse.hash})`);
+      throw new Error(`stake() succeeded but CreateService event not found (tx: ${txHash})`);
     }
 
     const safeAddress = this.parseMultisigFromReceipt(receipt);
     if (!safeAddress) {
-      throw new Error(`stake() succeeded but CreateMultisigWithAgents event not found (tx: ${txResponse.hash})`);
+      throw new Error(`stake() succeeded but CreateMultisigWithAgents event not found (tx: ${txHash})`);
     }
 
     console.error(`[fleet-bootstrap] Service ${index}: id=${serviceId}, safe=${safeAddress}`);
@@ -643,8 +676,8 @@ export class FleetBootstrapper {
     const serviceId = svc.service_id!;
 
     // Master EOA is the curating agent for this service and pays gas
-    const masterSigner = deriveMasterSigner(mnemonic);
-    const masterWithProvider = masterSigner.connect(this.provider);
+    const masterAccount = deriveMasterSigner(mnemonic);
+    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
 
     // Use distributor.reStake() — a purpose-built entry point for evicted services.
     // It calls IStaking.unstake() → IStaking.stake() on the staking proxy without
@@ -652,28 +685,24 @@ export class FleetBootstrapper {
     // stays in Deployed state, the Safe owners are untouched, and the same service
     // ID, Safe address, and mech address are preserved across the eviction.
     // Authorization: master EOA is a curating agent (recorded when it called stake()).
-    const distributorIface = new Interface(STOLAS_DISTRIBUTOR_ABI);
-    const reStakeData = distributorIface.encodeFunctionData('reStake', [
-      this.config.stakingContract,
-      serviceId,
-    ]);
+    const reStakeData = encodeFunctionData({
+      abi: STOLAS_DISTRIBUTOR_ABI,
+      functionName: 'reStake',
+      args: [this.config.stakingContract as Address, BigInt(serviceId)],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: calling distributor.reStake() for evicted service ${serviceId}`);
-    const tx = await ethersSendTransactionWithRetry(masterWithProvider, {
-      to: this.config.distributorAddress,
+    const reStakeHash = await viemSendTransactionWithRetry(masterWallet, this.publicClient, {
+      account: masterAccount as Account,
+      to: addr(this.config.distributorAddress),
       data: reStakeData,
-      gasLimit: 1_500_000n,
+      gas: 1_500_000n,
     });
-    const receipt = await ethersWaitForTransactionHashWithRetry(
-      this.provider,
-      tx.hash,
-      1,
-      30000,
-    );
-    if (!receipt || receipt.status !== 1) {
-      throw new Error(`reStake failed for service ${index}: ${tx.hash}`);
+    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, reStakeHash);
+    if (receipt.status !== 'success') {
+      throw new Error(`reStake failed for service ${index}: ${reStakeHash}`);
     }
-    console.error(`[fleet-bootstrap] Service ${index}: reStake confirmed (tx: ${tx.hash})`);
+    console.error(`[fleet-bootstrap] Service ${index}: reStake confirmed (tx: ${reStakeHash})`);
 
     // Service is now Staked again with the same service_id, safe_address, and mech_address.
     // Mark the step as complete so the bootstrap doesn't try to re-stake or re-deploy mech.
@@ -698,25 +727,27 @@ export class FleetBootstrapper {
     const safeAddress = svc.safe_address!;
 
     // Fund agent with gas from master
-    const masterSigner = deriveMasterSigner(mnemonic);
-    const masterWithProvider = masterSigner.connect(this.provider);
-    const agentBalance = await this.provider.getBalance(svc.agent_address);
+    const masterAccount = deriveMasterSigner(mnemonic);
+    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const agentBalance = await this.publicClient.getBalance({
+      address: getAddress(svc.agent_address) as Address,
+    });
 
     // Agent needs enough gas for mech deployment Safe tx (~2.6M gas)
     const minAgentGas = this.config.minEoaGasEth;
     if (agentBalance < minAgentGas) {
       const fundAmount = minAgentGas - agentBalance;
       console.error(`[fleet-bootstrap] Service ${index}: funding agent with ${fundAmount} wei`);
-      const fundTx = await ethersSendTransactionWithRetry(masterWithProvider, {
-        to: svc.agent_address,
+      const fundHash = await viemSendTransactionWithRetry(masterWallet, this.publicClient, {
+        account: masterAccount as Account,
+        to: addr(svc.agent_address),
         value: fundAmount,
       });
-      await ethersWaitForTransactionHashWithRetry(this.provider, fundTx.hash, 1, 30000);
+      await waitForTransactionReceiptWithRetry(this.publicClient, fundHash);
     }
 
     // Deploy mech via the service Safe (agent is Safe owner)
-    const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentKey = agentSigner.privateKey;
+    const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
 
     const safe = await initDeployedSafe({
       rpcUrl: this.config.rpcUrl,
@@ -724,28 +755,24 @@ export class FleetBootstrapper {
       safeAddress,
     });
 
-    const mechMarketplaceIface = new Interface(MECH_MARKETPLACE_CREATE_ABI);
-    const { AbiCoder } = await import('ethers');
-    const payload = AbiCoder.defaultAbiCoder().encode(['uint256'], [this.config.mechRequestPrice]);
+    const payload = encodeAbiParameters([{ type: 'uint256' }], [this.config.mechRequestPrice]);
 
-    const createData = mechMarketplaceIface.encodeFunctionData('create', [
-      serviceId,
-      this.config.mechFactory,
-      payload,
-    ]);
+    const createData = encodeFunctionData({
+      abi: MECH_MARKETPLACE_CREATE_ABI,
+      functionName: 'create',
+      args: [BigInt(serviceId), this.config.mechFactory as Address, payload],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: deploying mech`);
     const result = await executeSafeTxBatch(safe, [
       { to: this.config.mechMarketplace, value: '0', data: createData },
     ]);
 
-    const mechReceipt = await ethersWaitForTransactionHashWithRetry(
-      this.provider,
-      result.hash,
-      1,
-      30000,
+    const mechReceipt = await waitForTransactionReceiptWithRetry(
+      this.publicClient,
+      result.hash as Hex,
     );
-    if (!mechReceipt || mechReceipt.status === 0) {
+    if (mechReceipt.status !== 'success') {
       throw new Error(`Mech deployment tx failed for service ${index}: ${result.hash}`);
     }
 
@@ -753,8 +780,9 @@ export class FleetBootstrapper {
     const createMechTopic = '0x46e1ca45c09520471c43e2e88eca33bb51803011cfd456933629dcc645ecacd6';
     let mechAddress: string | null = null;
     for (const log of mechReceipt.logs) {
-      if (log.topics[0] === createMechTopic && log.topics.length >= 2) {
-        mechAddress = getAddress('0x' + log.topics[1].slice(26));
+      const t0 = log.topics[0];
+      if (t0 === createMechTopic && log.topics.length >= 2) {
+        mechAddress = getAddress(('0x' + log.topics[1]!.slice(26)) as Hex);
         break;
       }
     }
@@ -780,7 +808,7 @@ export class FleetBootstrapper {
   ): Promise<FleetState> {
     const svc = state.services.find(s => s.index === index)!;
     const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentKey = agentSigner.privateKey;
+    const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
     const agentAddress = svc.agent_address;
 
     // 1. Predict Safe if not yet done
@@ -803,24 +831,25 @@ export class FleetBootstrapper {
     // The agent pays for: Safe deploy + Safe top-up + ~8 Safe txs (service lifecycle + staking + mech)
     const SELF_BOND_AGENT_ETH = 25_000_000_000_000_000n; // 0.025 ETH
     const requiredAgentEth = SELF_BOND_AGENT_ETH;
-    const masterSigner = deriveMasterSigner(mnemonic);
-    const masterWithProvider = masterSigner.connect(this.provider);
-    const agentBalance = await this.provider.getBalance(agentAddress);
+    const masterAccount = deriveMasterSigner(mnemonic);
+    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const agentBalance = await this.publicClient.getBalance({ address: getAddress(agentAddress) as Address });
 
     if (agentBalance < requiredAgentEth) {
       const fundAmount = requiredAgentEth - agentBalance;
       console.error(`[fleet-bootstrap] Service ${index}: funding agent with ${fundAmount} wei from master`);
-      const fundTx = await ethersSendTransactionWithRetry(masterWithProvider, {
-        to: agentAddress,
+      const fundHash = await viemSendTransactionWithRetry(masterWallet, this.publicClient, {
+        account: masterAccount as Account,
+        to: addr(agentAddress),
         value: fundAmount,
       });
-      await ethersWaitForTransactionHashWithRetry(this.provider, fundTx.hash, 1, 30000);
+      await waitForTransactionReceiptWithRetry(this.publicClient, fundHash);
     }
 
     // 3. Check agent ETH balance (retry — public RPCs can lag after a write)
     let agentBalanceAfter = 0n;
     for (let attempt = 0; attempt < 5; attempt++) {
-      agentBalanceAfter = await this.provider.getBalance(agentAddress);
+      agentBalanceAfter = await this.publicClient.getBalance({ address: getAddress(agentAddress) as Address });
       if (agentBalanceAfter >= requiredAgentEth) break;
       if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
     }
@@ -831,18 +860,19 @@ export class FleetBootstrapper {
     }
 
     // 4. Check Safe ETH balance (agent can auto-top)
-    let safeEthBalance = await this.provider.getBalance(safeAddress);
+    let safeEthBalance = await this.publicClient.getBalance({ address: getAddress(safeAddress) as Address });
     if (safeEthBalance < this.config.minSafeEth) {
       const eoaAvailable = agentBalanceAfter - this.config.minEoaGasEth;
       const shortfall = this.config.minSafeEth - safeEthBalance;
       if (eoaAvailable >= shortfall) {
         console.error(`[fleet-bootstrap] Service ${index}: auto-topping Safe with ${shortfall} wei ETH`);
-        const agentWithProvider = agentSigner.connect(this.provider);
-        const topTx = await ethersSendTransactionWithRetry(agentWithProvider, {
-          to: safeAddress,
+        const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+        const topHash = await viemSendTransactionWithRetry(agentWallet, this.publicClient, {
+          account: agentSigner as Account,
+          to: addr(safeAddress),
           value: shortfall,
         });
-        await ethersWaitForTransactionHashWithRetry(this.provider, topTx.hash, 1, 30000);
+        await waitForTransactionReceiptWithRetry(this.publicClient, topHash);
         safeEthBalance += shortfall;
       }
     }
@@ -864,8 +894,8 @@ export class FleetBootstrapper {
     }
 
     // 6. Deploy Safe if not yet deployed
-    const code = await this.provider.getCode(safeAddress);
-    if (code === '0x') {
+    const code = await this.publicClient.getCode({ address: getAddress(safeAddress) as Address });
+    if (code === undefined || code === '0x') {
       console.error(`[fleet-bootstrap] Service ${index}: deploying Safe at ${safeAddress}`);
       const { safe } = await initPredictedSafe({
         rpcUrl: this.config.rpcUrl,
@@ -875,29 +905,25 @@ export class FleetBootstrapper {
       });
 
       const deployTx = await safe.createSafeDeploymentTransaction();
-      const agentWithProvider = agentSigner.connect(this.provider);
-      const txResponse = await ethersSendTransactionWithRetry(agentWithProvider, {
-        to: deployTx.to,
-        value: deployTx.value,
-        data: deployTx.data,
+      const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+      const deployHash = await viemSendTransactionWithRetry(agentWallet, this.publicClient, {
+        account: agentSigner as Account,
+        to: deployTx.to as Address,
+        value: BigInt(deployTx.value),
+        data: deployTx.data as Hex,
       });
 
-      const receipt = await ethersWaitForTransactionHashWithRetry(
-        this.provider,
-        txResponse.hash,
-        1,
-        30000,
-      );
-      if (!receipt || receipt.status !== 1) {
-        throw new Error(`Safe deployment tx failed for service ${index}: ${txResponse.hash}`);
+      const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, deployHash);
+      if (receipt.status !== 'success') {
+        throw new Error(`Safe deployment tx failed for service ${index}: ${deployHash}`);
       }
 
-      const deployedCode = await this.provider.getCode(safeAddress);
-      if (deployedCode === '0x') {
+      const deployedCode = await this.publicClient.getCode({ address: getAddress(safeAddress) as Address });
+      if (deployedCode === undefined || deployedCode === '0x') {
         throw new Error(`Safe deployment succeeded but no code at ${safeAddress}`);
       }
 
-      console.error(`[fleet-bootstrap] Service ${index}: Safe deployed (tx: ${txResponse.hash})`);
+      console.error(`[fleet-bootstrap] Service ${index}: Safe deployed (tx: ${deployHash})`);
     }
 
     // 7. Advance to service_created
@@ -920,8 +946,7 @@ export class FleetBootstrapper {
       }
     }
 
-    const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentKey = agentSigner.privateKey;
+    const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
     const safeAddress = svc.safe_address!;
 
     const safe = await initDeployedSafe({
@@ -930,30 +955,28 @@ export class FleetBootstrapper {
       safeAddress,
     });
 
-    const configHashBytes = cidToBytes32(this.config.serviceHash);
-    const serviceManagerIface = new Interface(SERVICE_MANAGER_ABI);
+    const configHashBytes = cidToBytes32(this.config.serviceHash) as Hex;
 
-    const createData = serviceManagerIface.encodeFunctionData('create', [
-      safeAddress,
-      this.config.olasToken,
-      configHashBytes,
-      [this.config.agentId],
-      [{ slots: 1, bond: this.config.bondAmount }],
-      1,
-    ]);
+    const createData = encodeFunctionData({
+      abi: SERVICE_MANAGER_ABI,
+      functionName: 'create',
+      args: [
+        getAddress(safeAddress) as Address,
+        this.config.olasToken as Address,
+        configHashBytes,
+        [this.config.agentId],
+        [{ slots: 1, bond: this.config.bondAmount }],
+        1,
+      ],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: creating service through Safe`);
     const result = await executeSafeTxBatch(safe, [
       { to: this.config.serviceManager, value: '0', data: createData },
     ]);
 
-    const receipt = await ethersWaitForTransactionHashWithRetry(
-      this.provider,
-      result.hash,
-      1,
-      30000,
-    );
-    if (!receipt || receipt.status !== 1) {
+    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, result.hash as Hex);
+    if (receipt.status !== 'success') {
       throw new Error(`Create service tx failed for service ${index}: ${result.hash}`);
     }
 
@@ -986,8 +1009,7 @@ export class FleetBootstrapper {
       return this.store.updateService(index, { step: 'agents_registered' });
     }
 
-    const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentKey = agentSigner.privateKey;
+    const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
 
     const safe = await initDeployedSafe({
       rpcUrl: this.config.rpcUrl,
@@ -995,17 +1017,17 @@ export class FleetBootstrapper {
       safeAddress: svc.safe_address!,
     });
 
-    const erc20Iface = new Interface(ERC20_ABI);
-    const serviceManagerIface = new Interface(SERVICE_MANAGER_ABI);
+    const approveData = encodeFunctionData({
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [this.config.serviceRegistryTokenUtility as Address, this.config.bondAmount],
+    }) as Hex;
 
-    const approveData = erc20Iface.encodeFunctionData('approve', [
-      this.config.serviceRegistryTokenUtility,
-      this.config.bondAmount,
-    ]);
-
-    const activateData = serviceManagerIface.encodeFunctionData('activateRegistration', [
-      serviceId,
-    ]);
+    const activateData = encodeFunctionData({
+      abi: SERVICE_MANAGER_ABI,
+      functionName: 'activateRegistration',
+      args: [BigInt(serviceId)],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: activating service ${serviceId}`);
     const result = await executeSafeTxBatch(safe, [
@@ -1013,13 +1035,8 @@ export class FleetBootstrapper {
       { to: this.config.serviceManager, value: '1', data: activateData },
     ]);
 
-    const receipt = await ethersWaitForTransactionHashWithRetry(
-      this.provider,
-      result.hash,
-      1,
-      30000,
-    );
-    if (!receipt || receipt.status !== 1) {
+    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, result.hash as Hex);
+    if (receipt.status !== 'success') {
       throw new Error(`Activate service tx failed for service ${index}: ${result.hash}`);
     }
 
@@ -1042,8 +1059,7 @@ export class FleetBootstrapper {
       return this.store.updateService(index, { step: 'service_deployed' });
     }
 
-    const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentKey = agentSigner.privateKey;
+    const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
 
     const safe = await initDeployedSafe({
       rpcUrl: this.config.rpcUrl,
@@ -1051,19 +1067,17 @@ export class FleetBootstrapper {
       safeAddress: svc.safe_address!,
     });
 
-    const erc20Iface = new Interface(ERC20_ABI);
-    const serviceManagerIface = new Interface(SERVICE_MANAGER_ABI);
+    const approveData = encodeFunctionData({
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [this.config.serviceRegistryTokenUtility as Address, this.config.bondAmount],
+    }) as Hex;
 
-    const approveData = erc20Iface.encodeFunctionData('approve', [
-      this.config.serviceRegistryTokenUtility,
-      this.config.bondAmount,
-    ]);
-
-    const registerData = serviceManagerIface.encodeFunctionData('registerAgents', [
-      serviceId,
-      [svc.agent_address],
-      [this.config.agentId],
-    ]);
+    const registerData = encodeFunctionData({
+      abi: SERVICE_MANAGER_ABI,
+      functionName: 'registerAgents',
+      args: [BigInt(serviceId), [getAddress(svc.agent_address) as Address], [this.config.agentId]],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: registering agent ${svc.agent_address} for service ${serviceId}`);
     const result = await executeSafeTxBatch(safe, [
@@ -1071,13 +1085,8 @@ export class FleetBootstrapper {
       { to: this.config.serviceManager, value: '1', data: registerData },
     ]);
 
-    const receipt = await ethersWaitForTransactionHashWithRetry(
-      this.provider,
-      result.hash,
-      1,
-      30000,
-    );
-    if (!receipt || receipt.status !== 1) {
+    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, result.hash as Hex);
+    if (receipt.status !== 'success') {
       throw new Error(`Register agents tx failed for service ${index}: ${result.hash}`);
     }
 
@@ -1100,8 +1109,7 @@ export class FleetBootstrapper {
       return this.store.updateService(index, { step: 'service_staked' });
     }
 
-    const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentKey = agentSigner.privateKey;
+    const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
     const safeAddress = svc.safe_address!;
 
     const safe = await initDeployedSafe({
@@ -1110,25 +1118,28 @@ export class FleetBootstrapper {
       safeAddress,
     });
 
-    const serviceManagerIface = new Interface(SERVICE_MANAGER_ABI);
-    const deployData = serviceManagerIface.encodeFunctionData('deploy', [
-      serviceId,
-      this.config.gnosisSafeSameAddressMultisig,
-      safeAddress,
-    ]);
+    const multisigInitBytes = encodeAbiParameters(
+      [{ type: 'address' }],
+      [addr(safeAddress)],
+    ) as Hex;
+
+    const deployData = encodeFunctionData({
+      abi: SERVICE_MANAGER_ABI,
+      functionName: 'deploy',
+      args: [
+        BigInt(serviceId),
+        addr(this.config.gnosisSafeSameAddressMultisig),
+        multisigInitBytes,
+      ],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: deploying service ${serviceId}`);
     const result = await executeSafeTxBatch(safe, [
       { to: this.config.serviceManager, value: '0', data: deployData },
     ]);
 
-    const receipt = await ethersWaitForTransactionHashWithRetry(
-      this.provider,
-      result.hash,
-      1,
-      30000,
-    );
-    if (!receipt || receipt.status !== 1) {
+    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, result.hash as Hex);
+    if (receipt.status !== 'success') {
       throw new Error(`Deploy service tx failed for service ${index}: ${result.hash}`);
     }
 
@@ -1151,8 +1162,7 @@ export class FleetBootstrapper {
       return this.store.updateService(index, { step: 'staked' });
     }
 
-    const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentKey = agentSigner.privateKey;
+    const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
     const safeAddress = svc.safe_address!;
 
     const safe = await initDeployedSafe({
@@ -1162,11 +1172,11 @@ export class FleetBootstrapper {
     });
 
     // Transaction 1: Approve service NFT for staking contract
-    const serviceApproveIface = new Interface(SERVICE_REGISTRY_APPROVE_ABI);
-    const approveData = serviceApproveIface.encodeFunctionData('approve', [
-      this.config.stakingContract,
-      serviceId,
-    ]);
+    const approveData = encodeFunctionData({
+      abi: SERVICE_REGISTRY_APPROVE_ABI,
+      functionName: 'approve',
+      args: [this.config.stakingContract as Address, BigInt(serviceId)],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: approving service ${serviceId} NFT for staking`);
     const approveResult = await executeSafeTxBatch(safe, [
@@ -1177,8 +1187,11 @@ export class FleetBootstrapper {
     console.error(`[fleet-bootstrap] Service ${index}: approve tx confirmed (${approveResult.hash})`);
 
     // Transaction 2: Stake via executeSafeTxDirect (bypasses Safe SDK gas estimation)
-    const stakingIface = new Interface(STAKING_ABI);
-    const stakeData = stakingIface.encodeFunctionData('stake', [serviceId]);
+    const stakeData = encodeFunctionData({
+      abi: STAKING_ABI,
+      functionName: 'stake',
+      args: [BigInt(serviceId)],
+    }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: staking service ${serviceId}`);
     const stakeResult = await executeSafeTxDirect({
@@ -1206,25 +1219,27 @@ export class FleetBootstrapper {
   // ── Helpers ──────────────────────────────────────────────────────────
 
   private async getOlasBalance(address: string): Promise<bigint> {
-    const olas = new Contract(this.config.olasToken, ERC20_ABI, this.provider);
-    return await olas.balanceOf(address);
+    return this.publicClient.readContract({
+      address: this.config.olasToken as Address,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf',
+      args: [getAddress(address) as Address],
+    });
   }
 
   private async getServiceState(serviceId: number): Promise<number> {
-    const registry = new Contract(this.config.serviceRegistry, SERVICE_REGISTRY_L2_ABI, this.provider);
-    const service = await registry.getService(serviceId);
+    const service = await this.publicClient.readContract({
+      address: this.config.serviceRegistry as Address,
+      abi: SERVICE_REGISTRY_L2_ABI,
+      functionName: 'getService',
+      args: [BigInt(serviceId)],
+    });
     return Number(service.state);
   }
 
   private async waitForSuccessfulTx(txHash: string, label: string): Promise<void> {
-    const receipt = await ethersWaitForTransactionHashWithRetry(
-      this.provider,
-      txHash,
-      1,
-      30000,
-    );
-    if (!receipt) throw new Error(`${label} tx not confirmed: ${txHash}`);
-    if (receipt.status !== 1) throw new Error(`${label} tx reverted: ${txHash}`);
+    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, txHash as Hex);
+    if (receipt.status !== 'success') throw new Error(`${label} tx reverted: ${txHash}`);
   }
 
   private async stolasPreflightCheck(): Promise<void> {
@@ -1234,8 +1249,12 @@ export class FleetBootstrapper {
       );
     }
 
-    const distributor = new Contract(this.config.distributorAddress, STOLAS_DISTRIBUTOR_ABI, this.provider);
-    const proxyConfig: bigint = await distributor.mapStakingProxyConfigs(this.config.stakingContract);
+    const proxyConfig = await this.publicClient.readContract({
+      address: this.config.distributorAddress as Address,
+      abi: STOLAS_DISTRIBUTOR_ABI,
+      functionName: 'mapStakingProxyConfigs',
+      args: [this.config.stakingContract as Address],
+    });
     if (proxyConfig === 0n) {
       throw new Error(
         `stOLAS distributor not configured for ${this.config.stakingContract}. ` +
@@ -1243,9 +1262,16 @@ export class FleetBootstrapper {
       );
     }
 
-    const staking = new Contract(this.config.stakingContract, STOLAS_STAKING_SLOTS_ABI, this.provider);
-    const serviceIds: bigint[] = await staking.getServiceIds();
-    const maxServices: bigint = await staking.maxNumServices();
+    const serviceIds = await this.publicClient.readContract({
+      address: this.config.stakingContract as Address,
+      abi: STOLAS_STAKING_SLOTS_ABI,
+      functionName: 'getServiceIds',
+    });
+    const maxServices = await this.publicClient.readContract({
+      address: this.config.stakingContract as Address,
+      abi: STOLAS_STAKING_SLOTS_ABI,
+      functionName: 'maxNumServices',
+    });
     const slotsRemaining = Number(maxServices) - serviceIds.length;
 
     if (slotsRemaining <= 0) {
@@ -1256,12 +1282,17 @@ export class FleetBootstrapper {
   }
 
   private async getStakingState(serviceId: number): Promise<number> {
-    const staking = new Contract(this.config.stakingContract, STAKING_ABI, this.provider);
-    return Number(await staking.getStakingState(serviceId));
+    return Number(
+      await this.publicClient.readContract({
+        address: this.config.stakingContract as Address,
+        abi: STAKING_ABI,
+        functionName: 'getStakingState',
+        args: [BigInt(serviceId)],
+      }),
+    );
   }
 
-  private async parseServiceIdFromReceipt(receipt: { logs: readonly { address: string; topics: readonly string[]; data: string }[] }): Promise<number | null> {
-    const registryIface = new Interface(SERVICE_REGISTRY_L2_ABI);
+  private async parseServiceIdFromReceipt(receipt: TransactionReceipt): Promise<number | null> {
     const createServiceTopic = EVENT_TOPICS.CreateService;
     const serviceRegistryAddress = this.config.serviceRegistry.toLowerCase();
 
@@ -1273,12 +1304,14 @@ export class FleetBootstrapper {
         continue;
       }
       try {
-        const parsed = registryIface.parseLog({
-          topics: log.topics as string[],
+        const decoded = decodeEventLog({
+          abi: SERVICE_REGISTRY_L2_ABI,
           data: log.data,
+          topics: log.topics as [Hex, ...Hex[]],
+          strict: false,
         });
-        if (parsed && parsed.args.serviceId !== undefined) {
-          return Number(parsed.args.serviceId);
+        if (decoded.eventName === 'CreateService' && 'serviceId' in decoded.args) {
+          return Number(decoded.args.serviceId);
         }
       } catch {
         // Not a matching event
@@ -1287,11 +1320,12 @@ export class FleetBootstrapper {
     return null;
   }
 
-  private parseMultisigFromReceipt(receipt: { logs: readonly { topics: readonly string[] }[] }): string | null {
+  private parseMultisigFromReceipt(receipt: TransactionReceipt): string | null {
     const topic = EVENT_TOPICS.CreateMultisigWithAgents;
     for (const log of receipt.logs) {
-      if (log.topics[0] === topic && log.topics.length >= 3) {
-        return getAddress('0x' + log.topics[2].slice(26));
+      const t0 = log.topics[0];
+      if (t0 === topic && log.topics.length >= 3) {
+        return getAddress(('0x' + log.topics[2]!.slice(26)) as Hex);
       }
     }
     return null;

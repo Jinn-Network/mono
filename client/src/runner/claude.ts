@@ -1,13 +1,30 @@
 import { spawn } from 'node:child_process';
-import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { DesiredState, RestorationResult } from '../types/index.js';
 import type { Runner, RunnerContext } from './runner.js';
 import { Store } from '../store/store.js';
 
-const __dirname = join(fileURLToPath(import.meta.url), '..');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** MCP subprocess: compiled `server.js` when present, else `node --import tsx server.ts` (dev / yarn e2e). */
+function resolveJinnMcpLauncher(explicitPath?: string): { command: string; args: string[] } {
+  if (explicitPath) {
+    return { command: process.execPath, args: [explicitPath] };
+  }
+  const mcpDir = join(__dirname, '..', 'mcp');
+  const js = join(mcpDir, 'server.js');
+  const ts = join(mcpDir, 'server.ts');
+  if (existsSync(js)) {
+    return { command: process.execPath, args: [js] };
+  }
+  if (existsSync(ts)) {
+    return { command: process.execPath, args: ['--import', 'tsx', ts] };
+  }
+  return { command: process.execPath, args: [js] };
+}
 
 export interface ClaudeRunnerConfig {
   claudePath?: string;
@@ -18,12 +35,12 @@ export interface ClaudeRunnerConfig {
 export class ClaudeRunner implements Runner {
   private claudePath: string;
   private model?: string;
-  private mcpServerPath: string;
+  private readonly mcpLauncher: { command: string; args: string[] };
 
   constructor(config: ClaudeRunnerConfig = {}) {
     this.claudePath = config.claudePath ?? 'claude';
     this.model = config.model;
-    this.mcpServerPath = config.mcpServerPath ?? join(__dirname, '..', 'mcp', 'server.ts');
+    this.mcpLauncher = resolveJinnMcpLauncher(config.mcpServerPath);
   }
 
   async run(desiredState: DesiredState, context: RunnerContext): Promise<RestorationResult> {
@@ -36,8 +53,8 @@ export class ClaudeRunner implements Runner {
     writeFileSync(mcpConfigPath, JSON.stringify({
       mcpServers: {
         'jinn-client': {
-          command: 'yarn',
-          args: ['exec', 'tsx', this.mcpServerPath],
+          command: this.mcpLauncher.command,
+          args: this.mcpLauncher.args,
           env: {
             DESIRED_STATE_ID: desiredState.id,
             DESIRED_STATE_DESCRIPTION: desiredState.description,

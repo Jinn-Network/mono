@@ -1,20 +1,41 @@
 {
-  "name": "jinn-client",
+  "name": "@jinn-network/client",
   "version": "0.1.0",
+  "description": "Jinn protocol client — headless daemon for the restoration training loop",
   "type": "module",
   "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "client"
+  },
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "jinn": "./bin/jinn"
+    "jinn": "./dist/bin/jinn.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "deployments/",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
-    "jinn": "tsx bin/jinn.ts",
-    "build": "tsc",
+    "jinn": "tsx src/bin/jinn.ts",
+    "build": "tsc && chmod +x dist/bin/jinn.js && node scripts/write-dist-build-meta.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prepublishOnly": "yarn build && yarn test",
+    "pack:smoke": "yarn pack -o jinn-client.tgz && node scripts/smoke-test-pack.mjs",
     "status": "tsx scripts/status.ts",
     "e2e": "tsx scripts/e2e-validate.ts",
     "staking": "tsx scripts/staking-validate.ts",
@@ -22,11 +43,14 @@
     "withdraw": "tsx scripts/withdraw.ts"
   },
   "dependencies": {
+    "@ethereumjs/wallet": "^10.0.0",
     "@hono/node-server": "^1.19.12",
     "@jinn-network/mech-client-ts": "^0.0.6",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@safe-global/protocol-kit": "^6.1.2",
     "@safe-global/types-kit": "^3.0.0",
+    "@scure/bip32": "^1.7.0",
+    "@scure/bip39": "^1.4.0",
     "@slicekit/erc8128": "^0.3.3",
     "@x402/core": "^2.9.0",
     "@x402/evm": "^2.9.0",

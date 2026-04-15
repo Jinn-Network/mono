@@ -7,7 +7,8 @@
  * rewardClaimIntervalMs / JINN_REWARD_CLAIM_INTERVAL_MS. Set interval to 0 to disable.
  */
 
-import type { JsonRpcProvider, Signer } from 'ethers';
+import type { PublicClient } from 'viem';
+import type { WalletClient } from 'viem';
 import { FleetStateStore } from '../earning/store.js';
 import {
   listStolasClaimTargets,
@@ -18,9 +19,9 @@ import type { Store } from '../store/store.js';
 
 export interface RewardClaimLoopConfig {
   intervalMs: number;
-  provider: JsonRpcProvider;
+  publicClient: PublicClient;
   /** Master EOA — same signer as distributor.stake() in bootstrap (pays gas). */
-  masterSigner: Signer;
+  masterWallet: WalletClient;
   store: FleetStateStore;
   chain: 'base' | 'base-sepolia';
   /** Resolved from getChainConfig (artifact overrides). */
@@ -37,7 +38,7 @@ export type RewardClaimTickConfig = Omit<RewardClaimLoopConfig, 'intervalMs'> & 
 export async function runRewardClaimOnce(cfg: RewardClaimTickConfig): Promise<StolasClaimTickResult> {
   const state = await cfg.store.load(cfg.chain);
   const targets = listStolasClaimTargets(state.services);
-  return tickStolasDistributorClaims(cfg.provider, cfg.masterSigner, {
+  return tickStolasDistributorClaims(cfg.publicClient, cfg.masterWallet, {
     distributorAddress: cfg.distributorAddress,
     stakingMode: state.staking_mode,
     targets,

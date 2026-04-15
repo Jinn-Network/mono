@@ -7,6 +7,7 @@ import {
   deriveAgentAddress,
   deriveAgentSigner,
   deriveMasterSigner,
+  walletPrivateKeyAtIndex,
 } from '../../src/earning/wallet.js';
 
 describe('HD wallet', () => {
@@ -54,13 +55,13 @@ describe('HD wallet', () => {
     const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
     const signer = deriveMasterSigner(mnemonic);
     expect(signer.address).toBe(deriveMasterAddress(mnemonic));
-    expect(signer.privateKey).toMatch(/^0x[0-9a-fA-F]{64}$/);
+    expect(walletPrivateKeyAtIndex(mnemonic, 0)).toMatch(/^0x[0-9a-fA-F]{64}$/);
   });
 
   it('derives a signer wallet for agent', () => {
     const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
     const signer = deriveAgentSigner(mnemonic, 1);
     expect(signer.address).toBe(deriveAgentAddress(mnemonic, 1));
-    expect(signer.privateKey).toMatch(/^0x[0-9a-fA-F]{64}$/);
+    expect(walletPrivateKeyAtIndex(mnemonic, 1)).toMatch(/^0x[0-9a-fA-F]{64}$/);
   });
 });

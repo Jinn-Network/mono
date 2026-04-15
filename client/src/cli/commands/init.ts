@@ -103,8 +103,8 @@ Does not contact the RPC or create services. Run \`jinn bootstrap\`
 after \`jinn init\` to advance the state machine.
 
 Examples:
-  JINN_PASSWORD=secret npx jinn init
-  JINN_PASSWORD=secret npx jinn init --human
+  JINN_PASSWORD=secret jinn init
+  JINN_PASSWORD=secret jinn init --human
 `,
   run,
 };
