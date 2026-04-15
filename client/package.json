@@ -25,8 +25,7 @@
     "LICENSE"
   ],
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "scripts": {
     "jinn": "tsx src/bin/jinn.ts",
@@ -36,6 +35,7 @@
     "test:watch": "vitest",
     "prepublishOnly": "yarn build && yarn test",
     "pack:smoke": "yarn pack -o jinn-client.tgz && node scripts/smoke-test-pack.mjs",
+    "release:operator-gate": "yarn staking && yarn e2e",
     "status": "tsx scripts/status.ts",
     "e2e": "tsx scripts/e2e-validate.ts",
     "staking": "tsx scripts/staking-validate.ts",

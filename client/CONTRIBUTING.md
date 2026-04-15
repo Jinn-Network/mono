@@ -65,7 +65,11 @@ yarn build                 # tsc output → dist/
 yarn pack -o test.tgz      # create publishable tarball
 ```
 
-The `files` field in `package.json` ensures only `dist/`, `deployments/`, and `README.md` are included in the tarball.
+The `files` field in `package.json` ensures only `dist/`, `deployments/`, `README.md`, and `LICENSE` are included in the tarball.
+
+## Releases
+
+Use [RELEASING.md](./RELEASING.md) for the package bootstrap publish, npm trusted-publishing setup, canary/stable release flow, and the operator gate (`yarn release:operator-gate`) that must pass on the exact stable release commit.
 
 ## Updating deployment artifacts
 
@@ -88,6 +92,7 @@ This copies the 4 deployment JSON files from `contracts/` into `client/deploymen
 | `yarn e2e` | End-to-end validation on Anvil fork |
 | `yarn staking` | Earning bootstrap validation on Anvil fork |
 | `yarn pack:smoke` | Pack tarball and run smoke tests |
+| `yarn release:operator-gate` | Run the stable-release operator gate (`staking` then `e2e`) |
 
 ## CI
 
