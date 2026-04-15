@@ -17,7 +17,7 @@ jobs:
     name: Build & Push OCI Image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Resolve release metadata
         id: meta
