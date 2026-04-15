@@ -1,0 +1,54 @@
+name: Canary
+
+on:
+  push:
+    branches: [main]
+    paths: ['client/**']
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    working-directory: client
+
+jobs:
+  canary:
+    name: Publish canary
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    env:
+      JINN_BUILD_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g npm@11.5.1
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn build
+      - run: yarn test
+
+      # Compute canary version: base version + canary tag + short SHA
+      - name: Set canary version
+        run: |
+          BASE=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+          CANARY="${BASE}-canary.${SHORT_SHA}"
+          echo "CANARY_VERSION=$CANARY" >> $GITHUB_ENV
+          echo "Publishing canary: $CANARY"
+
+          # Patch package.json with canary version (in-place, not committed)
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+            pkg.version = '${CANARY}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Publish canary (OIDC trusted publishing)
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --tag canary
