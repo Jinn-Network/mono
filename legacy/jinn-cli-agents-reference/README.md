@@ -1,3 +1,19 @@
+# Legacy Reference Only
+
+This directory is historical reference material from the older Jinn agent stack.
+It is not the current runtime for this repository.
+
+If you want to run the current Jinn client, use:
+
+```bash
+cd /Users/adrianobradley/jinn-mono/client
+npm install
+npx jinn run
+```
+
+The rest of this README describes the legacy system preserved here for protocol,
+OLAS, and migration context.
+
 # Gemini CLI Jinn
 
 A sophisticated worker system that integrates with Gemini CLI to process jobs through a Model Context Protocol (MCP) server, providing comprehensive telemetry and job management capabilities.

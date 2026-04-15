@@ -27,6 +27,7 @@ describe('runCli', () => {
     const parsed = JSON.parse(io.writes[io.writes.length - 1]);
     expect(parsed.code).toBe('invalid_invocation');
     expect(parsed.exitCode).toBe(11);
+    expect(String(parsed.details?.expected)).not.toContain('fleet-manage');
     expect(io.exits).toEqual([11]);
   });
 
@@ -44,5 +45,68 @@ describe('runCli', () => {
     const combined = io.writes.join('');
     expect(combined).toContain('jinn version');
     expect(combined).toContain('Examples:');
+  });
+
+  it('emits invalid_invocation for config load failures', async () => {
+    const io = captureIo();
+    await runCli(
+      ['version', '--config', '/tmp/does-not-exist.json'],
+      { writer: io.writer, exit: io.exit, stdoutIsTty: false },
+    );
+    const parsed = JSON.parse(io.writes[io.writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.details?.field).toBe('config');
+    expect(parsed.details?.code).toBe('config_file_not_found');
+    expect(io.exits).toEqual([11]);
+  });
+
+  it('prints fleet-manage help for fleet scale --help', async () => {
+    const io = captureIo();
+    await runCli(['fleet', 'scale', '--help'], {
+      writer: io.writer,
+      exit: io.exit,
+      stdoutIsTty: true,
+    });
+    const combined = io.writes.join('');
+    expect(combined).toContain('jinn fleet');
+    expect(combined).toContain('jinn fleet retire 1 --dry-run');
+  });
+
+  it('emits invalid_invocation envelope for fleet scale config load failures', async () => {
+    const io = captureIo();
+    await runCli(
+      ['fleet', 'scale', '--config', '/tmp/does-not-exist.json', '--to', '2', '--dry-run'],
+      { writer: io.writer, exit: io.exit, stdoutIsTty: false },
+    );
+    const parsed = JSON.parse(io.writes[io.writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.details?.field).toBe('config');
+    expect(parsed.details?.code).toBe('config_file_not_found');
+    expect(parsed.exampleCli).toBe('jinn fleet scale');
+    expect(io.exits).toEqual([11]);
+  });
+
+  it('emits invalid_invocation for unknown fleet subverbs', async () => {
+    const io = captureIo();
+    await runCli(['fleet', 'nope'], {
+      writer: io.writer,
+      exit: io.exit,
+      stdoutIsTty: false,
+    });
+    const parsed = JSON.parse(io.writes[io.writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.message).toBe('Unknown fleet subverb: nope');
+    expect(io.exits).toEqual([11]);
+  });
+
+  it('keeps fleet introspection for fleet --human', async () => {
+    const io = captureIo();
+    await runCli(['fleet', '--human'], {
+      writer: io.writer,
+      exit: io.exit,
+      stdoutIsTty: true,
+    });
+    expect(io.exits).toEqual([]);
+    expect(io.writes.join('')).not.toContain('Unknown fleet subverb');
   });
 });

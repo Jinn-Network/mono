@@ -94,7 +94,7 @@ The existing JinnRouter contract architecture (deployed on Base mainnet for Phas
 - Rewards per second: TBD based on emission rate
 - Max services: 100
 
-**Source:** `github.com/valory-xyz/autonolas-registries` — StakingBase.sol and related; existing JinnRouter.sol at `jinn-cli-agents/contracts/staking/JinnRouter.sol`
+**Source:** `github.com/valory-xyz/autonolas-registries` — StakingBase.sol and related; existing JinnRouter.sol at `legacy/jinn-cli-agents-reference/contracts/staking/JinnRouter.sol`
 
 ### 3.6 Client Updates
 

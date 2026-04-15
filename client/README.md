@@ -22,19 +22,35 @@ The default network is whatever network the protocol is currently launching on. 
 ```bash
 yarn install
 yarn test              # vitest suite
-JINN_PASSWORD=your-keystore-password yarn start
+JINN_PASSWORD=your-keystore-password yarn jinn run
 ```
 
 On first run, the bootstrap generates a master wallet and prints a funding address. Send testnet ETH to it, then re-run. The bootstrap is idempotent — it picks up where it left off.
 
 `JINN_PASSWORD` encrypts the local keystore and is env-only; never put it in a config file.
 
+## Operator map
+
+- `yarn jinn run` starts the daemon or exits non-zero with a structured next step.
+- `yarn jinn doctor` checks whether the environment and config are runnable.
+- `yarn jinn fund-requirements` shows exact funding gaps.
+- `yarn jinn status` is the monitoring roll-up.
+- `yarn jinn fleet`, `balance`, `history`, `rewards`, `logs` inspect state and history.
+- `yarn jinn submit-intent`, `claim-rewards`, `fleet scale`, `fleet retire`, `withdraw`, `keys backup` are state-changing operations.
+
+## Output contract
+
+- Operational verbs emit machine-readable JSON on stdout by default.
+- Add `--human` for readable terminal output.
+- `stderr` is reserved for progress, warnings, and daemon/runtime logs.
+- `jinn`, `jinn --help`, and `jinn <verb> --help` remain human-readable.
+
 ## Switching to mainnet
 
 When Phase 2 launches, the default will flip. Until then, an explicit opt-in:
 
 ```bash
-JINN_NETWORK=mainnet JINN_PASSWORD=secret yarn start
+JINN_NETWORK=mainnet JINN_PASSWORD=secret yarn jinn run
 ```
 
 or in `~/.jinn-client/config.json`:
@@ -54,7 +70,7 @@ For offline validation without touching real funds:
 anvil --fork-url https://sepolia.base.org --port 8545
 
 # Terminal 2
-JINN_RPC_URL=http://127.0.0.1:8545 JINN_PASSWORD=test yarn start
+JINN_RPC_URL=http://127.0.0.1:8545 JINN_PASSWORD=test yarn jinn run
 ```
 
 The bootstrap will pause at the funding gate. Fund the printed master address from one of Anvil's pre-funded keys with `cast send`, then re-run.
@@ -65,7 +81,7 @@ Config file first, env var override. Default location: `~/.jinn-client/config.js
 
 Override with `--config`:
 ```bash
-JINN_PASSWORD=secret yarn start -- --config ./my-config.json
+JINN_PASSWORD=secret yarn jinn run --config ./my-config.json
 ```
 
 | Config key       | Env override             | Default                           |
@@ -137,7 +153,7 @@ Base mainnet reference addresses (used when `network: mainnet`):
 
 | Command           | Description                                     |
 |-------------------|-------------------------------------------------|
-| `yarn start`      | Production daemon (requires JINN_PASSWORD)    |
+| `yarn jinn run`   | Production daemon (requires JINN_PASSWORD)      |
 | `yarn test`       | Run vitest suite                                |
 | `yarn build`      | TypeScript compile                              |
 | `yarn typecheck`  | Typecheck without emitting (`tsc --noEmit`)     |

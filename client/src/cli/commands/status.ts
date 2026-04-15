@@ -1,17 +1,45 @@
 import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
+import { emitResult } from '../output.js';
+import { emitEnvelope } from '../../errors/envelope.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleStatusRollupV1 } from '../../api/status-rollup-build.js';
 
 async function run(ctx: CommandContext): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS });
+  } catch (err) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: err instanceof Error ? err.message : String(err),
+        exampleCli: 'jinn status',
+        details: { field: 'flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
   const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
   const payload = assembleStatusRollupV1(raw);
-  ctx.writer.write(JSON.stringify(payload) + '\n');
+  emitResult(
+    payload,
+    (v) => JSON.stringify(v, null, 2),
+    {
+      json: Boolean(parsed.values.json),
+      human: Boolean(parsed.values.human),
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env['NO_COLOR']),
+    },
+  );
 }
 
 const command: CommandModule = {
   name: 'status',
   summary: 'Daemon liveness + roll-up (poll this for monitoring; pull detail separately)',
-  helpText: `Usage: jinn status [--json]
+  helpText: `Usage: jinn status [--human]
 
 Emits the §4.1 roll-up: daemon state, RPC reachability, fleet size /
 complete / needsAttention counts, pending earnings total, and a
@@ -26,8 +54,8 @@ All of (rpc.ok === true && fleet.needsAttention === 0 && exit.blocking === false
 means healthy. Pull \`jinn fleet\` or \`jinn history\` for detail.
 
 Examples:
-  jinn status --json
-  jinn status --json | jq '.rpc.ok and (.fleet.needsAttention == 0)'
+  npx jinn status
+  npx jinn status --human
 `,
   run,
 };

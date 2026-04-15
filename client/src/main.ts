@@ -12,9 +12,8 @@
  *
  * JINN_PASSWORD (env-only) is required for keystore encryption.
  *
- * Usage:
- *   JINN_PASSWORD=secret npm start
- *   JINN_PASSWORD=secret npm start -- --config ./my-config.json
+ * Canonical operator command:
+ *   npx jinn run
  */
 
 import { config as dotenvConfig } from 'dotenv';
@@ -112,6 +111,9 @@ function bootstrapIncompleteSteps(state: FleetState): { currentStep: string; nex
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 
 async function bootstrap(): Promise<{
+  masterAddress: `0x${string}`;
+  serviceIndex: number;
+  serviceId: number | null;
   agentPrivateKey: `0x${string}`;
   safeAddress: `0x${string}`;
   mechAddress?: `0x${string}`;
@@ -190,26 +192,49 @@ async function bootstrap(): Promise<{
   }
 
   return {
+    masterAddress: state.master_address as `0x${string}`,
+    serviceIndex: firstComplete.index,
+    serviceId: firstComplete.service_id ?? null,
     agentPrivateKey: agentSigner.privateKey as `0x${string}`,
     safeAddress: firstComplete.safe_address as `0x${string}`,
     mechAddress: firstComplete.mech_address ? (firstComplete.mech_address as `0x${string}`) : undefined,
   };
 }
 
+export interface DaemonStartupInfo {
+  schemaVersion: 1;
+  generatedAt: string;
+  kind: 'daemon_started';
+  pid: number;
+  network: 'testnet' | 'mainnet';
+  phase: 'phase-1b' | 'phase-0';
+  apiPort: number;
+  masterAddress: `0x${string}`;
+  safeAddress: `0x${string}`;
+  mechAddress: `0x${string}`;
+  serviceIndex: number;
+  serviceId: number | null;
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
-export async function main(): Promise<void> {
+export async function main(): Promise<DaemonStartupInfo> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
 
-  const { agentPrivateKey, safeAddress, mechAddress } = await bootstrap();
+  const { agentPrivateKey, masterAddress, safeAddress, mechAddress, serviceIndex, serviceId } =
+    await bootstrap();
 
   if (!mechAddress) {
-    if (config.network === 'testnet') {
-      console.log('[main] No mech marketplace configured for testnet. Bootstrap complete, daemon not started.');
-      console.log('[main] To run the daemon, deploy the mech marketplace and set JINN_TESTNET_MECH_DEPLOYMENT.');
-      return;
-    }
-    throw new Error('Bootstrap completed without a mech address. Re-run to deploy the mech.');
+    emitEnvelope({
+      code: 'fatal',
+      message: 'Bootstrap completed without a runnable mech deployment.',
+      hint: 'Set a valid mech deployment and re-run `npx jinn run`.',
+      exampleCli: 'npx jinn doctor',
+      details: {
+        network: config.network,
+        expected: 'configured mech deployment with a non-zero mech marketplace address',
+      },
+    });
   }
 
   const adapter = new MechAdapter({
@@ -305,6 +330,20 @@ export async function main(): Promise<void> {
 
   await daemon.start();
   console.log('[main] Daemon running. Press Ctrl+C to stop.');
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    kind: 'daemon_started',
+    pid: process.pid,
+    network: config.network,
+    phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
+    apiPort: config.apiPort,
+    masterAddress,
+    safeAddress,
+    mechAddress,
+    serviceIndex,
+    serviceId,
+  };
 }
 
 function isMainScriptEntry(): boolean {

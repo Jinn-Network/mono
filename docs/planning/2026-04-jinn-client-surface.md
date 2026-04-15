@@ -46,14 +46,14 @@ complete, at least one `createRestorationJob` call landed on-chain.
   - `better-sqlite3` postinstall requires a working C++ toolchain.
     No preflight check; on failure the agent sees an npm error and
     has to infer.
-  - `jinn-cli-agents/` is a git subtree and is large; not needed to
+  - `legacy/jinn-cli-agents-reference/` is a git subtree and is large; not needed to
     run the client but may confuse `find`/`grep` passes.
 - Automatable from one shot: **yes**, assuming toolchain is present.
 
 ### Step 1.2 — Read the README and discover there is no testnet path
 
 - Agent action: read `client/README.md`.
-- What's there: Phase 0 / Base mainnet, `JINN_PASSWORD=... npm start`,
+- What's there: Phase 0 / Base mainnet, `JINN_PASSWORD=... npx jinn run`,
   Anvil fork instructions. `client/README.md` shows only the
   `rpcUrl → https://mainnet.base.org` default and does not mention
   `network: testnet`, `JINN_TESTNET_L2_DEPLOYMENT`,
@@ -107,7 +107,7 @@ complete, at least one `createRestorationJob` call landed on-chain.
 ### Step 1.4 — Pick a password and invoke start
 
 - Agent action: `JINN_PASSWORD=<string> JINN_NETWORK=testnet \
-  JINN_TESTNET_*_DEPLOYMENT=... npm start` (from `client/`).
+  JINN_TESTNET_*_DEPLOYMENT=... npx jinn run` (from `client/`).
 - `JINN_PASSWORD` is env-only (`client/src/main.ts:38-46`,
   `client/src/config.ts:9`). For an agent this is fine — it
   generates a random password and stores it in its own secret store.
@@ -116,7 +116,7 @@ complete, at least one `createRestorationJob` call landed on-chain.
     `~/.jinn-client/earning/`. If the agent loses the password it
     loses access to the fleet. No "recover from seed phrase only"
     path is surfaced at the CLI.
-  - Running `npm start` from the wrong working directory silently
+  - Running `npx jinn run` from the wrong working directory silently
     picks up a different `.env` file via `dotenv` at
     `client/src/main.ts:34`.
 - Automatable from one shot: **yes** if the agent manages the
@@ -140,7 +140,7 @@ complete, at least one `createRestorationJob` call landed on-chain.
   - There is no structured output (JSON) on stdout the agent can
     grep. The `message` field is embedded in a `console.error` string
     only.
-  - After funding, the agent has to re-invoke `npm start`. There is
+  - After funding, the agent has to re-invoke `npx jinn run`. There is
     no "watch until funded" mode.
   - For `stakingMode: standard` on testnet, the master wallet only
     needs ETH, but the flow still calls stOLAS `distributor` later in
@@ -250,7 +250,7 @@ Ordered by blast radius for an AI-agent one-shot run:
 8. **Two-shot funding dance.** First run → fund → re-run. No
    "watch and continue" mode, and no machine-readable signal of
    what/where to fund.
-9. **`npm start` working-directory coupling.** Must be run from
+9. **`npx jinn run` working-directory coupling.** Must be run from
    `client/`, which must contain `.env` (or not — behavior varies
    with whether `.env` exists there).
 10. **Password key management is on the caller.** No recovery,

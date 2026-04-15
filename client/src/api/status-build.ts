@@ -183,14 +183,14 @@ function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fl
   }
 
   if (!fleetSum.loaded) {
-    actions.push('Run bootstrap (npm start with JINN_PASSWORD) to create fleet and staking state.');
+    actions.push('Run bootstrap (npx jinn run with JINN_PASSWORD) to create fleet and staking state.');
   } else {
     if (!raw.fleet?.master_address) {
       actions.push('Complete earning bootstrap so master_address is recorded.');
     }
     for (const s of raw.fleet?.services ?? []) {
       if (s.step !== 'complete') {
-        actions.push(`Resume service ${s.index}: local step "${s.step}" — re-run npm start.`);
+        actions.push(`Resume service ${s.index}: local step "${s.step}" — re-run npx jinn run.`);
       }
     }
   }

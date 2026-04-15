@@ -4,6 +4,9 @@ export function renderTopLevelHelp(commands: CommandModule[]): string {
   const lines: string[] = [];
   lines.push('Usage: jinn <verb> [flags...]');
   lines.push('');
+  lines.push('Output: operational verbs emit JSON on stdout by default.');
+  lines.push('Use `--human` for readable terminal output. Help stays human-readable.');
+  lines.push('');
   lines.push('Verbs:');
   const visible = commands.filter(c => c.name !== 'fleet-manage');
   const invocations = visible.map(c => `jinn ${c.name}`);
@@ -18,10 +21,20 @@ export function renderTopLevelHelp(commands: CommandModule[]): string {
   lines.push('  fleet scale --to N                    Grow or shrink the fleet');
   lines.push('  fleet retire <index>                  Retire one service');
   lines.push('');
+  lines.push('Operator map:');
+  lines.push('  jinn run                              Start the daemon or fail with a structured next step');
+  lines.push('  jinn doctor                           Check environment and config readiness');
+  lines.push('  jinn fund-requirements                Show exact funding gaps');
+  lines.push('  jinn status                           Poll health; use this for monitoring');
+  lines.push('  jinn fleet|balance|history|rewards    Inspect current state and history');
+  lines.push('  jinn submit-intent|claim-rewards      Execute protocol actions');
+  lines.push('  jinn withdraw|keys backup             Move funds or back up the mnemonic');
+  lines.push('');
   lines.push('Run `jinn <verb> --help` for verb-specific flags and examples.');
   return lines.join('\n');
 }
 
 export function renderCommandHelp(command: CommandModule): string {
-  return `jinn ${command.name} — ${command.summary}\n\n${command.helpText}`;
+  const label = command.name === 'fleet-manage' ? 'fleet' : command.name;
+  return `jinn ${label} — ${command.summary}\n\n${command.helpText}`;
 }

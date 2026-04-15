@@ -6,6 +6,7 @@
 
 import type { CommandContext } from './command.js';
 import { buildEnvelope, EXIT_CODES } from '../errors/envelope.js';
+import { emitResult } from './output.js';
 
 export interface ConfirmFlags {
   yes: boolean;
@@ -43,12 +44,29 @@ export interface DryRunPayload {
 
 /** Emit a dry-run JSON response (success path; no process exit). */
 export function emitDryRun(ctx: CommandContext, payload: DryRunPayload): void {
-  ctx.writer.write(
-    JSON.stringify({
+  const body = {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       dryRun: true,
       ...payload,
-    }) + '\n',
+    };
+  emitResult(
+    body,
+    (v) => {
+      const value = v as DryRunPayload & { dryRun: true };
+      return [
+        `Dry run: ${value.verb}`,
+        value.description,
+        `Planned steps: ${value.plan.length}`,
+        JSON.stringify(value.plan, null, 2),
+      ].join('\n');
+    },
+    {
+      json: ctx.argv.includes('--json'),
+      human: ctx.argv.includes('--human'),
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env['NO_COLOR']),
+    },
   );
 }

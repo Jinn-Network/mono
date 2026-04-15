@@ -4,6 +4,7 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
+import { resolveCliPassword } from '../password.js';
 
 /** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
 function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
@@ -41,10 +42,12 @@ function humanFundRequirements(payload: {
 
 async function run(ctx: CommandContext): Promise<void> {
   let json = false;
+  let human = false;
   let configPath: string | undefined;
   try {
     const parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS });
     json = Boolean(parsed.values.json);
+    human = Boolean(parsed.values.human);
     configPath =
       typeof parsed.values.config === 'string' && parsed.values.config.length > 0
         ? parsed.values.config
@@ -64,15 +67,15 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const password = ctx.env['JINN_PASSWORD'];
-  if (!password) {
+  const password = resolveCliPassword(ctx.argv, ctx.env);
+  if (!password.ok) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'A password is required to read the keystore.',
-        hint: 'Set the password environment variable required by the client, then re-run.',
+        message: password.message,
+        hint: 'Set JINN_PASSWORD or pass --password-fd N, then re-run.',
         exampleCli: 'jinn fund-requirements --json',
-        details: { field: 'keystore password', expected: 'non-empty string via environment' },
+        details: { field: 'keystore password', expected: 'non-empty string via environment or fd' },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -96,7 +99,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
   let result: Awaited<ReturnType<FleetBootstrapper['bootstrap']>>;
   try {
-    result = await bootstrapper.bootstrap(password);
+    result = await bootstrapper.bootstrap(password.password);
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
     const message =
@@ -141,6 +144,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
   emitResult(payload, (v) => humanFundRequirements(v as typeof payload), {
     json,
+    human,
     writer: ctx.writer,
     stdoutIsTty: ctx.stdoutIsTty,
     noColor: Boolean(ctx.env['NO_COLOR']),
@@ -151,7 +155,7 @@ async function run(ctx: CommandContext): Promise<void> {
 const command: CommandModule = {
   name: 'fund-requirements',
   summary: 'List addresses that need funding before the next bootstrap step',
-  helpText: `Usage: jinn fund-requirements [--json] [--config <path>]
+  helpText: `Usage: jinn fund-requirements [--human] [--config <path>] [--password-fd <fd>]
 
 Returns a JSON object listing every wallet that needs additional
 funding before the state machine can advance. Each entry names the
@@ -163,8 +167,8 @@ When \`satisfied\` is true, the \`requirements\` array is empty and
 no funding is needed right now.
 
 Examples:
-  jinn fund-requirements
-  jinn fund-requirements --json | jq '.requirements[]'
+  npx jinn fund-requirements
+  npx jinn fund-requirements --human
 `,
   run,
 };

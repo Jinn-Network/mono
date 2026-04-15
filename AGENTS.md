@@ -11,11 +11,11 @@ Jinn is a training protocol for state restoration. It defines a loop (Creation �
 ## Repository Structure
 
 ```
-jinn-cli-agents/ Git subtree — historical Jinn agent repo (IMPORTANT: see below)
+legacy/jinn-cli-agents-reference/ Git subtree — historical Jinn agent repo (IMPORTANT: see below)
 
 client/          TypeScript daemon — the main runnable component
   src/
-    main.ts              Production entry point (yarn start)
+    main.ts              Production entry point (via `yarn jinn run`)
     config.ts            Config loader (file > env > defaults)
     index.ts             Library exports
     adapters/
@@ -80,7 +80,7 @@ docs/            Design specs and implementation plans
 
 ## jinn-cli-agents Reference
 
-**Always check `jinn-cli-agents/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context:
+**Always check `legacy/jinn-cli-agents-reference/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context:
 
 - `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
 - `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
@@ -115,13 +115,13 @@ The e2e script spawns Anvil, bootstraps from scratch, runs create → restore �
 
 ```bash
 cd client
-JINN_PASSWORD=your-keystore-password yarn start
+JINN_PASSWORD=your-keystore-password yarn jinn run
 ```
 
 Or with a config file:
 
 ```bash
-JINN_PASSWORD=secret yarn start -- --config ./my-config.json
+JINN_PASSWORD=secret yarn jinn run --config ./my-config.json
 ```
 
 The daemon will:
@@ -148,7 +148,7 @@ cat > ~/.jinn-client/config.json << 'EOF'
 }
 EOF
 
-JINN_PASSWORD=test yarn start
+JINN_PASSWORD=test yarn jinn run
 # Will pause at awaiting_funding — fund via cast, then re-run
 ```
 
@@ -262,7 +262,7 @@ yarn build           # tsc compile
 yarn test            # vitest run
 yarn e2e             # end-to-end on Anvil fork
 yarn staking         # earning bootstrap validation on Anvil
-yarn start           # production daemon (requires JINN_PASSWORD)
+yarn jinn run        # production daemon (requires JINN_PASSWORD)
 
 # Contracts
 cd contracts

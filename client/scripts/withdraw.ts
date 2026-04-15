@@ -3,7 +3,7 @@
  * Operator withdraw: send JINN (ERC-20) and/or native ETH from the fleet master EOA to --to.
  *
  * Uses the same HD mnemonic keystore as earning bootstrap (~/.jinn-client/earning/master_keystore.json).
- * Password: JINN_PASSWORD (env-only, same as yarn start) or --password-fd N.
+ * Password: JINN_PASSWORD (env-only, same as yarn jinn run) or --password-fd N.
  *
  * Implementation: {@link ../src/withdraw/run-withdraw-plan.ts}
  */
@@ -33,7 +33,7 @@ function printHelp(): void {
   console.log(`
 Operator withdraw — master EOA and optional agent ETH sweep
 
-  JINN_PASSWORD is required unless --password-fd is used (same keystore password as yarn start).
+  JINN_PASSWORD is required unless --password-fd is used (same keystore password as yarn jinn run).
 
 Options:
   --to <address>           Recipient (required for transfers / sweep)
@@ -58,7 +58,7 @@ Options:
 
   --dry-run                  Print planned actions; no transactions
   --yes                      Skip interactive confirmation
-  --config <path>            Same as yarn start
+  --config <path>            Same as yarn jinn run
 
   -h, --help                 Show this help
 

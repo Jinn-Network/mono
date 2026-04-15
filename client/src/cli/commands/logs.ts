@@ -14,6 +14,7 @@ async function run(ctx: CommandContext): Promise<void> {
       options: {
         limit: { type: 'string', default: '100' },
         json: { type: 'boolean', default: false },
+        human: { type: 'boolean', default: false },
       },
       allowPositionals: false,
     });
@@ -38,34 +39,37 @@ async function run(ctx: CommandContext): Promise<void> {
   const config = loadConfig(fromVerbFlags ?? fromProcess);
   const store = new Store(config.dbPath);
   const rows = store.getRecentOwnActivity(limit);
-
-  rows.forEach((row, i) => {
-    const ts = new Date(REF_MS - i * 1000).toISOString();
-    ctx.writer.write(
-      JSON.stringify({
-        ts,
-        level: 'info',
-        component: 'activity',
-        msg: row.role,
-        requestId: row.requestId,
-        txHash: null,
-      }) + '\n',
-    );
-  });
+  const payload = rows.map((row, i) => ({
+    ts: new Date(REF_MS - i * 1000).toISOString(),
+    level: 'info',
+    component: 'activity',
+    msg: row.role,
+    requestId: row.requestId,
+    txHash: null,
+  }));
+  if (parsed.values.human) {
+    for (const line of payload) {
+      ctx.writer.write(`${line.ts} ${line.component} ${line.msg} request=${line.requestId}\n`);
+    }
+    return;
+  }
+  for (const line of payload) {
+    ctx.writer.write(JSON.stringify(line) + '\n');
+  }
 }
 
 const command: CommandModule = {
   name: 'logs',
   summary: 'Structured event log (one JSON object per line)',
-  helpText: `Usage: jinn logs [--limit <N>] [--json]
+  helpText: `Usage: jinn logs [--limit <N>] [--human]
 
 v1: reads the most recent N rows from the local activity store and
 emits one JSON object per line matching the spec §8 log line shape
 (\`ts\`, \`level\`, \`component\`, \`msg\`).
 
 Examples:
-  jinn logs --limit 50
-  jinn logs --limit 50 | jq 'select(.msg == "delivered")'
+  npx jinn logs --limit 50
+  npx jinn logs --human
 `,
   run,
 };

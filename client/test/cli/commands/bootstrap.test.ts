@@ -14,12 +14,23 @@ const bootstrapReturn = vi.hoisted(() => ({
   },
 }));
 
+const passwordResult = vi.hoisted(() => ({
+  val:
+    { ok: true as const, password: 'test' } as
+      | { ok: true; password: string }
+      | { ok: false; message: string },
+}));
+
 vi.mock('../../../src/earning/bootstrap.js', () => ({
   FleetBootstrapper: class {
     async bootstrap() {
       return { ...bootstrapReturn.val };
     }
   },
+}));
+
+vi.mock('../../../src/cli/password.js', () => ({
+  resolveCliPassword: vi.fn(() => passwordResult.val),
 }));
 
 function makeCtx(
@@ -42,6 +53,7 @@ function makeCtx(
 
 describe('bootstrap command', () => {
   it('emits funding_required envelope and exits 10 when bootstrap returns funding', async () => {
+    passwordResult.val = { ok: true, password: 'test' };
     bootstrapReturn.val = {
       ok: false,
       funding: {
@@ -69,6 +81,10 @@ describe('bootstrap command', () => {
   });
 
   it('emits invalid_invocation exit 11 when password env is missing', async () => {
+    passwordResult.val = {
+      ok: false,
+      message: 'Set JINN_PASSWORD or pass --password-fd N with a readable file descriptor.',
+    };
     const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
     const { ctx, writes, exits } = makeCtx({});
     await bootstrap.run(ctx);
@@ -79,7 +95,28 @@ describe('bootstrap command', () => {
     expect(exits).toEqual([11]);
   });
 
+  it('accepts --password-fd when password env is missing', async () => {
+    passwordResult.val = { ok: true, password: 'from-fd' };
+    bootstrapReturn.val = {
+      ok: false,
+      funding: {
+        master_address: '0xabc',
+        eth_required: '1000',
+        eth_balance: '500',
+      },
+      message: 'need more eth',
+      fleet_state: { master_address: '0xabc', services: [] },
+    };
+    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    const { ctx, writes, exits } = makeCtx({}, { argv: ['--password-fd', '0'] });
+    await bootstrap.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('funding_required');
+    expect(exits).toEqual([10]);
+  });
+
   it('emits JSON success on non-TTY even without --json', async () => {
+    passwordResult.val = { ok: true, password: 'test' };
     bootstrapReturn.val = {
       ok: true,
       message: 'ok',
@@ -98,7 +135,8 @@ describe('bootstrap command', () => {
     expect(exits).toEqual([0]);
   });
 
-  it('emits human success summary on TTY without --json', async () => {
+  it('emits JSON success on TTY without flags', async () => {
+    passwordResult.val = { ok: true, password: 'test' };
     bootstrapReturn.val = {
       ok: true,
       message: 'ok',
@@ -110,14 +148,13 @@ describe('bootstrap command', () => {
     const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
     const { ctx, writes, exits } = makeCtx(undefined, { stdoutIsTty: true });
     await bootstrap.run(ctx);
-    const out = writes[writes.length - 1];
-    expect(() => JSON.parse(out)).toThrow();
-    expect(out).toContain('Bootstrap complete.');
-    expect(out).toContain('0xmaster');
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.master).toBe('0xmaster');
     expect(exits).toEqual([0]);
   });
 
-  it('emits JSON success on TTY when --json is set', async () => {
+  it('emits human success summary on TTY when --human is set', async () => {
+    passwordResult.val = { ok: true, password: 'test' };
     bootstrapReturn.val = {
       ok: true,
       message: 'ok',
@@ -127,10 +164,11 @@ describe('bootstrap command', () => {
       },
     };
     const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
-    const { ctx, writes, exits } = makeCtx(undefined, { stdoutIsTty: true, argv: ['--json'] });
+    const { ctx, writes, exits } = makeCtx(undefined, { stdoutIsTty: true, argv: ['--human'] });
     await bootstrap.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]);
-    expect(parsed.master).toBe('0xaaa');
+    const out = writes[writes.length - 1];
+    expect(out).toContain('Bootstrap complete.');
+    expect(out).toContain('0xaaa');
     expect(exits).toEqual([0]);
   });
 });

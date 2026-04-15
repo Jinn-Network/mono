@@ -114,7 +114,7 @@ Existing fields unchanged. `stakingMode` defaults to `'standard'` (stOLAS) as al
 ### First run
 
 ```
-$ JINN_PASSWORD=secret npm start
+$ JINN_PASSWORD=secret npx jinn run
 
 [main] No wallet found. Generating new mnemonic...
 [main] Master address: 0xABC...
@@ -124,7 +124,7 @@ $ JINN_PASSWORD=secret npm start
 ### After funding
 
 ```
-$ JINN_PASSWORD=secret npm start
+$ JINN_PASSWORD=secret npx jinn run
 
 [main] Master balance: 0.05 ETH
 [earning] Bootstrapping 1 service...
@@ -137,7 +137,7 @@ $ JINN_PASSWORD=secret npm start
 ### Adding services
 
 ```
-$ JINN_TARGET_SERVICES=3 JINN_PASSWORD=secret npm start
+$ JINN_TARGET_SERVICES=3 JINN_PASSWORD=secret npx jinn run
 
 [earning] 1/3 services already complete
 [earning] Bootstrapping 2 new services...

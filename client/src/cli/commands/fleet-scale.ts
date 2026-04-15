@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
+import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
@@ -78,15 +79,26 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
   if (to === current) {
-    ctx.writer.write(
-      JSON.stringify({
+    emitResult(
+      {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'fleet scale',
         from: current,
         to,
         action: 'none',
-      }) + '\n',
+      },
+      (v) => {
+        const value = v as { from: number; to: number };
+        return `Fleet already at target size ${value.to}.`;
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
     );
     return;
   }
@@ -190,8 +202,8 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
     }
 
     const state = result.fleet_state;
-    ctx.writer.write(
-      JSON.stringify({
+    emitResult(
+      {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'fleet scale',
@@ -200,7 +212,18 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
         to,
         servicesComplete: state.services.filter(s => s.step === 'complete').length,
         message: result.message,
-      }) + '\n',
+      },
+      (v) => {
+        const value = v as { from: number; to: number; servicesComplete: number };
+        return `Fleet grow complete.\nFrom: ${value.from}\nTo: ${value.to}\nComplete services: ${value.servicesComplete}`;
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
     );
     return;
   }
@@ -257,8 +280,8 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
     }
   }
 
-  ctx.writer.write(
-    JSON.stringify({
+  emitResult(
+    {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       verb: 'fleet scale',
@@ -266,7 +289,18 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
       from: current,
       to,
       retired,
-    }) + '\n',
+    },
+    (v) => {
+      const value = v as { from: number; to: number; retired: Array<{ index: number }> };
+      return `Fleet shrink complete.\nFrom: ${value.from}\nTo: ${value.to}\nRetired chain indices: ${value.retired.map((r) => r.index).join(', ')}`;
+    },
+    {
+      json: Boolean(parsed.values.json),
+      human: Boolean(parsed.values.human),
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env['NO_COLOR']),
+    },
   );
 }
 
@@ -352,14 +386,22 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
   if (!svc) {
-    ctx.writer.write(
-      JSON.stringify({
+    emitResult(
+      {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'fleet retire',
         index: displayIndex,
         action: 'none',
-      }) + '\n',
+      },
+      (v) => `Service ${String((v as { index: number }).index)} is already absent from fleet state.`,
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
     );
     return;
   }
@@ -406,8 +448,8 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
       );
       return;
     }
-    ctx.writer.write(
-      JSON.stringify({
+    emitResult(
+      {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'fleet retire',
@@ -416,7 +458,18 @@ async function runRetire(ctx: CommandContext, rest: string[]): Promise<void> {
         ok: r.ok,
         txHash: r.txHash ?? null,
         message: r.message,
-      }) + '\n',
+      },
+      (v) => {
+        const value = v as { index: number; chainIndex: number; txHash: string | null };
+        return `Service retired.\nDisplay index: ${value.index}\nChain index: ${value.chainIndex}\nTx: ${value.txHash ?? 'n/a'}`;
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
     );
   } catch (e) {
     if (isRecoverableTransactionError(e)) {

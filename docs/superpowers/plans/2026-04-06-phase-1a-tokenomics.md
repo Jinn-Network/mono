@@ -331,7 +331,7 @@ Recommended fast-stack sequence:
    JINN_TESTNET_TOKEN_DEPLOYMENT=/Users/adrianobradley/jinn-mono/contracts/deployment-phase1a-token-baseSepolia-fast.json \
    BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
    JINN_PASSWORD=<keystore-password> \
-   npm start
+   npx jinn run
    ```
 
 Operational note:

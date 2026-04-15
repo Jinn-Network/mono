@@ -54,4 +54,12 @@ describe('version command', () => {
     expect(writes).toHaveLength(1);
     expect(exits).toEqual([]);
   });
+
+  it('emits invalid_invocation for bad flags', async () => {
+    const { ctx, writes, exits } = makeCtx(['--bogus']);
+    await version.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+  });
 });

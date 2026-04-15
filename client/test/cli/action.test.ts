@@ -51,4 +51,18 @@ describe('emitDryRun', () => {
     expect(parsed.plan).toEqual([{ step: 1, tx: 'JinnRouter.createRestorationJob(...)' }]);
     expect(exits).toEqual([]);
   });
+
+  it('emits human-readable dry-run output when --human is set', () => {
+    const { ctx, writes, exits } = makeCtx(true);
+    ctx.argv = ['--human'];
+    emitDryRun(ctx, {
+      verb: 'submit-intent',
+      description: 'Would post one intent',
+      plan: [{ step: 1 }],
+    });
+    const out = writes[writes.length - 1]!;
+    expect(out).toContain('Dry run: submit-intent');
+    expect(out).toContain('Would post one intent');
+    expect(exits).toEqual([]);
+  });
 });

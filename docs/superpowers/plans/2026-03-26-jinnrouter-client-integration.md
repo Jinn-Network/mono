@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-26-jinnrouter-client-integration-design.md`
 
-**JinnRouter Solidity source:** `/Users/gcd/Repositories/main/jinn-cli-agents/contracts/staking/JinnRouter.sol`
+**JinnRouter Solidity source:** `/Users/gcd/Repositories/main/legacy/jinn-cli-agents-reference/contracts/staking/JinnRouter.sol`
 
 **JinnRouter address (Base):** `0xfFa7118A3D820cd4E820010837D65FAfF463181B`
 

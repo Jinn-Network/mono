@@ -49,4 +49,14 @@ describe('init command', () => {
     const second = JSON.parse(writes2[writes2.length - 1]).master;
     expect(second).toBe(first);
   });
+
+  it('emits invalid_invocation for bad flags', async () => {
+    const { ctx, writes } = makeCtx({ argv: ['--humna'] });
+    const exits: number[] = [];
+    ctx.exit = (code: number) => { exits.push(code); };
+    await init.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+  });
 });

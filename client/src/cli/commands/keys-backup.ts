@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CommandContext, CommandModule } from '../command.js';
+import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { FleetStateStore } from '../../earning/store.js';
 import { decryptMnemonic } from '../../earning/wallet.js';
@@ -14,6 +15,7 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
       options: {
         output: { type: 'string' },
         json: { type: 'boolean', default: false },
+        human: { type: 'boolean', default: false },
       },
       allowPositionals: false,
     });
@@ -64,14 +66,25 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
   const mnemonic = await decryptMnemonic(keystore, password);
   writeFileSync(output, `${mnemonic}\n`, { encoding: 'utf-8', mode: 0o600 });
 
-  ctx.writer.write(
-    JSON.stringify({
+  emitResult(
+    {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       verb: 'keys backup',
       output,
       words: mnemonic.split(/\s+/).length,
-    }) + '\n',
+    },
+    (v) => {
+      const value = v as { output: string; words: number };
+      return `Mnemonic backup written.\nPath: ${value.output}\nWords: ${value.words}`;
+    },
+    {
+      json: Boolean(parsed.values.json),
+      human: Boolean(parsed.values.human),
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env['NO_COLOR']),
+    },
   );
 }
 
@@ -104,14 +117,14 @@ async function run(ctx: CommandContext): Promise<void> {
 const command: CommandModule = {
   name: 'keys',
   summary: 'Keystore management: backup',
-  helpText: `Usage: jinn keys backup --output <path>
+  helpText: `Usage: jinn keys backup --output <path> [--human]
 
 Decrypts the local keystore using JINN_PASSWORD and writes the
 mnemonic to <path> with mode 0600. Idempotent: same mnemonic →
 same output. No other side effects.
 
 Examples:
-  JINN_PASSWORD=secret jinn keys backup --output ~/backup/jinn.txt
+  JINN_PASSWORD=secret npx jinn keys backup --output ~/backup/jinn.txt
 `,
   run,
 };

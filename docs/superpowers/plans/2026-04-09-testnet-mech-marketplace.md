@@ -31,7 +31,7 @@
 | `contracts/src/vendor/mech/proxies/MechMarketplaceProxy.sol` | Marketplace UUPS proxy (vendored) |
 | `contracts/src/vendor/mech/interfaces/*.sol` | Interface files (vendored) |
 | `contracts/src/vendor/mech/lib/Mech.sol` | gnosis-mech base (vendored, flattened) |
-| `contracts/src/staking/JinnRouter.sol` | Copy from `jinn-cli-agents/contracts/staking/` |
+| `contracts/src/staking/JinnRouter.sol` | Copy from `legacy/jinn-cli-agents-reference/contracts/staking/` |
 | `contracts/scripts/deploy-phase1b-mech.ts` | Deployment script for full mech stack |
 | `contracts/test/phase1/MechMarketplace.test.ts` | Integration tests |
 
@@ -210,7 +210,7 @@ git commit -m "chore: add Hardhat compiler overrides for vendored mech contracts
 
 ## Task 4: Copy JinnRouter into contracts/src
 
-The JinnRouter exists in `jinn-cli-agents/contracts/staking/JinnRouter.sol`. Copy it into the main contracts directory so the deployment script can reference it.
+The JinnRouter exists in `legacy/jinn-cli-agents-reference/contracts/staking/JinnRouter.sol`. Copy it into the main contracts directory so the deployment script can reference it.
 
 **Files:**
 - Create: `contracts/src/staking/JinnRouter.sol`
@@ -218,7 +218,7 @@ The JinnRouter exists in `jinn-cli-agents/contracts/staking/JinnRouter.sol`. Cop
 - [ ] **Step 1: Copy the JinnRouter**
 
 ```bash
-cp jinn-cli-agents/contracts/staking/JinnRouter.sol contracts/src/staking/JinnRouter.sol
+cp legacy/jinn-cli-agents-reference/contracts/staking/JinnRouter.sol contracts/src/staking/JinnRouter.sol
 ```
 
 - [ ] **Step 2: Verify compilation**
@@ -537,7 +537,7 @@ JINN_TESTNET_TOKEN_DEPLOYMENT=../contracts/deployment-phase1a-token-baseSepolia-
 JINN_TESTNET_MECH_DEPLOYMENT=../contracts/deployment-phase1b-mech-baseSepolia-fast.json \
 BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
 JINN_PASSWORD=<password> \
-npm start
+npx jinn run
 ```
 
 Expected: bootstrap runs through `complete` (including mech deployment), daemon starts, three loops begin operating.

@@ -2,9 +2,20 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
 
 vi.mock('../../../src/main.js', () => ({
-  main: vi.fn(async () => {
-    /* successful daemon start */
-  }),
+  main: vi.fn(async () => ({
+    schemaVersion: 1,
+    generatedAt: '2026-04-15T00:00:00.000Z',
+    kind: 'daemon_started',
+    pid: 123,
+    network: 'testnet',
+    phase: 'phase-1b',
+    apiPort: 7331,
+    masterAddress: '0xmaster',
+    safeAddress: '0xsafe',
+    mechAddress: '0xmech',
+    serviceIndex: 1,
+    serviceId: 7,
+  })),
 }));
 
 function makeCtx(env: Record<string, string> = { JINN_PASSWORD: 'test' }): {
@@ -37,8 +48,10 @@ describe('run command', () => {
   it('delegates to main() when JINN_PASSWORD is set', async () => {
     const { default: run } = await import('../../../src/cli/commands/run.js');
     const { main } = await import('../../../src/main.js');
-    const { ctx } = makeCtx();
+    const { ctx, writes } = makeCtx();
     await run.run(ctx);
     expect(main).toHaveBeenCalled();
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.kind).toBe('daemon_started');
   });
 });

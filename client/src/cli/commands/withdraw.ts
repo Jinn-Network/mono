@@ -1,4 +1,5 @@
 import type { CommandContext, CommandModule } from '../command.js';
+import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
@@ -47,7 +48,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
   if (parsed.help) {
     ctx.writer.write(
-      `See \`jinn withdraw --help\` in the command module helpText, or \`npm run withdraw -- --help\` for the full operator script help.\n`,
+      `See \`jinn withdraw --help\` in the command module helpText, or \`npx jinn withdraw --human\` for the readable terminal form.\n`,
     );
     return;
   }
@@ -173,18 +174,29 @@ async function run(ctx: CommandContext): Promise<void> {
       parsed,
       log: () => {},
       warn: (s: string) => {
-        ctx.writer.write(s + '\n');
+        process.stderr.write(s + '\n');
       },
     });
-    ctx.writer.write(
-      JSON.stringify({
+    emitResult(
+      {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'withdraw',
         to: parsed.to,
         dryRun: false,
         status: 'complete',
-      }) + '\n',
+      },
+      (v) => {
+        const value = v as { to: string };
+        return `Withdraw plan complete.\nDestination: ${value.to}`;
+      },
+      {
+        json: parsed.json,
+        human: parsed.human,
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
     );
   } catch (e) {
     emitEnvelope(
@@ -200,10 +212,10 @@ async function run(ctx: CommandContext): Promise<void> {
 
 const command: CommandModule = {
   name: 'withdraw',
-  summary: 'Sweep master / agents per withdraw flags (see npm run withdraw)',
-  helpText: `Usage: jinn withdraw --to <address> [amount flags] [--dry-run | --yes]
+  summary: 'Sweep master / agents per withdraw flags',
+  helpText: `Usage: jinn withdraw --to <address> [amount flags] [--dry-run | --yes] [--human]
 
-Supports the same amount flags as \`npm run withdraw\`:
+Supports the same amount flags as the standalone withdraw helper:
   --jinn-amount / --amount / --jinn-wei / --drain-jinn
   --eth-amount / --eth-wei / --drain-eth
   --sweep-agents / --min-sweep-wei / --master-gas-reserve-wei
@@ -212,8 +224,8 @@ Supports the same amount flags as \`npm run withdraw\`:
 Large or drain operations require --yes (no TTY prompt).
 
 Examples:
-  jinn withdraw --to 0xDEST --dry-run
-  jinn withdraw --to 0xDEST --eth-amount 0.01 --yes
+  npx jinn withdraw --to 0xDEST --dry-run
+  npx jinn withdraw --to 0xDEST --eth-amount 0.01 --yes
 `,
   run,
 };

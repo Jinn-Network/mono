@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
+import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig, getConfigPathFromArgs } from '../../config.js';
 import { getChainConfig } from '../../earning/contracts.js';
 import { computeDeploymentDigest } from '../deployment-digest.js';
@@ -17,6 +20,25 @@ function readClientVersion(): string {
 }
 
 async function run(ctx: CommandContext): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: ctx.argv,
+      options: { ...COMMON_FLAGS },
+      allowPositionals: false,
+    });
+  } catch (err) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: err instanceof Error ? err.message : String(err),
+        exampleCli: 'jinn version',
+        details: { field: 'flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
   const configPath =
     getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
   const config = loadConfig(configPath);
@@ -57,16 +79,18 @@ async function run(ctx: CommandContext): Promise<void> {
   };
 
   emitResult(payload, (v) => JSON.stringify(v, null, 2), {
-    json: false,
+    json: Boolean(parsed.values.json),
+    human: Boolean(parsed.values.human),
     writer: ctx.writer,
     stdoutIsTty: ctx.stdoutIsTty,
+    noColor: Boolean(ctx.env['NO_COLOR']),
   });
 }
 
 const command: CommandModule = {
   name: 'version',
   summary: 'Print client version, protocol phase, and resolved token map',
-  helpText: `Usage: jinn version [--json]
+  helpText: `Usage: jinn version [--human]
 
 Prints a JSON object with the client version, protocol phase, current
 network, deployment artifact digests, and the resolved token-role map.
@@ -75,8 +99,8 @@ emits concrete token symbols and addresses — everywhere else uses role
 names (native / bond / reward).
 
 Examples:
-  jinn version
-  jinn version --json
+  npx jinn version
+  npx jinn version --human
 `,
   run,
 };

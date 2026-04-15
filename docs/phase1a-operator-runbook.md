@@ -134,7 +134,7 @@ JINN_TESTNET_L2_DEPLOYMENT=../contracts/deployment-phase1a-l2-baseSepolia-fast.j
 JINN_TESTNET_TOKEN_DEPLOYMENT=../contracts/deployment-phase1a-token-baseSepolia-fast.json \
 BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
 JINN_PASSWORD=<keystore-password> \
-npm start
+npx jinn run
 ```
 
 Bootstrap will pause at `awaiting_funding` — fund the Safe with ETH and JINN, then re-run.
@@ -212,7 +212,7 @@ JINN_TESTNET_TOKEN_DEPLOYMENT=../contracts/deployment-phase1a-token-baseSepolia-
 JINN_TESTNET_MECH_DEPLOYMENT=../contracts/deployment-phase1b-mech-baseSepolia-fast.json \
 BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
 JINN_PASSWORD=<keystore-password> \
-npm start
+npx jinn run
 ```
 
 The client will:

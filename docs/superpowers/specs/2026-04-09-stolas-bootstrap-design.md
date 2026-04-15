@@ -12,7 +12,7 @@ Integrate the stOLAS (ExternalStakingDistributor) flow into the client's `Earnin
 
 The Jinn staking contract (`0x51c5f...`) is now whitelisted on the stOLAS ExternalStakingDistributor (`0x40abf47B926181148000DbCC7c8DE76A3a61a66f`). This distributor allows operators to stake without providing OLAS — LemonTree depositors fund the capital. A single `distributor.stake()` call atomically creates the service, deploys a Safe, funds the bond, and stakes the service.
 
-The jinn-node codebase (`jinn-cli-agents/jinn-node/src/worker/stolas/StolasServiceBootstrap.ts`) already implements this flow using a Master Safe hierarchy. This design adapts it for our client's simpler agent-EOA-owns-Safe model.
+The jinn-node codebase (`legacy/jinn-cli-agents-reference/jinn-node/src/worker/stolas/StolasServiceBootstrap.ts`) already implements this flow using a Master Safe hierarchy. This design adapts it for our client's simpler agent-EOA-owns-Safe model.
 
 ## Design
 

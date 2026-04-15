@@ -52,4 +52,13 @@ describe('stop command', () => {
     expect(parsed.pid).toBe(99999);
     expect(typeof parsed.killed).toBe('boolean');
   });
+
+  it('emits invalid_invocation for bad flags', async () => {
+    const { ctx, writes, exits } = makeCtx();
+    ctx.argv = ['--humna'];
+    await stop.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+  });
 });

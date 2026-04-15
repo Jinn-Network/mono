@@ -8,6 +8,8 @@ export type WithdrawParsedArgs = {
   help: boolean;
   dryRun: boolean;
   yes: boolean;
+  json: boolean;
+  human: boolean;
   to: `0x${string}` | null;
   jinnWei: bigint | null;
   drainJinn: boolean;
@@ -98,6 +100,8 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
   const help = takeFlag(args, '--help') || takeFlag(args, '-h');
   const dryRun = takeFlag(args, '--dry-run');
   const yes = takeFlag(args, '--yes');
+  const json = takeFlag(args, '--json');
+  const human = takeFlag(args, '--human');
   const drainJinn = takeFlag(args, '--drain-jinn');
   const drainEth = takeFlag(args, '--drain-eth');
   const sweepAgents = takeFlag(args, '--sweep-agents');
@@ -192,6 +196,8 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
     help,
     dryRun,
     yes,
+    json,
+    human,
     to,
     jinnWei,
     drainJinn,

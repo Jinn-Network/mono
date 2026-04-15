@@ -140,6 +140,25 @@ export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl'> & {
 const DEFAULT_DIR = join(homedir(), '.jinn-client');
 const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
 
+export type ConfigLoadErrorCode =
+  | 'config_file_not_found'
+  | 'config_json_invalid'
+  | 'desired_states_file_not_found'
+  | 'desired_states_json_invalid'
+  | 'config_invalid';
+
+export class ConfigLoadError extends Error {
+  readonly code: ConfigLoadErrorCode;
+  readonly details?: Record<string, unknown>;
+
+  constructor(code: ConfigLoadErrorCode, message: string, details?: Record<string, unknown>) {
+    super(message);
+    this.name = 'ConfigLoadError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
 // ── Loader ──────────────────────────────────────────────────────────────────
 
 /**
@@ -155,12 +174,23 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   if (existsSync(filePath)) {
     const raw = readFileSync(filePath, 'utf-8');
-    fileValues = JSON.parse(raw) as Record<string, unknown>;
-    console.log(`[config] Loaded ${filePath}`);
+    try {
+      fileValues = JSON.parse(raw) as Record<string, unknown>;
+    } catch (error) {
+      throw new ConfigLoadError(
+        'config_json_invalid',
+        `Invalid JSON in config file: ${filePath}`,
+        {
+          path: filePath,
+          cause: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+    console.error(`[config] Loaded ${filePath}`);
   } else if (configPath) {
-    // Explicit path was given but doesn't exist — that's an error
-    console.error(`Fatal: config file not found: ${configPath}`);
-    process.exit(1);
+    throw new ConfigLoadError('config_file_not_found', `Config file not found: ${configPath}`, {
+      path: configPath,
+    });
   }
 
   // 2. Apply env var overrides
@@ -215,20 +245,39 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_DESIRED_STATES']) {
     const statesPath = env['JINN_DESIRED_STATES'];
     if (!existsSync(statesPath)) {
-      console.error(`Fatal: JINN_DESIRED_STATES file not found: ${statesPath}`);
-      process.exit(1);
+      throw new ConfigLoadError(
+        'desired_states_file_not_found',
+        `JINN_DESIRED_STATES file not found: ${statesPath}`,
+        { path: statesPath },
+      );
     }
-    merged.desiredStates = JSON.parse(readFileSync(statesPath, 'utf-8'));
+    try {
+      merged.desiredStates = JSON.parse(readFileSync(statesPath, 'utf-8'));
+    } catch (error) {
+      throw new ConfigLoadError(
+        'desired_states_json_invalid',
+        `Invalid JSON in JINN_DESIRED_STATES file: ${statesPath}`,
+        {
+          path: statesPath,
+          cause: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
   }
 
   // 3. Validate
   const result = JinnConfigSchema.safeParse(merged);
   if (!result.success) {
-    console.error('Fatal: invalid config:');
-    for (const issue of result.error.issues) {
-      console.error(`  ${issue.path.join('.')}: ${issue.message}`);
-    }
-    process.exit(1);
+    throw new ConfigLoadError(
+      'config_invalid',
+      'Invalid config.',
+      {
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      },
+    );
   }
 
   // 4. Resolve rpcUrl default based on network (if not explicitly set)

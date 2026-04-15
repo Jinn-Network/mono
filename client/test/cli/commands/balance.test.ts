@@ -53,4 +53,21 @@ describe('balance command', () => {
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.wallets.some((w: { role: string }) => w.role === 'master')).toBe(true);
   });
+
+  it('rejects unknown flags with invalid_invocation', async () => {
+    const { default: cmd } = await import('../../../src/cli/commands/balance.js');
+    const writes: string[] = [];
+    const exits: number[] = [];
+    const ctx: CommandContext = {
+      argv: ['--bogus'],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { writes.push(s); return true; } },
+      exit: (code: number) => { exits.push(code); },
+      env: {},
+    };
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+  });
 });

@@ -14,7 +14,7 @@
 - No `jinn doctor` verb — the preflight module is reusable but not yet wired to a verb.
 - No JSON-by-default-on-non-TTY handling — that's a CLI binary concern.
 
-**Before you start:** this slice modifies `client/src/main.ts`, which is the production entry point. Every task commits independently; if any commit breaks `npm start` for a funded fleet, stop and raise the issue before proceeding.
+**Before you start:** this slice modifies `client/src/main.ts`, which is the production entry point. Every task commits independently; if any commit breaks `npx jinn run` for a funded fleet, stop and raise the issue before proceeding.
 
 **Reference:** `spec/2026-04-14-client-surface.md` §5 (exit codes) and §6 (error envelope) are the source of truth. If anything in this plan conflicts with the spec, the spec wins.
 
@@ -335,7 +335,7 @@ Replace with:
       code: 'funding_required',
       message: result.message,
       hint: 'Fund the listed address and re-run this command.',
-      exampleCli: 'npm start',
+      exampleCli: 'npx jinn run',
       details: {
         masterAddress: result.funding.master_address,
         asset: 'native',
@@ -352,7 +352,7 @@ Add to the imports at the top of `client/src/main.ts`:
 import { emitEnvelope } from './errors/envelope.js';
 ```
 
-Note: `exampleCli` is `npm start` for now because the `jinn` binary does not yet exist. A follow-up plan will replace it with `jinn bootstrap` once the CLI ships.
+Note: `exampleCli` is `npx jinn run` for now because the `jinn` binary does not yet exist. A follow-up plan will replace it with `jinn bootstrap` once the CLI ships.
 
 - [ ] **Step 2: Replace the not-ok bootstrap branch**
 
@@ -398,7 +398,7 @@ Replace the `if` body with:
       code: 'bootstrap_incomplete',
       message: 'Bootstrap completed but no service is ready.',
       hint: 'Re-run to continue the state machine toward a running fleet.',
-      exampleCli: 'npm start',
+      exampleCli: 'npx jinn run',
       details: { completeCount: state.services.filter(s => s.step === 'complete').length },
     });
   }
@@ -815,7 +815,7 @@ Run, from a clean state, against the Anvil fork or with no keystore:
 
 ```bash
 rm -rf /tmp/jinn-smoke && \
-JINN_EARNING_DIR=/tmp/jinn-smoke JINN_PASSWORD=smoke npm start 2>/dev/null
+JINN_EARNING_DIR=/tmp/jinn-smoke JINN_PASSWORD=smoke npx jinn run 2>/dev/null
 echo "exit=$?"
 ```
 
@@ -833,7 +833,7 @@ cd client && npx vitest run test/preflight/claude-invocation-envelope.test.ts
 
 Expected: PASS (2 tests).
 
-- [ ] **Step 4b: Manual smoke — full `npm start` stack (optional)**
+- [ ] **Step 4b: Manual smoke — full `npx jinn run` stack (optional)**
 
 `checkClaudeBinary` runs **only after** bootstrap returns a complete service **with a mech address** (`client/src/main.ts`). A fresh `JINN_EARNING_DIR` therefore exits **`funding_required` (10)** before preflight — that is expected; it does not mean Step 4a failed.
 
@@ -843,7 +843,7 @@ To hit exit **11** on the real entrypoint, point `JINN_EARNING_DIR` at a directo
 NODE_BIN="$(command -v node)"
 export PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin"
 command -v claude >/dev/null && echo "SKIP: claude is on this PATH" && exit 0
-JINN_PASSWORD=… JINN_EARNING_DIR=… JINN_CLAUDE_PATH=claude npm start 2>/dev/null
+JINN_PASSWORD=… JINN_EARNING_DIR=… JINN_CLAUDE_PATH=claude npx jinn run 2>/dev/null
 echo "exit=$?"
 ```
 

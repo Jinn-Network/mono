@@ -11,6 +11,7 @@
 import type { CommandContext, CommandModule } from './command.js';
 import { emitEnvelope } from '../errors/envelope.js';
 import { renderTopLevelHelp, renderCommandHelp } from './help.js';
+import { ConfigLoadError } from '../config.js';
 
 import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
@@ -52,6 +53,10 @@ const COMMANDS: CommandModule[] = [
   keysCommand,
 ];
 
+function publicCommandNames(commands: CommandModule[]): string[] {
+  return commands.filter((c) => c.name !== 'fleet-manage').map((c) => c.name);
+}
+
 export interface RunCliOptions {
   writer?: { write: (s: string) => boolean };
   exit?: (code: number) => void;
@@ -70,22 +75,7 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
   }
 
   const [verb, ...rest] = argv;
-
-  // `jinn fleet scale|retire` → fleet-manage (not introspection `fleet`).
-  if (verb === 'fleet' && rest.length > 0 && (rest[0] === 'scale' || rest[0] === 'retire')) {
-    const fleetManage = COMMANDS.find(c => c.name === 'fleet-manage');
-    if (fleetManage) {
-      const ctx: CommandContext = {
-        argv: rest,
-        stdoutIsTty,
-        writer,
-        exit,
-        env: process.env,
-      };
-      await fleetManage.run(ctx);
-      return;
-    }
-  }
+  const isFleetManage = verb === 'fleet' && rest.length > 0 && !rest[0]!.startsWith('-');
 
   // --help at the top level
   if (verb === '--help' || verb === '-h') {
@@ -93,7 +83,9 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
     return;
   }
 
-  const command = COMMANDS.find((c) => c.name === verb);
+  const command = isFleetManage
+    ? COMMANDS.find((c) => c.name === 'fleet-manage')
+    : COMMANDS.find((c) => c.name === verb);
   if (!command) {
     emitEnvelope(
       {
@@ -103,7 +95,7 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
         exampleCli: 'jinn --help',
         details: {
           field: 'subcommand',
-          expected: COMMANDS.map((c) => c.name).join('|'),
+          expected: publicCommandNames(COMMANDS).join('|'),
         },
       },
       { writer, exit },
@@ -111,14 +103,17 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
     return;
   }
 
+  const commandArgv = rest;
+  const exampleInvocation = isFleetManage ? `jinn fleet ${rest[0]}` : `jinn ${verb}`;
+
   // Per-verb --help short-circuit (before any command-specific parsing)
-  if (rest.includes('--help') || rest.includes('-h')) {
+  if (commandArgv.includes('--help') || commandArgv.includes('-h')) {
     writer.write(renderCommandHelp(command) + '\n');
     return;
   }
 
   const ctx: CommandContext = {
-    argv: rest,
+    argv: commandArgv,
     stdoutIsTty,
     writer,
     exit,
@@ -128,6 +123,24 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
   try {
     await command.run(ctx);
   } catch (err) {
+    if (err instanceof ConfigLoadError) {
+      const details: Record<string, unknown> = {
+        field: 'config',
+        code: err.code,
+        ...(err.details ?? {}),
+      };
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err.message,
+          hint: 'Fix the configuration inputs and re-run the command.',
+          exampleCli: exampleInvocation,
+          details,
+        },
+        { writer, exit },
+      );
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     const details: Record<string, unknown> = { cause: message, verb };
     const debug = process.env['JINN_DEBUG'] === '1';

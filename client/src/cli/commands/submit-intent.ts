@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { getAddress } from 'ethers';
 import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
+import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
@@ -94,8 +95,8 @@ async function run(ctx: CommandContext): Promise<void> {
   const cacheKey = intentCacheKey(safe, id);
   const cached = jinnStore.getConfigValue(cacheKey);
   if (cached) {
-    ctx.writer.write(
-      JSON.stringify({
+    emitResult(
+      {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'submit-intent',
@@ -104,7 +105,18 @@ async function run(ctx: CommandContext): Promise<void> {
         requestId: cached,
         status: 'already_submitted',
         idempotent: true,
-      }) + '\n',
+      },
+      (v) => {
+        const value = v as { id: string; requestId: string; creatorMultisig: string };
+        return `Intent already submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`;
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
     );
     return;
   }
@@ -121,8 +133,8 @@ async function run(ctx: CommandContext): Promise<void> {
     });
     jinnStore.recordOwnActivity(requestId, 'created');
     jinnStore.setConfigValue(cacheKey, requestId);
-    ctx.writer.write(
-      JSON.stringify({
+    emitResult(
+      {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'submit-intent',
@@ -132,7 +144,18 @@ async function run(ctx: CommandContext): Promise<void> {
         status: 'submitted',
         attemptId,
         attemptNumber,
-      }) + '\n',
+      },
+      (v) => {
+        const value = v as { id: string; requestId: string; creatorMultisig: string };
+        return `Intent submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`;
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
     );
   } catch (e) {
     if (isRecoverableTransactionError(e)) {
@@ -162,14 +185,14 @@ async function run(ctx: CommandContext): Promise<void> {
 const command: CommandModule = {
   name: 'submit-intent',
   summary: 'Post a desired state (restoration job) to the protocol',
-  helpText: `Usage: jinn submit-intent --id <id> --description <text> [--dry-run] [--yes]
+  helpText: `Usage: jinn submit-intent --id <id> --description <text> [--dry-run] [--yes] [--human]
 
 Idempotent: re-posting the same (--id) from the same creator Safe returns the
 cached request id (local SQLite) without sending a new transaction.
 
 Examples:
-  jinn submit-intent --id health-check --description "The service is running" --dry-run
-  jinn submit-intent --id health-check --description "The service is running" --yes
+  npx jinn submit-intent --id health-check --description "The service is running" --dry-run
+  npx jinn submit-intent --id health-check --description "The service is running" --yes
 `,
   run,
 };

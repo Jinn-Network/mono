@@ -1709,7 +1709,7 @@ Change to:
 export async function main(): Promise<void> {
 ```
 
-No other changes — the bottom-level `main().catch(...)` invocation stays so `npm start` still works.
+No other changes — the bottom-level `main().catch(...)` invocation stays so `npx jinn run` still works.
 
 - [ ] **Step 2: Write the failing test**
 

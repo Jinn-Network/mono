@@ -2,17 +2,18 @@
  * CLI output helpers.
  *
  * Contract: spec/2026-04-14-client-surface.md §7.2.
- * - JSON is implicit when stdout is not a TTY.
+ * - JSON is the default for operational verbs.
  * - NO_COLOR strips ANSI in human mode.
  */
 
 export interface JsonModeInput {
   json: boolean;
+  human: boolean;
   stdoutIsTty: boolean;
 }
 
 export function isJsonMode(input: JsonModeInput): boolean {
-  return input.json || !input.stdoutIsTty;
+  return !input.human;
 }
 
 export function formatJson(value: unknown): string {
@@ -36,6 +37,7 @@ export function formatHuman(text: string, opts: HumanModeOpts): string {
  */
 export interface EmitOpts {
   json: boolean;
+  human?: boolean;
   writer?: { write: (s: string) => boolean };
   stdoutIsTty?: boolean;
   noColor?: boolean;
@@ -45,7 +47,7 @@ export function emitResult(value: unknown, humanRender: (v: unknown) => string, 
   const writer = opts.writer ?? process.stdout;
   const stdoutIsTty = opts.stdoutIsTty ?? Boolean(process.stdout.isTTY);
   const noColor = opts.noColor ?? Boolean(process.env['NO_COLOR']);
-  if (isJsonMode({ json: opts.json, stdoutIsTty })) {
+  if (isJsonMode({ json: opts.json, human: Boolean(opts.human), stdoutIsTty })) {
     writer.write(formatJson(value));
   } else {
     writer.write(formatHuman(humanRender(value), { noColor }) + '\n');

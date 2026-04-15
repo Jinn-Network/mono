@@ -45,4 +45,13 @@ describe('doctor command', () => {
     expect(names).toContain('node_version');
     expect(names).toContain('keystore_readable');
   });
+
+  it('emits invalid_invocation for bad flags', async () => {
+    const { ctx, writes, exits } = makeCtx();
+    ctx.argv = ['--bogus'];
+    await doctor.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+  });
 });

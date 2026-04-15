@@ -55,4 +55,21 @@ describe('fleet command', () => {
     expect(parsed.services).toHaveLength(1);
     expect(parsed.services[0].index).toBe(0);
   });
+
+  it('rejects unknown flags with invalid_invocation', async () => {
+    const { default: cmd } = await import('../../../src/cli/commands/fleet.js');
+    const writes: string[] = [];
+    const exits: number[] = [];
+    const ctx: CommandContext = {
+      argv: ['--bogus'],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { writes.push(s); return true; } },
+      exit: (code: number) => { exits.push(code); },
+      env: {},
+    };
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+  });
 });

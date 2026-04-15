@@ -101,7 +101,7 @@ async function printOfflineFleetSummary(earningDir: string): Promise<void> {
   for (const s of fleet.services) {
     console.log(`  service ${s.index}: ${s.step}  id=${s.service_id ?? '—'}`);
   }
-  console.log('Start the daemon (yarn start) or fix JINN_API_PORT / firewall for full status.');
+  console.log('Start the daemon (yarn jinn run) or fix JINN_API_PORT / firewall for full status.');
 }
 
 async function main(): Promise<void> {

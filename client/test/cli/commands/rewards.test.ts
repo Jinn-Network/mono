@@ -54,4 +54,21 @@ describe('rewards command', () => {
     expect(parsed.lastClaimAt).toBe('2026-04-14T11:00:00.000Z');
     expect(parsed.services[0].pending).toBe('1000');
   });
+
+  it('emits invalid_invocation for bad flags', async () => {
+    const { default: cmd } = await import('../../../src/cli/commands/rewards.js');
+    const writes: string[] = [];
+    const exits: number[] = [];
+    const ctx: CommandContext = {
+      argv: ['--configt', '/tmp/x'],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { writes.push(s); return true; } },
+      exit: (code: number) => { exits.push(code); },
+      env: {},
+    };
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+  });
 });

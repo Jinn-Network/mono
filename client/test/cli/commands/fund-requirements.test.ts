@@ -17,6 +17,13 @@ const fundReturn = vi.hoisted(() => ({
   },
 }));
 
+const passwordResult = vi.hoisted(() => ({
+  val:
+    { ok: true as const, password: 'test' } as
+      | { ok: true; password: string }
+      | { ok: false; message: string },
+}));
+
 vi.mock('../../../src/earning/bootstrap.js', () => ({
   FleetBootstrapper: class {
     async bootstrap() {
@@ -25,25 +32,33 @@ vi.mock('../../../src/earning/bootstrap.js', () => ({
   },
 }));
 
-function makeCtx(env: Record<string, string> = { JINN_PASSWORD: 'test' }): {
+vi.mock('../../../src/cli/password.js', () => ({
+  resolveCliPassword: vi.fn(() => passwordResult.val),
+}));
+
+function makeCtx(
+  env: Record<string, string> = { JINN_PASSWORD: 'test' },
+  argv: string[] = [],
+): {
   ctx: CommandContext;
   writes: string[];
+  exits: number[];
 } {
   const writes: string[] = [];
+  const exits: number[] = [];
   const ctx: CommandContext = {
-    argv: [],
+    argv,
     stdoutIsTty: false,
     writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: () => {
-      /* unused */
-    },
+    exit: (code: number) => { exits.push(code); },
     env,
   };
-  return { ctx, writes };
+  return { ctx, writes, exits };
 }
 
 describe('fund-requirements command', () => {
   it('emits a requirements array with role, address, asset, needWei', async () => {
+    passwordResult.val = { ok: true, password: 'test' };
     fundReturn.val = {
       ok: false,
       funding: {
@@ -71,6 +86,7 @@ describe('fund-requirements command', () => {
   });
 
   it('reports satisfied=true with empty requirements when no funding needed', async () => {
+    passwordResult.val = { ok: true, password: 'test' };
     fundReturn.val = {
       ok: true,
       message: 'ok',
@@ -82,5 +98,24 @@ describe('fund-requirements command', () => {
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.satisfied).toBe(true);
     expect(parsed.requirements).toEqual([]);
+  });
+
+  it('accepts --password-fd when password env is missing', async () => {
+    passwordResult.val = { ok: true, password: 'from-fd' };
+    fundReturn.val = {
+      ok: false,
+      funding: {
+        master_address: '0xMASTER',
+        eth_required: '1000000000000000000',
+        eth_balance: '0',
+      },
+      message: 'need eth',
+      fleet_state: { master_address: '0xMASTER', services: [] },
+    };
+    const { default: fr } = await import('../../../src/cli/commands/fund-requirements.js');
+    const { ctx, writes } = makeCtx({}, ['--password-fd', '0']);
+    await fr.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.satisfied).toBe(false);
   });
 });

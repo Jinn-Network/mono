@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
+import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { createCliSignerContext } from '../execution-context.js';
@@ -63,8 +64,8 @@ async function run(ctx: CommandContext): Promise<void> {
       distributorAddress: chainConfig.distributorAddress,
       strict: true,
     });
-    ctx.writer.write(
-      JSON.stringify({
+    emitResult(
+      {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         verb: 'claim-rewards',
@@ -76,7 +77,24 @@ async function run(ctx: CommandContext): Promise<void> {
         claimAttempted: tick.claimAttempted,
         failedRecoverable: tick.failedRecoverable,
         failedPermanent: tick.failedPermanent,
-      }) + '\n',
+      },
+      (v) => {
+        const value = v as { attempted: number; submitted: number; failedRecoverable: number; failedPermanent: number };
+        return [
+          'Reward claim tick complete.',
+          `Attempted services: ${value.attempted}`,
+          `Submitted claims: ${value.submitted}`,
+          `Recoverable failures: ${value.failedRecoverable}`,
+          `Permanent failures: ${value.failedPermanent}`,
+        ].join('\n');
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
     );
   } catch (e) {
     if (e instanceof TransientError || isRecoverableTransactionError(e)) {
@@ -106,14 +124,14 @@ async function run(ctx: CommandContext): Promise<void> {
 const command: CommandModule = {
   name: 'claim-rewards',
   summary: 'Pull pending protocol rewards to the fleet multisigs',
-  helpText: `Usage: jinn claim-rewards [--dry-run] [--yes]
+  helpText: `Usage: jinn claim-rewards [--dry-run] [--yes] [--human]
 
 Idempotent: zero-delta is success, not error. Second consecutive call
 may show submitted:0 and exits 0.
 
 Examples:
-  jinn claim-rewards --dry-run
-  jinn claim-rewards --yes
+  npx jinn claim-rewards --dry-run
+  npx jinn claim-rewards --yes
 `,
   run,
 };

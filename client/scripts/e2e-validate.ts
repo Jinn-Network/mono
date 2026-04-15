@@ -181,6 +181,7 @@ async function runJinnCliSubprocess(
   }
 
   const child = spawn('yarn', ['exec', 'tsx', jinnBin, ...finalArgs], {
+  const child = spawn('yarn', ['exec', 'tsx', jinnBin, ...finalArgs], {
     cwd: clientRoot,
     stdio: stdio as ('ignore' | 'pipe' | number)[],
     env: { ...process.env },

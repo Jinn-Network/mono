@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
+import { emitResult } from '../output.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleHistoryV1 } from '../../api/history-build.js';
 import { emitEnvelope } from '../../errors/envelope.js';
@@ -14,6 +15,7 @@ async function run(ctx: CommandContext): Promise<void> {
         since: { type: 'string' },
         cursor: { type: 'string' },
         json: { type: 'boolean', default: false },
+        human: { type: 'boolean', default: false },
       },
       allowPositionals: false,
     });
@@ -36,22 +38,27 @@ async function run(ctx: CommandContext): Promise<void> {
     since: parsed.values.since as string | undefined,
     cursor: parsed.values.cursor as string | undefined,
   });
-  ctx.writer.write(JSON.stringify(payload) + '\n');
+  emitResult(payload, (v) => JSON.stringify(v, null, 2), {
+    json: Boolean(parsed.values.json),
+    human: Boolean(parsed.values.human),
+    writer: ctx.writer,
+    stdoutIsTty: ctx.stdoutIsTty,
+    noColor: Boolean(ctx.env['NO_COLOR']),
+  });
 }
 
 const command: CommandModule = {
   name: 'history',
   summary: 'Recent protocol activity (intents, claims, deliveries, evaluations, rewards)',
-  helpText: `Usage: jinn history [--since <ISO-8601>] [--limit <N>] [--json]
+  helpText: `Usage: jinn history [--since <ISO-8601>] [--limit <N>] [--human]
 
 Returns recent protocol events from the local activity log. Each
 event has a stable \`kind\` enum (intent_posted, request_claimed,
 delivery_submitted, evaluation_submitted, reward_claimed, other).
 
 Examples:
-  jinn history --limit 20
-  jinn history --since 2026-04-14T00:00:00Z --json
-  jinn history --json | jq '.events[] | select(.outcome == "failed")'
+  npx jinn history --limit 20
+  npx jinn history --human
 `,
   run,
 };

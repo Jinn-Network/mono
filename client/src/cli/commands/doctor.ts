@@ -1,9 +1,12 @@
 import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
+import { emitEnvelope } from '../../errors/envelope.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../../preflight/claude-binary.js';
-import { loadConfig, type JinnConfig } from '../../config.js';
+import { getConfigPathFromArgs, loadConfig, type JinnConfig } from '../../config.js';
 import { getChainConfig } from '../../earning/contracts.js';
 
 interface CheckResult {
@@ -95,7 +98,28 @@ function claudeBinaryCheckForDoctor(claudePath: string, result: ClaudeBinaryChec
 }
 
 async function run(ctx: CommandContext): Promise<void> {
-  const config = loadConfig();
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: ctx.argv,
+      options: { ...COMMON_FLAGS },
+      allowPositionals: false,
+    });
+  } catch (err) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: err instanceof Error ? err.message : String(err),
+        exampleCli: 'jinn doctor',
+        details: { field: 'flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+  const configPath =
+    getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
+  const config = loadConfig(configPath);
   const checks: CheckResult[] = [];
 
   checks.push(await checkNodeVersion());
@@ -116,16 +140,18 @@ async function run(ctx: CommandContext): Promise<void> {
   };
 
   emitResult(payload, (v) => JSON.stringify(v, null, 2), {
-    json: false,
+    json: Boolean(parsed.values.json),
+    human: Boolean(parsed.values.human),
     writer: ctx.writer,
     stdoutIsTty: ctx.stdoutIsTty,
+    noColor: Boolean(ctx.env['NO_COLOR']),
   });
 }
 
 const command: CommandModule = {
   name: 'doctor',
   summary: 'Preflight checks: answers "would jinn run work?" without running it',
-  helpText: `Usage: jinn doctor [--json]
+  helpText: `Usage: jinn doctor [--human] [--config <path>]
 
 Runs a set of non-mutating checks against the local environment and
 configuration:
@@ -134,13 +160,13 @@ configuration:
   - keystore_readable   mnemonic keystore in configured earning directory (optional)
   - deployment_loaded   testnet/mainnet contract addresses resolved
 
-Emits a JSON object with a checks array, an overall ok flag, and a
-blockingCount. Exit code is 0 even when checks fail — callers read
-the JSON to decide whether to proceed.
+By default, emits a machine-readable JSON object with a checks array,
+an overall ok flag, and a blockingCount. Exit code is 0 even when
+checks fail — callers read the result to decide whether to proceed.
 
 Examples:
-  jinn doctor
-  jinn doctor --json | jq '.ok'
+  npx jinn doctor
+  npx jinn doctor --human
 `,
   run,
 };

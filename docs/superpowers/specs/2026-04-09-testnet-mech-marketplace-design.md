@@ -31,7 +31,7 @@ Vendored into: `contracts/src/vendor/mech/`
 
 | Contract | Source | Purpose |
 |----------|--------|---------|
-| `JinnRouter.sol` | `jinn-cli-agents/contracts/staking/` | Request routing + activity tracking + OLAS activity checker |
+| `JinnRouter.sol` | `legacy/jinn-cli-agents-reference/contracts/staking/` | Request routing + activity tracking + OLAS activity checker |
 | `ClaimRegistry.sol` | `contracts/src/claiming/` | Job claim coordination (optional) |
 
 ### 3.3 New staking proxy
@@ -150,7 +150,7 @@ JINN_TESTNET_TOKEN_DEPLOYMENT=../contracts/deployment-phase1a-token-baseSepolia-
 JINN_TESTNET_MECH_DEPLOYMENT=../contracts/deployment-phase1b-mech-baseSepolia-fast.json \
 BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
 JINN_PASSWORD=<keystore-password> \
-npm start
+npx jinn run
 ```
 
 The client bootstraps (wallet → Safe → service → staking → mech), then starts the daemon. The daemon runs the full training loop: posting desired states, restoring via Claude, delivering results, claiming deliveries, creating evaluation jobs.

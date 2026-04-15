@@ -2,16 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { isJsonMode, formatJson, formatHuman } from '../../src/cli/output.js';
 
 describe('isJsonMode', () => {
-  it('is true when --json is in flags', () => {
-    expect(isJsonMode({ json: true, stdoutIsTty: true })).toBe(true);
+  it('is true by default on a TTY', () => {
+    expect(isJsonMode({ json: false, human: false, stdoutIsTty: true })).toBe(true);
   });
 
-  it('is true when stdout is not a TTY', () => {
-    expect(isJsonMode({ json: false, stdoutIsTty: false })).toBe(true);
-  });
-
-  it('is false when stdout is a TTY and --json is not set', () => {
-    expect(isJsonMode({ json: false, stdoutIsTty: true })).toBe(false);
+  it('is false when --human is set', () => {
+    expect(isJsonMode({ json: false, human: true, stdoutIsTty: true })).toBe(false);
   });
 });
 

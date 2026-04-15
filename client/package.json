@@ -15,7 +15,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "tsx src/main.ts",
     "status": "tsx scripts/status.ts",
     "e2e": "tsx scripts/e2e-validate.ts",
     "staking": "tsx scripts/staking-validate.ts",
