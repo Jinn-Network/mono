@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli/index.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 function captureIo() {
   const writes: string[] = [];
@@ -108,5 +110,29 @@ describe('runCli', () => {
     });
     expect(io.exits).toEqual([]);
     expect(io.writes.join('')).not.toContain('Unknown fleet subverb');
+  });
+
+  it('keeps fleet introspection for fleet --human on a fresh home directory', async () => {
+    const prevHome = process.env.HOME;
+    const prevXdg = process.env.XDG_CONFIG_HOME;
+    const home = mkdtempSync(`${tmpdir()}/jinn-home-`);
+    process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = home;
+
+    try {
+      const io = captureIo();
+      await runCli(['fleet', '--human'], {
+        writer: io.writer,
+        exit: io.exit,
+        stdoutIsTty: true,
+      });
+      expect(io.exits).toEqual([]);
+      expect(io.writes.join('')).not.toContain('"code":"fatal"');
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prevXdg;
+    }
   });
 });

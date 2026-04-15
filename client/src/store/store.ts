@@ -1,4 +1,6 @@
 import Database from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS own_activity (
@@ -38,6 +40,9 @@ export class Store {
 
   constructor(dbPath: string) {
     this.path = dbPath;
+    if (dbPath !== ':memory:') {
+      mkdirSync(dirname(dbPath), { recursive: true });
+    }
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
