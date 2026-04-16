@@ -75,6 +75,7 @@ async function run(ctx: CommandContext): Promise<void> {
     earningDir: config.earningDir,
     chain: config.network === 'testnet' ? 'base-sepolia' : 'base',
     rpcUrl: config.rpcUrl,
+    env: ctx.env,
     stakingMode: config.stakingMode,
     targetServices: config.targetServices,
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,

@@ -15,6 +15,9 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Store } from '../store/store.js';
 import { addX402Routes, type X402Config } from '../x402/handler.js';
 import {
@@ -38,11 +41,21 @@ export interface ApiServer {
   close(): Promise<void>;
 }
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+let dashboardHtml: string;
+try {
+  dashboardHtml = readFileSync(join(__dirname, '..', 'dashboard', 'index.html'), 'utf-8');
+} catch {
+  dashboardHtml = '<html><body><p>Dashboard not found. Rebuild with <code>yarn build</code>.</p></body></html>';
+}
+
 export async function startApiServer(config: ApiServerConfig): Promise<ApiServer> {
   const { store } = config;
   const app = new Hono();
 
   app.use(cors());
+
+  app.get('/', (c) => c.html(dashboardHtml));
 
   app.get('/v1/status', async (c) => {
     try {

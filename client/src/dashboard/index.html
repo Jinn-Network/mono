@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jinn operator dashboard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: #e0e0e0;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  @media (min-width: 900px) {
+    .grid { grid-template-columns: 1fr 1fr; }
+    .full-width { grid-column: 1 / -1; }
+  }
+  .card {
+    border: 1px solid #1a1a2e;
+    border-radius: 6px;
+    padding: 14px 16px;
+    background: #0f0f18;
+  }
+  .card-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #888;
+    margin-bottom: 10px;
+  }
+
+  /* Health bar */
+  .health-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .health-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .health-dot.ok { background: #22c55e; }
+  .health-dot.warn { background: #f59e0b; }
+  .health-dot.error { background: #ef4444; }
+  .health-meta {
+    font-size: 12px;
+    color: #888;
+  }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    text-align: left;
+    font-weight: 500;
+    color: #888;
+    padding: 4px 8px 4px 0;
+    border-bottom: 1px solid #1a1a2e;
+  }
+  td {
+    padding: 4px 8px 4px 0;
+    border-bottom: 1px solid #111;
+  }
+
+  /* Step badges */
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+  .badge-complete { background: #22c55e22; color: #22c55e; }
+  .badge-staked, .badge-mech_deployed, .badge-service_staked { background: #3b82f622; color: #3b82f6; }
+  .badge-awaiting_stake, .badge-awaiting_funding { background: #f59e0b22; color: #f59e0b; }
+  .badge-default { background: #88888822; color: #888; }
+
+  /* KV pairs */
+  .kv { display: flex; justify-content: space-between; padding: 3px 0; }
+  .kv-key { color: #888; }
+  .kv-val { color: #e0e0e0; text-align: right; }
+
+  /* Warning bg */
+  .warn-bg { background: #f59e0b11; border-color: #f59e0b44; }
+  .ok-bg { background: #22c55e08; border-color: #22c55e33; }
+  .red-bg { background: #ef444411; border-color: #ef444444; }
+
+  /* Activity list */
+  .activity-list {
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 12px;
+  }
+  .activity-list div {
+    padding: 2px 0;
+    border-bottom: 1px solid #111;
+  }
+  .activity-list .role { color: #3b82f6; }
+
+  /* Next actions */
+  .actions-list { list-style: disc; padding-left: 18px; }
+  .actions-list li { padding: 2px 0; font-size: 13px; }
+
+  .error-msg { color: #ef4444; font-size: 12px; }
+  .truncated { font-family: inherit; }
+</style>
+</head>
+<body>
+<h1>jinn operator dashboard</h1>
+<div class="grid">
+
+  <!-- Health bar -->
+  <div id="panel-health" class="card full-width">
+    <div class="card-title">health</div>
+    <div class="health-bar">
+      <span id="health-dot" class="health-dot warn"></span>
+      <span id="health-label">connecting...</span>
+      <span id="health-meta" class="health-meta"></span>
+    </div>
+  </div>
+
+  <!-- Fleet -->
+  <div id="panel-fleet" class="card">
+    <div class="card-title">fleet</div>
+    <div id="fleet-content">--</div>
+  </div>
+
+  <!-- Master gas -->
+  <div id="panel-gas" class="card">
+    <div class="card-title">master gas</div>
+    <div id="gas-content">--</div>
+  </div>
+
+  <!-- Activity -->
+  <div id="panel-activity" class="card">
+    <div class="card-title">activity</div>
+    <div id="activity-content">--</div>
+  </div>
+
+  <!-- Rewards -->
+  <div id="panel-rewards" class="card">
+    <div class="card-title">rewards</div>
+    <div id="rewards-content">--</div>
+  </div>
+
+  <!-- Next actions -->
+  <div id="panel-actions" class="card full-width">
+    <div class="card-title">next actions</div>
+    <div id="actions-content">--</div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  var POLL_INTERVAL = 5000;
+
+  function $(id) { return document.getElementById(id); }
+
+  function truncAddr(addr) {
+    if (!addr || addr.length < 12) return addr || '--';
+    return addr.slice(0, 6) + '...' + addr.slice(-4);
+  }
+
+  function weiToEth(weiStr) {
+    if (!weiStr) return '--';
+    try {
+      var big = BigInt(weiStr);
+      var intPart = big / 10n**18n;
+      var fracPart = big % 10n**18n;
+      var fracStr = fracPart.toString().padStart(18, '0').slice(0, 4);
+      return intPart.toString() + '.' + fracStr;
+    } catch(e) { return weiStr; }
+  }
+
+  function stepBadgeClass(step) {
+    if (step === 'complete') return 'badge-complete';
+    if (['staked','mech_deployed','service_staked'].indexOf(step) !== -1) return 'badge-staked';
+    if (['awaiting_stake','awaiting_funding'].indexOf(step) !== -1) return 'badge-awaiting_stake';
+    return 'badge-default';
+  }
+
+  function setHealthIndicator(state, msg) {
+    var dot = $('health-dot');
+    var label = $('health-label');
+    dot.className = 'health-dot ' + (state === 'ok' ? 'ok' : 'error');
+    label.textContent = state === 'ok' ? 'connected' : 'error: ' + (msg || 'unknown');
+  }
+
+  function render(data) {
+    // Health
+    var dot = $('health-dot');
+    var label = $('health-label');
+    var meta = $('health-meta');
+
+    var isShutdown = data.daemon && data.daemon.shutdownState;
+    var rpcOk = data.rpc && data.rpc.ok;
+
+    if (isShutdown) {
+      dot.className = 'health-dot warn';
+      label.textContent = 'shutting down (' + data.daemon.shutdownState + ')';
+    } else if (!rpcOk) {
+      dot.className = 'health-dot error';
+      label.textContent = 'rpc error' + (data.rpc && data.rpc.error ? ': ' + data.rpc.error : '');
+    } else {
+      dot.className = 'health-dot ok';
+      label.textContent = 'healthy';
+    }
+
+    var metaParts = [];
+    if (data.rpc && data.rpc.chainId) metaParts.push('chain ' + data.rpc.chainId);
+    if (data.rpc && data.rpc.blockNumber) metaParts.push('block ' + data.rpc.blockNumber);
+    if (data.daemon && data.daemon.timestamp) {
+      var d = new Date(data.daemon.timestamp);
+      metaParts.push('at ' + d.toLocaleTimeString());
+    }
+    meta.textContent = metaParts.join(' | ');
+
+    // Fleet
+    renderFleet(data.fleet);
+
+    // Master gas
+    renderGas(data.masterGas);
+
+    // Activity
+    renderActivity(data.activity);
+
+    // Rewards
+    renderRewards(data.rewards, data.earnings);
+
+    // Next actions
+    renderActions(data.nextActions);
+  }
+
+  function renderFleet(fleet) {
+    var el = $('fleet-content');
+    el.textContent = '';
+
+    if (!fleet || !fleet.loaded) {
+      el.textContent = 'No fleet loaded';
+      return;
+    }
+
+    if (fleet.services.length === 0) {
+      el.textContent = 'No services';
+      return;
+    }
+
+    var tbl = document.createElement('table');
+    var thead = document.createElement('thead');
+    var hrow = document.createElement('tr');
+    ['#','step','svcId','safe','mech'].forEach(function(h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    tbl.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    fleet.services.forEach(function(s) {
+      var tr = document.createElement('tr');
+
+      var tdIdx = document.createElement('td');
+      tdIdx.textContent = String(s.index);
+      tr.appendChild(tdIdx);
+
+      var tdStep = document.createElement('td');
+      var badge = document.createElement('span');
+      badge.className = 'badge ' + stepBadgeClass(s.step);
+      badge.textContent = s.step;
+      tdStep.appendChild(badge);
+      tr.appendChild(tdStep);
+
+      var tdSvc = document.createElement('td');
+      tdSvc.textContent = s.serviceId != null ? String(s.serviceId) : '--';
+      tr.appendChild(tdSvc);
+
+      var tdSafe = document.createElement('td');
+      tdSafe.textContent = truncAddr(s.safeAddress);
+      tdSafe.title = s.safeAddress || '';
+      tdSafe.className = 'truncated';
+      tr.appendChild(tdSafe);
+
+      var tdMech = document.createElement('td');
+      tdMech.textContent = truncAddr(s.mechAddress);
+      tdMech.title = s.mechAddress || '';
+      tdMech.className = 'truncated';
+      tr.appendChild(tdMech);
+
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    el.appendChild(tbl);
+
+    var summary = document.createElement('div');
+    summary.style.marginTop = '8px';
+    summary.style.fontSize = '12px';
+    summary.style.color = '#888';
+    summary.textContent = fleet.stakedLikeCount + ' staked, ' + fleet.completeCount + ' complete';
+    el.appendChild(summary);
+  }
+
+  function renderGas(gas) {
+    var el = $('gas-content');
+    var panel = $('panel-gas');
+    el.textContent = '';
+    panel.className = 'card';
+
+    if (!gas) { el.textContent = '--'; return; }
+
+    var runwayLow = gas.runwayDaysExcess !== undefined && Number(gas.runwayDaysExcess) < 3;
+    if (runwayLow) {
+      panel.className = 'card red-bg';
+    }
+
+    var pairs = [
+      ['address', truncAddr(gas.address)],
+      ['balance', weiToEth(gas.balanceWei) + ' ETH'],
+      ['daily est.', weiToEth(gas.dailyEstimateWei) + ' ETH'],
+      ['runway', gas.runwayDaysExcess !== undefined ? gas.runwayDaysExcess + ' days' : '--'],
+    ];
+    if (gas.error) {
+      pairs.push(['error', gas.error]);
+    }
+
+    pairs.forEach(function(p) {
+      var row = document.createElement('div');
+      row.className = 'kv';
+      var k = document.createElement('span');
+      k.className = 'kv-key';
+      k.textContent = p[0];
+      var v = document.createElement('span');
+      v.className = 'kv-val';
+      v.textContent = p[1];
+      if (p[0] === 'address') v.title = gas.address || '';
+      if (p[0] === 'error') v.className = 'kv-val error-msg';
+      row.appendChild(k);
+      row.appendChild(v);
+      el.appendChild(row);
+    });
+  }
+
+  function renderActivity(act) {
+    var el = $('activity-content');
+    el.textContent = '';
+
+    if (!act) { el.textContent = '--'; return; }
+
+    // Counts
+    var counts = act.counts || {};
+    var keys = Object.keys(counts);
+    if (keys.length > 0) {
+      keys.forEach(function(k) {
+        var row = document.createElement('div');
+        row.className = 'kv';
+        var kSpan = document.createElement('span');
+        kSpan.className = 'kv-key';
+        kSpan.textContent = k;
+        var vSpan = document.createElement('span');
+        vSpan.className = 'kv-val';
+        vSpan.textContent = String(counts[k]);
+        row.appendChild(kSpan);
+        row.appendChild(vSpan);
+        el.appendChild(row);
+      });
+    } else {
+      var none = document.createElement('div');
+      none.style.color = '#888';
+      none.style.fontSize = '12px';
+      none.textContent = 'no activity recorded';
+      el.appendChild(none);
+    }
+
+    // Recent
+    var recent = act.recent || [];
+    if (recent.length > 0) {
+      var hdr = document.createElement('div');
+      hdr.style.marginTop = '10px';
+      hdr.style.fontSize = '11px';
+      hdr.style.color = '#666';
+      hdr.textContent = 'recent';
+      el.appendChild(hdr);
+
+      var list = document.createElement('div');
+      list.className = 'activity-list';
+      recent.forEach(function(r) {
+        var item = document.createElement('div');
+        var roleSpan = document.createElement('span');
+        roleSpan.className = 'role';
+        roleSpan.textContent = r.role;
+        item.appendChild(roleSpan);
+        var idText = document.createTextNode(' ' + truncAddr(r.requestId));
+        item.appendChild(idText);
+        list.appendChild(item);
+      });
+      el.appendChild(list);
+    }
+  }
+
+  function renderRewards(rewards, earnings) {
+    var el = $('rewards-content');
+    el.textContent = '';
+
+    if (!rewards) { el.textContent = '--'; return; }
+
+    var pairs = [
+      ['pending', rewards.pendingStakingRewardsWei ? weiToEth(rewards.pendingStakingRewardsWei) + ' ETH' : (rewards.pendingRewardsError || '--')],
+      ['claim interval', rewards.claimLoopIntervalMs ? (rewards.claimLoopIntervalMs / 1000) + 's' : 'disabled'],
+      ['last claim', rewards.lastClaimTickAt || '--'],
+    ];
+
+    pairs.forEach(function(p) {
+      var row = document.createElement('div');
+      row.className = 'kv';
+      var k = document.createElement('span');
+      k.className = 'kv-key';
+      k.textContent = p[0];
+      var v = document.createElement('span');
+      v.className = 'kv-val';
+      v.textContent = p[1];
+      if (p[0] === 'pending' && rewards.pendingRewardsError) v.className = 'kv-val error-msg';
+      row.appendChild(k);
+      row.appendChild(v);
+      el.appendChild(row);
+    });
+
+    if (earnings && earnings.hint) {
+      var hint = document.createElement('div');
+      hint.style.marginTop = '8px';
+      hint.style.fontSize = '11px';
+      hint.style.color = '#888';
+      hint.textContent = earnings.hint;
+      el.appendChild(hint);
+    }
+  }
+
+  function renderActions(actions) {
+    var el = $('actions-content');
+    var panel = $('panel-actions');
+    el.textContent = '';
+
+    if (!actions || actions.length === 0) {
+      panel.className = 'card full-width ok-bg';
+      el.textContent = 'no urgent actions';
+      return;
+    }
+
+    var isOnlyNoUrgent = actions.length === 1 && actions[0].toLowerCase().indexOf('no urgent') !== -1;
+    panel.className = isOnlyNoUrgent ? 'card full-width ok-bg' : 'card full-width warn-bg';
+
+    var ul = document.createElement('ul');
+    ul.className = 'actions-list';
+    actions.forEach(function(a) {
+      var li = document.createElement('li');
+      li.textContent = a;
+      ul.appendChild(li);
+    });
+    el.appendChild(ul);
+  }
+
+  async function poll() {
+    try {
+      var res = await fetch('/v1/status');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var data = await res.json();
+      render(data);
+      setHealthIndicator('ok');
+    } catch(err) {
+      setHealthIndicator('error', err.message);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    poll();
+    setInterval(poll, POLL_INTERVAL);
+  });
+})();
+</script>
+</body>
+</html>

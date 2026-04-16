@@ -14,13 +14,15 @@
     "node": ">=20"
   },
   "bin": {
-    "jinn": "./dist/bin/jinn.js"
+    "jinn": "./dist/bin/jinn.js",
+    "jinn-mcp": "./dist/bin/jinn-mcp.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist/",
     "deployments/",
+    "skills/",
     "README.md",
     "LICENSE"
   ],
@@ -29,7 +31,7 @@
   },
   "scripts": {
     "jinn": "tsx src/bin/jinn.ts",
-    "build": "tsc && chmod +x dist/bin/jinn.js && node scripts/write-dist-build-meta.mjs",
+    "build": "tsc && chmod +x dist/bin/jinn.js dist/bin/jinn-mcp.js && mkdir -p dist/dashboard && cp src/dashboard/index.html dist/dashboard/index.html && node scripts/write-dist-build-meta.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -61,6 +63,9 @@
     "hono": "^4.12.10",
     "viem": "^2.0.0",
     "zod": "^3.22.0"
+  },
+  "optionalDependencies": {
+    "@coinbase/cdp-sdk": "^1.47.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

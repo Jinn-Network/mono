@@ -329,7 +329,7 @@ export async function main(): Promise<DaemonStartupInfo> {
   process.on('exit', removePidfile);
 
   await daemon.start();
-  console.log('[main] Daemon running. Press Ctrl+C to stop.');
+  console.log(`[main] Daemon running. Dashboard: http://127.0.0.1:${config.apiPort}`);
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),

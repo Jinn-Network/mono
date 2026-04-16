@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
 
 const bootstrapReturn = vi.hoisted(() => ({
@@ -21,8 +21,19 @@ const passwordResult = vi.hoisted(() => ({
       | { ok: false; message: string },
 }));
 
+const loadConfigMock = vi.fn();
+let constructorOptions: Record<string, unknown> | undefined;
+
+vi.mock('../../../src/config.js', () => ({
+  loadConfig: loadConfigMock,
+}));
+
 vi.mock('../../../src/earning/bootstrap.js', () => ({
   FleetBootstrapper: class {
+    constructor(options: Record<string, unknown>) {
+      constructorOptions = options;
+    }
+
     async bootstrap() {
       return { ...bootstrapReturn.val };
     }
@@ -52,6 +63,23 @@ function makeCtx(
 }
 
 describe('bootstrap command', () => {
+  beforeEach(() => {
+    loadConfigMock.mockReturnValue({
+      earningDir: '/tmp/earning',
+      network: 'testnet',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      targetServices: 1,
+      debug: false,
+      pollIntervalMs: 5000,
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    constructorOptions = undefined;
+  });
+
   it('emits funding_required envelope and exits 10 when bootstrap returns funding', async () => {
     passwordResult.val = { ok: true, password: 'test' };
     bootstrapReturn.val = {
@@ -169,6 +197,33 @@ describe('bootstrap command', () => {
     const out = writes[writes.length - 1];
     expect(out).toContain('Bootstrap complete.');
     expect(out).toContain('0xaaa');
+    expect(exits).toEqual([0]);
+  });
+
+  it('passes the command env into FleetBootstrapper', async () => {
+    passwordResult.val = { ok: true, password: 'test-password' };
+    bootstrapReturn.val = {
+      ok: true,
+      message: 'ok',
+      fleet_state: {
+        master_address: '0xmaster',
+        services: [],
+      },
+    };
+    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    const { ctx, exits } = makeCtx({
+      JINN_PASSWORD: 'test-password',
+      JINN_DISABLE_TESTNET_FAUCET: '1',
+    }, { argv: ['--json'] });
+
+    await bootstrap.run(ctx);
+
+    expect(constructorOptions).toEqual(expect.objectContaining({
+      env: expect.objectContaining({
+        JINN_PASSWORD: 'test-password',
+        JINN_DISABLE_TESTNET_FAUCET: '1',
+      }),
+    }));
     expect(exits).toEqual([0]);
   });
 });
