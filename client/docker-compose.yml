@@ -6,8 +6,12 @@ version: '3.8'
 # 1. Create a .env file in this directory with your password:
 #    echo "JINN_PASSWORD=your-secure-password" > .env
 #
-# 2. (REQUIRED ONCE) Authenticate Claude (entrypoint must be `claude`, not `jinn`):
-#    docker compose run --rm -it --entrypoint claude jinn-daemon auth login
+# 2. (REQUIRED ONCE) Authenticate Claude for Docker:
+#    On your host machine (where you have a browser), run:
+#      claude setup-token
+#    This opens OAuth in the browser and gives you a long-lived sk-* token.
+#    Add it to your .env file:
+#      echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env
 #
 # 3. Start the daemon in the background:
 #    docker compose up -d
@@ -23,6 +27,7 @@ services:
     environment:
       - JINN_NETWORK=${JINN_NETWORK:-testnet}
       - JINN_POLL_INTERVAL_MS=${JINN_POLL_INTERVAL_MS:-5000}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
     ports:
       - "7331:7331"
     volumes:

@@ -13,6 +13,7 @@ import { Registry8004, type RegistryConfig } from '../discovery/registry.js';
 import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../discovery/subgraph.js';
 import type { X402Config } from '../x402/handler.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
+import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -37,6 +38,12 @@ export interface DaemonConfig {
    */
   rewardClaim?: RewardClaimLoopConfig;
 
+  /**
+   * Periodic agent EOA and Safe balance top-ups from the master wallet.
+   * Omitted or interval 0 → loop not started.
+   */
+  balanceTopup?: BalanceTopupLoopConfig;
+
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
 }
@@ -54,6 +61,7 @@ export class Daemon {
   private registry?: Registry8004;
   private readonly apiPort: number;
   private rewardClaimLoop?: RewardClaimLoop;
+  private balanceTopupLoop?: BalanceTopupLoop;
 
   constructor(private readonly config: DaemonConfig) {
     this.store = new Store(config.dbPath);
@@ -65,6 +73,12 @@ export class Daemon {
     if (config.rewardClaim && config.rewardClaim.intervalMs > 0) {
       this.rewardClaimLoop = new RewardClaimLoop({
         ...config.rewardClaim,
+        jinnStore: this.store,
+      });
+    }
+    if (config.balanceTopup && config.balanceTopup.intervalMs > 0) {
+      this.balanceTopupLoop = new BalanceTopupLoop({
+        ...config.balanceTopup,
         jinnStore: this.store,
       });
     }
@@ -124,6 +138,11 @@ export class Daemon {
         this.rewardClaimLoop.run().catch(err => console.error('[daemon] reward-claim crashed:', err)),
       );
     }
+    if (this.balanceTopupLoop) {
+      this.loopPromises.push(
+        this.balanceTopupLoop.run().catch(err => console.error('[daemon] balance-topup crashed:', err)),
+      );
+    }
   }
 
   async stop(): Promise<void> {
@@ -131,6 +150,7 @@ export class Daemon {
     this.restorerLoop.stop();
     this.deliveryWatcherLoop.stop();
     this.rewardClaimLoop?.stop();
+    this.balanceTopupLoop?.stop();
     this.peerSync?.stop();
 
     // Stop the adapter to unblock any pending async iterators

@@ -24,6 +24,7 @@ import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { emitEnvelope } from './errors/envelope.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
+import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
 import { FleetStateStore } from './earning/store.js';
@@ -256,6 +257,22 @@ export async function main(): Promise<DaemonStartupInfo> {
     emitClaudeBinaryPreflightFailure(preflight.detail, config.claudePath);
   }
 
+  const authContext = detectAuthContext({ cwd: process.cwd() });
+  const authProbe = probeClaudeAuth({ context: authContext, cwd: process.cwd() });
+  if (!authProbe.authenticated) {
+    emitEnvelope({
+      code: 'invalid_invocation',
+      message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
+      hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
+      exampleCli: 'jinn auth',
+      details: {
+        field: 'claude_auth',
+        context: authContext,
+        authenticated: false,
+      },
+    });
+  }
+
   const runner = new ClaudeRunner({
     claudePath: config.claudePath,
     model: config.claudeModel,
@@ -300,6 +317,20 @@ export async function main(): Promise<DaemonStartupInfo> {
             store: earningStore,
             chain: NETWORK_CHAIN,
             distributorAddress: CHAIN_CONFIG.distributorAddress,
+          }
+        : undefined,
+    balanceTopup:
+      config.balanceTopupIntervalMs > 0
+        ? {
+            intervalMs: config.balanceTopupIntervalMs,
+            publicClient,
+            masterWallet,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            eoaTopupTrigger: CHAIN_CONFIG.eoaTopupTrigger,
+            eoaTopupTarget: CHAIN_CONFIG.minEoaGasEth,
+            safeTopupTrigger: CHAIN_CONFIG.safeTopupTrigger,
+            safeTopupTarget: CHAIN_CONFIG.minSafeEth,
           }
         : undefined,
   });

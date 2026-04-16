@@ -6,6 +6,7 @@ import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../../preflight/claude-binary.js';
+import { detectAuthContext, probeClaudeAuth } from '../../preflight/claude-auth.js';
 import { getConfigPathFromArgs, loadConfig, type JinnConfig } from '../../config.js';
 import { getChainConfig } from '../../earning/contracts.js';
 
@@ -97,6 +98,22 @@ function claudeBinaryCheckForDoctor(claudePath: string, result: ClaudeBinaryChec
   };
 }
 
+async function checkClaudeAuth(): Promise<CheckResult> {
+  const cwd = process.cwd();
+  const context = detectAuthContext({ cwd });
+  const probe = probeClaudeAuth({ context, cwd });
+  return {
+    name: 'claude_auth',
+    ok: probe.authenticated,
+    detail: probe.authenticated
+      ? `${probe.detail} (${context})`
+      : `Not authenticated (${context})`,
+    ...(probe.authenticated
+      ? {}
+      : { remedy: 'Run `jinn auth` to authenticate Claude.' }),
+  };
+}
+
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
   try {
@@ -126,6 +143,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
   const claudeResult = await checkClaudeBinary(config.claudePath);
   checks.push(claudeBinaryCheckForDoctor(config.claudePath, claudeResult));
+  checks.push(await checkClaudeAuth());
 
   checks.push(await checkKeystoreReadable(config.earningDir));
   checks.push(await checkDeploymentLoaded(config));
@@ -157,6 +175,7 @@ Runs a set of non-mutating checks against the local environment and
 configuration:
   - node_version        Node.js >= 20
   - claude_binary       claude CLI resolvable on PATH
+  - claude_auth          Claude CLI authenticated
   - keystore_readable   mnemonic keystore in configured earning directory (optional)
   - deployment_loaded   testnet/mainnet contract addresses resolved
 

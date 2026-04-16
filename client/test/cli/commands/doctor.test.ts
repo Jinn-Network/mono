@@ -46,6 +46,14 @@ describe('doctor command', () => {
     expect(names).toContain('keystore_readable');
   });
 
+  it('includes the claude_auth check', async () => {
+    const { ctx, writes } = makeCtx();
+    await doctor.run(ctx);
+    const parsed = JSON.parse(writes[0]);
+    const names = parsed.checks.map((c: { name: string }) => c.name);
+    expect(names).toContain('claude_auth');
+  });
+
   it('emits invalid_invocation for bad flags', async () => {
     const { ctx, writes, exits } = makeCtx();
     ctx.argv = ['--bogus'];

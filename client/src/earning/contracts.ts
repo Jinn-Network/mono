@@ -129,6 +129,8 @@ export interface ChainConfig {
   serviceNft: string;
   minEoaGasEth: bigint;
   minSafeEth: bigint;
+  eoaTopupTrigger: bigint;
+  safeTopupTrigger: bigint;
   jinnRouter?: string;
   distributorAddress?: string;
   /**
@@ -191,6 +193,10 @@ const BASE_CONFIG: ChainConfig = {
   minEoaGasEth: 5_000_000_000_000_000n, // 0.005 ETH
   minSafeEth: 2_000_000_000_000_000n,   // 0.002 ETH
 
+  // Balance top-up triggers (refill starts when balance drops below these)
+  eoaTopupTrigger: 1_000_000_000_000_000n,  // 0.001 ETH
+  safeTopupTrigger: 500_000_000_000_000n,   // 0.0005 ETH
+
   routerClaimDeliveryVersion: 'v1',
 };
 
@@ -226,6 +232,10 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   // Conservative gas estimate
   minEoaGasEth: 5_000_000_000_000_000n, // 0.005 ETH
   minSafeEth: 2_000_000_000_000_000n,   // 0.002 ETH
+
+  // Balance top-up triggers (refill starts when balance drops below these)
+  eoaTopupTrigger: 1_000_000_000_000_000n,  // 0.001 ETH
+  safeTopupTrigger: 500_000_000_000_000n,   // 0.0005 ETH
 
   /** Phase 1b routers use V2 claimDelivery(bytes32,bytes32). */
   routerClaimDeliveryVersion: 'v2',

@@ -1,0 +1,31 @@
+# Jinn Client - Docker Release Acceptance Environment
+#
+# The acceptance scripts generate .acceptance/config.json and
+# .acceptance/docker-compose.env before invoking this compose file.
+# One-time Claude login against the dedicated acceptance auth volume:
+#
+#   docker compose --env-file .acceptance/docker-compose.env \
+#     -f docker-compose.acceptance.yml \
+#     run --rm -it --entrypoint claude jinn-acceptance-daemon auth login
+
+services:
+  jinn-acceptance-daemon:
+    image: ${JINN_ACCEPTANCE_IMAGE:-jinn-client:acceptance-local}
+    restart: "no"
+    environment:
+      JINN_PASSWORD: ${JINN_PASSWORD}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      NO_COLOR: ${NO_COLOR:-1}
+    volumes:
+      - jinn-acceptance-data:/data
+      - jinn-acceptance-claude-state:/root/.claude
+      - ${JINN_ACCEPTANCE_CONFIG_FILE:-./.acceptance/config.json}:/acceptance/config.json:ro
+    command: ["run", "--config", "/acceptance/config.json"]
+
+volumes:
+  jinn-acceptance-data:
+    name: ${JINN_ACCEPTANCE_DATA_VOLUME:-jinn-acceptance-data-volume}
+    external: true
+  jinn-acceptance-claude-state:
+    name: ${JINN_ACCEPTANCE_CLAUDE_VOLUME:-jinn-acceptance-claude-auth-volume}
+    external: true

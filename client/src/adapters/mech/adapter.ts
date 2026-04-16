@@ -410,6 +410,17 @@ export class MechAdapter implements ExecutionAdapter {
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
       const evaluationDataHex = cidToDigestHex(evaluationCid);
 
+      // Verify the restoration claim landed on-chain before submitting.
+      // RPC load balancers can serve stale state right after a write,
+      // causing the router's restorationDeliveryClaimed check to fail
+      // with RestorationNotClaimed (surfaces as Safe GS013).
+      const isClaimed = await this.verifyRestorationClaimed(requestId as `0x${string}`);
+      if (!isClaimed) {
+        console.error(`[mech] restorationDeliveryClaimed not yet visible for ${requestId} — will retry`);
+        this.claimedButNotEvaluated.add(requestId);
+        return;
+      }
+
       const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
       const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
 
@@ -442,6 +453,32 @@ export class MechAdapter implements ExecutionAdapter {
       // Track for retry on next poll cycle (doesn't require a new Deliver event)
       this.claimedButNotEvaluated.add(requestId);
     }
+  }
+
+  private async verifyRestorationClaimed(requestId: `0x${string}`): Promise<boolean> {
+    const MAX_POLLS = 5;
+    const POLL_DELAY_MS = 2_000;
+    const abi = [{
+      type: 'function' as const,
+      name: 'restorationDeliveryClaimed' as const,
+      inputs: [{ name: 'requestId', type: 'bytes32' as const }],
+      outputs: [{ name: '', type: 'bool' as const }],
+      stateMutability: 'view' as const,
+    }];
+
+    for (let i = 0; i < MAX_POLLS; i++) {
+      const claimed = await this.publicClient.readContract({
+        address: this.config.routerAddress,
+        abi,
+        functionName: 'restorationDeliveryClaimed',
+        args: [requestId],
+      });
+      if (claimed) return true;
+      if (i < MAX_POLLS - 1) {
+        await new Promise(r => setTimeout(r, POLL_DELAY_MS));
+      }
+    }
+    return false;
   }
 
   async stop(): Promise<void> {

@@ -17,6 +17,7 @@ import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
 import initCommand from './commands/init.js';
 import quickstartCommand from './commands/quickstart.js';
+import authCommand from './commands/auth.js';
 import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
 import runCommand from './commands/run.js';
@@ -40,6 +41,7 @@ const COMMANDS: CommandModule[] = [
   doctorCommand,
   initCommand,
   quickstartCommand,
+  authCommand,
   bootstrapCommand,
   fundRequirementsCommand,
   runCommand,

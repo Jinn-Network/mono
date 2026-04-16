@@ -1,0 +1,560 @@
+#!/usr/bin/env node
+/**
+ * Docker-first real testnet release acceptance harness.
+ *
+ * This is the primary manual end-to-end gate before creating a stable
+ * client-vX.Y.Z release. It builds the local release image, runs the daemon
+ * through docker compose against the dedicated acceptance volumes, observes two
+ * successful protocol cycles, then submits a real reward claim.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import {
+  buildOperatorClientConfig,
+  resolveAcceptanceRpcUrl,
+  toInt,
+} from './lib/acceptance-operator-config.mjs';
+import {
+  buildDockerComposeEnv,
+  dockerAcceptanceComposeEnvPath,
+  dockerAcceptanceConfigPath,
+  dockerAcceptanceEvidenceRoot,
+  dockerAcceptanceWorkspaceRoot,
+  formatEnvFile,
+  resolveDockerAcceptanceBaseEnv,
+} from './lib/docker-acceptance.mjs';
+import { summarizeArtifactRows } from './lib/acceptance-artifacts.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const clientRoot = join(__dirname, '..');
+const composeFile = join(clientRoot, 'docker-compose.acceptance.yml');
+const composeService = 'jinn-acceptance-daemon';
+const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
+const DEFAULT_POLL_MS = 15_000;
+const DEFAULT_TARGET_CYCLES = 2;
+
+function printHelp() {
+  console.log(`Usage: node scripts/testnet-acceptance-docker.mjs [options]
+
+Runs the Docker-first real testnet release acceptance gate:
+  yarn typecheck
+  yarn test
+  yarn build
+  yarn pack:smoke
+  yarn release:operator-gate
+  yarn release:testnet-acceptance
+  git tag client-vX.Y.Z
+
+Options:
+  --mode <steady-state|fresh-state> Validation mode (default: steady-state)
+  --evidence-dir <path>             Explicit evidence directory
+  --timeout-ms <ms>                 Max daemon runtime window (default: 1200000)
+  --poll-ms <ms>                    Poll interval while waiting for cycles
+  --target-cycles <n>               Required new cycles (default: 2)
+  --image-tag <tag>                 Local image tag (default: from .env.acceptance or jinn-client:acceptance-local)
+  --help                            Show this help
+
+Env resolution:
+  1. client/.env
+  2. client/.env.acceptance
+  3. current process env
+
+Required env after resolution:
+  JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD
+  JINN_TESTNET_ACCEPTANCE_RPC_URL or BASE_SEPOLIA_RPC_URL
+
+Generated files:
+  client/.acceptance/config.json
+  client/.acceptance/docker-compose.env
+
+Evidence:
+  client/acceptance-runs/<timestamp>-<runId>/
+`);
+}
+
+function fail(message, details) {
+  const error = new Error(message);
+  error.details = details;
+  throw error;
+}
+
+function timestampSlug(date = new Date()) {
+  return date.toISOString().replace(/[:.]/g, '-');
+}
+
+function makeRunId() {
+  return `${timestampSlug()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function ensureDir(path) {
+  mkdirSync(path, { recursive: true });
+}
+
+function writeJson(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function parseJsonStdout(stdout, label) {
+  const trimmed = stdout.trim();
+  if (!trimmed) fail(`${label}: expected JSON stdout but stdout was empty`);
+  const lines = trimmed.split('\n').map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (!lines[i].startsWith('{') && !lines[i].startsWith('[')) continue;
+    try {
+      return JSON.parse(lines[i]);
+    } catch {
+      // keep scanning
+    }
+  }
+  fail(`${label}: stdout did not contain JSON`, { stdout });
+}
+
+function runProcess(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd,
+    env: options.env,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
+}
+
+function runLoggedProcess(command, args, options = {}) {
+  const result = runProcess(command, args, options);
+  if (options.evidenceBase) {
+    writeFileSync(`${options.evidenceBase}.stdout`, result.stdout, 'utf8');
+    writeFileSync(`${options.evidenceBase}.stderr`, result.stderr, 'utf8');
+  }
+  return result;
+}
+
+function expectExit(result, expected, label) {
+  if (!expected.includes(result.status)) {
+    fail(`${label}: unexpected exit ${result.status}`, {
+      expected,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    });
+  }
+}
+
+function countHistoryKinds(payload) {
+  const counts = {};
+  for (const event of payload.events ?? []) {
+    counts[event.kind] = (counts[event.kind] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function sumPendingRewards(payload) {
+  return (payload.services ?? []).reduce((sum, svc) => sum + BigInt(svc.pending ?? '0'), 0n);
+}
+
+function composeArgs(composeEnvPath, extra) {
+  return ['compose', '--env-file', composeEnvPath, '-f', composeFile, ...extra];
+}
+
+function readGitCommit() {
+  const result = runProcess('git', ['rev-parse', 'HEAD'], { cwd: clientRoot });
+  if (result.status !== 0) {
+    return 'unknown';
+  }
+  return result.stdout.trim() || 'unknown';
+}
+
+function isGitDirty() {
+  const result = runProcess('git', ['status', '--short'], { cwd: clientRoot });
+  return result.status === 0 && result.stdout.trim().length > 0;
+}
+
+function queryDockerArtifactRows(composeEnvPath, desiredStateIds, evidenceBase) {
+  const script = `
+    import Database from 'better-sqlite3';
+    import { existsSync } from 'node:fs';
+    const dbPath = '/data/jinn.db';
+    const ids = JSON.parse(process.argv[1]);
+    if (!existsSync(dbPath)) {
+      console.log('[]');
+      process.exit(0);
+    }
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const placeholders = ids.map(() => '?').join(', ');
+      const rows = db.prepare(
+        \`SELECT desired_state_id, request_id, title, tags, outcome, created_at
+            FROM artifacts
+           WHERE desired_state_id IN (\${placeholders})
+           ORDER BY created_at ASC\`,
+      ).all(...ids);
+      console.log(JSON.stringify(rows));
+    } finally {
+      db.close();
+    }
+  `;
+  const result = runLoggedProcess(
+    'docker',
+    composeArgs(composeEnvPath, [
+      'run',
+      '--rm',
+      '-T',
+      '--no-deps',
+      '--entrypoint',
+      'node',
+      composeService,
+      '--input-type=module',
+      '-e',
+      script,
+      JSON.stringify(desiredStateIds),
+    ]),
+    {
+      cwd: clientRoot,
+      evidenceBase,
+    },
+  );
+  expectExit(result, [0], 'docker artifact query');
+  return parseJsonStdout(result.stdout, 'docker-artifact-query');
+}
+
+async function sleep(ms) {
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+async function main() {
+  const parsed = parseArgs({
+    options: {
+      help: { type: 'boolean', default: false },
+      mode: { type: 'string', default: 'steady-state' },
+      'evidence-dir': { type: 'string' },
+      'timeout-ms': { type: 'string' },
+      'poll-ms': { type: 'string' },
+      'target-cycles': { type: 'string' },
+      'image-tag': { type: 'string' },
+    },
+    allowPositionals: false,
+  });
+
+  if (parsed.values.help) {
+    printHelp();
+    return;
+  }
+
+  const mode = parsed.values.mode;
+  if (!['steady-state', 'fresh-state'].includes(mode)) {
+    fail(`Unsupported --mode: ${mode}`);
+  }
+
+  const baseEnv = resolveDockerAcceptanceBaseEnv({ clientRoot, env: process.env });
+  const password = baseEnv['JINN_TESTNET_ACCEPTANCE_PASSWORD'] ?? baseEnv['JINN_PASSWORD'];
+  if (!password) {
+    fail('Set JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD in client/.env.acceptance or your environment.');
+  }
+  const rpcUrl = resolveAcceptanceRpcUrl(baseEnv);
+  if (!rpcUrl) {
+    fail('Set JINN_TESTNET_ACCEPTANCE_RPC_URL or BASE_SEPOLIA_RPC_URL for Docker acceptance.');
+  }
+
+  const workspaceRoot = dockerAcceptanceWorkspaceRoot(clientRoot);
+  const configPath = dockerAcceptanceConfigPath(clientRoot);
+  const composeEnvPath = dockerAcceptanceComposeEnvPath(clientRoot);
+  const runId = makeRunId();
+  const evidenceDir = resolve(
+    parsed.values['evidence-dir'] ?? join(dockerAcceptanceEvidenceRoot(clientRoot), runId),
+  );
+  const timeoutMs = toInt(parsed.values['timeout-ms'], DEFAULT_TIMEOUT_MS);
+  const pollMs = toInt(parsed.values['poll-ms'], DEFAULT_POLL_MS);
+  const targetCycles = toInt(parsed.values['target-cycles'], DEFAULT_TARGET_CYCLES);
+  const imageTag = parsed.values['image-tag'] ?? baseEnv['JINN_ACCEPTANCE_IMAGE'] ?? 'jinn-client:acceptance-local';
+  const buildCommit = process.env['JINN_BUILD_COMMIT'] ?? readGitCommit();
+  const dirty = isGitDirty();
+  const startedAt = new Date().toISOString();
+
+  ensureDir(workspaceRoot);
+  ensureDir(evidenceDir);
+
+  const config = buildOperatorClientConfig({
+    rpcUrl,
+    clientHome: '/data',
+    runIdSuffix: runId,
+    env: baseEnv,
+  });
+  const desiredStateIds = (config.desiredStates ?? []).map((state) => state.id);
+  if (targetCycles > desiredStateIds.length) {
+    fail(`target-cycles (${targetCycles}) exceeds configured desired states (${desiredStateIds.length}).`);
+  }
+
+  writeJson(configPath, config);
+
+  const composeEnv = buildDockerComposeEnv({
+    clientRoot,
+    env: baseEnv,
+    imageTag,
+    configPath,
+  });
+  writeFileSync(composeEnvPath, formatEnvFile(composeEnv), 'utf8');
+  writeJson(join(evidenceDir, 'inputs.json'), {
+    startedAt,
+    mode,
+    timeoutMs,
+    pollMs,
+    targetCycles,
+    imageTag,
+    buildCommit,
+    dirty,
+    composeEnvPath,
+    configPath,
+    desiredStateIds,
+    dataVolume: composeEnv.JINN_ACCEPTANCE_DATA_VOLUME,
+    claudeVolume: composeEnv.JINN_ACCEPTANCE_CLAUDE_VOLUME,
+  });
+
+  const runImage = (args, stepName, expected = [0]) => {
+    const result = runLoggedProcess('docker', ['run', '--rm', imageTag, ...args], {
+      cwd: clientRoot,
+      evidenceBase: join(evidenceDir, stepName),
+    });
+    expectExit(result, expected, stepName);
+    return result;
+  };
+
+  const runCompose = (args, stepName, expected = [0]) => {
+    const result = runLoggedProcess('docker', composeArgs(composeEnvPath, args), {
+      cwd: clientRoot,
+      evidenceBase: join(evidenceDir, stepName),
+    });
+    expectExit(result, expected, stepName);
+    return result;
+  };
+
+  const runJinnRaw = (args, stepName, expected = [0]) => runCompose(
+    ['run', '--rm', '-T', '--no-deps', composeService, ...args],
+    stepName,
+    expected,
+  );
+
+  const runJinn = (args, stepName, expected = [0]) => runJinnRaw(
+    [...args, '--config', '/acceptance/config.json'],
+    stepName,
+    expected,
+  );
+
+  try {
+    runCompose(['down', '--remove-orphans'], '00-compose-down', [0]);
+
+    if (mode === 'fresh-state') {
+      runLoggedProcess('docker', ['volume', 'rm', '-f', composeEnv.JINN_ACCEPTANCE_DATA_VOLUME], {
+        cwd: clientRoot,
+        evidenceBase: join(evidenceDir, '00-volume-rm-data'),
+      });
+    }
+
+    runCompose(['config'], '01-compose-config', [0]);
+    runLoggedProcess('docker', ['volume', 'create', composeEnv.JINN_ACCEPTANCE_DATA_VOLUME], {
+      cwd: clientRoot,
+      evidenceBase: join(evidenceDir, '02-volume-create-data'),
+    });
+    runLoggedProcess('docker', ['volume', 'create', composeEnv.JINN_ACCEPTANCE_CLAUDE_VOLUME], {
+      cwd: clientRoot,
+      evidenceBase: join(evidenceDir, '03-volume-create-claude'),
+    });
+
+    const build = runLoggedProcess('docker', [
+      'build',
+      '--build-arg',
+      `JINN_BUILD_COMMIT=${buildCommit}`,
+      '-t',
+      imageTag,
+      '.',
+    ], {
+      cwd: clientRoot,
+      evidenceBase: join(evidenceDir, '05-docker-build'),
+    });
+    expectExit(build, [0], 'docker build');
+
+    const version = parseJsonStdout(runImage(['version', '--json'], '06-version').stdout, 'version');
+    const help = runImage(['--help'], '07-help');
+    if (!help.stdout.includes('jinn run')) {
+      fail('help: expected top-level help text to include `jinn run`.');
+    }
+
+    const doctor = parseJsonStdout(runJinn(['doctor', '--json'], '08-doctor').stdout, 'doctor');
+    if (doctor.ok !== true) {
+      fail('doctor: expected ok=true for Docker release acceptance environment', doctor);
+    }
+
+    const bootstrapResult = runJinn(['bootstrap', '--json'], '09-bootstrap', [0, 10, 20]);
+    if (bootstrapResult.status === 10) {
+      const envelope = parseJsonStdout(bootstrapResult.stdout, 'bootstrap-funding');
+      fail(
+        'bootstrap: funding_required — fund the operator wallet and re-run.\n'
+          + `  ${envelope.message ?? 'See fund-requirements output.'}`,
+        envelope,
+      );
+    }
+    expectExit(bootstrapResult, [0], '09-bootstrap');
+    const bootstrap = parseJsonStdout(bootstrapResult.stdout, 'bootstrap');
+    if (!Array.isArray(bootstrap.services) || !bootstrap.services.some((svc) => svc.step === 'complete')) {
+      fail('bootstrap: expected at least one complete service', bootstrap);
+    }
+
+    const baselineStatus = parseJsonStdout(runJinn(['status', '--json'], '10-status-before').stdout, 'status-before');
+    const baselineRewards = parseJsonStdout(runJinn(['rewards', '--json'], '11-rewards-before').stdout, 'rewards-before');
+    const baselineHistory = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '12-history-before').stdout, 'history-before');
+    const baselineRows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '13-artifacts-before'));
+    const baselineArtifacts = summarizeArtifactRows(baselineRows, desiredStateIds);
+    writeJson(join(evidenceDir, 'baseline-summary.json'), {
+      historyCounts: countHistoryKinds(baselineHistory),
+      desiredStateIds,
+      artifactProgress: baselineArtifacts.byDesiredState,
+      pendingRewardsWei: sumPendingRewards(baselineRewards).toString(),
+      status: baselineStatus,
+    });
+
+    runCompose(['up', '-d', composeService], '14-compose-up', [0]);
+
+    let startup = null;
+    const startupStartedAt = Date.now();
+    while (Date.now() - startupStartedAt < 60_000) {
+      const logs = runCompose(['logs', '--no-color', composeService], '15-logs-startup', [0]);
+      writeFileSync(join(evidenceDir, '15-daemon.logs.txt'), logs.stdout, 'utf8');
+      const lines = logs.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+      for (const rawLine of lines) {
+        // Docker Compose prefixes lines with "<service>  | "; strip that.
+        const pipeIdx = rawLine.indexOf('| ');
+        const line = pipeIdx >= 0 ? rawLine.slice(pipeIdx + 2).trim() : rawLine;
+        if (!line.startsWith('{')) continue;
+        try {
+          const payload = JSON.parse(line);
+          if (payload.kind === 'daemon_started') {
+            startup = payload;
+            break;
+          }
+        } catch {
+          // ignore non-json log lines
+        }
+      }
+      if (startup) break;
+      await sleep(2000);
+    }
+    if (!startup) {
+      fail('daemon did not emit daemon_started within 60s', {
+        logsPath: join(evidenceDir, '15-daemon.logs.txt'),
+      });
+    }
+    writeJson(join(evidenceDir, '15-run.startup.json'), startup);
+
+    let observed = null;
+    const pollPath = join(evidenceDir, '16-cycle-poll.jsonl');
+    const pollStartedAt = Date.now();
+    while (Date.now() - pollStartedAt < timeoutMs) {
+      const status = parseJsonStdout(runJinn(['status', '--json'], '16-status-poll').stdout, 'status-poll');
+      const rows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '16-artifacts-poll'));
+      const artifactProgress = summarizeArtifactRows(rows, desiredStateIds);
+      const snapshot = {
+        at: new Date().toISOString(),
+        desiredStateIds,
+        completedCycles: artifactProgress.completedCycles,
+        artifactProgress: artifactProgress.byDesiredState,
+        blocking: status.exit?.blocking ?? false,
+        daemonShutdownState: status.daemon?.shutdownState ?? null,
+      };
+      appendFileSync(pollPath, `${JSON.stringify(snapshot)}\n`, 'utf8');
+
+      if (artifactProgress.completedCycles >= targetCycles) {
+        observed = { artifactProgress, status };
+        break;
+      }
+      await sleep(pollMs);
+    }
+
+    const logsAfter = runCompose(['logs', '--no-color', '--timestamps', composeService], '17-logs-final', [0]);
+    writeFileSync(join(evidenceDir, '17-daemon.logs.txt'), logsAfter.stdout, 'utf8');
+
+    if (!observed) {
+      fail(`Timed out waiting for ${targetCycles} new protocol cycles`, {
+        pollPath,
+        timeoutMs,
+      });
+    }
+
+    const stop = parseJsonStdout(runJinnRaw(['stop', '--json'], '18-stop').stdout, 'stop');
+    await sleep(10_000);
+
+    const fleet = parseJsonStdout(runJinn(['fleet', '--json'], '19-fleet-after').stdout, 'fleet-after');
+    const statusAfter = parseJsonStdout(runJinn(['status', '--json'], '20-status-after').stdout, 'status-after');
+    const rewardsBeforeClaim = parseJsonStdout(runJinn(['rewards', '--json'], '21-rewards-before-claim').stdout, 'rewards-before-claim');
+    const historyAfter = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '22-history-after').stdout, 'history-after');
+    const artifactsAfter = summarizeArtifactRows(
+      queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '23-artifacts-after')),
+      desiredStateIds,
+    );
+    writeJson(join(evidenceDir, '23-artifacts-after.json'), artifactsAfter);
+
+    const pendingBeforeClaim = sumPendingRewards(rewardsBeforeClaim);
+    if (pendingBeforeClaim <= 0n) {
+      fail('rewards-before-claim: expected visible pending rewards before explicit claim', rewardsBeforeClaim);
+    }
+
+    const claim = parseJsonStdout(runJinn(['claim-rewards', '--yes', '--json'], '24-claim-rewards').stdout, 'claim-rewards');
+    if ((claim.submitted ?? 0) <= 0) {
+      fail('claim-rewards: expected submitted > 0 for Docker release acceptance', claim);
+    }
+
+    writeJson(join(evidenceDir, 'summary.json'), {
+      startedAt,
+      mode,
+      imageTag,
+      buildCommit,
+      dirty,
+      composeEnvPath,
+      configPath,
+      dataVolume: composeEnv.JINN_ACCEPTANCE_DATA_VOLUME,
+      claudeVolume: composeEnv.JINN_ACCEPTANCE_CLAUDE_VOLUME,
+      version,
+      doctor,
+      bootstrap,
+      startup,
+      stop,
+      desiredStateIds,
+      observedCompletedCycles: observed.artifactProgress.completedCycles,
+      observedArtifactProgress: observed.artifactProgress.byDesiredState,
+      pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
+      claim,
+      fleet,
+      statusBefore: baselineStatus,
+      statusAfter,
+      historyBeforeCounts: countHistoryKinds(baselineHistory),
+      historyAfterCounts: countHistoryKinds(historyAfter),
+      finishedAt: new Date().toISOString(),
+    });
+
+    console.log('testnet-acceptance: ok');
+    console.log(`  image: ${imageTag}`);
+    console.log(`  evidence: ${evidenceDir}`);
+    console.log(`  version: ${version.client?.version ?? 'unknown'}`);
+    console.log(`  commit: ${version.client?.commit ?? 'unknown'}`);
+    console.log(`  pending before claim: ${pendingBeforeClaim.toString()} wei`);
+    console.log(`  submitted claims: ${claim.submitted}`);
+  } finally {
+    runLoggedProcess('docker', composeArgs(composeEnvPath, ['down', '--remove-orphans']), {
+      cwd: clientRoot,
+      evidenceBase: join(evidenceDir, '99-compose-down'),
+    });
+  }
+}
+
+main().catch((error) => {
+  console.error('testnet-acceptance: failed');
+  console.error(error instanceof Error ? error.message : String(error));
+  if (error && typeof error === 'object' && 'details' in error && error.details) {
+    console.error(JSON.stringify(error.details, null, 2));
+  }
+  process.exit(1);
+});

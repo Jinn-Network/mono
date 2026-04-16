@@ -61,6 +61,13 @@ export const JinnConfigSchema = z.object({
    */
   rewardClaimIntervalMs: z.number().int().min(0).default(600_000),
 
+  /**
+   * How often the daemon checks agent EOA and Safe balances and tops them up from the master
+   * wallet when they drop below trigger thresholds (ms). Default 300000 (5 min).
+   * Set to 0 to disable. Env: JINN_BALANCE_TOPUP_INTERVAL_MS
+   */
+  balanceTopupIntervalMs: z.number().int().min(0).default(300_000),
+
   /** HTTP API port */
   apiPort: z.number().int().positive().default(7331),
 
@@ -204,6 +211,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_REWARD_CLAIM_INTERVAL_MS'] !== undefined) {
     merged.rewardClaimIntervalMs = parseInt(env['JINN_REWARD_CLAIM_INTERVAL_MS'], 10);
   }
+  if (env['JINN_BALANCE_TOPUP_INTERVAL_MS']) merged.balanceTopupIntervalMs = Number.parseInt(env['JINN_BALANCE_TOPUP_INTERVAL_MS'], 10);
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];

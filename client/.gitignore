@@ -3,7 +3,10 @@ dist/
 jinn-client.tgz
 *.db
 .env
+.env.acceptance
 *.log
+.acceptance/
+acceptance-runs/
 
 .yarn/*
 !.yarn/patches

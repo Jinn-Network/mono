@@ -147,6 +147,8 @@ const ENV_ALLOWLIST = [
   'NODE_PATH',
   'NODE_OPTIONS',
   'NPM_CONFIG_PREFIX',
+  // Claude Code auth — needed in Docker where keychain is unavailable.
+  'CLAUDE_CODE_OAUTH_TOKEN',
 ];
 
 const ENV_BLOCKLIST = [

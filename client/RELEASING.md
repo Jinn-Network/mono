@@ -100,6 +100,7 @@ docker run --rm ghcr.io/jinn-network/client:X.Y.Z version --json
 Also verify the documented Docker auth flow exactly as shipped:
 
 ```bash
-docker compose run --rm -it --entrypoint claude jinn-daemon auth login
+claude setup-token                          # on host — produces sk-ant-oat01-...
+echo "CLAUDE_CODE_OAUTH_TOKEN=sk-..." >> .env
 docker compose up -d
 ```
