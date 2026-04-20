@@ -34,7 +34,8 @@ jobs:
               ;;
           esac
 
-          PACKAGE_VERSION=$(cd client && node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          # working-directory default is `client/`, no extra cd.
+          PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
           if [ "${VERSION}" != "${PACKAGE_VERSION}" ]; then
             echo "::error::Release tag version ${VERSION} does not match client/package.json version ${PACKAGE_VERSION}"
             exit 1
