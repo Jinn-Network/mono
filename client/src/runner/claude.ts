@@ -133,6 +133,13 @@ Work autonomously. Do not ask questions.`;
 
 // Environment allowlist for agent subprocess — only pass what's needed.
 // The agent must never see private keys, operator passwords, or secrets.
+//
+// CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are explicit auth paths for
+// Claude Code itself (equivalent to `claude auth login` / `claude
+// setup-token`). Headless Docker deployments need them forwarded — without
+// them the spawned agent always fails with "Not logged in". They are Claude
+// credentials, not Jinn operator secrets, so forwarding is scoped and
+// intentional.
 const ENV_ALLOWLIST = [
   'PATH',
   'HOME',
@@ -148,7 +155,13 @@ const ENV_ALLOWLIST = [
   'NODE_OPTIONS',
   'NPM_CONFIG_PREFIX',
   // Claude Code auth — needed in Docker where keychain is unavailable.
+  // CLAUDE_CODE_OAUTH_TOKEN is the output of `claude setup-token` (subscription
+  // path, year-long validity); ANTHROPIC_API_KEY is the pay-per-request fallback.
+  // Both are Claude credentials, not Jinn operator secrets, so forwarding is
+  // scoped and intentional. Without these the spawned `claude -p …` fails with
+  // "Not logged in · Please run /login".
   'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
 ];
 
 const ENV_BLOCKLIST = [

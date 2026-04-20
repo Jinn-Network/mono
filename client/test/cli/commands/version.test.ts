@@ -62,4 +62,36 @@ describe('version command', () => {
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
   });
+
+  it('resolves a non-unknown deployment digest for zero-config testnet operators', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const prev = { ...process.env };
+    const tmp = mkdtempSync(join(tmpdir(), 'jinn-version-home-'));
+    process.env.HOME = tmp;
+    process.env.JINN_NETWORK = 'testnet';
+    try {
+      const { ctx, writes } = makeCtx();
+      await version.run(ctx);
+      const parsed = JSON.parse(writes[0]);
+      expect(parsed.network).toBe('testnet');
+      expect(parsed.deployments.artifacts.length).toBeGreaterThan(0);
+      expect(parsed.deployments.digest).not.toBe('unknown');
+      expect(parsed.deployments.digest).toMatch(/^[0-9a-f]{64}$/);
+    } finally {
+      process.env = prev;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('--human output starts with "Jinn client" and includes the commit line', async () => {
+    const { ctx, writes } = makeCtx(['--human']);
+    await version.run(ctx);
+    const out = writes.join('');
+    expect(out.startsWith('Jinn client ')).toBe(true);
+    expect(out).toMatch(/^Commit: /m);
+    expect(out).toMatch(/^Deployments: /m);
+    expect(out).toMatch(/^Tokens: /m);
+  });
 });

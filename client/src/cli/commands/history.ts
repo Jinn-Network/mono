@@ -16,6 +16,7 @@ async function run(ctx: CommandContext): Promise<void> {
         cursor: { type: 'string' },
         json: { type: 'boolean', default: false },
         human: { type: 'boolean', default: false },
+        config: { type: 'string' },
       },
       allowPositionals: false,
     });

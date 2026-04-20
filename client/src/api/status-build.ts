@@ -13,6 +13,7 @@ export interface GatheredStatusRaw {
   hintsScope?: StatusHintsScope;
   shutdownState: string | null;
   dbPath: string;
+  earningDir?: string;
   activityCounts: Record<string, number>;
   recentActivity: Array<{ requestId: string; role: string }>;
   lastRewardClaimTickAt: string | null;

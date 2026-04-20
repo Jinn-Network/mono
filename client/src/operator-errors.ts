@@ -3,6 +3,8 @@
  * Full stack traces and raw RPC errors are reserved for JINN_DEBUG mode.
  */
 
+import { isUnauthorizedAccountError } from './errors/unauthorized-account.js';
+
 function envDebugTruthy(value: string | undefined): boolean {
   if (value === undefined) return false;
   const v = value.trim().toLowerCase();
@@ -54,6 +56,17 @@ export interface OperatorErrorParts {
 export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorParts {
   const msg = stringifyUnknown(error);
   const lower = msg.toLowerCase();
+
+  if (isUnauthorizedAccountError(msg) || msg.includes('curating-agent whitelist')) {
+    // Surfaces from `recoverEvictedService` when distributor.reStake reverts
+    // because the operator is not in mapCuratingAgents / mapManagingAgents on
+    // the stOLAS ExternalStakingDistributor. Keep the full actionable message
+    // so `setCuratingAgents` guidance isn't truncated by the 220-char cap.
+    return {
+      summary: msg.split('reStake revert:')[0]?.trim() ?? msg,
+      hint: 'The evicted service cannot self-heal without the distributor owner pre-authorising this operator. See the summary for the setCuratingAgents call, or abandon-and-rebootstrap.',
+    };
+  }
 
   if (msg.includes('GS013')) {
     return {

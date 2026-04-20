@@ -100,6 +100,27 @@ describe('fund-requirements command', () => {
     expect(parsed.requirements).toEqual([]);
   });
 
+  it('--human formats amounts as ETH (not raw wei)', async () => {
+    passwordResult.val = { ok: true, password: 'test' };
+    fundReturn.val = {
+      ok: false,
+      funding: {
+        master_address: '0xMASTER',
+        eth_required: '5000000000000000', // 0.005 ETH
+        eth_balance: '0',
+      },
+      message: 'need eth',
+      fleet_state: { master_address: '0xMASTER', services: [] },
+    };
+    const { default: fr } = await import('../../../src/cli/commands/fund-requirements.js');
+    const { ctx, writes } = makeCtx({ JINN_PASSWORD: 'test' }, ['--human']);
+    await fr.run(ctx);
+    const out = writes.join('');
+    expect(out).toMatch(/Funding required/);
+    expect(out).toMatch(/0\.005 ETH/);
+    expect(out).not.toMatch(/wei/);
+  });
+
   it('accepts --password-fd when password env is missing', async () => {
     passwordResult.val = { ok: true, password: 'from-fd' };
     fundReturn.val = {

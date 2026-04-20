@@ -42,6 +42,7 @@ const mockRaw: GatheredStatusRaw = {
   pollIntervalMs: 5000,
   masterDailyEstimateWei: '1',
   pendingStakingRewardsWei: '42',
+  earningDir: '/tmp/earning',
 };
 
 vi.mock('../../../src/cli/introspection-context.js', () => ({
@@ -73,6 +74,10 @@ describe('status command', () => {
     expect(parsed.earnings.asset).toBe('reward');
     expect(parsed.exit.blocking).toBe(true);
     expect(parsed.exit.hint).toContain('fleet');
+    expect(parsed.paths).toEqual({
+      earningDir: '/tmp/earning',
+      dbPath: '/tmp/x',
+    });
   });
 
   it('rejects unknown flags with invalid_invocation', async () => {

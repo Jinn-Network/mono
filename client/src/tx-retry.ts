@@ -52,7 +52,17 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   if (lower.includes('user rejected') || lower.includes('user denied')) return false;
   if (lower.includes('rejected the request')) return false;
 
-  if (msg.includes('GS013')) return false;
+  // Gnosis Safe 1.3.0 wraps every inner execTransaction revert as GS013 when
+  // safeTxGas == 0 && gasPrice == 0 (see GnosisSafe.sol §execTransaction:
+  // `require(success || safeTxGas != 0 || gasPrice != 0, "GS013")`). That
+  // hides the real cause, which in this codebase is often GS026 ("Invalid
+  // owner provided") from a stale-nonce signature when two Safe writes
+  // raced. The `executeSafeTransaction` lambda already re-reads the Safe
+  // nonce and re-signs on every retry, so treating GS013 as recoverable is
+  // self-healing for the racy case. A truly unrecoverable GS013 (e.g.
+  // downstream contract bug) still fails after maxAttempts with the same
+  // error — same end state as before.
+  if (msg.includes('GS013')) return true;
   if (msg.includes('GS026')) return true;
 
   if (

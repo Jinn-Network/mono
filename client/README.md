@@ -16,20 +16,40 @@ yarn global add @jinn-network/client@latest
 
 ## Quick start
 
+The fast path for a new operator on Base Sepolia:
+
 ```bash
-# Generate wallet and keystore
-jinn init
+# Zero-to-running in one command (init + funding check + bootstrap + run).
+JINN_PASSWORD=your-keystore-password jinn quickstart
+```
 
-# Check environment readiness
-jinn doctor
+Or step by step:
 
-# Start the daemon
+```bash
+# 1. Generate the encrypted keystore (picks an HD wallet deterministically).
+JINN_PASSWORD=your-keystore-password jinn init
+
+# 2. Verify the environment and resolved deployment.
+jinn doctor --human
+
+# 3. List the exact funding gaps (ETH and stOLAS on Base Sepolia).
+jinn fund-requirements --human
+
+# 4. Send the requested testnet funds to the printed master address, then:
+JINN_PASSWORD=your-keystore-password jinn bootstrap
+
+# 5. Start the daemon.
 JINN_PASSWORD=your-keystore-password jinn run
 ```
 
-On first run, the bootstrap generates a master wallet and prints a funding address. Send testnet ETH to it, then re-run. The bootstrap is idempotent — it picks up where it left off.
+`jinn init`, `jinn fund-requirements`, `jinn bootstrap`, and `jinn run` all
+share the same encrypted keystore and fleet state under
+`~/.jinn-client/earning/`. They are idempotent — re-run any of them safely.
 
-`JINN_PASSWORD` encrypts the local keystore and is env-only; never put it in a config file.
+`JINN_PASSWORD` encrypts the local keystore and is **required** for every
+verb that touches private keys (`init`, `bootstrap`, `run`,
+`fund-requirements`, `keys backup`, `submit-intent`, `claim-rewards`,
+`withdraw`). It is env-only; never put it in a config file.
 
 ## Try without installing
 
@@ -74,13 +94,16 @@ docker run --rm ghcr.io/jinn-network/client:latest version --json
 
 | Command | Purpose | Idempotent |
 |---|---|---|
-| `jinn init` | Generate wallet + keystore | Yes |
+| `jinn quickstart` | One-shot init + funding check + bootstrap + run | Yes |
+| `jinn init` | Generate wallet + keystore + fleet state | Yes |
 | `jinn doctor` | Preflight checks without mutation | Yes |
 | `jinn bootstrap` | Advance toward a running fleet | Yes |
 | `jinn fund-requirements` | List what needs funding | Yes |
 | `jinn run` | Start the daemon (foreground) | N/A |
 | `jinn stop` | Signal a running daemon to stop | Yes |
 | `jinn version` | Version, phase, deployment digest | Yes |
+| `jinn update` | Update the client package + refresh plugins | Yes |
+| `jinn plugin install` | Wire Jinn into Claude Code / Codex / other AI tools | Yes |
 
 ### Monitoring
 
@@ -104,7 +127,8 @@ All action verbs support `--dry-run` and `--yes`.
 | `jinn fleet scale --to N` | Grow or shrink fleet |
 | `jinn fleet retire <index>` | Retire one service |
 | `jinn withdraw --to <addr>` | Sweep wallets to external address |
-| `jinn keys backup --output <path>` | Export mnemonic |
+| `jinn keys backup --output <path>` | Export mnemonic (writes plaintext; treat the output file as seed material) |
+| `jinn keys change-password` | Re-encrypt the keystore with a new password |
 
 ## Output contract
 
@@ -138,6 +162,19 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | desiredStates | JINN_DESIRED_STATES | [health-check] |
 
 `JINN_PASSWORD` is env-only (keystore encryption, never in config files). Alternatively, use `--password-fd <N>` to read from a file descriptor.
+
+## Tokens
+
+| Role | Phase 1b (testnet, Base Sepolia) | Phase 2 (mainnet, Base) |
+|---|---|---|
+| Gas (native) | ETH | ETH |
+| Staking bond | stOLAS | OLAS |
+| Reward | stOLAS | OLAS (+ JINN incentives after launch) |
+
+On testnet, stOLAS is the liquid-staked OLAS variant used for bonds and
+incentives; OLAS backs stOLAS upstream and is not required directly.
+`jinn fund-requirements` surfaces the exact per-wallet needs for the
+current phase.
 
 ## Switching to mainnet
 

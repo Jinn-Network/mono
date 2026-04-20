@@ -14,6 +14,9 @@ services:
     restart: "no"
     environment:
       JINN_PASSWORD: ${JINN_PASSWORD}
+      # Non-interactive Claude auth. `claude setup-token` prints an OAT that
+      # the CLI will accept via this env var — no keychain / libsecret / login
+      # flow needed. Keeps the daemon runnable in a headless container.
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       NO_COLOR: ${NO_COLOR:-1}
     volumes:

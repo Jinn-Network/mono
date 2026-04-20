@@ -175,6 +175,39 @@ function isGitDirty() {
   return result.status === 0 && result.stdout.trim().length > 0;
 }
 
+/**
+ * Warn when the current branch is more than ~2 commits behind the tip of
+ * `origin/main`. This catches the class of bug we hit on 2026-04-18: the
+ * deterministic acceptance prompts lived on main but were absent from a
+ * long-lived drill-fix branch, so the evaluator kept returning FAILURE on
+ * vague prompts even though the acceptance harness itself was working.
+ * Non-fatal: logs a warning and proceeds. Skipped when git fetch can't
+ * reach origin (offline / shallow clone).
+ */
+function warnIfBranchLagsMain() {
+  const fetch = runProcess('git', ['fetch', '--quiet', 'origin', 'main'], { cwd: clientRoot });
+  if (fetch.status !== 0) {
+    // Offline, shallow clone, or origin/main missing — silently skip.
+    return;
+  }
+  const mergeBase = runProcess('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: clientRoot });
+  const originTip = runProcess('git', ['rev-parse', 'origin/main'], { cwd: clientRoot });
+  if (mergeBase.status !== 0 || originTip.status !== 0) return;
+  const mb = mergeBase.stdout.trim();
+  const tip = originTip.stdout.trim();
+  if (mb === tip) return; // up-to-date with main
+  const behind = runProcess('git', ['rev-list', '--count', `${mb}..${tip}`], { cwd: clientRoot });
+  if (behind.status !== 0) return;
+  const count = parseInt(behind.stdout.trim(), 10);
+  if (Number.isFinite(count) && count >= 2) {
+    console.error(
+      `[acceptance] WARNING: this branch is ${count} commits behind origin/main. ` +
+      `Acceptance harness + prompts may have evolved since the merge-base (${mb.slice(0, 8)}). ` +
+      `Consider 'git rebase origin/main' before gating a release.`,
+    );
+  }
+}
+
 function queryDockerArtifactRows(composeEnvPath, desiredStateIds, evidenceBase) {
   const script = `
     import Database from 'better-sqlite3';
@@ -250,6 +283,8 @@ async function main() {
   if (!['steady-state', 'fresh-state'].includes(mode)) {
     fail(`Unsupported --mode: ${mode}`);
   }
+
+  warnIfBranchLagsMain();
 
   const baseEnv = resolveDockerAcceptanceBaseEnv({ clientRoot, env: process.env });
   const password = baseEnv['JINN_TESTNET_ACCEPTANCE_PASSWORD'] ?? baseEnv['JINN_PASSWORD'];

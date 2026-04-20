@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
@@ -9,6 +9,7 @@ import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../../preflight
 import { detectAuthContext, probeClaudeAuth } from '../../preflight/claude-auth.js';
 import { getConfigPathFromArgs, loadConfig, type JinnConfig } from '../../config.js';
 import { getChainConfig } from '../../earning/contracts.js';
+import { mnemonicKeystorePath } from '../../earning/store.js';
 
 interface CheckResult {
   name: string;
@@ -29,19 +30,19 @@ async function checkNodeVersion(): Promise<CheckResult> {
   };
 }
 
-async function checkKeystoreReadable(earningDir: string): Promise<CheckResult> {
-  const keystorePath = join(earningDir, 'mnemonic.keystore.json');
+function checkKeystorePresent(earningDir: string): CheckResult {
+  const keystorePath = mnemonicKeystorePath(earningDir);
   if (existsSync(keystorePath)) {
     return {
-      name: 'keystore_readable',
+      name: 'keystore_present',
       ok: true,
-      detail: 'mnemonic keystore present in configured earning directory',
+      detail: `mnemonic keystore present at ${keystorePath}`,
     };
   }
   return {
-    name: 'keystore_readable',
-    ok: true, // Missing is fine before `jinn init`; not a blocker.
-    detail: 'no keystore yet (expected on a fresh install)',
+    name: 'keystore_present',
+    ok: true, // Missing is fine before `jinn init`; `jinn run` / `bootstrap` will create it.
+    detail: 'no keystore yet — run `jinn init` to create one',
   };
 }
 
@@ -145,7 +146,7 @@ async function run(ctx: CommandContext): Promise<void> {
   checks.push(claudeBinaryCheckForDoctor(config.claudePath, claudeResult));
   checks.push(await checkClaudeAuth());
 
-  checks.push(await checkKeystoreReadable(config.earningDir));
+  checks.push(checkKeystorePresent(config.earningDir));
   checks.push(await checkDeploymentLoaded(config));
 
   const blockingCount = checks.filter((c) => !c.ok).length;
@@ -157,13 +158,32 @@ async function run(ctx: CommandContext): Promise<void> {
     blockingCount,
   };
 
-  emitResult(payload, (v) => JSON.stringify(v, null, 2), {
+  emitResult(payload, (v) => humanDoctor(v as typeof payload), {
     json: Boolean(parsed.values.json),
     human: Boolean(parsed.values.human),
     writer: ctx.writer,
     stdoutIsTty: ctx.stdoutIsTty,
     noColor: Boolean(ctx.env['NO_COLOR']),
   });
+}
+
+function humanDoctor(payload: {
+  checks: CheckResult[];
+  ok: boolean;
+  blockingCount: number;
+}): string {
+  const lines: string[] = [];
+  for (const check of payload.checks) {
+    const mark = check.ok ? 'ok  ' : 'fail';
+    lines.push(`[${mark}] ${check.name}: ${check.detail}`);
+    if (check.remedy) lines.push(`       remedy: ${check.remedy}`);
+  }
+  lines.push(
+    payload.ok
+      ? 'Summary: all checks passed.'
+      : `Summary: ${payload.blockingCount} blocking check(s) failed.`,
+  );
+  return lines.join('\n');
 }
 
 const command: CommandModule = {
@@ -175,8 +195,8 @@ Runs a set of non-mutating checks against the local environment and
 configuration:
   - node_version        Node.js >= 20
   - claude_binary       claude CLI resolvable on PATH
-  - claude_auth          Claude CLI authenticated
-  - keystore_readable   mnemonic keystore in configured earning directory (optional)
+  - claude_auth         Claude CLI authenticated
+  - keystore_present    mnemonic keystore in configured earning directory (optional)
   - deployment_loaded   testnet/mainnet contract addresses resolved
 
 By default, emits a machine-readable JSON object with a checks array,

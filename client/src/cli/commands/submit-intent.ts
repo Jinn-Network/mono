@@ -73,7 +73,21 @@ async function run(ctx: CommandContext): Promise<void> {
   if (dryRun) {
     const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
     const service = raw.fleet?.services.find(s => s.step === 'complete');
-    const creatorMultisig = service?.safe_address ?? '0x';
+    if (!service?.safe_address) {
+      emitEnvelope(
+        {
+          code: 'bootstrap_incomplete',
+          message:
+            'No bootstrapped service available to submit intents from. Run `jinn bootstrap` first.',
+          hint: 'Run `jinn fund-requirements` to see outstanding funding, then `jinn bootstrap`.',
+          exampleCli: 'jinn bootstrap --human',
+          details: { field: 'fleet.services', expected: 'at least one service at step=complete' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    const creatorMultisig = getAddress(service.safe_address);
     emitDryRun(ctx, {
       verb: 'submit-intent',
       description: `Would post intent '${id}' from ${creatorMultisig}`,

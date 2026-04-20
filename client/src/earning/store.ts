@@ -19,9 +19,14 @@ import {
 
 export const DEFAULT_EARNING_DIR = path.join(os.homedir(), '.jinn-client', 'earning');
 
-const STATE_FILE = 'earning_state.json';
-const MNEMONIC_KEYSTORE_FILE = 'master_keystore.json';
-const LEGACY_KEYSTORE_FILE = 'agent_keystore.json';
+export const STATE_FILE = 'earning_state.json';
+export const MNEMONIC_KEYSTORE_FILE = 'master_keystore.json';
+export const LEGACY_KEYSTORE_FILE = 'agent_keystore.json';
+
+/** Absolute path to the encrypted mnemonic keystore for a given earning dir. */
+export function mnemonicKeystorePath(earningDir: string): string {
+  return path.join(earningDir, MNEMONIC_KEYSTORE_FILE);
+}
 
 async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   const dir = path.dirname(filePath);

@@ -42,7 +42,7 @@ vi.mock('../../../src/config.js', async importOriginal => {
 });
 
 describe('logs command', () => {
-  it('writes one JSON object per line', async () => {
+  it('emits a single JSON envelope with an events array', async () => {
     const { default: cmd } = await import('../../../src/cli/commands/logs.js');
     const writes: string[] = [];
     const ctx: CommandContext = {
@@ -53,14 +53,18 @@ describe('logs command', () => {
       env: {},
     };
     await cmd.run(ctx);
-    expect(writes).toHaveLength(2);
-    for (const w of writes) {
-      expect(w.endsWith('\n')).toBe(true);
-      const parsed = JSON.parse(w);
-      expect(parsed.ts).toBeDefined();
-      expect(parsed.level).toBeDefined();
-      expect(parsed.component).toBeDefined();
-      expect(parsed.msg).toBeDefined();
+    expect(writes).toHaveLength(1);
+    expect(writes[0].endsWith('\n')).toBe(true);
+    const parsed = JSON.parse(writes[0]);
+    expect(parsed.schemaVersion).toBe(1);
+    expect(Array.isArray(parsed.events)).toBe(true);
+    expect(parsed.events).toHaveLength(2);
+    expect(parsed.cursor).toEqual({ next: null });
+    for (const ev of parsed.events) {
+      expect(ev.ts).toBeDefined();
+      expect(ev.level).toBeDefined();
+      expect(ev.component).toBeDefined();
+      expect(ev.msg).toBeDefined();
     }
   });
 
@@ -76,5 +80,34 @@ describe('logs command', () => {
     };
     await cmd.run(ctx);
     expect(writes).toHaveLength(1);
+    const parsed = JSON.parse(writes[0]);
+    expect(parsed.events).toHaveLength(1);
+  });
+
+  it('emits an empty envelope when the store has no activity', async () => {
+    vi.resetModules();
+    vi.doMock('../../../src/store/store.js', () => ({
+      Store: class {
+        constructor(_path: string) {}
+        getRecentOwnActivity() { return []; }
+        close() {}
+      },
+    }));
+    const { default: cmd } = await import('../../../src/cli/commands/logs.js');
+    const writes: string[] = [];
+    const ctx: CommandContext = {
+      argv: [],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { writes.push(s); return true; } },
+      exit: () => {},
+      env: {},
+    };
+    await cmd.run(ctx);
+    expect(writes).toHaveLength(1);
+    const parsed = JSON.parse(writes[0]);
+    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.events).toEqual([]);
+    expect(parsed.cursor).toEqual({ next: null });
+    vi.doUnmock('../../../src/store/store.js');
   });
 });

@@ -239,7 +239,7 @@ The client will:
 ## Troubleshooting
 
 **Bootstrap stuck at `awaiting_funding`**
-- Fund the Safe address with ETH (for gas) and JINN (2x bond amount for activation + registration)
+- Fund the Safe address with ETH (for gas) and stOLAS on Base Sepolia (2x bond amount for activation + registration). stOLAS is the liquid-staked OLAS variant wrapped by the Phase 1b distributor; OLAS itself is never sent to the Safe.
 - Use `cast send` from a funded account
 
 **RPC write failures on Base Sepolia**

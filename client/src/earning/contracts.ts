@@ -25,7 +25,7 @@ const BUNDLED_DEPLOYMENTS_DIR = path.join(PACKAGE_ROOT, 'deployments');
  * After a contract redeploy, run `scripts/sync-deployments.sh` to refresh these
  * from the contracts/ directory.
  */
-const DEFAULT_TESTNET_ARTIFACTS = {
+export const DEFAULT_TESTNET_ARTIFACTS = {
   token: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1a-token-baseSepolia-fast.json'),
   l2: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1a-l2-baseSepolia-fast.json'),
   mech: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),

@@ -96,13 +96,40 @@ async function run(ctx: CommandContext): Promise<void> {
     },
   };
 
-  emitResult(payload, (v) => JSON.stringify(v, null, 2), {
+  emitResult(payload, (v) => humanVersion(v as typeof payload), {
     json: Boolean(parsed.values.json),
     human: Boolean(parsed.values.human),
     writer: ctx.writer,
     stdoutIsTty: ctx.stdoutIsTty,
     noColor: Boolean(ctx.env['NO_COLOR']),
   });
+}
+
+function humanVersion(payload: {
+  client: { version: string; commit: string };
+  protocol: { phase: string };
+  network: 'testnet' | 'mainnet';
+  deployments: { digest: string; artifacts: Array<{ name: string }> };
+  tokens: {
+    native: { symbol: string };
+    bond: { symbol: string; address: string };
+    reward: { symbol: string };
+  };
+}): string {
+  const digest =
+    payload.deployments.digest === 'unknown'
+      ? 'unknown'
+      : `${payload.deployments.digest.slice(0, 12)}…`;
+  const artifactNames =
+    payload.deployments.artifacts.length > 0
+      ? payload.deployments.artifacts.map((a) => a.name).join(', ')
+      : '(none)';
+  return [
+    `Jinn client ${payload.client.version} (${payload.protocol.phase}, ${payload.network})`,
+    `Commit: ${payload.client.commit}`,
+    `Deployments: ${digest} — ${artifactNames}`,
+    `Tokens: native=${payload.tokens.native.symbol}, bond=${payload.tokens.bond.symbol} @ ${payload.tokens.bond.address}, reward=${payload.tokens.reward.symbol}`,
+  ].join('\n');
 }
 
 const command: CommandModule = {

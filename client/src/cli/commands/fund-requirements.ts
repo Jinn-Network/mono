@@ -1,9 +1,12 @@
+import { createPublicClient, formatUnits, http, type Address } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
+import { getChainConfig } from '../../earning/contracts.js';
 import { resolveCliPassword } from '../password.js';
 
 /** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
@@ -24,6 +27,15 @@ interface FundRequirementRow {
   details: { tokenAddress: string | null; tokenSymbol: string };
 }
 
+function formatAmount(wei: string, symbol: string): string {
+  try {
+    // All three asset roles (native, bond, reward) use 18 decimals in Phase 1b.
+    return `${formatUnits(BigInt(wei), 18)} ${symbol}`;
+  } catch {
+    return `${wei} wei (${symbol})`;
+  }
+}
+
 function humanFundRequirements(payload: {
   satisfied: boolean;
   requirements: FundRequirementRow[];
@@ -33,9 +45,9 @@ function humanFundRequirements(payload: {
   }
   const lines = ['Funding required before bootstrap can advance:'];
   for (const r of payload.requirements) {
-    lines.push(
-      `- ${r.role} @ ${r.address}: asset role ${r.asset}, need ${r.needWei} wei, have ${r.haveWei} wei`,
-    );
+    const need = formatAmount(r.needWei, r.details.tokenSymbol);
+    const have = formatAmount(r.haveWei, r.details.tokenSymbol);
+    lines.push(`- ${r.role} @ ${r.address}: need ${need}, have ${have}`);
   }
   return lines.join('\n');
 }
@@ -133,6 +145,61 @@ async function run(ctx: CommandContext): Promise<void> {
       blocks: 'bootstrap',
       details: { tokenAddress: null, tokenSymbol: 'ETH' },
     });
+  } else {
+    // Bootstrap is satisfied. Still probe per-Safe native ETH: the daemon's
+    // balance-topup-loop auto-tops from master at runtime, but operators
+    // running in tooling contexts (acceptance gate, CI, bare `submit-intent`)
+    // hit the mech-fee path before any topup tick fires. A Safe that holds
+    // less than the per-service `minSafeEth` threshold will silently fail on
+    // `createEvaluationJob`, wrapped as `GS013` at the Safe layer — surface
+    // it here so ops see the gap before running.
+    const chainKey = config.network === 'testnet' ? 'base-sepolia' : 'base';
+    const chainCfg = getChainConfig(chainKey, {
+      testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+      testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+      testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+      testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    });
+    const viemChain = chainKey === 'base' ? base : baseSepolia;
+    const publicClient = createPublicClient({
+      chain: viemChain,
+      transport: http(config.rpcUrl),
+    });
+    const probeRows = await Promise.all(
+      result.fleet_state.services
+        .filter(svc => svc.step === 'complete' && svc.safe_address)
+        .map(async (svc): Promise<FundRequirementRow | null> => {
+          const address = svc.safe_address as string;
+          try {
+            const bal = await publicClient.getBalance({ address: address as Address });
+            if (bal >= chainCfg.minSafeEth) return null;
+            return {
+              role: `service_${svc.index}_safe`,
+              address,
+              asset: 'native',
+              haveWei: bal.toString(),
+              needWei: (chainCfg.minSafeEth - bal).toString(),
+              reason:
+                `Service ${svc.index} Safe needs native ETH to pay mech fees (each evaluation job sends 99 wei). ` +
+                `The daemon's balance-topup-loop auto-refills from master at runtime; funding it manually is ` +
+                `required only when running CLI verbs (submit-intent, acceptance gate) outside the daemon.`,
+              blocks: 'run',
+              details: { tokenAddress: null, tokenSymbol: 'ETH' },
+            };
+          } catch (err) {
+            // Probe failures are not a funding gap on their own; emit a warning
+            // so operators can distinguish "Safe OK" from "couldn't tell".
+            const message = err instanceof Error ? err.message : String(err);
+            process.stderr.write(
+              `[warn] fund-requirements: failed to probe Safe ${address} for service ${svc.index}: ${message}\n`,
+            );
+            return null;
+          }
+        }),
+    );
+    for (const row of probeRows) {
+      if (row) requirements.push(row);
+    }
   }
 
   const payload = {

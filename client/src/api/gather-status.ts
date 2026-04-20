@@ -84,6 +84,7 @@ export async function gatherGatheredStatusRaw(
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
     dbPath: store.path,
+    earningDir: status?.earningDir,
     activityCounts,
     recentActivity,
     lastRewardClaimTickAt,

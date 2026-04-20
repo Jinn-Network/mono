@@ -1,8 +1,10 @@
 import { parseArgs } from 'node:util';
 import { join } from 'node:path';
 import type { CommandContext, CommandModule } from '../command.js';
+import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
+import { loadConfig, getConfigPathFromArgs } from '../../config.js';
 import { FleetStateStore } from '../../earning/store.js';
 import {
   generateMnemonic,
@@ -17,11 +19,7 @@ async function run(ctx: CommandContext): Promise<void> {
   try {
     parsed = parseArgs({
       args: ctx.argv,
-      options: {
-        json: { type: 'boolean', default: false },
-        human: { type: 'boolean', default: false },
-        'password-fd': { type: 'string' },
-      },
+      options: { ...COMMON_FLAGS },
       allowPositionals: false,
     });
   } catch (err) {
@@ -51,7 +49,21 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const earningDir = ctx.env['JINN_EARNING_DIR'] ?? join(process.env['HOME'] ?? '.', '.jinn-client', 'earning');
+  const configPath =
+    getConfigPathFromArgs(ctx.argv) ?? getConfigPathFromArgs(process.argv.slice(2));
+  let configEarningDir: string | undefined;
+  let configNetwork: 'mainnet' | 'testnet' | undefined;
+  try {
+    const cfg = loadConfig(configPath);
+    configEarningDir = cfg.earningDir;
+    configNetwork = cfg.network;
+  } catch {
+    // Config file is optional; fall back to env var / default below.
+  }
+  const earningDir =
+    ctx.env['JINN_EARNING_DIR'] ??
+    configEarningDir ??
+    join(process.env['HOME'] ?? '.', '.jinn-client', 'earning');
   const store = new FleetStateStore(earningDir);
 
   if (!store.hasMnemonicKeystore() && store.hasLegacyKeystore()) {
@@ -69,16 +81,32 @@ async function run(ctx: CommandContext): Promise<void> {
     masterAddress = deriveMasterAddress(mnemonic);
   }
 
+  // Persist master_address so downstream verbs (fund-requirements,
+  // bootstrap) hydrate from the existing wallet instead of rolling a
+  // fresh HD mnemonic.
+  const network = ctx.env['JINN_NETWORK'] ?? configNetwork ?? 'testnet';
+  const chain: 'base' | 'base-sepolia' = network === 'mainnet' ? 'base' : 'base-sepolia';
+  await store.patchFleet({ master_address: masterAddress, chain });
+
   emitResult(
     {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       master: masterAddress,
       keystoreDir: earningDir,
+      nextStep: {
+        cli: 'jinn fund-requirements',
+        purpose: 'List addresses that need funding before bootstrap can advance.',
+      },
     },
     (v) => {
-      const value = v as { master: string; keystoreDir: string };
-      return `Keystore ready.\nMaster: ${value.master}\nDirectory: ${value.keystoreDir}`;
+      const value = v as { master: string; keystoreDir: string; nextStep: { cli: string } };
+      return (
+        `Keystore ready.\nMaster: ${value.master}\nDirectory: ${value.keystoreDir}\n` +
+        `Next: ${value.nextStep.cli}\n` +
+        `Backup: your JINN_PASSWORD and the mnemonic in this keystore are the only way to recover this wallet. ` +
+        `Run \`jinn keys backup\` to export the mnemonic.`
+      );
     },
     {
       json: Boolean(parsed.values.json),

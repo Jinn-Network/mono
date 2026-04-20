@@ -106,6 +106,12 @@ Examples:
   jinn run
   jinn run --human
   printf '%s\n' secret | jinn run --password-fd 0
+
+Failure example (funding gate):
+  $ jinn run
+  {"schemaVersion":1,"code":"funding_required","exitCode":10,...}
+  $ echo $?
+  10
 `,
   run,
 };

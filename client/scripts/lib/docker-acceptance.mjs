@@ -68,6 +68,10 @@ export function buildDockerComposeEnv({
     JINN_ACCEPTANCE_CLAUDE_VOLUME: merged['JINN_ACCEPTANCE_CLAUDE_VOLUME'] ?? DEFAULT_ACCEPTANCE_CLAUDE_VOLUME,
     JINN_ACCEPTANCE_CONFIG_FILE: resolve(configPath ?? dockerAcceptanceConfigPath(clientRoot)),
     JINN_PASSWORD: merged['JINN_TESTNET_ACCEPTANCE_PASSWORD'] ?? merged['JINN_PASSWORD'] ?? '',
+    // Non-interactive Claude auth: output of `claude setup-token`. When set,
+    // the daemon inside the container uses it directly and no keychain /
+    // libsecret / browser login is required.
+    CLAUDE_CODE_OAUTH_TOKEN: merged['CLAUDE_CODE_OAUTH_TOKEN'] ?? '',
     JINN_RPC_URL: rpcUrl,
     JINN_NETWORK: merged['JINN_ACCEPTANCE_NETWORK'] ?? merged['JINN_NETWORK'] ?? 'testnet',
     JINN_POLL_INTERVAL_MS: String(pollIntervalMs),

@@ -10,15 +10,15 @@ const mockRaw: GatheredStatusRaw = {
   lastRewardClaimTickAt: null,
   rewardClaimIntervalMs: 1,
   fleet: {
-    master_address: '0xM',
+    master_address: '0x1234567890123456789012345678901234567890',
     chain: 'base-sepolia',
     staking_mode: 'standard',
     updated_at: '2026-04-14T12:00:00.000Z',
     services: [
       {
         index: 1,
-        agent_address: '0xAGENT',
-        safe_address: '0xSAFE',
+        agent_address: '0xaabbccddeeff11223344556677889900aabbccdd',
+        safe_address: '0x00112233445566778899aabbccddeeff00112233',
         service_id: 42,
         mech_address: null,
         staking_address: null,
@@ -28,7 +28,7 @@ const mockRaw: GatheredStatusRaw = {
     ],
   },
   rpc: { ok: true },
-  master: { address: '0xM', balanceWei: '0' },
+  master: { address: '0x1234567890123456789012345678901234567890', balanceWei: '0' },
   pollIntervalMs: 5000,
   masterDailyEstimateWei: '0',
 };
@@ -103,5 +103,29 @@ describe('submit-intent command', () => {
     expect(parsed.code).toBe('invalid_invocation');
     expect(parsed.details?.field).toBe('--id');
     expect(exits).toEqual([11]);
+  });
+
+  it('--dry-run emits bootstrap_incomplete when no service is at step=complete', async () => {
+    vi.resetModules();
+    vi.doMock('../../../src/cli/introspection-context.js', () => ({
+      gatherIntrospectionRaw: vi.fn(async () => ({
+        ...mockRaw,
+        fleet: { ...mockRaw.fleet!, services: [] },
+      })),
+    }));
+    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const { ctx, writes, exits } = makeCtx([
+      '--id',
+      'test-1',
+      '--description',
+      'x',
+      '--dry-run',
+    ]);
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('bootstrap_incomplete');
+    expect(parsed.exitCode).toBe(20);
+    expect(exits).toEqual([20]);
+    vi.doUnmock('../../../src/cli/introspection-context.js');
   });
 });

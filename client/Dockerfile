@@ -51,6 +51,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Claude CLI globally so the daemon can spawn it
 RUN npm install -g @anthropic-ai/claude-code
 
+# Claude Code writes its main config to $HOME/.claude.json, but docker-compose
+# mounts the auth volume at $HOME/.claude (the directory). Without this symlink
+# .claude.json lives on the ephemeral overlay fs and is wiped on every
+# `docker compose run --rm`, forcing a fresh `claude auth login` each run.
+# The symlink redirects the file into the mounted directory so the OAuth
+# token persists in the named volume.
+RUN mkdir -p /root/.claude && ln -sf /root/.claude/claude.json /root/.claude.json
+
 # Copy only what's needed to run
 COPY --from=build /app/dist dist/
 COPY --from=build /app/deployments deployments/

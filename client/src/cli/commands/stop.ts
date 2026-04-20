@@ -13,6 +13,7 @@ async function run(ctx: CommandContext): Promise<void> {
       options: {
         json: { type: 'boolean', default: false },
         human: { type: 'boolean', default: false },
+        config: { type: 'string' },
       },
       allowPositionals: false,
     });

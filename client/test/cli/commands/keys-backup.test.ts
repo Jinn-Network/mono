@@ -33,6 +33,32 @@ describe('keys backup command', () => {
     expect(mnemonic.split(/\s+/).length).toBeGreaterThanOrEqual(12);
   });
 
+  it('emits a plaintext-warning line to stderr', async () => {
+    const { dir, password } = await makeKeystore();
+    const outPath = join(dir, 'backup.txt');
+    const stderrWrites: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+      stderrWrites.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const ctx: CommandContext = {
+        argv: ['backup', '--output', outPath],
+        stdoutIsTty: false,
+        writer: { write: () => true },
+        exit: () => {},
+        env: { JINN_PASSWORD: password, JINN_EARNING_DIR: dir },
+      };
+      await keysCmd.run(ctx);
+    } finally {
+      process.stderr.write = origWrite;
+    }
+    const joined = stderrWrites.join('');
+    expect(joined).toMatch(/\[warn\] Mnemonic written in plaintext/);
+    expect(joined).toMatch(/seed material/);
+  });
+
   it('missing --output emits invalid_invocation', async () => {
     const { dir, password } = await makeKeystore();
     const writes: string[] = [];

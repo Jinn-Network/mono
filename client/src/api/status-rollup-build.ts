@@ -18,6 +18,7 @@ export interface StatusRollupV1Response {
   rpc: { ok: boolean; chainId: number; blockNumber: number; error?: string };
   fleet: { size: number; complete: number; needsAttention: number };
   earnings: { pendingTotal: string; asset: 'reward' };
+  paths: { earningDir: string | null; dbPath: string };
   exit: { blocking: boolean; hint: string | null };
 }
 
@@ -86,6 +87,10 @@ export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Re
     earnings: {
       pendingTotal: raw.pendingStakingRewardsWei ?? '0',
       asset: 'reward',
+    },
+    paths: {
+      earningDir: raw.earningDir ?? null,
+      dbPath: raw.dbPath,
     },
     exit,
   };

@@ -30,6 +30,13 @@ describe('tx-retry', () => {
       expect(isRecoverableTransactionError(new Error('GS026 invalid owner'))).toBe(true);
     });
 
+    it('returns true for GS013 (Safe 1.3.0 wraps GS026/nonce-race as GS013)', () => {
+      const safeWrappedError = new Error(
+        'The contract function "execTransaction" reverted with the following reason:\nGS013',
+      );
+      expect(isRecoverableTransactionError(safeWrappedError)).toBe(true);
+    });
+
     it('returns true for replacement underpriced', () => {
       expect(
         isRecoverableTransactionError(new Error('replacement transaction underpriced')),
