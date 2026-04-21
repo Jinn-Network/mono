@@ -40,6 +40,7 @@ import { ClaudeMcpHyperliquidImpl } from './restorer/impls/claude-mcp-hyperliqui
 import { PortfolioV0Evaluator } from './restorer/impls/portfolio-v0-evaluator/index.js';
 import { PredictionV0BaselineImpl } from './restorer/impls/prediction-v0-baseline/index.js';
 import { PredictionV0Evaluator } from './restorer/impls/prediction-v0-evaluator/index.js';
+import { ClaudeMcpPredictionImpl } from './restorer/impls/claude-mcp-prediction/index.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 
@@ -333,6 +334,16 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // prediction-v0-baseline: reference restorer for prediction.v0 intents
   implRegistry.register(new PredictionV0BaselineImpl({
+    rpcUrl: config.rpcUrl,
+  }));
+
+  // claude-mcp-prediction: opt-in alternative that spawns Claude via MCP.
+  // Only chosen when config.restorers.byKind['prediction.v0'] names it.
+  // Registered unconditionally so the registry's byKind dispatch can find
+  // it when opted-in; baseline stays default via the byKind map above.
+  implRegistry.register(new ClaudeMcpPredictionImpl({
+    claudePath: config.claudePath,
+    claudeModel: config.claudeModel,
     rpcUrl: config.rpcUrl,
   }));
 

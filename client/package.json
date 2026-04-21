@@ -38,6 +38,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:claude-prediction": "yarn build && JINN_TEST_CLAUDE_PREDICTION=1 vitest run test/restorer/impls/claude-mcp-prediction/isolation.test.ts",
     "prepublishOnly": "yarn build && yarn test",
     "pack:smoke": "yarn pack -o jinn-client.tgz && node scripts/smoke-test-pack.mjs",
     "release:operator-gate": "yarn staking && yarn e2e",
