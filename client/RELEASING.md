@@ -8,9 +8,23 @@ This package is published from the monorepo, but operators consume it as a stand
 
 The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `client-vX.Y.Z`.
 
+The release flow has four layers:
+
+1. fast CI in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+2. the fork-based local operator gate (`yarn release:operator-gate`)
+3. the manual real testnet Docker acceptance gate (`yarn release:testnet-acceptance`; first-time setup: `yarn setup:testnet-acceptance-operator`, see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
+4. the GitHub Release workflows for npm `latest` and GHCR
+
+The old host-installed full acceptance run remains available only as a secondary debug path:
+
+```bash
+yarn setup:testnet-acceptance-operator:host
+yarn release:testnet-acceptance:host
+```
+
 ## One-time bootstrap publish
 
-Do this once because the package does not exist on npm yet.
+Do this once because the package did not exist on npm initially.
 
 1. Work from a clean `main` commit with the intended `client/package.json` version.
 2. Run the local release checks:
@@ -42,11 +56,7 @@ After the bootstrap publish succeeds:
    - GitHub repo: `Jinn-Network/mono`
    - workflow file: `npm-publish.yml`
    - environment: `npm-publish`
-3. Verify the registration:
-   ```bash
-   npm trust list @jinn-network/client
-   ```
-4. Remove any legacy npm token secrets once OIDC publishing is confirmed.
+3. Remove any legacy npm token secrets once OIDC publishing is confirmed.
 
 ## Canary releases
 
@@ -67,11 +77,18 @@ npx @jinn-network/client@canary --help
 
 1. Update `client/package.json` to the next stable semver.
 2. Merge that version bump to `main`.
-3. Run the exact release gate on the release commit:
+3. Run the exact release gates on the release commit:
    ```bash
    cd client
+   yarn typecheck
+   yarn test
+   yarn build
+   yarn pack:smoke
    yarn release:operator-gate
+   yarn setup:testnet-acceptance-operator
+   yarn release:testnet-acceptance
    ```
+   The Docker acceptance gate is documented in [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md).
 4. Create the Git tag and GitHub release using the package-specific tag shape:
    ```bash
    git tag client-vX.Y.Z
@@ -95,7 +112,10 @@ npm install -g @jinn-network/client@latest
 jinn version --json
 jinn doctor --json
 docker run --rm ghcr.io/jinn-network/client:X.Y.Z version --json
+docker run --rm ghcr.io/jinn-network/client:X.Y.Z doctor --json
 ```
+
+The real end-to-end daemon loop stays manual and local. It is intentionally not moved into GitHub Actions CI.
 
 Also verify the documented Docker auth flow exactly as shipped:
 

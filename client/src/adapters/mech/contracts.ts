@@ -13,9 +13,9 @@ import {
   JINN_ROUTER_ABI,
   JINN_ROUTER_CLAIM_DELIVERY_V1_ABI,
   JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
-  CLAIM_REGISTRY_ABI,
   NATIVE_PAYMENT_TYPE,
 } from './types.js';
+import { CLAIM_REGISTRY_ABI } from '../claim-registry/abi.js';
 import { executeSafeTransaction } from './safe.js';
 import {
   isRecoverableTransactionError,
@@ -395,6 +395,8 @@ export interface DecodedMarketplaceRequest {
   requestId: string;
   requestDataHex: string;
   priorityMech: string;
+  transactionHash?: `0x${string}`;
+  blockNumber?: number;
 }
 
 export function decodeMarketplaceRequestLogs(logs: Log[]): DecodedMarketplaceRequest[] {
@@ -417,6 +419,8 @@ export function decodeMarketplaceRequestLogs(logs: Log[]): DecodedMarketplaceReq
             requestId: String(args.requestIds[i]),
             requestDataHex: String(args.requestDatas[i]),
             priorityMech: String(args.priorityMech),
+            transactionHash: log.transactionHash ?? undefined,
+            blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
           });
         }
       }
@@ -465,6 +469,15 @@ export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
 
 // ── Delivery ─────────────────────────────────────────────────────────────────
 
+// Error names reported by the Mech Marketplace contract for duplicate delivery.
+// The exact name varies across contract versions; we match all known variants.
+const ALREADY_DELIVERED_PATTERNS = [
+  'AlreadyDelivered',
+  'DeliveryAlreadyCompleted',
+  'JobAlreadyDelivered',
+  'RequestAlreadyDelivered',
+];
+
 export async function callDeliverToMarketplace(
   publicClient: PublicClient,
   walletClient: WalletClient,
@@ -479,10 +492,23 @@ export async function callDeliverToMarketplace(
     args: [requestIds, datas],
   });
 
-  return executeSafeTransaction(publicClient, walletClient, {
-    safeAddress,
-    to: mechContractAddress,
-    value: 0n,
-    data: calldata,
-  });
+  try {
+    return await executeSafeTransaction(publicClient, walletClient, {
+      safeAddress,
+      to: mechContractAddress,
+      value: 0n,
+      data: calldata,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Idempotent: if the mech already recorded this delivery (e.g. crash
+    // recovery re-entered this path), treat it as success. The tx hash is
+    // unavailable at this point, but the engine's deliveryTxHash column would
+    // have been set by the previous attempt's onDeliveryTxLanded callback.
+    if (ALREADY_DELIVERED_PATTERNS.some(p => message.includes(p))) {
+      console.error(`[mech] callDeliverToMarketplace: already delivered (idempotent), requestIds=${requestIds.join(',')}`);
+      return '0x' as Hex;
+    }
+    throw err;
+  }
 }

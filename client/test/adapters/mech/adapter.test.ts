@@ -93,4 +93,79 @@ describe('MechAdapter with JinnRouter', () => {
 
     await adapter.stop();
   });
+
+  it('populates on-chain provenance fields from MarketplaceRequest log metadata', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeMarketplaceRequestLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, parseDesiredStateFromPayload } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const fakeTxHash = ('0x' + 'ab'.repeat(32)) as `0x${string}`;
+    const fakeBlockNumber = 42_000;
+    const fakeDigest = 'cc'.repeat(32);
+
+    vi.mocked(decodeMarketplaceRequestLogs).mockReturnValueOnce([{
+      requestId: '0x' + 'aa'.repeat(32),
+      requestDataHex: '0x' + fakeDigest,
+      priorityMech: '0x' + '00'.repeat(20),
+      transactionHash: fakeTxHash,
+      blockNumber: fakeBlockNumber,
+    }]);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ description: 'test intent' });
+    vi.mocked(parseDesiredStateFromPayload).mockReturnValueOnce({ id: 'ds-prov', description: 'test intent' });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    // Advance block cursor so the poll sees new blocks
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(200n);
+    (adapter as any).requestBlockCursor = 100n;
+
+    const gen = adapter.watchForRequests()[Symbol.asyncIterator]();
+    const { value: request } = await gen.next();
+
+    expect(request).toBeDefined();
+    expect(request!.intentCid).toBe(`f01551220${fakeDigest}`);
+    expect(request!.onchainCreationTx).toBe(fakeTxHash);
+    expect(request!.onchainCreationBlock).toBe(fakeBlockNumber);
+
+    await adapter.stop();
+  });
+
+  it('preserves restoration result context across evaluation-job retries', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { submitEvaluationJob } = await import('../../../src/adapters/mech/contracts.js');
+    const { buildDesiredStatePayload } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(submitEvaluationJob)
+      .mockRejectedValueOnce(new Error('GS013'))
+      .mockResolvedValueOnce(['0x' + 'bb'.repeat(32)]);
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    // Stub verifyRestorationClaimed() to always report the claim is visible
+    // (origin/main added a readContract poll before submitting the evaluation
+    // job; without this stub the test would hit MAX_POLLS * POLL_DELAY_MS).
+    (adapter as any).publicClient.readContract = vi.fn().mockResolvedValue(true);
+
+    const requestId = '0x' + 'aa'.repeat(32);
+    (adapter as any).pendingEvaluations.set(requestId, {
+      id: 'ds-1',
+      description: 'test',
+    });
+
+    await (adapter as any).tryCreateEvaluationJob(requestId, 'restoration output');
+    await (adapter as any).tryCreateEvaluationJob(requestId);
+
+    expect(vi.mocked(buildDesiredStatePayload)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(buildDesiredStatePayload).mock.calls[1]?.[0]).toMatchObject({
+      type: 'evaluation',
+      restorationRequestId: requestId,
+      context: {
+        restorationResult: 'restoration output',
+      },
+    });
+
+    await adapter.stop();
+  });
 });

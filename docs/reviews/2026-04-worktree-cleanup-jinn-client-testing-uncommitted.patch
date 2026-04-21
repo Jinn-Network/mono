@@ -1,0 +1,916 @@
+diff --git a/client/README.md b/client/README.md
+index b92df276..45284bcc 100644
+--- a/client/README.md
++++ b/client/README.md
+@@ -52,7 +52,9 @@ Because the macOS keychain securely encrypts OAuth tokens, you **cannot** simply
+ 
+ 2. **Authenticate Claude (One-Time):** The image entrypoint is the `jinn` binary, so run the Anthropic CLI directly by overriding the entrypoint. This performs the OAuth flow and saves the token to the persistent `jinn-claude-state` volume (same volumes as the daemon service):
+    ```bash
+-   docker compose run --rm -it --entrypoint claude jinn-daemon auth login
++   claude setup-token
++   echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env
++   jinn auth --docker-compose --json
+    ```
+    Use `-it` so the CLI can open a browser (or show a URL to visit) and receive input. The process stays in the foreground until you finish sign-in.
+    *Follow the URL to authenticate in your browser.*
+diff --git a/client/RELEASING.md b/client/RELEASING.md
+index 5668752b..0baa1e78 100644
+--- a/client/RELEASING.md
++++ b/client/RELEASING.md
+@@ -102,5 +102,6 @@ Also verify the documented Docker auth flow exactly as shipped:
+ ```bash
+ claude setup-token                          # on host — produces sk-ant-oat01-...
+ echo "CLAUDE_CODE_OAUTH_TOKEN=sk-..." >> .env
++jinn auth --docker-compose --json
+ docker compose up -d
+ ```
+diff --git a/client/TESTNET_ACCEPTANCE.md b/client/TESTNET_ACCEPTANCE.md
+index 3af24a32..297ae4ea 100644
+--- a/client/TESTNET_ACCEPTANCE.md
++++ b/client/TESTNET_ACCEPTANCE.md
+@@ -90,6 +90,7 @@ These are intentionally distinct from the normal operator compose volumes.
+    Add the resulting `sk-*` token to `client/.env.acceptance`:
+    ```bash
+    echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
++   yarn jinn auth --docker-compose --json
+    ```
+ 5. Run the steady-state release gate:
+    ```bash
+diff --git a/client/docker-compose.acceptance.yml b/client/docker-compose.acceptance.yml
+index 58699b35..bd2cdef0 100644
+--- a/client/docker-compose.acceptance.yml
++++ b/client/docker-compose.acceptance.yml
+@@ -6,7 +6,8 @@
+ #
+ #   docker compose --env-file .acceptance/docker-compose.env \
+ #     -f docker-compose.acceptance.yml \
+-#     run --rm -it --entrypoint claude jinn-acceptance-daemon auth login
++#     claude setup-token
++#     echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
+ 
+ services:
+   jinn-acceptance-daemon:
+diff --git a/client/scripts/setup-testnet-acceptance-operator-docker.mjs b/client/scripts/setup-testnet-acceptance-operator-docker.mjs
+index 435473ee..0c8d8976 100644
+--- a/client/scripts/setup-testnet-acceptance-operator-docker.mjs
++++ b/client/scripts/setup-testnet-acceptance-operator-docker.mjs
+@@ -212,10 +212,9 @@ or:
+ 
+   if (!parsed.values.bootstrap) {
+     console.log(`
+-One-time Claude login against the dedicated acceptance auth volume:
+-  docker compose --env-file .acceptance/docker-compose.env \\
+-    -f docker-compose.acceptance.yml \\
+-    run --rm -it --entrypoint claude ${composeService} auth login
++One-time Claude token setup for Docker acceptance:
++  claude setup-token
++  echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
+ 
+ Next:
+   yarn release:testnet-acceptance
+@@ -236,10 +235,9 @@ Next:
+         console.log('setup-testnet-acceptance-operator:docker bootstrap complete');
+         console.log(JSON.stringify(payload, null, 2));
+         console.log(`
+-One-time Claude login against the dedicated acceptance auth volume:
+-  docker compose --env-file .acceptance/docker-compose.env \\
+-    -f docker-compose.acceptance.yml \\
+-    run --rm -it --entrypoint claude ${composeService} auth login
++One-time Claude token setup for Docker acceptance:
++  claude setup-token
++  echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
+ 
+ Next:
+   yarn release:testnet-acceptance
+diff --git a/client/src/cli/commands/auth.ts b/client/src/cli/commands/auth.ts
+index cef1e8cf..35904563 100644
+--- a/client/src/cli/commands/auth.ts
++++ b/client/src/cli/commands/auth.ts
+@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
+ import type { CommandContext, CommandModule } from '../command.js';
+ import { emitResult } from '../output.js';
+ import { emitEnvelope } from '../../errors/envelope.js';
++import { getConfigPathFromArgs, loadConfig } from '../../config.js';
+ import {
+   detectAuthContext,
+   probeClaudeAuth,
+@@ -23,6 +24,7 @@ async function run(ctx: CommandContext): Promise<void> {
+       options: {
+         json: { type: 'boolean' },
+         human: { type: 'boolean' },
++        'docker-compose': { type: 'boolean' },
+       },
+       allowPositionals: false,
+     });
+@@ -39,9 +41,20 @@ async function run(ctx: CommandContext): Promise<void> {
+     return;
+   }
+ 
++  const configPath = getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
++  const config = loadConfig(configPath);
+   const cwd = process.cwd();
+-  const context = detectAuthContext({ cwd });
+-  const probe = probeClaudeAuth({ context, cwd });
++  const context = detectAuthContext({
++    cwd,
++    env: ctx.env,
++    composeServiceExists: parsed.values['docker-compose'] === true,
++  });
++  const probe = probeClaudeAuth({
++    context,
++    cwd,
++    claudePath: config.claudePath,
++    env: ctx.env,
++  });
+ 
+   if (probe.authenticated) {
+     const payload = {
+@@ -65,10 +78,14 @@ async function run(ctx: CommandContext): Promise<void> {
+   // Not authenticated
+   if (!ctx.stdoutIsTty) {
+     const contextLabel = CONTEXT_LABELS[context] ?? context;
++    const message =
++      context === 'docker-compose'
++        ? 'Claude is not configured for Docker Compose. Run `jinn auth --docker-compose` in a TTY to set up and validate the Docker token.'
++        : `Claude is not authenticated ${contextLabel}. Run \`jinn auth\` in a TTY to configure access.`;
+     emitEnvelope(
+       {
+         code: 'invalid_invocation',
+-        message: `Claude is not authenticated ${contextLabel}. Run \`jinn auth\` in a TTY to log in.`,
++        message,
+         exampleCli: 'jinn auth',
+         details: { field: 'auth', context },
+       },
+@@ -85,11 +102,25 @@ async function run(ctx: CommandContext): Promise<void> {
+ 
+   if (context === 'docker-compose') {
+     process.stderr.write(
+-      'A browser URL will appear in the output below. Open it to complete authentication.\n',
++      'Claude Docker auth uses a host-generated token. `claude setup-token` will run next; export the printed token as `CLAUDE_CODE_OAUTH_TOKEN` for your Docker environment.\n',
+     );
+   }
+ 
+-  const { command, args } = buildLoginCommand(context, cwd);
++  const login = buildLoginCommand(context, cwd, config.claudePath);
++  if (login.kind === 'manual') {
++    emitEnvelope(
++      {
++        code: 'invalid_invocation',
++        message: login.detail,
++        exampleCli: 'jinn auth',
++        details: { context },
++      },
++      { writer: ctx.writer, exit: ctx.exit },
++    );
++    return;
++  }
++
++  const { command, args } = login;
+   const result = spawnSync(command, args, { stdio: 'inherit' });
+ 
+   if (result.status !== 0) {
+@@ -105,8 +136,27 @@ async function run(ctx: CommandContext): Promise<void> {
+     return;
+   }
+ 
++  if (login.kind === 'setup-token') {
++    emitEnvelope(
++      {
++        code: 'invalid_invocation',
++        message:
++          'Token setup completed. Export the printed token as `CLAUDE_CODE_OAUTH_TOKEN` in your Docker env file, then re-run `jinn auth --docker-compose`.',
++        exampleCli: 'jinn auth --docker-compose',
++        details: { context },
++      },
++      { writer: ctx.writer, exit: ctx.exit },
++    );
++    return;
++  }
++
+   // Re-probe to verify
+-  const reProbe = probeClaudeAuth({ context, cwd });
++  const reProbe = probeClaudeAuth({
++    context,
++    cwd,
++    claudePath: config.claudePath,
++    env: ctx.env,
++  });
+ 
+   if (reProbe.authenticated) {
+     const payload = {
+@@ -130,7 +180,7 @@ async function run(ctx: CommandContext): Promise<void> {
+   emitEnvelope(
+     {
+       code: 'fatal',
+-      message: 'Login completed but Claude is still not authenticated. Try running `jinn auth` again.',
++      message: 'Login completed but Claude is still not configured. Try running `jinn auth` again.',
+       exampleCli: 'jinn auth',
+       details: { context },
+     },
+@@ -141,14 +191,14 @@ async function run(ctx: CommandContext): Promise<void> {
+ const command: CommandModule = {
+   name: 'auth',
+   summary: 'Check and configure Claude authentication for the current environment',
+-  helpText: `Usage: jinn auth [--human] [--json]
++  helpText: `Usage: jinn auth [--human] [--json] [--docker-compose]
+ 
+ Checks whether the Claude CLI is authenticated in the detected context and,
+-if running in a TTY, launches the interactive login flow automatically.
++if running in a TTY, launches the appropriate login flow when configuration is missing.
+ 
+ Context detection (priority order):
+   container       Running inside a Docker container (/.dockerenv present)
+-  docker-compose  A docker-compose.yml with a jinn-daemon service is in cwd
++  docker-compose  Explicitly requested host-side Docker Compose auth flow
+   bare            Plain host environment (default)
+ 
+ Behaviour:
+@@ -157,19 +207,21 @@ Behaviour:
+   - If not authenticated in a non-TTY → emits an invalid_invocation envelope
+     (exit 11) suitable for CI pipelines.
+   - If not authenticated in a TTY → prints guidance to stderr, then runs the
+-    appropriate login command with inherited stdio.
++    appropriate Claude login command with inherited stdio.
+ 
+ Docker Compose note:
+-  When context is docker-compose the login command runs inside the
+-  jinn-daemon container via \`docker compose run\`. A browser URL will appear
+-  in the terminal — open it to complete authentication.
++  Docker Compose uses \`CLAUDE_CODE_OAUTH_TOKEN\`, so host-side setup still
++  runs through \`claude setup-token\`. After setup, export the token into the
++  Docker environment and re-run \`jinn auth --docker-compose\`.
+ 
+ Flags:
+   --json    Force JSON output (default for non-TTY)
+   --human   Force human-readable output
++  --docker-compose  Validate Docker Compose auth using local compose env files
+ 
+ Examples:
+   jinn auth
++  jinn auth --docker-compose
+   jinn auth --human
+   jinn auth --json
+ `,
+diff --git a/client/src/cli/commands/doctor.ts b/client/src/cli/commands/doctor.ts
+index 3e0e7a85..a51a2e96 100644
+--- a/client/src/cli/commands/doctor.ts
++++ b/client/src/cli/commands/doctor.ts
+@@ -98,10 +98,23 @@ function claudeBinaryCheckForDoctor(claudePath: string, result: ClaudeBinaryChec
+   };
+ }
+ 
+-async function checkClaudeAuth(): Promise<CheckResult> {
++async function checkClaudeAuth(
++  config: JinnConfig,
++  env: NodeJS.ProcessEnv,
++  dockerCompose: boolean,
++): Promise<CheckResult> {
+   const cwd = process.cwd();
+-  const context = detectAuthContext({ cwd });
+-  const probe = probeClaudeAuth({ context, cwd });
++  const context = detectAuthContext({
++    cwd,
++    env,
++    composeServiceExists: dockerCompose,
++  });
++  const probe = probeClaudeAuth({
++    context,
++    cwd,
++    claudePath: config.claudePath,
++    env,
++  });
+   return {
+     name: 'claude_auth',
+     ok: probe.authenticated,
+@@ -119,7 +132,10 @@ async function run(ctx: CommandContext): Promise<void> {
+   try {
+     parsed = parseArgs({
+       args: ctx.argv,
+-      options: { ...COMMON_FLAGS },
++      options: {
++        ...COMMON_FLAGS,
++        'docker-compose': { type: 'boolean' },
++      },
+       allowPositionals: false,
+     });
+   } catch (err) {
+@@ -143,7 +159,13 @@ async function run(ctx: CommandContext): Promise<void> {
+ 
+   const claudeResult = await checkClaudeBinary(config.claudePath);
+   checks.push(claudeBinaryCheckForDoctor(config.claudePath, claudeResult));
+-  checks.push(await checkClaudeAuth());
++  checks.push(
++    await checkClaudeAuth(
++      config,
++      ctx.env,
++      parsed.values['docker-compose'] === true,
++    ),
++  );
+ 
+   checks.push(await checkKeystoreReadable(config.earningDir));
+   checks.push(await checkDeploymentLoaded(config));
+@@ -169,7 +191,7 @@ async function run(ctx: CommandContext): Promise<void> {
+ const command: CommandModule = {
+   name: 'doctor',
+   summary: 'Preflight checks: answers "would jinn run work?" without running it',
+-  helpText: `Usage: jinn doctor [--human] [--config <path>]
++  helpText: `Usage: jinn doctor [--human] [--config <path>] [--docker-compose]
+ 
+ Runs a set of non-mutating checks against the local environment and
+ configuration:
+@@ -185,6 +207,7 @@ checks fail — callers read the result to decide whether to proceed.
+ 
+ Examples:
+   jinn doctor
++  jinn doctor --docker-compose
+   jinn doctor --human
+ `,
+   run,
+diff --git a/client/src/main.ts b/client/src/main.ts
+index 3725b063..5705ced4 100644
+--- a/client/src/main.ts
++++ b/client/src/main.ts
+@@ -222,6 +222,32 @@ export interface DaemonStartupInfo {
+ export async function main(): Promise<DaemonStartupInfo> {
+   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
+ 
++  const preflight = await checkClaudeBinary(config.claudePath);
++  if (!preflight.ok) {
++    emitClaudeBinaryPreflightFailure(preflight.detail, config.claudePath);
++  }
++
++  const authContext = detectAuthContext({ cwd: process.cwd(), env: process.env });
++  const authProbe = probeClaudeAuth({
++    context: authContext,
++    cwd: process.cwd(),
++    claudePath: config.claudePath,
++    env: process.env,
++  });
++  if (!authProbe.authenticated) {
++    emitEnvelope({
++      code: 'invalid_invocation',
++      message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
++      hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
++      exampleCli: 'jinn auth',
++      details: {
++        field: 'claude_auth',
++        context: authContext,
++        authenticated: false,
++      },
++    });
++  }
++
+   const { agentPrivateKey, masterAddress, safeAddress, mechAddress, serviceIndex, serviceId } =
+     await bootstrap();
+ 
+@@ -252,27 +278,6 @@ export async function main(): Promise<DaemonStartupInfo> {
+     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
+   });
+ 
+-  const preflight = await checkClaudeBinary(config.claudePath);
+-  if (!preflight.ok) {
+-    emitClaudeBinaryPreflightFailure(preflight.detail, config.claudePath);
+-  }
+-
+-  const authContext = detectAuthContext({ cwd: process.cwd() });
+-  const authProbe = probeClaudeAuth({ context: authContext, cwd: process.cwd() });
+-  if (!authProbe.authenticated) {
+-    emitEnvelope({
+-      code: 'invalid_invocation',
+-      message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
+-      hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
+-      exampleCli: 'jinn auth',
+-      details: {
+-        field: 'claude_auth',
+-        context: authContext,
+-        authenticated: false,
+-      },
+-    });
+-  }
+-
+   const runner = new ClaudeRunner({
+     claudePath: config.claudePath,
+     model: config.claudeModel,
+@@ -377,4 +382,3 @@ export async function main(): Promise<DaemonStartupInfo> {
+   };
+ }
+ 
+-
+diff --git a/client/src/preflight/claude-auth.ts b/client/src/preflight/claude-auth.ts
+index ebf8656e..35f7ae64 100644
+--- a/client/src/preflight/claude-auth.ts
++++ b/client/src/preflight/claude-auth.ts
+@@ -1,17 +1,19 @@
+ /**
+- * Preflight: detect Claude auth context and probe authentication status.
++ * Preflight: detect Claude auth context and probe whether the current
++ * environment has usable Claude credentials configured.
+  *
+  * Three contexts are recognised:
+  *   - 'container'      — running inside a Docker container (/.dockerenv exists)
+- *   - 'docker-compose' — a docker-compose.yml with a jinn-daemon service lives in cwd
++ *   - 'docker-compose' — explicitly requested host-side Docker auth flow
+  *   - 'bare'           — plain host environment (default)
+  *
+- * Priority: container > docker-compose > bare.
++ * Priority: container > explicit override > bare.
+  */
+ 
+ import { existsSync, readFileSync } from 'node:fs';
+-import { spawnSync } from 'node:child_process';
++import { homedir } from 'node:os';
+ import { join } from 'node:path';
++import { spawnSync } from 'node:child_process';
+ 
+ // ---------------------------------------------------------------------------
+ // Types
+@@ -21,9 +23,10 @@ export type AuthContext = 'container' | 'docker-compose' | 'bare';
+ 
+ export interface DetectContextOptions {
+   cwd: string;
++  env?: NodeJS.ProcessEnv;
+   /** Override the /.dockerenv existence check (for testing). */
+   dockerenvExists?: boolean;
+-  /** Override the docker-compose.yml jinn-daemon check (for testing). */
++  /** Explicitly force docker-compose context (for testing / callers). */
+   composeServiceExists?: boolean;
+ }
+ 
+@@ -43,14 +46,18 @@ export interface AuthProbeResult {
+ export interface ProbeOptions {
+   context: AuthContext;
+   cwd: string;
++  claudePath?: string;
++  env?: NodeJS.ProcessEnv;
++  homeDir?: string;
++  authCommandsSupported?: boolean;
+   /** Inject a pre-computed spawn result (for testing). */
+   spawnResult?: SpawnResult;
+ }
+ 
+-export interface LoginResult {
+-  success: boolean;
+-  detail: string;
+-}
++export type LoginCommand =
++  | { kind: 'setup-token'; command: string; args: string[] }
++  | { kind: 'auth-login'; command: string; args: string[] }
++  | { kind: 'manual'; detail: string };
+ 
+ // ---------------------------------------------------------------------------
+ // detectAuthContext
+@@ -59,10 +66,10 @@ export interface LoginResult {
+ /**
+  * Determine which environment Claude is running in.
+  * When `dockerenvExists` / `composeServiceExists` are omitted the function
+- * inspects the filesystem directly.
++ * inspects the runtime environment directly.
+  */
+ export function detectAuthContext(opts: DetectContextOptions): AuthContext {
+-  const { cwd } = opts;
++  const env = opts.env ?? process.env;
+ 
+   // Resolve dockerenv — injected override takes precedence over filesystem.
+   const inContainer =
+@@ -72,46 +79,59 @@ export function detectAuthContext(opts: DetectContextOptions): AuthContext {
+ 
+   if (inContainer) return 'container';
+ 
+-  // Resolve compose service — injected override or parse the file.
+-  const hasComposeService =
+-    opts.composeServiceExists !== undefined
+-      ? opts.composeServiceExists
+-      : _composeHasJinnDaemon(cwd);
++  const explicitContext = env['JINN_CLAUDE_AUTH_CONTEXT'];
++  if (explicitContext === 'docker-compose' || explicitContext === 'bare') {
++    return explicitContext;
++  }
++
++  // Docker Compose should only be entered explicitly so a source checkout that
++  // happens to include docker-compose.yml still behaves like a normal host run.
++  const hasComposeService = opts.composeServiceExists === true;
+ 
+   if (hasComposeService) return 'docker-compose';
+ 
+   return 'bare';
+ }
+ 
+-function _composeHasJinnDaemon(cwd: string): boolean {
+-  const composePath = join(cwd, 'docker-compose.yml');
+-  if (!existsSync(composePath)) return false;
+-  try {
+-    const content = readFileSync(composePath, 'utf8');
+-    return content.includes('jinn-daemon');
+-  } catch {
+-    return false;
+-  }
+-}
+-
+ // ---------------------------------------------------------------------------
+ // probeClaudeAuth
+ // ---------------------------------------------------------------------------
+ 
+ /**
+- * Probe whether `claude` is authenticated in the given context.
+- * When `spawnResult` is provided (testing) no subprocess is created.
++ * Probe whether Claude is configured in the given context.
++ * When `spawnResult` is provided (testing) legacy JSON parsing is exercised
++ * without reading local auth state.
+  */
+ export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
+-  const { context, cwd } = opts;
++  const { context } = opts;
++  const env = opts.env ?? process.env;
++  const rootDir = opts.homeDir ?? homedir();
++  const effectiveEnv =
++    context === 'docker-compose'
++      ? _resolveDockerComposeEnv(opts.cwd, env)
++      : env;
++  const authCommandsSupported =
++    opts.authCommandsSupported ??
++    _supportsClaudeAuthCommands(opts.claudePath ?? 'claude', effectiveEnv);
++
++  if (opts.spawnResult === undefined) {
++    if (authCommandsSupported) {
++      return _probeViaAuthStatus(
++        opts.claudePath ?? 'claude',
++        effectiveEnv,
++        context,
++      );
++    }
++    return _probeWithoutAuthStatus(context, effectiveEnv, rootDir);
++  }
+ 
+-  const sr: SpawnResult = opts.spawnResult ?? _spawnAuthStatus(context, cwd);
++  const sr: SpawnResult = opts.spawnResult;
+ 
+   if (sr.status !== 0) {
+     return {
+       authenticated: false,
+       context,
+-      detail: sr.stderr || 'claude auth status exited with non-zero status',
++      detail: sr.stderr || 'Claude auth probe exited with non-zero status',
+     };
+   }
+ 
+@@ -122,7 +142,7 @@ export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
+     return {
+       authenticated: false,
+       context,
+-      detail: 'claude auth status output is not valid JSON',
++      detail: 'Claude auth probe output is not valid JSON',
+     };
+   }
+ 
+@@ -148,39 +168,154 @@ export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
+   };
+ }
+ 
+-function _spawnAuthStatus(context: AuthContext, cwd: string): SpawnResult {
+-  let command: string;
+-  let args: string[];
++function _probeViaAuthStatus(
++  claudePath: string,
++  env: NodeJS.ProcessEnv,
++  context: AuthContext,
++): AuthProbeResult {
++  const result = spawnSync(claudePath, ['auth', 'status'], {
++    encoding: 'utf8',
++    env,
++  });
++  const stdout = result.stdout ?? '';
++  const stderr = result.stderr ?? '';
++
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(stdout);
++  } catch {
++    return {
++      authenticated: false,
++      context,
++      detail: stderr || stdout.trim() || 'Claude auth status returned invalid output',
++    };
++  }
++
++  if (
++    parsed !== null &&
++    typeof parsed === 'object' &&
++    'loggedIn' in parsed
++  ) {
++    const loggedIn = (parsed as Record<string, unknown>).loggedIn === true;
++    const email =
++      typeof (parsed as Record<string, unknown>).email === 'string'
++        ? ((parsed as Record<string, unknown>).email as string)
++        : undefined;
++    return {
++      authenticated: loggedIn,
++      context,
++      detail: loggedIn
++        ? email
++          ? `logged in as ${email}`
++          : 'logged in'
++        : 'not logged in',
++      ...(email !== undefined ? { email } : {}),
++    };
++  }
++
++  return {
++    authenticated: false,
++    context,
++    detail: stderr || stdout.trim() || 'Claude auth status did not report login state',
++  };
++}
+ 
++function _probeWithoutAuthStatus(
++  context: AuthContext,
++  env: NodeJS.ProcessEnv,
++  homeDir: string,
++): AuthProbeResult {
++  const token = env['CLAUDE_CODE_OAUTH_TOKEN']?.trim();
+   if (context === 'docker-compose') {
+-    command = 'docker';
+-    args = [
+-      'compose',
+-      '-f',
+-      join(cwd, 'docker-compose.yml'),
+-      'run',
+-      '--rm',
+-      '-T',
+-      '--no-deps',
+-      '--entrypoint',
+-      'claude',
+-      'jinn-daemon',
+-      'auth',
+-      'status',
+-    ];
+-  } else {
+-    command = 'claude';
+-    args = ['auth', 'status'];
++    return {
++      authenticated: false,
++      context,
++      detail: token
++        ? 'Claude Code is too old to validate Docker tokens. Upgrade to v2.1.78+ and re-run `jinn auth --docker-compose`.'
++        : 'CLAUDE_CODE_OAUTH_TOKEN is not set for Docker Compose',
++    };
++  }
++
++  if (_hasPersistedClaudeSession(homeDir)) {
++    return {
++      authenticated: true,
++      context,
++      detail: 'persisted Claude session found',
++    };
+   }
+ 
+-  const result = spawnSync(command, args, { encoding: 'utf8' });
+   return {
+-    status: result.status,
+-    stdout: result.stdout ?? '',
+-    stderr: result.stderr ?? '',
++    authenticated: false,
++    context,
++    detail: 'no persisted Claude session found',
+   };
+ }
+ 
++function _resolveDockerComposeEnv(
++  cwd: string,
++  env: NodeJS.ProcessEnv,
++): NodeJS.ProcessEnv {
++  const merged: NodeJS.ProcessEnv = {};
++  for (const candidate of [
++    join(cwd, '.env'),
++    join(cwd, '.env.acceptance'),
++    join(cwd, '.acceptance', 'docker-compose.env'),
++  ]) {
++    if (!existsSync(candidate)) continue;
++    Object.assign(merged, _parseEnvFile(candidate));
++  }
++  return { ...merged, ...env };
++}
++
++function _parseEnvFile(path: string): NodeJS.ProcessEnv {
++  const out: NodeJS.ProcessEnv = {};
++  try {
++    const raw = readFileSync(path, 'utf8');
++    for (const line of raw.split(/\r?\n/)) {
++      const trimmed = line.trim();
++      if (!trimmed || trimmed.startsWith('#')) continue;
++      const idx = trimmed.indexOf('=');
++      if (idx <= 0) continue;
++      out[trimmed.slice(0, idx)] = trimmed.slice(idx + 1);
++    }
++  } catch {
++    // ignore env-file parse failures and fall back to process.env
++  }
++  return out;
++}
++
++function _supportsClaudeAuthCommands(
++  claudePath: string,
++  env: NodeJS.ProcessEnv,
++): boolean {
++  const result = spawnSync(claudePath, ['--version'], {
++    encoding: 'utf8',
++    env,
++  });
++  const versionText = (result.stdout ?? '').trim();
++  const match = versionText.match(/(\d+)\.(\d+)\.(\d+)/);
++  if (!match) return false;
++  const major = Number.parseInt(match[1]!, 10);
++  const minor = Number.parseInt(match[2]!, 10);
++  const patch = Number.parseInt(match[3]!, 10);
++  if (major > 2) return true;
++  if (major < 2) return false;
++  if (minor > 1) return true;
++  if (minor < 1) return false;
++  return patch >= 78;
++}
++
++function _hasPersistedClaudeSession(homeDir: string): boolean {
++  const statePath = join(homeDir, '.claude', '.claude.json');
++  if (!existsSync(statePath)) return false;
++  try {
++    const parsed = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>;
++    return typeof parsed['userID'] === 'string' && parsed['userID'].trim().length > 0;
++  } catch {
++    return false;
++  }
++}
++
+ // ---------------------------------------------------------------------------
+ // buildLoginCommand
+ // ---------------------------------------------------------------------------
+@@ -191,26 +326,28 @@ function _spawnAuthStatus(context: AuthContext, cwd: string): SpawnResult {
+ export function buildLoginCommand(
+   context: AuthContext,
+   cwd: string,
+-): { command: string; args: string[] } {
++  claudePath = 'claude',
++  authCommandsSupported?: boolean,
++): LoginCommand {
+   if (context === 'docker-compose') {
+     return {
+-      command: 'docker',
+-      args: [
+-        'compose',
+-        '-f',
+-        join(cwd, 'docker-compose.yml'),
+-        'run',
+-        '--rm',
+-        '-it',
+-        '--no-deps',
+-        '--entrypoint',
+-        'claude',
+-        'jinn-daemon',
+-        'auth',
+-        'login',
+-      ],
++      kind: 'setup-token',
++      command: claudePath,
++      args: ['setup-token'],
++    };
++  }
++
++  if (authCommandsSupported ?? _supportsClaudeAuthCommands(claudePath, process.env)) {
++    return {
++      kind: 'auth-login',
++      command: claudePath,
++      args: ['auth', 'login'],
+     };
+   }
+ 
+-  return { command: 'claude', args: ['auth', 'login'] };
++  return {
++    kind: 'manual',
++    detail:
++      'This Claude Code version does not support `claude auth login`. Upgrade to v2.1.78+ or open `claude` and run `/login` manually.',
++  };
+ }
+diff --git a/client/test/preflight/claude-auth.test.ts b/client/test/preflight/claude-auth.test.ts
+index 6b9f255f..55b4abc8 100644
+--- a/client/test/preflight/claude-auth.test.ts
++++ b/client/test/preflight/claude-auth.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from 'vitest';
+-import { mkdtempSync, writeFileSync } from 'node:fs';
++import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+ import { join } from 'node:path';
+ import { tmpdir } from 'node:os';
+ import {
+@@ -33,7 +33,7 @@ describe('detectAuthContext', () => {
+     expect(result).toBe('container');
+   });
+ 
+-  it('returns "docker-compose" when composeServiceExists is true', () => {
++  it('returns "docker-compose" when composeServiceExists is explicitly true', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-'));
+     const result = detectAuthContext({
+       cwd: dir,
+@@ -43,12 +43,22 @@ describe('detectAuthContext', () => {
+     expect(result).toBe('docker-compose');
+   });
+ 
+-  it('returns "bare" when composeServiceExists is false', () => {
++  it('returns "docker-compose" when explicitly requested through env', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-'));
+     const result = detectAuthContext({
+       cwd: dir,
+       dockerenvExists: false,
+-      composeServiceExists: false,
++      env: { JINN_CLAUDE_AUTH_CONTEXT: 'docker-compose' },
++    });
++    expect(result).toBe('docker-compose');
++  });
++
++  it('does not infer docker-compose from a repo checkout by default', () => {
++    const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-'));
++    writeFileSync(join(dir, 'docker-compose.yml'), 'services:\n  jinn-daemon:\n    image: test\n');
++    const result = detectAuthContext({
++      cwd: dir,
++      dockerenvExists: false,
+     });
+     expect(result).toBe('bare');
+   });
+@@ -111,6 +121,34 @@ describe('probeClaudeAuth', () => {
+     });
+     expect(result.authenticated).toBe(false);
+   });
++
++  it('does not trust CLAUDE_CODE_OAUTH_TOKEN when auth commands are unavailable', () => {
++    const result = probeClaudeAuth({
++      context: 'docker-compose',
++      cwd: '/tmp',
++      env: {
++        CLAUDE_CODE_OAUTH_TOKEN: 'sk-test',
++      },
++      authCommandsSupported: false,
++    });
++    expect(result.authenticated).toBe(false);
++  });
++
++  it('returns authenticated=true when persisted Claude session exists', () => {
++    const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-home-'));
++    mkdirSync(join(dir, '.claude'));
++    writeFileSync(
++      join(dir, '.claude', '.claude.json'),
++      JSON.stringify({ userID: 'user-123' }),
++    );
++    const result = probeClaudeAuth({
++      context: 'bare',
++      cwd: '/tmp',
++      homeDir: dir,
++      env: {},
++    });
++    expect(result.authenticated).toBe(true);
++  });
+ });
+ 
+ // ---------------------------------------------------------------------------
+@@ -118,34 +156,22 @@ describe('probeClaudeAuth', () => {
+ // ---------------------------------------------------------------------------
+ 
+ describe('buildLoginCommand', () => {
+-  it('returns direct claude command for bare context', () => {
+-    const result = buildLoginCommand('bare', '/some/path');
+-    expect(result.command).toBe('claude');
++  it('returns auth login for bare context when supported', () => {
++    const result = buildLoginCommand('bare', '/some/path', '/custom/claude', true);
++    expect(result.command).toBe('/custom/claude');
++    expect(result.kind).toBe('auth-login');
+     expect(result.args).toEqual(['auth', 'login']);
+   });
+ 
+-  it('returns direct claude command for container context', () => {
+-    const result = buildLoginCommand('container', '/some/path');
+-    expect(result.command).toBe('claude');
+-    expect(result.args).toEqual(['auth', 'login']);
++  it('returns a manual fallback for bare context when auth login is unsupported', () => {
++    const result = buildLoginCommand('bare', '/some/path', 'claude', false);
++    expect(result.kind).toBe('manual');
+   });
+ 
+-  it('returns docker compose command with jinn-daemon for docker-compose context', () => {
++  it('returns host setup-token command for docker-compose context', () => {
+     const result = buildLoginCommand('docker-compose', '/my/project');
+-    expect(result.command).toBe('docker');
+-    expect(result.args).toEqual([
+-      'compose',
+-      '-f',
+-      '/my/project/docker-compose.yml',
+-      'run',
+-      '--rm',
+-      '-it',
+-      '--no-deps',
+-      '--entrypoint',
+-      'claude',
+-      'jinn-daemon',
+-      'auth',
+-      'login',
+-    ]);
++    expect(result.kind).toBe('setup-token');
++    expect(result.command).toBe('claude');
++    expect(result.args).toEqual(['setup-token']);
+   });
+ });

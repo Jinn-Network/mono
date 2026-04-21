@@ -54,6 +54,35 @@ describe('Fleet bootstrap', () => {
     expect(state.services).toEqual([]);
   });
 
+  it('hydrates master_address when keystore exists without fleet master (post-init)', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.funding).toBeDefined();
+    const expected = deriveMasterAddress(mnemonic);
+    expect(getAddress(result.funding!.master_address)).toBe(getAddress(expected));
+
+    const state = await store.load();
+    expect(getAddress(state.master_address!)).toBe(getAddress(expected));
+  });
+
   it('detects legacy keystore and migrates', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { RESTORATION_INTENTS_SCHEMA } from '../restorer/engine/persistence.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS own_activity (
@@ -35,7 +36,8 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_remote ON artifacts (remote);
 `;
 
 export class Store {
-  private db: Database.Database;
+  /** Exposed for engine persistence layer — treat as package-internal. */
+  readonly db: Database.Database;
   readonly path: string;
 
   constructor(dbPath: string) {
@@ -46,6 +48,7 @@ export class Store {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
+    this.db.exec(RESTORATION_INTENTS_SCHEMA);
   }
 
   recordOwnActivity(requestId: string, role: 'created' | 'claimed' | 'delivered' | 'evaluated'): void {

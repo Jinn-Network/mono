@@ -32,7 +32,8 @@ JINN_PASSWORD=your-keystore-password jinn init
 # 2. Verify the environment and resolved deployment.
 jinn doctor --human
 
-# 3. List the exact funding gaps (ETH and stOLAS on Base Sepolia).
+# 3. List exact funding gaps. On testnet this is ETH only — the staking pool
+#    is managed protocol-side and operators don't hold bond tokens directly.
 jinn fund-requirements --human
 
 # 4. Send the requested testnet funds to the printed master address, then:
@@ -43,8 +44,16 @@ JINN_PASSWORD=your-keystore-password jinn run
 ```
 
 `jinn init`, `jinn fund-requirements`, `jinn bootstrap`, and `jinn run` all
-share the same encrypted keystore and fleet state under
-`~/.jinn-client/earning/`. They are idempotent — re-run any of them safely.
+share the same encrypted keystore and fleet state under `~/.jinn-client/earning/`
+by default. They are idempotent — re-run any of them safely.
+
+To keep testnet and mainnet state side-by-side on the same machine, set
+`JINN_EARNING_DIR` to a network-specific path:
+
+```bash
+JINN_NETWORK=testnet JINN_EARNING_DIR=~/.jinn-client/earning-testnet jinn run
+JINN_NETWORK=mainnet JINN_EARNING_DIR=~/.jinn-client/earning-mainnet jinn run
+```
 
 `JINN_PASSWORD` encrypts the local keystore and is **required** for every
 verb that touches private keys (`init`, `bootstrap`, `run`,
@@ -76,6 +85,8 @@ Because the macOS keychain securely encrypts OAuth tokens, you **cannot** simply
    ```
    Use `-it` so the CLI can open a browser (or show a URL to visit) and receive input. The process stays in the foreground until you finish sign-in.
    *Follow the URL to authenticate in your browser.*
+
+   > **Note:** this block assumes you've cloned the git repo — the compose file lives at `client/docker-compose.yml`. If you installed via `npm install -g`, copy the compose file from `$(npm root -g)/@jinn-network/client/docker-compose.yml` to a working directory first, then run the commands there.
 
 3. **Start the Fleet:** Now that the Docker volume holds the token, start the headless daemon:
    ```bash
@@ -150,7 +161,7 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 
 | Config key | Env override | Default |
 |---|---|---|
-| network | JINN_NETWORK | testnet (flips to mainnet at launch) |
+| network | JINN_NETWORK | read from config; `mainnet` if unset (flips to `testnet` default for the Phase 2 mainnet launch window) |
 | rpcUrl | BASE_RPC_URL / JINN_RPC_URL | network-appropriate public RPC |
 | claudeModel | JINN_CLAUDE_MODEL | claude-haiku-4-5-20251001 |
 | claudePath | JINN_CLAUDE_PATH | claude |
@@ -167,22 +178,61 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 
 | Role | Phase 1b (testnet, Base Sepolia) | Phase 2 (mainnet, Base) |
 |---|---|---|
-| Gas (native) | ETH | ETH |
-| Staking bond | stOLAS | OLAS |
+| Gas (native) | ETH (CDP auto-funded on testnet) | ETH |
+| Staking bond | Pooled, protocol-managed via stOLAS distributor (operators hold nothing) | OLAS (operator-held) |
 | Reward | stOLAS | OLAS (+ JINN incentives after launch) |
 
-On testnet, stOLAS is the liquid-staked OLAS variant used for bonds and
-incentives; OLAS backs stOLAS upstream and is not required directly.
-`jinn fund-requirements` surfaces the exact per-wallet needs for the
-current phase.
+**Important:** under stOLAS standard mode (the Phase 1b default), operators
+**do not hold a bond token themselves**. The stOLAS distributor pools JINN
+contributed by stakers and stakes on behalf of operators; your service gets
+created against that shared pool. `jinn fund-requirements` surfaces only the
+per-wallet ETH you need. If the distributor pool is drained, `jinn doctor`
+will warn you — the fix is a protocol-team refill, not operator action.
 
 ## Switching to mainnet
 
 When Phase 2 launches, the default flips. Until then:
 
 ```bash
-JINN_NETWORK=mainnet JINN_PASSWORD=secret jinn run
+JINN_NETWORK=mainnet \
+JINN_EARNING_DIR=~/.jinn-client/earning-mainnet \
+JINN_PASSWORD=secret \
+jinn run
 ```
+
+Use a distinct `JINN_EARNING_DIR` to keep testnet and mainnet keystore
+state isolated. Mixing them on the same directory is an easy way to
+point a mainnet daemon at a testnet-derived master wallet.
+
+## Troubleshooting
+
+Quick answers to the things that typically surprise new operators:
+
+- **Bootstrap loops for a minute then exits with `funding_required`** —
+  the CDP faucet drip is small (~0.0001 ETH per call) and the bootstrap
+  floor is 0.005 ETH. The client now drains the faucet up to 60 times per
+  invocation automatically; if you still see `funding_required`, CDP rate-
+  limited your master address. Wait 24h or fund manually:
+  <https://portal.cdp.coinbase.com/products/faucet>.
+- **Claude session exits in ~18 seconds with no trades** — usually means
+  the daemon ran from source (via `tsx`) instead of the compiled `dist/`,
+  so the MCP wrapper couldn't load `mcp-tools.js`. Run `yarn build && yarn
+  dev` (dev) or reinstall via `npm install -g @jinn-network/client@latest`
+  (operator). `jinn doctor` flags this as `daemon_runtime_ready`.
+- **Bootstrap fails with `Overflow(20, 0)` at `distributor.stake()`** —
+  the testnet stOLAS distributor pool is drained. Operators cannot fix
+  this; the Jinn protocol team has to refill it. Report to the testnet
+  status channel and re-run `jinn bootstrap` once the pool is topped up.
+- **Position auto-closed within seconds of opening** — most likely
+  a competing trading bot is active on the same Hyperliquid master. Use a
+  fresh HL master per protocol test; do not share master accounts between
+  experiments.
+- **`jinn doctor` passes but `jinn run` fails** — check the specific
+  check names in doctor's output vs the specific error from `run`. The
+  most common mismatch is auth-context: if you're in the `client/` git
+  checkout dir, `detectAuthContext` infers `docker-compose` mode even on
+  a bare host. Run the daemon from `$HOME` or any directory without a
+  `docker-compose.yml` that names `jinn-daemon`.
 
 ## How it works
 

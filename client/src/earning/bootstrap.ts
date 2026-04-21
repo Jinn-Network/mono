@@ -180,7 +180,7 @@ export class FleetBootstrapper {
 
       // Phase 1b: Check master funding
       const masterAddress = state.master_address!;
-      const masterBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
+      let masterBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
       // Self-bond mode needs much more ETH than standard mode because the master
       // funds the agent which then pays for: Safe deploy, 5 service registry txs
       // (create, activate, register, deploy, stake), and mech deploy. Roughly
@@ -206,39 +206,64 @@ export class FleetBootstrapper {
         ? this.config.minEoaGasEth
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
       const autoFaucetEnabled = this.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
-      if (systemEth < requiredMasterEth) {
-        // On testnet, attempt automatic faucet funding before giving up
-        if (this.chain === 'base-sepolia' && autoFaucetEnabled) {
-          console.error('[fleet-bootstrap] Attempting automatic faucet funding via Coinbase CDP...');
+
+      // Re-sum system ETH (master + agent/safe balances for self-bond mode).
+      // Hoisted so the drip loop below can refresh cheaply.
+      const refreshSystemEth = async (): Promise<{ system: bigint; master: bigint }> => {
+        const m = await this.publicClient.getBalance({ address: masterAddress as Address });
+        let total = m;
+        if (this.stakingMode === 'self-bond') {
+          for (const svc of state.services) {
+            if (svc.agent_address) {
+              total += await this.publicClient.getBalance({
+                address: getAddress(svc.agent_address) as Address,
+              });
+            }
+            if (svc.safe_address) {
+              total += await this.publicClient.getBalance({
+                address: getAddress(svc.safe_address) as Address,
+              });
+            }
+          }
+        }
+        return { system: total, master: m };
+      };
+
+      // On testnet, drain the CDP faucet in a loop until master has enough ETH.
+      // CDP's drip is tiny (~0.0001 ETH) vs the 0.005 ETH bootstrap floor — a
+      // single drip is never enough, and the older two-drip pattern forced
+      // operators to re-run `jinn bootstrap` 25+ times. We loop until funded,
+      // rate-limited, or an error. Cap at 60 iterations as a safety bound.
+      if (systemEth < requiredMasterEth && this.chain === 'base-sepolia' && autoFaucetEnabled) {
+        const MAX_FAUCET_ITERS = 60;
+        const INTER_DRIP_PAUSE_MS = 1_000;
+        console.error(
+          `[fleet-bootstrap] Master has ${formatEther(systemEth)} ETH; need ${formatEther(requiredMasterEth)} ETH. ` +
+          `Draining CDP faucet (up to ${MAX_FAUCET_ITERS} drips)...`,
+        );
+        for (let i = 0; i < MAX_FAUCET_ITERS; i++) {
           const faucetResult = await requestTestnetFunding(masterAddress, 'base-sepolia');
-          if (faucetResult.ok) {
-            console.error(`[fleet-bootstrap] Faucet funded successfully (tx: ${faucetResult.txHash}). Rechecking balance...`);
-            // Wait for tx propagation
-            await new Promise(r => setTimeout(r, 3000));
-            // Re-read balance and continue if sufficient
-            const refreshedBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
-            let refreshedSystemEth = refreshedBalance;
-            if (this.stakingMode === 'self-bond') {
-              for (const svc of state.services) {
-                if (svc.agent_address) {
-                  refreshedSystemEth += await this.publicClient.getBalance({
-                    address: getAddress(svc.agent_address) as Address,
-                  });
-                }
-                if (svc.safe_address) {
-                  refreshedSystemEth += await this.publicClient.getBalance({
-                    address: getAddress(svc.safe_address) as Address,
-                  });
-                }
-              }
+          if (!faucetResult.ok) {
+            if (faucetResult.rateLimited) {
+              console.error(`[fleet-bootstrap] CDP faucet rate-limited after ${i} drips: ${faucetResult.reason}`);
+            } else {
+              console.error(`[fleet-bootstrap] CDP faucet error after ${i} drips: ${faucetResult.reason}`);
             }
-            if (refreshedSystemEth >= requiredMasterEth) {
-              console.error('[fleet-bootstrap] Faucet funding sufficient. Continuing bootstrap...');
-              // Update systemEth/masterBalance for the runway check below
-              systemEth = refreshedSystemEth;
-            }
-          } else {
-            console.error(`[fleet-bootstrap] Faucet unavailable: ${faucetResult.reason}`);
+            break;
+          }
+          if ((i + 1) % 10 === 0) {
+            console.error(`[fleet-bootstrap] ${i + 1} drips landed; rechecking balance...`);
+          }
+          await new Promise(r => setTimeout(r, INTER_DRIP_PAUSE_MS));
+          const refreshed = await refreshSystemEth();
+          systemEth = refreshed.system;
+          masterBalance = refreshed.master;
+          if (systemEth >= requiredMasterEth) {
+            console.error(
+              `[fleet-bootstrap] Faucet funding sufficient after ${i + 1} drip${i === 0 ? '' : 's'} ` +
+              `(master=${formatEther(masterBalance)} ETH). Continuing bootstrap...`,
+            );
+            break;
           }
         }
       }
@@ -343,6 +368,18 @@ export class FleetBootstrapper {
   ): Promise<FleetState> {
     if (this.store.hasMnemonicKeystore() && state.master_address) {
       return state;
+    }
+
+    // `jinn init` writes the mnemonic keystore but does not patch earning_state.json.
+    // Hydrate master_address from the existing keystore instead of generating a new wallet.
+    if (this.store.hasMnemonicKeystore()) {
+      const mnemonic = await decryptMnemonic(await this.store.loadMnemonicKeystore(), password);
+      const masterAddress = deriveMasterAddress(mnemonic);
+      return this.store.patchFleet({
+        master_address: masterAddress,
+        chain: this.chain,
+        staking_mode: this.stakingMode,
+      });
     }
 
     console.error('[fleet-bootstrap] Generating new HD wallet...');
@@ -942,7 +979,7 @@ export class FleetBootstrapper {
 
     // 5. Check Safe OLAS balance
     const requiredOlas = this.config.bondAmount * SAFE_TOKEN_BOOTSTRAP_MULTIPLIER;
-    const olasBalance = await this.getOlasBalance(safeAddress);
+    const olasBalance = await this.getBondTokenBalance(safeAddress);
     if (olasBalance < requiredOlas) {
       throw new Error(
         `Service ${index}: Safe ${safeAddress} needs ${requiredOlas} OLAS wei for bonding but has ${olasBalance}. ` +
@@ -1275,7 +1312,7 @@ export class FleetBootstrapper {
 
   // ── Helpers ──────────────────────────────────────────────────────────
 
-  private async getOlasBalance(address: string): Promise<bigint> {
+  private async getBondTokenBalance(address: string): Promise<bigint> {
     return this.publicClient.readContract({
       address: this.config.olasToken as Address,
       abi: ERC20_ABI,

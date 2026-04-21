@@ -537,6 +537,7 @@ __metadata:
     "@hono/node-server": "npm:^1.19.12"
     "@jinn-network/mech-client-ts": "npm:^0.0.6"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
+    "@msgpack/msgpack": "npm:^3.0.0"
     "@safe-global/protocol-kit": "npm:^6.1.2"
     "@safe-global/types-kit": "npm:^3.0.0"
     "@scure/bip32": "npm:^1.7.0"
@@ -737,6 +738,13 @@ __metadata:
     zod:
       optional: false
   checksum: 10c0/7c4bc339205b1652330cd4e6b121cc859079655f2b9c0506bbb15563ba0d07924bda3d949705530532db7f4d2cb86d633dc8f92bc32803d97c7bece2ac63e29f
+  languageName: node
+  linkType: hard
+
+"@msgpack/msgpack@npm:^3.0.0":
+  version: 3.1.3
+  resolution: "@msgpack/msgpack@npm:3.1.3"
+  checksum: 10c0/1fa9a760a58e64e121561d17977b680198ff24d83e951df3896f8639d06824f2cba20af92a19940461e0d5d6dc696bd01222bd901164759432eadd0f482d0816
   languageName: node
   linkType: hard
 

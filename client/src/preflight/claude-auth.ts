@@ -6,7 +6,14 @@
  *   - 'docker-compose' — a docker-compose.yml with a jinn-daemon service lives in cwd
  *   - 'bare'           — plain host environment (default)
  *
- * Priority: container > docker-compose > bare.
+ * Priority:
+ *   1. JINN_RUNTIME_MODE env var (authoritative; CI/scripted operators)
+ *   2. `runtimeMode` field in the resolved config (persisted by `jinn auth`)
+ *   3. Filesystem heuristic (container → docker-compose → bare) as a last resort
+ *
+ * The filesystem path is a LAST RESORT because running from the `client/`
+ * checkout dir misdetects as docker-compose (the package's own compose file
+ * names `jinn-daemon`). Operators should set `runtimeMode` at `jinn auth`.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -21,6 +28,10 @@ export type AuthContext = 'container' | 'docker-compose' | 'bare';
 
 export interface DetectContextOptions {
   cwd: string;
+  /** Optional explicit mode, typically from `config.runtimeMode`. Highest priority. */
+  configuredMode?: AuthContext;
+  /** Optional env (default: process.env). Tests can inject a stub. */
+  env?: NodeJS.ProcessEnv;
   /** Override the /.dockerenv existence check (for testing). */
   dockerenvExists?: boolean;
   /** Override the docker-compose.yml jinn-daemon check (for testing). */
@@ -63,8 +74,22 @@ export interface LoginResult {
  */
 export function detectAuthContext(opts: DetectContextOptions): AuthContext {
   const { cwd } = opts;
+  const env = opts.env ?? process.env;
 
-  // Resolve dockerenv — injected override takes precedence over filesystem.
+  // 1. JINN_RUNTIME_MODE env var (CI / scripted operators).
+  const envMode = env['JINN_RUNTIME_MODE'];
+  if (envMode === 'bare' || envMode === 'docker-compose' || envMode === 'container') {
+    return envMode;
+  }
+
+  // 2. Explicit config (persisted by `jinn auth`).
+  if (opts.configuredMode) {
+    return opts.configuredMode;
+  }
+
+  // 3. Filesystem heuristic — last resort. Flawed inside the client/ checkout dir
+  // because the package's own docker-compose.yml names jinn-daemon. Prefer
+  // setting runtimeMode explicitly.
   const inContainer =
     opts.dockerenvExists !== undefined
       ? opts.dockerenvExists
@@ -72,7 +97,6 @@ export function detectAuthContext(opts: DetectContextOptions): AuthContext {
 
   if (inContainer) return 'container';
 
-  // Resolve compose service — injected override or parse the file.
   const hasComposeService =
     opts.composeServiceExists !== undefined
       ? opts.composeServiceExists

@@ -10,6 +10,10 @@ export interface DesiredStatePayload {
   attemptId?: string;
   attemptNumber?: number;
   restorationRequestId?: string;
+  // portfolio.v0 additions — optional on both read and write for backward compat
+  spec?: { kind: string } & Record<string, unknown>;
+  window?: { startTs: number; endTs: number };
+  eligibility?: Record<string, unknown>;
 }
 
 export interface RestorationResultPayload {
@@ -27,10 +31,21 @@ export function buildDesiredStatePayload(state: DesiredState): DesiredStatePaylo
     attemptId: state.attemptId,
     attemptNumber: state.attemptNumber,
     restorationRequestId: state.restorationRequestId,
+    ...(state.spec ? { spec: state.spec } : {}),
+    ...(state.window ? { window: state.window } : {}),
+    ...(state.eligibility ? { eligibility: state.eligibility } : {}),
   };
 }
 
 export function parseDesiredStateFromPayload(payload: Record<string, unknown>): DesiredState {
+  const spec = payload.spec as DesiredState['spec'] | undefined;
+  const rawWindow = payload.window as { startTs?: unknown; endTs?: unknown } | undefined;
+  const window =
+    rawWindow && typeof rawWindow.startTs === 'number' && typeof rawWindow.endTs === 'number'
+      ? { startTs: rawWindow.startTs, endTs: rawWindow.endTs }
+      : undefined;
+  const eligibility = payload.eligibility as Record<string, unknown> | undefined;
+
   return {
     id: (payload.desiredStateId as string) ?? '',
     description: (payload.description as string) ?? '',
@@ -39,6 +54,9 @@ export function parseDesiredStateFromPayload(payload: Record<string, unknown>): 
     attemptId: payload.attemptId as string | undefined,
     attemptNumber: payload.attemptNumber as number | undefined,
     restorationRequestId: payload.restorationRequestId as string | undefined,
+    ...(spec ? { spec } : {}),
+    ...(window ? { window } : {}),
+    ...(eligibility ? { eligibility } : {}),
   };
 }
 

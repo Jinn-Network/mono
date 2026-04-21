@@ -34,6 +34,12 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
+import { RestorerImplRegistry } from './restorer/engine/registry.js';
+import { LegacyClaudeImpl } from './restorer/impls/legacy-claude/index.js';
+import { ClaudeMcpHyperliquidImpl } from './restorer/impls/claude-mcp-hyperliquid/index.js';
+import { PortfolioV0Evaluator } from './restorer/impls/portfolio-v0-evaluator/index.js';
+import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
+import { createClients } from './adapters/mech/safe.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -257,7 +263,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     emitClaudeBinaryPreflightFailure(preflight.detail, config.claudePath);
   }
 
-  const authContext = detectAuthContext({ cwd: process.cwd() });
+  const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
   const authProbe = probeClaudeAuth({ context: authContext, cwd: process.cwd() });
   if (!authProbe.authenticated) {
     emitEnvelope({
@@ -287,11 +293,95 @@ export async function main(): Promise<DaemonStartupInfo> {
   const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
   const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
 
+  // ── RestorationEngine wiring ─────────────────────────────────────────────────
+
+  // Build agent viem clients (same creds as MechAdapter uses internally).
+  const agentChain = config.network === 'testnet'
+    ? (await import('viem/chains')).baseSepolia
+    : (await import('viem/chains')).base;
+  const agentClients = createClients(config.rpcUrl, agentPrivateKey, agentChain);
+
+  // ── Impl registry ────────────────────────────────────────────────────────────
+
+  const implRegistry = new RestorerImplRegistry({
+    byKind: {
+      'portfolio.v0': 'claude-mcp-hyperliquid',
+      'portfolio.v0.eval': 'portfolio-v0-evaluator',
+    },
+    default: 'legacy-claude',
+    ...(config.restorers ?? {}),
+  });
+
+  // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) intents
+  implRegistry.register(new LegacyClaudeImpl({
+    runner,
+    workingDirectory: '/tmp',
+    timeoutMs: 300_000,
+    daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
+  }));
+
+  // claude-mcp-hyperliquid: portfolio.v0 trader
+  implRegistry.register(new ClaudeMcpHyperliquidImpl({
+    claudePath: config.claudePath,
+    claudeModel: config.claudeModel,
+  }));
+
+  // portfolio-v0-evaluator: deterministic verifier for portfolio.v0.eval
+  implRegistry.register(new PortfolioV0Evaluator());
+
+  console.log(`[main] RestorerImplRegistry: ${implRegistry.list().map(i => i.name).join(', ')}`);
+
+  // ── Engine deps ───────────────────────────────────────────────────────────────
+
+  // Packaging deps: IPFS upload + optional artifact registration (wired in daemon via registerArtifact)
+  const packagingDeps = {
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
+  };
+
+  // Manifest assembly deps: sign manifests with agent EOA private key
+  const manifestDeps = {
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    agentEoaPrivateKey: agentPrivateKey,
+    safeAddress,
+  };
+
+  // Delivery deps: deliver to marketplace + claimDelivery via JinnRouter
+  const deliveryDeps = {
+    publicClient: agentClients.publicClient,
+    walletClient: agentClients.walletClient,
+    safeAddress,
+    mechContractAddress: mechAddress,
+    routerAddress: ROUTER_ADDRESS,
+    claimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
+  };
+
+  // Claim deps: only available when ClaimRegistry is deployed (optional).
+  // Address sourced from env var JINN_CLAIM_REGISTRY_ADDRESS (no chain config entry yet).
+  const claimRegistryAddress = (process.env['JINN_CLAIM_REGISTRY_ADDRESS'] ?? '') as `0x${string}` | '';
+  const claimDeps = claimRegistryAddress
+    ? {
+        registryClient: new ClaimRegistryClient(
+          agentClients.publicClient,
+          agentClients.walletClient,
+          claimRegistryAddress as `0x${string}`,
+          safeAddress,
+        ),
+        marketplaceClaimer: adapter,
+      }
+    : undefined;
+
+  if (claimRegistryAddress) {
+    console.log(`[main] ClaimRegistry: ${claimRegistryAddress}`);
+  } else {
+    console.log('[main] ClaimRegistry: not configured (claim step will use NotImplementedError fallback)');
+  }
+
   const daemon = new Daemon({
     adapter,
     runner,
     desiredStates: config.desiredStates,
     dbPath: config.dbPath,
+    pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
     peers: config.peers.length > 0 ? config.peers : undefined,
     subgraphUrl: config.subgraphUrl,
@@ -319,6 +409,20 @@ export async function main(): Promise<DaemonStartupInfo> {
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
+    restorationEngine: {
+      // TODO(jinn-mono-cy4): RestorationEngineOptions has redundant registry+implRegistry
+      // fields. Engine refactor should consolidate to one. Locked in this PR.
+      registry: implRegistry,
+      paths: {
+        workingDirRoot: '/tmp/jinn-engine-working',
+        implStateDirRoot: '/tmp/jinn-engine-impl-state',
+      },
+      claimDeps,
+      packagingDeps,
+      manifestDeps,
+      deliveryDeps,
+      implRegistry,
+    },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
         ? {

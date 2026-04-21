@@ -30,6 +30,7 @@ export const DEFAULT_TESTNET_ARTIFACTS = {
   l2: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1a-l2-baseSepolia-fast.json'),
   mech: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),
   stolas: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
+  faucet: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-testnet-faucet-baseSepolia-fast.json'),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -134,6 +135,11 @@ export interface ChainConfig {
   jinnRouter?: string;
   distributorAddress?: string;
   /**
+   * Testnet-only JINN faucet (testnet operator onboarding). Absent on mainnet.
+   * Resolved from the deployment-jinn-testnet-faucet-baseSepolia artifact.
+   */
+  jinnFaucet?: string;
+  /**
    * JinnRouter claimDelivery ABI: V1 single arg (Base mainnet), V2 + evidenceHash (testnet / Phase 1b).
    * Override with JINN_ROUTER_CLAIM_DELIVERY_VERSION=v1|v2.
    */
@@ -145,6 +151,7 @@ interface ChainConfigOverrides {
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
+  testnetFaucetDeploymentPath?: string;
 }
 
 interface DeploymentArtifact {
@@ -339,6 +346,19 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
       throw new Error(`stOLAS artifact ${path.resolve(stolasArtifactPath)} is missing contracts.distributor`);
     }
     resolved.distributorAddress = distributor;
+  }
+
+  // Testnet JINN faucet (optional — if the artifact is absent we just skip auto-drip).
+  const faucetArtifactPath =
+    overrides.testnetFaucetDeploymentPath
+    ?? process.env['JINN_TESTNET_FAUCET_DEPLOYMENT']
+    ?? DEFAULT_TESTNET_ARTIFACTS.faucet;
+  if (faucetArtifactPath && existsSync(path.resolve(faucetArtifactPath))) {
+    const faucetArtifact = loadArtifact(faucetArtifactPath);
+    const faucetAddress = faucetArtifact.contracts?.faucet;
+    if (faucetAddress) {
+      resolved.jinnFaucet = faucetAddress;
+    }
   }
 
   return resolved;

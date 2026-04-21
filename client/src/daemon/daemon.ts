@@ -13,6 +13,7 @@ import { Registry8004, type RegistryConfig } from '../discovery/registry.js';
 import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../discovery/subgraph.js';
 import type { X402Config } from '../x402/handler.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
+import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 
 const DEFAULT_API_PORT = 7331;
@@ -23,6 +24,8 @@ export interface DaemonConfig {
   desiredStates: DesiredState[];
   dbPath: string;
   shutdownTimeoutMs?: number;
+  /** Engine tick interval (ms) for re-driving in-flight intents. Defaults to 5000. */
+  pollIntervalMs?: number;
   apiPort?: number;
   peers?: string[];
   signer?: EthHttpSigner;
@@ -46,12 +49,25 @@ export interface DaemonConfig {
 
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
+
+  /**
+   * When provided, the daemon uses RestorationEngine (new engine path) instead
+   * of the legacy RestorerLoop for intent dispatch.
+   *
+   * Required for portfolio.v0 and portfolio.v0.eval spec kinds.
+   * Legacy health-check intents (no spec) are dispatched to the legacy-claude impl
+   * registered as the default fallback in the impl registry.
+   */
+  restorationEngine?: Omit<RestorationEngineOptions, 'store'>;
 }
 
 export class Daemon {
   private store: Store;
   private creatorLoop: CreatorLoop;
+  /** @deprecated Kept for backwards compatibility (test suite). Not started when restorationEngine is configured. */
   private restorerLoop: RestorerLoop;
+  private restorationEngine?: RestorationEngine;
+  private engineStopped = false;
   private deliveryWatcherLoop: DeliveryWatcherLoop;
   private adapter: ExecutionAdapter;
   private loopPromises: Promise<void>[] = [];
@@ -70,6 +86,14 @@ export class Daemon {
     this.creatorLoop = new CreatorLoop(this.adapter, config.desiredStates, this.store);
     this.restorerLoop = new RestorerLoop(this.adapter, config.runner, this.store, '/tmp', 300000, `http://127.0.0.1:${this.apiPort}`);
     this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter);
+
+    if (config.restorationEngine) {
+      this.restorationEngine = new RestorationEngine({
+        ...config.restorationEngine,
+        store: this.store,
+      });
+    }
+
     if (config.rewardClaim && config.rewardClaim.intervalMs > 0) {
       this.rewardClaimLoop = new RewardClaimLoop({
         ...config.rewardClaim,
@@ -127,11 +151,24 @@ export class Daemon {
       );
     }
 
-    this.loopPromises.push(
-      this.creatorLoop.run().catch(err => console.error('[daemon] creator crashed:', err)),
-      this.restorerLoop.run().catch(err => console.error('[daemon] restorer crashed:', err)),
-      this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
-    );
+    if (this.restorationEngine) {
+      // Engine path: recover in-flight intents, then run event-watching loop.
+      const engine = this.restorationEngine;
+      await engine.recoverInFlight();
+      this.loopPromises.push(
+        this.creatorLoop.run().catch(err => console.error('[daemon] creator crashed:', err)),
+        this._runEngineWatcherLoop(engine).catch(err => console.error('[daemon] engine-watcher crashed:', err)),
+        engine.runTickLoop(this.config.pollIntervalMs ?? 5000).catch(err => console.error('[daemon] engine-tick crashed:', err)),
+        this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
+      );
+    } else {
+      // Legacy path: RestorerLoop handles claim + run + submitResult.
+      this.loopPromises.push(
+        this.creatorLoop.run().catch(err => console.error('[daemon] creator crashed:', err)),
+        this.restorerLoop.run().catch(err => console.error('[daemon] restorer crashed:', err)),
+        this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
+      );
+    }
 
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
@@ -148,6 +185,13 @@ export class Daemon {
   async stop(): Promise<void> {
     this.creatorLoop.stop();
     this.restorerLoop.stop();
+    this.engineStopped = true;
+    if (this.restorationEngine) {
+      this.restorationEngine.stop();
+      await this.restorationEngine.releaseClaimedNotStarted().catch(err =>
+        console.error('[daemon] engine releaseClaimedNotStarted failed (non-fatal):', err),
+      );
+    }
     this.deliveryWatcherLoop.stop();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
@@ -170,6 +214,69 @@ export class Daemon {
 
   getShutdownState(): string | null {
     return this.cachedShutdownState;
+  }
+
+  /**
+   * Bridge loop: consumes adapter.watchForRequests() and routes each request to
+   * the RestorationEngine via observe() + process().
+   *
+   * For legacy intents (no spec), the engine dispatches to the legacy-claude impl.
+   * For portfolio.v0 intents, the engine dispatches to claude-mcp-hyperliquid.
+   * For portfolio.v0.eval intents, the engine dispatches to portfolio-v0-evaluator.
+   *
+   * On-chain provenance (intentCid, onchainCreationTx, onchainCreationBlock) is
+   * populated from the RestorationRequest when available (MechAdapter sets these
+   * from the MarketplaceRequest event log). Legacy paths that don't populate them
+   * fall back to safe defaults with a warning.
+   */
+  private async _runEngineWatcherLoop(engine: RestorationEngine): Promise<void> {
+    const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h
+
+    for await (const request of this.adapter.watchForRequests()) {
+      if (this.engineStopped) break;
+      if (!request.requestId) continue;
+
+      const specKind = request.desiredState.spec?.kind ?? undefined;
+      const windowStartTs = request.desiredState.window?.startTs ?? Date.now();
+      const windowEndTs = request.desiredState.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
+
+      // Warn on missing provenance — legacy intents may legitimately lack it.
+      if (!request.intentCid) {
+        console.warn(`[daemon] intent ${request.requestId} missing provenance field intentCid — manifest integrity checks may fail`);
+      }
+      if (!request.onchainCreationTx) {
+        console.warn(`[daemon] intent ${request.requestId} missing provenance field onchainCreationTx — manifest integrity checks may fail`);
+      }
+      if (request.onchainCreationBlock == null) {
+        console.warn(`[daemon] intent ${request.requestId} missing provenance field onchainCreationBlock — manifest integrity checks may fail`);
+      }
+
+      try {
+        await engine.observe({
+          requestId: request.requestId,
+          intentCid: request.intentCid ?? '',
+          onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
+          onchainCreationBlock: request.onchainCreationBlock ?? 0,
+          specKind,
+          windowStartTs,
+          windowEndTs,
+          desiredState: request.desiredState,
+        });
+
+        // Drive the engine state machine for this request.
+        // process() advances one transition per call; the engine handles retries
+        // internally on the next daemon iteration if the intent is re-encountered.
+        // Fire-and-forget: each intent processes independently. SQLite serialises
+        // writes through better-sqlite3's synchronous interface, so concurrent
+        // process() calls don't corrupt state. Future readers: do NOT await — that
+        // would serialise all intent processing into a single queue.
+        engine.process(request.requestId).catch(err => {
+          console.error(`[daemon] engine.process failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
+        });
+      } catch (err) {
+        console.error(`[daemon] engine.observe failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
+      }
+    }
   }
 
   /**

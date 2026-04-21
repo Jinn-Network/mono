@@ -228,56 +228,9 @@ export const JINN_ROUTER_ABI = [
   },
 ] as const;
 
-export const CLAIM_REGISTRY_ABI = [
-  {
-    name: 'claimJob',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'requestId', type: 'bytes32' }],
-    outputs: [],
-  },
-  {
-    name: 'getJobClaim',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'requestId', type: 'bytes32' }],
-    outputs: [
-      { name: 'claimer', type: 'address' },
-      { name: 'expiresAt', type: 'uint256' },
-    ],
-  },
-  {
-    name: 'releaseClaim',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'requestId', type: 'bytes32' }],
-    outputs: [],
-  },
-  {
-    name: 'JobClaimed',
-    type: 'event',
-    inputs: [
-      { name: 'requestId', type: 'bytes32', indexed: true },
-      { name: 'claimer', type: 'address', indexed: true },
-      { name: 'expiresAt', type: 'uint256', indexed: false },
-    ],
-  },
-  {
-    name: 'ClaimExpired',
-    type: 'event',
-    inputs: [
-      { name: 'requestId', type: 'bytes32', indexed: true },
-      { name: 'previousClaimer', type: 'address', indexed: true },
-    ],
-  },
-  {
-    name: 'expiredClaimCount',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: '', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-] as const;
+// CLAIM_REGISTRY_ABI was removed from here — canonical definition lives in
+// client/src/adapters/claim-registry/abi.ts (single source of truth).
+// Consumers in this directory import from '../claim-registry/abi.js'.
 
 export const SAFE_ABI = [
   {

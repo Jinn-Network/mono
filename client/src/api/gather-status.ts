@@ -16,6 +16,7 @@ import {
   resolveMasterDailyEstimateWei,
 } from './status-build.js';
 import { listStolasClaimTargets } from '../earning/stolas-claim.js';
+import { gatherPortfolioV0Status } from './portfolio-v0-build.js';
 
 export interface StatusGatherConfig {
   earningDir: string;
@@ -81,6 +82,14 @@ export async function gatherGatheredStatusRaw(
     status?.pollIntervalMs ?? 5000,
   );
 
+  // portfolio.v0 lifecycle data — best-effort, never throws
+  let portfolioV0: ReturnType<typeof gatherPortfolioV0Status> | undefined;
+  try {
+    portfolioV0 = gatherPortfolioV0Status(store);
+  } catch {
+    portfolioV0 = undefined;
+  }
+
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
     dbPath: store.path,
@@ -94,6 +103,7 @@ export async function gatherGatheredStatusRaw(
     master: { address: null },
     pollIntervalMs: status?.pollIntervalMs ?? 5000,
     masterDailyEstimateWei: daily.toString(),
+    portfolioV0,
   };
 
   if (!status) {

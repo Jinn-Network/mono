@@ -148,6 +148,40 @@ describe('loadConfig RPC override handling', () => {
     expect(config.targetServices).toBe(1);
   });
 
+  it('preserves portfolio.v0 DesiredState fields (window, spec, eligibility) through config parsing', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      desiredStates: [
+        {
+          id: 'portfolio-test-1',
+          description: 'Achieve 5% equity return on Hyperliquid testnet.',
+          window: { startTs: 1_700_000_000_000, endTs: 1_700_086_400_000 },
+          spec: {
+            kind: 'portfolio.v0',
+            account: { venue: 'hyperliquid-testnet', masterAddress: '0xdeadbeef' },
+            target: { metric: 'equity_return_pct', minReturnPct: 5 },
+            constraint: { maxDrawdownPct: 10 },
+          },
+          eligibility: { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 },
+        },
+      ],
+    });
+
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+    const ds = config.desiredStates[0];
+
+    expect(ds).toBeDefined();
+    expect(ds!.id).toBe('portfolio-test-1');
+    expect(ds!.window).toEqual({ startTs: 1_700_000_000_000, endTs: 1_700_086_400_000 });
+    expect(ds!.spec).toMatchObject({ kind: 'portfolio.v0' });
+    expect(ds!.eligibility).toEqual({ minClosedTrades: 20, minTradedNotionalMultiple: 5.0 });
+  });
+
   it('loads testnet artifact override paths from config and env', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',

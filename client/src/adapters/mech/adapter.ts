@@ -51,6 +51,9 @@ export class MechAdapter implements ExecutionAdapter {
   // Restoration requests where claimDelivery succeeded but evaluation creation failed.
   // Swept on each poll cycle so they don't require a new Deliver event.
   private claimedButNotEvaluated = new Set<string>();
+  // Restoration result content cached across evaluation-job retries so a transient
+  // Safe/router failure does not silently strip evaluator context on the next poll.
+  private pendingEvaluationResults = new Map<string, string>();
   // Original desired states keyed by request ID (restoration and evaluation)
   // so we can yield accurate desiredState in DeliveredResult
   private originalStates = new Map<string, DesiredState>();
@@ -223,16 +226,28 @@ export class MechAdapter implements ExecutionAdapter {
           this.requestBlockCursor = currentBlock;
 
           const decoded = decodeMarketplaceRequestLogs(logs);
-          for (const { requestId, requestDataHex, priorityMech } of decoded) {
+          for (const { requestId, requestDataHex, priorityMech, transactionHash, blockNumber } of decoded) {
             if (!this.claimPolicy.shouldAccept({ requestId, requestDataHex, priorityMech })) {
               continue;
             }
             try {
               const digest = requestDataHex.startsWith('0x') ? requestDataHex.slice(2) : requestDataHex;
-              const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${digest}`) as Record<string, unknown>;
+              // CIDv1 hex with raw codec (0x55) + sha2-256 (0x12) + 32-byte length (0x20).
+              // The Autonolas registry returns raw-codec CIDs when uploading files with
+              // cid-version=1 (Kubo default for files). This is confirmed by the existing
+              // IPFS_GATEWAY_PREFIX constant (f01551220) which has worked in production.
+              // If the gateway ever switches to dag-pb (0x70) the prefix would be f01701220.
+              const intentCid = `f01551220${digest}`;
+              const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid) as Record<string, unknown>;
               const desiredState = parseDesiredStateFromPayload(payload);
 
-              yield { requestId, desiredState };
+              yield {
+                requestId,
+                desiredState,
+                intentCid,
+                onchainCreationTx: transactionHash,
+                onchainCreationBlock: blockNumber,
+              };
             } catch (err) {
               console.error(`[mech] Failed to parse request ${requestId}:`, err);
             }
@@ -396,6 +411,10 @@ export class MechAdapter implements ExecutionAdapter {
   private async tryCreateEvaluationJob(requestId: string, restorationResultData?: string): Promise<void> {
     if (!this.pendingEvaluations.has(requestId)) return;
     const originalState = this.pendingEvaluations.get(requestId)!;
+    if (restorationResultData) {
+      this.pendingEvaluationResults.set(requestId, restorationResultData);
+    }
+    const cachedRestorationResultData = restorationResultData ?? this.pendingEvaluationResults.get(requestId);
     try {
       const evaluationState: DesiredState = {
         ...originalState,
@@ -403,7 +422,7 @@ export class MechAdapter implements ExecutionAdapter {
         restorationRequestId: requestId,
         context: {
           ...originalState.context,
-          ...(restorationResultData ? { restorationResult: restorationResultData } : {}),
+          ...(cachedRestorationResultData ? { restorationResult: cachedRestorationResultData } : {}),
         },
       };
       const evaluationPayload = buildDesiredStatePayload(evaluationState);
@@ -448,6 +467,7 @@ export class MechAdapter implements ExecutionAdapter {
       // Success — clean up both tracking sets
       this.pendingEvaluations.delete(requestId);
       this.claimedButNotEvaluated.delete(requestId);
+      this.pendingEvaluationResults.delete(requestId);
     } catch (err) {
       console.error(`[mech] Failed to create evaluation job for ${requestId}:`, err);
       // Track for retry on next poll cycle (doesn't require a new Deliver event)

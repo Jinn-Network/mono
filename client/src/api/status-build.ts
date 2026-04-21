@@ -3,6 +3,7 @@
  */
 
 import type { FleetState } from '../earning/types.js';
+import type { PortfolioV0Status } from './portfolio-v0-build.js';
 
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
 
@@ -31,6 +32,8 @@ export interface GatheredStatusRaw {
   /** Resolved daily burn estimate for runway (wei string). */
   masterDailyEstimateWei: string;
   minMasterEthWei?: string;
+  /** portfolio.v0 lifecycle data — populated by gather-status from the SQLite store. */
+  portfolioV0?: PortfolioV0Status;
 }
 
 export interface StatusV1Response {
@@ -80,6 +83,8 @@ export interface StatusV1Response {
     hint: string;
   };
   nextActions: string[];
+  /** portfolio.v0 lifecycle data — optional, absent when not available. */
+  portfolioV0?: PortfolioV0Status;
 }
 
 const STAKED_LIKE_STEPS = new Set([
@@ -274,5 +279,6 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
       hint: buildEarningsHint(raw, fleetSum),
     },
     nextActions: buildNextActions(raw, fleetSum),
+    ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
   };
 }

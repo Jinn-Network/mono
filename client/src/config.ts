@@ -18,14 +18,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { DesiredStateSchema, parseDesiredState } from './types/desired-state.js';
+import type { DesiredState } from './types/desired-state.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
-
-const DesiredStateSchema = z.object({
-  id: z.string(),
-  description: z.string().min(1),
-  context: z.record(z.unknown()).optional(),
-});
 
 export const JinnConfigSchema = z.object({
   /**
@@ -76,6 +72,16 @@ export const JinnConfigSchema = z.object({
 
   /** Model for restoration/evaluation agent */
   claudeModel: z.string().default('claude-haiku-4-5-20251001'),
+
+  /**
+   * How the operator runs the daemon. Set once at `jinn auth`, read by every
+   * command that probes the Claude CLI or spawns a subprocess. Leaving it
+   * unset falls back to filesystem-based detection (docker-compose.yml near
+   * cwd, /.dockerenv, etc.) which is error-prone inside a checkout of the
+   * repo itself.
+   * Env override: JINN_RUNTIME_MODE.
+   */
+  runtimeMode: z.enum(['bare', 'docker-compose', 'container']).optional(),
 
   /** Comma-separated or array of peer URLs */
   peers: z.union([
@@ -135,11 +141,29 @@ export const JinnConfigSchema = z.object({
     .string()
     .regex(/^\d+$/, 'must be a non-negative integer string')
     .optional(),
+
+  /**
+   * Operator-controlled impl dispatch for the restorer engine.
+   *
+   * Wired by daemon (jinn-mono-bv5); engine consumes via RestorerImplRegistry config.
+   *
+   * byKind:   explicit spec.kind → impl name mapping (highest priority)
+   * default:  fallback impl name when no kind-specific match is found
+   * disabled: impl names to exclude from dispatch entirely
+   */
+  restorers: z
+    .object({
+      byKind: z.record(z.string()).optional(),
+      default: z.string().optional(),
+      disabled: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
-/** JinnConfig with rpcUrl guaranteed to be resolved (never undefined). */
-export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl'> & {
+/** JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and desiredStates with id always assigned. */
+export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'desiredStates'> & {
   rpcUrl: string;
+  desiredStates: DesiredState[];
 };
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -215,6 +239,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
+  if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
   if (env['JINN_PEERS'])             merged.peers = env['JINN_PEERS'];
   if (env['JINN_SUBGRAPH_URL'])      merged.subgraphUrl = env['JINN_SUBGRAPH_URL'];
   if (env['JINN_NODE_ENDPOINT'])     merged.nodeEndpoint = env['JINN_NODE_ENDPOINT'];
@@ -297,6 +322,8 @@ export function loadConfig(configPath?: string): JinnConfig {
   return {
     ...parsed,
     rpcUrl: parsed.rpcUrl ?? defaultRpcUrl,
+    // parseDesiredState assigns a UUID to any entry missing an id
+    desiredStates: parsed.desiredStates.map(parseDesiredState),
   };
 }
 

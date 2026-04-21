@@ -1,0 +1,727 @@
+/**
+ * Integration test for PortfolioV0Evaluator.
+ *
+ * Uses synthetic manifests + injected test deps (_testDeps) to verify:
+ * - supports() / canAttempt()
+ * - Verdict derivation for PASS, FAIL, REJECTED, INDETERMINATE scenarios
+ * - verdict.json is written to workingDir
+ * - Output shape matches expectations
+ */
+
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { PortfolioV0Evaluator } from '../../../../src/restorer/impls/portfolio-v0-evaluator/index.js';
+import type { RestorationContext } from '../../../../src/restorer/types.js';
+import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { HlFill, HlGridPoint } from '../../../../src/venues/hyperliquid/types.js';
+
+// ── Shared test data ──────────────────────────────────────────────────────────
+
+const NOW = 1_746_000_000_000;
+const START_TS = NOW - 86_400_000;
+const END_TS = NOW;
+
+/** 25 fills; all closed trades (closedPnl != "0.0"), sz=0.04, px=50000 → notional=2000 each. */
+const MOCK_FILLS: HlFill[] = Array.from({ length: 25 }, (_, i) => ({
+  coin: 'BTC',
+  px: '50000',
+  sz: '0.04',   // 0.04 * 50000 = 2000 notional per fill
+  side: 'B' as const,
+  time: START_TS + i * (86_400_000 / 25),
+  startPosition: '0',
+  dir: 'Open Long',
+  closedPnl: '100.0',
+  hash: `0x${i.toString(16).padStart(4, '0')}`,
+  oid: i,
+  crossed: false,
+  fee: '0.5',
+  tid: i + 1,
+  feeToken: 'USDC',
+  twapId: null,
+}));
+
+// Total notional = 25 * 2000 = 50000; preValue = 10000 → notional multiple = 5.0x
+// closedTrades = 25 (all have non-zero closedPnl)
+
+const PRE_VALUE = 10_000;
+const POST_VALUE = 10_600;  // 6% return
+
+const PRE_SNAPSHOT = {
+  capturedAt: START_TS + 1000,
+  hlTime: START_TS + 1000,
+  payload: { marginSummary: { accountValue: String(PRE_VALUE) } },
+};
+
+const POST_SNAPSHOT = {
+  capturedAt: END_TS,
+  hlTime: END_TS,
+  payload: { marginSummary: { accountValue: String(POST_VALUE) } },
+};
+
+const MOCK_MANIFEST = {
+  schemaVersion: 'portfolio.v0.manifest.v1',
+  generatedAt: NOW,
+  intent: {
+    cid: 'QmINTENT',
+    onchainCreationTx: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
+    onchainCreationBlock: 100,
+    requestId: '0x0000000000000000000000000000000000000000000000000000000000000001',
+  },
+  restorer: {
+    safeAddress: '0x1111111111111111111111111111111111111111',
+    agentEoa: '0x2222222222222222222222222222222222222222',
+  },
+  window: { startTs: START_TS, endTs: END_TS },
+  preSnapshot: PRE_SNAPSHOT,
+  postSnapshot: POST_SNAPSHOT,
+  fills: MOCK_FILLS,
+  gating: {
+    equityReturnPct: '6.0',
+    maxDrawdownPct: '0.0',
+    closedTradesCount: 25,
+    tradedNotionalMultiple: '5.0',
+  },
+  artifacts: [],
+  signature: {
+    algo: 'secp256k1',
+    signer: '0x2222222222222222222222222222222222222222',
+    hash: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+    sig: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef00',
+  },
+};
+
+const MOCK_INTENT_BASE = {
+  id: 'portfolio-intent-1',
+  description: 'Test portfolio.v0 intent',
+  window: { startTs: START_TS, endTs: END_TS },
+  spec: {
+    kind: 'portfolio.v0',
+    account: {
+      venue: 'hyperliquid-mainnet',
+      masterAddress: '0x3333333333333333333333333333333333333333',
+    },
+    target: {
+      metric: 'equity_return_pct',
+      minReturnPct: 5.0,
+    },
+    constraint: {
+      maxDrawdownPct: 10.0,
+    },
+  },
+  eligibility: {
+    minClosedTrades: 20,
+    minTradedNotionalMultiple: 5.0,
+  },
+};
+
+// ── HL mock data ──────────────────────────────────────────────────────────────
+
+/**
+ * Grid that brackets START_TS + 1000 (the pre snapshot capturedAt).
+ * Points chosen so linear interpolation at (START_TS+1000) yields ~10000.
+ * We pick: before=[START_TS, 9900], after=[START_TS+2000, 10100]
+ * frac = (1000-0)/(2000-0) = 0.5
+ * value = 9900 + 0.5 * (10100-9900) = 10000 exactly.
+ */
+const MOCK_GRID: HlGridPoint[] = [
+  [START_TS - 200_000_000, '9500'],
+  [START_TS, '9900'],           // before: t=START_TS, v=9900
+  [START_TS + 2000, '10100'],   // after: t=START_TS+2000, v=10100
+  [END_TS + 1000, '11000'],
+];
+
+function makeMockHlDeps(overrides: {
+  fills?: HlFill[];
+  grid?: HlGridPoint[];
+  startTimeClamped?: boolean;
+} = {}) {
+  const fills = overrides.fills ?? MOCK_FILLS;
+  const grid = overrides.grid ?? MOCK_GRID;
+  const clamped = overrides.startTimeClamped ?? false;
+  return {
+    hlPortfolioPeriod: async (_user: string) => ({
+      accountValueHistory: grid,
+    }),
+    hlUserFillsByTime: async (_user: string, _startTime: number, _endTime?: number) => ({
+      fills,
+      startTimeClamped: clamped,
+    }),
+  };
+}
+
+function makeMockIpfsFetch(manifest = MOCK_MANIFEST, intent = MOCK_INTENT_BASE) {
+  return async (_gatewayUrl: string, cid: string) => {
+    if (cid === 'QmMANIFEST') return manifest;
+    if (cid === 'QmINTENT') return intent;
+    throw new Error(`Unknown CID: ${cid}`);
+  };
+}
+
+// ── Context factory ───────────────────────────────────────────────────────────
+
+function makeTmpDir(): string {
+  const dir = join(tmpdir(), `eval-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+interface CtxOverrides {
+  specOverrides?: Record<string, unknown>;
+  manifest?: typeof MOCK_MANIFEST;
+  intent?: typeof MOCK_INTENT_BASE;
+  fills?: HlFill[];
+  grid?: HlGridPoint[];
+  startTimeClamped?: boolean;
+  ipfsFetchError?: boolean;
+}
+
+function makeCtx(workingDir: string, overrides: CtxOverrides = {}): RestorationContext {
+  const {
+    specOverrides = {},
+    manifest = MOCK_MANIFEST,
+    intent = MOCK_INTENT_BASE,
+    fills,
+    grid,
+    startTimeClamped,
+    ipfsFetchError = false,
+  } = overrides;
+
+  const _testDeps = {
+    fetchFromIpfs: ipfsFetchError
+      ? async () => { throw new Error('IPFS unavailable'); }
+      : makeMockIpfsFetch(manifest, intent),
+    ...makeMockHlDeps({ fills, grid, startTimeClamped }),
+  };
+
+  const ds: DesiredState = {
+    id: 'eval-intent-1',
+    description: 'Verify portfolio.v0 manifest QmMANIFEST.',
+    window: { startTs: NOW - 3_600_000, endTs: NOW },
+    spec: {
+      kind: 'portfolio.v0.eval',
+      targetManifestCid: 'QmMANIFEST',
+      targetIntentCid: 'QmINTENT',
+      targetCreationTx: '0xevalcreatetx',
+      targetRequestId: '0xevalreqid',
+      targetCreationBlock: 42,
+      safeAddress: '0x0000000000000000000000000000000000000001',
+      agentEoa: '0x0000000000000000000000000000000000000002',
+      _testDeps,
+      ...specOverrides,
+    },
+  };
+
+  return {
+    intent: ds,
+    implStateDir: workingDir,
+    workingDir,
+    log: () => {},
+    abort: new AbortController().signal,
+    msUntilEndTs: () => 60_000,
+  };
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe('PortfolioV0Evaluator', () => {
+  const impl = new PortfolioV0Evaluator();
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    dirs.length = 0;
+  });
+
+  // ── supports() ──────────────────────────────────────────────────────────────
+
+  describe('supports()', () => {
+    it('returns true for portfolio.v0.eval', () => {
+      expect(impl.supports({ kind: 'portfolio.v0.eval' })).toBe(true);
+    });
+
+    it('returns false for portfolio.v0', () => {
+      expect(impl.supports({ kind: 'portfolio.v0' })).toBe(false);
+    });
+
+    it('returns false for unknown kinds', () => {
+      expect(impl.supports({ kind: 'other.kind' })).toBe(false);
+    });
+  });
+
+  // ── canAttempt() ────────────────────────────────────────────────────────────
+
+  describe('canAttempt()', () => {
+    it('returns ok=true for valid eval intent', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+      const result = await impl.canAttempt!(ctx.intent);
+      expect(result.ok).toBe(true);
+    });
+
+    it('returns ok=false when spec.kind is wrong', async () => {
+      const intent: DesiredState = {
+        id: 'x',
+        description: 'x',
+        spec: { kind: 'portfolio.v0' },
+      };
+      const result = await impl.canAttempt!(intent);
+      expect(result.ok).toBe(false);
+    });
+
+    it('returns ok=false when targetManifestCid is missing', async () => {
+      const intent: DesiredState = {
+        id: 'x',
+        description: 'x',
+        spec: { kind: 'portfolio.v0.eval', targetIntentCid: 'Qm' },
+      };
+      const result = await impl.canAttempt!(intent);
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  // ── run() — happy path (PASS) ────────────────────────────────────────────────
+
+  describe('run() — PASS scenario', () => {
+    it('produces PASS verdict for well-formed manifest meeting all criteria', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      const output = await impl.run(ctx);
+
+      expect(output.venueRef.name).toBe('hyperliquid');
+      expect(output.gating.verdict).toBe('PASS');
+      expect(typeof output.gating.score).toBe('string');
+      expect(BigInt(output.gating.score as string)).toBeGreaterThan(0n);
+      expect(output.gating.scoreBasis).toBe('calmar.v1');
+
+    });
+
+    it('produces PASS verdict when the manifest uses the unified snapshot shape', async () => {
+      // Restorer today writes unified-shape snapshots: top-level `accountValue`
+      // + nested raw perps/spot payloads, with NO top-level `marginSummary`.
+      // Evaluator must pull the unified value from the claimed payload for
+      // post-snapshot metric extraction (no grid-based post rederivation exists).
+      const wd = makeTmpDir(); dirs.push(wd);
+      const unifiedPreSnapshot = {
+        capturedAt: START_TS + 1000,
+        hlTime: START_TS + 1000,
+        payload: {
+          accountValue: String(PRE_VALUE),
+          perpsAccountValue: '0',
+          spotUsdc: String(PRE_VALUE),
+          clearinghouseState: {
+            marginSummary: { accountValue: '0', totalNtlPos: '0', totalRawUsd: '0', totalMarginUsed: '0' },
+            crossMarginSummary: { accountValue: '0', totalNtlPos: '0', totalRawUsd: '0', totalMarginUsed: '0' },
+            crossMaintenanceMarginUsed: '0',
+            withdrawable: '0',
+            assetPositions: [],
+            time: START_TS + 1000,
+          },
+          spotClearinghouseState: {
+            balances: [{ coin: 'USDC', token: 0, total: String(PRE_VALUE), hold: '0.0', entryNtl: '0.0' }],
+          },
+        },
+      };
+      const unifiedPostSnapshot = {
+        capturedAt: END_TS,
+        hlTime: END_TS,
+        payload: {
+          accountValue: String(POST_VALUE),
+          perpsAccountValue: '0',
+          spotUsdc: String(POST_VALUE),
+          clearinghouseState: {
+            marginSummary: { accountValue: '0', totalNtlPos: '0', totalRawUsd: '0', totalMarginUsed: '0' },
+            crossMarginSummary: { accountValue: '0', totalNtlPos: '0', totalRawUsd: '0', totalMarginUsed: '0' },
+            crossMaintenanceMarginUsed: '0',
+            withdrawable: '0',
+            assetPositions: [],
+            time: END_TS,
+          },
+          spotClearinghouseState: {
+            balances: [{ coin: 'USDC', token: 0, total: String(POST_VALUE), hold: '0.0', entryNtl: '0.0' }],
+          },
+        },
+      };
+      const unifiedManifest = {
+        ...MOCK_MANIFEST,
+        preSnapshot: unifiedPreSnapshot,
+        postSnapshot: unifiedPostSnapshot,
+      };
+
+      const ctx = makeCtx(wd, { manifest: unifiedManifest });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('PASS');
+    });
+
+    it('writes verdict.json to workingDir', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      await impl.run(ctx);
+
+      const verdictPath = join(wd, 'verdict.json');
+      expect(existsSync(verdictPath)).toBe(true);
+
+      const verdict = JSON.parse(readFileSync(verdictPath, 'utf-8'));
+      expect(verdict.schemaVersion).toBe('portfolio.v0.eval.manifest.v1');
+      expect(verdict.verdict).toBe('PASS');
+      expect(verdict.checks).toBeDefined();
+      expect(Array.isArray(verdict.checks)).toBe(true);
+    });
+
+    it('verdict.json contains all impl-declared checks', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      await impl.run(ctx);
+
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      const checkNames = verdict.checks.map((c: { name: string }) => c.name);
+
+      const expectedChecks = [
+        'availability.hyperliquid_reachable',
+        'availability.hl_pre_snapshot_rederivable',
+        'availability.hl_fills_rederivable',
+        'availability.hl_post_snapshot_rederivable',
+        'integrity.window_bounds',
+        'eligibility.min_closed_trades',
+        'eligibility.min_traded_notional',
+        'consistency.pre_snapshot',
+        'consistency.post_snapshot',
+        'consistency.fills',
+        'consistency.gating.equity_return',
+        'consistency.gating.max_drawdown',
+        'consistency.gating.closed_trades',
+        'consistency.gating.traded_notional',
+        'spec.equity_return_target',
+        'spec.max_drawdown_constraint',
+      ];
+
+      for (const name of expectedChecks) {
+        expect(checkNames, `missing check: ${name}`).toContain(name);
+      }
+    });
+
+    it('declares verdict.json artifact with role evaluation_verdict', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      const output = await impl.run(ctx);
+
+      expect(output.artifacts).toBeDefined();
+      const verdictArtifact = output.artifacts!.find((a) => a.role === 'evaluation_verdict');
+      expect(verdictArtifact).toBeDefined();
+      expect(verdictArtifact!.path).toBe('verdict.json');
+    });
+
+    it('score is bounded [0, 1e18] for PASS verdict', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      const output = await impl.run(ctx);
+
+      const score = BigInt(output.gating.score as string);
+      expect(score).toBeGreaterThanOrEqual(0n);
+      expect(score).toBeLessThanOrEqual(BigInt(1e18));
+    });
+  });
+
+  // ── run() — FAIL scenario (spec not met) ─────────────────────────────────────
+
+  describe('run() — FAIL scenario', () => {
+    it('produces FAIL verdict when equity return target is not met', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+
+      const highTargetIntent = {
+        ...MOCK_INTENT_BASE,
+        spec: {
+          ...MOCK_INTENT_BASE.spec,
+          target: { metric: 'equity_return_pct', minReturnPct: 50.0 }, // 50% target — won't be met
+        },
+      };
+
+      const ctx = makeCtx(wd, { intent: highTargetIntent });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('FAIL');
+      expect(output.gating.score).toBe('0');
+
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      expect(verdict.verdict).toBe('FAIL');
+      const specCheck = verdict.checks.find((c: { name: string }) => c.name === 'spec.equity_return_target');
+      expect(specCheck?.status).toBe('FAIL');
+    });
+
+    it('produces FAIL verdict when claimed drawdown is inconsistent with rederived value', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+
+      // Manifest claims 15% drawdown, but rederived from the linear 10000→10600 grid is ~0%.
+      // consistency.gating.max_drawdown FAILS (|15.0 - 0| >> 0.05 tolerance).
+      // spec.max_drawdown_constraint checks rederived (~0%), not claimed, so that check PASSes.
+      // Net result: FAIL driven by consistency.gating.max_drawdown.
+      const manifestWithDrawdown = {
+        ...MOCK_MANIFEST,
+        gating: {
+          ...MOCK_MANIFEST.gating,
+          maxDrawdownPct: '15.0',  // 15% drawdown claimed — inconsistent with rederived ~0%
+        },
+      };
+
+      const ctx = makeCtx(wd, { manifest: manifestWithDrawdown });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('FAIL');
+      expect(output.gating.score).toBe('0');
+
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      expect(verdict.verdict).toBe('FAIL');
+      const drawdownCheck = verdict.checks.find(
+        (c: { name: string }) => c.name === 'consistency.gating.max_drawdown',
+      );
+      expect(drawdownCheck).toBeDefined();
+      expect(drawdownCheck.status).toBe('FAIL');
+    });
+  });
+
+  // ── run() — REJECTED scenario (eligibility not met) ──────────────────────────
+
+  describe('run() — REJECTED scenario', () => {
+    it('produces REJECTED verdict when minClosedTrades not met', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+
+      // Intent requiring 100 closed trades; mock only provides 25
+      const highEligIntent = {
+        ...MOCK_INTENT_BASE,
+        eligibility: {
+          minClosedTrades: 100,          // Need 100 closed trades
+          minTradedNotionalMultiple: 5.0,
+        },
+      };
+
+      const ctx = makeCtx(wd, { intent: highEligIntent });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('REJECTED');
+      expect(output.gating.score).toBe('0');
+    });
+
+    it('produces REJECTED verdict when minTradedNotional not met', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+
+      // Intent requiring 50x notional multiple; mock only provides 5x
+      const highNotionalIntent = {
+        ...MOCK_INTENT_BASE,
+        eligibility: {
+          minClosedTrades: 20,
+          minTradedNotionalMultiple: 50.0,  // 50x — won't be met
+        },
+      };
+
+      const ctx = makeCtx(wd, { intent: highNotionalIntent });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('REJECTED');
+      expect(output.gating.score).toBe('0');
+    });
+  });
+
+  // ── run() — INDETERMINATE scenario ───────────────────────────────────────────
+
+  describe('run() — INDETERMINATE scenario', () => {
+    it('produces INDETERMINATE verdict when IPFS fetch fails', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+
+      const ctx = makeCtx(wd, { ipfsFetchError: true });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('INDETERMINATE');
+      expect(output.gating.score).toBe('0');
+
+      // IPFS failure must be attributed to the IPFS layer, not hyperliquid
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      const ipfsCheck = verdict.checks.find(
+        (c: { name: string; status: string }) => c.name === 'availability.ipfs_reachable',
+      );
+      expect(ipfsCheck).toBeDefined();
+      expect(ipfsCheck.status).toBe('FAIL');
+      // Must NOT be attributed to HL
+      const hlCheck = verdict.checks.find(
+        (c: { name: string }) => c.name === 'availability.hyperliquid_reachable' && (c as { status: string }).status === 'FAIL',
+      );
+      expect(hlCheck).toBeUndefined();
+    });
+
+    it('produces INDETERMINATE verdict when fills are clamped', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+
+      const ctx = makeCtx(wd, { startTimeClamped: true });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('INDETERMINATE');
+      expect(output.gating.score).toBe('0');
+    });
+
+    it('produces INDETERMINATE verdict when no grid bracket for pre snapshot', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+
+      // Grid that does not bracket the preSnapshot capturedAt (START_TS + 1000)
+      const emptyGrid: HlGridPoint[] = [];
+
+      const ctx = makeCtx(wd, { grid: emptyGrid });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('INDETERMINATE');
+    });
+
+    it('forces INDETERMINATE when post-snapshot rederivable check is SKIP (funding-accrual edge)', async () => {
+      // Spec §7.5: if postSnapshot.capturedAt > endTs + 60s, the check is SKIP and
+      // verdict MUST be INDETERMINATE — even when all other checks would PASS.
+      const wd = makeTmpDir(); dirs.push(wd);
+
+      // postSnapshot.capturedAt = END_TS + 90_000 ms, which is > END_TS + 60_000 ms
+      const latePostSnapshot = {
+        capturedAt: END_TS + 90_000,
+        hlTime: END_TS + 90_000,
+        payload: { marginSummary: { accountValue: String(POST_VALUE) } },
+      };
+
+      const manifestWithLatePost = {
+        ...MOCK_MANIFEST,
+        postSnapshot: latePostSnapshot,
+      };
+
+      const ctx = makeCtx(wd, { manifest: manifestWithLatePost });
+      const output = await impl.run(ctx);
+
+      expect(output.gating.verdict).toBe('INDETERMINATE');
+      expect(output.gating.score).toBe('0');
+
+      // Confirm the SKIP check is present in the verdict manifest
+      const verdict = JSON.parse(
+        (await import('node:fs')).readFileSync(
+          (await import('node:path')).join(wd, 'verdict.json'),
+          'utf-8',
+        ),
+      );
+      expect(verdict.verdict).toBe('INDETERMINATE');
+      const skipCheck = verdict.checks.find(
+        (c: { name: string; status: string }) =>
+          c.name === 'availability.hl_post_snapshot_rederivable' && c.status === 'SKIP',
+      );
+      expect(skipCheck).toBeDefined();
+    });
+  });
+
+  // ── Verdict manifest structure ────────────────────────────────────────────────
+
+  describe('verdict manifest structure', () => {
+    it('contains rederived + claimed sections', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      await impl.run(ctx);
+
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      expect(verdict.rederived).toBeDefined();
+      expect(verdict.claimed).toBeDefined();
+      expect(verdict.rederived.gating).toBeDefined();
+      expect(verdict.claimed.gating).toBeDefined();
+    });
+
+    it('has signature section', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      await impl.run(ctx);
+
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      expect(verdict.signature).toBeDefined();
+      expect(verdict.signature.algo).toBe('secp256k1');
+    });
+
+    it('score is "0" for INDETERMINATE verdict', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd, { ipfsFetchError: true });
+
+      const output = await impl.run(ctx);
+      expect(output.gating.score).toBe('0');
+    });
+
+    it('verdict.json includes scoreBasis and scoreVersion', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      await impl.run(ctx);
+
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      expect(verdict.scoreBasis).toBe('calmar.v1');
+      expect(verdict.scoreVersion).toBe('v1');
+    });
+
+    it('verdict.json has correct schemaVersion', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd);
+
+      await impl.run(ctx);
+
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      expect(verdict.schemaVersion).toBe('portfolio.v0.eval.manifest.v1');
+    });
+
+    it('verdict.json carries targetCreationBlock from EvalSpec (not hardcoded 0)', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      // makeCtx passes targetCreationBlock: 42
+      const ctx = makeCtx(wd);
+
+      await impl.run(ctx);
+
+      const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
+      expect(verdict.intent.onchainCreationBlock).toBe(42);
+    });
+
+    // ── Finding #12: generatedAt determinism ────────────────────────────────
+    // Two evaluations of identical inputs at different wall-clock times must
+    // produce the same signed hash but different generatedAt values.
+
+    it('two evaluations at different times produce the same signed hash (finding #12)', async () => {
+      const T1 = 1_750_000_000_000;
+      const T2 = T1 + 3_600_000; // 1 hour later
+
+      // Run at T1
+      vi.useFakeTimers();
+      vi.setSystemTime(T1);
+      const wd1 = makeTmpDir(); dirs.push(wd1);
+      const ctx1 = makeCtx(wd1);
+      await impl.run(ctx1);
+      const verdict1 = JSON.parse(readFileSync(join(wd1, 'verdict.json'), 'utf-8'));
+
+      // Run at T2
+      vi.setSystemTime(T2);
+      const wd2 = makeTmpDir(); dirs.push(wd2);
+      const ctx2 = makeCtx(wd2);
+      await impl.run(ctx2);
+      const verdict2 = JSON.parse(readFileSync(join(wd2, 'verdict.json'), 'utf-8'));
+
+      vi.useRealTimers();
+
+      // Signed hash must be identical
+      expect(verdict1.signature.hash).toBe(verdict2.signature.hash);
+
+      // generatedAt must differ (wall-clock differs)
+      expect(verdict1.generatedAt).toBe(T1);
+      expect(verdict2.generatedAt).toBe(T2);
+      expect(verdict1.generatedAt).not.toBe(verdict2.generatedAt);
+
+      // generatedAt must NOT appear inside the signed envelope (i.e., not in
+      // the fields covered by signature.hash). We verify this structurally:
+      // the signed content is everything except `signature` and `generatedAt`.
+      expect(typeof verdict1.generatedAt).toBe('number');
+      expect(typeof verdict2.generatedAt).toBe('number');
+    });
+  });
+});

@@ -1,0 +1,15 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-20T13:14:18.413Z",
+  "config": {
+    "jinnToken": "0xAB9a01cd4A379e36006ec6df2960CF39EF79df63",
+    "dripAmount": "100000000000000000000",
+    "dripInterval": 86400,
+    "initialSupplyBridged": "1000000000000000000000"
+  },
+  "contracts": {
+    "faucet": "0xa7c2DBA07E41F16eF94cbEAeAEd97bC904032619"
+  }
+}
