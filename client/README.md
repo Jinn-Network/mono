@@ -103,8 +103,12 @@ treat the wallet as hot and keep funds to the gas + rewards minimum.
 ## Try without installing
 
 ```bash
-npx @jinn-network/client@latest doctor
+npx -p @jinn-network/client@latest jinn doctor
 ```
+
+> The `-p` flag is required because the package ships two bins (`jinn` and
+> `jinn-mcp`); without it npx refuses to pick and exits with
+> `could not determine executable to run`.
 
 ## Let your agent do it
 
@@ -266,7 +270,7 @@ All action verbs support `--dry-run` and `--yes`.
 - Add `--human` for readable terminal output.
 - `stderr` is reserved for progress, warnings, and runtime logs.
 - Non-zero exits emit a structured error envelope on stdout with `schemaVersion`, `code`, `exitCode`, `message`, `hint`, and `exampleCli`.
-- Without a global install, use `npx @jinn-network/client@latest <verb> ...` instead of `jinn ...` (the package name is scoped; `npx jinn` resolves a different package).
+- Without a global install, use `npx -p @jinn-network/client@latest jinn <verb> ...` instead of `jinn ...`. The `-p` form is required because the package publishes two bins (`jinn` and `jinn-mcp`); plain `npx @jinn-network/client@latest` exits with `could not determine executable to run`.
 
 See the [client surface spec](https://github.com/Jinn-Network/mono/blob/main/spec/2026-04-14-client-surface.md) for the full CLI reference.
 
