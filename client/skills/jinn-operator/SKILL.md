@@ -122,6 +122,91 @@ The automatic faucet may have rate-limited (1 claim per 24 hours per address). O
 - Wait 24 hours and re-run `jinn quickstart`
 - Fund manually: go to https://portal.cdp.coinbase.com/products/faucet, send testnet ETH to the printed master address, then re-run
 
+## Phase 3.5: Opting In to Intent Kinds
+
+After quickstart, the daemon participates in `legacy` (health-check) and `prediction.v0` intents by default. Other intent kinds are **off by default** because they require operator-specific credentials (exchange authorizations, API keys, etc.).
+
+### Generic flow (applies to every intent kind with external deps)
+
+**Always start with `list`.** It tells you what's enabled, what's ready, and for disabled kinds, what running `enable` would need.
+
+```bash
+jinn intents list --human
+```
+
+Example output for a fresh operator:
+```
+kind           enabled   ready   notes
+portfolio.v0   no        no      HL api-wallet not provisioned
+prediction.v0  yes       yes
+```
+
+### Enabling a kind (idempotent state machine)
+
+```bash
+jinn intents enable <kind> [--key=value ...]
+```
+
+The command is idempotent. Rerun the same command until the response has `"status": "ready"`. Intermediate states tell you exactly what to do:
+
+- `"status": "missing_args"` — the envelope lists `required` args. Re-run with them. Shape:
+  ```json
+  {
+    "status": "missing_args",
+    "required": [{"name": "hl-master", "description": "...", "required": true}],
+    "example": {"cli": "jinn intents enable portfolio.v0 --hl-master 0x..."}
+  }
+  ```
+
+- `"status": "waiting_for_external_action"` — the operator needs to do something out-of-band (e.g., approve an api-wallet on an exchange). Show the `action.description` and `action.url` to the operator. When they confirm done, run the command in `nextInvocation.cli`. Shape:
+  ```json
+  {
+    "status": "waiting_for_external_action",
+    "action": {"description": "...", "url": "https://..."},
+    "details": {"apiWalletAddress": "0x..."},
+    "nextInvocation": {"cli": "jinn intents enable <kind> --confirm-approved", "purpose": "..."}
+  }
+  ```
+
+- `"status": "ready"` — the kind is enabled. The daemon will now claim intents of this kind. No further action.
+
+- `"status": "error"` — surface `message` to the operator.
+
+### Disabling
+
+```bash
+jinn intents disable <kind>
+```
+
+Removes the kind from the operator's claim rotation. Preserves any generated key material so a later `enable` doesn't re-initialize exchange approvals.
+
+### Example: enabling portfolio.v0
+
+portfolio.v0 requires a Hyperliquid master account (holds USDC) and an approved HL api-wallet (agent key). The enable flow walks the operator through it:
+
+1. Run list to see what's needed:
+   ```bash
+   jinn intents list --human
+   jinn intents status portfolio.v0 --human
+   ```
+
+2. First invocation generates the api-wallet keypair and returns `waiting_for_external_action` with the wallet address and the HL URL:
+   ```bash
+   jinn intents enable portfolio.v0 --hl-master 0xYOUR_HL_MASTER
+   ```
+
+3. Surface the wallet address and URL to the operator. They approve the address on HL (Settings → API Wallets → Add).
+
+4. Once they confirm, re-run with `--confirm-approved`:
+   ```bash
+   jinn intents enable portfolio.v0 --confirm-approved
+   ```
+   Envelope returns `"status": "ready"`. Config is updated. Daemon will claim future portfolio.v0 requests.
+
+### Runtime guardrail
+
+The daemon checks each impl's readiness before spending gas on a claim transaction. If a portfolio.v0 request arrives and the api-wallet is missing/unapproved, the intent is marked FAILED locally with a reason pointing back to `jinn intents enable portfolio.v0 ...`. No gas wasted.
+
 ## Phase 4: Ongoing Operation
 
 ### Monitoring

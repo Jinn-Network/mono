@@ -71,12 +71,24 @@ export const PredictionV0IntentSchema = z
     spec: PredictionV0SpecSchema,
     eligibility: PredictionV0EligibilitySchema.default({}),
   })
-  .refine(d => d.window.endTs - d.window.startTs === 3_600_000, {
-    message: 'window must be exactly 1h (endTs - startTs === 3_600_000 ms)',
+  .refine(d => d.window.endTs > d.window.startTs, {
+    message: 'window.endTs must be > window.startTs',
     path: ['window'],
   })
-  .refine(d => d.spec.question.resolveTs === d.window.endTs + 900_000, {
-    message: 'resolveTs must equal window.endTs + 900_000 ms (15min)',
+  .refine(d => d.window.endTs - d.window.startTs >= 60_000, {
+    message: 'window must be at least 1 minute',
+    path: ['window'],
+  })
+  .refine(d => d.window.endTs - d.window.startTs <= 86_400_000, {
+    message: 'window must be at most 24 hours',
+    path: ['window'],
+  })
+  .refine(d => d.spec.question.resolveTs >= d.window.endTs, {
+    message: 'resolveTs must be ≥ window.endTs',
+    path: ['spec', 'question', 'resolveTs'],
+  })
+  .refine(d => d.spec.question.resolveTs - d.window.endTs <= 3_600_000, {
+    message: 'resolve gap (resolveTs - endTs) must be ≤ 1 hour',
     path: ['spec', 'question', 'resolveTs'],
   });
 

@@ -53,21 +53,52 @@ describe('PredictionV0IntentSchema', () => {
     spec: validThresholdSpec,
   };
 
-  it('accepts a 1h window with resolveTs = endTs + 15min', () => {
+  it('accepts a 1h window with resolveTs = endTs + 15min (mainnet-style)', () => {
     expect(PredictionV0IntentSchema.parse(validIntent).window.endTs).toBe(3_600_000);
   });
 
-  it('rejects a window that is not exactly 1h', () => {
-    const bad = { ...validIntent, window: { startTs: 0, endTs: 3_600_001 } };
-    expect(() => PredictionV0IntentSchema.parse(bad)).toThrow(/exactly 1h/);
+  it('accepts a 10min window with resolveTs = endTs + 5min (fast-test cadence)', () => {
+    const fast = {
+      ...validIntent,
+      window: { startTs: 0, endTs: 600_000 },
+      spec: { ...validThresholdSpec, question: { ...validThresholdSpec.question, resolveTs: 900_000 } },
+    };
+    expect(() => PredictionV0IntentSchema.parse(fast)).not.toThrow();
   });
 
-  it('rejects resolveTs that is not exactly endTs + 15min', () => {
+  it('rejects a window shorter than 1 minute', () => {
     const bad = {
       ...validIntent,
-      spec: { ...validThresholdSpec, question: { ...validThresholdSpec.question, resolveTs: 4_500_001 } },
+      window: { startTs: 0, endTs: 30_000 },
+      spec: { ...validThresholdSpec, question: { ...validThresholdSpec.question, resolveTs: 30_000 } },
+    };
+    expect(() => PredictionV0IntentSchema.parse(bad)).toThrow(/at least 1 minute/);
+  });
+
+  it('rejects a window longer than 24 hours', () => {
+    const tooLong = 86_400_001;
+    const bad = {
+      ...validIntent,
+      window: { startTs: 0, endTs: tooLong },
+      spec: { ...validThresholdSpec, question: { ...validThresholdSpec.question, resolveTs: tooLong + 60_000 } },
+    };
+    expect(() => PredictionV0IntentSchema.parse(bad)).toThrow(/at most 24 hours/);
+  });
+
+  it('rejects resolveTs before endTs', () => {
+    const bad = {
+      ...validIntent,
+      spec: { ...validThresholdSpec, question: { ...validThresholdSpec.question, resolveTs: 3_500_000 } },
     };
     expect(() => PredictionV0IntentSchema.parse(bad)).toThrow(/resolveTs/);
+  });
+
+  it('rejects resolve gap > 1 hour', () => {
+    const bad = {
+      ...validIntent,
+      spec: { ...validThresholdSpec, question: { ...validThresholdSpec.question, resolveTs: 3_600_000 + 3_600_001 } },
+    };
+    expect(() => PredictionV0IntentSchema.parse(bad)).toThrow(/≤ 1 hour/);
   });
 });
 

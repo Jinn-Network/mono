@@ -347,6 +347,38 @@ export class RestorationEngine {
       throw new NotImplementedError('claim');
     }
 
+    // ── Pre-claim impl gate ─────────────────────────────────────────────────
+    // Refuse to claim intents whose impl is either unregistered (operator has
+    // opted out via config.restorers.disabled[]) or not ready (external deps
+    // missing — e.g. HL api-wallet not approved for portfolio.v0). Marking
+    // FAILED is terminal so we don't re-attempt; another operator can still
+    // claim from the marketplace.
+    //
+    // Only fires when an implRegistry is wired in (production); tests that
+    // inject claimDeps without a registry intentionally exercise the raw
+    // claim path and are not gated.
+    if (this.implRegistry && intent.specKind) {
+      const impl = this.implRegistry.findFor({
+        kind: intent.specKind,
+        type: intent.intentType ?? 'restoration',
+      });
+      if (!impl) {
+        const reason = `no impl registered or enabled for kind '${intent.specKind}'; run \`jinn intents enable ${intent.specKind}\` to opt in`;
+        this.persistence.markFailed(intent.requestId, reason);
+        console.log(`[restorer-engine] ${intent.requestId}: skipping claim — ${reason}`);
+        throw new Error(reason);
+      }
+      if (impl.isReady) {
+        const status = await impl.isReady();
+        if (!status.ready) {
+          const reason = `impl '${impl.name}' not ready: ${status.reason ?? 'unknown'}${status.nextStep?.cli ? ` — run \`${status.nextStep.cli}\`` : ''}`;
+          this.persistence.markFailed(intent.requestId, reason);
+          console.log(`[restorer-engine] ${intent.requestId}: skipping claim — ${reason}`);
+          throw new Error(reason);
+        }
+      }
+    }
+
     const { registryClient, marketplaceClaimer } = this.claimDeps;
 
     await executeTwoLayerClaim(

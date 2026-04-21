@@ -131,6 +131,36 @@ The `jinn-operator` skill activates on mentions of "jinn", "jinn network", and
 "jinn quickstart", then walks your agent through install, auth, bootstrap, and
 daemon lifecycle. You stay in the loop for funding decisions.
 
+## Opting in to specific intent kinds
+
+After `quickstart`, your daemon participates in `legacy` (health-check) and
+`prediction.v0` intents by default. Other kinds — like `portfolio.v0`, which
+executes trades against a Hyperliquid master account — are **off by default**
+because they need credentials only you can provide. This prevents your daemon
+from claiming a request it can't actually fulfill.
+
+Inspect and toggle participation with `jinn intents`:
+
+```bash
+jinn intents list --human                          # every kind, current state
+jinn intents status portfolio.v0 --human           # details for one kind
+jinn intents enable portfolio.v0 --hl-master 0x... # start the opt-in flow
+jinn intents enable portfolio.v0 --confirm-approved
+jinn intents disable portfolio.v0                  # opt out, keep state
+```
+
+Each `enable` is an idempotent state machine. Rerun until the envelope reports
+`"status": "ready"`. When the flow needs something from you (an exchange
+approval, an API key), it returns `waiting_for_external_action` with the URL
+and the exact command to rerun next. Agents with the `jinn-operator` skill
+installed know how to walk an operator through any kind automatically — just
+paste "enable portfolio.v0 for me" and they'll take it from there.
+
+**Safety net:** before spending gas on a claim, the daemon checks whether the
+responsible impl is actually ready. If a portfolio.v0 request arrives and your
+api-wallet isn't approved, the daemon records the intent as FAILED locally
+with a clear reason instead of wasting gas claiming it.
+
 ## Docker
 
 The daemon spawns the Anthropic `claude` CLI as a subprocess for

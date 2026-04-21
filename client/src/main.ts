@@ -309,12 +309,19 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Impl registry ────────────────────────────────────────────────────────────
 
+  // Default-disable impls with external dependencies the operator must opt
+  // into (see cli/intent-registry-access.ts). The user's
+  // `config.restorers.disabled[]` fully overrides this default when present,
+  // so `jinn intents enable <kind>` persists the opt-in by writing to that
+  // list in ~/.jinn-client/config.json.
+  const { DEFAULT_DISABLED_IMPLS } = await import('./cli/intent-registry-access.js');
   const implRegistry = new RestorerImplRegistry({
     byKind: {
       'portfolio.v0': 'claude-mcp-hyperliquid',
       'prediction.v0': 'prediction-v0-baseline',
     },
     default: 'legacy-claude',
+    disabled: [...DEFAULT_DISABLED_IMPLS],
     ...(config.restorers ?? {}),
   });
 

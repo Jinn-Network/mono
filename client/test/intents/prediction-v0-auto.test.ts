@@ -43,7 +43,8 @@ describe('makePredictionV0Generator', () => {
     expect(q.threshold).toBe('2311.5');
   });
 
-  it('uses the hour boundary as the stable intent ID', async () => {
+  it('uses the window boundary as the stable intent ID (default 10min bucket)', async () => {
+    // Bucket 1: 18:20:00 - 18:30:00 → both 18:23:45 and 18:29:00 land here
     vi.setSystemTime(new Date('2026-04-21T18:23:45Z'));
     const genA = makePredictionV0Generator({
       feed: '0x000000000000000000000000000000000000feed',
@@ -52,22 +53,36 @@ describe('makePredictionV0Generator', () => {
       _publicClient: makePublicClient('2300'),
     });
     const a1 = await genA();
-    // Still within the same hour — different call, same id.
-    vi.setSystemTime(new Date('2026-04-21T18:59:00Z'));
+    vi.setSystemTime(new Date('2026-04-21T18:29:00Z'));
     const a2 = await genA();
     expect(a1!.id).toBe(a2!.id);
-    // Cross hour boundary — different id.
-    vi.setSystemTime(new Date('2026-04-21T19:00:01Z'));
+    // Cross bucket boundary (18:30) → different id.
+    vi.setSystemTime(new Date('2026-04-21T18:30:01Z'));
     const a3 = await genA();
     expect(a3!.id).not.toBe(a1!.id);
   });
 
-  it('window spans exactly 1h; resolveTs is endTs + 15min', async () => {
+  it('default window = 10min, resolve gap = 5min (fast-test cadence)', async () => {
     vi.setSystemTime(new Date('2026-04-21T18:23:45Z'));
     const gen = makePredictionV0Generator({
       feed: '0x000000000000000000000000000000000000feed',
       feedDescription: 'ETH / USD',
       venue: 'chainlink-base-sepolia',
+      _publicClient: makePublicClient('2300'),
+    });
+    const state = await gen();
+    expect(state!.window!.endTs - state!.window!.startTs).toBe(600_000);
+    expect((state!.spec as any).question.resolveTs).toBe(state!.window!.endTs + 300_000);
+  });
+
+  it('respects custom windowDurationMs + resolveGapMs (mainnet-style 1h+15min)', async () => {
+    vi.setSystemTime(new Date('2026-04-21T18:23:45Z'));
+    const gen = makePredictionV0Generator({
+      feed: '0x000000000000000000000000000000000000feed',
+      feedDescription: 'ETH / USD',
+      venue: 'chainlink-base-sepolia',
+      windowDurationMs: 3_600_000,
+      resolveGapMs: 900_000,
       _publicClient: makePublicClient('2300'),
     });
     const state = await gen();

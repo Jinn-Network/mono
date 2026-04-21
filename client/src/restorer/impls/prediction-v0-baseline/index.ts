@@ -8,7 +8,14 @@ import { join } from 'node:path';
 import { createPublicClient, http } from 'viem';
 import { baseSepolia, base } from 'viem/chains';
 
-import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../types.js';
+import type {
+  RestorerImpl,
+  RestorationContext,
+  RestorationOutput,
+  ReadyStatus,
+  EnableResult,
+  IntentEnableMetadata,
+} from '../../types.js';
 import type { PublicClient } from 'viem';
 import { PredictionV0IntentSchema } from '../../../types/prediction.js';
 import {
@@ -33,6 +40,22 @@ export class PredictionV0BaselineImpl implements RestorerImpl {
 
   supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
     return ctx.kind === 'prediction.v0' && ctx.type !== 'evaluation';
+  }
+
+  async isReady(): Promise<ReadyStatus> {
+    // Zero external deps — prediction.v0 runs against on-chain oracles only.
+    return { ready: true };
+  }
+
+  enableMetadata(): IntentEnableMetadata {
+    return {
+      description:
+        'prediction.v0 — submit probability predictions against on-chain price feeds. No external credentials required.',
+    };
+  }
+
+  async onEnable(_args: Record<string, string | undefined>): Promise<EnableResult> {
+    return { status: 'ready' };
   }
 
   async canAttempt(intent: import('../../../types/desired-state.js').DesiredState):

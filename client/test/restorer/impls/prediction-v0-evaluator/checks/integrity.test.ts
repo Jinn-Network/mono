@@ -16,17 +16,42 @@ const validIntent = {
 };
 
 describe('integrity.window_bounds', () => {
-  it('PASS on valid bounds', () => {
+  it('PASS on valid 1h window + 15min resolve gap', () => {
     expect(checkWindowBounds(validIntent as any).status).toBe('PASS');
   });
-  it('FAIL when window not exactly 1h', () => {
-    const bad = { ...validIntent, window: { startTs: 0, endTs: 3_600_001 } };
+  it('PASS on 10min window + 5min resolve gap (fast-test)', () => {
+    const fast = {
+      window: { startTs: 0, endTs: 600_000 },
+      spec: { question: { kind: 'threshold', operator: 'GT', threshold: '3500', resolveTs: 900_000 } },
+    };
+    expect(checkWindowBounds(fast as any).status).toBe('PASS');
+  });
+  it('FAIL when window shorter than 1 minute', () => {
+    const bad = {
+      window: { startTs: 0, endTs: 30_000 },
+      spec: { question: { kind: 'threshold', operator: 'GT', threshold: '3500', resolveTs: 30_000 } },
+    };
     expect(checkWindowBounds(bad as any).status).toBe('FAIL');
   });
-  it('FAIL when resolveTs != endTs + 15min', () => {
+  it('FAIL when window longer than 24 hours', () => {
+    const tooLong = 86_400_001;
+    const bad = {
+      window: { startTs: 0, endTs: tooLong },
+      spec: { question: { kind: 'threshold', operator: 'GT', threshold: '3500', resolveTs: tooLong + 60_000 } },
+    };
+    expect(checkWindowBounds(bad as any).status).toBe('FAIL');
+  });
+  it('FAIL when resolveTs before endTs', () => {
     const bad = {
       ...validIntent,
-      spec: { ...validIntent.spec, question: { ...validIntent.spec.question, resolveTs: 4_500_001 } },
+      spec: { ...validIntent.spec, question: { ...validIntent.spec.question, resolveTs: 3_500_000 } },
+    };
+    expect(checkWindowBounds(bad as any).status).toBe('FAIL');
+  });
+  it('FAIL when resolve gap > 1 hour', () => {
+    const bad = {
+      ...validIntent,
+      spec: { ...validIntent.spec, question: { ...validIntent.spec.question, resolveTs: 3_600_000 + 3_600_001 } },
     };
     expect(checkWindowBounds(bad as any).status).toBe('FAIL');
   });

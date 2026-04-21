@@ -35,6 +35,17 @@ export interface PredictionV0AutoConfig {
   thresholdSentinel?: string;
   /** Comparator operator. Default 'GT'. */
   operator?: 'GT' | 'GTE' | 'LT' | 'LTE';
+  /**
+   * Submission window duration in ms. Default: 600_000 (10 min) to sync with
+   * the 15-min fast-test epoch on Base Sepolia. Set to 3_600_000 for 1h
+   * mainnet-style windows. Bucket size also uses this value.
+   */
+  windowDurationMs?: number;
+  /**
+   * Gap between window.endTs and resolveTs in ms. Default: 300_000 (5 min).
+   * Bounded by schema to ≤ 1h.
+   */
+  resolveGapMs?: number;
   /** RPC URL for the publicClient used to read Chainlink. */
   rpcUrl?: string;
   /** Injected publicClient — tests pass a mock; production leaves unset. */
@@ -53,6 +64,8 @@ export type PredictionV0Generator = () => Promise<DesiredState | null>;
 export function makePredictionV0Generator(config: PredictionV0AutoConfig): PredictionV0Generator {
   const threshold = config.thresholdSentinel ?? 'current+0.5%';
   const operator = config.operator ?? 'GT';
+  const windowDurationMs = config.windowDurationMs ?? 600_000;   // 10 min default (fast-test)
+  const resolveGapMs = config.resolveGapMs ?? 300_000;           // 5 min default
 
   // Lazy publicClient construction — reused across calls.
   let publicClient: PublicClient | null = config._publicClient ?? null;
@@ -67,12 +80,12 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
   };
 
   return async (): Promise<DesiredState | null> => {
-    // Bucket start = hour boundary ≤ now.
+    // Bucket start = windowDurationMs boundary ≤ now. Stable ID per bucket
+    // prevents duplicate posts within the same window.
     const now = Date.now();
-    const hourMs = 3_600_000;
-    const startTs = Math.floor(now / hourMs) * hourMs;
-    const endTs = startTs + hourMs;
-    const resolveTs = endTs + 900_000;
+    const startTs = Math.floor(now / windowDurationMs) * windowDurationMs;
+    const endTs = startTs + windowDurationMs;
+    const resolveTs = endTs + resolveGapMs;
 
     const template = {
       id: `pred-v0-auto-${startTs}`,

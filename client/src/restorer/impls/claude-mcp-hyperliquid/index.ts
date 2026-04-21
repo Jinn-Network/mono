@@ -19,12 +19,19 @@
  *   Programmatic approval is a §8.5 future item.
  */
 
-import { writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
-import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../types.js';
+import type {
+  RestorerImpl,
+  RestorationContext,
+  RestorationOutput,
+  ReadyStatus,
+  EnableResult,
+  IntentEnableMetadata,
+} from '../../types.js';
 import type { DesiredState } from '../../../types/desired-state.js';
 import type { RationaleEntry } from '../../../types/portfolio.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
@@ -43,7 +50,13 @@ import {
   tradedNotionalMultiple,
 } from '../portfolio-v0-evaluator/canonical-metrics.js';
 
-import { provisionApiWallet } from './api-wallet.js';
+import {
+  provisionApiWallet,
+  loadApiWalletState,
+  markApiWalletApproved,
+  saveApiWalletState,
+  walletStatePath,
+} from './api-wallet.js';
 import { buildHlTools } from './mcp-tools.js';
 import { createRateLimitState, DEFAULT_SAFETY_CONFIG as DEFAULT_SAFETY_CONFIG_IMPORTED } from './safety-rails.js';
 import type { SafetyConfig } from './safety-rails.js';
@@ -63,9 +76,18 @@ export interface ClaudeMcpHyperliquidConfig {
   cadenceMs?: number;
   /** Max session wall time in ms. Default: 8 min */
   sessionMaxMs?: number;
+  /**
+   * Impl state directory root — used by `isReady` and `onEnable` to locate
+   * the api-wallet file outside of a running intent context. Defaults to
+   * `/tmp/jinn-engine-impl-state/claude-mcp-hyperliquid` to match the
+   * convention the engine uses in `main.ts`.
+   */
+  implStateDir?: string;
   /** Injected deps for testing */
   _testDeps?: TestDeps;
 }
+
+const DEFAULT_IMPL_STATE_DIR = '/tmp/jinn-engine-impl-state/claude-mcp-hyperliquid';
 
 export interface TestDeps {
   /** Mock runner — called instead of spawning Claude */
@@ -106,6 +128,170 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
     // implStateDir is not available in canAttempt — we can only check
     // if the intent is structurally valid. API wallet check is done at run() time.
     return { ok: true };
+  }
+
+  /** Resolve the impl state directory used by enable / readiness flows. */
+  private resolveImplStateDir(): string {
+    return this.config.implStateDir ?? DEFAULT_IMPL_STATE_DIR;
+  }
+
+  async isReady(): Promise<ReadyStatus> {
+    const implStateDir = this.resolveImplStateDir();
+    const wallet = loadApiWalletState(implStateDir);
+    if (!wallet) {
+      return {
+        ready: false,
+        reason: 'HL api-wallet not provisioned',
+        nextStep: {
+          description: 'Run `jinn intents enable portfolio.v0 --hl-master <your-HL-master-address>` to generate the api-wallet and complete HL approval.',
+          cli: 'jinn intents enable portfolio.v0 --hl-master 0x...',
+        },
+      };
+    }
+    if (!wallet.approved) {
+      return {
+        ready: false,
+        reason: 'HL api-wallet generated but not approved on HL',
+        nextStep: {
+          description: `Approve address ${wallet.address} on Hyperliquid (Settings → API Wallets → Add), then re-run \`jinn intents enable portfolio.v0 --confirm-approved\`.`,
+          cli: 'jinn intents enable portfolio.v0 --confirm-approved',
+          url: 'https://app.hyperliquid-testnet.xyz/API',
+        },
+      };
+    }
+    if (!wallet.masterAddress) {
+      return {
+        ready: false,
+        reason: 'HL master address not recorded in api-wallet state',
+        nextStep: {
+          description: 'Re-run enable with the master address to record it: `jinn intents enable portfolio.v0 --hl-master 0x...`.',
+          cli: 'jinn intents enable portfolio.v0 --hl-master 0x...',
+        },
+      };
+    }
+    return { ready: true };
+  }
+
+  enableMetadata(): IntentEnableMetadata {
+    return {
+      description:
+        'portfolio.v0 — 24h managed-trading intent executed against a Hyperliquid master account. Requires you to (1) bring an HL master with USDC, and (2) approve a generated api-wallet as an HL agent.',
+      requiredArgs: [
+        { name: 'hl-master', description: 'Your Hyperliquid master address (holds USDC; approves the api-wallet).', required: true },
+      ],
+      externalResources: [
+        { name: 'HL Testnet Settings → API Wallets', url: 'https://app.hyperliquid-testnet.xyz/API' },
+        { name: 'HL Mainnet Settings → API Wallets', url: 'https://app.hyperliquid.xyz/API' },
+      ],
+    };
+  }
+
+  async onEnable(args: Record<string, string | undefined>): Promise<EnableResult> {
+    const implStateDir = this.resolveImplStateDir();
+    const hlMaster = args['hl-master'];
+    const confirmApproved = args['confirm-approved'] !== undefined;
+
+    // Ensure the impl state directory exists so we can write the wallet file.
+    if (!existsSync(implStateDir)) {
+      mkdirSync(implStateDir, { recursive: true, mode: 0o700 });
+    }
+
+    const existing = loadApiWalletState(implStateDir);
+
+    // Already enabled: idempotent no-op.
+    if (existing && existing.approved && existing.masterAddress) {
+      return {
+        status: 'ready',
+        details: {
+          apiWalletAddress: existing.address,
+          masterAddress: existing.masterAddress,
+        },
+      };
+    }
+
+    // First invocation: need --hl-master to know which account this wallet belongs to.
+    if (!existing && !hlMaster) {
+      return {
+        status: 'missing_args',
+        required: [
+          { name: 'hl-master', description: 'Your Hyperliquid master address (holds USDC).', required: true },
+        ],
+        example: { cli: 'jinn intents enable portfolio.v0 --hl-master 0x...' },
+      };
+    }
+
+    // State transition 1: no wallet yet — generate it and tell the agent to have the operator approve on HL.
+    if (!existing) {
+      const wallet = provisionApiWallet(implStateDir);
+      // Record the master so we don't re-ask on the next invocation.
+      saveApiWalletState(implStateDir, { ...wallet, masterAddress: hlMaster });
+      return {
+        status: 'waiting_for_external_action',
+        action: {
+          description: `API wallet ${wallet.address} generated. Open the Hyperliquid UI, go to Settings → API Wallets → Add, and approve this address under your master ${hlMaster}. Once done, re-run this command with --confirm-approved.`,
+          url: 'https://app.hyperliquid-testnet.xyz/API',
+        },
+        details: {
+          apiWalletAddress: wallet.address,
+          masterAddress: hlMaster,
+          walletStatePath: walletStatePath(implStateDir),
+        },
+        nextInvocation: {
+          cli: 'jinn intents enable portfolio.v0 --confirm-approved',
+          purpose: 'Record the operator-confirmed HL approval and enable portfolio.v0 claims.',
+        },
+      };
+    }
+
+    // State transition 2: wallet exists, not yet confirmed — if --confirm-approved is passed, flip the flag.
+    if (!existing.approved && !confirmApproved) {
+      return {
+        status: 'waiting_for_external_action',
+        action: {
+          description: `Approve api-wallet address ${existing.address} on Hyperliquid under master ${existing.masterAddress ?? hlMaster ?? '<set via --hl-master>'}, then re-run with --confirm-approved.`,
+          url: 'https://app.hyperliquid-testnet.xyz/API',
+        },
+        details: {
+          apiWalletAddress: existing.address,
+          masterAddress: existing.masterAddress ?? hlMaster,
+        },
+        nextInvocation: {
+          cli: 'jinn intents enable portfolio.v0 --confirm-approved',
+          purpose: 'Record the operator-confirmed HL approval.',
+        },
+      };
+    }
+
+    // State transition 3: --confirm-approved passed — persist approval and optionally update the master.
+    const updated = markApiWalletApproved(implStateDir);
+    const resolvedMaster = hlMaster ?? updated.masterAddress;
+    if (!resolvedMaster) {
+      return {
+        status: 'missing_args',
+        required: [
+          { name: 'hl-master', description: 'Master address was never recorded; pass --hl-master now.', required: true },
+        ],
+        example: { cli: 'jinn intents enable portfolio.v0 --hl-master 0x... --confirm-approved' },
+      };
+    }
+    if (updated.masterAddress !== resolvedMaster) {
+      saveApiWalletState(implStateDir, { ...updated, masterAddress: resolvedMaster });
+    }
+
+    return {
+      status: 'ready',
+      details: {
+        apiWalletAddress: updated.address,
+        masterAddress: resolvedMaster,
+      },
+    };
+  }
+
+  async onDisable(): Promise<void> {
+    // Intentionally no-op on key material: operators may re-enable later
+    // and re-generating the wallet would force a fresh HL approval round-trip.
+    // The config-level disable (removing the impl from `restorers.disabled`)
+    // is handled by the `jinn intents disable` verb, not the impl itself.
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
@@ -708,7 +894,6 @@ await startMcpServer(config);
 
 // ── Jinn MCP launcher resolution ──────────────────────────────────────────────
 
-import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

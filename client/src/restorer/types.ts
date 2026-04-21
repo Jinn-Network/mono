@@ -39,6 +39,77 @@ export interface RestorationOutput {
   rationale?: RationaleEntry[];
 }
 
+// ── Enable / readiness types ──────────────────────────────────────────────────
+
+/**
+ * Context-free readiness probe. "Are this impl's external dependencies
+ * satisfied right now, regardless of any specific intent?" Used by
+ * `jinn intents list|status` and by the claim-policy gate that refuses
+ * to spend gas claiming an intent whose impl cannot execute.
+ */
+export interface ReadyStatus {
+  ready: boolean;
+  reason?: string;
+  /** Optional hint for the operator/agent on how to become ready. */
+  nextStep?: { description: string; cli?: string; url?: string };
+}
+
+/**
+ * Argument a kind-specific enable flow wants from the operator, surfaced
+ * via `enableMetadata()`. The generic `jinn intents enable <kind>` verb
+ * parses these from `--key=value` flags without caring what they mean.
+ */
+export interface EnableArgDef {
+  name: string;
+  description: string;
+  required: boolean;
+}
+
+/**
+ * Metadata that `jinn intents list` uses to teach the operator (or agent)
+ * what's needed to enable a kind. Returned without running the flow.
+ */
+export interface IntentEnableMetadata {
+  /** Human-readable summary of what opting in to this kind entails. */
+  description: string;
+  requiredArgs?: EnableArgDef[];
+  /** External URLs the operator/agent will need (e.g. exchange UI). */
+  externalResources?: Array<{ name: string; url: string }>;
+}
+
+/**
+ * Outcome of a single `jinn intents enable <kind>` invocation.
+ *
+ * The flow is idempotent: the agent reruns the same command until
+ * `status === 'ready'`. Each intermediate state carries enough info for
+ * the agent to know what to do next (show a URL, collect more args,
+ * surface an error).
+ */
+export type EnableResult =
+  | {
+      status: 'ready';
+      /** Anything the impl wants to surface (e.g. master address, wallet address). */
+      details?: Record<string, unknown>;
+    }
+  | {
+      status: 'waiting_for_external_action';
+      /** What the operator has to do out-of-band (e.g. approve an api-wallet). */
+      action: { description: string; url?: string };
+      details?: Record<string, unknown>;
+      /** The exact CLI the agent should re-run once the action is done. */
+      nextInvocation: { cli: string; purpose: string };
+    }
+  | {
+      status: 'missing_args';
+      required: EnableArgDef[];
+      example: { cli: string };
+    }
+  | {
+      status: 'error';
+      message: string;
+      details?: Record<string, unknown>;
+    };
+
 // ── RestorerImpl ──────────────────────────────────────────────────────────────
 
 export interface RestorerImpl {
@@ -58,4 +129,47 @@ export interface RestorerImpl {
   supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean;
   canAttempt?(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }>;
   run(ctx: RestorationContext): Promise<RestorationOutput>;
+
+  /**
+   * Context-free readiness probe. Zero-dep impls can omit this (treated
+   * as `{ ready: true }`). Impls with external deps (credentials, files,
+   * exchange approvals) report current readiness plus a `nextStep` hint.
+   */
+  isReady?(): Promise<ReadyStatus>;
+
+  /**
+   * Describes what `onEnable` wants from the caller. Consumed by
+   * `jinn intents list` so the agent can tell the operator what a
+   * specific kind's enable flow needs without triggering it first.
+   */
+  enableMetadata?(): IntentEnableMetadata;
+
+  /**
+   * Idempotent enable-state machine. Called by `jinn intents enable <kind>`.
+   *
+   * Contract:
+   *   - Zero-dep impls return `{ status: 'ready' }` on every call.
+   *   - Impls with external deps advance as far as they can without
+   *     blocking, then return a `waiting_for_external_action` envelope
+   *     the agent surfaces to the operator.
+   *   - Subsequent invocations pick up where the previous left off.
+   *   - Calling after already-enabled is a no-op that returns `ready`.
+   *
+   * `args` is the raw `--key=value` map parsed from the CLI. Impls
+   * validate and coerce as needed; missing required args should return
+   * `{ status: 'missing_args', required: [...], example: {...} }`.
+   *
+   * Impls that omit this method cannot be enabled by the generic CLI;
+   * they are either always-on (zero-dep) or require manual config.
+   */
+  onEnable?(args: Record<string, string | undefined>): Promise<EnableResult>;
+
+  /**
+   * Optional inverse of `onEnable`. Invoked when the operator runs
+   * `jinn intents disable <kind>`. Should NOT destroy unrecoverable
+   * state (generated key material, on-chain registrations); reserve
+   * that for explicit `jinn intents purge` or similar (out of scope
+   * for this interface).
+   */
+  onDisable?(): Promise<void>;
 }

@@ -84,7 +84,23 @@ export interface TemplateReaderDeps {
     feed: `0x${string}`;
     venue: 'chainlink-base' | 'chainlink-base-sepolia';
   }) => Promise<string>;
+  /**
+   * Window duration when the template uses `window.startTs = 0` (now-relative
+   * sentinel). Default: 10 min — syncs with the 15-min fast-test epoch cadence
+   * on testnet. Set to 3_600_000 for a 1h window (mainnet-style dogfood).
+   */
+  windowDurationMs?: number;
+  /**
+   * Resolve gap when the template uses `window.startTs = 0`. Default: 5 min.
+   * `resolveTs = endTs + resolveGapMs`. Bounded by schema to ≤ 1h.
+   */
+  resolveGapMs?: number;
 }
+
+/** Default window duration for the startTs-sentinel fill. Tuned for fast-test. */
+export const DEFAULT_WINDOW_DURATION_MS = 600_000;
+/** Default resolve gap for the startTs-sentinel fill. Tuned for fast-test. */
+export const DEFAULT_RESOLVE_GAP_MS = 300_000;
 
 /**
  * Resolve all supported sentinels in a raw prediction.v0 template + return a
@@ -106,15 +122,16 @@ export async function resolvePredictionV0Template(
   const stub = JSON.parse(JSON.stringify(template)) as Record<string, unknown>;
 
   // ── (1) window.startTs = 0 → now-relative ──────────────────────────────────
+  const windowMs = deps.windowDurationMs ?? DEFAULT_WINDOW_DURATION_MS;
+  const resolveMs = deps.resolveGapMs ?? DEFAULT_RESOLVE_GAP_MS;
   const win = stub['window'] as { startTs?: number; endTs?: number } | undefined;
   if (win && win.startTs === 0) {
     const now = Date.now();
     win.startTs = now;
-    win.endTs = now + 3_600_000;
-    // Fix up resolveTs inside the spec.question as well.
+    win.endTs = now + windowMs;
     const spec = stub['spec'] as { question?: { resolveTs?: number } } | undefined;
     if (spec?.question) {
-      spec.question.resolveTs = now + 3_600_000 + 900_000;
+      spec.question.resolveTs = now + windowMs + resolveMs;
     }
   }
 

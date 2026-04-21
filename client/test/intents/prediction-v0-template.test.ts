@@ -53,9 +53,22 @@ describe('resolvePredictionV0Template', () => {
     const after = Date.now();
     expect(resolved.window.startTs).toBeGreaterThanOrEqual(before);
     expect(resolved.window.startTs).toBeLessThanOrEqual(after);
-    expect(resolved.window.endTs).toBe(resolved.window.startTs + 3_600_000);
+    // Default: 10 min window + 5 min resolve gap (fast-test epoch cadence).
+    expect(resolved.window.endTs - resolved.window.startTs).toBe(600_000);
     if (resolved.spec.question.kind !== 'threshold') throw new Error('wrong kind');
-    expect(resolved.spec.question.resolveTs).toBe(resolved.window.endTs + 900_000);
+    expect(resolved.spec.question.resolveTs - resolved.window.endTs).toBe(300_000);
+  });
+
+  it('respects custom windowDurationMs + resolveGapMs overrides (mainnet-style)', async () => {
+    const readCurrent = vi.fn(async () => '2300');
+    const resolved = await resolvePredictionV0Template(validTemplate(), {
+      readCurrent,
+      windowDurationMs: 3_600_000,
+      resolveGapMs: 900_000,
+    });
+    expect(resolved.window.endTs - resolved.window.startTs).toBe(3_600_000);
+    if (resolved.spec.question.kind !== 'threshold') throw new Error('wrong kind');
+    expect(resolved.spec.question.resolveTs - resolved.window.endTs).toBe(900_000);
   });
 
   it('resolves "current" threshold via readCurrent', async () => {

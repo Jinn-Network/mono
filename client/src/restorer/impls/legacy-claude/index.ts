@@ -10,7 +10,14 @@
  */
 
 import { type Runner, type RunnerContext } from '../../../runner/runner.js';
-import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../types.js';
+import type {
+  RestorerImpl,
+  RestorationContext,
+  RestorationOutput,
+  ReadyStatus,
+  EnableResult,
+  IntentEnableMetadata,
+} from '../../types.js';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +54,21 @@ export class LegacyClaudeImpl implements RestorerImpl {
 
   async canAttempt(): Promise<{ ok: true }> {
     return { ok: true };
+  }
+
+  async isReady(): Promise<ReadyStatus> {
+    return { ready: true };
+  }
+
+  enableMetadata(): IntentEnableMetadata {
+    return {
+      description:
+        'legacy-claude — handles health-check intents (no spec.kind). Always enabled.',
+    };
+  }
+
+  async onEnable(_args: Record<string, string | undefined>): Promise<EnableResult> {
+    return { status: 'ready' };
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {

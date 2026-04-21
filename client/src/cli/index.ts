@@ -35,6 +35,7 @@ import withdrawCommand from './commands/withdraw.js';
 import keysCommand from './commands/keys-backup.js';
 import pluginCommand from './commands/plugin-install.js';
 import updateCommand from './commands/update.js';
+import intentsCommand from './commands/intents.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -59,6 +60,7 @@ const COMMANDS: CommandModule[] = [
   keysCommand,
   pluginCommand,
   updateCommand,
+  intentsCommand,
 ];
 
 function publicCommandNames(commands: CommandModule[]): string[] {

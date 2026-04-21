@@ -2,21 +2,41 @@ import { recoverAddress } from 'viem';
 import type { Check } from '../types.js';
 import type { PredictionV0Intent, PredictionSubmissionManifest } from '../../../../types/prediction.js';
 
+/**
+ * Window-bounds integrity. We no longer pin an exact duration — the schema
+ * enforces sane min/max bounds (1min ≤ window ≤ 24h; 0 ≤ resolveGap ≤ 1h),
+ * so this check just re-verifies those invariants at eval time in case the
+ * manifest was built against an older schema version.
+ */
+const MIN_WINDOW_MS = 60_000;
+const MAX_WINDOW_MS = 86_400_000;
+const MAX_RESOLVE_GAP_MS = 3_600_000;
+
 export function checkWindowBounds(intent: PredictionV0Intent): Check {
   const wDelta = intent.window.endTs - intent.window.startTs;
-  if (wDelta !== 3_600_000) {
+  if (wDelta < MIN_WINDOW_MS || wDelta > MAX_WINDOW_MS) {
     return {
       name: 'integrity.window_bounds',
       status: 'FAIL',
-      detail: { expected: 3_600_000, got: wDelta },
+      detail: {
+        reason: 'window out of bounds',
+        got: wDelta,
+        min: MIN_WINDOW_MS,
+        max: MAX_WINDOW_MS,
+      },
     };
   }
   const rDelta = intent.spec.question.resolveTs - intent.window.endTs;
-  if (rDelta !== 900_000) {
+  if (rDelta < 0 || rDelta > MAX_RESOLVE_GAP_MS) {
     return {
       name: 'integrity.window_bounds',
       status: 'FAIL',
-      detail: { expected: 900_000, got: rDelta, field: 'resolveTs' },
+      detail: {
+        reason: 'resolve gap out of bounds',
+        got: rDelta,
+        min: 0,
+        max: MAX_RESOLVE_GAP_MS,
+      },
     };
   }
   return { name: 'integrity.window_bounds', status: 'PASS' };
