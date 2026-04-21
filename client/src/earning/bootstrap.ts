@@ -269,6 +269,43 @@ export class FleetBootstrapper {
       }
 
       if (systemEth < requiredMasterEth) {
+        // On testnet, attempt automatic faucet funding before giving up
+        if (this.chain === 'base-sepolia') {
+          console.error('[fleet-bootstrap] Attempting automatic faucet funding via Coinbase CDP...');
+          const faucetResult = await requestTestnetFunding(masterAddress, 'base-sepolia');
+          if (faucetResult.ok) {
+            console.error(`[fleet-bootstrap] Faucet funded successfully (tx: ${faucetResult.txHash}). Rechecking balance...`);
+            // Wait for tx propagation
+            await new Promise(r => setTimeout(r, 3000));
+            // Re-read balance and continue if sufficient
+            const refreshedBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
+            let refreshedSystemEth = refreshedBalance;
+            if (this.stakingMode === 'self-bond') {
+              for (const svc of state.services) {
+                if (svc.agent_address) {
+                  refreshedSystemEth += await this.publicClient.getBalance({
+                    address: getAddress(svc.agent_address) as Address,
+                  });
+                }
+                if (svc.safe_address) {
+                  refreshedSystemEth += await this.publicClient.getBalance({
+                    address: getAddress(svc.safe_address) as Address,
+                  });
+                }
+              }
+            }
+            if (refreshedSystemEth >= requiredMasterEth) {
+              console.error('[fleet-bootstrap] Faucet funding sufficient. Continuing bootstrap...');
+              // Update systemEth/masterBalance for the runway check below
+              systemEth = refreshedSystemEth;
+            }
+          } else {
+            console.error(`[fleet-bootstrap] Faucet unavailable: ${faucetResult.reason}`);
+          }
+        }
+      }
+
+      if (systemEth < requiredMasterEth) {
         const shortfall = requiredMasterEth - systemEth;
         const friendly = `Your master wallet needs more ETH (currently ${formatEther(masterBalance)} ETH, need ${formatEther(shortfall)} ETH more). Please send ETH to: ${masterAddress}`;
         return {

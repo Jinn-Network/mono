@@ -128,4 +128,39 @@ describe('submit-intent command', () => {
     expect(exits).toEqual([20]);
     vi.doUnmock('../../../src/cli/introspection-context.js');
   });
+
+  it('accepts --spec-file with a prediction.v0 intent', async () => {
+    vi.resetModules();
+    vi.doMock('../../../src/cli/introspection-context.js', () => ({
+      gatherIntrospectionRaw: vi.fn(async () => mockRaw),
+    }));
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-submit-intent-'));
+    const tmpFile = join(tmp, 'pred-intent.json');
+    writeFileSync(tmpFile, JSON.stringify({
+      window: { startTs: 0, endTs: 3600000 },
+      spec: {
+        kind: 'prediction.v0',
+        oracle: { venue: 'chainlink-base-sepolia', feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1', feedDescription: 'ETH / USD' },
+        question: { kind: 'threshold', operator: 'GT', threshold: '3500', resolveTs: 4500000 },
+      },
+      eligibility: { maxSubmissionDelayMs: 60000 },
+    }));
+    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const { ctx, writes } = makeCtx([
+      '--id', 'pred-1',
+      '--description', 'ETH > 3500',
+      '--spec-file', tmpFile,
+      '--dry-run',
+    ]);
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.verb).toBe('submit-intent');
+    expect(parsed.plan[0]).toMatchObject({ id: 'pred-1' });
+    expect(parsed.plan[0].spec?.kind).toBe('prediction.v0');
+    vi.doUnmock('../../../src/cli/introspection-context.js');
+  });
 });

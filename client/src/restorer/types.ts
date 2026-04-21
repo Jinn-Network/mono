@@ -45,7 +45,17 @@ export interface RestorerImpl {
   name: string;
   /** semver */
   version: string;
-  supports(spec: { kind: string }): boolean;
+  /**
+   * Return true if this impl should handle the given (kind, type) pair.
+   *
+   * `type` reflects DesiredState.type:
+   *   - 'restoration' (or undefined — legacy default): the impl runs a restoration attempt
+   *   - 'evaluation': the impl runs as an evaluator producing a verdict
+   *
+   * A restorer impl for kind=X should return true for type !== 'evaluation'.
+   * An evaluator impl for kind=X should return true for type === 'evaluation'.
+   */
+  supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean;
   canAttempt?(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }>;
   run(ctx: RestorationContext): Promise<RestorationOutput>;
 }

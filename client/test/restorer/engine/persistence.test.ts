@@ -539,3 +539,43 @@ describe('concurrent transition', () => {
     expect(err.message).toContain('req-x');
   });
 });
+
+// ── intent_type roundtrip tests ───────────────────────────────────────────────
+
+describe('IntentPersistence — intent_type', () => {
+  it('persists intentType roundtrip', () => {
+    const store = new Store(':memory:');
+    const p = new IntentPersistence(store.db);
+    p.insertDiscovered({
+      requestId: '0xabc',
+      intentCid: 'cid',
+      onchainCreationTx: '0x0',
+      onchainCreationBlock: 1,
+      specKind: 'prediction.v0',
+      intentType: 'evaluation',
+      windowStartTs: 0,
+      windowEndTs: 3_600_000,
+      desiredState: { id: 'i', description: 'd' },
+    });
+    const got = p.getByRequestId('0xabc');
+    expect(got?.intentType).toBe('evaluation');
+    store.close();
+  });
+
+  it('defaults to null when intentType not provided', () => {
+    const store = new Store(':memory:');
+    const p = new IntentPersistence(store.db);
+    p.insertDiscovered({
+      requestId: '0xdef',
+      intentCid: 'cid',
+      onchainCreationTx: '0x0',
+      onchainCreationBlock: 1,
+      windowStartTs: 0,
+      windowEndTs: 3_600_000,
+      desiredState: { id: 'i', description: 'd' },
+    });
+    const got = p.getByRequestId('0xdef');
+    expect(got?.intentType).toBeNull();
+    store.close();
+  });
+});

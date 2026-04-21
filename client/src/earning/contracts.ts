@@ -184,6 +184,7 @@ const BASE_CONFIG: ChainConfig = {
 
   // Jinn staking (JinnRouter activity checker)
   stakingContract: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+  jinnRouter: '0xfFa7118A3D820cd4E820010837D65FAfF463181B',
 
   // stOLAS ExternalStakingDistributor (LemonTree, Base mainnet)
   distributorAddress: '0x40abf47B926181148000DbCC7c8DE76A3a61a66f',

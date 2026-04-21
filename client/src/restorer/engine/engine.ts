@@ -51,8 +51,8 @@ export class NotImplementedError extends Error {
 // ── Registry stub (to be fleshed out in impl task) ───────────────────────────
 
 export interface RestorerImplRegistry {
-  /** Returns the impl name for a given spec kind, or null if none registered. */
-  resolveImplName(specKind: string | null): string | null;
+  /** Returns the impl name for a given spec kind (and optional type), or null if none registered. */
+  resolveImplName(ctx: { kind: string | null; type?: 'restoration' | 'evaluation' }): string | null;
 }
 
 // ── Engine options ────────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ export interface RestorationEngineOptions {
    * When provided and findFor() returns an impl, runImpl() dispatches to it.
    */
   implRegistry?: {
-    findFor(spec: { kind: string }): RestorerImpl | undefined;
+    findFor(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): RestorerImpl | undefined;
   };
 }
 
@@ -420,7 +420,7 @@ export class RestorationEngine {
     // (join(implStateDirRoot, impl.name)). Falls back to specKind then 'default'
     // when no impl is registered — legacy path preserved for health-check intents.
     const resolvedImpl = intent.specKind
-      ? this.implRegistry?.findFor({ kind: intent.specKind }) ?? null
+      ? this.implRegistry?.findFor({ kind: intent.specKind, type: intent.intentType ?? 'restoration' }) ?? null
       : null;
     const implStateName = intent.implName ?? resolvedImpl?.name ?? intent.specKind ?? 'default';
     const implStateDir = join(this.paths.implStateDirRoot, implStateName);
@@ -463,7 +463,8 @@ export class RestorationEngine {
    */
   protected async runImpl(intent: PersistedIntent): Promise<void> {
     const specKind = intent.specKind ?? '';
-    const impl = this.implRegistry?.findFor({ kind: specKind });
+    const type = intent.intentType ?? 'restoration';
+    const impl = this.implRegistry?.findFor({ kind: specKind, type });
     if (!impl) {
       throw new NotImplementedError('runImpl');
     }

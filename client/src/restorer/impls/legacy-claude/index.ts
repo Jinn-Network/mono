@@ -38,8 +38,11 @@ export class LegacyClaudeImpl implements RestorerImpl {
    * Supports the empty-string kind produced by the engine for intents with no spec.
    * Also supports explicitly undefined-kind intents routed by registry default config.
    */
-  supports(spec: { kind: string }): boolean {
-    return spec.kind === '' || spec.kind === 'legacy';
+  supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
+    // legacy-claude handles restoration-type health-check intents with no spec.kind.
+    // It never runs as an evaluator.
+    if (ctx.type === 'evaluation') return false;
+    return ctx.kind === '' || ctx.kind === 'legacy';
   }
 
   async canAttempt(): Promise<{ ok: true }> {

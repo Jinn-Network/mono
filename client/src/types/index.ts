@@ -25,3 +25,16 @@ export {
 } from './portfolio.js';
 
 export { TransientError, PermanentError } from './errors.js';
+
+export {
+  PredictionV0SpecSchema,
+  PredictionV0EligibilitySchema,
+  PredictionV0IntentSchema,
+  PredictionSubmissionManifestSchema,
+  PredictionVerdictManifestSchema,
+  type PredictionV0Spec,
+  type PredictionV0Eligibility,
+  type PredictionV0Intent,
+  type PredictionSubmissionManifest,
+  type PredictionVerdictManifest,
+} from './prediction.js';

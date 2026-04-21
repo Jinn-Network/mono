@@ -64,7 +64,6 @@ import { PortfolioV0Evaluator } from '../src/restorer/impls/portfolio-v0-evaluat
 import type { RestorationContext } from '../src/restorer/types.js';
 import type { HlClearinghouseState, HlFill, HlGridPoint } from '../src/venues/hyperliquid/types.js';
 import type { DesiredState } from '../src/types/desired-state.js';
-import type { EvalSpec } from '../src/restorer/impls/portfolio-v0-evaluator/types.js';
 import type { RestorationManifest } from '../src/types/portfolio.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -613,7 +612,7 @@ async function main(): Promise<void> {
     let evalVerdict = 'UNKNOWN';
 
     results.push(await runPhase('Phase 7: Claim eval job + run PortfolioV0Evaluator (mocked IPFS + mocked HL)', async () => {
-      if (!adapter || !intentCid || !capturedManifestCid || !capturedManifest || !tmpDir || !agentEoaPrivateKey || !safeAddress || !capturedWindow) {
+      if (!adapter || !capturedManifest || !tmpDir || !agentEoaPrivateKey || !safeAddress || !capturedWindow) {
         throw new Error('Missing state from prior phases');
       }
 
@@ -640,60 +639,26 @@ async function main(): Promise<void> {
       await adapter.claimRequest(req.requestId);
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-      // Build evaluator context with in-memory IPFS mock (avoids IPFS roundtrip)
+      // Build evaluator context using the unified-payload model (Task 10 migration).
+      // The restorer's manifest is inlined at context.restorationResult; the original
+      // portfolio.v0 spec is carried directly on the evalIntent.spec — no IPFS fetch.
       const capturedWindow2 = capturedWindow;
       const capturedManifest2 = capturedManifest;
-      const intentCid2 = intentCid;
-      const capturedManifestCid2 = capturedManifestCid;
-
-      const evalSpec: EvalSpec = {
-        kind: 'portfolio.v0.eval',
-        targetManifestCid: capturedManifestCid2,
-        targetIntentCid: intentCid2,
-        targetCreationTx: '0x',
-        targetRequestId: restorationRequestId ?? '0x',
-        targetCreationBlock: 0,
-        safeAddress,
-        agentEoa: privateKeyToAccount(agentEoaPrivateKey).address,
-        agentEoaPrivateKey,
-        ipfsGatewayUrl: 'https://gateway.autonolas.tech',
-        _testDeps: {
-          fetchFromIpfs: async (_gatewayUrl: string, cid: string) => {
-            if (cid === capturedManifestCid2) return capturedManifest2 as unknown;
-            if (cid === intentCid2) {
-              return {
-                id: 'pf-v0-e2e-test',
-                description: 'portfolio.v0 e2e: grow equity by 1% over 24h window on Hyperliquid testnet',
-                window: capturedWindow2,
-                spec: {
-                  kind: 'portfolio.v0',
-                  account: { venue: 'hyperliquid-testnet', masterAddress: '0x0000000000000000000000000000000000000001' },
-                  target: { metric: 'equity_return_pct', minReturnPct: 1.0 },
-                  constraint: { maxDrawdownPct: 10.0 },
-                },
-                eligibility: { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 },
-              };
-            }
-            throw new Error(`Mocked IPFS: unknown CID ${cid}`);
-          },
-          hlPortfolioPeriod: async (_user: string) => {
-            const { startTs, endTs } = capturedWindow2;
-            const grid: HlGridPoint[] = [[startTs - 3_600_000, '1000'], [startTs + 1000, '1000'], [endTs - 1000, '1000'], [endTs + 3_600_000, '1000']];
-            return { accountValueHistory: grid };
-          },
-          hlUserFillsByTime: async (_user: string, _startTime: number, _endTime?: number) => ({
-            fills: [] as HlFill[],
-            startTimeClamped: false,
-          }),
-        },
-      };
 
       const evalIntent: DesiredState = {
         id: 'pf-v0-e2e-eval',
         description: 'Evaluate portfolio.v0 restoration attempt',
         type: 'evaluation',
         restorationRequestId,
-        spec: evalSpec as unknown as Record<string, unknown>,
+        window: capturedWindow2,
+        spec: {
+          kind: 'portfolio.v0',
+          account: { venue: 'hyperliquid-testnet', masterAddress: '0x0000000000000000000000000000000000000001' },
+          target: { metric: 'equity_return_pct', minReturnPct: 1.0 },
+          constraint: { maxDrawdownPct: 10.0 },
+        } as unknown as Record<string, unknown>,
+        eligibility: { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 } as unknown as Record<string, unknown>,
+        context: { restorationResult: JSON.stringify(capturedManifest2) },
       };
 
       const evalWorkingDir = join(tmpDir, 'eval-working', req.requestId);
@@ -711,7 +676,24 @@ async function main(): Promise<void> {
         msUntilEndTs: () => 0,
       };
 
-      const evaluator = new PortfolioV0Evaluator();
+      // Pass test deps via constructor config (unified-payload pattern).
+      // HL calls are mocked to return 0 fills — triggers REJECTED verdict (eligibility.minClosedTrades = 20).
+      const evaluator = new PortfolioV0Evaluator({
+        safeAddress,
+        agentEoa: privateKeyToAccount(agentEoaPrivateKey).address,
+        agentEoaPrivateKey,
+        _testDeps: {
+          hlPortfolioPeriod: async (_user: string) => {
+            const { startTs, endTs } = capturedWindow2;
+            const grid: HlGridPoint[] = [[startTs - 3_600_000, '1000'], [startTs + 1000, '1000'], [endTs - 1000, '1000'], [endTs + 3_600_000, '1000']];
+            return { accountValueHistory: grid };
+          },
+          hlUserFillsByTime: async (_user: string, _startTime: number, _endTime?: number) => ({
+            fills: [] as HlFill[],
+            startTimeClamped: false,
+          }),
+        },
+      });
       const evalOutput = await evaluator.run(evalCtx);
 
       evalVerdict = String(evalOutput.gating['verdict'] ?? 'UNKNOWN');

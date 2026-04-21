@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS restoration_intents (
   onchain_creation_tx     TEXT NOT NULL,
   onchain_creation_block  INTEGER NOT NULL,
   spec_kind               TEXT,
+  intent_type             TEXT,     -- 'restoration' | 'evaluation' | NULL (legacy)
   impl_name               TEXT,
 
   state                   TEXT NOT NULL,
@@ -109,6 +110,8 @@ export interface PersistedIntentInput {
   onchainCreationTx: string;
   onchainCreationBlock: number;
   specKind?: string;
+  /** 'restoration' (default) or 'evaluation'. Captured from DesiredState.type at observe() time. */
+  intentType?: 'restoration' | 'evaluation';
   windowStartTs: number;
   windowEndTs: number;
   /**
@@ -128,6 +131,7 @@ export interface PersistedIntent {
   onchainCreationTx: string;
   onchainCreationBlock: number;
   specKind: string | null;
+  intentType: 'restoration' | 'evaluation' | null;
   implName: string | null;
 
   state: IntentState;
@@ -213,6 +217,7 @@ interface RawRow {
   onchain_creation_tx: string;
   onchain_creation_block: number;
   spec_kind: string | null;
+  intent_type: string | null;
   impl_name: string | null;
   state: string;
   state_updated_at: number;
@@ -255,6 +260,7 @@ function runAdditiveMigrations(db: Database.Database): void {
     // Persists impl outputs so pack() can recover a deterministic manifest CID
     // after a process restart (otherwise in-memory implOutputs is lost).
     { column: 'impl_outputs_json',     ddl: 'ALTER TABLE restoration_intents ADD COLUMN impl_outputs_json TEXT' },
+    { column: 'intent_type',           ddl: 'ALTER TABLE restoration_intents ADD COLUMN intent_type TEXT' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
@@ -289,6 +295,7 @@ function rowToIntent(row: RawRow): PersistedIntent {
     onchainCreationTx: row.onchain_creation_tx,
     onchainCreationBlock: row.onchain_creation_block,
     specKind: row.spec_kind,
+    intentType: (row.intent_type ?? null) as 'restoration' | 'evaluation' | null,
     implName: row.impl_name,
     state: row.state as IntentState,
     stateUpdatedAt: row.state_updated_at,
@@ -337,11 +344,11 @@ export class IntentPersistence {
     this.db.prepare(`
       INSERT OR IGNORE INTO restoration_intents (
         request_id, intent_cid, onchain_creation_tx, onchain_creation_block,
-        spec_kind, state, state_updated_at, window_start_ts, window_end_ts,
+        spec_kind, intent_type, state, state_updated_at, window_start_ts, window_end_ts,
         desired_state_payload
       ) VALUES (
         @requestId, @intentCid, @onchainCreationTx, @onchainCreationBlock,
-        @specKind, 'DISCOVERED', @now, @windowStartTs, @windowEndTs,
+        @specKind, @intentType, 'DISCOVERED', @now, @windowStartTs, @windowEndTs,
         @desiredStatePayload
       )
     `).run({
@@ -350,6 +357,7 @@ export class IntentPersistence {
       onchainCreationTx: input.onchainCreationTx,
       onchainCreationBlock: input.onchainCreationBlock,
       specKind: input.specKind ?? null,
+      intentType: input.intentType ?? null,
       now: Date.now(),
       windowStartTs: input.windowStartTs,
       windowEndTs: input.windowEndTs,

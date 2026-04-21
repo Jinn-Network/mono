@@ -226,6 +226,34 @@ export const JINN_ROUTER_ABI = [
       { name: 'jobType', type: 'uint8', indexed: false },
     ],
   },
+  {
+    name: 'creationCount',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'multisig', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'restorationDeliveryCount',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'multisig', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'evaluationCreationCount',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'multisig', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'evaluationDeliveryCount',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'multisig', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
 ] as const;
 
 // CLAIM_REGISTRY_ABI was removed from here — canonical definition lives in

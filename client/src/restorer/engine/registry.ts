@@ -59,26 +59,29 @@ export class RestorerImplRegistry implements IRestorerImplRegistry {
    * Returns undefined if no suitable impl is found (all disabled, none
    * support the kind, or registry is empty).
    */
-  findFor(spec: { kind: string }): RestorerImpl | undefined {
+  findFor(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): RestorerImpl | undefined {
     const disabled = new Set(this.config.disabled ?? []);
     const active = this.impls.filter((impl) => !disabled.has(impl.name));
 
-    // 1. byKind explicit mapping
-    const kindName = this.config.byKind?.[spec.kind];
+    // 1. byKind explicit mapping — but ONLY honor it if the named impl supports
+    //    the requested ctx. Otherwise fall through (e.g., byKind points at the
+    //    restorer impl, but ctx asks for an evaluation).
+    const kindName = this.config.byKind?.[ctx.kind];
     if (kindName) {
-      return active.find((impl) => impl.name === kindName);
+      const named = active.find((impl) => impl.name === kindName);
+      if (named && named.supports(ctx)) return named;
     }
 
     // 2. default fallback name
     if (this.config.default) {
       const defaultImpl = active.find((impl) => impl.name === this.config.default);
-      if (defaultImpl && defaultImpl.supports(spec)) {
+      if (defaultImpl && defaultImpl.supports(ctx)) {
         return defaultImpl;
       }
     }
 
     // 3. First-match by supports()
-    return active.find((impl) => impl.supports(spec));
+    return active.find((impl) => impl.supports(ctx));
   }
 
   /** All registered impls (including disabled ones). */
@@ -90,9 +93,9 @@ export class RestorerImplRegistry implements IRestorerImplRegistry {
    * IRestorerImplRegistry compatibility: resolve an impl name for a given
    * spec kind, or null if none registered.
    */
-  resolveImplName(specKind: string | null): string | null {
-    if (specKind === null) return null;
-    const impl = this.findFor({ kind: specKind });
+  resolveImplName(ctx: { kind: string | null; type?: 'restoration' | 'evaluation' }): string | null {
+    if (ctx.kind === null) return null;
+    const impl = this.findFor({ kind: ctx.kind, type: ctx.type });
     return impl?.name ?? null;
   }
 }

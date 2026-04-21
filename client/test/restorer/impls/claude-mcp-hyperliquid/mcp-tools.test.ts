@@ -221,6 +221,7 @@ describe('hl_open_position safety rails', () => {
     expect(data.code).toBe('SLIPPAGE_EXCEEDED');
   });
 
+
   it('rejects open without tp/sl when bypassRiskRails is not set', async () => {
     const deps = makeDeps();
     const tools = buildHlTools(deps);
@@ -259,6 +260,7 @@ describe('hl_open_position safety rails', () => {
     expect(data.error).toBe(true);
     expect(data.code).toBe('SL_INVALID');
   });
+
 
   it('rejects notional > 25% of account value', async () => {
     const deps = makeDeps();
@@ -844,7 +846,7 @@ describe('HL response statuses inspection', () => {
       const tools = buildHlTools(deps);
       const tool = findTool(tools, 'hl_open_position');
       const result = await tool.handler({
-        coin: 'BTC', side: 'long', size: 0.001, leverage: 5, slippageBps: 10, bypassRiskRails: true,
+coin: 'BTC', side: 'long', size: 0.001, leverage: 5, slippageBps: 10, bypassRiskRails: true,
       });
       const data = parseResult(result);
       expect(data.submitted).toBe(true);
@@ -920,7 +922,7 @@ describe('maxNotionalUsd hard cap', () => {
       const tool = findTool(tools, 'hl_open_position');
 
       const result = await tool.handler({
-        coin: 'BTC', side: 'long', size: 0.001, leverage: 5, slippageBps: 10, bypassRiskRails: true,
+coin: 'BTC', side: 'long', size: 0.001, leverage: 5, slippageBps: 10, bypassRiskRails: true,
       });
       const data = parseResult(result);
       expect(data.submitted).toBe(true);

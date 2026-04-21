@@ -1,11 +1,17 @@
 /**
  * Integration test for PortfolioV0Evaluator.
  *
- * Uses synthetic manifests + injected test deps (_testDeps) to verify:
+ * Uses synthetic manifests + injected test deps (_testDeps on config) to verify:
  * - supports() / canAttempt()
  * - Verdict derivation for PASS, FAIL, REJECTED, INDETERMINATE scenarios
  * - verdict.json is written to workingDir
  * - Output shape matches expectations
+ *
+ * Unified-payload model (Task 7/9):
+ *   - spec.kind = 'portfolio.v0' (same as restoration)
+ *   - intent.type = 'evaluation'
+ *   - manifest inlined at intent.context.restorationResult (JSON string)
+ *   - _testDeps injected via PortfolioV0Evaluator constructor config, not spec
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -92,6 +98,7 @@ const MOCK_MANIFEST = {
   },
 };
 
+// The original portfolio.v0 intent spec (used in MOCK_INTENT_BASE and as spec in eval intents)
 const MOCK_INTENT_BASE = {
   id: 'portfolio-intent-1',
   description: 'Test portfolio.v0 intent',
@@ -151,14 +158,6 @@ function makeMockHlDeps(overrides: {
   };
 }
 
-function makeMockIpfsFetch(manifest = MOCK_MANIFEST, intent = MOCK_INTENT_BASE) {
-  return async (_gatewayUrl: string, cid: string) => {
-    if (cid === 'QmMANIFEST') return manifest;
-    if (cid === 'QmINTENT') return intent;
-    throw new Error(`Unknown CID: ${cid}`);
-  };
-}
-
 // ── Context factory ───────────────────────────────────────────────────────────
 
 function makeTmpDir(): string {
@@ -168,48 +167,65 @@ function makeTmpDir(): string {
 }
 
 interface CtxOverrides {
-  specOverrides?: Record<string, unknown>;
+  /** Override the spec on the eval intent (e.g., to change minReturnPct). */
+  intentSpecOverrides?: Record<string, unknown>;
+  /** Override eligibility on the eval intent. */
+  eligibilityOverrides?: Record<string, unknown>;
+  /** The manifest to inline as context.restorationResult. */
   manifest?: typeof MOCK_MANIFEST;
-  intent?: typeof MOCK_INTENT_BASE;
   fills?: HlFill[];
   grid?: HlGridPoint[];
   startTimeClamped?: boolean;
-  ipfsFetchError?: boolean;
+  /** Simulate HL API failure. */
+  hlError?: boolean;
 }
 
-function makeCtx(workingDir: string, overrides: CtxOverrides = {}): RestorationContext {
+/**
+ * Build a RestorationContext for an evaluation intent using the unified-payload model.
+ *
+ * - spec.kind = 'portfolio.v0' (same as restoration)
+ * - intent.type = 'evaluation'
+ * - manifest is inlined at context.restorationResult as a JSON string
+ * - HL test deps are passed via evaluator constructor config (_testDeps)
+ */
+function makeCtx(
+  workingDir: string,
+  evaluator: PortfolioV0Evaluator,
+  overrides: CtxOverrides = {},
+): RestorationContext {
   const {
-    specOverrides = {},
+    intentSpecOverrides = {},
+    eligibilityOverrides,
     manifest = MOCK_MANIFEST,
-    intent = MOCK_INTENT_BASE,
-    fills,
-    grid,
-    startTimeClamped,
-    ipfsFetchError = false,
   } = overrides;
-
-  const _testDeps = {
-    fetchFromIpfs: ipfsFetchError
-      ? async () => { throw new Error('IPFS unavailable'); }
-      : makeMockIpfsFetch(manifest, intent),
-    ...makeMockHlDeps({ fills, grid, startTimeClamped }),
-  };
 
   const ds: DesiredState = {
     id: 'eval-intent-1',
-    description: 'Verify portfolio.v0 manifest QmMANIFEST.',
-    window: { startTs: NOW - 3_600_000, endTs: NOW },
+    description: 'Evaluate portfolio.v0 restoration result',
+    type: 'evaluation',
+    restorationRequestId: '0xrequest',
+    window: { startTs: START_TS, endTs: END_TS },
     spec: {
-      kind: 'portfolio.v0.eval',
-      targetManifestCid: 'QmMANIFEST',
-      targetIntentCid: 'QmINTENT',
-      targetCreationTx: '0xevalcreatetx',
-      targetRequestId: '0xevalreqid',
-      targetCreationBlock: 42,
-      safeAddress: '0x0000000000000000000000000000000000000001',
-      agentEoa: '0x0000000000000000000000000000000000000002',
-      _testDeps,
-      ...specOverrides,
+      kind: 'portfolio.v0',
+      account: {
+        venue: 'hyperliquid-mainnet',
+        masterAddress: '0x3333333333333333333333333333333333333333',
+      },
+      target: {
+        metric: 'equity_return_pct',
+        minReturnPct: 5.0,
+      },
+      constraint: {
+        maxDrawdownPct: 10.0,
+      },
+      ...intentSpecOverrides,
+    },
+    eligibility: eligibilityOverrides ?? {
+      minClosedTrades: 20,
+      minTradedNotionalMultiple: 5.0,
+    },
+    context: {
+      restorationResult: JSON.stringify(manifest),
     },
   };
 
@@ -223,10 +239,36 @@ function makeCtx(workingDir: string, overrides: CtxOverrides = {}): RestorationC
   };
 }
 
+/**
+ * Build a PortfolioV0Evaluator with injected HL test deps.
+ * HL deps are now on the constructor config, not the spec.
+ */
+function makeEvaluator(overrides: {
+  fills?: HlFill[];
+  grid?: HlGridPoint[];
+  startTimeClamped?: boolean;
+  hlError?: boolean;
+} = {}): PortfolioV0Evaluator {
+  if (overrides.hlError) {
+    return new PortfolioV0Evaluator({
+      _testDeps: {
+        hlPortfolioPeriod: async () => { throw new Error('HL unavailable'); },
+        hlUserFillsByTime: async () => { throw new Error('HL unavailable'); },
+      },
+    });
+  }
+  return new PortfolioV0Evaluator({
+    _testDeps: makeMockHlDeps({
+      fills: overrides.fills,
+      grid: overrides.grid,
+      startTimeClamped: overrides.startTimeClamped,
+    }),
+  });
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('PortfolioV0Evaluator', () => {
-  const impl = new PortfolioV0Evaluator();
   const dirs: string[] = [];
 
   afterEach(() => {
@@ -239,16 +281,24 @@ describe('PortfolioV0Evaluator', () => {
   // ── supports() ──────────────────────────────────────────────────────────────
 
   describe('supports()', () => {
-    it('returns true for portfolio.v0.eval', () => {
-      expect(impl.supports({ kind: 'portfolio.v0.eval' })).toBe(true);
+    it('returns true for portfolio.v0 + type=evaluation', () => {
+      const impl = makeEvaluator();
+      expect(impl.supports({ kind: 'portfolio.v0', type: 'evaluation' })).toBe(true);
     });
 
-    it('returns false for portfolio.v0', () => {
+    it('returns false for portfolio.v0 without type=evaluation (restoration)', () => {
+      const impl = makeEvaluator();
       expect(impl.supports({ kind: 'portfolio.v0' })).toBe(false);
     });
 
+    it('returns false for portfolio.v0 with type=restoration', () => {
+      const impl = makeEvaluator();
+      expect(impl.supports({ kind: 'portfolio.v0', type: 'restoration' })).toBe(false);
+    });
+
     it('returns false for unknown kinds', () => {
-      expect(impl.supports({ kind: 'other.kind' })).toBe(false);
+      const impl = makeEvaluator();
+      expect(impl.supports({ kind: 'other.kind', type: 'evaluation' })).toBe(false);
     });
   });
 
@@ -256,27 +306,64 @@ describe('PortfolioV0Evaluator', () => {
 
   describe('canAttempt()', () => {
     it('returns ok=true for valid eval intent', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
       const result = await impl.canAttempt!(ctx.intent);
       expect(result.ok).toBe(true);
     });
 
     it('returns ok=false when spec.kind is wrong', async () => {
+      const impl = makeEvaluator();
       const intent: DesiredState = {
         id: 'x',
         description: 'x',
-        spec: { kind: 'portfolio.v0' },
+        type: 'evaluation',
+        restorationRequestId: '0xrequest',
+        spec: { kind: 'portfolio.v0.other' },
+        context: { restorationResult: JSON.stringify(MOCK_MANIFEST) },
       };
       const result = await impl.canAttempt!(intent);
       expect(result.ok).toBe(false);
     });
 
-    it('returns ok=false when targetManifestCid is missing', async () => {
+    it('returns ok=false when type is not evaluation', async () => {
+      const impl = makeEvaluator();
       const intent: DesiredState = {
         id: 'x',
         description: 'x',
-        spec: { kind: 'portfolio.v0.eval', targetIntentCid: 'Qm' },
+        type: 'restoration',
+        restorationRequestId: '0xrequest',
+        spec: { kind: 'portfolio.v0' },
+        context: { restorationResult: JSON.stringify(MOCK_MANIFEST) },
+      };
+      const result = await impl.canAttempt!(intent);
+      expect(result.ok).toBe(false);
+    });
+
+    it('returns ok=false when context.restorationResult is missing', async () => {
+      const impl = makeEvaluator();
+      const intent: DesiredState = {
+        id: 'x',
+        description: 'x',
+        type: 'evaluation',
+        restorationRequestId: '0xrequest',
+        spec: { kind: 'portfolio.v0' },
+        // no context
+      };
+      const result = await impl.canAttempt!(intent);
+      expect(result.ok).toBe(false);
+    });
+
+    it('returns ok=false when restorationRequestId is missing', async () => {
+      const impl = makeEvaluator();
+      const intent: DesiredState = {
+        id: 'x',
+        description: 'x',
+        type: 'evaluation',
+        // no restorationRequestId
+        spec: { kind: 'portfolio.v0' },
+        context: { restorationResult: JSON.stringify(MOCK_MANIFEST) },
       };
       const result = await impl.canAttempt!(intent);
       expect(result.ok).toBe(false);
@@ -287,8 +374,9 @@ describe('PortfolioV0Evaluator', () => {
 
   describe('run() — PASS scenario', () => {
     it('produces PASS verdict for well-formed manifest meeting all criteria', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       const output = await impl.run(ctx);
 
@@ -305,6 +393,7 @@ describe('PortfolioV0Evaluator', () => {
       // + nested raw perps/spot payloads, with NO top-level `marginSummary`.
       // Evaluator must pull the unified value from the claimed payload for
       // post-snapshot metric extraction (no grid-based post rederivation exists).
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
       const unifiedPreSnapshot = {
         capturedAt: START_TS + 1000,
@@ -352,15 +441,16 @@ describe('PortfolioV0Evaluator', () => {
         postSnapshot: unifiedPostSnapshot,
       };
 
-      const ctx = makeCtx(wd, { manifest: unifiedManifest });
+      const ctx = makeCtx(wd, impl, { manifest: unifiedManifest });
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('PASS');
     });
 
     it('writes verdict.json to workingDir', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       await impl.run(ctx);
 
@@ -375,8 +465,9 @@ describe('PortfolioV0Evaluator', () => {
     });
 
     it('verdict.json contains all impl-declared checks', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       await impl.run(ctx);
 
@@ -408,8 +499,9 @@ describe('PortfolioV0Evaluator', () => {
     });
 
     it('declares verdict.json artifact with role evaluation_verdict', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       const output = await impl.run(ctx);
 
@@ -420,8 +512,9 @@ describe('PortfolioV0Evaluator', () => {
     });
 
     it('score is bounded [0, 1e18] for PASS verdict', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       const output = await impl.run(ctx);
 
@@ -435,17 +528,15 @@ describe('PortfolioV0Evaluator', () => {
 
   describe('run() — FAIL scenario', () => {
     it('produces FAIL verdict when equity return target is not met', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
 
-      const highTargetIntent = {
-        ...MOCK_INTENT_BASE,
-        spec: {
-          ...MOCK_INTENT_BASE.spec,
-          target: { metric: 'equity_return_pct', minReturnPct: 50.0 }, // 50% target — won't be met
+      // Override the target on the eval intent spec: 50% target — won't be met with 6% return
+      const ctx = makeCtx(wd, impl, {
+        intentSpecOverrides: {
+          target: { metric: 'equity_return_pct', minReturnPct: 50.0 },
         },
-      };
-
-      const ctx = makeCtx(wd, { intent: highTargetIntent });
+      });
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('FAIL');
@@ -472,7 +563,8 @@ describe('PortfolioV0Evaluator', () => {
         },
       };
 
-      const ctx = makeCtx(wd, { manifest: manifestWithDrawdown });
+      const impl = makeEvaluator();
+      const ctx = makeCtx(wd, impl, { manifest: manifestWithDrawdown });
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('FAIL');
@@ -494,16 +586,14 @@ describe('PortfolioV0Evaluator', () => {
     it('produces REJECTED verdict when minClosedTrades not met', async () => {
       const wd = makeTmpDir(); dirs.push(wd);
 
-      // Intent requiring 100 closed trades; mock only provides 25
-      const highEligIntent = {
-        ...MOCK_INTENT_BASE,
-        eligibility: {
-          minClosedTrades: 100,          // Need 100 closed trades
+      // Eval intent requires 100 closed trades; mock only provides 25
+      const impl = makeEvaluator();
+      const ctx = makeCtx(wd, impl, {
+        eligibilityOverrides: {
+          minClosedTrades: 100,
           minTradedNotionalMultiple: 5.0,
         },
-      };
-
-      const ctx = makeCtx(wd, { intent: highEligIntent });
+      });
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('REJECTED');
@@ -513,16 +603,14 @@ describe('PortfolioV0Evaluator', () => {
     it('produces REJECTED verdict when minTradedNotional not met', async () => {
       const wd = makeTmpDir(); dirs.push(wd);
 
-      // Intent requiring 50x notional multiple; mock only provides 5x
-      const highNotionalIntent = {
-        ...MOCK_INTENT_BASE,
-        eligibility: {
+      // Eval intent requires 50x notional multiple; mock only provides 5x
+      const impl = makeEvaluator();
+      const ctx = makeCtx(wd, impl, {
+        eligibilityOverrides: {
           minClosedTrades: 20,
-          minTradedNotionalMultiple: 50.0,  // 50x — won't be met
+          minTradedNotionalMultiple: 50.0,
         },
-      };
-
-      const ctx = makeCtx(wd, { intent: highNotionalIntent });
+      });
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('REJECTED');
@@ -533,33 +621,31 @@ describe('PortfolioV0Evaluator', () => {
   // ── run() — INDETERMINATE scenario ───────────────────────────────────────────
 
   describe('run() — INDETERMINATE scenario', () => {
-    it('produces INDETERMINATE verdict when IPFS fetch fails', async () => {
+    it('produces INDETERMINATE verdict when HL API fails', async () => {
       const wd = makeTmpDir(); dirs.push(wd);
 
-      const ctx = makeCtx(wd, { ipfsFetchError: true });
+      // HL deps throw — simulates HL unavailability (was previously IPFS failure)
+      const impl = makeEvaluator({ hlError: true });
+      const ctx = makeCtx(wd, impl);
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('INDETERMINATE');
       expect(output.gating.score).toBe('0');
 
-      // IPFS failure must be attributed to the IPFS layer, not hyperliquid
+      // Failure must be attributed to the HL layer
       const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
-      const ipfsCheck = verdict.checks.find(
-        (c: { name: string; status: string }) => c.name === 'availability.ipfs_reachable',
-      );
-      expect(ipfsCheck).toBeDefined();
-      expect(ipfsCheck.status).toBe('FAIL');
-      // Must NOT be attributed to HL
       const hlCheck = verdict.checks.find(
-        (c: { name: string }) => c.name === 'availability.hyperliquid_reachable' && (c as { status: string }).status === 'FAIL',
+        (c: { name: string; status: string }) => c.name === 'availability.hyperliquid_reachable',
       );
-      expect(hlCheck).toBeUndefined();
+      expect(hlCheck).toBeDefined();
+      expect(hlCheck.status).toBe('FAIL');
     });
 
     it('produces INDETERMINATE verdict when fills are clamped', async () => {
       const wd = makeTmpDir(); dirs.push(wd);
 
-      const ctx = makeCtx(wd, { startTimeClamped: true });
+      const impl = makeEvaluator({ startTimeClamped: true });
+      const ctx = makeCtx(wd, impl);
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('INDETERMINATE');
@@ -572,7 +658,8 @@ describe('PortfolioV0Evaluator', () => {
       // Grid that does not bracket the preSnapshot capturedAt (START_TS + 1000)
       const emptyGrid: HlGridPoint[] = [];
 
-      const ctx = makeCtx(wd, { grid: emptyGrid });
+      const impl = makeEvaluator({ grid: emptyGrid });
+      const ctx = makeCtx(wd, impl);
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('INDETERMINATE');
@@ -595,7 +682,8 @@ describe('PortfolioV0Evaluator', () => {
         postSnapshot: latePostSnapshot,
       };
 
-      const ctx = makeCtx(wd, { manifest: manifestWithLatePost });
+      const impl = makeEvaluator();
+      const ctx = makeCtx(wd, impl, { manifest: manifestWithLatePost });
       const output = await impl.run(ctx);
 
       expect(output.gating.verdict).toBe('INDETERMINATE');
@@ -621,8 +709,9 @@ describe('PortfolioV0Evaluator', () => {
 
   describe('verdict manifest structure', () => {
     it('contains rederived + claimed sections', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       await impl.run(ctx);
 
@@ -634,8 +723,9 @@ describe('PortfolioV0Evaluator', () => {
     });
 
     it('has signature section', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       await impl.run(ctx);
 
@@ -645,16 +735,18 @@ describe('PortfolioV0Evaluator', () => {
     });
 
     it('score is "0" for INDETERMINATE verdict', async () => {
+      const impl = makeEvaluator({ hlError: true });
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd, { ipfsFetchError: true });
+      const ctx = makeCtx(wd, impl);
 
       const output = await impl.run(ctx);
       expect(output.gating.score).toBe('0');
     });
 
     it('verdict.json includes scoreBasis and scoreVersion', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       await impl.run(ctx);
 
@@ -664,8 +756,9 @@ describe('PortfolioV0Evaluator', () => {
     });
 
     it('verdict.json has correct schemaVersion', async () => {
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       await impl.run(ctx);
 
@@ -673,15 +766,17 @@ describe('PortfolioV0Evaluator', () => {
       expect(verdict.schemaVersion).toBe('portfolio.v0.eval.manifest.v1');
     });
 
-    it('verdict.json carries targetCreationBlock from EvalSpec (not hardcoded 0)', async () => {
+    it('verdict.json carries onchainCreationBlock from manifest intent provenance', async () => {
+      // In the unified-payload model, onchainCreationBlock comes from the inlined manifest,
+      // not from EvalSpec pointer fields. MOCK_MANIFEST.intent.onchainCreationBlock = 100.
+      const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
-      // makeCtx passes targetCreationBlock: 42
-      const ctx = makeCtx(wd);
+      const ctx = makeCtx(wd, impl);
 
       await impl.run(ctx);
 
       const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
-      expect(verdict.intent.onchainCreationBlock).toBe(42);
+      expect(verdict.intent.onchainCreationBlock).toBe(100);
     });
 
     // ── Finding #12: generatedAt determinism ────────────────────────────────
@@ -695,16 +790,18 @@ describe('PortfolioV0Evaluator', () => {
       // Run at T1
       vi.useFakeTimers();
       vi.setSystemTime(T1);
+      const impl1 = makeEvaluator();
       const wd1 = makeTmpDir(); dirs.push(wd1);
-      const ctx1 = makeCtx(wd1);
-      await impl.run(ctx1);
+      const ctx1 = makeCtx(wd1, impl1);
+      await impl1.run(ctx1);
       const verdict1 = JSON.parse(readFileSync(join(wd1, 'verdict.json'), 'utf-8'));
 
       // Run at T2
       vi.setSystemTime(T2);
+      const impl2 = makeEvaluator();
       const wd2 = makeTmpDir(); dirs.push(wd2);
-      const ctx2 = makeCtx(wd2);
-      await impl.run(ctx2);
+      const ctx2 = makeCtx(wd2, impl2);
+      await impl2.run(ctx2);
       const verdict2 = JSON.parse(readFileSync(join(wd2, 'verdict.json'), 'utf-8'));
 
       vi.useRealTimers();

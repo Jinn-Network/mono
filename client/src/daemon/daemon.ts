@@ -54,9 +54,10 @@ export interface DaemonConfig {
    * When provided, the daemon uses RestorationEngine (new engine path) instead
    * of the legacy RestorerLoop for intent dispatch.
    *
-   * Required for portfolio.v0 and portfolio.v0.eval spec kinds.
-   * Legacy health-check intents (no spec) are dispatched to the legacy-claude impl
-   * registered as the default fallback in the impl registry.
+   * Required for portfolio.v0 spec kind (both restoration and evaluation).
+   * Evaluation intents (type === 'evaluation') are dispatched via supports() to
+   * portfolio-v0-evaluator; legacy health-check intents (no spec) fall back to
+   * legacy-claude via the default impl in the registry.
    */
   restorationEngine?: Omit<RestorationEngineOptions, 'store'>;
 }
@@ -258,6 +259,7 @@ export class Daemon {
           onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
           onchainCreationBlock: request.onchainCreationBlock ?? 0,
           specKind,
+          intentType: (request.desiredState.type ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,
           windowEndTs,
           desiredState: request.desiredState,

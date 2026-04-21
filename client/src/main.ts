@@ -38,6 +38,8 @@ import { RestorerImplRegistry } from './restorer/engine/registry.js';
 import { LegacyClaudeImpl } from './restorer/impls/legacy-claude/index.js';
 import { ClaudeMcpHyperliquidImpl } from './restorer/impls/claude-mcp-hyperliquid/index.js';
 import { PortfolioV0Evaluator } from './restorer/impls/portfolio-v0-evaluator/index.js';
+import { PredictionV0BaselineImpl } from './restorer/impls/prediction-v0-baseline/index.js';
+import { PredictionV0Evaluator } from './restorer/impls/prediction-v0-evaluator/index.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 
@@ -306,7 +308,7 @@ export async function main(): Promise<DaemonStartupInfo> {
   const implRegistry = new RestorerImplRegistry({
     byKind: {
       'portfolio.v0': 'claude-mcp-hyperliquid',
-      'portfolio.v0.eval': 'portfolio-v0-evaluator',
+      'prediction.v0': 'prediction-v0-baseline',
     },
     default: 'legacy-claude',
     ...(config.restorers ?? {}),
@@ -326,8 +328,20 @@ export async function main(): Promise<DaemonStartupInfo> {
     claudeModel: config.claudeModel,
   }));
 
-  // portfolio-v0-evaluator: deterministic verifier for portfolio.v0.eval
+  // portfolio-v0-evaluator: deterministic verifier — dispatched via type='evaluation' for portfolio.v0 kind
   implRegistry.register(new PortfolioV0Evaluator());
+
+  // prediction-v0-baseline: reference restorer for prediction.v0 intents
+  implRegistry.register(new PredictionV0BaselineImpl({
+    rpcUrl: config.rpcUrl,
+  }));
+
+  // prediction-v0-evaluator: deterministic verifier for prediction.v0 evaluation jobs
+  implRegistry.register(new PredictionV0Evaluator({
+    evaluatorPk: agentPrivateKey,
+    evaluatorSafeAddress: safeAddress,
+    rpcUrl: config.rpcUrl,
+  }));
 
   console.log(`[main] RestorerImplRegistry: ${implRegistry.list().map(i => i.name).join(', ')}`);
 

@@ -206,21 +206,24 @@ describe('RestorerImplRegistry dispatch (integration)', () => {
     expect(impl?.name).toBe('claude-mcp-hyperliquid');
   });
 
-  it('routes portfolio.v0.eval to portfolio-v0-evaluator by byKind config', async () => {
+  it('routes portfolio.v0 + type=evaluation to portfolio-v0-evaluator via supports() first-match', async () => {
+    // In the unified-payload model, portfolio-v0-evaluator is no longer registered
+    // via byKind['portfolio.v0.eval']. It is selected via first-match supports() when
+    // kind='portfolio.v0' and type='evaluation'.
     const { RestorerImplRegistry } = await import('../../../../src/restorer/engine/registry.js');
     const { PortfolioV0Evaluator } = await import('../../../../src/restorer/impls/portfolio-v0-evaluator/index.js');
     const { LegacyClaudeImpl: LCI } = await import('../../../../src/restorer/impls/legacy-claude/index.js');
 
     const runner: Runner = { run: vi.fn() };
+    // No byKind entry for portfolio.v0 — evaluator is selected via supports()
     const registry = new RestorerImplRegistry({
-      byKind: { 'portfolio.v0.eval': 'portfolio-v0-evaluator' },
       default: 'legacy-claude',
     });
 
     registry.register(new LCI({ runner }));
     registry.register(new PortfolioV0Evaluator());
 
-    const impl = registry.findFor({ kind: 'portfolio.v0.eval' });
+    const impl = registry.findFor({ kind: 'portfolio.v0', type: 'evaluation' });
     expect(impl?.name).toBe('portfolio-v0-evaluator');
   });
 

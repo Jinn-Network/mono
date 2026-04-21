@@ -1,7 +1,7 @@
 /**
  * portfolio-v0-evaluator — deterministic verifier for portfolio.v0 manifests.
  *
- * Implements RestorerImpl for spec.kind === "portfolio.v0.eval".
+ * Implements RestorerImpl for spec.kind === "portfolio.v0" && type === "evaluation".
  * No LLM. Pure deterministic verification per spec §7.
  *
  * Architecture decision (T7):
@@ -11,6 +11,13 @@
  *   writes it as verdict.json in workingDir, and declares it as an artifact
  *   with role "evaluation_verdict". The engine's outer manifest becomes the
  *   packaging container; verdict.json is the meaningful payload.
+ *
+ * Unified-payload model (Task 7):
+ *   - spec.kind is "portfolio.v0" (same as restoration)
+ *   - intent.type === "evaluation"
+ *   - Restorer's manifest is inlined at intent.context.restorationResult (JSON string)
+ *   - Original intent spec is at intent.spec (PortfolioV0Spec) — no IPFS fetch needed
+ *   - intent.restorationRequestId carries the on-chain request ID
  */
 
 import { writeFileSync } from 'node:fs';
@@ -25,7 +32,6 @@ import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../
 import { bracketGridPoints } from '../../../venues/hyperliquid/grid.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { signCanonical } from '../../engine/signing.js';
-import { fetchFromIpfs } from '../../../adapters/mech/ipfs.js';
 
 import {
   RestorationManifestSchema,
@@ -63,7 +69,7 @@ import {
 } from './checks/consistency.js';
 import { checkEquityReturnTarget, checkMaxDrawdownConstraint } from './checks/spec.js';
 
-import type { Check, Verdict, EvalSpec } from './types.js';
+import type { Check, Verdict, PortfolioV0EvaluatorConfig } from './types.js';
 
 // ── Verdict derivation per §7.3 ───────────────────────────────────────────────
 
@@ -105,7 +111,10 @@ function deriveVerdict(checks: Check[]): Verdict {
  * sibling field in _buildOutput after signing.
  */
 function _assembleUnsignedManifest(params: {
-  evalSpec: EvalSpec;
+  intentCid: string;
+  onchainCreationTx: string;
+  onchainCreationBlock: number;
+  restorationRequestId: string;
   intent: DesiredState;
   checks: Check[];
   verdict: Verdict;
@@ -118,7 +127,8 @@ function _assembleUnsignedManifest(params: {
   evaluatorAgentEoa: `0x${string}`;
 }): Record<string, unknown> {
   const {
-    evalSpec, intent, checks, verdict, score,
+    intentCid, onchainCreationTx, onchainCreationBlock, restorationRequestId,
+    intent, checks, verdict, score,
     targetManifest, rederivPrePayload, rederivFills, rederived,
     evaluatorSafeAddress, evaluatorAgentEoa,
   } = params;
@@ -131,10 +141,10 @@ function _assembleUnsignedManifest(params: {
   };
 
   const intentProvenance = {
-    cid: evalSpec.targetIntentCid ?? '',
-    onchainCreationTx: evalSpec.targetCreationTx ?? '0x',
-    onchainCreationBlock: evalSpec.targetCreationBlock,
-    requestId: evalSpec.targetRequestId ?? '0x',
+    cid: intentCid,
+    onchainCreationTx: onchainCreationTx ?? '0x',
+    onchainCreationBlock: onchainCreationBlock,
+    requestId: restorationRequestId ?? '0x',
   };
 
   const rederivPreSnap = rederivPrePayload ?? {
@@ -237,57 +247,64 @@ export class PortfolioV0Evaluator implements RestorerImpl {
   readonly name = 'portfolio-v0-evaluator';
   readonly version = '1.0.0';
 
-  supports(spec: { kind: string }): boolean {
-    return spec.kind === 'portfolio.v0.eval';
+  private readonly config: PortfolioV0EvaluatorConfig;
+
+  constructor(config: PortfolioV0EvaluatorConfig = {}) {
+    this.config = config;
+  }
+
+  supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
+    return ctx.kind === 'portfolio.v0' && ctx.type === 'evaluation';
   }
 
   async canAttempt(
     intent: DesiredState,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const spec = intent.spec as EvalSpec | undefined;
-    if (!spec || spec.kind !== 'portfolio.v0.eval') {
-      return { ok: false, reason: 'spec.kind is not portfolio.v0.eval' };
+    if (intent.spec?.kind !== 'portfolio.v0') {
+      return { ok: false, reason: 'spec.kind is not portfolio.v0' };
     }
-    if (!spec.targetManifestCid) {
-      return { ok: false, reason: 'spec.targetManifestCid is required' };
+    if (intent.type !== 'evaluation') {
+      return { ok: false, reason: 'DesiredState.type is not evaluation' };
     }
-    if (!spec.targetIntentCid) {
-      return { ok: false, reason: 'spec.targetIntentCid is required' };
+    if (!intent.restorationRequestId) {
+      return { ok: false, reason: 'restorationRequestId is required' };
+    }
+    const restorationResult = intent.context?.['restorationResult'];
+    if (typeof restorationResult !== 'string') {
+      return { ok: false, reason: 'context.restorationResult (manifest JSON) is required' };
     }
     return { ok: true };
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
-    const { intent, workingDir, log } = ctx;
-    const evalSpec = intent.spec as unknown as EvalSpec;
-    const ipfsGatewayUrl = evalSpec.ipfsGatewayUrl ?? 'https://gateway.autonolas.tech';
+    const { intent, log } = ctx;
 
-    log({ level: 'info', msg: 'portfolio-v0-evaluator: starting evaluation', data: { targetManifestCid: evalSpec.targetManifestCid } });
-
-    const checks: Check[] = [];
-
-    // Injectable deps — real or test-injected
-    const ipfsFetch = evalSpec._testDeps?.fetchFromIpfs ?? fetchFromIpfs;
-
-    // ── Step 1: Fetch original intent + manifest from IPFS ────────────────────
+    // ── Step 1: Parse restorer's manifest from inlined context ────────────────
+    // The manifest JSON is inlined by MechAdapter.tryCreateEvaluationJob at context.restorationResult.
+    // Falls back to an error — crash recovery path not yet implemented.
     let targetManifest: RestorationManifest;
     let targetIntent: ReturnType<typeof PortfolioV0IntentSchema.parse>;
     let hlPortfolioPeriodFn: (user: string) => Promise<{ accountValueHistory: HlGridPoint[] } | null>;
     let hlUserFillsByTimeFn: (user: string, startTime: number, endTime?: number) => Promise<{ fills: HlFill[]; startTimeClamped: boolean }>;
 
-    try {
-      const [rawManifest, rawIntent] = await Promise.all([
-        ipfsFetch(ipfsGatewayUrl, evalSpec.targetManifestCid),
-        ipfsFetch(ipfsGatewayUrl, evalSpec.targetIntentCid),
-      ]);
+    const checks: Check[] = [];
 
-      targetManifest = RestorationManifestSchema.parse(rawManifest);
-      targetIntent = PortfolioV0IntentSchema.parse(rawIntent);
+    const inlined = intent.context?.['restorationResult'];
+    if (typeof inlined !== 'string') {
+      throw new Error(
+        'portfolio-v0-evaluator: restorationResult missing from context; crash recovery path not yet implemented',
+      );
+    }
+
+    try {
+      targetManifest = RestorationManifestSchema.parse(JSON.parse(inlined));
+      // The original portfolio.v0 intent is directly at intent.spec — no IPFS fetch needed.
+      targetIntent = PortfolioV0IntentSchema.parse(intent);
 
       // Determine HL client from venue (or use injected test deps)
-      if (evalSpec._testDeps?.hlPortfolioPeriod && evalSpec._testDeps?.hlUserFillsByTime) {
-        hlPortfolioPeriodFn = evalSpec._testDeps.hlPortfolioPeriod;
-        hlUserFillsByTimeFn = evalSpec._testDeps.hlUserFillsByTime;
+      if (this.config._testDeps?.hlPortfolioPeriod && this.config._testDeps?.hlUserFillsByTime) {
+        hlPortfolioPeriodFn = this.config._testDeps.hlPortfolioPeriod;
+        hlUserFillsByTimeFn = this.config._testDeps.hlUserFillsByTime;
       } else {
         const venue = targetIntent.spec.account.venue;
         const baseUrl = venue === 'hyperliquid-mainnet' ? HL_MAINNET_BASE_URL : HL_TESTNET_BASE_URL;
@@ -297,16 +314,24 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log({ level: 'error', msg: 'portfolio-v0-evaluator: failed to fetch manifest/intent', data: { err: msg } });
+      log({ level: 'error', msg: 'portfolio-v0-evaluator: failed to parse manifest/intent', data: { err: msg } });
       // We cannot proceed — return a minimal INDETERMINATE output.
-      // Fix 5: attribute this failure to the IPFS layer, not hyperliquid.
       checks.push({
-        name: 'availability.ipfs_reachable',
+        name: 'availability.manifest_parseable',
         status: 'FAIL',
-        detail: `Failed to fetch manifest or intent from IPFS: ${msg}`,
+        detail: `Failed to parse manifest or intent: ${msg}`,
       });
-      return this._buildOutput(ctx, checks, null, null, null, null);
+      return this._buildOutput(ctx, checks, null, null, null, null, null, null, null, null);
     }
+
+    // Extract provenance fields from the parsed manifest + intent
+    const intentCid = targetManifest.intent.cid;
+    const onchainCreationTx = targetManifest.intent.onchainCreationTx;
+    const onchainCreationBlock = targetManifest.intent.onchainCreationBlock;
+    const restorationRequestId = intent.restorationRequestId!;
+
+    log({ level: 'info', msg: 'portfolio-v0-evaluator: starting evaluation', data: { intentCid, restorationRequestId } });
+
 
     const masterAddress = targetIntent.spec.account.masterAddress;
     const { startTs, endTs } = targetManifest.window;
@@ -338,7 +363,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
 
     checks.push(checkHlReachable(hlReachable));
     if (!hlReachable) {
-      return this._buildOutput(ctx, checks, null, null, null, null);
+      return this._buildOutput(ctx, checks, null, null, null, null, intentCid, onchainCreationTx, onchainCreationBlock, restorationRequestId);
     }
 
     const preCapturedAt = targetManifest.preSnapshot.capturedAt;
@@ -447,7 +472,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       notional: rederivNotional,
     };
 
-    return this._buildOutput(ctx, checks, targetManifest, rederivPrePayload, rederivFills, rederived);
+    return this._buildOutput(ctx, checks, targetManifest, rederivPrePayload, rederivFills, rederived, intentCid, onchainCreationTx, onchainCreationBlock, restorationRequestId);
   }
 
   private async _buildOutput(
@@ -462,9 +487,12 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       closedTrades: number;
       notional: number;
     } | null,
+    intentCid: string | null | undefined,
+    onchainCreationTx: string | null | undefined,
+    onchainCreationBlock: number | null | undefined,
+    restorationRequestId: string | null | undefined,
   ): Promise<RestorationOutput> {
     const { intent, workingDir, log } = ctx;
-    const evalSpec = intent.spec as unknown as EvalSpec;
 
     // Spec §7.5 funding-accrual edge case: if hl_post_snapshot_rederivable is SKIP,
     // the verdict MUST be INDETERMINATE regardless of other check outcomes.
@@ -480,16 +508,19 @@ export class PortfolioV0Evaluator implements RestorerImpl {
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: verdict derived', data: { verdict, score, checkCount: checks.length } });
 
-    // Evaluator identity — injected via spec fields by the daemon
-    const evaluatorSafeAddress = (evalSpec.safeAddress ?? '0x0000000000000000000000000000000000000000') as `0x${string}`;
-    const evaluatorAgentEoa = (evalSpec.agentEoa ?? '0x0000000000000000000000000000000000000000') as `0x${string}`;
+    // Evaluator identity — sourced from constructor config (injected by daemon)
+    const evaluatorSafeAddress = (this.config.safeAddress ?? '0x0000000000000000000000000000000000000000') as `0x${string}`;
+    const evaluatorAgentEoa = (this.config.agentEoa ?? '0x0000000000000000000000000000000000000000') as `0x${string}`;
 
     // ── Assemble unsigned verdict manifest ────────────────────────────────────
     // generatedAt is NOT included in the signed content: it is non-deterministic
     // (wall-clock) and must not affect the hash. It is added below after signing.
 
     const unsigned = _assembleUnsignedManifest({
-      evalSpec,
+      intentCid: intentCid ?? '',
+      onchainCreationTx: onchainCreationTx ?? '0x',
+      onchainCreationBlock: onchainCreationBlock ?? 0,
+      restorationRequestId: restorationRequestId ?? '0x',
       intent,
       checks,
       verdict,
@@ -504,7 +535,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
 
     // ── Sign or emit stub ─────────────────────────────────────────────────────
 
-    const privateKey = evalSpec.agentEoaPrivateKey as Hex | undefined;
+    const privateKey = this.config.agentEoaPrivateKey as Hex | undefined;
     const { hash, sig } = await _signOrStub(unsigned, privateKey, evaluatorAgentEoa, log);
 
     // generatedAt: unsigned metadata — sits outside the signed envelope.
@@ -543,7 +574,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
         skipCount: checks.filter((c) => c.status === 'SKIP').length,
       },
       informational: {
-        targetManifestCid: evalSpec.targetManifestCid,
+        intentCid: intentCid ?? '',
         equityReturnPct: String(rederived?.equityReturn ?? 0),
         maxDrawdownPct: String(rederived?.maxDrawdown ?? 0),
         closedTradesCount: rederived?.closedTrades ?? 0,

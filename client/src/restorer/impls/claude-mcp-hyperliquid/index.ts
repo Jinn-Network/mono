@@ -85,8 +85,8 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
     this.config = config;
   }
 
-  supports(spec: { kind: string }): boolean {
-    return spec.kind === 'portfolio.v0';
+  supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
+    return ctx.kind === 'portfolio.v0' && ctx.type !== 'evaluation';
   }
 
   async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {

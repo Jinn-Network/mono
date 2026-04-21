@@ -303,52 +303,63 @@ export class MechAdapter implements ExecutionAdapter {
 
           const decoded = decodeDeliverLogs(logs);
           for (const { requestId, deliveryDataHex, mechAddress } of decoded) {
-            // Only claim deliveries for requests this client created
-            const isOurs = this.pendingEvaluations.has(requestId) || this.pendingEvaluationClaims.has(requestId);
-            if (!isOurs) continue;
+            // Two concerns, independent:
+            //   (a) Did this Safe DELIVER this? → claim it (counter credit goes to msg.sender)
+            //       The Deliver event's mechAddress is mechServiceMultisig (the Safe that owns
+            //       the mech), so we compare against this.config.safeAddress.
+            //   (b) Did this Safe CREATE the underlying request? → act on the delivery
+            //       (trigger eval creation for restoration deliveries; clean up for eval deliveries)
+            const iDelivered = mechAddress.toLowerCase() === this.config.safeAddress.toLowerCase();
+            const iCreatedRestoration = this.pendingEvaluations.has(requestId);
+            const iCreatedEvaluation = this.pendingEvaluationClaims.has(requestId);
+            if (!iDelivered && !iCreatedRestoration && !iCreatedEvaluation) continue;
 
-            try {
-              const variant = this.config.routerClaimDeliveryVariant;
-              let evidenceHash: `0x${string}` | undefined;
-              if (variant === 'v2' && this.pendingEvaluations.has(requestId)) {
-                try {
-                  const checkpoint: EvidenceCheckpointV1 = {
-                    version: 1,
-                    desiredStateHash: requestId,
-                    toolCalls: [],
-                    externalInteractions: [],
-                    outcome: 'success',
-                  };
-                  evidenceHash = computeEvidenceSimHash(checkpoint);
-                } catch (err) {
-                  console.error(`[mech] Failed to compute evidence SimHash for ${requestId}:`, err);
+            // (a) If I delivered, claim delivery → msg.sender = my Safe → correct role credit.
+            if (iDelivered) {
+              try {
+                const variant = this.config.routerClaimDeliveryVariant;
+                let evidenceHash: `0x${string}` | undefined;
+                if (variant === 'v2') {
+                  try {
+                    const checkpoint: EvidenceCheckpointV1 = {
+                      version: 1,
+                      desiredStateHash: requestId,
+                      toolCalls: [],
+                      externalInteractions: [],
+                      outcome: 'success',
+                    };
+                    evidenceHash = computeEvidenceSimHash(checkpoint);
+                  } catch (err) {
+                    console.error(`[mech] Failed to compute evidence SimHash for ${requestId}:`, err);
+                  }
+                }
+                await claimDelivery(
+                  this.publicClient,
+                  this.walletClient,
+                  this.config.safeAddress,
+                  this.config.routerAddress,
+                  requestId as `0x${string}`,
+                  { variant, evidenceHash },
+                );
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                if (message.includes('RequestNotFound')) {
+                  console.error(`[mech] claimDelivery skipped (not a router request): ${requestId}`);
+                  // fall through — creator actions below don't depend on our claim specifically
+                } else if (/already.*claimed|alreadyClaimed/i.test(message)) {
+                  // Idempotent: someone else raced us, fine.
+                } else {
+                  console.error(`[mech] claimDelivery failed for ${requestId}:`, err);
+                  // Don't continue — may retry next poll via unchanged tracking
+                  continue;
                 }
               }
-
-              await claimDelivery(
-                this.publicClient,
-                this.walletClient,
-                this.config.safeAddress,
-                this.config.routerAddress,
-                requestId as `0x${string}`,
-                {
-                  variant,
-                  evidenceHash,
-                },
-              );
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              if (message.includes('RequestNotFound')) {
-                console.error(`[mech] claimDelivery skipped (not a router request): ${requestId}`);
-                continue;
-              }
-              console.error(`[mech] claimDelivery failed for ${requestId}:`, err);
-              // Don't remove from pending — will retry next poll
-              continue;
             }
 
-            // If this was a restoration delivery, fetch result and post the evaluation job
-            if (this.pendingEvaluations.has(requestId)) {
+            // (b) If I created the restoration, post the eval job once the claim is on-chain.
+            //     The deliverer (someone else, or us if we also delivered) must have claimed first.
+            //     tryCreateEvaluationJob calls verifyRestorationClaimed() which polls for the claim.
+            if (iCreatedRestoration) {
               let restorationResultData: string | undefined;
               try {
                 const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
@@ -360,12 +371,12 @@ export class MechAdapter implements ExecutionAdapter {
               await this.tryCreateEvaluationJob(requestId, restorationResultData);
             }
 
-            // If this was an evaluation delivery, just clear the tracking
-            if (this.pendingEvaluationClaims.has(requestId)) {
+            // (c) If I created the evaluation, clean up tracking once delivered.
+            if (iCreatedEvaluation) {
               this.pendingEvaluationClaims.delete(requestId);
             }
 
-            // Parse and yield the delivery result
+            // (d) Yield the delivery result.
             try {
               const deliveryDigest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
               const resultPayload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${deliveryDigest}`) as Record<string, unknown>;
