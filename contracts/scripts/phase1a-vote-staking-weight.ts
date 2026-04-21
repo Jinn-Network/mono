@@ -16,6 +16,7 @@ const VE_ABI = [
   "function lockedEnd(address account) view returns (uint256)",
   "function createLock(uint256 amount, uint256 unlockTime)",
   "function increaseAmount(uint256 amount)",
+  "function withdraw()",
 ];
 
 const VOTE_WEIGHTING_ABI = [
@@ -127,6 +128,15 @@ async function main() {
       throw new Error(
         "No active veJINN lock found. Set PHASE1A_VOTE_LOCK_AMOUNT so the script can create one.",
       );
+    }
+
+    // If the signer has an expired lock with unwithdrawn JINN in veJINN, createLock
+    // reverts with LockedValueNotZero. Withdraw first, then create a fresh lock.
+    if (lockEnd > 0n) {
+      console.log(`Withdrawing expired lock (ended ${formatTs(lockEnd)})...`);
+      const withdrawTx = await veOLAS.withdraw();
+      console.log(`Withdraw tx:               ${withdrawTx.hash}`);
+      await withdrawTx.wait();
     }
 
     const balance = (await jinn.balanceOf(signerAddress)) as bigint;
