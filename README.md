@@ -4,8 +4,6 @@ Monorepo for the Jinn protocol — a training protocol for agentic intents.
 Operators run a headless daemon that observes marketplace requests, executes
 them via Claude Code, and earns on-chain rewards for measured work.
 
-**Current phase:** 1b (testnet) on Base Sepolia. Mainnet launch is Phase 2.
-
 ## I want to run a daemon on testnet
 
 Start here: [`docs/operator-testnet.md`](docs/operator-testnet.md) — honest
