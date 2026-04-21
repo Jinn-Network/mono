@@ -3,6 +3,7 @@ import type { CommandContext } from '../../../src/cli/command.js';
 
 const runInitMock = vi.fn();
 const runBootstrapMock = vi.fn();
+const runDoctorMock = vi.fn();
 const loadConfigMock = vi.fn();
 const mainMock = vi.fn();
 
@@ -21,6 +22,15 @@ vi.mock('../../../src/cli/commands/bootstrap.js', () => ({
     summary: '',
     helpText: '',
     run: runBootstrapMock,
+  },
+}));
+
+vi.mock('../../../src/cli/commands/doctor.js', () => ({
+  default: {
+    name: 'doctor',
+    summary: '',
+    helpText: '',
+    run: runDoctorMock,
   },
 }));
 
@@ -60,6 +70,10 @@ describe('quickstart command', () => {
 
   it('passes --config through to bootstrap and disables faucet retries while polling', async () => {
     vi.useFakeTimers();
+
+    runDoctorMock.mockImplementation(async (ctx: CommandContext) => {
+      ctx.writer.write(JSON.stringify({ ok: true, blockingCount: 0, checks: [] }));
+    });
 
     runInitMock.mockImplementation(async (ctx: CommandContext) => {
       ctx.writer.write(JSON.stringify({ master: '0xmaster' }));

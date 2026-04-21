@@ -22,6 +22,13 @@ export const JINN_STAKING_ABI = [
     type: 'function',
   },
   {
+    inputs: [],
+    name: 'getNextRewardCheckpointTimestamp',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
     inputs: [
       { name: 'serviceId', type: 'uint256' },
     ],

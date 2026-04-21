@@ -28,6 +28,8 @@ export interface GatheredStatusRaw {
   };
   pendingStakingRewardsWei?: string;
   pendingRewardsError?: string;
+  /** ISO timestamp when the staking contract will next accept a checkpoint. */
+  nextCheckpointAt?: string;
   pollIntervalMs: number;
   /** Resolved daily burn estimate for runway (wei string). */
   masterDailyEstimateWei: string;

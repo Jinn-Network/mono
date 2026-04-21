@@ -239,7 +239,7 @@ export class FleetBootstrapper {
         const INTER_DRIP_PAUSE_MS = 1_000;
         console.error(
           `[fleet-bootstrap] Master has ${formatEther(systemEth)} ETH; need ${formatEther(requiredMasterEth)} ETH. ` +
-          `Draining CDP faucet (up to ${MAX_FAUCET_ITERS} drips)...`,
+          `Draining CDP faucet (each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-60 s on first run).`,
         );
         for (let i = 0; i < MAX_FAUCET_ITERS; i++) {
           const faucetResult = await requestTestnetFunding(masterAddress, 'base-sepolia');
@@ -251,13 +251,15 @@ export class FleetBootstrapper {
             }
             break;
           }
-          if ((i + 1) % 10 === 0) {
-            console.error(`[fleet-bootstrap] ${i + 1} drips landed; rechecking balance...`);
-          }
           await new Promise(r => setTimeout(r, INTER_DRIP_PAUSE_MS));
           const refreshed = await refreshSystemEth();
           systemEth = refreshed.system;
           masterBalance = refreshed.master;
+          if ((i + 1) % 5 === 0) {
+            console.error(
+              `[fleet-bootstrap] drip ${i + 1}/${MAX_FAUCET_ITERS} · master=${formatEther(masterBalance)} ETH · target=${formatEther(requiredMasterEth)} ETH`,
+            );
+          }
           if (systemEth >= requiredMasterEth) {
             console.error(
               `[fleet-bootstrap] Faucet funding sufficient after ${i + 1} drip${i === 0 ? '' : 's'} ` +

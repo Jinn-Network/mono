@@ -244,13 +244,18 @@ async function run(ctx: CommandContext): Promise<void> {
   const distributorCheck = await checkDistributorReachable(config);
   if (distributorCheck) checks.push(distributorCheck);
 
-  // portfolio.v0 checks — use the same implStateDirRoot that main.ts wires up.
-  // The daemon hardcodes /tmp/jinn-engine-impl-state; the per-impl dir appends
-  // the impl name (claude-mcp-hyperliquid).
-  const implStateDirRoot = '/tmp/jinn-engine-impl-state';
-  const hlImplStateDir = join(implStateDirRoot, 'claude-mcp-hyperliquid');
-  const portfolioChecks = runPortfolioV0DoctorChecks(hlImplStateDir);
-  checks.push(...portfolioChecks);
+  // portfolio.v0 checks — only run if the operator has configured a
+  // portfolio.v0 desired state. Otherwise, reporting `hl_api_wallet: fail`
+  // on a fresh operator who hasn't submitted an HL intent is false-alarm
+  // noise. Operators who want the HL-specific preflight in isolation can
+  // run those checks under a dedicated verb once one exists.
+  const hasPortfolioV0 = config.desiredStates.some((d) => d.spec?.kind === 'portfolio.v0');
+  if (hasPortfolioV0) {
+    const implStateDirRoot = '/tmp/jinn-engine-impl-state';
+    const hlImplStateDir = join(implStateDirRoot, 'claude-mcp-hyperliquid');
+    const portfolioChecks = runPortfolioV0DoctorChecks(hlImplStateDir);
+    checks.push(...portfolioChecks);
+  }
 
   const blockingCount = checks.filter((c) => !c.ok).length;
   const payload = {

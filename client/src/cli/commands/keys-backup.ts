@@ -8,7 +8,7 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { FleetStateStore } from '../../earning/store.js';
 import { decryptMnemonic, encryptMnemonic } from '../../earning/wallet.js';
-import { resolveCurrentPassword, resolveNewPassword } from '../password.js';
+import { resolveCliPassword, resolveNewPassword } from '../password.js';
 
 async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
   let parsed;
@@ -49,14 +49,14 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
     );
     return;
   }
-  const password = ctx.env['JINN_PASSWORD'];
-  if (!password) {
+  const resolved = resolveCliPassword(rest, ctx.env);
+  if (!resolved.ok) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'JINN_PASSWORD is required to decrypt the keystore.',
+        message: resolved.message,
         exampleCli: 'JINN_PASSWORD=... jinn keys backup --output /tmp/mnemonic.txt',
-        details: { field: 'JINN_PASSWORD', expected: 'non-empty string' },
+        details: { field: 'keystore password', expected: 'non-empty string via env, fd, or auto-generated file' },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -67,7 +67,7 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
     ctx.env['JINN_EARNING_DIR'] ?? join(process.env['HOME'] ?? '.', '.jinn-client', 'earning');
   const store = new FleetStateStore(earningDir);
   const keystore = await store.loadMnemonicKeystore();
-  const mnemonic = await decryptMnemonic(keystore, password);
+  const mnemonic = await decryptMnemonic(keystore, resolved.password);
   writeFileSync(output, `${mnemonic}\n`, { encoding: 'utf-8', mode: 0o600 });
   process.stderr.write(
     `[warn] Mnemonic written in plaintext to ${output} (mode 0600). Treat this file as seed material.\n`,
@@ -136,7 +136,7 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
   }
 
   // 3. Resolve current password
-  const current = resolveCurrentPassword(ctx.argv, ctx.env);
+  const current = resolveCliPassword(ctx.argv, ctx.env);
   if (!current.ok) {
     emitEnvelope(
       {
@@ -282,10 +282,12 @@ backup:
   same output. No other side effects.
 
 change-password:
-  Decrypts the keystore with the current password (from
-  ~/.jinn-client/keystore-password, JINN_PASSWORD, or --password-fd)
-  and re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
-  Deletes the auto-generated password file if present.
+  Decrypts the keystore with the current password (resolved from
+  --password-fd, JINN_PASSWORD, or the auto-generated
+  ~/.jinn-client/keystore-password file, in that order) and
+  re-encrypts it with JINN_NEW_PASSWORD (min 8 characters).
+  Deletes the auto-generated password file if present; after that,
+  set JINN_PASSWORD yourself for subsequent commands.
 
 Examples:
   JINN_PASSWORD=secret jinn keys backup --output ~/backup/jinn.txt

@@ -39,7 +39,7 @@ async function sumPendingStakingRewards(
   rpcUrl: string,
   network: 'mainnet' | 'testnet',
   fleet: FleetState,
-): Promise<{ sum: string } | { error: string }> {
+): Promise<{ sum: string; nextCheckpointAt?: string } | { error: string }> {
   const targets = listStolasClaimTargets(fleet.services);
   if (targets.length === 0) {
     return { sum: '0' };
@@ -52,6 +52,7 @@ async function sumPendingStakingRewards(
   });
 
   let total = 0n;
+  let nextCheckpointAt: string | undefined;
   try {
     for (const t of targets) {
       const pending = await client.readContract({
@@ -62,7 +63,24 @@ async function sumPendingStakingRewards(
       });
       total += pending;
     }
-    return { sum: total.toString() };
+    // All staked services in a Phase 1b fleet share the same staking proxy;
+    // a single read of the earliest checkpoint timestamp is sufficient.
+    try {
+      const nextTs = await client.readContract({
+        address: targets[0]!.stakingProxy as `0x${string}`,
+        abi: JINN_STAKING_ABI,
+        functionName: 'getNextRewardCheckpointTimestamp',
+      });
+      if (nextTs > 0n) {
+        nextCheckpointAt = new Date(Number(nextTs) * 1000).toISOString();
+      }
+    } catch {
+      // Non-fatal: older staking proxy deploys may not expose this function;
+      // rewards-build keeps nextCheckpointAt as null in that case.
+    }
+    return nextCheckpointAt
+      ? { sum: total.toString(), nextCheckpointAt }
+      : { sum: total.toString() };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
@@ -176,6 +194,7 @@ export async function gatherGatheredStatusRaw(
     const pr = await sumPendingStakingRewards(status.rpcUrl, status.network, fleet);
     if ('sum' in pr) {
       raw.pendingStakingRewardsWei = pr.sum;
+      if (pr.nextCheckpointAt) raw.nextCheckpointAt = pr.nextCheckpointAt;
     } else {
       raw.pendingRewardsError = pr.error;
     }

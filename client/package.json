@@ -23,6 +23,8 @@
     "dist/",
     "deployments/",
     "skills/",
+    "docker-compose.yml",
+    "CONTRIBUTING.md",
     "README.md",
     "LICENSE"
   ],

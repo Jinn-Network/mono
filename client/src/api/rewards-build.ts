@@ -58,7 +58,7 @@ export function assembleRewardsV1(raw: GatheredStatusRaw): RewardsV1Response {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     lastClaimAt: raw.lastRewardClaimTickAt,
-    nextCheckpointAt: null,
+    nextCheckpointAt: raw.nextCheckpointAt ?? null,
     services,
   };
 }

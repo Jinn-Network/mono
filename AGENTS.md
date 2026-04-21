@@ -1,21 +1,22 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex (codex.com) when working with code in this repository. The content below mirrors `CLAUDE.md` so that Codex and Claude Code operate on the same architectural understanding; references to the `claude` CLI describe what the daemon spawns as a subprocess for restorations, not which agent tool the operator uses.
+
 
 ## Project Overview
 
 Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a (JINN token + DAO + distribution on testnet) is deployed and proven on Sepolia/Base Sepolia. Phase 1b (protocol hardening on testnet) is in progress — see `spec/2026-04-06-phase-1a-design.md` and `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`.
 
-Jinn is a training protocol for state restoration. It defines a loop (Creation → Restoration → Evaluation → Knowledge) where desired states are published with fees, participants attempt restoration, evaluators verify results, and knowledge accumulates to improve future attempts.
+Jinn is a training protocol for agentic intents. It defines a loop (Creation → Execution → Evaluation → Knowledge) where intents are published with fees, participants attempt fulfillment, evaluators verify results, and knowledge accumulates to improve future attempts.
 
 ## Repository Structure
 
 ```
-legacy/jinn-cli-agents-reference/ Git subtree — historical Jinn agent repo (IMPORTANT: see below)
+jinn-cli-agents/ Git subtree — historical Jinn agent repo (IMPORTANT: see below)
 
 client/          TypeScript daemon — the main runnable component
   src/
-    main.ts              Production entry point (via `yarn jinn run`)
+    main.ts              Production entry point (yarn start)
     config.ts            Config loader (file > env > defaults)
     index.ts             Library exports
     adapters/
@@ -31,11 +32,11 @@ client/          TypeScript daemon — the main runnable component
     daemon/
       daemon.ts          Orchestrates creator, restorer, delivery-watcher loops
       creator.ts         Posts desired states via adapter
-      restorer.ts        Claims requests, runs Codex, submits results
+      restorer.ts        Claims requests, runs Claude, submits results
       delivery-watcher.ts  Claims deliveries, creates evaluation jobs
     runner/
       runner.ts          Runner interface
-      Codex.ts          Spawns Codex CLI via MCP for restoration/evaluation
+      claude.ts          Spawns Claude CLI via MCP for restoration/evaluation
       simple.ts          Callback-based runner for testing
     earning/
       bootstrap.ts       11-step state machine (wallet → Safe → staking → mech)
@@ -51,13 +52,13 @@ client/          TypeScript daemon — the main runnable component
     discovery/
       registry.ts        ERC-8004 on-chain artifact registration
       subgraph.ts        The Graph subgraph queries
-    mcp/server.ts        MCP tools exposed to Codex subprocess
+    mcp/server.ts        MCP tools exposed to Claude subprocess
     x402/                Payment-gated artifact access
     types/               DesiredState, errors, core types
   scripts/
     e2e-validate.ts      Self-contained e2e test on Anvil fork
     staking-validate.ts  Earning bootstrap validation
-    mock-agent.ts        Mock agent for testing (replaces Codex)
+    mock-agent.ts        Mock agent for testing (replaces Claude)
   fixtures/
     config.example.json  Example config file
     local-config.json    Local adapter test config
@@ -80,7 +81,7 @@ docs/            Design specs and implementation plans
 
 ## jinn-cli-agents Reference
 
-**Always check `legacy/jinn-cli-agents-reference/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context:
+**Always check `jinn-cli-agents/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context:
 
 - `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
 - `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
@@ -89,7 +90,7 @@ docs/            Design specs and implementation plans
 - `docs/reference/olas-contracts.md` — Base mainnet contract addresses, MechMarketplace ABI
 - `docs/reference/blood-written-rules.md` — Hard-won operational lessons (RPC limits, IPFS, polling, etc.)
 - `docs/runbooks/` — Setup, deployment, recovery, troubleshooting guides
-- `AGENTS.md` — System architecture overview for the agent orchestration layer
+- `CLAUDE.md` — System architecture overview for the agent orchestration layer
 
 ## Running the Client
 
@@ -97,7 +98,7 @@ docs/            Design specs and implementation plans
 
 - Node.js 22 (`corepack enable` once so Yarn matches each package’s `packageManager` field)
 - Foundry (`anvil` for local fork, `cast` for funding)
-- Codex CLI (`Codex` in PATH — the daemon spawns it as a subprocess)
+- Claude Code CLI (`claude` in PATH — the daemon spawns it as a subprocess)
 
 ### Quick validation (Anvil fork, no real funds)
 
@@ -115,17 +116,16 @@ The e2e script spawns Anvil, bootstraps from scratch, runs create → restore �
 
 ```bash
 cd client
-JINN_PASSWORD=your-keystore-password yarn jinn run
+JINN_PASSWORD=your-keystore-password yarn start
 ```
 
 Or with a config file:
 
 ```bash
-JINN_PASSWORD=secret yarn jinn run --config ./my-config.json
+JINN_PASSWORD=secret yarn start -- --config ./my-config.json
 ```
 
 The daemon will:
-
 1. Run the earning bootstrap (wallet → Safe → service → staking → mech)
 2. Pause at `awaiting_funding` if the wallet needs ETH/OLAS — fund and re-run
 3. Start the daemon with 3 loops (creator, restorer, delivery-watcher)
@@ -141,19 +141,18 @@ mkdir -p ~/.jinn-client
 cat > ~/.jinn-client/config.json << 'EOF'
 {
   "rpcUrl": "http://127.0.0.1:8545",
-  "claudeModel": "Codex-haiku-4-5-20251001",
+  "claudeModel": "claude-haiku-4-5-20251001",
   "desiredStates": [
     { "id": "test-1", "description": "The service is healthy and responding." }
   ]
 }
 EOF
 
-JINN_PASSWORD=test yarn jinn run
+JINN_PASSWORD=test yarn start
 # Will pause at awaiting_funding — fund via cast, then re-run
 ```
 
 Funding on Anvil (use pre-funded account):
-
 ```bash
 # Fund EOA with ETH
 cast send <EOA_ADDRESS> --value 0.01ether \
@@ -171,36 +170,32 @@ cast send 0x54330d28ca3357F294334BDC454a032e7f353416 \
 
 Config file first, env var override. File at `~/.jinn-client/config.json` or `--config <path>`.
 
-
-| Config key      | Env override              | Default                                                            |
-| --------------- | ------------------------- | ------------------------------------------------------------------ |
-| rpcUrl          | BASE_RPC_URL/JINN_RPC_URL | [https://mainnet.base.org](https://mainnet.base.org)               |
-| claudeModel     | JINN_CLAUDE_MODEL         | Codex-haiku-4-5-20251001                                           |
-| claudePath      | JINN_CLAUDE_PATH          | Codex                                                              |
-| pollIntervalMs  | JINN_POLL_INTERVAL_MS     | 5000                                                               |
-| apiPort         | JINN_API_PORT             | 7331                                                               |
-| dbPath          | JINN_DB_PATH              | ~/.jinn-client/jinn.db                                             |
-| earningDir      | JINN_EARNING_DIR          | ~/.jinn-client/earning                                             |
-| peers           | JINN_PEERS                | []                                                                 |
-| subgraphUrl     | JINN_SUBGRAPH_URL         | (none)                                                             |
-| desiredStates   | JINN_DESIRED_STATES       | [health-check]                                                     |
-| ipfsRegistryUrl | JINN_IPFS_REGISTRY_URL    | [https://registry.autonolas.tech](https://registry.autonolas.tech) |
-| ipfsGatewayUrl  | JINN_IPFS_GATEWAY_URL     | [https://gateway.autonolas.tech](https://gateway.autonolas.tech)   |
-
+| Config key       | Env override             | Default                           |
+|------------------|--------------------------|-----------------------------------|
+| rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| https://mainnet.base.org          |
+| claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
+| claudePath       | JINN_CLAUDE_PATH         | claude                            |
+| pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
+| apiPort          | JINN_API_PORT            | 7331                              |
+| dbPath           | JINN_DB_PATH             | ~/.jinn-client/jinn.db            |
+| earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
+| peers            | JINN_PEERS               | []                                |
+| subgraphUrl      | JINN_SUBGRAPH_URL        | (none)                            |
+| desiredStates    | JINN_DESIRED_STATES      | [health-check]                    |
+| ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
+| ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 
 `JINN_PASSWORD` is env-only — never in config files.
 
 ## On-Chain Addresses (Base)
 
-
 | Component              | Address                                      |
-| ---------------------- | -------------------------------------------- |
+|------------------------|----------------------------------------------|
 | JinnRouter             | `0xfFa7118A3D820cd4E820010837D65FAfF463181B` |
 | Activity checker proxy | `0x477C41Cccc8bd08027e40CEF80c25918C595a24d` |
 | Mech marketplace       | `0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020` |
 | Staking contract       | `0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54` |
 | OLAS token             | `0x54330d28ca3357F294334BDC454a032e7f353416` |
-
 
 ## Architecture
 
@@ -215,7 +210,7 @@ Three layers, top to bottom:
 The daemon runs three concurrent loops:
 
 1. **CreatorLoop** — posts each desired state once via `JinnRouter.createRestorationJob()`
-2. **RestorerLoop** — watches marketplace for requests, claims them, spawns Codex CLI to attempt restoration, submits result via `mech.deliverToMarketplace()`
+2. **RestorerLoop** — watches marketplace for requests, claims them, spawns Claude CLI to attempt restoration, submits result via `mech.deliverToMarketplace()`
 3. **DeliveryWatcherLoop** — watches for deliveries, calls `JinnRouter.claimDelivery()`, then creates evaluation jobs via `JinnRouter.createEvaluationJob()`
 
 Each JinnRouter call increments activity counters for the Safe multisig. The OLAS staking contract reads these counters at checkpoints to determine reward eligibility.
@@ -223,7 +218,6 @@ Each JinnRouter call increments activity counters for the Safe multisig. The OLA
 ### Earning bootstrap
 
 The `EarningBootstrapper` walks through 11 idempotent steps:
-
 1. wallet — create agent EOA + encrypted keystore
 2. safe_predicted — predict Safe address
 3. awaiting_funding — gate until EOA has ETH + Safe has OLAS
@@ -262,7 +256,7 @@ yarn build           # tsc compile
 yarn test            # vitest run
 yarn e2e             # end-to-end on Anvil fork
 yarn staking         # earning bootstrap validation on Anvil
-yarn jinn run        # production daemon (requires JINN_PASSWORD)
+yarn start           # production daemon (requires JINN_PASSWORD)
 
 # Contracts
 cd contracts

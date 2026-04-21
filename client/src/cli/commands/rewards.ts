@@ -1,9 +1,39 @@
 import { parseArgs } from 'node:util';
+import { formatUnits } from 'viem';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { emitResult } from '../output.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
-import { assembleRewardsV1 } from '../../api/rewards-build.js';
+import { assembleRewardsV1, type RewardsV1Response } from '../../api/rewards-build.js';
+
+function formatRewardAmount(wei: string): string {
+  try {
+    // stOLAS / JINN / OLAS all use 18 decimals.
+    return `${formatUnits(BigInt(wei), 18)} stOLAS`;
+  } catch {
+    return `${wei} wei`;
+  }
+}
+
+function humanRewards(payload: RewardsV1Response): string {
+  const lines: string[] = [];
+  if (payload.services.length === 0) {
+    lines.push('No services staked yet. Run `jinn bootstrap` to stake one.');
+  } else {
+    const anyPending = payload.services.some((s) => s.pending !== '0');
+    lines.push(anyPending ? 'Pending rewards:' : 'Pending rewards: none yet.');
+    for (const s of payload.services) {
+      lines.push(`  Service #${s.index}: ${formatRewardAmount(s.pending)} pending · ${formatRewardAmount(s.claimed)} claimed`);
+    }
+  }
+  lines.push(
+    `Last claim tick: ${payload.lastClaimAt ?? 'never (daemon not yet run the claim loop)'}`,
+  );
+  lines.push(
+    `Next checkpoint: ${payload.nextCheckpointAt ?? 'not reported by the staking contract'}`,
+  );
+  return lines.join('\n');
+}
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -31,7 +61,7 @@ async function run(ctx: CommandContext): Promise<void> {
   }
   const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
   const payload = assembleRewardsV1(raw);
-  emitResult(payload, (v) => JSON.stringify(v, null, 2), {
+  emitResult(payload, (v) => humanRewards(v as RewardsV1Response), {
     json: Boolean(parsed.values.json),
     human: Boolean(parsed.values.human),
     writer: ctx.writer,

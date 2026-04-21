@@ -9,6 +9,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import initCommand from './init.js';
 import bootstrapCommand from './bootstrap.js';
+import doctorCommand from './doctor.js';
 
 // StringWriter to capture sub-command output
 class StringWriter {
@@ -66,6 +67,42 @@ async function run(ctx: CommandContext): Promise<void> {
   }
 
   const subEnv = { ...ctx.env, JINN_PASSWORD: password };
+
+  // ── Step 1.5: Doctor preflight ──
+  // Run doctor before touching any wallet state so blocking problems (missing
+  // Claude binary, unreachable RPC, broken deployment) surface as the first
+  // error the operator sees — not an opaque bootstrap failure eight steps in.
+  console.error('[quickstart] Running preflight checks...');
+  const doctorWriter = new StringWriter();
+  await doctorCommand.run({
+    argv: ['--json', ...(configPath ? ['--config', configPath] : [])],
+    stdoutIsTty: false,
+    writer: doctorWriter,
+    exit: () => {},
+    env: subEnv,
+  });
+  let doctorPayload: { ok: boolean; blockingCount: number; checks: Array<{ name: string; ok: boolean; detail: string; remedy?: string }> } | null = null;
+  try {
+    doctorPayload = JSON.parse(doctorWriter.toString().trim());
+  } catch { /* doctor output malformed — proceed and let bootstrap fail loudly */ }
+  if (doctorPayload && !doctorPayload.ok) {
+    const blocking = doctorPayload.checks.filter((c) => !c.ok);
+    // portfolio.v0 impl-state checks are advisory for a fresh operator who
+    // hasn't submitted an HL intent yet — don't block quickstart on them.
+    const realBlockers = blocking.filter(
+      (c) => !c.name.startsWith('portfolio_') && !c.name.startsWith('hl_'),
+    );
+    if (realBlockers.length > 0) {
+      console.error('[quickstart] Preflight failed. Fix the following and re-run:');
+      for (const c of realBlockers) {
+        console.error(`  - ${c.name}: ${c.detail}`);
+        if (c.remedy) console.error(`      remedy: ${c.remedy}`);
+      }
+      ctx.exit(11);
+      return;
+    }
+  }
+  console.error('[quickstart] Preflight OK.');
 
   // ── Step 2: Init (idempotent) ──
   console.error('[quickstart] Initializing wallet...');
@@ -187,12 +224,31 @@ async function run(ctx: CommandContext): Promise<void> {
 
   // ── Step 4: Print summary ──
   const apiPort = String(loadConfig(configPath).apiPort);
+  const keystoreFile = join(jinnDir, 'earning', 'master_keystore.json');
   console.error('');
-  console.error('Quickstart complete!');
-  console.error(`  Dashboard: http://127.0.0.1:${apiPort}`);
   if (passwordGenerated) {
-    console.error(`  Password:  saved to ${passwordFilePath}`);
-    console.error('  To change: JINN_NEW_PASSWORD=<new> jinn keys change-password');
+    const bar = '━'.repeat(64);
+    console.error(bar);
+    console.error('Your Jinn wallet has been created.');
+    console.error('');
+    console.error(`  Master address:  ${masterAddress || '(run `jinn version` to read)'}`);
+    console.error(`  Keystore:        ${keystoreFile}`);
+    console.error(`  Password:        ${passwordFilePath}`);
+    console.error(`  Dashboard:       http://127.0.0.1:${apiPort}`);
+    console.error('');
+    console.error('Back up your mnemonic NOW to somewhere off this machine:');
+    console.error('  jinn keys backup --output /path/to/secure/location.txt');
+    console.error('');
+    console.error('TESTER TIER — treat this wallet as hot.');
+    console.error('  The password file sits next to the encrypted keystore, so anyone');
+    console.error('  with shell access to this machine can decrypt it. Keep funds to');
+    console.error('  the gas + rewards minimum; use a hardware wallet for anything else.');
+    console.error('');
+    console.error('To rotate the password: JINN_NEW_PASSWORD=<new> jinn keys change-password');
+    console.error(bar);
+  } else {
+    console.error('Quickstart complete!');
+    console.error(`  Dashboard: http://127.0.0.1:${apiPort}`);
   }
   console.error('');
 

@@ -77,21 +77,24 @@ describe('keys backup command', () => {
     expect(exits).toEqual([11]);
   });
 
-  it('missing JINN_PASSWORD emits invalid_invocation', async () => {
+  it('missing password (env, fd, and file all absent) emits invalid_invocation', async () => {
     const { dir } = await makeKeystore();
     const writes: string[] = [];
     const exits: number[] = [];
+    // Point HOME at a fresh temp dir so the file-fallback in resolveCliPassword
+    // cannot find a real ~/.jinn-client/keystore-password on the test machine.
+    const fakeHome = mkdtempSync(join(tmpdir(), 'jinn-keys-backup-home-'));
     const ctx: CommandContext = {
       argv: ['backup', '--output', join(dir, 'x.txt')],
       stdoutIsTty: false,
       writer: { write: (s: string) => { writes.push(s); return true; } },
       exit: (c: number) => { exits.push(c); },
-      env: { JINN_EARNING_DIR: dir },
+      env: { JINN_EARNING_DIR: dir, HOME: fakeHome },
     };
     await keysCmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
-    expect(parsed.details?.field).toBe('JINN_PASSWORD');
+    expect(parsed.details?.field).toBe('keystore password');
     expect(exits).toEqual([11]);
   });
 });
