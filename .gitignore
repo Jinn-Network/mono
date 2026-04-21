@@ -1,7 +1,13 @@
 .worktrees/
 node_modules/
+.claude/
 
 # Beads / Dolt files (added by bd init)
+.beads
+.beads.pre-helm-*/
 .dolt/
 *.db
 .beads-credential-key
+
+# Per-operator dev helpers (not collaborative)
+client/start-daemon.sh
