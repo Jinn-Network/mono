@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { getAddress } from 'viem';
+import { createPublicClient, getAddress, http, type PublicClient } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
 import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
@@ -9,8 +10,9 @@ import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { createCliExecutionContext } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
-import { PredictionV0IntentSchema } from '../../types/prediction.js';
 import type { DesiredState } from '../../types/desired-state.js';
+import { resolvePredictionV0Template } from '../../intents/prediction-v0-template.js';
+import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
 
 function intentCacheKey(safe: string, intentId: string): string {
   return `cli_intent:${getAddress(safe)}:${intentId}`;
@@ -97,19 +99,29 @@ async function run(ctx: CommandContext): Promise<void> {
     const kind = (raw['spec'] as any)?.kind;
     if (kind === 'prediction.v0') {
       const stub: any = { id: id!, description: description!, ...raw };
-      // If the fixture used zero as a now-relative template, fill in current time
-      if (stub.window?.startTs === 0) {
-        const now = Date.now();
-        stub.window.startTs = now;
-        stub.window.endTs = now + 3_600_000;
-        stub.spec.question.resolveTs = now + 3_600_000 + 900_000;
-      }
-      const parsedIntent = PredictionV0IntentSchema.safeParse(stub);
-      if (!parsedIntent.success) {
+      // Sentinel resolution: startTs=0 → now-relative, threshold="current[±N[%]]"
+      // → read Chainlink and substitute an absolute price.
+      try {
+        const parsedIntent = await resolvePredictionV0Template(stub, {
+          readCurrent: async ({ feed, venue }) => {
+            const chain = venue === 'chainlink-base' ? base : baseSepolia;
+            const rpcUrl = ctx.env[venue === 'chainlink-base' ? 'BASE_RPC_URL' : 'BASE_SEPOLIA_RPC_URL']
+              ?? (venue === 'chainlink-base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org');
+            const publicClient = createPublicClient({ chain, transport: http(rpcUrl) }) as unknown as PublicClient;
+            const reading = await readChainlinkLatest(feed, publicClient);
+            return scaleToDecimal(reading.answer, reading.decimals);
+          },
+        });
+        specOverlay = {
+          window: parsedIntent.window,
+          spec: parsedIntent.spec,
+          eligibility: parsedIntent.eligibility,
+        };
+      } catch (err) {
         emitEnvelope(
           {
             code: 'invalid_invocation',
-            message: `Invalid prediction.v0 intent: ${parsedIntent.error.message}`,
+            message: `Invalid prediction.v0 intent: ${err instanceof Error ? err.message : String(err)}`,
             exampleCli: 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
             details: { field: 'spec-file' },
           },
@@ -117,11 +129,6 @@ async function run(ctx: CommandContext): Promise<void> {
         );
         return;
       }
-      specOverlay = {
-        window: parsedIntent.data.window,
-        spec: parsedIntent.data.spec,
-        eligibility: parsedIntent.data.eligibility,
-      };
     } else {
       // Future kinds: pass through without validation
       specOverlay = {
@@ -271,12 +278,21 @@ cached request id (local SQLite) without sending a new transaction.
 Options:
   --spec-file <path>  Path to a JSON file containing typed intent fields (window, spec, eligibility).
                       Supports prediction.v0 intents with full Zod validation.
-                      If window.startTs is 0, timestamps are filled relative to now.
+
+                      Sentinels resolved at post time:
+                        window.startTs: 0              → Date.now(); endTs + resolveTs follow
+                        spec.question.threshold:       → the current Chainlink feed price
+                          "current"                      (exactly)
+                          "current+0.5%" / "current-2%"  (percentage offset)
+                          "current+100"  / "current-50"  (absolute offset)
+                      For price-aware thresholds the CLI reads the feed named in
+                      spec.oracle before posting; use BASE_SEPOLIA_RPC_URL to
+                      override the default public RPC.
 
 Examples:
   jinn submit-intent --id health-check --description "The service is running" --dry-run
   jinn submit-intent --id health-check --description "The service is running" --yes
-  jinn submit-intent --id eth-pred-1 --description "ETH > 3500" --spec-file fixtures/prediction-v0-intent.example.json --dry-run
+  jinn submit-intent --id eth-up --description "ETH direction" --spec-file fixtures/prediction-v0-intent.example.json --yes
 `,
   run,
 };

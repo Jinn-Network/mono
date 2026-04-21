@@ -1,5 +1,14 @@
 {
-  "window": { "startTs": 0, "endTs": 3600000 },
+  "_comment": [
+    "prediction.v0 intent template. The submit-intent CLI resolves two sentinels:",
+    "  * window.startTs = 0       → Date.now() at post time; endTs + resolveTs follow",
+    "  * threshold = \"current\"  → current Chainlink price at post time",
+    "",
+    "Default: a coin-flip direction question — 'will ETH/USD be higher than right now,",
+    "one hour from now, at resolveTs (endTs + 15min)?' Swap the operator to LT for a",
+    "downside question, or use 'current+0.5%' / 'current-1%' for biased thresholds."
+  ],
+  "window": { "startTs": 0, "endTs": 0 },
   "spec": {
     "kind": "prediction.v0",
     "oracle": {
@@ -10,8 +19,8 @@
     "question": {
       "kind": "threshold",
       "operator": "GT",
-      "threshold": "3500",
-      "resolveTs": 4500000
+      "threshold": "current",
+      "resolveTs": 0
     }
   },
   "eligibility": { "maxSubmissionDelayMs": 60000 }

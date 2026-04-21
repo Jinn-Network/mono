@@ -2,7 +2,7 @@ import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import type { DesiredState } from '../types/index.js';
 import { Store } from '../store/store.js';
-import { CreatorLoop } from './creator.js';
+import { CreatorLoop, type IntentGenerator } from './creator.js';
 import { RestorerLoop } from './restorer.js';
 import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
@@ -51,6 +51,20 @@ export interface DaemonConfig {
   status?: StatusGatherConfig;
 
   /**
+   * Extra intent generators called each CreatorLoop tick. Each returns a
+   * freshly-built DesiredState (or null to skip this tick). Used e.g. for
+   * auto-posting price-aware prediction.v0 intents on testnet.
+   */
+  intentGenerators?: IntentGenerator[];
+
+  /**
+   * Creator Safe address — used to scope CreatorLoop's SQLite idempotency
+   * cache keys per-Safe. Without this, two co-located daemons on the same
+   * DB would collide. Optional for backwards compatibility.
+   */
+  creatorSafeAddress?: string;
+
+  /**
    * When provided, the daemon uses RestorationEngine (new engine path) instead
    * of the legacy RestorerLoop for intent dispatch.
    *
@@ -84,7 +98,13 @@ export class Daemon {
     this.store = new Store(config.dbPath);
     this.adapter = config.adapter;
     this.apiPort = config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
-    this.creatorLoop = new CreatorLoop(this.adapter, config.desiredStates, this.store);
+    this.creatorLoop = new CreatorLoop(
+      this.adapter,
+      config.desiredStates,
+      this.store,
+      config.intentGenerators ?? [],
+      config.creatorSafeAddress,
+    );
     this.restorerLoop = new RestorerLoop(this.adapter, config.runner, this.store, '/tmp', 300000, `http://127.0.0.1:${this.apiPort}`);
     this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter);
 

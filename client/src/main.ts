@@ -43,6 +43,9 @@ import { PredictionV0Evaluator } from './restorer/impls/prediction-v0-evaluator/
 import { ClaudeMcpPredictionImpl } from './restorer/impls/claude-mcp-prediction/index.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
+import { makePredictionV0Generator } from './intents/prediction-v0-auto.js';
+import { BASE_SEPOLIA_FEEDS, BASE_FEEDS } from './venues/chainlink/feeds.js';
+import type { IntentGenerator } from './daemon/creator.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -401,6 +404,21 @@ export async function main(): Promise<DaemonStartupInfo> {
     console.log('[main] ClaimRegistry: not configured (claim step will use NotImplementedError fallback)');
   }
 
+  // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
+  const intentGenerators: IntentGenerator[] = [];
+  const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
+  if (config.network === 'testnet' && !autoIntentsDisabled) {
+    intentGenerators.push(makePredictionV0Generator({
+      feed: BASE_SEPOLIA_FEEDS['ETH / USD'],
+      feedDescription: 'ETH / USD',
+      venue: 'chainlink-base-sepolia',
+      rpcUrl: config.rpcUrl,
+    }));
+    console.log('[main] auto-intent generator enabled: prediction.v0 (testnet, ETH/USD coin-flip+0.5%)');
+  } else if (config.network === 'mainnet' && !autoIntentsDisabled && BASE_FEEDS['ETH / USD']) {
+    // Mainnet opt-in only; default is OFF. Reserved for a future flag.
+  }
+
   const daemon = new Daemon({
     adapter,
     runner,
@@ -411,6 +429,8 @@ export async function main(): Promise<DaemonStartupInfo> {
     peers: config.peers.length > 0 ? config.peers : undefined,
     subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
+    intentGenerators,
+    creatorSafeAddress: safeAddress,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
