@@ -18,11 +18,14 @@
 
 import { ethers } from "hardhat";
 
-// ─── L1 Contract Addresses (Sepolia) ───────────────────────────────────────
-const JINN = "0x95A0d0E40Ea5F85968dF9eF43e9E4a37D6C8b8a0";
-const TOKENOMICS = "0xac1D01d27dcfc377656fc728222b40DCe4b203a0";
-const TREASURY = "0x0eD61f297Ae6a9B6231818EB5055bF4002Eb99bE";
-const DISPENSER = "0xB9485266348C49918842BF7152dbE76d36bb9A3D";
+// ─── L1 Contract Addresses (Sepolia — live fast deployment) ────────────────
+// Sourced from deployment-phase1a-sepolia-fast.json (2026-04-08 redeploy).
+// TODO: replace hardcodes with loadPhase1aArtifactsFromDisk() for
+// deployment-portable checkpointing.
+const JINN = "0xc3ae831f146Eabbb8095E1EDf90a187AA4E5F408";
+const TOKENOMICS = "0x302cd1f188fCFcA64EA038aFa738D90951360739";
+const TREASURY = "0x9A0570db9a846a5114f6bFEAd75c9a820800255B";
+const DISPENSER = "0xaFE21C6dBeF2d41A769F58CE068aa991369FB1e0";
 
 // ─── Minimal ABIs ──────────────────────────────────────────────────────────
 const JINN_ABI = [
