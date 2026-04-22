@@ -30,7 +30,8 @@ import {
   callDeliverToMarketplace,
   scanRestorationJobs,
   scanEvaluationJobs,
-  findLatestRequestDataHexForMarketplaceRequest,
+  scanLatestRequestDataByRid,
+  scanLatestDeliveryDataByRid,
   findLatestDeliveryDataHexForRequest,
 } from './contracts.js';
 import { type MechAdapterConfig, MECH_MARKETPLACE_ABI } from './types.js';
@@ -57,14 +58,13 @@ export class MechAdapter implements ExecutionAdapter {
   // Restoration result content cached across evaluation-job retries so a transient
   // Safe/router failure does not silently strip evaluator context on the next poll.
   private pendingEvaluationResults = new Map<string, string>();
+  // RIDs with no delivery found in backfill window; avoids repeated 500k-block rescans.
+  private backfillMissRids = new Set<string>();
   // Original desired states keyed by request ID (restoration and evaluation)
   // so we can yield accurate desiredState in DeliveredResult
   private originalStates = new Map<string, DesiredState>();
   private store?: Store;
   private claimPolicy: ClaimPolicy;
-
-  /** On-demand Deliver scan so evaluation creation can find IPFS even if `pendingEvaluationResults` is cold. */
-  private static readonly DELIVER_LOOKBACK_BLOCKS = 500_000n;
 
   constructor(config: MechAdapterConfig, store?: Store) {
     this.config = config;
@@ -175,17 +175,24 @@ export class MechAdapter implements ExecutionAdapter {
     // Set delivery block cursor to scan from recovery point
     this.deliveryBlockCursor = fromBlock;
 
+    const latestRequestDataByRid = await scanLatestRequestDataByRid(
+      this.publicClient,
+      this.config.mechMarketplaceAddress,
+      fromBlock,
+      currentBlock,
+    );
+    const latestDeliveryDataByRid = await scanLatestDeliveryDataByRid(
+      this.publicClient,
+      this.config.mechContractAddress,
+      fromBlock,
+      currentBlock,
+    );
+
     for (const { requestId } of restorations) {
       const pe = this.pendingEvaluations.get(requestId);
       if (!pe) continue;
 
-      const requestDataHex = await findLatestRequestDataHexForMarketplaceRequest(
-        this.publicClient,
-        this.config.mechMarketplaceAddress,
-        requestId,
-        fromBlock,
-        currentBlock,
-      );
+      const requestDataHex = latestRequestDataByRid.get(requestId.toLowerCase());
       if (requestDataHex) {
         const d = String(requestDataHex);
         const digest = d.startsWith('0x') ? d.slice(2) : d;
@@ -195,13 +202,7 @@ export class MechAdapter implements ExecutionAdapter {
         });
       }
 
-      const deliveryDataHex = await findLatestDeliveryDataHexForRequest(
-        this.publicClient,
-        this.config.mechContractAddress,
-        requestId,
-        fromBlock,
-        currentBlock,
-      );
+      const deliveryDataHex = latestDeliveryDataByRid.get(requestId.toLowerCase());
       if (deliveryDataHex) {
         try {
           const d = String(deliveryDataHex);
@@ -214,6 +215,7 @@ export class MechAdapter implements ExecutionAdapter {
             requestId,
             (payload.data as string) ?? JSON.stringify(payload),
           );
+          this.backfillMissRids.delete(requestId);
         } catch (err) {
           console.error(`[mech] recovery: could not load restoration result IPFS for ${requestId}:`, err);
         }
@@ -426,6 +428,7 @@ export class MechAdapter implements ExecutionAdapter {
                 const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
                 const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${digest}`) as Record<string, unknown>;
                 restorationResultData = (payload.data as string) ?? JSON.stringify(payload);
+                this.backfillMissRids.delete(requestId);
               } catch (err) {
                 console.error(`[mech] Failed to fetch restoration result for evaluation: ${requestId}`, err);
               }
@@ -491,9 +494,13 @@ export class MechAdapter implements ExecutionAdapter {
     if (this.pendingEvaluationResults.has(requestId)) {
       return this.pendingEvaluationResults.get(requestId);
     }
+    if (this.backfillMissRids.has(requestId)) {
+      return undefined;
+    }
     const currentBlock = await this.publicClient.getBlockNumber();
-    const from = currentBlock > MechAdapter.DELIVER_LOOKBACK_BLOCKS
-      ? currentBlock - MechAdapter.DELIVER_LOOKBACK_BLOCKS
+    const lookbackBlocks = this.config.mechDeliverBackfillLookbackBlocks ?? 500_000n;
+    const from = currentBlock > lookbackBlocks
+      ? currentBlock - lookbackBlocks
       : 1n;
     const dhex = await findLatestDeliveryDataHexForRequest(
       this.publicClient,
@@ -502,7 +509,10 @@ export class MechAdapter implements ExecutionAdapter {
       from,
       currentBlock,
     );
-    if (!dhex) return undefined;
+    if (!dhex) {
+      this.backfillMissRids.add(requestId);
+      return undefined;
+    }
     try {
       const d = String(dhex);
       const dig = d.startsWith('0x') ? d.slice(2) : d;
@@ -512,6 +522,7 @@ export class MechAdapter implements ExecutionAdapter {
       )) as Record<string, unknown>;
       const data = (payload.data as string) ?? JSON.stringify(payload);
       this.pendingEvaluationResults.set(requestId, data);
+      this.backfillMissRids.delete(requestId);
       return data;
     } catch (err) {
       console.error(`[mech] backfill: failed to load restoration result for ${requestId}:`, err);
@@ -524,12 +535,14 @@ export class MechAdapter implements ExecutionAdapter {
     const originalState = this.pendingEvaluations.get(requestId)!;
     if (restorationResultData) {
       this.pendingEvaluationResults.set(requestId, restorationResultData);
+      this.backfillMissRids.delete(requestId);
     }
     let cachedRestorationResultData = restorationResultData ?? this.pendingEvaluationResults.get(requestId);
     if (cachedRestorationResultData == null) {
       cachedRestorationResultData = await this.backfillRestorationResultFromChain(requestId);
     }
     if (cachedRestorationResultData == null) {
+      this.claimedButNotEvaluated.add(requestId);
       console.error(
         `[mech] no restoration result yet for ${requestId} (evaluation job and IPFS upload deferred until Deliver or backfill)`,
       );
