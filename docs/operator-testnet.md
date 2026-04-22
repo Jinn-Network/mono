@@ -147,6 +147,12 @@ jinn balance
 # Structured event log (one JSON object per line).
 jinn logs
 
+# Live tail of daemon lifecycle transitions.
+jinn logs --follow
+
+# Dashboard UI
+open http://127.0.0.1:7331/
+
 # Direct HTTP — portfolio.v0 specifics.
 curl -s http://127.0.0.1:7331/v1/status | jq .portfolioV0
 ```

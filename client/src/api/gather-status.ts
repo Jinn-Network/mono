@@ -2,21 +2,37 @@
  * Best-effort status collection for GET /v1/status (RPC + earning store + SQLite).
  */
 
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, type PublicClient } from 'viem';
+
+/** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
+type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
 import { base, baseSepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import { FleetStateStore } from '../earning/store.js';
 import { getChainConfig } from '../earning/contracts.js';
 import { JINN_STAKING_ABI } from '../earning/jinn-rewards.js';
 import type { FleetState } from '../earning/types.js';
+import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import {
   assembleStatusV1,
   type GatheredStatusRaw,
+  type ServiceBalanceErrorEntry,
   type StatusV1Response,
   resolveMasterDailyEstimateWei,
 } from './status-build.js';
 import { listStolasClaimTargets } from '../earning/stolas-claim.js';
 import { gatherPortfolioV0Status } from './portfolio-v0-build.js';
+import type { BalanceCacheEntry } from '../store/store.js';
+
+const ERC20_BALANCE_OF_ABI = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
 
 export interface StatusGatherConfig {
   earningDir: string;
@@ -40,10 +56,10 @@ async function sumPendingStakingRewards(
   rpcUrl: string,
   network: 'mainnet' | 'testnet',
   fleet: FleetState,
-): Promise<{ sum: string; nextCheckpointAt?: string } | { error: string }> {
+): Promise<{ sum: string; pendingByService: Record<number, string>; nextCheckpointAt?: string } | { error: string }> {
   const targets = listStolasClaimTargets(fleet.services);
   if (targets.length === 0) {
-    return { sum: '0' };
+    return { sum: '0', pendingByService: {} };
   }
 
   const chain = network === 'testnet' ? baseSepolia : base;
@@ -53,6 +69,7 @@ async function sumPendingStakingRewards(
   });
 
   let total = 0n;
+  const pendingByService: Record<number, string> = {};
   let nextCheckpointAt: string | undefined;
   try {
     for (const t of targets) {
@@ -63,6 +80,10 @@ async function sumPendingStakingRewards(
         args: [BigInt(t.serviceId)],
       });
       total += pending;
+      const svc = fleet.services.find((s) => s.service_id === t.serviceId);
+      if (svc) {
+        pendingByService[displayFleetServiceIndex(svc)] = pending.toString();
+      }
     }
     // All staked services in a Phase 1b fleet share the same staking proxy;
     // a single read of the earliest checkpoint timestamp is sufficient.
@@ -80,11 +101,137 @@ async function sumPendingStakingRewards(
       // rewards-build keeps nextCheckpointAt as null in that case.
     }
     return nextCheckpointAt
-      ? { sum: total.toString(), nextCheckpointAt }
-      : { sum: total.toString() };
+      ? { sum: total.toString(), pendingByService, nextCheckpointAt }
+      : { sum: total.toString(), pendingByService };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+function hasUsefulCacheValues(entry: BalanceCacheEntry, isAgentRole: boolean): boolean {
+  if (isAgentRole) return entry.nativeWei != null;
+  return entry.nativeWei != null || entry.bondWei != null;
+}
+
+async function gatherServiceBalances(
+  store: Store,
+  rpcClient: StatusBalanceRpc,
+  fleet: FleetState,
+  chainCfg: ReturnType<typeof getChainConfig>,
+): Promise<{
+  byDisplay: Record<
+    number,
+    { agentNativeWei: string; safeNativeWei: string; safeBondWei: string }
+  >;
+  errorsByDisplay: Record<number, ServiceBalanceErrorEntry>;
+}> {
+  const ttlMs = 30_000;
+  const now = Date.now();
+  const cache = new Map(store.getBalanceCache().map((e) => [e.role, e]));
+  const out: Record<
+    number,
+    { agentNativeWei: string; safeNativeWei: string; safeBondWei: string }
+  > = {};
+  const errorsByDisplay: Record<number, ServiceBalanceErrorEntry> = {};
+
+  async function getCachedOrFetch(
+    role: string,
+    address: string,
+    isAgentRole: boolean,
+    fetcher: () => Promise<{ nativeWei?: string; bondWei?: string; assetExtraJson?: string }>,
+  ): Promise<BalanceCacheEntry> {
+    const cached = cache.get(role);
+    if (cached && cached.address.toLowerCase() === address.toLowerCase()) {
+      const age = now - Date.parse(cached.fetchedAt);
+      const canUseTtl =
+        Number.isFinite(age) && age <= ttlMs && (!cached.error || hasUsefulCacheValues(cached, isAgentRole));
+      if (canUseTtl) return cached;
+    }
+    try {
+      const fresh = await fetcher();
+      const entry: BalanceCacheEntry = {
+        role,
+        address,
+        nativeWei: fresh.nativeWei ?? null,
+        bondWei: fresh.bondWei ?? null,
+        assetExtraJson: fresh.assetExtraJson ?? null,
+        fetchedAt: new Date(now).toISOString(),
+        error: null,
+      };
+      store.upsertBalanceCache(entry);
+      cache.set(role, entry);
+      return entry;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const keepTs =
+        cached &&
+        hasUsefulCacheValues(cached, isAgentRole) &&
+        cached.fetchedAt;
+      const entry: BalanceCacheEntry = {
+        role,
+        address,
+        nativeWei: cached?.nativeWei ?? null,
+        bondWei: cached?.bondWei ?? null,
+        assetExtraJson: cached?.assetExtraJson ?? null,
+        fetchedAt: (keepTs ? keepTs : new Date(now).toISOString()) as string,
+        error: errMsg,
+      };
+      store.upsertBalanceCache(entry);
+      cache.set(role, entry);
+      return entry;
+    }
+  }
+
+  await Promise.all(
+    fleet.services.map(async (svc) => {
+      const displayIndex = displayFleetServiceIndex(svc);
+      const agentAddr = svc.agent_address;
+      const safeAddr = svc.safe_address;
+      if (!agentAddr && !safeAddr) return;
+
+      const agentRole = `service.${displayIndex}.agent`;
+      const safeRole = `service.${displayIndex}.multisig`;
+      const [agent, safe] = await Promise.all([
+        agentAddr
+          ? getCachedOrFetch(agentRole, agentAddr, true, async () => {
+              const native = await rpcClient.getBalance({ address: agentAddr as `0x${string}` });
+              return { nativeWei: native.toString() };
+            })
+          : Promise.resolve<BalanceCacheEntry>({
+              role: agentRole, address: '0x', nativeWei: '0', bondWei: '0', fetchedAt: new Date(now).toISOString(),
+            }),
+        safeAddr
+          ? getCachedOrFetch(safeRole, safeAddr, false, async () => {
+              const [native, bond] = await Promise.all([
+                rpcClient.getBalance({ address: safeAddr as `0x${string}` }),
+                rpcClient.readContract({
+                  address: chainCfg.olasToken as `0x${string}`,
+                  abi: ERC20_BALANCE_OF_ABI,
+                  functionName: 'balanceOf',
+                  args: [safeAddr as `0x${string}`],
+                }),
+              ]);
+              return { nativeWei: native.toString(), bondWei: bond.toString() };
+            })
+          : Promise.resolve<BalanceCacheEntry>({
+              role: safeRole, address: '0x', nativeWei: '0', bondWei: '0', fetchedAt: new Date(now).toISOString(),
+            }),
+      ]);
+      const agentWei = agent.nativeWei ?? '0';
+      const safeNWei = safe.nativeWei ?? '0';
+      const safeBWei = safe.bondWei ?? '0';
+      const rowErr: ServiceBalanceErrorEntry = {};
+      if (agent.error) rowErr.agent = agent.error;
+      if (safe.error) rowErr.multisig = safe.error;
+      if (Object.keys(rowErr).length) errorsByDisplay[displayIndex] = rowErr;
+      out[displayIndex] = {
+        agentNativeWei: agentWei,
+        safeNativeWei: safeNWei,
+        safeBondWei: safeBWei,
+      };
+    }),
+  );
+  return { byDisplay: out, errorsByDisplay };
 }
 
 /** Collect status inputs without assembling the legacy mega-response. */
@@ -93,8 +240,17 @@ export async function gatherGatheredStatusRaw(
   status: StatusGatherConfig | undefined,
 ): Promise<GatheredStatusRaw> {
   const shutdownState = store.getShutdownState();
-  const activityCounts = store.getOwnActivityCounts();
-  const recentActivity = store.getRecentOwnActivity(12);
+  const activityCounts = store.getActivityCountsByKind();
+  const recentActivity = store.getRecentActivityEvents(12).map((row) => ({
+    id: row.id,
+    ts: row.ts,
+    kind: row.kind,
+    requestId: row.requestId,
+    serviceIndex: row.serviceIndex,
+    txHash: row.txHash,
+    specKind: row.specKind,
+    outcome: row.outcome,
+  }));
   const lastRewardClaimTickAt = store.getConfigValue('last_reward_claim_tick_at');
   const daily = resolveMasterDailyEstimateWei(
     status?.masterEthDailyEstimateWei,
@@ -123,6 +279,9 @@ export async function gatherGatheredStatusRaw(
     pollIntervalMs: status?.pollIntervalMs ?? 5000,
     masterDailyEstimateWei: daily.toString(),
     portfolioV0,
+    serviceBalances: {},
+    pendingByService: {},
+    claimedByService: store.getClaimedRewardsByService(),
   };
 
   if (!status) {
@@ -196,9 +355,30 @@ export async function gatherGatheredStatusRaw(
     const pr = await sumPendingStakingRewards(status.rpcUrl, status.network, fleet);
     if ('sum' in pr) {
       raw.pendingStakingRewardsWei = pr.sum;
+      raw.pendingByService = pr.pendingByService;
       if (pr.nextCheckpointAt) raw.nextCheckpointAt = pr.nextCheckpointAt;
     } else {
       raw.pendingRewardsError = pr.error;
+    }
+  }
+
+  if (fleet) {
+    const per: Record<
+      number,
+      { counts: Record<string, number>; lastEventAt: string | null }
+    > = {};
+    for (const svc of fleet.services) {
+      const di = displayFleetServiceIndex(svc);
+      per[di] = {
+        counts: store.getActivityCountsForService(di),
+        lastEventAt: store.getLastEventAtForService(di),
+      };
+    }
+    raw.perServiceActivity = per;
+    const bal = await gatherServiceBalances(store, client, fleet, chainCfg);
+    raw.serviceBalances = bal.byDisplay;
+    if (Object.keys(bal.errorsByDisplay).length > 0) {
+      raw.serviceBalanceErrors = bal.errorsByDisplay;
     }
   }
 

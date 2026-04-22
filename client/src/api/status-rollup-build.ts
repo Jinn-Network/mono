@@ -5,6 +5,11 @@
  */
 
 import type { GatheredStatusRaw } from './status-build.js';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+let versionCommitCache: { version: string; commit: string } | null = null;
 
 export interface StatusRollupV1Response {
   schemaVersion: 1;
@@ -14,6 +19,8 @@ export interface StatusRollupV1Response {
     startedAt: string | null;
     phase: string;
     network: 'testnet' | 'mainnet';
+    version?: string;
+    commit?: string;
   };
   rpc: { ok: boolean; chainId: number; blockNumber: number; error?: string };
   fleet: { size: number; complete: number; needsAttention: number };
@@ -52,7 +59,27 @@ function buildExitRollup(
   return { blocking: false, hint: null };
 }
 
+function readVersionCommit(): { version: string; commit: string } {
+  if (versionCommitCache) {
+    return versionCommitCache;
+  }
+  const here = dirname(fileURLToPath(import.meta.url));
+  let version = '0.0.0';
+  let commit = 'unknown';
+  try {
+    const pkg = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf-8')) as { version?: string };
+    version = pkg.version ?? version;
+  } catch { /* */ }
+  try {
+    const meta = JSON.parse(readFileSync(join(here, '..', 'build-meta.json'), 'utf-8')) as { commit?: string };
+    commit = meta.commit ?? commit;
+  } catch { /* */ }
+  versionCommitCache = { version, commit };
+  return versionCommitCache;
+}
+
 export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Response {
+  const { version, commit } = readVersionCommit();
   const services = raw.fleet?.services ?? [];
   const complete = services.filter(s => s.step === 'complete').length;
   const needsAttention = services.length - complete;
@@ -72,6 +99,8 @@ export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Re
       startedAt: null,
       phase,
       network,
+      version,
+      commit,
     },
     rpc: {
       ok: raw.rpc.ok,

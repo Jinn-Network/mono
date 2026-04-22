@@ -57,6 +57,12 @@ export interface StolasClaimTickResult {
   failedRecoverable: number;
   /** Non-recoverable send errors, bad/missing receipts, etc. */
   failedPermanent: number;
+  claims: Array<{
+    serviceId: number;
+    stakingProxy: string;
+    txHash: string;
+    amountWei: string;
+  }>;
 }
 
 /**
@@ -86,6 +92,7 @@ export async function tickStolasDistributorClaims(
     claimAttempted: 0,
     failedRecoverable: 0,
     failedPermanent: 0,
+    claims: [],
   };
 
   if (options.stakingMode !== 'standard') {
@@ -134,6 +141,12 @@ export async function tickStolasDistributorClaims(
         continue;
       }
       result.submitted += 1;
+      result.claims.push({
+        serviceId,
+        stakingProxy: getAddress(stakingProxy),
+        txHash: String(txHash),
+        amountWei: pending.toString(),
+      });
       console.log(
         `[reward-claim] Submitted distributor.claim for service ${serviceId} (~${pending.toString()} wei pending before tx)`,
       );

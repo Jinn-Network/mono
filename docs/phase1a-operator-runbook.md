@@ -223,6 +223,11 @@ The client will:
 5. Claim deliveries, create evaluation jobs
 6. Activity is tracked by the JinnRouter and feeds into staking rewards
 
+When healthy, daemon progress is visible through:
+- `jinn status --human` (rollup health + fleet summary)
+- `jinn logs --follow --human` (live lifecycle stream with timestamps)
+- Dashboard at `http://127.0.0.1:7331/` (in-flight intents, verdicts, earnings, fleet, and next actions)
+
 ### New env var
 
 | Env var | Purpose |

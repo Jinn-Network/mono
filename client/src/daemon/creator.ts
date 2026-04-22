@@ -3,6 +3,7 @@ import type { DesiredState, RequestId } from '../types/index.js';
 import type { Store } from '../store/store.js';
 import { TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
+import { emitEvent } from '../observability/emit-event.js';
 
 export interface ActiveAttempt {
   desiredState: DesiredState;
@@ -97,6 +98,13 @@ export class CreatorLoop {
           status: 'pending',
         });
         this.store.recordOwnActivity(requestId, 'created');
+        emitEvent(this.store, {
+          kind: 'intent_posted',
+          requestId,
+          specKind: state.spec?.kind,
+          outcome: 'ok',
+          detail: `Posted intent for desired state ${state.id}`,
+        }, 'creator');
         this.store.setConfigValue(cacheKey, requestId);
         return requestId;
       } catch (err) {
@@ -114,6 +122,11 @@ export class CreatorLoop {
         await this.tick();
       } catch (err) {
         console.error('[creator] Error:', err);
+        emitEvent(this.store, {
+          kind: 'tick_error',
+          outcome: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        }, 'creator');
         delayMs = isRecoverableTransactionError(err) ? 12_000 : 8000;
       }
       await Promise.race([

@@ -249,6 +249,9 @@ docker run --rm ghcr.io/jinn-network/client:latest version --json
 | `jinn history` | Recent protocol activity |
 | `jinn rewards` | Earned vs claimed per service |
 | `jinn logs` | Structured event stream |
+| `jinn logs --follow` | Live tail of lifecycle events |
+
+Dashboard: when `jinn run` is active, open [`http://127.0.0.1:7331/`](http://127.0.0.1:7331/) for live in-flight intents, verdicts, earnings, fleet balances, recent activity, and next actions.
 
 ### Actions
 

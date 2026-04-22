@@ -15,6 +15,7 @@ import type { X402Config } from '../x402/handler.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
+import { emitEvent } from '../observability/emit-event.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -106,7 +107,7 @@ export class Daemon {
       config.creatorSafeAddress,
     );
     this.restorerLoop = new RestorerLoop(this.adapter, config.runner, this.store, '/tmp', 300000, `http://127.0.0.1:${this.apiPort}`);
-    this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter);
+    this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter, this.store);
 
     if (config.restorationEngine) {
       this.restorationEngine = new RestorationEngine({
@@ -133,6 +134,7 @@ export class Daemon {
     await this.adapter.initialize();
     this.store.setShutdownState('running');
     this.cachedShutdownState = 'running';
+    emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 
     // Start HTTP API server
     this.apiServer = await startApiServer({
@@ -156,6 +158,11 @@ export class Daemon {
         await this.backfillFromSubgraph({ url: subgraphUrl });
       } catch (err) {
         console.error('[daemon] Subgraph backfill failed (non-fatal):', err instanceof Error ? err.message : err);
+        emitEvent(this.store, {
+          kind: 'tick_error',
+          outcome: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        }, 'daemon');
       }
     }
 
@@ -230,6 +237,7 @@ export class Daemon {
 
     this.store.setShutdownState('clean');
     this.cachedShutdownState = 'clean';
+    emitEvent(this.store, { kind: 'shutdown', outcome: 'ok', detail: 'Daemon stopped cleanly' }, 'daemon');
     this.store.close();
   }
 
@@ -294,9 +302,23 @@ export class Daemon {
         // would serialise all intent processing into a single queue.
         engine.process(request.requestId).catch(err => {
           console.error(`[daemon] engine.process failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
+          emitEvent(this.store, {
+            kind: 'tick_error',
+            requestId: request.requestId,
+            specKind,
+            outcome: 'failed',
+            detail: err instanceof Error ? err.message : String(err),
+          }, 'daemon');
         });
       } catch (err) {
         console.error(`[daemon] engine.observe failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
+        emitEvent(this.store, {
+          kind: 'tick_error',
+          requestId: request.requestId,
+          specKind,
+          outcome: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        }, 'daemon');
       }
     }
   }

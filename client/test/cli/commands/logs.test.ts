@@ -1,17 +1,36 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
 
+const eventRows = [
+  {
+    id: 1,
+    ts: '2026-04-14T12:00:00.000Z',
+    kind: 'delivered' as const,
+    requestId: 'req_2' as const,
+    serviceIndex: null as const,
+    txHash: null as const,
+    specKind: null as const,
+    outcome: 'ok' as const,
+    detail: null as const,
+  },
+  {
+    id: 2,
+    ts: '2026-04-14T11:00:00.000Z',
+    kind: 'created' as const,
+    requestId: 'req_1' as const,
+    serviceIndex: null as const,
+    txHash: null as const,
+    specKind: null as const,
+    outcome: 'ok' as const,
+    detail: null as const,
+  },
+];
+
 vi.mock('../../../src/store/store.js', () => ({
   Store: class {
     constructor(_path: string) {}
-    getRecentOwnActivity(limit: number) {
-      const all = [
-        { requestId: 'req_1', role: 'created' },
-        { requestId: 'req_2', role: 'delivered' },
-      ];
-      return all.slice(0, limit);
-    }
-    close() {}
+    getRecentActivityEvents = (limit: number) => eventRows.slice(0, limit).sort((a, b) => a.id - b.id);
+    getActivityEventsAfterId = () => [] as never[];
   },
 }));
 
@@ -54,8 +73,8 @@ describe('logs command', () => {
     };
     await cmd.run(ctx);
     expect(writes).toHaveLength(1);
-    expect(writes[0].endsWith('\n')).toBe(true);
-    const parsed = JSON.parse(writes[0]);
+    expect(writes[0]!.endsWith('\n')).toBe(true);
+    const parsed = JSON.parse(writes[0]!);
     expect(parsed.schemaVersion).toBe(1);
     expect(Array.isArray(parsed.events)).toBe(true);
     expect(parsed.events).toHaveLength(2);
@@ -80,7 +99,7 @@ describe('logs command', () => {
     };
     await cmd.run(ctx);
     expect(writes).toHaveLength(1);
-    const parsed = JSON.parse(writes[0]);
+    const parsed = JSON.parse(writes[0]!);
     expect(parsed.events).toHaveLength(1);
   });
 
@@ -89,8 +108,8 @@ describe('logs command', () => {
     vi.doMock('../../../src/store/store.js', () => ({
       Store: class {
         constructor(_path: string) {}
-        getRecentOwnActivity() { return []; }
-        close() {}
+        getRecentActivityEvents() { return []; }
+        getActivityEventsAfterId() { return []; }
       },
     }));
     const { default: cmd } = await import('../../../src/cli/commands/logs.js');
@@ -104,7 +123,7 @@ describe('logs command', () => {
     };
     await cmd.run(ctx);
     expect(writes).toHaveLength(1);
-    const parsed = JSON.parse(writes[0]);
+    const parsed = JSON.parse(writes[0]!);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.events).toEqual([]);
     expect(parsed.cursor).toEqual({ next: null });
