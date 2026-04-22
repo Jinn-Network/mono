@@ -443,9 +443,16 @@ export function decodeMarketplaceRequestLogs(logs: Log[]): DecodedMarketplaceReq
       if (decoded.eventName === 'MarketplaceRequest') {
         const args = decoded.args as {
           priorityMech: string;
-          requestIds: readonly Hex[];
-          requestDatas: readonly Hex[];
+          requestIds: readonly Hex[] | undefined;
+          requestDatas: readonly Hex[] | undefined;
         };
+        if (!args.requestIds?.length || !args.requestDatas?.length) {
+          console.error('[mech] MarketplaceRequest decode missing requestIds/requestDatas', {
+            hasRequestIds: args.requestIds != null,
+            hasRequestDatas: args.requestDatas != null,
+          });
+          continue;
+        }
         for (let i = 0; i < args.requestIds.length; i++) {
           results.push({
             requestId: String(args.requestIds[i]),

@@ -1,7 +1,8 @@
 import { privateKeyToAccount } from 'viem/accounts';
-import { keccak256, stringToHex } from 'viem';
 import type { PredictionSubmissionManifest, PredictionV0Intent } from '../../../../src/types/prediction.js';
 import type { DesiredState } from '../../../../src/types/desired-state.js';
+import { signCanonical } from '../../../../src/restorer/engine/signing.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
 
 export function makeValidIntent(overrides: Partial<PredictionV0Intent> = {}): PredictionV0Intent {
   return {
@@ -47,15 +48,17 @@ export async function makeSignedManifest(overrides: {
       modelId: 'spot-carry.v1',
     },
   };
-  const canonical = JSON.stringify(base);
-  const hash = keccak256(stringToHex(canonical));
-  // account.sign({hash}) is raw ECDSA (no EIP-191). recoverAddress in
-  // checkManifestSignature must use the same semantic.
-  const sig = overrides.corruptSignature ? ('0x' + 'a'.repeat(130)) as `0x${string}` : await account.sign({ hash });
-  return { ...base, signature: { algo: 'secp256k1' as const, signer: account.address, hash, sig } };
+  const s = await signCanonical(base, pk, account.address);
+  const sig = overrides.corruptSignature ? (('0x' + 'a'.repeat(130)) as `0x${string}`) : s.sig;
+  return { ...base, signature: { algo: 'secp256k1' as const, signer: account.address, hash: s.hash, sig } };
 }
 
-export function makeEvalDesiredState(manifest: PredictionSubmissionManifest, intent: PredictionV0Intent): DesiredState {
+export function makeEvalDesiredState(
+  manifest: PredictionSubmissionManifest | Record<string, unknown>,
+  intent: PredictionV0Intent,
+  options?: { omitRestorationIntentCid?: boolean },
+): DesiredState {
+  const m = manifest as { intent: { cid: string } };
   return {
     id: 'eval',
     description: 'evaluate',
@@ -64,6 +67,11 @@ export function makeEvalDesiredState(manifest: PredictionSubmissionManifest, int
     window: intent.window,
     spec: intent.spec,
     eligibility: intent.eligibility,
-    context: { restorationResult: JSON.stringify(manifest) },
+    context: {
+      restorationResult: JSON.stringify(manifest),
+      ...(options?.omitRestorationIntentCid
+        ? {}
+        : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: m.intent.cid }),
+    },
   } as unknown as DesiredState;
 }

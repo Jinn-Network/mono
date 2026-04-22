@@ -2,13 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionV0Evaluator } from '../../../../src/restorer/impls/prediction-v0-evaluator/index.js';
+import { signCanonical } from '../../../../src/restorer/engine/signing.js';
 import { makeValidIntent, makeSignedManifest, makeEvalDesiredState } from './test-helpers.js';
 
 function makeCtx(intent: any, deps: any) {
   const tmp = mkdtempSync(join(tmpdir(), 'pred-eval-'));
   return {
     intent,
+    intentCid: 'intent-cid',
     implStateDir: tmp,
     workingDir: tmp,
     log: () => {},
@@ -26,7 +29,6 @@ function spanningDeps(priceAtResolve: string) {
       nextRound: { roundId: 2n, answer: 0n, startedAt: 4_500_001, updatedAt: 4_500_001, answeredInRound: 2n, decimals: 8 },
       spanning: true,
     }),
-    expectedIntentCid: 'intent-cid',
   };
 }
 
@@ -50,7 +52,9 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('accepts the engine outer manifest produced by prediction restorations', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
-    const outerManifest = {
+    const pk = ('0x' + '1'.repeat(64)) as `0x${string}`;
+    const account = privateKeyToAccount(pk);
+    const unsignedOuter: Record<string, unknown> = {
       schemaVersion: 'portfolio.v0.manifest.v1',
       generatedAt: manifest.generatedAt,
       intent: manifest.intent,
@@ -61,9 +65,13 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
       fills: [],
       gating: manifest.prediction,
       artifacts: [],
-      signature: manifest.signature,
     };
-    const evalIntent = makeEvalDesiredState(outerManifest as any, intent);
+    const s = await signCanonical(unsignedOuter, pk, account.address);
+    const outerManifest = {
+      ...unsignedOuter,
+      signature: { algo: 'secp256k1' as const, signer: account.address, hash: s.hash, sig: s.sig },
+    };
+    const evalIntent = makeEvalDesiredState(outerManifest, intent);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
@@ -95,6 +103,15 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     expect(out.gating.score).toBe('0');
   });
 
+  it('INDETERMINATE when context.restorationIntentCid is missing (legacy eval payload)', async () => {
+    const intent = makeValidIntent();
+    const manifest = await makeSignedManifest({ intentCid: 'intent-cid' });
+    const evalIntent = makeEvalDesiredState(manifest, intent, { omitRestorationIntentCid: true });
+    const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
+    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    expect(out.gating.verdict).toBe('INDETERMINATE');
+  });
+
   it('INDETERMINATE when oracle has no spanning round', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ intentCid: 'intent-cid' });
@@ -106,7 +123,6 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
         nextRound: null,
         spanning: false,
       }),
-      expectedIntentCid: 'intent-cid',
     }));
     expect(out.gating.verdict).toBe('INDETERMINATE');
   });

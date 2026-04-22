@@ -36,6 +36,7 @@ import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { computeEvidenceSimHash, type EvidenceCheckpointV1 } from '../../earning/evidence-simhash.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -185,6 +186,8 @@ export class MechAdapter implements ExecutionAdapter {
     const restorationPayload = buildDesiredStatePayload(restorationState);
     const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, restorationPayload);
     const restorationDataHex = cidToDigestHex(restorationCid);
+    const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
+    const restorationIntentCid = `f01551220${digestNo0x}`;
 
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
@@ -206,9 +209,15 @@ export class MechAdapter implements ExecutionAdapter {
 
     const restorationRequestId = restorationRequestIds[0];
 
-    // Store for evaluation creation after delivery is claimed
-    this.pendingEvaluations.set(restorationRequestId, state);
-    this.originalStates.set(restorationRequestId, { ...state, type: 'restoration' });
+    // Store for evaluation creation after delivery is claimed. The evaluation
+    // job’s IPFS CID is different from the restoration intended-state CID; evaluators
+    // need the latter to verify submission.intent.cid (see context.restorationIntentCid).
+    const stateForEval: DesiredState = {
+      ...state,
+      context: { ...(state.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: restorationIntentCid },
+    };
+    this.pendingEvaluations.set(restorationRequestId, stateForEval);
+    this.originalStates.set(restorationRequestId, { ...stateForEval, type: 'restoration' });
 
     return restorationRequestId;
   }
@@ -314,8 +323,15 @@ export class MechAdapter implements ExecutionAdapter {
             const iCreatedEvaluation = this.pendingEvaluationClaims.has(requestId);
             if (!iDelivered && !iCreatedRestoration && !iCreatedEvaluation) continue;
 
-            // (a) If I delivered, claim delivery → msg.sender = my Safe → correct role credit.
-            if (iDelivered) {
+            // (a) Claim delivery on the router so `restorationDeliveryClaimed[requestId]` is set
+            // (required before createEvaluationJob can run).
+            // - Same-operator: we delivered (iDelivered) → our Safe claims and gets counter credit.
+            // - Cross-operator: we created the request (iCreatedRestoration) but another mech
+            //   delivered (iDelivered is false) → the creator Safe must still call claimDelivery
+            //   so the router flips `restorationDeliveryClaimed` for this requestId. Otherwise
+            //   tryCreateEvaluationJob never unblocks. See JinnRouter.claimDelivery in contracts.
+            const shouldClaimDelivery = iDelivered || (iCreatedRestoration && !iDelivered);
+            if (shouldClaimDelivery) {
               try {
                 const variant = this.config.routerClaimDeliveryVariant;
                 let evidenceHash: `0x${string}` | undefined;
@@ -487,8 +503,10 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private async verifyRestorationClaimed(requestId: `0x${string}`): Promise<boolean> {
-    const MAX_POLLS = 5;
-    const POLL_DELAY_MS = 2_000;
+    // RPC / fork can lag right after claimDelivery; give more room than 5×2s so
+    // tryCreateEvaluationJob succeeds on the first watchForDeliveries pass when possible.
+    const MAX_POLLS = 12;
+    const POLL_DELAY_MS = 1_500;
     const abi = [{
       type: 'function' as const,
       name: 'restorationDeliveryClaimed' as const,
