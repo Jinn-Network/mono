@@ -143,6 +143,18 @@ describe('loadConfig RPC override handling', () => {
     expect(config.stakingMode).toBe('standard');
   });
 
+  it('defaults testnet to Base Sepolia rpcUrl', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.rpcUrl).toBe('https://sepolia.base.org');
+  });
+
   it('accepts self-bond stakingMode from env', () => {
     process.env['JINN_STAKING_MODE'] = 'self-bond';
     const config = loadConfig();

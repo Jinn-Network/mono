@@ -38,6 +38,7 @@ import { type MechAdapterConfig, MECH_MARKETPLACE_ABI } from './types.js';
 import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
+import { formatRpcError } from '../../rpc-error-context.js';
 import { computeEvidenceSimHash, type EvidenceCheckpointV1 } from '../../earning/evidence-simhash.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
 
@@ -86,7 +87,14 @@ export class MechAdapter implements ExecutionAdapter {
       async () => this.publicClient.getBlockNumber(),
       {
         onRetry: ({ attempt, message }) => {
-          console.error(`[mech] getBlockNumber retry ${attempt}: ${message}`);
+          console.error(
+            `[mech] getBlockNumber retry ${attempt}: ` +
+            formatRpcError(message, {
+              operation: 'getBlockNumber',
+              chain: this.config.chainId === 84532 ? 'base-sepolia' : 'base',
+              rpcUrl: this.config.rpcUrl,
+            }),
+          );
         },
       },
     );
@@ -244,7 +252,7 @@ export class MechAdapter implements ExecutionAdapter {
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
 
-    const restorationRequestIds = await submitRestorationJob(
+    const restorationJob = await submitRestorationJob(
       this.publicClient,
       this.walletClient,
       this.config.safeAddress,
@@ -254,9 +262,14 @@ export class MechAdapter implements ExecutionAdapter {
       deliveryRate,
       maxTimeout,
     );
+    const restorationRequestIds = restorationJob.requestIds;
 
     if (restorationRequestIds.length === 0) {
-      throw new PermanentError('No request IDs returned from router');
+      throw new PermanentError(
+        'No request IDs returned from router ' +
+        `(tx=${restorationJob.txHash}, router=${this.config.routerAddress}, safe=${this.config.safeAddress}, ` +
+        `mech=${this.config.mechContractAddress}, receiptLogs=${restorationJob.receiptLogCount}, chainId=${this.config.chainId})`,
+      );
     }
 
     const restorationRequestId = restorationRequestIds[0];
@@ -315,7 +328,13 @@ export class MechAdapter implements ExecutionAdapter {
           }
         }
       } catch (err) {
-        console.error('[mech] Error polling for requests:', err);
+        console.error('[mech] Error polling for requests:', formatRpcError(err, {
+          operation: 'pollMarketplaceRequests',
+          chain: this.config.chainId === 84532 ? 'base-sepolia' : 'base',
+          rpcUrl: this.config.rpcUrl,
+          contract: this.config.mechMarketplaceAddress,
+          fromBlock: this.requestBlockCursor + 1n,
+        }));
       }
 
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
@@ -478,7 +497,13 @@ export class MechAdapter implements ExecutionAdapter {
           await this.tryCreateEvaluationJob(rid);
         }
       } catch (err) {
-        console.error('[mech] Error polling for deliveries:', err);
+        console.error('[mech] Error polling for deliveries:', formatRpcError(err, {
+          operation: 'pollDeliveries',
+          chain: this.config.chainId === 84532 ? 'base-sepolia' : 'base',
+          rpcUrl: this.config.rpcUrl,
+          contract: this.config.mechContractAddress,
+          fromBlock: this.deliveryBlockCursor + 1n,
+        }));
       }
 
       // Persist block cursor for crash recovery

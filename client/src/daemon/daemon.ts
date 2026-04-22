@@ -133,6 +133,7 @@ export class Daemon {
   async start(): Promise<void> {
     await this.adapter.initialize();
     this.store.setShutdownState('running');
+    this.store.setDaemonStartedAt(new Date().toISOString());
     this.cachedShutdownState = 'running';
     emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 

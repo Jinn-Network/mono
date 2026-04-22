@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import auth from '../../../src/cli/commands/auth.js';
 import type { CommandContext } from '../../../src/cli/command.js';
@@ -58,6 +61,33 @@ describe('auth command', () => {
       // Not authenticated on non-TTY: invalid_invocation
       expect(parsed.code).toBe('invalid_invocation');
       expect(exits).toEqual([11]);
+    }
+  });
+
+  it('persists a testnet rpcUrl when JINN_NETWORK=testnet and config is fresh', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-config-'));
+    const configPath = join(dir, 'config.json');
+    const prev = process.env.JINN_NETWORK;
+    process.env.JINN_NETWORK = 'testnet';
+    try {
+      const { ctx } = makeCtx({
+        argv: ['--mode', 'bare', '--config', configPath],
+        stdoutIsTty: false,
+      });
+      await auth.run(ctx);
+      const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+      expect(persisted).toMatchObject({
+        network: 'testnet',
+        rpcUrl: 'https://sepolia.base.org',
+        runtimeMode: 'bare',
+      });
+    } finally {
+      if (prev === undefined) {
+        delete process.env.JINN_NETWORK;
+      } else {
+        process.env.JINN_NETWORK = prev;
+      }
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

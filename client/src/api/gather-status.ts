@@ -240,6 +240,7 @@ export async function gatherGatheredStatusRaw(
   status: StatusGatherConfig | undefined,
 ): Promise<GatheredStatusRaw> {
   const shutdownState = store.getShutdownState();
+  const daemonStartedAt = store.getDaemonStartedAt();
   const activityCounts = store.getActivityCountsByKind();
   const recentActivity = store.getRecentActivityEvents(12).map((row) => ({
     id: row.id,
@@ -267,6 +268,7 @@ export async function gatherGatheredStatusRaw(
 
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
+    daemonStartedAt,
     dbPath: store.path,
     earningDir: status?.earningDir,
     activityCounts,

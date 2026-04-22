@@ -79,4 +79,14 @@ describe('assembleStatusRollupV1', () => {
     const parsed = assembleStatusRollupV1(raw);
     expect(parsed.exit.blocking).toBe(false);
   });
+
+  it('low master ETH is a warning hint, not a blocking exit', () => {
+    const raw = makeRaw();
+    raw.fleet!.services = raw.fleet!.services.map(s => ({ ...s, step: 'complete' as const }));
+    raw.minMasterEthWei = '100';
+    raw.master.balanceWei = '1';
+    const parsed = assembleStatusRollupV1(raw);
+    expect(parsed.exit.blocking).toBe(false);
+    expect(parsed.exit.hint).toContain('runway is low');
+  });
 });

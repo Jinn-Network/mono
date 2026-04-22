@@ -165,6 +165,15 @@ export class Store {
     return row?.value ?? null;
   }
 
+  setDaemonStartedAt(value: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run('daemon_started_at', value);
+  }
+
+  getDaemonStartedAt(): string | null {
+    const row = this.db.prepare('SELECT value FROM config WHERE key = ?').get('daemon_started_at') as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
   /** Generic config row (e.g. last_reward_claim_tick_at). */
   getConfigValue(key: string): string | null {
     const row = this.db.prepare('SELECT value FROM config WHERE key = ?').get(key) as { value: string } | undefined;

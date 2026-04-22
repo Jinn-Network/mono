@@ -18,6 +18,7 @@ export interface GatheredStatusRaw {
   /** sqlite_only: only SQLite-backed fields (e2e / API without fleet context). */
   hintsScope?: StatusHintsScope;
   shutdownState: string | null;
+  daemonStartedAt?: string | null;
   dbPath: string;
   earningDir?: string;
   activityCounts: Record<string, number>;
@@ -65,6 +66,7 @@ export interface StatusV1Response {
   statusMode: 'full' | 'sqlite_only';
   daemon: {
     shutdownState: string | null;
+    startedAt: string | null;
     dbPath: string;
     timestamp: string;
   };
@@ -245,7 +247,7 @@ function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fl
     const excess = bal > min ? bal - min : 0n;
     const days = excess / daily;
     if (days < 3n && raw.rpc.ok) {
-      actions.push('Master ETH runway is low — consider topping up the master wallet.');
+      actions.push('Master ETH runway is low; top up the master wallet soon.');
     }
   }
 
@@ -276,6 +278,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     statusMode: mode,
     daemon: {
       shutdownState: raw.shutdownState,
+      startedAt: raw.daemonStartedAt ?? null,
       dbPath: raw.dbPath,
       timestamp: new Date().toISOString(),
     },

@@ -6,6 +6,8 @@ const runBootstrapMock = vi.fn();
 const runDoctorMock = vi.fn();
 const loadConfigMock = vi.fn();
 const mainMock = vi.fn();
+const checkRpcNetworkMock = vi.fn();
+const checkApiPortAvailableMock = vi.fn();
 
 vi.mock('../../../src/cli/commands/init.js', () => ({
   default: {
@@ -36,6 +38,16 @@ vi.mock('../../../src/cli/commands/doctor.js', () => ({
 
 vi.mock('../../../src/config.js', () => ({
   loadConfig: loadConfigMock,
+}));
+
+vi.mock('../../../src/preflight/rpc-network.js', () => ({
+  checkRpcNetwork: checkRpcNetworkMock,
+  rpcNetworkFailureHint: () => 'fix rpc',
+}));
+
+vi.mock('../../../src/preflight/api-port.js', () => ({
+  checkApiPortAvailable: checkApiPortAvailableMock,
+  apiPortFailureMessage: (r: { port: number }) => `Port ${r.port} is already in use.`,
 }));
 
 vi.mock('../../../src/main.js', () => ({
@@ -94,7 +106,9 @@ describe('quickstart command', () => {
         ctx.exit(0);
       });
 
-    loadConfigMock.mockReturnValue({ apiPort: 9555 });
+    loadConfigMock.mockReturnValue({ apiPort: 9555, network: 'testnet', rpcUrl: 'https://sepolia.base.org' });
+    checkRpcNetworkMock.mockResolvedValue({ ok: true });
+    checkApiPortAvailableMock.mockResolvedValue({ ok: true, port: 9555 });
 
     const { default: quickstart } = await import('../../../src/cli/commands/quickstart.js');
     const { ctx, writes, exits } = makeCtx(['--config', '/tmp/custom.json', '--no-daemon']);
@@ -104,6 +118,7 @@ describe('quickstart command', () => {
     await runPromise;
 
     expect(runBootstrapMock).toHaveBeenCalledTimes(2);
+    expect(checkApiPortAvailableMock).not.toHaveBeenCalled();
     expect(runBootstrapMock.mock.calls[0]?.[0]).toMatchObject({
       argv: ['--json', '--config', '/tmp/custom.json'],
       env: expect.objectContaining({ JINN_PASSWORD: 'test-password' }),
@@ -120,5 +135,21 @@ describe('quickstart command', () => {
     const payload = JSON.parse(writes[writes.length - 1] ?? '{}');
     expect(payload.status).toBe('ready');
     expect(payload.dashboardUrl).toBe('http://127.0.0.1:9555');
+  });
+
+  it('fails before bootstrap when daemon mode needs an occupied api port', async () => {
+    loadConfigMock.mockReturnValue({ apiPort: 7331, network: 'testnet', rpcUrl: 'https://sepolia.base.org' });
+    checkRpcNetworkMock.mockResolvedValue({ ok: true });
+    checkApiPortAvailableMock.mockResolvedValue({ ok: false, port: 7331, code: 'EADDRINUSE', message: 'in use' });
+
+    const { default: quickstart } = await import('../../../src/cli/commands/quickstart.js');
+    const { ctx, writes, exits } = makeCtx([]);
+    await quickstart.run(ctx);
+
+    const parsed = JSON.parse(writes[writes.length - 1] ?? '{}');
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.details).toMatchObject({ field: 'apiPort', port: 7331 });
+    expect(runBootstrapMock).not.toHaveBeenCalled();
+    expect(exits).toEqual([11]);
   });
 });

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline';
@@ -13,7 +13,7 @@ import {
   buildLoginCommand,
   type AuthContext,
 } from '../../preflight/claude-auth.js';
-import { loadConfig } from '../../config.js';
+import { ConfigLoadError, loadConfig } from '../../config.js';
 
 const CONTEXT_LABELS: Record<string, string> = {
   container: 'inside this container',
@@ -38,7 +38,16 @@ function persistRuntimeMode(mode: AuthContext, configPath: string = DEFAULT_CONF
       current = {};
     }
   }
+  const envNetwork = process.env['JINN_NETWORK'] === 'mainnet' ? 'mainnet' : 'testnet';
+  if (current['network'] === undefined) {
+    current['network'] = envNetwork;
+  }
+  const network = current['network'] === 'mainnet' ? 'mainnet' : 'testnet';
+  if (current['rpcUrl'] === undefined) {
+    current['rpcUrl'] = network === 'testnet' ? 'https://sepolia.base.org' : 'https://mainnet.base.org';
+  }
   current['runtimeMode'] = mode;
+  mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
   writeFileSync(configPath, JSON.stringify(current, null, 2) + '\n', { encoding: 'utf-8' });
 }
 
@@ -98,13 +107,26 @@ async function run(ctx: CommandContext): Promise<void> {
     typeof parsed.values.config === 'string' && parsed.values.config.length > 0
       ? parsed.values.config
       : undefined;
-  const config = loadConfig(configPath);
+  const modeFlag = typeof parsed.values.mode === 'string' ? parsed.values.mode : undefined;
+  let config: ReturnType<typeof loadConfig> | { runtimeMode?: AuthContext };
+  try {
+    config = loadConfig(configPath);
+  } catch (error) {
+    if (
+      error instanceof ConfigLoadError &&
+      error.code === 'config_file_not_found' &&
+      modeFlag !== undefined
+    ) {
+      config = {};
+    } else {
+      throw error;
+    }
+  }
 
   // ── Resolve runtime mode ─────────────────────────────────────────────────
   // Order: --mode flag > config.runtimeMode > (interactive prompt if TTY)
   // > filesystem-based auto-detect (legacy fallback).
   let runtimeMode: AuthContext | undefined;
-  const modeFlag = typeof parsed.values.mode === 'string' ? parsed.values.mode : undefined;
   if (modeFlag) {
     if (modeFlag !== 'bare' && modeFlag !== 'docker-compose' && modeFlag !== 'container') {
       emitEnvelope(

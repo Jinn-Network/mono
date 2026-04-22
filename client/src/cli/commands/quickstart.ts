@@ -10,6 +10,8 @@ import { loadConfig } from '../../config.js';
 import initCommand from './init.js';
 import bootstrapCommand from './bootstrap.js';
 import doctorCommand from './doctor.js';
+import { checkRpcNetwork, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
+import { apiPortFailureMessage, checkApiPortAvailable } from '../../preflight/api-port.js';
 
 // StringWriter to capture sub-command output
 class StringWriter {
@@ -67,6 +69,44 @@ async function run(ctx: CommandContext): Promise<void> {
   }
 
   const subEnv = { ...ctx.env, JINN_PASSWORD: password };
+  const config = loadConfig(configPath);
+
+  const rpcPreflight = await checkRpcNetwork(config);
+  if (!rpcPreflight.ok) {
+    emitEnvelope({
+      code: 'invalid_invocation',
+      message: rpcPreflight.message,
+      hint: rpcNetworkFailureHint(rpcPreflight),
+      exampleCli: 'jinn doctor --human',
+      details: {
+        field: 'rpcUrl',
+        network: rpcPreflight.network,
+        expectedChainId: rpcPreflight.expectedChainId,
+        actualChainId: rpcPreflight.actualChainId ?? null,
+        rpcHost: rpcPreflight.rpcHost,
+        reason: rpcPreflight.reason,
+      },
+    }, { writer: ctx.writer, exit: ctx.exit });
+    return;
+  }
+
+  if (!noDaemon) {
+    const portPreflight = await checkApiPortAvailable(config.apiPort);
+    if (!portPreflight.ok) {
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message: apiPortFailureMessage(portPreflight),
+        hint: 'Stop the other daemon or set JINN_API_PORT / apiPort to a free port before running quickstart.',
+        exampleCli: 'JINN_API_PORT=7332 jinn quickstart',
+        details: {
+          field: 'apiPort',
+          port: portPreflight.port,
+          reason: portPreflight.code ?? 'unavailable',
+        },
+      }, { writer: ctx.writer, exit: ctx.exit });
+      return;
+    }
+  }
 
   // ── Step 1.5: Doctor preflight ──
   // Run doctor before touching any wallet state so blocking problems (missing
@@ -223,7 +263,7 @@ async function run(ctx: CommandContext): Promise<void> {
   }
 
   // ── Step 4: Print summary ──
-  const apiPort = String(loadConfig(configPath).apiPort);
+  const apiPort = String(config.apiPort);
   const keystoreFile = join(jinnDir, 'earning', 'master_keystore.json');
   console.error('');
   if (passwordGenerated) {
