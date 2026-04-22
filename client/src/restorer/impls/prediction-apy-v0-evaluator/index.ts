@@ -4,7 +4,8 @@ import { createPublicClient, http, keccak256, stringToHex } from 'viem';
 import { base, baseSepolia, mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { PublicClient } from 'viem';
-import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../types.js';
+import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { DesiredState } from '../../../types/desired-state.js';
 import { PredictionApyV0IntentSchema, type PredictionApyVerdictManifest } from '../../../types/prediction-apy.js';
 import { twApyBpsOverWindow } from '../../../venues/aave-v3/client.js';
@@ -21,8 +22,9 @@ import { computeScore } from './score.js';
 import type { Check, Verdict } from './types.js';
 
 export interface PredictionApyV0EvaluatorConfig {
-  evaluatorPk: `0x${string}`;
-  evaluatorSafeAddress: `0x${string}`;
+  stub?: boolean;
+  evaluatorPk?: `0x${string}`;
+  evaluatorSafeAddress?: `0x${string}`;
   rpcUrl?: string;
   archiveRpcUrl?: string;
   _testDeps?: {
@@ -53,6 +55,11 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     return ctx.kind === 'prediction.apy.v0' && ctx.type === 'evaluation';
   }
 
+  async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
+    return { ready: true };
+  }
+
   async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (intent.spec?.kind !== 'prediction.apy.v0') return { ok: false, reason: 'spec.kind is not prediction.apy.v0' };
     if (intent.type !== 'evaluation') return { ok: false, reason: 'type is not evaluation' };
@@ -63,6 +70,12 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    if (this.config.stub) {
+      throw new Error('prediction-apy-v0-evaluator: stub registry cannot run evaluation (requires live daemon)');
+    }
+    if (!this.config.evaluatorPk || !this.config.evaluatorSafeAddress) {
+      throw new Error('prediction-apy-v0-evaluator: evaluatorPk and evaluatorSafeAddress are required');
+    }
     const testDeps = (ctx as RestorationContext & { _testDeps?: PredictionApyV0EvaluatorConfig['_testDeps'] })._testDeps
       ?? this.config._testDeps;
     const expectedRef = resolveExpectedRestorationIntentCid(ctx.intent, testDeps);
@@ -157,7 +170,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     const groundTruthBps = deriveGroundTruthBps(intent, twApyBps);
     const scored = computeScore(verdict, submission.prediction.predictedBps, groundTruthBps, intent.spec.metric.toleranceBps);
 
-    const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk);
+    const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
     const baseManifest: Omit<PredictionApyVerdictManifest, 'signature'> = {
       schemaVersion: 'prediction.apy.v0.verdict.v1',
       generatedAt: Date.now(),

@@ -16,14 +16,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
 import { RestorerImplRegistry } from '../restorer/engine/registry.js';
-import { PredictionV0BaselineImpl } from '../restorer/impls/prediction-v0-baseline/index.js';
-import { PredictionV0Evaluator } from '../restorer/impls/prediction-v0-evaluator/index.js';
-import { PredictionApyV0BaselineImpl } from '../restorer/impls/prediction-apy-v0-baseline/index.js';
-import { PredictionApyV0Evaluator } from '../restorer/impls/prediction-apy-v0-evaluator/index.js';
-import { ClaudeMcpHyperliquidImpl } from '../restorer/impls/claude-mcp-hyperliquid/index.js';
-import { ClaudeMcpPredictionImpl } from '../restorer/impls/claude-mcp-prediction/index.js';
-import { ClaudeMcpPredictionApyImpl } from '../restorer/impls/claude-mcp-prediction-apy/index.js';
-import { PortfolioV0Evaluator } from '../restorer/impls/portfolio-v0-evaluator/index.js';
+import { buildRestorerImpls } from '../restorer/impls/index.js';
 import type { JinnConfig } from '../config.js';
 
 /**
@@ -45,11 +38,9 @@ export function resolveConfigPath(explicit?: string): string {
 }
 
 /**
- * Construct the same impl registry main.ts uses, populated with the subset
- * of impls that can answer `isReady` / `onEnable` without live chain/runner
- * dependencies. Evaluators and the legacy-claude impl are omitted because
- * they don't expose enable-level UX (legacy-claude is always-on; evaluators
- * dispatch by type='evaluation' rather than by kind).
+ * Uses {@link buildRestorerImpls} with `stub: true` and no runner (no
+ * `legacy-claude` — requires the daemon process + Claude runner).
+ * Honest readiness for stub is refined in 7ee.2.
  */
 export function buildIntentsCliRegistry(config: JinnConfig): RestorerImplRegistry {
   const registry = new RestorerImplRegistry({
@@ -58,38 +49,15 @@ export function buildIntentsCliRegistry(config: JinnConfig): RestorerImplRegistr
     disabled: resolveEffectiveDisabled(config),
   });
 
-  registry.register(new PredictionV0BaselineImpl({ rpcUrl: config.rpcUrl }));
-  registry.register(new PredictionV0Evaluator({
-    evaluatorPk: '0x' + '00'.repeat(32) as `0x${string}`,
-    evaluatorSafeAddress: '0x0000000000000000000000000000000000000000',
-    rpcUrl: config.rpcUrl,
-  }));
-  registry.register(new PredictionApyV0BaselineImpl({
+  for (const impl of buildRestorerImpls({
+    stub: true,
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
-  }));
-  registry.register(new PredictionApyV0Evaluator({
-    evaluatorPk: '0x' + '00'.repeat(32) as `0x${string}`,
-    evaluatorSafeAddress: '0x0000000000000000000000000000000000000000',
-    rpcUrl: config.rpcUrl,
-    archiveRpcUrl: config.archiveRpcUrl,
-  }));
-  registry.register(new ClaudeMcpHyperliquidImpl({
     claudePath: config.claudePath,
     claudeModel: config.claudeModel,
-  }));
-  registry.register(new ClaudeMcpPredictionImpl({
-    claudePath: config.claudePath,
-    claudeModel: config.claudeModel,
-    rpcUrl: config.rpcUrl,
-  }));
-  registry.register(new ClaudeMcpPredictionApyImpl({
-    claudePath: config.claudePath,
-    claudeModel: config.claudeModel,
-    rpcUrl: config.rpcUrl,
-    archiveRpcUrl: config.archiveRpcUrl,
-  }));
-  registry.register(new PortfolioV0Evaluator());
+  })) {
+    registry.register(impl);
+  }
 
   return registry;
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   resolvePredictionV0Template,
   isCurrentSentinel,
+  predictionV0TemplateNeedsReadCurrent,
 } from '../../src/intents/prediction-v0-template.js';
 
 const validTemplate = () => ({
@@ -46,6 +47,24 @@ describe('isCurrentSentinel', () => {
 });
 
 describe('resolvePredictionV0Template', () => {
+  it('rejects current[±…] threshold without readCurrent', async () => {
+    const t = validTemplate();
+    await expect(resolvePredictionV0Template(t, {})).rejects.toThrow(/readCurrent is required/);
+  });
+
+  it('predictionV0TemplateNeedsReadCurrent is true for current sentinel, false for literal threshold', () => {
+    const base = validTemplate();
+    expect(predictionV0TemplateNeedsReadCurrent(base)).toBe(true);
+    const literal = {
+      ...base,
+      spec: {
+        ...base.spec,
+        question: { ...base.spec.question, threshold: '3500' },
+      },
+    };
+    expect(predictionV0TemplateNeedsReadCurrent(literal)).toBe(false);
+  });
+
   it('fills startTs=0 with now-relative values and maintains refinements', async () => {
     const before = Date.now();
     const readCurrent = vi.fn(async () => '2300');

@@ -20,6 +20,7 @@
  */
 
 import { writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -32,6 +33,7 @@ import type {
   EnableResult,
   IntentEnableMetadata,
 } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { DesiredState } from '../../../types/desired-state.js';
 import type { RationaleEntry } from '../../../types/portfolio.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
@@ -77,17 +79,24 @@ export interface ClaudeMcpHyperliquidConfig {
   /** Max session wall time in ms. Default: 8 min */
   sessionMaxMs?: number;
   /**
-   * Impl state directory root — used by `isReady` and `onEnable` to locate
-   * the api-wallet file outside of a running intent context. Defaults to
-   * `/tmp/jinn-engine-impl-state/claude-mcp-hyperliquid` to match the
-   * convention the engine uses in `main.ts`.
+   * Impl state directory — used by `isReady` and `onEnable` to locate
+   * the api-wallet file outside of a running intent context. Defaults under
+   * `~/.jinn-client/engine/impl-state/claude-mcp-hyperliquid` (see `config.engine`).
    */
   implStateDir?: string;
   /** Injected deps for testing */
   _testDeps?: TestDeps;
+  /** CLI `jinn intents` registry without a live fleet */
+  stub?: boolean;
 }
 
-const DEFAULT_IMPL_STATE_DIR = '/tmp/jinn-engine-impl-state/claude-mcp-hyperliquid';
+const DEFAULT_IMPL_STATE_DIR = join(
+  homedir(),
+  '.jinn-client',
+  'engine',
+  'impl-state',
+  'claude-mcp-hyperliquid',
+);
 
 export interface TestDeps {
   /** Mock runner — called instead of spawning Claude */
@@ -136,6 +145,7 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
   }
 
   async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
     const implStateDir = this.resolveImplStateDir();
     const wallet = loadApiWalletState(implStateDir);
     if (!wallet) {
@@ -295,6 +305,9 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    if (this.config.stub) {
+      throw new Error('claude-mcp-hyperliquid: stub registry cannot run (requires live daemon)');
+    }
     const { intent, implStateDir, workingDir, log, abort, msUntilEndTs } = ctx;
     const testDeps = this.config._testDeps;
 

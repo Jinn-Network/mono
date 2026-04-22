@@ -53,6 +53,7 @@ export interface ClaudeMcpPredictionApyConfig {
   claudePath?: string;
   sessionMaxMs?: number;
   _testDeps?: TestDeps;
+  stub?: boolean;
 }
 
 export interface TestDeps {

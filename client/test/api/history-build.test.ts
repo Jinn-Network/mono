@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { assembleHistoryV1 } from '../../src/api/history-build.js';
 import type { GatheredStatusRaw } from '../../src/api/status-build.js';
@@ -5,7 +7,7 @@ import type { GatheredStatusRaw } from '../../src/api/status-build.js';
 function makeRaw(): GatheredStatusRaw {
   return {
     shutdownState: null,
-    dbPath: '/tmp/jinn.db',
+    dbPath: join(tmpdir(), 'history-build-test.db'),
     activityCounts: { created: 2, delivered: 1 },
     recentActivity: [
       {

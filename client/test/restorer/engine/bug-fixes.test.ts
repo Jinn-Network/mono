@@ -6,6 +6,9 @@
  *   - jinn-mono-u59: takePreSnapshot resolves impl.name via registry for implStateDir
  *   - jinn-mono-cmb: session-orchestrator ignores undefined config overrides
  */
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Store } from '../../../src/store/store.js';
 import {
@@ -25,12 +28,13 @@ import {
 // ── Test scaffolding ──────────────────────────────────────────────────────────
 
 const noopRegistry: RestorerImplRegistry = { resolveImplName: () => null };
+const engTestRoot = mkdtempSync(join(tmpdir(), 're-eng-'));
 
 function makeOpts(store: Store, implRegistry?: RestorationEngineOptions['implRegistry']): RestorationEngineOptions {
   return {
     store,
     registry: noopRegistry,
-    paths: { workingDirRoot: '/tmp/jinn-engine-test/work', implStateDirRoot: '/tmp/jinn-engine-test/impl' },
+    paths: { workingDirRoot: join(engTestRoot, 'work'), implStateDirRoot: join(engTestRoot, 'impl') },
     ...(implRegistry ? { implRegistry } : {}),
   };
 }

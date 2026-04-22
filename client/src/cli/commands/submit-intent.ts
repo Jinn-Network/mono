@@ -11,8 +11,7 @@ import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { createCliExecutionContext } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { DesiredState } from '../../types/desired-state.js';
-import { resolvePredictionV0Template } from '../../intents/prediction-v0-template.js';
-import { resolvePredictionApyV0Template } from '../../intents/prediction-apy-v0-template.js';
+import { SPEC_KINDS, unknownKindMessage } from '../../intents/kinds/index.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
 
 function intentCacheKey(safe: string, intentId: string): string {
@@ -97,67 +96,57 @@ async function run(ctx: CommandContext): Promise<void> {
       );
       return;
     }
-    const kind = (raw['spec'] as any)?.kind;
-    if (kind === 'prediction.v0') {
-      const stub: any = { id: id!, description: description!, ...raw };
-      // Sentinel resolution: startTs=0 → now-relative, threshold="current[±N[%]]"
-      // → read Chainlink and substitute an absolute price.
-      try {
-        const parsedIntent = await resolvePredictionV0Template(stub, {
-          readCurrent: async ({ feed, venue }) => {
-            const chain = venue === 'chainlink-base' ? base : baseSepolia;
-            const rpcUrl = ctx.env[venue === 'chainlink-base' ? 'BASE_RPC_URL' : 'BASE_SEPOLIA_RPC_URL']
-              ?? (venue === 'chainlink-base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org');
-            const publicClient = createPublicClient({ chain, transport: http(rpcUrl) }) as unknown as PublicClient;
-            const reading = await readChainlinkLatest(feed, publicClient);
-            return scaleToDecimal(reading.answer, reading.decimals);
-          },
-        });
-        specOverlay = {
-          window: parsedIntent.window,
-          spec: parsedIntent.spec,
-          eligibility: parsedIntent.eligibility,
-        };
-      } catch (err) {
-        emitEnvelope(
-          {
-            code: 'invalid_invocation',
-            message: `Invalid prediction.v0 intent: ${err instanceof Error ? err.message : String(err)}`,
-            exampleCli: 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
-            details: { field: 'spec-file' },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
-      }
-    } else if (kind === 'prediction.apy.v0') {
-      const stub: any = { id: id!, description: description!, ...raw };
-      try {
-        const parsedIntent = await resolvePredictionApyV0Template(stub);
-        specOverlay = {
-          window: parsedIntent.window,
-          spec: parsedIntent.spec,
-          eligibility: parsedIntent.eligibility,
-        };
-      } catch (err) {
-        emitEnvelope(
-          {
-            code: 'invalid_invocation',
-            message: `Invalid prediction.apy.v0 intent: ${err instanceof Error ? err.message : String(err)}`,
-            exampleCli: 'jinn submit-intent --id my-apy-1 --description "..." --spec-file fixtures/prediction-apy-v0-intent.example.json --dry-run',
-            details: { field: 'spec-file' },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
-      }
-    } else {
-      // Future kinds: pass through without validation
+    const kind = (raw['spec'] as { kind?: unknown } | undefined)?.kind;
+    const kindStr = typeof kind === 'string' ? kind : undefined;
+    const specKind = kindStr !== undefined ? SPEC_KINDS[kindStr] : undefined;
+    if (!specKind) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: unknownKindMessage(kindStr),
+          exampleCli:
+            'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
+          details: { field: 'spec-file', expected: 'spec.kind must be a registered intent kind' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const stub: Record<string, unknown> = { id: id!, description: description!, ...raw };
+    try {
+      const parsedOverlay = await specKind.parseSpec(stub, {
+        readCurrent: async ({ feed, venue }) => {
+          const chain = venue === 'chainlink-base' ? base : baseSepolia;
+          const rpcUrl = ctx.env[venue === 'chainlink-base' ? 'BASE_RPC_URL' : 'BASE_SEPOLIA_RPC_URL']
+            ?? (venue === 'chainlink-base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org');
+          const publicClient = createPublicClient({ chain, transport: http(rpcUrl) }) as unknown as PublicClient;
+          const reading = await readChainlinkLatest(feed, publicClient);
+          return scaleToDecimal(reading.answer, reading.decimals);
+        },
+      });
       specOverlay = {
-        window: raw['window'] as any,
-        spec: raw['spec'] as any,
-        eligibility: raw['eligibility'] as any,
+        window: parsedOverlay.window,
+        spec: parsedOverlay.spec,
+        eligibility: parsedOverlay.eligibility,
       };
+    } catch (err) {
+      const exampleCli =
+        kindStr === 'prediction.apy.v0'
+          ? 'jinn submit-intent --id my-apy-1 --description "..." --spec-file fixtures/prediction-apy-v0-intent.example.json --dry-run'
+          : kindStr === 'portfolio.v0'
+            ? 'jinn submit-intent --id pf-1 --description "..." --spec-file <portfolio-fixture.json> --dry-run'
+            : 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run';
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `Invalid ${kindStr} intent: ${err instanceof Error ? err.message : String(err)}`,
+          exampleCli,
+          details: { field: 'spec-file' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
     }
   }
 
@@ -299,7 +288,7 @@ cached request id (local SQLite) without sending a new transaction.
 
 Options:
   --spec-file <path>  Path to a JSON file containing typed intent fields (window, spec, eligibility).
-                      Supports prediction.v0 and prediction.apy.v0 intents with full Zod validation.
+                      Supports registered kinds: portfolio.v0, prediction.v0, prediction.apy.v0 (Zod validation).
 
                       Sentinels resolved at post time:
                         window.startTs: 0              → Date.now(); endTs + resolveTs follow

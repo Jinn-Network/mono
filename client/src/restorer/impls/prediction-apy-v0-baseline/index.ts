@@ -10,6 +10,7 @@ import type {
   EnableResult,
   IntentEnableMetadata,
 } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { PublicClient } from 'viem';
 import { PredictionApyV0IntentSchema } from '../../../types/prediction-apy.js';
 import { twApyBpsOverWindow } from '../../../venues/aave-v3/client.js';
@@ -18,6 +19,7 @@ import { persistencePredict } from './strategy.js';
 export interface PredictionApyV0BaselineConfig {
   rpcUrl?: string;
   archiveRpcUrl?: string;
+  stub?: boolean;
   _testDeps?: {
     twApyBpsOverWindow?: (args: {
       windowEndTs: number;
@@ -46,6 +48,7 @@ export class PredictionApyV0BaselineImpl implements RestorerImpl {
   }
 
   async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
     return { ready: true };
   }
 
@@ -67,6 +70,9 @@ export class PredictionApyV0BaselineImpl implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    if (this.config.stub) {
+      throw new Error('prediction-apy-v0-baseline: stub registry cannot run (requires live daemon)');
+    }
     const parsed = PredictionApyV0IntentSchema.parse(ctx.intent);
     const { venue, pool, reserve } = parsed.spec.oracle;
     const { chain, chainId } = chainForVenue(venue);

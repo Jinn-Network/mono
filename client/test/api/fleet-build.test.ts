@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { assembleFleetV1 } from '../../src/api/fleet-build.js';
 import type { GatheredStatusRaw } from '../../src/api/status-build.js';
@@ -5,7 +7,7 @@ import type { GatheredStatusRaw } from '../../src/api/status-build.js';
 function makeRaw(overrides: Partial<GatheredStatusRaw> = {}): GatheredStatusRaw {
   return {
     shutdownState: 'running',
-    dbPath: '/tmp/jinn.db',
+    dbPath: join(tmpdir(), 'fleet-build-test.db'),
     activityCounts: {},
     recentActivity: [],
     lastRewardClaimTickAt: null,

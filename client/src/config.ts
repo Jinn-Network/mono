@@ -157,12 +157,30 @@ export const JinnConfigSchema = z.object({
       disabled: z.array(z.string()).optional(),
     })
     .optional(),
+
+  /**
+   * Restoration engine durable directories (per-intent work + impl state).
+   * Defaults under ~/.jinn-client/engine/. Env: JINN_ENGINE_WORKING_DIR_ROOT,
+   * JINN_ENGINE_IMPL_STATE_DIR_ROOT.
+   */
+  engine: z
+    .object({
+      workingDirRoot: z.string().optional(),
+      implStateDirRoot: z.string().optional(),
+    })
+    .optional(),
 });
 
+const DEFAULT_ENGINE = {
+  workingDirRoot: join(homedir(), '.jinn-client', 'engine', 'work'),
+  implStateDirRoot: join(homedir(), '.jinn-client', 'engine', 'impl-state'),
+} as const;
+
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and desiredStates with id always assigned. */
-export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'desiredStates'> & {
+export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'desiredStates' | 'engine'> & {
   rpcUrl: string;
   desiredStates: DesiredState[];
+  engine: { workingDirRoot: string; implStateDirRoot: string };
 };
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -262,6 +280,17 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.masterEthDailyEstimateWei = env['JINN_MASTER_ETH_DAILY_WEI'].trim();
   }
 
+  if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
+    const prev = typeof merged['engine'] === 'object' && merged['engine'] !== null
+      ? (merged['engine'] as Record<string, unknown>)
+      : {};
+    merged['engine'] = {
+      ...prev,
+      ...(env['JINN_ENGINE_WORKING_DIR_ROOT'] ? { workingDirRoot: env['JINN_ENGINE_WORKING_DIR_ROOT'] } : {}),
+      ...(env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] ? { implStateDirRoot: env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] } : {}),
+    };
+  }
+
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
@@ -329,6 +358,10 @@ export function loadConfig(configPath?: string): JinnConfig {
     rpcUrl: parsed.rpcUrl ?? defaultRpcUrl,
     // parseDesiredState assigns a UUID to any entry missing an id
     desiredStates: parsed.desiredStates.map(parseDesiredState),
+    engine: {
+      workingDirRoot: parsed.engine?.workingDirRoot ?? DEFAULT_ENGINE.workingDirRoot,
+      implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,
+    },
   };
 }
 

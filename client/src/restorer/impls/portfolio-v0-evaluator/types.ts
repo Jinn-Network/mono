@@ -24,6 +24,8 @@ export type Verdict = 'PASS' | 'FAIL' | 'REJECTED' | 'INDETERMINATE';
 // ── PortfolioV0EvaluatorConfig ────────────────────────────────────────────────
 
 export interface PortfolioV0EvaluatorConfig {
+  /** Set by {@link buildRestorerImpls} for CLI registries. */
+  stub?: boolean;
   /** Evaluator Safe multisig address (injected by daemon). */
   safeAddress?: string;
   /** Evaluator agent EOA address (injected by daemon). */

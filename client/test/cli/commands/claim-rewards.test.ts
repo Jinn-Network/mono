@@ -20,7 +20,7 @@ describe('claim-rewards command', () => {
     const { ctx, writes } = makeCtx([
       '--dry-run',
       '--config',
-      '/tmp/jinn-config-test.json',
+      '/tmp/claim-rewards-config-test.json',
       '--password-fd',
       '4',
     ]);
