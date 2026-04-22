@@ -11,6 +11,10 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   decodeMarketplaceRequestLogs: vi.fn().mockReturnValue([]),
   decodeDeliverLogs: vi.fn().mockReturnValue([]),
   callDeliverToMarketplace: vi.fn(),
+  findLatestRequestDataHexForMarketplaceRequest: vi.fn().mockResolvedValue(null),
+  findLatestDeliveryDataHexForRequest: vi.fn().mockResolvedValue(null),
+  scanRestorationJobs: vi.fn().mockResolvedValue([]),
+  scanEvaluationJobs: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock IPFS
@@ -165,6 +169,30 @@ describe('MechAdapter with JinnRouter', () => {
         restorationResult: 'restoration output',
       },
     });
+
+    await adapter.stop();
+  });
+
+  it('defers evaluation job when restoration result is not in cache and chain backfill finds nothing', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { submitEvaluationJob, findLatestDeliveryDataHexForRequest } = await import('../../../src/adapters/mech/contracts.js');
+    const { buildDesiredStatePayload } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValue(null);
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    const requestId = '0x' + 'aa'.repeat(32);
+    (adapter as any).pendingEvaluations.set(requestId, {
+      id: 'ds-1',
+      description: 'test',
+    });
+
+    await (adapter as any).tryCreateEvaluationJob(requestId);
+
+    expect(vi.mocked(buildDesiredStatePayload)).not.toHaveBeenCalled();
+    expect(submitEvaluationJob).not.toHaveBeenCalled();
 
     await adapter.stop();
   });
