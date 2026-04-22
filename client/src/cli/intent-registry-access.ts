@@ -22,6 +22,7 @@ import { PredictionApyV0BaselineImpl } from '../restorer/impls/prediction-apy-v0
 import { PredictionApyV0Evaluator } from '../restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { ClaudeMcpHyperliquidImpl } from '../restorer/impls/claude-mcp-hyperliquid/index.js';
 import { ClaudeMcpPredictionImpl } from '../restorer/impls/claude-mcp-prediction/index.js';
+import { ClaudeMcpPredictionApyImpl } from '../restorer/impls/claude-mcp-prediction-apy/index.js';
 import { PortfolioV0Evaluator } from '../restorer/impls/portfolio-v0-evaluator/index.js';
 import type { JinnConfig } from '../config.js';
 
@@ -81,6 +82,12 @@ export function buildIntentsCliRegistry(config: JinnConfig): RestorerImplRegistr
     claudePath: config.claudePath,
     claudeModel: config.claudeModel,
     rpcUrl: config.rpcUrl,
+  }));
+  registry.register(new ClaudeMcpPredictionApyImpl({
+    claudePath: config.claudePath,
+    claudeModel: config.claudeModel,
+    rpcUrl: config.rpcUrl,
+    archiveRpcUrl: config.archiveRpcUrl,
   }));
   registry.register(new PortfolioV0Evaluator());
 
