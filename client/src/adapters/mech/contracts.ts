@@ -126,11 +126,33 @@ const CLAIM_RETRY_ATTEMPTS = 6;
 const CLAIM_RETRY_DELAY_MS = 2000;
 
 const ZERO_EVIDENCE: Hex = '0x0000000000000000000000000000000000000000000000000000000000000000';
+const JINN_ROUTER_CLAIMED_ABI = [
+  {
+    name: 'claimed',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const;
 
 export interface ClaimDeliveryOptions {
   variant: 'v1' | 'v2';
   /** V2 only; ignored for V1. */
   evidenceHash?: Hex;
+}
+
+async function isDeliveryAlreadyClaimed(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  requestId: Hex,
+): Promise<boolean> {
+  return Boolean(await publicClient.readContract({
+    address: routerAddress,
+    abi: JINN_ROUTER_CLAIMED_ABI,
+    functionName: 'claimed',
+    args: [requestId],
+  }));
 }
 
 export async function claimDelivery(
@@ -141,6 +163,11 @@ export async function claimDelivery(
   requestId: Hex,
   options: ClaimDeliveryOptions,
 ): Promise<Hex> {
+  if (await isDeliveryAlreadyClaimed(publicClient, routerAddress, requestId)) {
+    console.error(`[router] claimDelivery: already claimed ${requestId}`);
+    return '0x' as Hex;
+  }
+
   const calldata =
     options.variant === 'v2'
       ? encodeFunctionData({
@@ -167,6 +194,11 @@ export async function claimDelivery(
 
       // AlreadyClaimed — idempotent, treat as success
       if (message.includes('AlreadyClaimed')) {
+        console.error(`[router] claimDelivery: already claimed ${requestId}`);
+        return '0x' as Hex;
+      }
+
+      if (await isDeliveryAlreadyClaimed(publicClient, routerAddress, requestId)) {
         console.error(`[router] claimDelivery: already claimed ${requestId}`);
         return '0x' as Hex;
       }
