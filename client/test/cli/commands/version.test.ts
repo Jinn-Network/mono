@@ -39,6 +39,7 @@ describe('version command', () => {
       testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+      testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     });
     const bond = parsed.tokens.bond as { symbol: string; address: string; decimals: number };
     expect(bond.symbol).not.toMatch(/^0x/i);

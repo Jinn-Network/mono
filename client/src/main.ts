@@ -71,6 +71,7 @@ const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN, {
   testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
   testnetMechDeploymentPath: config.testnetMechDeploymentPath,
   testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+  testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
 });
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
@@ -143,6 +144,7 @@ async function bootstrap(): Promise<{
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
     masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
     pollIntervalMs: config.pollIntervalMs,
@@ -390,9 +392,13 @@ export async function main(): Promise<DaemonStartupInfo> {
     claimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
   };
 
-  // Claim deps: only available when ClaimRegistry is deployed (optional).
-  // Address sourced from env var JINN_CLAIM_REGISTRY_ADDRESS (no chain config entry yet).
-  const claimRegistryAddress = (process.env['JINN_CLAIM_REGISTRY_ADDRESS'] ?? '') as `0x${string}` | '';
+  // Claim deps: use the network default when bundled, with env override for
+  // emergency redeploys or custom test deployments.
+  const claimRegistryAddress = (
+    process.env['JINN_CLAIM_REGISTRY_ADDRESS']
+    ?? CHAIN_CONFIG.claimRegistry
+    ?? ''
+  ) as `0x${string}` | '';
   const claimDeps = claimRegistryAddress
     ? {
         registryClient: new ClaimRegistryClient(
@@ -449,6 +455,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+      testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     },
     rewardClaim:
       config.rewardClaimIntervalMs > 0
@@ -532,5 +539,3 @@ export async function main(): Promise<DaemonStartupInfo> {
     serviceId,
   };
 }
-
-

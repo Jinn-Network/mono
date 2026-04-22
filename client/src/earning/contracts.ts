@@ -31,6 +31,7 @@ export const DEFAULT_TESTNET_ARTIFACTS = {
   mech: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),
   stolas: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
   faucet: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-testnet-faucet-baseSepolia-fast.json'),
+  claimRegistry: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-claim-registry-baseSepolia.json'),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -133,6 +134,7 @@ export interface ChainConfig {
   eoaTopupTrigger: bigint;
   safeTopupTrigger: bigint;
   jinnRouter?: string;
+  claimRegistry?: string;
   distributorAddress?: string;
   /**
    * Testnet-only JINN faucet (testnet operator onboarding). Absent on mainnet.
@@ -152,6 +154,7 @@ interface ChainConfigOverrides {
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
   testnetFaucetDeploymentPath?: string;
+  testnetClaimRegistryDeploymentPath?: string;
 }
 
 interface DeploymentArtifact {
@@ -359,6 +362,18 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     const faucetAddress = faucetArtifact.contracts?.faucet;
     if (faucetAddress) {
       resolved.jinnFaucet = faucetAddress;
+    }
+  }
+
+  const claimRegistryArtifactPath =
+    overrides.testnetClaimRegistryDeploymentPath
+    ?? process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT']
+    ?? DEFAULT_TESTNET_ARTIFACTS.claimRegistry;
+  if (claimRegistryArtifactPath && existsSync(path.resolve(claimRegistryArtifactPath))) {
+    const claimRegistryArtifact = loadArtifact(claimRegistryArtifactPath);
+    const claimRegistry = claimRegistryArtifact.contracts?.claimRegistry;
+    if (claimRegistry) {
+      resolved.claimRegistry = claimRegistry;
     }
   }
 

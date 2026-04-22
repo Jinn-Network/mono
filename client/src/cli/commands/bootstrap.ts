@@ -82,6 +82,7 @@ async function run(ctx: CommandContext): Promise<void> {
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
     pollIntervalMs: config.pollIntervalMs,
   });

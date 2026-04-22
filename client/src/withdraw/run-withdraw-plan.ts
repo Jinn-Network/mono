@@ -61,6 +61,7 @@ export function resolveWithdrawTokenAddress(
       testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+      testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     }).olasToken,
   );
 }
@@ -270,6 +271,7 @@ export async function runWithdrawPlan(options: RunWithdrawPlanOptions): Promise<
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
   });
   if (chainId !== chainConfig.chainId) {
     throw new Error(`RPC chainId ${chainId} does not match expected ${chainConfig.chainId} for ${chain}.`);

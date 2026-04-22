@@ -59,17 +59,26 @@ async function checkDeploymentLoaded(config: JinnConfig): Promise<CheckResult> {
       testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+      testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     });
     const hasMech = cfg.mechMarketplace !== '0x0000000000000000000000000000000000000000';
+    const requiresClaimRegistry = config.network === 'testnet';
+    const claimRegistryDetail = cfg.claimRegistry
+      ? ', claim registry resolved'
+      : requiresClaimRegistry
+        ? ', claim registry not configured'
+        : '';
     return {
       name: 'deployment_loaded',
-      ok: hasMech,
-      detail: hasMech ? `resolved on ${chain}` : 'resolved deployment has no usable routing address',
-      ...(hasMech
+      ok: hasMech && (!requiresClaimRegistry || Boolean(cfg.claimRegistry)),
+      detail: hasMech
+        ? `resolved on ${chain}${claimRegistryDetail}`
+        : 'resolved deployment has no usable routing address',
+      ...(hasMech && (!requiresClaimRegistry || cfg.claimRegistry)
         ? {}
         : {
             remedy:
-              'Update testnet deployment settings in your configuration file, or use a network with bundled deployment data.',
+              'Update deployment settings in your configuration file, or use a network with bundled deployment data.',
           }),
     };
   } catch {
@@ -148,6 +157,7 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
       testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+      testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     });
     if (!cfg.distributorAddress) {
       return {

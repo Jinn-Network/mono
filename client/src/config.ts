@@ -121,6 +121,9 @@ export const JinnConfigSchema = z.object({
   /** Optional Base Sepolia stOLAS deployment artifact path */
   testnetStolasDeploymentPath: z.string().optional(),
 
+  /** Optional Base Sepolia ClaimRegistry deployment artifact path */
+  testnetClaimRegistryDeploymentPath: z.string().optional(),
+
   /** Staking mode: 'standard' uses stOLAS (no OLAS needed), 'self-bond' uses operator-provided OLAS. */
   stakingMode: z.enum(['standard', 'self-bond']).default('standard'),
 
@@ -248,6 +251,9 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TESTNET_L2_DEPLOYMENT']) merged.testnetL2DeploymentPath = env['JINN_TESTNET_L2_DEPLOYMENT'];
   if (env['JINN_TESTNET_TOKEN_DEPLOYMENT']) merged.testnetL2TokenDeploymentPath = env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   if (env['JINN_TESTNET_MECH_DEPLOYMENT']) merged.testnetMechDeploymentPath = env['JINN_TESTNET_MECH_DEPLOYMENT'];
+  if (env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT']) {
+    merged.testnetClaimRegistryDeploymentPath = env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'];
+  }
   if (env['JINN_STAKING_MODE'])           merged.stakingMode = env['JINN_STAKING_MODE'];
   if (env['JINN_TARGET_SERVICES'])    merged.targetServices = parseInt(env['JINN_TARGET_SERVICES'], 10);
 

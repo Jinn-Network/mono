@@ -136,6 +136,7 @@ async function runScale(ctx: CommandContext, rest: string[]): Promise<void> {
       testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+      testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
       debug: config.debug,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
       pollIntervalMs: config.pollIntervalMs,

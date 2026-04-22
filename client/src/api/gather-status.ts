@@ -29,6 +29,7 @@ export interface StatusGatherConfig {
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
+  testnetClaimRegistryDeploymentPath?: string;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -137,6 +138,7 @@ export async function gatherGatheredStatusRaw(
     testnetL2TokenDeploymentPath: status.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: status.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: status.testnetStolasDeploymentPath,
+    testnetClaimRegistryDeploymentPath: status.testnetClaimRegistryDeploymentPath,
   });
 
   const raw: GatheredStatusRaw = {

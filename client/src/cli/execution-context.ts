@@ -74,6 +74,7 @@ async function buildCliSignerContext(
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
   });
 
   const fleetStore = new FleetStateStore(config.earningDir);

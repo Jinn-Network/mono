@@ -13,17 +13,21 @@ DEST="$CLIENT_DIR/deployments"
 mkdir -p "$DEST"
 
 FILES=(
-  deployment-phase1a-token-baseSepolia-fast.json
-  deployment-phase1a-l2-baseSepolia-fast.json
-  deployment-phase1b-mech-baseSepolia-fast.json
-  deployment-stolas-l2-baseSepolia-fast.json
+  deployment-phase1a-token-baseSepolia-fast.json:deployment-phase1a-token-baseSepolia-fast.json
+  deployment-phase1a-l2-baseSepolia-fast.json:deployment-phase1a-l2-baseSepolia-fast.json
+  deployment-phase1b-mech-baseSepolia-fast.json:deployment-phase1b-mech-baseSepolia-fast.json
+  deployment-stolas-l2-baseSepolia-fast.json:deployment-stolas-l2-baseSepolia-fast.json
+  deployment-jinn-testnet-faucet-baseSepolia.json:deployment-jinn-testnet-faucet-baseSepolia-fast.json
+  deployment-claim-registry-baseSepolia.json:deployment-claim-registry-baseSepolia.json
 )
 
-for f in "${FILES[@]}"; do
-  src="$CONTRACTS_DIR/$f"
+for entry in "${FILES[@]}"; do
+  src_name="${entry%%:*}"
+  dest_name="${entry##*:}"
+  src="$CONTRACTS_DIR/$src_name"
   if [ -f "$src" ]; then
-    cp "$src" "$DEST/$f"
-    echo "✓ $f"
+    cp "$src" "$DEST/$dest_name"
+    echo "✓ $dest_name"
   else
     echo "⚠ Missing: $src"
   fi

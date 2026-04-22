@@ -66,6 +66,7 @@ async function run(ctx: CommandContext): Promise<void> {
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
   });
 
   /** Human-readable ERC-20 ticker; `address` is always `chainConfig.olasToken` (bond + reward role). */

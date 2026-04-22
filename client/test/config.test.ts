@@ -12,6 +12,7 @@ describe('loadConfig RPC override handling', () => {
   const originalJinnNetwork = process.env['JINN_NETWORK'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
+  const originalTestnetClaimRegistryDeployment = process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'];
 
   afterEach(async () => {
     if (originalBaseRpcUrl === undefined) {
@@ -48,6 +49,12 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
     } else {
       process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = originalTestnetTokenDeployment;
+    }
+
+    if (originalTestnetClaimRegistryDeployment === undefined) {
+      delete process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'];
+    } else {
+      process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'] = originalTestnetClaimRegistryDeployment;
     }
 
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -187,10 +194,12 @@ describe('loadConfig RPC override handling', () => {
       network: 'testnet',
       testnetL2DeploymentPath: '/tmp/from-file-l2.json',
       testnetL2TokenDeploymentPath: '/tmp/from-file-token.json',
+      testnetClaimRegistryDeploymentPath: '/tmp/from-file-claim-registry.json',
     });
 
     process.env['JINN_TESTNET_L2_DEPLOYMENT'] = '/tmp/from-env-l2.json';
     process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = '/tmp/from-env-token.json';
+    process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'] = '/tmp/from-env-claim-registry.json';
     delete process.env['BASE_RPC_URL'];
     delete process.env['BASE_SEPOLIA_RPC_URL'];
     delete process.env['JINN_RPC_URL'];
@@ -200,5 +209,6 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.testnetL2DeploymentPath).toBe('/tmp/from-env-l2.json');
     expect(config.testnetL2TokenDeploymentPath).toBe('/tmp/from-env-token.json');
+    expect(config.testnetClaimRegistryDeploymentPath).toBe('/tmp/from-env-claim-registry.json');
   });
 });
