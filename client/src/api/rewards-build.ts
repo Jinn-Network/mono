@@ -33,23 +33,36 @@ export interface RewardsV1Response {
 export function assembleRewardsV1(raw: GatheredStatusRaw): RewardsV1Response {
   const total = raw.pendingStakingRewardsWei ?? '0';
   const list = raw.fleet?.services ?? [];
-  const firstStakedIdx = list.findIndex(s => STAKED_LIKE_STEPS.has(s.step));
-  const rewardIdx = firstStakedIdx >= 0 ? firstStakedIdx : 0;
+  const pendingByService = raw.pendingByService ?? {};
+  const claimedByService = raw.claimedByService ?? {};
+  const pendingByKeys = Object.keys(pendingByService);
+  let legacyPendingIndex: number | null = null;
+  if (pendingByKeys.length === 0 && list.length > 0) {
+    try {
+      if (total !== '0' && BigInt(total) > 0n) {
+        const s = list.find(svc => STAKED_LIKE_STEPS.has(svc.step)) ?? list[0];
+        if (s) legacyPendingIndex = displayFleetServiceIndex(s);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
-  const services = list.map((svc, i) => {
+  const services = list.map((svc) => {
+    const index = displayFleetServiceIndex(svc);
     const stakedLike = STAKED_LIKE_STEPS.has(svc.step);
-    const pending =
-      firstStakedIdx < 0
-        ? i === 0
-          ? total
-          : '0'
-        : stakedLike && i === rewardIdx
-          ? total
-          : '0';
+    const claimed = claimedByService[index]?.total ?? '0';
     return {
-      index: displayFleetServiceIndex(svc),
-      pending,
-      claimed: '0',
+      index,
+      pending: stakedLike
+        ? (pendingByService[index] ??
+            (list.length === 1
+              ? total
+              : legacyPendingIndex === index
+                ? total
+                : '0'))
+        : '0',
+      claimed,
       asset: 'reward' as const,
     };
   });

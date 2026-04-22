@@ -3,6 +3,50 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { RESTORATION_INTENTS_SCHEMA } from '../restorer/engine/persistence.js';
 
+export interface ActivityEventInput {
+  ts: string | null;
+  kind: string;
+  requestId?: string | null;
+  serviceIndex?: number | null;
+  txHash?: string | null;
+  specKind?: string | null;
+  outcome?: string | null;
+  detail?: string | null;
+}
+
+export interface ActivityEventRow {
+  id: number;
+  ts: string | null;
+  kind: string;
+  requestId: string | null;
+  serviceIndex: number | null;
+  txHash: string | null;
+  specKind: string | null;
+  outcome: string | null;
+  detail: string | null;
+}
+
+export interface RewardClaimInput {
+  ts: string;
+  serviceIndex: number;
+  serviceId?: number | null;
+  stakingProxy: string;
+  distributor: string;
+  txHash: string;
+  amountWei: string;
+  asset?: string;
+}
+
+export interface BalanceCacheEntry {
+  role: string;
+  address: string;
+  nativeWei?: string | null;
+  bondWei?: string | null;
+  assetExtraJson?: string | null;
+  fetchedAt: string;
+  error?: string | null;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS own_activity (
   request_id TEXT PRIMARY KEY,
@@ -33,6 +77,45 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_desired_state ON artifacts (desired_sta
 CREATE INDEX IF NOT EXISTS idx_artifacts_outcome ON artifacts (outcome);
 CREATE INDEX IF NOT EXISTS idx_artifacts_remote ON artifacts (remote);
 
+CREATE TABLE IF NOT EXISTS activity_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT,
+  kind TEXT NOT NULL,
+  request_id TEXT,
+  service_index INTEGER,
+  tx_hash TEXT,
+  spec_kind TEXT,
+  outcome TEXT,
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_activity_events_ts ON activity_events (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_events_req ON activity_events (request_id);
+CREATE INDEX IF NOT EXISTS idx_activity_events_service_idx ON activity_events (service_index);
+
+CREATE TABLE IF NOT EXISTS reward_claims (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  service_index INTEGER NOT NULL,
+  service_id INTEGER,
+  staking_proxy TEXT NOT NULL,
+  distributor TEXT NOT NULL,
+  tx_hash TEXT NOT NULL,
+  amount_wei TEXT NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'reward'
+);
+CREATE INDEX IF NOT EXISTS idx_reward_claims_svc ON reward_claims (service_index);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reward_claims_tx ON reward_claims (tx_hash);
+
+CREATE TABLE IF NOT EXISTS balance_cache (
+  role TEXT PRIMARY KEY,
+  address TEXT NOT NULL,
+  native_wei TEXT,
+  bond_wei TEXT,
+  asset_extra_json TEXT,
+  fetched_at TEXT NOT NULL,
+  error TEXT
+);
+
 `;
 
 export class Store {
@@ -49,12 +132,23 @@ export class Store {
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
     this.db.exec(RESTORATION_INTENTS_SCHEMA);
+    this.ensureRewardClaimsTxIndex();
+    this.backfillActivityEvents();
+  }
+
+  /** Idempotent: older DBs before idx_reward_claims_tx may lack the unique index. */
+  private ensureRewardClaimsTxIndex(): void {
+    this.db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_reward_claims_tx ON reward_claims (tx_hash)`,
+    );
   }
 
   recordOwnActivity(requestId: string, role: 'created' | 'claimed' | 'delivered' | 'evaluated'): void {
     this.db.prepare(
       `INSERT OR REPLACE INTO own_activity (request_id, role) VALUES (?, ?)`
     ).run(requestId, role);
+    const ts = new Date().toISOString();
+    this.recordActivityEvent({ ts, kind: role, requestId });
   }
 
   isOwnActivity(requestId: string): boolean {
@@ -83,22 +177,258 @@ export class Store {
 
   /** Counts of protocol roles recorded for this node (best-effort activity hints). */
   getOwnActivityCounts(): Record<string, number> {
+    const counts = this.getActivityCountsByKind();
+    if (Object.keys(counts).length > 0) return counts;
     const rows = this.db.prepare(
       `SELECT role, COUNT(*) as c FROM own_activity GROUP BY role`,
     ).all() as Array<{ role: string; c: number }>;
     const out: Record<string, number> = {};
-    for (const r of rows) {
-      out[r.role] = r.c;
-    }
+    for (const r of rows) out[r.role] = r.c;
     return out;
   }
 
   /** Latest own_activity rows by insertion order (approximate). */
   getRecentOwnActivity(limit: number): Array<{ requestId: string; role: string }> {
-    const rows = this.db.prepare(
+    const rows = this.getRecentActivityEvents(limit);
+    if (rows.length > 0) return rows.map((r) => ({ requestId: r.requestId ?? '', role: r.kind }));
+    const legacyRows = this.db.prepare(
       `SELECT request_id, role FROM own_activity ORDER BY rowid DESC LIMIT ?`,
     ).all(Math.max(0, Math.min(limit, 1000))) as Array<{ request_id: string; role: string }>;
-    return rows.map(r => ({ requestId: r.request_id, role: r.role }));
+    return legacyRows.map(r => ({ requestId: r.request_id, role: r.role }));
+  }
+
+  recordActivityEvent(event: ActivityEventInput): void {
+    this.db.prepare(
+      `INSERT INTO activity_events (ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail)
+       VALUES (@ts, @kind, @requestId, @serviceIndex, @txHash, @specKind, @outcome, @detail)`,
+    ).run({
+      ts: event.ts ?? null,
+      kind: event.kind,
+      requestId: event.requestId ?? null,
+      serviceIndex: event.serviceIndex ?? null,
+      txHash: event.txHash ?? null,
+      specKind: event.specKind ?? null,
+      outcome: event.outcome ?? null,
+      detail: event.detail ?? null,
+    });
+  }
+
+  getRecentActivityEvents(
+    limit: number,
+    opts: { since?: string; cursor?: string } = {},
+  ): ActivityEventRow[] {
+    const effectiveLimit = Math.max(0, Math.min(limit, 1000));
+    const clauses: string[] = [];
+    const params: Record<string, unknown> = { limit: effectiveLimit };
+    if (opts.since) {
+      clauses.push('ts IS NOT NULL AND ts >= @since');
+      params['since'] = opts.since;
+    }
+    if (opts.cursor) {
+      clauses.push('ts IS NOT NULL AND ts < @cursor');
+      params['cursor'] = opts.cursor;
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.db.prepare(
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail
+       FROM activity_events
+       ${where}
+       ORDER BY id DESC
+       LIMIT @limit`,
+    ).all(params) as Array<{
+      id: number;
+      ts: string | null;
+      kind: string;
+      request_id: string | null;
+      service_index: number | null;
+      tx_hash: string | null;
+      spec_kind: string | null;
+      outcome: string | null;
+      detail: string | null;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      ts: r.ts,
+      kind: r.kind,
+      requestId: r.request_id,
+      serviceIndex: r.service_index,
+      txHash: r.tx_hash,
+      specKind: r.spec_kind,
+      outcome: r.outcome,
+      detail: r.detail,
+    }));
+  }
+
+  /** Newer events first, then ascending id for `jinn logs --follow` (oldest in batch printed first in caller). */
+  getActivityEventsAfterId(afterId: number, limit: number): ActivityEventRow[] {
+    const effectiveLimit = Math.max(0, Math.min(limit, 1000));
+    const rows = this.db
+      .prepare(
+        `SELECT id, ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail
+         FROM activity_events
+         WHERE id > @afterId
+         ORDER BY id ASC
+         LIMIT @limit`,
+      )
+      .all({ afterId, limit: effectiveLimit }) as Array<{
+        id: number;
+        ts: string | null;
+        kind: string;
+        request_id: string | null;
+        service_index: number | null;
+        tx_hash: string | null;
+        spec_kind: string | null;
+        outcome: string | null;
+        detail: string | null;
+      }>;
+    return rows.map((r) => ({
+      id: r.id,
+      ts: r.ts,
+      kind: r.kind,
+      requestId: r.request_id,
+      serviceIndex: r.service_index,
+      txHash: r.tx_hash,
+      specKind: r.spec_kind,
+      outcome: r.outcome,
+      detail: r.detail,
+    }));
+  }
+
+  getActivityCountsByKind(): Record<string, number> {
+    const rows = this.db.prepare(
+      `SELECT kind, COUNT(*) as c FROM activity_events GROUP BY kind`,
+    ).all() as Array<{ kind: string; c: number }>;
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.kind] = r.c;
+    return out;
+  }
+
+  getLastEventAtForService(serviceIndex: number): string | null {
+    const row = this.db.prepare(
+      `SELECT ts FROM activity_events WHERE service_index = ? AND ts IS NOT NULL ORDER BY id DESC LIMIT 1`,
+    ).get(serviceIndex) as { ts: string | null } | undefined;
+    return row?.ts ?? null;
+  }
+
+  getActivityCountsForService(serviceIndex: number): Record<string, number> {
+    const rows = this.db.prepare(
+      `SELECT kind, COUNT(*) as c FROM activity_events WHERE service_index = ? GROUP BY kind`,
+    ).all(serviceIndex) as Array<{ kind: string; c: number }>;
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.kind] = r.c;
+    return out;
+  }
+
+  recordRewardClaim(claim: RewardClaimInput): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO reward_claims
+         (ts, service_index, service_id, staking_proxy, distributor, tx_hash, amount_wei, asset)
+         VALUES (@ts, @serviceIndex, @serviceId, @stakingProxy, @distributor, @txHash, @amountWei, @asset)`,
+      )
+      .run({
+        ts: claim.ts,
+        serviceIndex: claim.serviceIndex,
+        serviceId: claim.serviceId ?? null,
+        stakingProxy: claim.stakingProxy,
+        distributor: claim.distributor,
+        txHash: claim.txHash,
+        amountWei: claim.amountWei,
+        asset: claim.asset ?? 'reward',
+      });
+  }
+
+  getClaimedRewardsByService(): Record<number, { total: string; lastAt: string; lastTxHash: string }> {
+    const rows = this.db.prepare(
+      `SELECT id, service_index, amount_wei, ts, tx_hash FROM reward_claims ORDER BY id ASC`,
+    ).all() as Array<{
+      id: number;
+      service_index: number;
+      amount_wei: string;
+      ts: string;
+      tx_hash: string;
+    }>;
+    const out: Record<number, { total: string; lastAt: string; lastTxHash: string }> = {};
+    const lastId: Record<number, number> = {};
+    for (const r of rows) {
+      const current = out[r.service_index];
+      const nextTotal = (current ? BigInt(current.total) : 0n) + BigInt(r.amount_wei);
+      const isNewer = !current || r.id > (lastId[r.service_index] ?? 0);
+      if (isNewer) {
+        lastId[r.service_index] = r.id;
+      }
+      out[r.service_index] = {
+        total: nextTotal.toString(),
+        lastAt: isNewer || !current ? r.ts : current.lastAt,
+        lastTxHash: isNewer || !current ? r.tx_hash : current.lastTxHash,
+      };
+    }
+    return out;
+  }
+
+  upsertBalanceCache(entry: BalanceCacheEntry): void {
+    this.db.prepare(
+      `INSERT INTO balance_cache (role, address, native_wei, bond_wei, asset_extra_json, fetched_at, error)
+       VALUES (@role, @address, @nativeWei, @bondWei, @assetExtraJson, @fetchedAt, @error)
+       ON CONFLICT(role) DO UPDATE SET
+         address=excluded.address,
+         native_wei=excluded.native_wei,
+         bond_wei=excluded.bond_wei,
+         asset_extra_json=excluded.asset_extra_json,
+         fetched_at=excluded.fetched_at,
+         error=excluded.error`,
+    ).run({
+      role: entry.role,
+      address: entry.address,
+      nativeWei: entry.nativeWei ?? null,
+      bondWei: entry.bondWei ?? null,
+      assetExtraJson: entry.assetExtraJson ?? null,
+      fetchedAt: entry.fetchedAt,
+      error: entry.error ?? null,
+    });
+  }
+
+  getBalanceCache(): BalanceCacheEntry[] {
+    const rows = this.db.prepare(
+      `SELECT role, address, native_wei, bond_wei, asset_extra_json, fetched_at, error
+       FROM balance_cache`,
+    ).all() as Array<{
+      role: string;
+      address: string;
+      native_wei: string | null;
+      bond_wei: string | null;
+      asset_extra_json: string | null;
+      fetched_at: string;
+      error: string | null;
+    }>;
+    return rows.map((r) => ({
+      role: r.role,
+      address: r.address,
+      nativeWei: r.native_wei,
+      bondWei: r.bond_wei,
+      assetExtraJson: r.asset_extra_json,
+      fetchedAt: r.fetched_at,
+      error: r.error,
+    }));
+  }
+
+  private backfillActivityEvents(): void {
+    const migrationKey = 'activity_events_migrated_v1';
+    const insert = this.db.prepare(
+      `INSERT INTO activity_events (ts, kind, request_id)
+       SELECT NULL, o.role, o.request_id
+       FROM own_activity o
+       WHERE NOT EXISTS (
+         SELECT 1 FROM activity_events a
+         WHERE a.request_id = o.request_id AND a.kind = o.role
+       )`,
+    );
+    const tx = this.db.transaction(() => {
+      if (this.getConfigValue(migrationKey) === 'true') return;
+      insert.run();
+      this.setConfigValue(migrationKey, 'true');
+    });
+    tx();
   }
 
   getLastProcessedBlock(): bigint | null {

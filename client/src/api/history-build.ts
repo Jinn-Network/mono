@@ -14,6 +14,8 @@ type EventKind =
   | 'reward_claimed'
   | 'other';
 
+type ActivitySourceRow = GatheredStatusRaw['recentActivity'][number];
+
 export interface HistoryEvent {
   id: string;
   at: string;
@@ -38,45 +40,77 @@ export interface HistoryOptions {
   cursor?: string;
 }
 
-/** own_activity roles → spec §3.3 event kinds */
-const ROLE_TO_KIND: Record<string, EventKind> = {
-  created: 'intent_posted',
-  claimed: 'request_claimed',
-  delivered: 'delivery_submitted',
-  evaluated: 'evaluation_submitted',
-};
-
-const REF_MS = Date.UTC(2026, 3, 14, 12, 0, 0);
-
-function syntheticAt(i: number): string {
-  return new Date(REF_MS - i * 60 * 60 * 1000).toISOString();
+function toEventKind(kind: string): EventKind {
+  switch (kind) {
+    case 'created':
+      return 'intent_posted';
+    case 'claimed':
+      return 'request_claimed';
+    case 'delivered':
+      return 'delivery_submitted';
+    case 'evaluated':
+      return 'evaluation_submitted';
+    case 'intent_posted':
+    case 'request_claimed':
+    case 'delivery_submitted':
+    case 'evaluation_submitted':
+    case 'reward_claimed':
+      return kind;
+    default:
+      return 'other';
+  }
 }
 
-export function assembleHistoryV1(raw: GatheredStatusRaw, opts: HistoryOptions): HistoryV1Response {
+/**
+ * @param activityFromStore When set (e.g. from `jinn history`), pre-filtered rows with correct limit/cursor; {@link opts} filter fields are not re-applied.
+ */
+export function assembleHistoryV1(
+  raw: GatheredStatusRaw,
+  opts: HistoryOptions,
+  activityFromStore?: ActivitySourceRow[],
+): HistoryV1Response {
   const limit = Math.min(Math.max(opts.limit, 1), 500);
   const generatedAt = new Date().toISOString();
 
-  let rows = raw.recentActivity.map((e, i) => ({
-    ...e,
-    at: syntheticAt(i),
-  }));
+  let source: ActivitySourceRow[];
 
-  if (opts.since) {
-    const sinceTs = new Date(opts.since).getTime();
-    rows = rows.filter(e => !Number.isNaN(sinceTs) && new Date(e.at).getTime() >= sinceTs);
+  if (activityFromStore) {
+    source = activityFromStore;
+  } else {
+    let rows = raw.recentActivity;
+    if (opts.since) {
+      const sinceTs = new Date(opts.since).getTime();
+      rows = rows.filter(
+        (e) =>
+          e.ts != null
+          && !Number.isNaN(sinceTs)
+          && new Date(e.ts).getTime() >= sinceTs,
+      );
+    }
+    if (opts.cursor) {
+      const cursorTs = new Date(opts.cursor).getTime();
+      rows = rows.filter(
+        (e) =>
+          e.ts != null
+          && !Number.isNaN(cursorTs)
+          && new Date(e.ts).getTime() < cursorTs,
+      );
+    }
+    source = rows;
   }
 
-  const events: HistoryEvent[] = rows.slice(0, limit).map((e, i) => {
-    const kind = ROLE_TO_KIND[e.role] ?? 'other';
+  const withTs = source.filter((e): e is typeof e & { ts: string } => e.ts != null);
+  const events: HistoryEvent[] = withTs.slice(0, limit).map((e, i) => {
+    const kind = toEventKind(e.kind);
     return {
-      id: `evt_${String(i).padStart(5, '0')}`,
-      at: e.at,
-      serviceIndex: 0,
+      id: `evt_${String(e.id ?? i).padStart(5, '0')}`,
+      at: e.ts,
+      serviceIndex: e.serviceIndex ?? 0,
       kind,
-      ...(kind === 'other' ? { subkind: e.role } : {}),
+      ...(kind === 'other' ? { subkind: e.kind } : {}),
       intentId: e.requestId ?? null,
-      txHash: null,
-      outcome: 'ok' as const,
+      txHash: e.txHash ?? null,
+      outcome: e.outcome === 'failed' ? 'failed' : 'ok',
     };
   });
 

@@ -40,14 +40,14 @@ export function assembleBalanceV1(raw: GatheredStatusRaw): BalanceV1Response {
     wallets.push({
       role: `service.${di}.agent`,
       address: svc.agent_address || '0x',
-      balances: [{ asset: 'native', amountWei: '0' }],
+      balances: [{ asset: 'native', amountWei: raw.serviceBalances?.[di]?.agentNativeWei ?? '0' }],
     });
     wallets.push({
       role: `service.${di}.multisig`,
       address: svc.safe_address || '0x',
       balances: [
-        { asset: 'native', amountWei: '0' },
-        { asset: 'bond', amountWei: '0' },
+        { asset: 'native', amountWei: raw.serviceBalances?.[di]?.safeNativeWei ?? '0' },
+        { asset: 'bond', amountWei: raw.serviceBalances?.[di]?.safeBondWei ?? '0' },
       ],
     });
   }

@@ -49,15 +49,6 @@ export interface FleetV1Response {
   services: FleetV1Service[];
 }
 
-function activityCountsSurface(raw: GatheredStatusRaw): Record<string, number> {
-  const c = raw.activityCounts;
-  return {
-    create: c['created'] ?? 0,
-    deliver: c['delivered'] ?? 0,
-    evaluate: c['evaluated'] ?? 0,
-  };
-}
-
 function computeAttention(
   svc: ServiceState,
   raw: GatheredStatusRaw,
@@ -90,23 +81,25 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
   const network: 'testnet' | 'mainnet' =
     fleet?.chain === 'base' ? 'mainnet' : 'testnet';
   const masterAddress = fleet?.master_address ?? raw.master.address ?? '0x';
-  const pending = raw.pendingStakingRewardsWei ?? '0';
-  const counts = activityCountsSurface(raw);
+  const pendingByService = raw.pendingByService ?? {};
 
-  const services = (fleet?.services ?? []).map((svc, i) => ({
-    index: displayFleetServiceIndex(svc),
+  const services = (fleet?.services ?? []).map((svc, i) => {
+    const di = displayFleetServiceIndex(svc);
+    const per = raw.perServiceActivity?.[di];
+    return {
+    index: di,
     step: svc.step,
     serviceId: svc.service_id,
     wallets: {
       agent: {
         address: svc.agent_address || '0x',
-        balances: [{ asset: 'native', amountWei: '0' }],
+        balances: [{ asset: 'native', amountWei: raw.serviceBalances?.[di]?.agentNativeWei ?? '0' }],
       },
       multisig: {
         address: svc.safe_address || '0x',
         balances: [
-          { asset: 'native', amountWei: '0' },
-          { asset: 'bond', amountWei: '0' },
+          { asset: 'native', amountWei: raw.serviceBalances?.[di]?.safeNativeWei ?? '0' },
+          { asset: 'bond', amountWei: raw.serviceBalances?.[di]?.safeBondWei ?? '0' },
         ],
       },
     },
@@ -116,15 +109,16 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
       sinceBlock: null,
     },
     activity: {
-      lastEventAt: null,
-      counts,
+      lastEventAt: per?.lastEventAt ?? null,
+      counts: per?.counts ?? {},
     },
     rewards: {
-      pending,
+      pending: pendingByService[di] ?? '0',
       asset: 'reward' as const,
     },
     attention: computeAttention(svc, raw, i === 0),
-  }));
+  };
+  });
 
   return {
     schemaVersion: 1,

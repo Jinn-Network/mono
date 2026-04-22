@@ -4,6 +4,7 @@ import type { Store } from '../store/store.js';
 import { PermanentError, TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
 import type { RestorationRequest } from '../types/index.js';
+import { emitEvent } from '../observability/emit-event.js';
 
 export class RestorerLoop {
   private stopped = false;
@@ -42,6 +43,13 @@ export class RestorerLoop {
     }
 
     this.store.recordOwnActivity(request.requestId, 'claimed');
+    emitEvent(this.store, {
+      kind: 'request_claimed',
+      requestId: request.requestId,
+      specKind: request.desiredState.spec?.kind,
+      outcome: 'ok',
+      detail: 'Claimed restoration request',
+    }, 'restorer');
 
     try {
       const result = await this.runner.run(request.desiredState, {
@@ -54,9 +62,23 @@ export class RestorerLoop {
 
       await this.adapter.submitResult(request.requestId, result);
       this.store.recordOwnActivity(request.requestId, 'delivered');
+      emitEvent(this.store, {
+        kind: 'delivery_submitted',
+        requestId: request.requestId,
+        specKind: request.desiredState.spec?.kind,
+        outcome: 'ok',
+        detail: 'Submitted restoration result',
+      }, 'restorer');
     } catch (err) {
       if (!(err instanceof TransientError)) {
         console.error(`[restorer] Failed to restore ${request.requestId}:`, err);
+        emitEvent(this.store, {
+          kind: 'tick_error',
+          requestId: request.requestId,
+          specKind: request.desiredState.spec?.kind,
+          outcome: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        }, 'restorer');
       }
     }
 
@@ -72,6 +94,11 @@ export class RestorerLoop {
           await Promise.race([new Promise(r => setTimeout(r, 5000)), this.stopPromise]);
         } else {
           console.error('[restorer] Error:', err);
+          emitEvent(this.store, {
+            kind: 'tick_error',
+            outcome: 'failed',
+            detail: err instanceof Error ? err.message : String(err),
+          }, 'restorer');
           const delayMs = isRecoverableTransactionError(err) ? 15_000 : 10_000;
           await Promise.race([new Promise(r => setTimeout(r, delayMs)), this.stopPromise]);
         }
