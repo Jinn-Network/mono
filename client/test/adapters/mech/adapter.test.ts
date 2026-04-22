@@ -4,7 +4,11 @@ import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../src/restorer/impls/
 
 // Mock contract helpers
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
-  submitRestorationJob: vi.fn().mockResolvedValue(['0x' + 'aa'.repeat(32)]),
+  submitRestorationJob: vi.fn().mockResolvedValue({
+    requestIds: ['0x' + 'aa'.repeat(32)],
+    txHash: '0x' + '12'.repeat(32),
+    receiptLogCount: 1,
+  }),
   submitEvaluationJob: vi.fn().mockResolvedValue(['0x' + 'bb'.repeat(32)]),
   claimDelivery: vi.fn().mockResolvedValue('0x1234'),
   getMechDeliveryRate: vi.fn().mockResolvedValue(1000000n),
@@ -82,6 +86,26 @@ describe('MechAdapter with JinnRouter', () => {
       expect.any(String),
       expect.any(BigInt),
       expect.any(BigInt),
+    );
+
+    await adapter.stop();
+  });
+
+  it('includes router context when create returns no request ids', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { submitRestorationJob } = await import('../../../src/adapters/mech/contracts.js');
+
+    vi.mocked(submitRestorationJob).mockResolvedValueOnce({
+      requestIds: [],
+      txHash: ('0x' + '99'.repeat(32)) as `0x${string}`,
+      receiptLogCount: 3,
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    await expect(adapter.postDesiredState({ id: 'ds-1', description: 'test' })).rejects.toThrow(
+      new RegExp(`tx=0x9999.*router=${TEST_CONFIG.routerAddress}.*receiptLogs=3`),
     );
 
     await adapter.stop();

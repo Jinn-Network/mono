@@ -32,7 +32,7 @@ export async function submitRestorationJob(
   requestDataHex: Hex,
   priceWei: bigint,
   responseTimeout: bigint,
-): Promise<string[]> {
+): Promise<{ requestIds: string[]; txHash: Hex; receiptLogCount: number }> {
   const calldata = encodeFunctionData({
     abi: JINN_ROUTER_ABI,
     functionName: 'createRestorationJob',
@@ -69,7 +69,7 @@ export async function submitRestorationJob(
     }
   }
 
-  return requestIds;
+  return { requestIds, txHash, receiptLogCount: receipt.logs.length };
 }
 
 export async function submitEvaluationJob(

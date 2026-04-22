@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { CreatorLoop } from '../../src/daemon/creator.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { Store } from '../../src/store/store.js';
-import type { DesiredState } from '../../src/types/index.js';
+import { PermanentError, type DesiredState } from '../../src/types/index.js';
 
 describe('CreatorLoop', () => {
   it('posts desired states with type and attemptId', async () => {
@@ -136,6 +136,25 @@ describe('CreatorLoop', () => {
     await loop.tick(); // generator succeeds; posts
     expect(postSpy).toHaveBeenCalledTimes(1);
 
+    store.close();
+    await adapter.stop();
+  });
+
+  it('backs off permanent create failures for the same intent', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+
+    const states: DesiredState[] = [{ id: 'gated', description: 'router-gated' }];
+    const postSpy = vi
+      .spyOn(adapter, 'postDesiredState')
+      .mockRejectedValue(new PermanentError('No request IDs returned from router'));
+    const loop = new CreatorLoop(adapter, states, store, [], '0xSafeAddr');
+
+    await expect(loop.tick()).rejects.toThrow(/No request IDs/);
+    await loop.tick();
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
     store.close();
     await adapter.stop();
   });

@@ -48,8 +48,8 @@ function buildExitRollup(
     try {
       if (BigInt(raw.master.balanceWei) < BigInt(raw.minMasterEthWei)) {
         return {
-          blocking: true,
-          hint: 'Master ETH is below the configured minimum runway threshold.',
+          blocking: false,
+          hint: 'Master ETH runway is low; top up the master wallet soon.',
         };
       }
     } catch {
@@ -96,7 +96,7 @@ export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Re
     generatedAt: new Date().toISOString(),
     daemon: {
       state: daemonState(raw.shutdownState),
-      startedAt: null,
+      startedAt: raw.daemonStartedAt ?? null,
       phase,
       network,
       version,

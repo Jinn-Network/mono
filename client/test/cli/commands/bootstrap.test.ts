@@ -22,10 +22,16 @@ const passwordResult = vi.hoisted(() => ({
 }));
 
 const loadConfigMock = vi.fn();
+const checkRpcNetworkMock = vi.fn();
 let constructorOptions: Record<string, unknown> | undefined;
 
 vi.mock('../../../src/config.js', () => ({
   loadConfig: loadConfigMock,
+}));
+
+vi.mock('../../../src/preflight/rpc-network.js', () => ({
+  checkRpcNetwork: checkRpcNetworkMock,
+  rpcNetworkFailureHint: () => 'fix rpc',
 }));
 
 vi.mock('../../../src/earning/bootstrap.js', () => ({
@@ -64,6 +70,13 @@ function makeCtx(
 
 describe('bootstrap command', () => {
   beforeEach(() => {
+    checkRpcNetworkMock.mockResolvedValue({
+      ok: true,
+      network: 'testnet',
+      expectedChainId: 84532,
+      actualChainId: 84532,
+      rpcHost: '127.0.0.1:8545',
+    });
     loadConfigMock.mockReturnValue({
       earningDir: '/tmp/earning',
       network: 'testnet',
@@ -225,5 +238,34 @@ describe('bootstrap command', () => {
       }),
     }));
     expect(exits).toEqual([0]);
+  });
+
+  it('fails before constructing bootstrapper when rpc chain is mismatched', async () => {
+    passwordResult.val = { ok: true, password: 'test' };
+    checkRpcNetworkMock.mockResolvedValueOnce({
+      ok: false,
+      network: 'testnet',
+      expectedChainId: 84532,
+      actualChainId: 8453,
+      rpcHost: 'mainnet.base.org',
+      reason: 'chain_mismatch',
+      message: 'RPC chain mismatch for testnet',
+    });
+    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    const { ctx, writes, exits } = makeCtx();
+
+    await bootstrap.run(ctx);
+
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.details).toMatchObject({
+      field: 'rpcUrl',
+      network: 'testnet',
+      expectedChainId: 84532,
+      actualChainId: 8453,
+      rpcHost: 'mainnet.base.org',
+    });
+    expect(constructorOptions).toBeUndefined();
+    expect(exits).toEqual([11]);
   });
 });

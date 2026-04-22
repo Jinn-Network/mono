@@ -22,17 +22,20 @@ async function tryMergeStatusFromHttp(
     const res = await fetch(url, { signal: ac.signal });
     if (!res.ok) return local;
     const remote = (await res.json()) as StatusV1Response;
+    const next: GatheredStatusRaw = {
+      ...local,
+      shutdownState: remote.daemon?.shutdownState ?? local.shutdownState,
+      daemonStartedAt: remote.daemon?.startedAt ?? local.daemonStartedAt,
+    };
     if (remote.rpc?.ok && !local.rpc.ok) {
-      return {
-        ...local,
-        rpc: {
-          ok: remote.rpc.ok,
-          chainId: remote.rpc.chainId,
-          blockNumber: remote.rpc.blockNumber,
-          ...(remote.rpc.error ? { error: remote.rpc.error } : {}),
-        },
+      next.rpc = {
+        ok: remote.rpc.ok,
+        chainId: remote.rpc.chainId,
+        blockNumber: remote.rpc.blockNumber,
+        ...(remote.rpc.error ? { error: remote.rpc.error } : {}),
       };
     }
+    return next;
   } catch {
     /* ignore — local gather is authoritative */
   } finally {

@@ -39,6 +39,7 @@ const mockRaw: GatheredStatusRaw = {
   },
   rpc: { ok: true, chainId: 84532, blockNumber: '999' },
   master: { address: '0xM', balanceWei: '1' },
+  daemonStartedAt: '2026-04-14T12:00:00.000Z',
   pollIntervalMs: 5000,
   masterDailyEstimateWei: '1',
   pendingStakingRewardsWei: '42',
@@ -64,6 +65,7 @@ describe('status command', () => {
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.daemon.state).toBe('running');
+    expect(parsed.daemon.startedAt).toBe('2026-04-14T12:00:00.000Z');
     expect(parsed.daemon.network).toBe('testnet');
     expect(parsed.rpc.ok).toBe(true);
     expect(parsed.rpc.chainId).toBe(84532);
@@ -95,5 +97,21 @@ describe('status command', () => {
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
+  });
+
+  it('renders human output through the CLI dispatcher', async () => {
+    const { runCli } = await import('../../../src/cli/index.js');
+    const writes: string[] = [];
+    const exits: number[] = [];
+    await runCli(['status', '--human'], {
+      stdoutIsTty: true,
+      writer: { write: (s: string) => { writes.push(s); return true; } },
+      exit: (code: number) => { exits.push(code); },
+    });
+
+    const out = writes.join('');
+    expect(out).toContain('daemon=running');
+    expect(out).not.toMatch(/^\{/);
+    expect(exits).toEqual([]);
   });
 });

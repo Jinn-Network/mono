@@ -1,7 +1,7 @@
 import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { DesiredState, RequestId } from '../types/index.js';
 import type { Store } from '../store/store.js';
-import { TransientError } from '../types/index.js';
+import { PermanentError, TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
 
@@ -27,10 +27,16 @@ export class CreatorLoop {
   // ~20 activities/day needed; each cycle = 4 activities; 5 cycles/day = 1 every ~4.8h.
   // Use 4h to provide safety margin.
   private static readonly REPOST_INTERVAL_MS = 4 * 60 * 60 * 1000;
+  private static readonly PERMANENT_FAILURE_BACKOFF_MS = 30 * 60 * 1000;
 
   /** SQLite config key for durable idempotency across daemon restarts. */
   private static cacheKey(state: DesiredState, safeAddress?: string): string {
     const prefix = safeAddress ? `created_intent:${safeAddress}` : 'created_intent';
+    return `${prefix}:${state.id}`;
+  }
+
+  private static failureCacheKey(state: DesiredState, safeAddress?: string): string {
+    const prefix = safeAddress ? `create_failed:${safeAddress}` : 'create_failed';
     return `${prefix}:${state.id}`;
   }
 
@@ -78,6 +84,14 @@ export class CreatorLoop {
         this.posted.set(state.id, now);
         continue;
       }
+      const failureKey = CreatorLoop.failureCacheKey(state, this.safeAddress);
+      const failedAt = this.store.getConfigValue(failureKey);
+      if (failedAt) {
+        const ts = Number(failedAt);
+        if (Number.isFinite(ts) && now - ts < CreatorLoop.PERMANENT_FAILURE_BACKOFF_MS) {
+          continue;
+        }
+      }
 
       try {
         const prev = this.attempts.get(state.id);
@@ -109,6 +123,13 @@ export class CreatorLoop {
         return requestId;
       } catch (err) {
         if (err instanceof TransientError) continue;
+        if (err instanceof PermanentError) {
+          this.store.setConfigValue(failureKey, String(now));
+          console.error(
+            `[creator] Permanent create failure for ${state.id}; backing off for ` +
+            `${Math.round(CreatorLoop.PERMANENT_FAILURE_BACKOFF_MS / 60000)} min: ${err.message}`,
+          );
+        }
         throw err;
       }
     }

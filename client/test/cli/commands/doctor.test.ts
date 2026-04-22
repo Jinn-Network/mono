@@ -1,6 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import doctor from '../../../src/cli/commands/doctor.js';
 import type { CommandContext } from '../../../src/cli/command.js';
+
+vi.mock('../../../src/preflight/rpc-network.js', () => ({
+  checkRpcNetwork: vi.fn(async () => ({
+    ok: true,
+    network: 'mainnet',
+    expectedChainId: 8453,
+    actualChainId: 8453,
+    rpcHost: 'mainnet.base.org',
+  })),
+  rpcNetworkFailureHint: vi.fn(() => 'Set rpcUrl to a matching Base RPC endpoint.'),
+}));
 
 function makeCtx(env: Record<string, string> = {}): {
   ctx: CommandContext; writes: string[]; exits: number[];

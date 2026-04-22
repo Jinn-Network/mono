@@ -79,6 +79,7 @@ import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
 import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
+import { rpcHostForDisplay } from '../preflight/rpc-network.js';
 import type { Account } from 'viem/accounts';
 
 const addr = (value: string): Address => getAddress(value) as Address;
@@ -241,7 +242,8 @@ export class FleetBootstrapper {
         const INTER_DRIP_PAUSE_MS = 1_000;
         console.error(
           `[fleet-bootstrap] Master has ${formatEther(systemEth)} ETH; need ${formatEther(requiredMasterEth)} ETH. ` +
-          `Draining CDP faucet (each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-60 s on first run).`,
+          `Draining CDP faucet on ${this.chain} via ${rpcHostForDisplay(this.config.rpcUrl)} ` +
+          `(each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-60 s on first run).`,
         );
         for (let i = 0; i < MAX_FAUCET_ITERS; i++) {
           const faucetResult = await requestTestnetFunding(masterAddress, 'base-sepolia');
@@ -259,7 +261,8 @@ export class FleetBootstrapper {
           masterBalance = refreshed.master;
           if ((i + 1) % 5 === 0) {
             console.error(
-              `[fleet-bootstrap] drip ${i + 1}/${MAX_FAUCET_ITERS} · master=${formatEther(masterBalance)} ETH · target=${formatEther(requiredMasterEth)} ETH`,
+              `[fleet-bootstrap] drip ${i + 1}/${MAX_FAUCET_ITERS} · chain=${this.chain} · rpc=${rpcHostForDisplay(this.config.rpcUrl)} · ` +
+              `master=${formatEther(masterBalance)} ETH · target=${formatEther(requiredMasterEth)} ETH`,
             );
           }
           if (systemEth >= requiredMasterEth) {
@@ -272,41 +275,11 @@ export class FleetBootstrapper {
         }
       }
 
-      if (systemEth < requiredMasterEth) {
-        // On testnet, attempt automatic faucet funding before giving up
-        if (this.chain === 'base-sepolia') {
-          console.error('[fleet-bootstrap] Attempting automatic faucet funding via Coinbase CDP...');
-          const faucetResult = await requestTestnetFunding(masterAddress, 'base-sepolia');
-          if (faucetResult.ok) {
-            console.error(`[fleet-bootstrap] Faucet funded successfully (tx: ${faucetResult.txHash}). Rechecking balance...`);
-            // Wait for tx propagation
-            await new Promise(r => setTimeout(r, 3000));
-            // Re-read balance and continue if sufficient
-            const refreshedBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
-            let refreshedSystemEth = refreshedBalance;
-            if (this.stakingMode === 'self-bond') {
-              for (const svc of state.services) {
-                if (svc.agent_address) {
-                  refreshedSystemEth += await this.publicClient.getBalance({
-                    address: getAddress(svc.agent_address) as Address,
-                  });
-                }
-                if (svc.safe_address) {
-                  refreshedSystemEth += await this.publicClient.getBalance({
-                    address: getAddress(svc.safe_address) as Address,
-                  });
-                }
-              }
-            }
-            if (refreshedSystemEth >= requiredMasterEth) {
-              console.error('[fleet-bootstrap] Faucet funding sufficient. Continuing bootstrap...');
-              // Update systemEth/masterBalance for the runway check below
-              systemEth = refreshedSystemEth;
-            }
-          } else {
-            console.error(`[fleet-bootstrap] Faucet unavailable: ${faucetResult.reason}`);
-          }
-        }
+      if (systemEth < requiredMasterEth && this.chain === 'base-sepolia' && autoFaucetEnabled) {
+        console.error(
+          '[fleet-bootstrap] Automatic faucet funding did not reach the target. ' +
+          'Switching to manual funding only; no more faucet requests will be sent in this run.',
+        );
       }
 
       if (systemEth < requiredMasterEth) {

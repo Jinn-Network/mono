@@ -4,6 +4,9 @@ import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { resolveCliPassword } from '../password.js';
+import { getConfigPathFromArgs, loadConfig } from '../../config.js';
+import { checkRpcNetwork, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
+import { apiPortFailureMessage, checkApiPortAvailable } from '../../preflight/api-port.js';
 
 function routeConsoleToStderr(): void {
   const writer = (line: string): void => {
@@ -72,6 +75,47 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
   process.env['JINN_PASSWORD'] = password.password;
+  const configPath = getConfigPathFromArgs(ctx.argv);
+  const config = loadConfig(configPath);
+  const rpcPreflight = await checkRpcNetwork(config);
+  if (!rpcPreflight.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: rpcPreflight.message,
+        hint: rpcNetworkFailureHint(rpcPreflight),
+        exampleCli: 'jinn doctor --human',
+        details: {
+          field: 'rpcUrl',
+          network: rpcPreflight.network,
+          expectedChainId: rpcPreflight.expectedChainId,
+          actualChainId: rpcPreflight.actualChainId ?? null,
+          rpcHost: rpcPreflight.rpcHost,
+          reason: rpcPreflight.reason,
+        },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+  const portPreflight = await checkApiPortAvailable(config.apiPort);
+  if (!portPreflight.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: apiPortFailureMessage(portPreflight),
+        hint: `Use --config with apiPort or set JINN_API_PORT to a free port before running jinn run.`,
+        exampleCli: 'JINN_API_PORT=7332 jinn run',
+        details: {
+          field: 'apiPort',
+          port: portPreflight.port,
+          reason: portPreflight.code ?? 'unavailable',
+        },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
   if (!(parsed.values.human as boolean)) {
     routeConsoleToStderr();
   }

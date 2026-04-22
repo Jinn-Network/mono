@@ -5,6 +5,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import { resolveCliPassword } from '../password.js';
+import { checkRpcNetwork, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
 
 /** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
 function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
@@ -71,6 +72,27 @@ async function run(ctx: CommandContext): Promise<void> {
   }
 
   const config = loadConfig(configPath);
+  const rpcPreflight = await checkRpcNetwork(config);
+  if (!rpcPreflight.ok) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: rpcPreflight.message,
+        hint: rpcNetworkFailureHint(rpcPreflight),
+        exampleCli: 'jinn doctor --human',
+        details: {
+          field: 'rpcUrl',
+          network: rpcPreflight.network,
+          expectedChainId: rpcPreflight.expectedChainId,
+          actualChainId: rpcPreflight.actualChainId ?? null,
+          rpcHost: rpcPreflight.rpcHost,
+          reason: rpcPreflight.reason,
+        },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
   const bootstrapper = new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: config.network === 'testnet' ? 'base-sepolia' : 'base',

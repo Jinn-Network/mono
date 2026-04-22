@@ -15,6 +15,7 @@ import { getConfigPathFromArgs, loadConfig, type JinnConfig } from '../../config
 import { getChainConfig, ERC20_ABI } from '../../earning/contracts.js';
 import { runPortfolioV0DoctorChecks } from '../../api/portfolio-v0-doctor.js';
 import { mnemonicKeystorePath } from '../../earning/store.js';
+import { checkRpcNetwork, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
 
 interface CheckResult {
   name: string;
@@ -166,7 +167,7 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
         detail: 'distributor address not configured (standard mode staking disabled)',
       };
     }
-    const client = createPublicClient({ chain: baseSepolia, transport: http(cfg.rpcUrl) });
+    const client = createPublicClient({ chain: baseSepolia, transport: http(config.rpcUrl) });
     const balance = await client.readContract({
       address: cfg.olasToken as Address,
       abi: ERC20_ABI,
@@ -198,6 +199,23 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
       detail: `distributor probe failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+async function checkRpcNetworkForDoctor(config: JinnConfig): Promise<CheckResult> {
+  const result = await checkRpcNetwork(config);
+  if (result.ok) {
+    return {
+      name: 'rpc_network',
+      ok: true,
+      detail: `${result.rpcHost} reports chain ${result.actualChainId} for ${result.network}`,
+    };
+  }
+  return {
+    name: 'rpc_network',
+    ok: false,
+    detail: result.message,
+    remedy: rpcNetworkFailureHint(result),
+  };
 }
 
 async function checkClaudeAuth(config: JinnConfig): Promise<CheckResult> {
@@ -248,6 +266,7 @@ async function run(ctx: CommandContext): Promise<void> {
   checks.push(await checkClaudeAuth(config));
 
   checks.push(checkKeystorePresent(config.earningDir));
+  checks.push(await checkRpcNetworkForDoctor(config));
   checks.push(await checkDeploymentLoaded(config));
   checks.push(checkDaemonRuntimeReady());
 

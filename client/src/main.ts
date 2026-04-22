@@ -50,6 +50,8 @@ import { makePredictionV0Generator } from './intents/prediction-v0-auto.js';
 import { makePredictionApyV0Generator } from './intents/prediction-apy-v0-auto.js';
 import { BASE_SEPOLIA_FEEDS, BASE_FEEDS } from './venues/chainlink/feeds.js';
 import type { IntentGenerator } from './daemon/creator.js';
+import { checkRpcNetwork, rpcNetworkFailureHint } from './preflight/rpc-network.js';
+import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -239,6 +241,39 @@ export interface DaemonStartupInfo {
 
 export async function main(): Promise<DaemonStartupInfo> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
+
+  const rpcPreflight = await checkRpcNetwork(config);
+  if (!rpcPreflight.ok) {
+    emitEnvelope({
+      code: 'invalid_invocation',
+      message: rpcPreflight.message,
+      hint: rpcNetworkFailureHint(rpcPreflight),
+      exampleCli: 'jinn doctor --human',
+      details: {
+        field: 'rpcUrl',
+        network: rpcPreflight.network,
+        expectedChainId: rpcPreflight.expectedChainId,
+        actualChainId: rpcPreflight.actualChainId ?? null,
+        rpcHost: rpcPreflight.rpcHost,
+        reason: rpcPreflight.reason,
+      },
+    });
+  }
+
+  const portPreflight = await checkApiPortAvailable(config.apiPort);
+  if (!portPreflight.ok) {
+    emitEnvelope({
+      code: 'invalid_invocation',
+      message: apiPortFailureMessage(portPreflight),
+      hint: 'Stop the other daemon or set JINN_API_PORT / apiPort to a free port.',
+      exampleCli: 'JINN_API_PORT=7332 jinn run',
+      details: {
+        field: 'apiPort',
+        port: portPreflight.port,
+        reason: portPreflight.code ?? 'unavailable',
+      },
+    });
+  }
 
   const { agentPrivateKey, masterAddress, safeAddress, mechAddress, serviceIndex, serviceId } =
     await bootstrap();
@@ -543,7 +578,25 @@ export async function main(): Promise<DaemonStartupInfo> {
   };
   process.on('exit', removePidfile);
 
-  await daemon.start();
+  try {
+    await daemon.start();
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'EADDRINUSE') {
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message: `Port ${config.apiPort} is already in use. Stop the other daemon or set JINN_API_PORT / apiPort to another port.`,
+        hint: 'Set JINN_API_PORT to a free port, or stop the process currently listening on the dashboard/API port.',
+        exampleCli: 'JINN_API_PORT=7332 jinn run',
+        details: {
+          field: 'apiPort',
+          port: config.apiPort,
+          reason: 'EADDRINUSE',
+        },
+      });
+    }
+    throw error;
+  }
   console.log(`[main] Daemon running. Dashboard: http://127.0.0.1:${config.apiPort}`);
   return {
     schemaVersion: 1,
