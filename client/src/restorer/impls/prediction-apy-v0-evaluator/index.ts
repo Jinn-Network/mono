@@ -6,14 +6,17 @@ import { privateKeyToAccount } from 'viem/accounts';
 import type { PublicClient } from 'viem';
 import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../types.js';
 import type { DesiredState } from '../../../types/desired-state.js';
-import {
-  PredictionApyV0IntentSchema,
-  PredictionApySubmissionManifestSchema,
-  type PredictionApySubmissionManifest,
-  type PredictionApyVerdictManifest,
-} from '../../../types/prediction-apy.js';
+import { PredictionApyV0IntentSchema, type PredictionApyVerdictManifest } from '../../../types/prediction-apy.js';
 import { twApyBpsOverWindow } from '../../../venues/aave-v3/client.js';
+import {
+  checkIntentRef,
+  checkIntentRefMissingExpected,
+  checkManifestSignature,
+  recomputeTopLevelSignatureHash,
+} from '../prediction-v0-evaluator/checks/integrity.js';
+import { resolveExpectedRestorationIntentCid } from '../evaluation-context.js';
 import { deriveGroundTruthBps } from './canonical-metrics.js';
+import { parsePredictionApySubmissionManifest } from './parse-submission.js';
 import { computeScore } from './score.js';
 import type { Check, Verdict } from './types.js';
 
@@ -32,26 +35,6 @@ export interface PredictionApyV0EvaluatorConfig {
     }) => Promise<{ twApyBps: number; sampleCount: number }>;
     expectedIntentCid?: string;
   };
-}
-
-function parseSubmissionManifest(manifestJson: string): PredictionApySubmissionManifest {
-  const raw = JSON.parse(manifestJson) as Record<string, unknown>;
-  const direct = PredictionApySubmissionManifestSchema.safeParse(raw);
-  if (direct.success) return direct.data;
-  const normalized = {
-    schemaVersion: 'prediction.apy.v0.submission.v1',
-    generatedAt: raw['generatedAt'],
-    intent: raw['intent'],
-    restorer: raw['restorer'],
-    window: raw['window'],
-    prediction: {
-      predictedBps: String((raw['gating'] as Record<string, unknown> | undefined)?.['predictedBps'] ?? ''),
-      submittedAt: Number((raw['gating'] as Record<string, unknown> | undefined)?.['submittedAt'] ?? 0),
-      modelId: String((raw['gating'] as Record<string, unknown> | undefined)?.['modelId'] ?? ''),
-    },
-    signature: raw['signature'],
-  };
-  return PredictionApySubmissionManifestSchema.parse(normalized);
 }
 
 function chainForVenue(venue: 'aave-v3-base-sepolia' | 'aave-v3-base' | 'aave-v3-mainnet') {
@@ -80,8 +63,14 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    const testDeps = (ctx as RestorationContext & { _testDeps?: PredictionApyV0EvaluatorConfig['_testDeps'] })._testDeps
+      ?? this.config._testDeps;
+    const expectedRef = resolveExpectedRestorationIntentCid(ctx.intent, testDeps);
+
     const intent = PredictionApyV0IntentSchema.parse(ctx.intent);
-    const submission = parseSubmissionManifest(ctx.intent.context!['restorationResult'] as string);
+    const manifestJson = ctx.intent.context!['restorationResult'] as string;
+    const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
+    const submission = parsePredictionApySubmissionManifest(manifestJson);
     const checks: Check[] = [];
     const { venue, pool, reserve } = intent.spec.oracle;
     const { chain, chainId } = chainForVenue(venue);
@@ -89,8 +78,8 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     let twApyBps: number;
     let sampleCount: number;
     try {
-      if (this.config._testDeps?.twApyBpsOverWindow) {
-        const result = await this.config._testDeps.twApyBpsOverWindow({
+      if (testDeps?.twApyBpsOverWindow) {
+        const result = await testDeps.twApyBpsOverWindow({
           pool: pool as `0x${string}`,
           reserve: reserve as `0x${string}`,
           windowEndTs: intent.spec.question.resolveTs,
@@ -124,19 +113,38 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
       sampleCount = 0;
     }
 
-    if (
-      submission.prediction.submittedAt >= intent.window.startTs &&
-      submission.prediction.submittedAt <= intent.window.endTs
-    ) {
-      checks.push({ name: 'eligibility.submission_within_window', status: 'PASS' });
-    } else {
-      checks.push({ name: 'eligibility.submission_within_window', status: 'FAIL' });
+    {
+      const sa = submission.prediction.submittedAt;
+      const w = intent.window;
+      const within = sa >= w.startTs && sa < w.endTs;
+      checks.push({
+        name: 'eligibility.submission_within_window',
+        status: within ? 'PASS' : 'FAIL',
+        detail: within ? undefined : { submittedAt: sa, startTs: w.startTs, endTs: w.endTs },
+      });
+    }
+    {
+      const sa = submission.prediction.submittedAt;
+      const w = intent.window;
+      const maxDelay = intent.eligibility.maxSubmissionDelayMs;
+      const within = sa <= w.startTs + maxDelay;
+      checks.push({
+        name: 'eligibility.submission_within_max_delay',
+        status: within ? 'PASS' : 'FAIL',
+        detail: within
+          ? undefined
+          : { submittedAt: sa, startTs: w.startTs, maxSubmissionDelayMs: maxDelay },
+      });
     }
 
-    if (submission.intent.cid === (this.config._testDeps?.expectedIntentCid ?? submission.intent.cid)) {
-      checks.push({ name: 'integrity.intent_ref', status: 'PASS' });
+    {
+      const recomputed = recomputeTopLevelSignatureHash(rawPayload);
+      checks.push(await checkManifestSignature(recomputed, submission.signature));
+    }
+    if (expectedRef.kind === 'missing') {
+      checks.push(checkIntentRefMissingExpected());
     } else {
-      checks.push({ name: 'integrity.intent_ref', status: 'FAIL' });
+      checks.push(checkIntentRef(submission.intent.cid, expectedRef.cid));
     }
 
     if (intent.spec.metric.toleranceBps > 0) {
@@ -171,7 +179,6 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
         predictedBps: submission.prediction.predictedBps,
         submittedAt: submission.prediction.submittedAt,
         modelId: submission.prediction.modelId,
-        submissionManifestCid: 'inline',
       },
       groundTruth: {
         twApyBps: groundTruthBps,
@@ -205,9 +212,11 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
 
 function deriveVerdict(checks: Check[]): Verdict {
   if (checks.some((c) => c.name.startsWith('availability.') && c.status !== 'PASS')) return 'INDETERMINATE';
+  if (checks.some((c) => c.name.startsWith('integrity.') && c.status === 'INDETERMINATE')) return 'INDETERMINATE';
   if (checks.some((c) => c.name.startsWith('eligibility.') && c.status === 'FAIL')) return 'REJECTED';
   if (checks.some((c) => (c.name.startsWith('integrity.') || c.name.startsWith('spec.')) && c.status === 'FAIL')) return 'FAIL';
   return 'PASS';
 }
 
+export { parsePredictionApySubmissionManifest } from './parse-submission.js';
 export default PredictionApyV0Evaluator;

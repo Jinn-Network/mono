@@ -21,7 +21,5 @@
       "resolveTs": 0
     }
   },
-  "eligibility": {
-    "maxSubmissionDelayMs": 60000
-  }
+  "eligibility": {}
 }

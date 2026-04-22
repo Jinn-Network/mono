@@ -70,14 +70,17 @@ export class PredictionApyV0BaselineImpl implements RestorerImpl {
     const parsed = PredictionApyV0IntentSchema.parse(ctx.intent);
     const { venue, pool, reserve } = parsed.spec.oracle;
     const { chain, chainId } = chainForVenue(venue);
-    const rpcUrl = this.config.rpcUrl ?? this.config.archiveRpcUrl;
+    const rpcUrl = this.config.archiveRpcUrl ?? this.config.rpcUrl;
+    // At submission time, resolveTs is usually in the future — cap the TWA
+    // window end at "now" so we only sample historical state (persistence baseline).
+    const windowEndForTwa = Math.min(parsed.spec.question.resolveTs, Date.now());
     let twApyBps: number;
     let sampleCount: number;
     if (this.config._testDeps?.twApyBpsOverWindow) {
       const result = await this.config._testDeps.twApyBpsOverWindow({
         pool: pool as `0x${string}`,
         reserve: reserve as `0x${string}`,
-        windowEndTs: parsed.spec.question.resolveTs,
+        windowEndTs: windowEndForTwa,
         twaWindowSeconds: parsed.spec.metric.twaWindowSeconds,
         sampleCount: parsed.spec.metric.sampleCount,
       });
@@ -93,7 +96,7 @@ export class PredictionApyV0BaselineImpl implements RestorerImpl {
         publicClient,
         pool: pool as `0x${string}`,
         reserve: reserve as `0x${string}`,
-        windowEndTs: parsed.spec.question.resolveTs,
+        windowEndTs: windowEndForTwa,
         twaWindowSeconds: parsed.spec.metric.twaWindowSeconds,
         sampleCount: parsed.spec.metric.sampleCount,
       });

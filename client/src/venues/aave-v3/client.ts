@@ -63,9 +63,13 @@ export function liquidityRateRayToApyBps(rateRay: bigint): number {
 export async function findBlockAtOrBeforeTimestamp(
   publicClient: PublicClient,
   targetTsMs: number,
+  options?: { minBlock?: bigint },
 ): Promise<{ number: bigint; timestampMs: number }> {
   const latest = await publicClient.getBlock({ blockTag: 'latest' });
-  let lo = 0n;
+  let lo = options?.minBlock ?? 0n;
+  if (lo > latest.number) {
+    lo = 0n;
+  }
   let hi = latest.number;
   let best = 0n;
   while (lo <= hi) {
@@ -88,8 +92,11 @@ export async function readReserveRateAtTimestamp(
   pool: `0x${string}`,
   reserve: `0x${string}`,
   timestampMs: number,
+  options?: { minBlockForSearch?: bigint },
 ): Promise<ReserveRateReading> {
-  const block = await findBlockAtOrBeforeTimestamp(publicClient, timestampMs);
+  const block = await findBlockAtOrBeforeTimestamp(publicClient, timestampMs, {
+    minBlock: options?.minBlockForSearch,
+  });
   const reserveData = await publicClient.readContract({
     address: pool,
     abi: AAVE_POOL_ABI,
@@ -114,8 +121,12 @@ export async function twApyBpsOverWindow(params: {
 }): Promise<TwaApyBpsResult> {
   const sampleTs = scheduleSampleTimestamps(params.windowEndTs, params.twaWindowSeconds, params.sampleCount);
   let sum = 0;
+  let minBlock: bigint | undefined;
   for (const ts of sampleTs) {
-    const r = await readReserveRateAtTimestamp(params.publicClient, params.pool, params.reserve, ts);
+    const r = await readReserveRateAtTimestamp(params.publicClient, params.pool, params.reserve, ts, {
+      minBlockForSearch: minBlock,
+    });
+    minBlock = r.blockNumber;
     sum += liquidityRateRayToApyBps(r.currentLiquidityRateRay);
   }
   return {
