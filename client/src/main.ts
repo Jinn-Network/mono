@@ -42,6 +42,7 @@ import { PredictionV0BaselineImpl } from './restorer/impls/prediction-v0-baselin
 import { PredictionV0Evaluator } from './restorer/impls/prediction-v0-evaluator/index.js';
 import { ClaudeMcpPredictionImpl } from './restorer/impls/claude-mcp-prediction/index.js';
 import { PredictionApyV0BaselineImpl } from './restorer/impls/prediction-apy-v0-baseline/index.js';
+import { ClaudeMcpPredictionApyImpl } from './restorer/impls/claude-mcp-prediction-apy/index.js';
 import { PredictionApyV0Evaluator } from './restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
@@ -366,6 +367,12 @@ export async function main(): Promise<DaemonStartupInfo> {
     rpcUrl: config.rpcUrl,
   }));
   implRegistry.register(new PredictionApyV0BaselineImpl({
+    rpcUrl: config.rpcUrl,
+    archiveRpcUrl: config.archiveRpcUrl,
+  }));
+  implRegistry.register(new ClaudeMcpPredictionApyImpl({
+    claudePath: config.claudePath,
+    claudeModel: config.claudeModel,
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
   }));
