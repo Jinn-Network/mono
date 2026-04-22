@@ -47,6 +47,34 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     expect(out.gating.groundTruth).toBe('YES');
   });
 
+  it('accepts the engine outer manifest produced by prediction restorations', async () => {
+    const intent = makeValidIntent();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
+    const outerManifest = {
+      schemaVersion: 'portfolio.v0.manifest.v1',
+      generatedAt: manifest.generatedAt,
+      intent: manifest.intent,
+      restorer: manifest.restorer,
+      window: manifest.window,
+      preSnapshot: { schemaVersion: 1, capturedAt: 0, venue: { name: 'chainlink' }, account: {}, positions: [], openOrders: [] },
+      postSnapshot: { schemaVersion: 1, capturedAt: 0, venue: { name: 'chainlink' }, account: {}, positions: [], openOrders: [] },
+      fills: [],
+      gating: manifest.prediction,
+      artifacts: [],
+      signature: manifest.signature,
+    };
+    const evalIntent = makeEvalDesiredState(outerManifest as any, intent);
+    const evaluator = new PredictionV0Evaluator({
+      evaluatorPk,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+
+    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+
+    expect(out.gating.verdict).toBe('PASS');
+    expect(out.artifacts[0]?.metadata).toMatchObject({ schemaVersion: 'prediction.v0.verdict.v1' });
+  });
+
   it('REJECTED when submittedAt > window.endTs', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ submittedAt: intent.window.endTs + 1, intentCid: 'intent-cid' });

@@ -18,6 +18,7 @@ import type { DesiredState } from '../../../types/desired-state.js';
 import {
   PredictionV0IntentSchema,
   PredictionSubmissionManifestSchema,
+  type PredictionSubmissionManifest,
   type PredictionVerdictManifest,
 } from '../../../types/prediction.js';
 import {
@@ -51,6 +52,38 @@ export interface PredictionV0EvaluatorConfig {
   };
 }
 
+function parseRestorationSubmissionManifest(manifestJson: string): PredictionSubmissionManifest {
+  const raw = JSON.parse(manifestJson) as Record<string, unknown>;
+  const direct = PredictionSubmissionManifestSchema.safeParse(raw);
+  if (direct.success) return direct.data;
+
+  if (raw['schemaVersion'] !== 'portfolio.v0.manifest.v1') {
+    return PredictionSubmissionManifestSchema.parse(raw);
+  }
+
+  const gating = raw['gating'] as Record<string, unknown> | undefined;
+  const informational = raw['informational'] as Record<string, unknown> | undefined;
+  const oracleSnapshot = informational?.['oracleSnapshot'];
+  const normalized = {
+    schemaVersion: 'prediction.v0.submission.v1',
+    generatedAt: raw['generatedAt'],
+    intent: raw['intent'],
+    restorer: raw['restorer'],
+    window: raw['window'],
+    prediction: {
+      probability: String(gating?.['probability'] ?? ''),
+      submittedAt: Number(gating?.['submittedAt']),
+      modelId: String(gating?.['modelId'] ?? ''),
+    },
+    ...(oracleSnapshot && typeof oracleSnapshot === 'object'
+      ? { oracleSnapshot }
+      : {}),
+    signature: raw['signature'],
+  };
+
+  return PredictionSubmissionManifestSchema.parse(normalized);
+}
+
 export class PredictionV0Evaluator implements RestorerImpl {
   readonly name = 'prediction-v0-evaluator';
   readonly version = '1.0.0';
@@ -82,7 +115,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
 
     // 2. Parse restorer's manifest from inlined context
     const manifestJson = intent.context!['restorationResult'] as string;
-    const manifest = PredictionSubmissionManifestSchema.parse(JSON.parse(manifestJson));
+    const manifest = parseRestorationSubmissionManifest(manifestJson);
 
     // 3. Fetch Chainlink spanning round
     let spanning: SpanningResult;
