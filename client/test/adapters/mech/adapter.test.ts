@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../src/restorer/impls/evaluation-context.js';
 
 // Mock contract helpers
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
@@ -11,6 +12,12 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   decodeMarketplaceRequestLogs: vi.fn().mockReturnValue([]),
   decodeDeliverLogs: vi.fn().mockReturnValue([]),
   callDeliverToMarketplace: vi.fn(),
+  scanLatestRequestDataByRid: vi.fn().mockResolvedValue(new Map()),
+  scanLatestDeliveryDataByRid: vi.fn().mockResolvedValue(new Map()),
+  findLatestRequestDataHexForMarketplaceRequest: vi.fn().mockResolvedValue(null),
+  findLatestDeliveryDataHexForRequest: vi.fn().mockResolvedValue(null),
+  scanRestorationJobs: vi.fn().mockResolvedValue([]),
+  scanEvaluationJobs: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock IPFS
@@ -165,6 +172,106 @@ describe('MechAdapter with JinnRouter', () => {
         restorationResult: 'restoration output',
       },
     });
+
+    await adapter.stop();
+  });
+
+  it('defers evaluation job when restoration result is not in cache and chain backfill finds nothing', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { submitEvaluationJob, findLatestDeliveryDataHexForRequest } = await import('../../../src/adapters/mech/contracts.js');
+    const { buildDesiredStatePayload } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValue(null);
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    const requestId = '0x' + 'aa'.repeat(32);
+    (adapter as any).pendingEvaluations.set(requestId, {
+      id: 'ds-1',
+      description: 'test',
+    });
+
+    await (adapter as any).tryCreateEvaluationJob(requestId);
+
+    expect(vi.mocked(buildDesiredStatePayload)).not.toHaveBeenCalled();
+    expect(submitEvaluationJob).not.toHaveBeenCalled();
+    expect((adapter as any).claimedButNotEvaluated.has(requestId)).toBe(true);
+
+    await adapter.stop();
+  });
+
+  it('recoverPendingState backfills restorationIntentCid from marketplace logs', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      scanRestorationJobs,
+      scanEvaluationJobs,
+      scanLatestRequestDataByRid,
+      scanLatestDeliveryDataByRid,
+    } = await import('../../../src/adapters/mech/contracts.js');
+
+    vi.mocked(scanRestorationJobs).mockResolvedValueOnce([{ requestId: '0x' + 'aa'.repeat(32), creator: TEST_CONFIG.safeAddress }]);
+    vi.mocked(scanEvaluationJobs).mockResolvedValueOnce([]);
+    vi.mocked(scanLatestRequestDataByRid).mockResolvedValueOnce(new Map([
+      [('0x' + 'aa'.repeat(32)).toLowerCase(), ('0x' + 'dd'.repeat(32)) as `0x${string}`],
+    ]));
+    vi.mocked(scanLatestDeliveryDataByRid).mockResolvedValueOnce(new Map());
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    (adapter as any).store = {
+      getLastProcessedBlock: () => 50n,
+      setLastProcessedBlock: vi.fn(),
+      savePendingEvaluation: vi.fn(),
+      getPendingEvaluations: vi.fn().mockReturnValue([]),
+      deletePendingEvaluation: vi.fn(),
+      saveDeliveryStatus: vi.fn(),
+      getDeliveryStatus: vi.fn(),
+      saveAttemptToResolveClaim: vi.fn(),
+      hasAttemptedToResolveClaim: vi.fn(),
+    };
+
+    (adapter as any).publicClient.readContract = vi.fn().mockResolvedValue([
+      '0x' + '00'.repeat(20),
+      '0x' + '00'.repeat(20),
+      TEST_CONFIG.safeAddress,
+      0n,
+      0n,
+      '0x' + '00'.repeat(32),
+    ]);
+
+    await (adapter as any).recoverPendingState(100n);
+
+    const pending = (adapter as any).pendingEvaluations.get('0x' + 'aa'.repeat(32));
+    expect(pending.context[RESTORATION_INTENT_CID_CONTEXT_KEY]).toBe(`f01551220${'dd'.repeat(32)}`);
+
+    await adapter.stop();
+  });
+
+  it('tryCreateEvaluationJob uses chain backfill result when cache is cold', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { submitEvaluationJob, findLatestDeliveryDataHexForRequest } = await import('../../../src/adapters/mech/contracts.js');
+    const { buildDesiredStatePayload, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValueOnce(('0x' + 'ef'.repeat(32)) as `0x${string}`);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'backfilled restoration output' });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    (adapter as any).publicClient.readContract = vi.fn().mockResolvedValue(true);
+
+    const requestId = '0x' + 'aa'.repeat(32);
+    (adapter as any).pendingEvaluations.set(requestId, {
+      id: 'ds-1',
+      description: 'test',
+    });
+
+    await (adapter as any).tryCreateEvaluationJob(requestId);
+
+    expect(vi.mocked(buildDesiredStatePayload).mock.calls.at(-1)?.[0]).toMatchObject({
+      context: { restorationResult: 'backfilled restoration output' },
+    });
+    expect(submitEvaluationJob).toHaveBeenCalled();
 
     await adapter.stop();
   });

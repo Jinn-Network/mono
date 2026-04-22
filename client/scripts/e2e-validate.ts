@@ -122,6 +122,63 @@ async function waitFor(
   throw new Error(`Timeout waiting for: ${description}`);
 }
 
+/**
+ * `watchForDeliveries` can yield a restoration delivery before
+ * `tryCreateEvaluationJob` has observed `restorationDeliveryClaimed` on the
+ * router (stale RPC). The eval tx may post on a later `watchForDeliveries`
+ * poll. Operator B's `processOne` must not start until
+ * `EvaluationJobCreated` for this restoration is on chain.
+ */
+async function waitForRouterEvaluationJobForRestoration(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  restorationRequestId: Hex,
+  anvilRpc: string,
+  fromBlock: bigint,
+): Promise<void> {
+  const want = restorationRequestId.toLowerCase();
+  await waitFor(
+    `router EvaluationJobCreated (restorationRequestId ${restorationRequestId})`,
+    async () => {
+      try {
+        await jsonRpc(anvilRpc, 'evm_mine', []);
+      } catch {
+        /* ignore */
+      }
+      const tip = await publicClient.getBlockNumber();
+      if (tip < fromBlock) {
+        return false;
+      }
+      const logs = await publicClient.getLogs({
+        address: routerAddress,
+        fromBlock,
+        toBlock: tip,
+      });
+      for (const log of logs) {
+        try {
+          const decoded = decodeEventLog({
+            abi: JINN_ROUTER_ABI,
+            data: log.data,
+            topics: log.topics,
+          });
+          if (decoded.eventName === 'EvaluationJobCreated') {
+            const args = decoded.args as { restorationRequestId: Hex };
+            if (String(args.restorationRequestId).toLowerCase() === want) {
+              return true;
+            }
+          }
+        } catch {
+          /* not a router event */
+        }
+      }
+      return false;
+    },
+    120_000,
+    500,
+  );
+  console.log('    Evaluation job on chain (EvaluationJobCreated) — proceeding to operator B eval');
+}
+
 async function jsonRpc(url: string, method: string, params: unknown[] = []): Promise<unknown> {
   const res = await fetch(url, {
     method: 'POST',
@@ -215,6 +272,9 @@ async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseRes
     const ms = Date.now() - start;
     const error = err instanceof Error ? err.message : String(err);
     console.error(`  ✗ ${name} (${ms}ms): ${error}`);
+    if (err instanceof Error && err.stack) {
+      console.error(err.stack);
+    }
     return { name, ok: false, ms, error };
   }
 }
@@ -1507,6 +1567,9 @@ async function main(): Promise<void> {
           try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch {}
         }, 1000);
 
+        // Scan for EvaluationJobCreated from this point; the event may land after the first
+        // watchForDeliveries yield (restorationDeliveryClaimed retry / next poll).
+        const crossEvalScanFromBlock = await publicClient.getBlockNumber();
         const crossDeliveryIter = creatorAdapter.watchForDeliveries()[Symbol.asyncIterator]();
         const crossDelivery = await Promise.race([
           crossDeliveryIter.next().then(r => r.value),
@@ -1514,7 +1577,15 @@ async function main(): Promise<void> {
         ]);
         console.log(`    A claimed restoration, type: ${crossDelivery?.desiredState?.type}`);
 
-        // B delivers evaluation
+        await waitForRouterEvaluationJobForRestoration(
+          publicClient,
+          ROUTER_ADDRESS,
+          crossRequestId as Hex,
+          ANVIL_RPC,
+          crossEvalScanFromBlock,
+        );
+
+        // B delivers evaluation (only after eval request is guaranteed on chain for B's mech)
         await Promise.race([
           restorerB.processOne(),
           sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`Operator B eval processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
@@ -1668,7 +1739,8 @@ async function main(): Promise<void> {
     // ── Phase 13b: On-Chain ClaimRegistry ──────────────────────────────────
 
     const { OnChainClaimPolicy } = await import('../src/adapters/mech/claim-policy.js');
-    const { CLAIM_REGISTRY_ABI } = await import('../src/adapters/mech/types.js');
+    // Canonical ABI — do not import from adapters/mech/types (CLAIM_REGISTRY_ABI was removed there).
+    const { CLAIM_REGISTRY_ABI } = await import('../src/adapters/claim-registry/abi.js');
 
     results.push(
       await runPhase('Phase 13b: On-Chain ClaimRegistry — deploy, claim, reject, expire, reclaim', async () => {

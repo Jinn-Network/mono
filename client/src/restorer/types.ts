@@ -11,6 +11,13 @@ import type { OutputArtifact, RationaleEntry, Snapshot } from '../types/portfoli
 
 export interface RestorationContext {
   intent: DesiredState;
+  /**
+   * IPFS CID of this job's desired state (from Marketplace / observe).
+   * Restorers' submission manifests should reference the same CID; evaluators
+   * compare it via integrity.intent_ref. May be an empty string when
+   * provenance is missing (dev / legacy).
+   */
+  intentCid?: string;
   /** Persistent directory for impl-specific state. */
   implStateDir: string;
   /** Ephemeral working directory (cleared between attempts). */

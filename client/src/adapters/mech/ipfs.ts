@@ -69,9 +69,89 @@ export function buildResultPayload(requestId: string, result: RestorationResult)
 }
 
 /**
- * Upload JSON to IPFS via the Autonolas registry.
- * Uses pushJsonToIpfs from mech-client-ts — the same function jinn-node uses.
- * Returns [digestHex, cidString].
+ * Default per-request timeout (ms) when fetching from a gateway.
+ * jinn-node uses 7–10s; we allow a bit more for slow public gateways.
+ */
+const IPFS_FETCH_TIMEOUT_MS = 15_000;
+
+const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
+
+/**
+ * Normalizes operator-configured `ipfsGatewayUrl` into a base that ends with `/ipfs/`
+ * so we can append a CID path without double `/ipfs/ipfs/`.
+ *
+ * jinn-node defaults to `https://gateway.autonolas.tech/ipfs/`; operators sometimes set
+ * the origin only (`https://gateway.autonolas.tech`) or paste the full `/ipfs/` URL.
+ * See: jinn-node `fetchIpfsMetadata` / `shared/ipfs` gateway joining.
+ */
+export function normalizeIpfsGatewayBase(gatewayUrl: string): string {
+  let t = gatewayUrl.trim();
+  if (t === '') t = 'https://gateway.autonolas.tech';
+  t = t.replace(/\/+$/, '');
+  if (!t.toLowerCase().endsWith('/ipfs')) {
+    t = `${t}/ipfs`;
+  }
+  return `${t}/`;
+}
+
+/**
+ * For the same 32-byte on-chain digest, Autonolas may address content as CIDv1 **raw** (`f01551220…`)
+ * or **dag-pb** (`f01701220…`). Gateways can 404/500 on the wrong codec — jinn-node always tries both.
+ * See: `jinn-node/src/worker/metadata/fetchIpfsMetadata.ts` (buildIpfsHashCandidates).
+ */
+export function buildIpfsHexCidCandidatesFromPartialHex(hex: string): string[] {
+  const h = (hex.startsWith('0x') ? hex.slice(2) : hex).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(h)) {
+    return [hex];
+  }
+  // Raw (registry file JSON) first — matches mech `pushJsonToIpfs` / on-chain requestData
+  return [`f01551220${h}`, `f01701220${h}`];
+}
+
+/**
+ * Build CID path segments to try for `fetchFromIpfs`. Accepts on-chain f01… hex, or full base32 (bafy…, Qm…).
+ */
+export function buildIpfsFetchCidPathCandidates(cidOrPath: string): string[] {
+  const s = cidOrPath.trim();
+  const lower = s.toLowerCase();
+  // Prefixes are CIDv1 multibase+version+codec (9 hex chars for f015 / f017 forms we use)
+  if (lower.startsWith('f01551220') && lower.length > 9) {
+    return buildIpfsHexCidCandidatesFromPartialHex(lower.slice(9));
+  }
+  if (lower.startsWith('f01701220') && lower.length > 9) {
+    return buildIpfsHexCidCandidatesFromPartialHex(lower.slice(9));
+  }
+  if (/^[0-9a-f]+$/i.test(s) && s.length === 64) {
+    return buildIpfsHexCidCandidatesFromPartialHex(s);
+  }
+  return [s];
+}
+
+async function fetchJsonFromUrl(url: string, signal: AbortSignal): Promise<unknown> {
+  const response = await fetch(url, { method: 'GET', signal });
+  if (!response.ok) {
+    throw new Error(`IPFS fetch failed: ${response.status} ${response.statusText} (${url.slice(0, 80)}…)`);
+  }
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error(`IPFS response is not JSON (content-type: ${contentType || 'none'})`);
+  }
+}
+
+/**
+ * Fetch JSON from IPFS gateways, mirroring jinn-node:
+ * 1) Normalize base URL (avoid `/ipfs//ipfs/` when env already includes `/ipfs/`).
+ * 2) Try raw then dag-pb hex CIDs for the same digest.
+ * 3) Retry on primary gateway then public ipfs.io fallback.
+ *
+ * Upload path stays `pushJsonToIpfs` from mech-client-ts (axios, same as jinn-node) — it already
+ * enforces a registry timeout; we do not wrap it again here.
  */
 export async function uploadToIpfs(_registryUrl: string, data: unknown): Promise<string> {
   const { pushJsonToIpfs } = await import('@jinn-network/mech-client-ts/dist/ipfs.js');
@@ -80,9 +160,28 @@ export async function uploadToIpfs(_registryUrl: string, data: unknown): Promise
 }
 
 export async function fetchFromIpfs(gatewayUrl: string, cid: string): Promise<unknown> {
-  const response = await fetch(`${gatewayUrl}/ipfs/${cid}`);
-  if (!response.ok) throw new Error(`IPFS fetch failed: ${response.statusText}`);
-  return response.json();
+  const base = normalizeIpfsGatewayBase(gatewayUrl);
+  const candidates = buildIpfsFetchCidPathCandidates(cid);
+  const errors: string[] = [];
+  for (const cidPath of candidates) {
+    for (const [name, baseUrl] of [
+      ['primary', base] as const,
+      ['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const,
+    ]) {
+      const url = `${baseUrl}${cidPath}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
+      try {
+        return await fetchJsonFromUrl(url, controller.signal);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push(`${name}:${url.slice(0, 100)}: ${message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  throw new Error(`IPFS JSON fetch failed after all candidates: ${errors.join(' | ')}`);
 }
 
 /**
@@ -130,13 +229,12 @@ export function digestHexToGatewayUrl(digestHex: string): string {
 }
 
 /**
- * Fetch content from IPFS using a raw SHA256 digest hex.
+ * Fetch content from IPFS using a raw SHA256 digest hex (with or without `0x`).
+ * Uses the same multi-codec and multi-gateway path as `fetchFromIpfs`.
  */
 export async function fetchFromDigest(digestHex: string): Promise<unknown> {
-  const url = digestHexToGatewayUrl(digestHex);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`IPFS fetch failed: ${response.statusText}`);
-  return response.json();
+  const hex = (digestHex.startsWith('0x') ? digestHex.slice(2) : digestHex).toLowerCase();
+  return fetchFromIpfs('https://gateway.autonolas.tech', `f01551220${hex}`);
 }
 
 // ── Base encoding helpers ────────────────────────────────────────────────────

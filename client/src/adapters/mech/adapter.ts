@@ -30,12 +30,16 @@ import {
   callDeliverToMarketplace,
   scanRestorationJobs,
   scanEvaluationJobs,
+  scanLatestRequestDataByRid,
+  scanLatestDeliveryDataByRid,
+  findLatestDeliveryDataHexForRequest,
 } from './contracts.js';
 import { type MechAdapterConfig, MECH_MARKETPLACE_ABI } from './types.js';
 import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { computeEvidenceSimHash, type EvidenceCheckpointV1 } from '../../earning/evidence-simhash.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -54,6 +58,8 @@ export class MechAdapter implements ExecutionAdapter {
   // Restoration result content cached across evaluation-job retries so a transient
   // Safe/router failure does not silently strip evaluator context on the next poll.
   private pendingEvaluationResults = new Map<string, string>();
+  // RIDs with no delivery found in backfill window; avoids repeated 500k-block rescans.
+  private backfillMissRids = new Set<string>();
   // Original desired states keyed by request ID (restoration and evaluation)
   // so we can yield accurate desiredState in DeliveredResult
   private originalStates = new Map<string, DesiredState>();
@@ -169,6 +175,53 @@ export class MechAdapter implements ExecutionAdapter {
     // Set delivery block cursor to scan from recovery point
     this.deliveryBlockCursor = fromBlock;
 
+    const latestRequestDataByRid = await scanLatestRequestDataByRid(
+      this.publicClient,
+      this.config.mechMarketplaceAddress,
+      fromBlock,
+      currentBlock,
+    );
+    const latestDeliveryDataByRid = await scanLatestDeliveryDataByRid(
+      this.publicClient,
+      this.config.mechContractAddress,
+      fromBlock,
+      currentBlock,
+    );
+
+    for (const { requestId } of restorations) {
+      const pe = this.pendingEvaluations.get(requestId);
+      if (!pe) continue;
+
+      const requestDataHex = latestRequestDataByRid.get(requestId.toLowerCase());
+      if (requestDataHex) {
+        const d = String(requestDataHex);
+        const digest = d.startsWith('0x') ? d.slice(2) : d;
+        this.pendingEvaluations.set(requestId, {
+          ...pe,
+          context: { ...pe.context, [RESTORATION_INTENT_CID_CONTEXT_KEY]: `f01551220${digest}` },
+        });
+      }
+
+      const deliveryDataHex = latestDeliveryDataByRid.get(requestId.toLowerCase());
+      if (deliveryDataHex) {
+        try {
+          const d = String(deliveryDataHex);
+          const dig = d.startsWith('0x') ? d.slice(2) : d;
+          const payload = (await fetchFromIpfs(
+            this.config.ipfsGatewayUrl,
+            `f01551220${dig}`,
+          )) as Record<string, unknown>;
+          this.pendingEvaluationResults.set(
+            requestId,
+            (payload.data as string) ?? JSON.stringify(payload),
+          );
+          this.backfillMissRids.delete(requestId);
+        } catch (err) {
+          console.error(`[mech] recovery: could not load restoration result IPFS for ${requestId}:`, err);
+        }
+      }
+    }
+
     const recovered = this.pendingEvaluations.size + this.pendingEvaluationClaims.size + this.claimedButNotEvaluated.size;
     if (recovered > 0) {
       console.error(`[mech] Recovered: ${this.pendingEvaluations.size} pending evaluations, ${this.pendingEvaluationClaims.size} pending eval claims, ${this.claimedButNotEvaluated.size} claimed but not evaluated`);
@@ -185,6 +238,8 @@ export class MechAdapter implements ExecutionAdapter {
     const restorationPayload = buildDesiredStatePayload(restorationState);
     const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, restorationPayload);
     const restorationDataHex = cidToDigestHex(restorationCid);
+    const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
+    const restorationIntentCid = `f01551220${digestNo0x}`;
 
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
@@ -206,9 +261,15 @@ export class MechAdapter implements ExecutionAdapter {
 
     const restorationRequestId = restorationRequestIds[0];
 
-    // Store for evaluation creation after delivery is claimed
-    this.pendingEvaluations.set(restorationRequestId, state);
-    this.originalStates.set(restorationRequestId, { ...state, type: 'restoration' });
+    // Store for evaluation creation after delivery is claimed. The evaluation
+    // job’s IPFS CID is different from the restoration intended-state CID; evaluators
+    // need the latter to verify submission.intent.cid (see context.restorationIntentCid).
+    const stateForEval: DesiredState = {
+      ...state,
+      context: { ...(state.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: restorationIntentCid },
+    };
+    this.pendingEvaluations.set(restorationRequestId, stateForEval);
+    this.originalStates.set(restorationRequestId, { ...stateForEval, type: 'restoration' });
 
     return restorationRequestId;
   }
@@ -287,11 +348,6 @@ export class MechAdapter implements ExecutionAdapter {
   async *watchForDeliveries(): AsyncIterable<DeliveredResult> {
     while (!this.stopped) {
       try {
-        // Retry evaluation creation for claimed restorations that failed previously
-        for (const rid of [...this.claimedButNotEvaluated]) {
-          await this.tryCreateEvaluationJob(rid);
-        }
-
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.deliveryBlockCursor) {
           const logs = await this.publicClient.getLogs({
@@ -314,8 +370,15 @@ export class MechAdapter implements ExecutionAdapter {
             const iCreatedEvaluation = this.pendingEvaluationClaims.has(requestId);
             if (!iDelivered && !iCreatedRestoration && !iCreatedEvaluation) continue;
 
-            // (a) If I delivered, claim delivery → msg.sender = my Safe → correct role credit.
-            if (iDelivered) {
+            // (a) Claim delivery on the router so `restorationDeliveryClaimed[requestId]` is set
+            // (required before createEvaluationJob can run).
+            // - Same-operator: we delivered (iDelivered) → our Safe claims and gets counter credit.
+            // - Cross-operator: we created the request (iCreatedRestoration) but another mech
+            //   delivered (iDelivered is false) → the creator Safe must still call claimDelivery
+            //   so the router flips `restorationDeliveryClaimed` for this requestId. Otherwise
+            //   tryCreateEvaluationJob never unblocks. See JinnRouter.claimDelivery in contracts.
+            const shouldClaimDelivery = iDelivered || (iCreatedRestoration && !iDelivered);
+            if (shouldClaimDelivery) {
               try {
                 const variant = this.config.routerClaimDeliveryVariant;
                 let evidenceHash: `0x${string}` | undefined;
@@ -365,6 +428,7 @@ export class MechAdapter implements ExecutionAdapter {
                 const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
                 const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${digest}`) as Record<string, unknown>;
                 restorationResultData = (payload.data as string) ?? JSON.stringify(payload);
+                this.backfillMissRids.delete(requestId);
               } catch (err) {
                 console.error(`[mech] Failed to fetch restoration result for evaluation: ${requestId}`, err);
               }
@@ -406,6 +470,13 @@ export class MechAdapter implements ExecutionAdapter {
             }
           }
         }
+
+        // After new Deliver events are processed (and `pendingEvaluationResults` may be warm),
+        // retry evaluation creation. Doing this *before* deliver processing can upload an
+        // evaluation desired state without `restorationResult` in context.
+        for (const rid of [...this.claimedButNotEvaluated]) {
+          await this.tryCreateEvaluationJob(rid);
+        }
       } catch (err) {
         console.error('[mech] Error polling for deliveries:', err);
       }
@@ -419,13 +490,64 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
+  private async backfillRestorationResultFromChain(requestId: string): Promise<string | undefined> {
+    if (this.pendingEvaluationResults.has(requestId)) {
+      return this.pendingEvaluationResults.get(requestId);
+    }
+    if (this.backfillMissRids.has(requestId)) {
+      return undefined;
+    }
+    const currentBlock = await this.publicClient.getBlockNumber();
+    const lookbackBlocks = this.config.mechDeliverBackfillLookbackBlocks ?? 500_000n;
+    const from = currentBlock > lookbackBlocks
+      ? currentBlock - lookbackBlocks
+      : 1n;
+    const dhex = await findLatestDeliveryDataHexForRequest(
+      this.publicClient,
+      this.config.mechContractAddress,
+      requestId,
+      from,
+      currentBlock,
+    );
+    if (!dhex) {
+      this.backfillMissRids.add(requestId);
+      return undefined;
+    }
+    try {
+      const d = String(dhex);
+      const dig = d.startsWith('0x') ? d.slice(2) : d;
+      const payload = (await fetchFromIpfs(
+        this.config.ipfsGatewayUrl,
+        `f01551220${dig}`,
+      )) as Record<string, unknown>;
+      const data = (payload.data as string) ?? JSON.stringify(payload);
+      this.pendingEvaluationResults.set(requestId, data);
+      this.backfillMissRids.delete(requestId);
+      return data;
+    } catch (err) {
+      console.error(`[mech] backfill: failed to load restoration result for ${requestId}:`, err);
+      return undefined;
+    }
+  }
+
   private async tryCreateEvaluationJob(requestId: string, restorationResultData?: string): Promise<void> {
     if (!this.pendingEvaluations.has(requestId)) return;
     const originalState = this.pendingEvaluations.get(requestId)!;
     if (restorationResultData) {
       this.pendingEvaluationResults.set(requestId, restorationResultData);
+      this.backfillMissRids.delete(requestId);
     }
-    const cachedRestorationResultData = restorationResultData ?? this.pendingEvaluationResults.get(requestId);
+    let cachedRestorationResultData = restorationResultData ?? this.pendingEvaluationResults.get(requestId);
+    if (cachedRestorationResultData == null) {
+      cachedRestorationResultData = await this.backfillRestorationResultFromChain(requestId);
+    }
+    if (cachedRestorationResultData == null) {
+      this.claimedButNotEvaluated.add(requestId);
+      console.error(
+        `[mech] no restoration result yet for ${requestId} (evaluation job and IPFS upload deferred until Deliver or backfill)`,
+      );
+      return;
+    }
     try {
       const evaluationState: DesiredState = {
         ...originalState,
@@ -433,7 +555,7 @@ export class MechAdapter implements ExecutionAdapter {
         restorationRequestId: requestId,
         context: {
           ...originalState.context,
-          ...(cachedRestorationResultData ? { restorationResult: cachedRestorationResultData } : {}),
+          restorationResult: cachedRestorationResultData,
         },
       };
       const evaluationPayload = buildDesiredStatePayload(evaluationState);
@@ -487,8 +609,10 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private async verifyRestorationClaimed(requestId: `0x${string}`): Promise<boolean> {
-    const MAX_POLLS = 5;
-    const POLL_DELAY_MS = 2_000;
+    // RPC / fork can lag right after claimDelivery; give more room than 5×2s so
+    // tryCreateEvaluationJob succeeds on the first watchForDeliveries pass when possible.
+    const MAX_POLLS = 12;
+    const POLL_DELAY_MS = 1_500;
     const abi = [{
       type: 'function' as const,
       name: 'restorationDeliveryClaimed' as const,
