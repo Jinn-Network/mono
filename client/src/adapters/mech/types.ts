@@ -10,6 +10,8 @@ export interface MechAdapterConfig {
   ipfsRegistryUrl: string;  // Upload endpoint (e.g., https://registry.autonolas.tech)
   ipfsGatewayUrl: string;   // Read endpoint (e.g., https://gateway.autonolas.tech)
   pollIntervalMs: number;
+  /** Optional delivery backfill horizon for late evaluation creation retries. */
+  mechDeliverBackfillLookbackBlocks?: bigint;
   chainId: number;
   /** Base mainnet V1 vs Phase 1b V2 `claimDelivery` — align with `ChainConfig.routerClaimDeliveryVersion`. */
   routerClaimDeliveryVariant: 'v1' | 'v2';

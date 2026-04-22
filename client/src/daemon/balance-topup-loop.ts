@@ -14,6 +14,8 @@ import { getAddress, formatEther } from 'viem';
 import type { FleetStateStore } from '../earning/store.js';
 import type { Store } from '../store/store.js';
 import { viemSendTransactionWithRetry, waitForTransactionReceiptWithRetry } from '../tx-retry.js';
+import { emitEvent } from '../observability/emit-event.js';
+import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 
 export interface BalanceTopupLoopConfig {
   intervalMs: number;
@@ -51,19 +53,33 @@ export class BalanceTopupLoop {
     for (const svc of state.services) {
       if (svc.step !== 'complete') continue;
       if (!svc.agent_address || !svc.safe_address) continue;
+      const displayIndex = displayFleetServiceIndex(svc);
 
       try {
-        await this.topUpService(svc.index, svc.agent_address, svc.safe_address, masterAccount);
+        await this.topUpService(
+          displayIndex,
+          svc.index,
+          svc.agent_address,
+          svc.safe_address,
+          masterAccount,
+        );
       } catch (err) {
         console.error(
           `[balance-topup] Service ${svc.index}: unexpected error (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
+        this.config.jinnStore && emitEvent(this.config.jinnStore, {
+          kind: 'tick_error',
+          serviceIndex: displayIndex,
+          outcome: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        }, 'balance-topup');
       }
     }
   }
 
   private async topUpService(
-    index: number,
+    displayIndex: number,
+    logIndex: number,
     agentAddressRaw: string,
     safeAddressRaw: string,
     masterAccount: NonNullable<WalletClient['account']>,
@@ -78,7 +94,7 @@ export class BalanceTopupLoop {
       const masterBal = await this.config.publicClient.getBalance({ address: masterAccount.address });
       if (masterBal > needed) {
         console.error(
-          `[balance-topup] Service ${index}: agent ${agentAddr} balance ${formatEther(agentBal)} ETH below trigger, topping up with ${formatEther(needed)} ETH from master`,
+          `[balance-topup] Service ${logIndex}: agent ${agentAddr} balance ${formatEther(agentBal)} ETH below trigger, topping up with ${formatEther(needed)} ETH from master`,
         );
         const hash = await viemSendTransactionWithRetry(
           this.config.masterWallet,
@@ -90,6 +106,13 @@ export class BalanceTopupLoop {
           },
         );
         await waitForTransactionReceiptWithRetry(this.config.publicClient, hash);
+        this.config.jinnStore && emitEvent(this.config.jinnStore, {
+          kind: 'balance_topup',
+          serviceIndex: displayIndex,
+          txHash: hash,
+          outcome: 'ok',
+          detail: `Topped up agent to ${formatEther(this.config.eoaTopupTarget)} ETH`,
+        }, 'balance-topup');
       } else {
         console.error(
           `[balance-topup] Warning: master balance (${formatEther(masterBal)} ETH) too low to top up agent ${agentAddr} (needs ${formatEther(needed)} ETH)`,
@@ -104,7 +127,7 @@ export class BalanceTopupLoop {
       const masterBal = await this.config.publicClient.getBalance({ address: masterAccount.address });
       if (masterBal > safeNeeded) {
         console.error(
-          `[balance-topup] Service ${index}: Safe ${safeAddr} balance ${formatEther(safeBal)} ETH below trigger, topping up with ${formatEther(safeNeeded)} ETH from master`,
+          `[balance-topup] Service ${logIndex}: Safe ${safeAddr} balance ${formatEther(safeBal)} ETH below trigger, topping up with ${formatEther(safeNeeded)} ETH from master`,
         );
         const hash = await viemSendTransactionWithRetry(
           this.config.masterWallet,
@@ -116,6 +139,13 @@ export class BalanceTopupLoop {
           },
         );
         await waitForTransactionReceiptWithRetry(this.config.publicClient, hash);
+        this.config.jinnStore && emitEvent(this.config.jinnStore, {
+          kind: 'balance_topup',
+          serviceIndex: displayIndex,
+          txHash: hash,
+          outcome: 'ok',
+          detail: `Topped up safe to ${formatEther(this.config.safeTopupTarget)} ETH`,
+        }, 'balance-topup');
       } else {
         console.error(
           `[balance-topup] Warning: master balance (${formatEther(masterBal)} ETH) too low to top up Safe ${safeAddr} (needs ${formatEther(safeNeeded)} ETH)`,
@@ -134,6 +164,11 @@ export class BalanceTopupLoop {
         await this.runOnce();
       } catch (err) {
         console.error('[balance-topup] Tick failed (non-fatal):', err instanceof Error ? err.message : err);
+        this.config.jinnStore && emitEvent(this.config.jinnStore, {
+          kind: 'tick_error',
+          outcome: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        }, 'balance-topup');
       }
       this.config.jinnStore?.setConfigValue('last_balance_topup_tick_at', new Date().toISOString());
       await new Promise(r => setTimeout(r, this.config.intervalMs));

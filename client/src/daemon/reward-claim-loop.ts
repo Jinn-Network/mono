@@ -16,6 +16,8 @@ import {
   type StolasClaimTickResult,
 } from '../earning/stolas-claim.js';
 import type { Store } from '../store/store.js';
+import { emitEvent } from '../observability/emit-event.js';
+import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 
 export interface RewardClaimLoopConfig {
   intervalMs: number;
@@ -56,7 +58,34 @@ export class RewardClaimLoop {
   }
 
   async runOnce(): Promise<void> {
-    await runRewardClaimOnce(this.config);
+    const result = await runRewardClaimOnce(this.config);
+    if (!this.config.jinnStore || result.claims.length === 0) return;
+    const state = await this.config.store.load(this.config.chain);
+    const serviceByStakingId = new Map<number, (typeof state.services)[number]>();
+    for (const svc of state.services) {
+      if (svc.service_id != null) serviceByStakingId.set(svc.service_id, svc);
+    }
+    for (const claim of result.claims) {
+      const svc = serviceByStakingId.get(claim.serviceId);
+      if (!svc) continue;
+      const serviceIndex = displayFleetServiceIndex(svc);
+      this.config.jinnStore.recordRewardClaim({
+        ts: new Date().toISOString(),
+        serviceIndex,
+        serviceId: claim.serviceId,
+        stakingProxy: claim.stakingProxy,
+        distributor: this.config.distributorAddress ?? '0x',
+        txHash: claim.txHash,
+        amountWei: claim.amountWei,
+      });
+      emitEvent(this.config.jinnStore, {
+        kind: 'reward_claimed',
+        serviceIndex,
+        txHash: claim.txHash,
+        outcome: 'ok',
+        detail: `Claimed ${claim.amountWei} reward wei for service ${claim.serviceId}`,
+      }, 'reward-claim');
+    }
   }
 
   async run(): Promise<void> {
@@ -69,6 +98,11 @@ export class RewardClaimLoop {
         await this.runOnce();
       } catch (err) {
         console.error('[reward-claim] Tick failed (non-fatal):', err instanceof Error ? err.message : err);
+        this.config.jinnStore && emitEvent(this.config.jinnStore, {
+          kind: 'tick_error',
+          outcome: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        }, 'reward-claim');
       }
       this.config.jinnStore?.setConfigValue('last_reward_claim_tick_at', new Date().toISOString());
       await new Promise(r => setTimeout(r, this.config.intervalMs));

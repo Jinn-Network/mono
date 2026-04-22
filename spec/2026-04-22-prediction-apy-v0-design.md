@@ -74,4 +74,3 @@ Verdicts:
 | `claude-mcp-prediction-apy` | No (opt-in) | Spawns Claude Code with MCP tools `read_aave_reserve` + `submit_apy_prediction`. Operators select via `jinn intents` / config `restorers.byKind`. |
 
 Do not flip the default to the Claude impl until the opt-in isolation test (`JINN_TEST_CLAUDE_PREDICTION_APY=1`, script `yarn test:claude-prediction-apy`) is green on at least three separate runs, matching the gate used for `prediction.v0` / `claude-mcp-prediction`.
-

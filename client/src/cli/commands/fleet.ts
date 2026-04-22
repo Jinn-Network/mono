@@ -4,6 +4,18 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleFleetV1 } from '../../api/fleet-build.js';
+import type { FleetV1Response } from '../../api/fleet-build.js';
+
+function humanFleet(payload: FleetV1Response): string {
+  if (payload.services.length === 0) return 'No fleet services found.';
+  const lines = ['#  step           serviceId  agentETH      safeETH       safeOLAS      staked  lastEventAt'];
+  for (const s of payload.services) {
+    lines.push(
+      `${String(s.index).padEnd(2)} ${s.step.padEnd(13)} ${String(s.serviceId ?? '-').padEnd(9)} ${s.wallets.agent.balances[0]?.amountWei ?? '0'} ${s.wallets.multisig.balances[0]?.amountWei ?? '0'} ${s.wallets.multisig.balances[1]?.amountWei ?? '0'} ${String(s.staking.staked).padEnd(6)} ${s.activity.lastEventAt ?? '-'}`,
+    );
+  }
+  return lines.join('\n');
+}
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -23,7 +35,7 @@ async function run(ctx: CommandContext): Promise<void> {
   }
   const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
   const payload = assembleFleetV1(raw);
-  emitResult(payload, (v) => JSON.stringify(v, null, 2), {
+  emitResult(payload, (v) => humanFleet(v as FleetV1Response), {
     json: Boolean(parsed.values.json),
     human: Boolean(parsed.values.human),
     writer: ctx.writer,

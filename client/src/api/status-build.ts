@@ -9,6 +9,11 @@ const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 
+export interface ServiceBalanceErrorEntry {
+  agent?: string;
+  multisig?: string;
+}
+
 export interface GatheredStatusRaw {
   /** sqlite_only: only SQLite-backed fields (e2e / API without fleet context). */
   hintsScope?: StatusHintsScope;
@@ -16,7 +21,16 @@ export interface GatheredStatusRaw {
   dbPath: string;
   earningDir?: string;
   activityCounts: Record<string, number>;
-  recentActivity: Array<{ requestId: string; role: string }>;
+  recentActivity: Array<{
+    id: number;
+    ts: string | null;
+    kind: string;
+    requestId: string | null;
+    serviceIndex: number | null;
+    txHash: string | null;
+    specKind: string | null;
+    outcome: string | null;
+  }>;
   lastRewardClaimTickAt: string | null;
   rewardClaimIntervalMs: number;
   fleet: FleetState | null;
@@ -36,6 +50,15 @@ export interface GatheredStatusRaw {
   minMasterEthWei?: string;
   /** portfolio.v0 lifecycle data — populated by gather-status from the SQLite store. */
   portfolioV0?: PortfolioV0Status;
+  serviceBalances?: Record<number, { agentNativeWei: string; safeNativeWei: string; safeBondWei: string }>;
+  /** Last balance fetch error per service (display index). Present when a fetch failed. */
+  serviceBalanceErrors?: Record<number, ServiceBalanceErrorEntry>;
+  perServiceActivity?: Record<
+    number,
+    { counts: Record<string, number>; lastEventAt: string | null }
+  >;
+  pendingByService?: Record<number, string>;
+  claimedByService?: Record<number, { total: string; lastAt: string; lastTxHash: string }>;
 }
 
 export interface StatusV1Response {
@@ -64,7 +87,7 @@ export interface StatusV1Response {
   };
   activity: {
     counts: Record<string, number>;
-    recent: Array<{ requestId: string; role: string }>;
+    recent: GatheredStatusRaw['recentActivity'];
   };
   rewards: {
     claimLoopIntervalMs: number;

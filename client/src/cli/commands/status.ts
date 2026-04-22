@@ -4,6 +4,18 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleStatusRollupV1 } from '../../api/status-rollup-build.js';
+import type { StatusRollupV1Response } from '../../api/status-rollup-build.js';
+
+function humanStatus(v: StatusRollupV1Response): string {
+  const health = v.exit.blocking ? `degraded: ${v.exit.hint ?? 'attention needed'}` : 'healthy';
+  return [
+    `daemon=${v.daemon.state} network=${v.daemon.network} chain=${v.rpc.chainId} block=${v.rpc.blockNumber}`,
+    `health=${health}`,
+    `fleet: ${v.fleet.size} services, ${v.fleet.complete} complete, ${v.fleet.needsAttention} need attention`,
+    `pending: ${v.earnings.pendingTotal} reward-wei`,
+    v.exit.blocking && v.exit.hint ? `hint: ${v.exit.hint}` : '',
+  ].filter(Boolean).join('\n');
+}
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -25,7 +37,7 @@ async function run(ctx: CommandContext): Promise<void> {
   const payload = assembleStatusRollupV1(raw);
   emitResult(
     payload,
-    (v) => JSON.stringify(v, null, 2),
+    (v) => humanStatus(v as StatusRollupV1Response),
     {
       json: Boolean(parsed.values.json),
       human: Boolean(parsed.values.human),

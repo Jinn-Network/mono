@@ -54,6 +54,7 @@
     "status": "tsx scripts/status.ts",
     "e2e": "tsx scripts/e2e-validate.ts",
     "e2e-portfolio-v0": "tsx scripts/e2e-portfolio-v0.ts",
+    "e2e-prediction-apy-v0": "tsx scripts/e2e-prediction-apy-v0.ts",
     "e2e:prediction": "cd ../contracts && yarn compile && cd ../client && tsx scripts/e2e-prediction-v0.ts",
     "staking": "tsx scripts/staking-validate.ts",
     "stolas": "tsx scripts/stolas-validate.ts",

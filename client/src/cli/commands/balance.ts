@@ -4,6 +4,17 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleBalanceV1 } from '../../api/balance-build.js';
+import type { BalanceV1Response } from '../../api/balance-build.js';
+
+function humanBalance(payload: BalanceV1Response): string {
+  const lines = ['role                  address         nativeWei        bondWei'];
+  for (const w of payload.wallets) {
+    lines.push(
+      `${w.role.padEnd(20)} ${(w.address ?? '0x').slice(0, 12).padEnd(12)} ${(w.balances.find((b) => b.asset === 'native')?.amountWei ?? '0').padEnd(15)} ${w.balances.find((b) => b.asset === 'bond')?.amountWei ?? '0'}`,
+    );
+  }
+  return lines.join('\n');
+}
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -23,7 +34,7 @@ async function run(ctx: CommandContext): Promise<void> {
   }
   const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
   const payload = assembleBalanceV1(raw);
-  emitResult(payload, (v) => JSON.stringify(v, null, 2), {
+  emitResult(payload, (v) => humanBalance(v as BalanceV1Response), {
     json: Boolean(parsed.values.json),
     human: Boolean(parsed.values.human),
     writer: ctx.writer,

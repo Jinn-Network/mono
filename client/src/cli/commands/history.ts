@@ -4,6 +4,20 @@ import { emitResult } from '../output.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleHistoryV1 } from '../../api/history-build.js';
 import { emitEnvelope } from '../../errors/envelope.js';
+import type { HistoryV1Response } from '../../api/history-build.js';
+import { loadConfig, getConfigPathFromArgs } from '../../config.js';
+import { Store } from '../../store/store.js';
+
+function humanHistory(payload: HistoryV1Response): string {
+  if (payload.events.length === 0) return 'No history events yet.';
+  const lines = ['TIME      KIND                 SVC  REQUEST      TX'];
+  for (const e of payload.events) {
+    lines.push(
+      `${e.at.slice(11, 19)}  ${e.kind.padEnd(20)}  ${String(e.serviceIndex).padEnd(3)}  ${(e.intentId ?? '-').slice(0, 10)}  ${(e.txHash ?? '-').slice(0, 10)}`,
+    );
+  }
+  return lines.join('\n');
+}
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -32,14 +46,27 @@ async function run(ctx: CommandContext): Promise<void> {
     );
     return;
   }
-  const limit = parseInt(parsed.values.limit as string, 10);
+  const n = parseInt(parsed.values.limit as string, 10);
+  const effLimit = Math.min(Math.max(Number.isFinite(n) ? n : 50, 1), 500);
+  const fromVerbFlags = getConfigPathFromArgs(ctx.argv);
+  const fromProcess =
+    typeof process !== 'undefined' ? getConfigPathFromArgs(process.argv.slice(2)) : undefined;
+  const config = loadConfig(fromVerbFlags ?? fromProcess);
+  const store = new Store(config.dbPath);
+  const since = parsed.values.since as string | undefined;
+  const cursor = parsed.values.cursor as string | undefined;
+  const fromStore = store.getRecentActivityEvents(effLimit, { since, cursor });
   const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-  const payload = assembleHistoryV1(raw, {
-    limit: Number.isFinite(limit) ? limit : 50,
-    since: parsed.values.since as string | undefined,
-    cursor: parsed.values.cursor as string | undefined,
-  });
-  emitResult(payload, (v) => JSON.stringify(v, null, 2), {
+  const payload = assembleHistoryV1(
+    raw,
+    {
+      limit: effLimit,
+      since,
+      cursor,
+    },
+    fromStore,
+  );
+  emitResult(payload, (v) => humanHistory(v as HistoryV1Response), {
     json: Boolean(parsed.values.json),
     human: Boolean(parsed.values.human),
     writer: ctx.writer,
