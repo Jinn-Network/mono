@@ -46,7 +46,12 @@ export const PredictionApyV0SpecSchema = z.object({
 export type PredictionApyV0Spec = z.infer<typeof PredictionApyV0SpecSchema>;
 
 export const PredictionApyV0EligibilitySchema = z.object({
-  maxSubmissionDelayMs: z.number().int().default(60_000),
+  /**
+   * Latest time after window start for a valid submission: submittedAt ≤
+   * startTs + maxSubmissionDelayMs. Default 72h so it does not cut off
+   * late-in-window posts on long windows; tighten per market.
+   */
+  maxSubmissionDelayMs: z.number().int().min(1).default(72 * 3_600_000),
 });
 
 export type PredictionApyV0Eligibility = z.infer<typeof PredictionApyV0EligibilitySchema>;
@@ -79,10 +84,18 @@ export const PredictionApyV0IntentSchema = z
     message: 'resolve gap must be ≤ 8 days',
     path: ['spec', 'question', 'resolveTs'],
   })
-  .refine((d) => d.spec.metric.sampleCount <= d.spec.metric.twaWindowSeconds, {
-    message: 'sampleCount must be <= twaWindowSeconds',
-    path: ['spec', 'metric', 'sampleCount'],
-  });
+  .refine(
+    (d) => {
+      const { twaWindowSeconds, sampleCount } = d.spec.metric;
+      if (sampleCount < 2) return true;
+      const stepMs = Math.floor((twaWindowSeconds * 1000) / (sampleCount - 1));
+      return stepMs >= 1000;
+    },
+    {
+      message: 'TWA sample spacing must be at least 1 second (increase window or reduce sampleCount)',
+      path: ['spec', 'metric', 'sampleCount'],
+    },
+  );
 
 export type PredictionApyV0Intent = z.infer<typeof PredictionApyV0IntentSchema>;
 
@@ -123,7 +136,8 @@ export const PredictionApyVerdictManifestSchema = z.object({
     predictedBps: IntegerStringSchema,
     submittedAt: z.number().int(),
     modelId: z.string(),
-    submissionManifestCid: z.string(),
+    /** Present when the submission was registered on IPFS; omitted for inline/dev. */
+    submissionManifestCid: z.string().min(1).optional(),
   }),
   groundTruth: z.object({
     twApyBps: IntegerStringSchema,
@@ -132,7 +146,7 @@ export const PredictionApyVerdictManifestSchema = z.object({
   checks: z.array(
     z.object({
       name: z.string(),
-      status: z.enum(['PASS', 'FAIL', 'SKIP']),
+      status: z.enum(['PASS', 'FAIL', 'SKIP', 'INDETERMINATE']),
       detail: z.union([z.string(), z.record(z.unknown())]).optional(),
     }),
   ),

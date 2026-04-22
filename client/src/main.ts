@@ -46,6 +46,7 @@ import { PredictionApyV0Evaluator } from './restorer/impls/prediction-apy-v0-eva
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { makePredictionV0Generator } from './intents/prediction-v0-auto.js';
+import { makePredictionApyV0Generator } from './intents/prediction-apy-v0-auto.js';
 import { BASE_SEPOLIA_FEEDS, BASE_FEEDS } from './venues/chainlink/feeds.js';
 import type { IntentGenerator } from './daemon/creator.js';
 
@@ -437,6 +438,10 @@ export async function main(): Promise<DaemonStartupInfo> {
       rpcUrl: config.rpcUrl,
     }));
     console.log('[main] auto-intent generator enabled: prediction.v0 (testnet, ETH/USD coin-flip+0.5%)');
+    if (process.env['JINN_ENABLE_APY_AUTO_INTENTS'] === '1') {
+      intentGenerators.push(makePredictionApyV0Generator());
+      console.log('[main] auto-intent generator enabled: prediction.apy.v0 (JINN_ENABLE_APY_AUTO_INTENTS=1)');
+    }
   } else if (config.network === 'mainnet' && !autoIntentsDisabled && BASE_FEEDS['ETH / USD']) {
     // Mainnet opt-in only; default is OFF. Reserved for a future flag.
   }

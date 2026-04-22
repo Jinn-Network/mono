@@ -48,7 +48,7 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
           },
           question: { resolveTs },
         },
-        eligibility: { maxSubmissionDelayMs: 60_000 },
+        eligibility: { maxSubmissionDelayMs: windowDurationMs },
       });
       return intent as unknown as DesiredState;
     } catch {

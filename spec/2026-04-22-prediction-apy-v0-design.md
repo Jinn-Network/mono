@@ -25,6 +25,8 @@ Status: draft
 - Intent window: 10 minutes (`windowDurationMs = 600_000`).
 - Resolve gap: 5 minutes (`resolveGapMs = 300_000`).
 - TWA: 1 hour (`twaWindowSeconds = 3600`) with 12 samples.
+- Baseline restorer: TWA `windowEnd` is `min(resolveTs, now)` at submission time so samples stay in the past. Evaluator at resolution uses `resolveTs` as the window end.
+- Testnet: optional `prediction.apy.v0` auto-intents when `JINN_ENABLE_APY_AUTO_INTENTS=1` (off by default; `prediction.v0` auto remains the default loop activity).
 
 ## Mainnet profile defaults
 
@@ -41,17 +43,26 @@ Status: draft
 - Score basis: `absolute-error-linear.v1`.
 - Formula: `score = max(0, 1 - error/toleranceBps)` scaled to 1e18.
 
+## Verdict manifest
+
+- `claimed.submissionManifestCid` is optional (omit when no IPFS child CID; do not use a placeholder string).
+
 ## Checks
 
 1. availability: Aave pool/reserve data readable for every sample point.
-2. eligibility: submission timestamp is inside intent window.
-3. integrity: signed submission manifest + intent CID linkage.
-4. spec: valid sample/twa parameters and positive tolerance.
+2. eligibility: `submittedAt` in `[window.startTs, window.endTs)`; and `submittedAt ≤ window.startTs + eligibility.maxSubmissionDelayMs` (default 72h in schema so short windows are not accidentally cut off by a 60s default).
+3. integrity:
+   - `integrity.manifest_signature`: recompute the keccak256 over the canonical unsigned JSON (same as restorer `signCanonical`) and verify the secp256k1 signature.
+   - `integrity.intent_ref`: compare the submission manifest’s `intent.cid` to the **restoration** job’s intended-state IPFS CID. The evaluation job’s `DesiredState` is a different IPFS object; the protocol therefore requires `context.restorationIntentCid` on the **evaluation** `DesiredState` (set by Jinn’s mech adapter when it creates the eval job from a delivered restoration). If that key is missing (e.g. legacy or third-party eval jobs), the check is `INDETERMINATE` — the evaluator does **not** fall back to the evaluation job’s `intentCid` (which would be the wrong reference and cause false `FAIL` / false `PASS` bugs).
+4. spec: valid TWA sample spacing (≥1s between samples), and positive tolerance.
 
-Failures map to verdicts:
+Verdicts:
 
-- availability fail/skip -> `INDETERMINATE`
+- availability fail -> `INDETERMINATE`
+- any `integrity.*` with status `INDETERMINATE` (e.g. missing `context.restorationIntentCid`) -> `INDETERMINATE`
 - eligibility fail -> `REJECTED`
-- integrity/spec fail -> `FAIL`
+- other integrity or spec fail -> `FAIL`
 - all pass -> `PASS`
+
+`prediction.v0` evaluation uses the same `context.restorationIntentCid` rule and the same `integrity.*` / `INDETERMINATE` ordering.
 
