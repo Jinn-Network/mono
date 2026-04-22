@@ -1,4 +1,5 @@
-import { recoverAddress } from 'viem';
+import { keccak256, recoverAddress } from 'viem';
+import { canonicalJson } from '../../../engine/canonical-json.js';
 import type { Check } from '../types.js';
 import type { PredictionV0Intent, PredictionSubmissionManifest } from '../../../../types/prediction.js';
 
@@ -70,6 +71,15 @@ export function checkManifestFieldsPresent(
   return { name: 'integrity.manifest_fields_present', status: 'PASS' };
 }
 
+/**
+ * Recompute keccak256 over the canonical JSON of the top-level object after
+ * removing `signature` — the same pre-image the restorer `signCanonical` hashes.
+ */
+export function recomputeTopLevelSignatureHash(manifest: Record<string, unknown>): `0x${string}` {
+  const { signature: _sig, ...unsigned } = manifest;
+  return keccak256(new TextEncoder().encode(canonicalJson(unsigned))) as `0x${string}`;
+}
+
 export async function checkManifestSignature(
   canonicalHash: `0x${string}`,
   signature: PredictionSubmissionManifest['signature'],
@@ -99,5 +109,16 @@ export function checkIntentRef(manifestIntentCid: string, expectedIntentCid: str
     name: 'integrity.intent_ref',
     status: manifestIntentCid === expectedIntentCid ? 'PASS' : 'FAIL',
     detail: manifestIntentCid === expectedIntentCid ? undefined : { manifestIntentCid, expectedIntentCid },
+  };
+}
+
+export function checkIntentRefMissingExpected(): Check {
+  return {
+    name: 'integrity.intent_ref',
+    status: 'INDETERMINATE',
+    detail: {
+      reason:
+        'context.restorationIntentCid missing; cannot verify submission.intent.cid trustlessly',
+    },
   };
 }

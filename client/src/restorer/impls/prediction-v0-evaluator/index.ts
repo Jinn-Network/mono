@@ -36,7 +36,10 @@ import {
   checkManifestFieldsPresent,
   checkManifestSignature,
   checkIntentRef,
+  checkIntentRefMissingExpected,
+  recomputeTopLevelSignatureHash,
 } from './checks/integrity.js';
+import { resolveExpectedRestorationIntentCid } from '../evaluation-context.js';
 import { checkQuestionKindSupported } from './checks/spec.js';
 
 export interface PredictionV0EvaluatorConfig {
@@ -108,6 +111,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
     const { intent, workingDir, log } = ctx;
     // Support _testDeps injection from ctx (test) or config (constructor).
     const testDeps = (ctx as any)._testDeps ?? this.config._testDeps;
+    const expectedRef = resolveExpectedRestorationIntentCid(intent, testDeps);
 
     // 1. Parse intent — same spec the restorer ran under
     const predictionIntent = PredictionV0IntentSchema.parse(intent);
@@ -115,6 +119,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
 
     // 2. Parse restorer's manifest from inlined context
     const manifestJson = intent.context!['restorationResult'] as string;
+    const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
     const manifest = parseRestorationSubmissionManifest(manifestJson);
 
     // 3. Fetch Chainlink spanning round
@@ -154,8 +159,15 @@ export class PredictionV0Evaluator implements RestorerImpl {
     // integrity
     checks.push(checkWindowBounds(predictionIntent));
     checks.push(checkManifestFieldsPresent(manifest.prediction));
-    checks.push(await checkManifestSignature(manifest.signature.hash as `0x${string}`, manifest.signature));
-    checks.push(checkIntentRef(manifest.intent.cid, testDeps?.expectedIntentCid ?? manifest.intent.cid));
+    {
+      const recomputed = recomputeTopLevelSignatureHash(rawPayload);
+      checks.push(await checkManifestSignature(recomputed, manifest.signature));
+    }
+    if (expectedRef.kind === 'missing') {
+      checks.push(checkIntentRefMissingExpected());
+    } else {
+      checks.push(checkIntentRef(manifest.intent.cid, expectedRef.cid));
+    }
 
     // spec
     checks.push(checkQuestionKindSupported(predictionIntent.spec.question));
@@ -191,7 +203,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
         probability: manifest.prediction.probability,
         submittedAt: manifest.prediction.submittedAt,
         modelId: manifest.prediction.modelId,
-        submissionManifestCid: 'inline',
+        // Omitted when no IPFS submission CID is available (inline / dev).
       },
       groundTruth,
       checks,
@@ -245,6 +257,8 @@ function deriveVerdict(checks: Check[]): Verdict {
   if (checks.some(c => c.name.startsWith('availability.') && c.status === 'FAIL')) return 'INDETERMINATE';
   // Any availability SKIP → INDETERMINATE (oracle not yet spanning)
   if (checks.some(c => c.name.startsWith('availability.') && c.status === 'SKIP')) return 'INDETERMINATE';
+  // Missing trust anchor for intent CID (e.g. legacy eval payload) → INDETERMINATE
+  if (checks.some(c => c.name.startsWith('integrity.') && c.status === 'INDETERMINATE')) return 'INDETERMINATE';
   // Any eligibility FAIL → REJECTED
   if (checks.some(c => c.name.startsWith('eligibility.') && c.status === 'FAIL')) return 'REJECTED';
   // Any integrity or spec FAIL → FAIL

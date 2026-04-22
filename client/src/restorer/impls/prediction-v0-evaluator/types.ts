@@ -1,4 +1,4 @@
-export type CheckStatus = 'PASS' | 'FAIL' | 'SKIP';
+export type CheckStatus = 'PASS' | 'FAIL' | 'SKIP' | 'INDETERMINATE';
 
 export interface Check {
   name: string;

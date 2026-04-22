@@ -132,7 +132,7 @@ export type PredictionSubmissionManifest = z.infer<typeof PredictionSubmissionMa
 
 const CheckSchema = z.object({
   name: z.string(),
-  status: z.enum(['PASS', 'FAIL', 'SKIP']),
+  status: z.enum(['PASS', 'FAIL', 'SKIP', 'INDETERMINATE']),
   detail: z.union([z.string(), z.record(z.unknown())]).optional(),
 });
 
@@ -157,7 +157,8 @@ export const PredictionVerdictManifestSchema = z.object({
     probability: z.string(),
     submittedAt: z.number().int(),
     modelId: z.string(),
-    submissionManifestCid: z.string(),
+    /** Present when the submission was registered on IPFS; omitted for inline/dev. */
+    submissionManifestCid: z.string().min(1).optional(),
   }),
   groundTruth: z.enum(['YES', 'NO']),
   checks: z.array(CheckSchema),

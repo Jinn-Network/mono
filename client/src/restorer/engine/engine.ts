@@ -517,6 +517,7 @@ export class RestorationEngine {
           ...(intent.specKind ? { spec: { kind: intent.specKind } } : {}),
           window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
         }) as import('../../types/desired-state.js').DesiredState,
+        intentCid: intent.intentCid,
         implStateDir,
         workingDir,
         log: (event: { level: string; msg: string; data?: unknown }) => {
