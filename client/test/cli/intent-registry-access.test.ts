@@ -4,8 +4,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_BY_KIND,
   DEFAULT_DISABLED_IMPLS,
+  resetImplForKindInConfig,
+  resolveEffectiveByKind,
   setImplEnabledInConfig,
+  setImplForKindInConfig,
   resolveEffectiveDisabled,
   isImplDisabled,
 } from '../../src/cli/intent-registry-access.js';
@@ -95,5 +99,40 @@ describe('isImplDisabled', () => {
   it('returns false after operator enables impl via config', () => {
     const config = { restorers: { disabled: [] } } as unknown as JinnConfig;
     expect(isImplDisabled('claude-mcp-hyperliquid', config)).toBe(false);
+  });
+});
+
+describe('byKind config helpers', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'jinn-intent-bykind-'));
+    configPath = join(dir, 'config.json');
+  });
+
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('writes and resets a byKind override', () => {
+    setImplForKindInConfig('prediction.v0', 'claude-mcp-prediction', configPath);
+    let written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.restorers.byKind['prediction.v0']).toBe('claude-mcp-prediction');
+
+    resetImplForKindInConfig('prediction.v0', configPath);
+    written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.restorers.byKind['prediction.v0']).toBeUndefined();
+  });
+
+  it('merges user byKind over defaults', () => {
+    const config = {
+      restorers: {
+        byKind: {
+          'prediction.v0': 'claude-mcp-prediction',
+        },
+      },
+    } as unknown as JinnConfig;
+    const byKind = resolveEffectiveByKind(config);
+    expect(byKind['portfolio.v0']).toBe(DEFAULT_BY_KIND['portfolio.v0']);
+    expect(byKind['prediction.v0']).toBe('claude-mcp-prediction');
   });
 });

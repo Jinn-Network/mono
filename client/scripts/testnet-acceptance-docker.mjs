@@ -27,6 +27,7 @@ import {
   formatEnvFile,
   resolveDockerAcceptanceBaseEnv,
 } from './lib/docker-acceptance.mjs';
+import { PASSWORD_RESOLUTION_HINT, resolveAcceptancePassword } from './lib/resolve-acceptance-password.mjs';
 import { summarizeArtifactRows } from './lib/acceptance-artifacts.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -64,8 +65,8 @@ Env resolution:
   3. current process env
 
 Required env after resolution:
-  JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD
   JINN_TESTNET_ACCEPTANCE_RPC_URL or BASE_SEPOLIA_RPC_URL
+  Keystore: JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD, or ~/.jinn-client/keystore-password
 
 Generated files:
   client/.acceptance/config.json
@@ -287,11 +288,14 @@ async function main() {
   warnIfBranchLagsMain();
 
   const baseEnv = resolveDockerAcceptanceBaseEnv({ clientRoot, env: process.env });
-  const password = baseEnv['JINN_TESTNET_ACCEPTANCE_PASSWORD'] ?? baseEnv['JINN_PASSWORD'];
+  const password = resolveAcceptancePassword(baseEnv);
   if (!password) {
-    fail('Set JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD in client/.env.acceptance or your environment.');
+    fail(
+      `Missing keystore password. ${PASSWORD_RESOLUTION_HINT} You can also put it in client/.env.acceptance.`,
+    );
   }
-  const rpcUrl = resolveAcceptanceRpcUrl(baseEnv);
+  const gateEnv = { ...baseEnv, JINN_PASSWORD: password };
+  const rpcUrl = resolveAcceptanceRpcUrl(gateEnv);
   if (!rpcUrl) {
     fail('Set JINN_TESTNET_ACCEPTANCE_RPC_URL or BASE_SEPOLIA_RPC_URL for Docker acceptance.');
   }
@@ -318,7 +322,7 @@ async function main() {
     rpcUrl,
     clientHome: '/data',
     runIdSuffix: runId,
-    env: baseEnv,
+    env: gateEnv,
   });
   const desiredStateIds = (config.desiredStates ?? []).map((state) => state.id);
   if (targetCycles > desiredStateIds.length) {
@@ -329,7 +333,7 @@ async function main() {
 
   const composeEnv = buildDockerComposeEnv({
     clientRoot,
-    env: baseEnv,
+    env: gateEnv,
     imageTag,
     configPath,
   });

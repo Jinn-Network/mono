@@ -38,3 +38,16 @@ export {
   type PredictionSubmissionManifest,
   type PredictionVerdictManifest,
 } from './prediction.js';
+
+export {
+  PredictionApyV0SpecSchema,
+  PredictionApyV0EligibilitySchema,
+  PredictionApyV0IntentSchema,
+  PredictionApySubmissionManifestSchema,
+  PredictionApyVerdictManifestSchema,
+  type PredictionApyV0Spec,
+  type PredictionApyV0Eligibility,
+  type PredictionApyV0Intent,
+  type PredictionApySubmissionManifest,
+  type PredictionApyVerdictManifest,
+} from './prediction-apy.js';

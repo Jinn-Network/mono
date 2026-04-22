@@ -49,6 +49,14 @@ describe('runCli', () => {
     expect(combined).toContain('Examples:');
   });
 
+  it('prints mcp command help', async () => {
+    const io = captureIo();
+    await runCli(['mcp', '--help'], { writer: io.writer, exit: io.exit, stdoutIsTty: true });
+    const combined = io.writes.join('');
+    expect(combined).toContain('jinn mcp');
+    expect(combined).toContain('MCP server');
+  });
+
   it('emits invalid_invocation for config load failures', async () => {
     const io = captureIo();
     await runCli(

@@ -12,6 +12,7 @@ import { createCliExecutionContext } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { DesiredState } from '../../types/desired-state.js';
 import { resolvePredictionV0Template } from '../../intents/prediction-v0-template.js';
+import { resolvePredictionApyV0Template } from '../../intents/prediction-apy-v0-template.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
 
 function intentCacheKey(safe: string, intentId: string): string {
@@ -123,6 +124,27 @@ async function run(ctx: CommandContext): Promise<void> {
             code: 'invalid_invocation',
             message: `Invalid prediction.v0 intent: ${err instanceof Error ? err.message : String(err)}`,
             exampleCli: 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
+            details: { field: 'spec-file' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+    } else if (kind === 'prediction.apy.v0') {
+      const stub: any = { id: id!, description: description!, ...raw };
+      try {
+        const parsedIntent = await resolvePredictionApyV0Template(stub);
+        specOverlay = {
+          window: parsedIntent.window,
+          spec: parsedIntent.spec,
+          eligibility: parsedIntent.eligibility,
+        };
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: `Invalid prediction.apy.v0 intent: ${err instanceof Error ? err.message : String(err)}`,
+            exampleCli: 'jinn submit-intent --id my-apy-1 --description "..." --spec-file fixtures/prediction-apy-v0-intent.example.json --dry-run',
             details: { field: 'spec-file' },
           },
           { writer: ctx.writer, exit: ctx.exit },
@@ -277,7 +299,7 @@ cached request id (local SQLite) without sending a new transaction.
 
 Options:
   --spec-file <path>  Path to a JSON file containing typed intent fields (window, spec, eligibility).
-                      Supports prediction.v0 intents with full Zod validation.
+                      Supports prediction.v0 and prediction.apy.v0 intents with full Zod validation.
 
                       Sentinels resolved at post time:
                         window.startTs: 0              → Date.now(); endTs + resolveTs follow
@@ -293,6 +315,7 @@ Examples:
   jinn submit-intent --id health-check --description "The service is running" --dry-run
   jinn submit-intent --id health-check --description "The service is running" --yes
   jinn submit-intent --id eth-up --description "ETH direction" --spec-file fixtures/prediction-v0-intent.example.json --yes
+  jinn submit-intent --id usdc-apy --description "Aave APY" --spec-file fixtures/prediction-apy-v0-intent.example.json --yes
 `,
   run,
 };

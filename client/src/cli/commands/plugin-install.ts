@@ -54,7 +54,7 @@ function upsertJsonMcpServer(filePath: string, rootKey: string): { ok: boolean; 
   if ('jinn' in section) {
     return { ok: true, detail: `Already configured in ${filePath}` };
   }
-  section['jinn'] = { command: 'jinn-mcp' };
+  section['jinn'] = { command: 'jinn', args: ['mcp'] };
   data[rootKey] = section;
   writeJsonFile(filePath, data);
   return { ok: true, detail: `Wrote MCP entry to ${filePath}` };
@@ -79,7 +79,7 @@ function removeJsonMcpServer(filePath: string, rootKey: string): { ok: boolean; 
 // Helpers — TOML MCP config (Codex)
 // ---------------------------------------------------------------------------
 
-const TOML_BLOCK = `[mcp_servers.jinn]\ncommand = "jinn-mcp"`;
+const TOML_BLOCK = `[mcp_servers.jinn]\ncommand = "jinn"\nargs = ["mcp"]`;
 
 function hasTomlMcpServer(filePath: string): boolean {
   if (!existsSync(filePath)) return false;
@@ -106,7 +106,11 @@ function removeTomlMcpServer(filePath: string): { ok: boolean; detail: string } 
     return { ok: true, detail: 'Not configured' };
   }
   // Remove the block: header line + command line (and optional trailing blank line)
-  const updated = content.replace(/\n?\[mcp_servers\.jinn\]\ncommand = "jinn-mcp"\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  const updated = content
+    .replace(/\n?\[mcp_servers\.jinn\]\ncommand = "jinn"\nargs = \["mcp"\]\n?/g, '\n')
+    .replace(/\n?\[mcp_servers\.jinn\]\ncommand = "jinn-mcp"\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim() + '\n';
   writeFileSync(filePath, updated, 'utf-8');
   return { ok: true, detail: `Removed MCP entry from ${filePath}` };
 }
@@ -283,7 +287,7 @@ const TARGETS: PluginTarget[] = [
         }
       } catch { /* proceed */ }
       try {
-        execSync(`claude mcp add --scope ${scope} jinn -- jinn-mcp`, { stdio: 'ignore' });
+        execSync(`claude mcp add --scope ${scope} jinn -- jinn mcp`, { stdio: 'ignore' });
         return { ok: true, detail: `Added jinn MCP via claude CLI (scope: ${scope})` };
       } catch (err) {
         return { ok: false, detail: `Failed to add MCP: ${err instanceof Error ? err.message : String(err)}` };

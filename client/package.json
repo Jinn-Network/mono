@@ -1,6 +1,6 @@
 {
   "name": "@jinn-network/client",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Jinn protocol client — headless daemon for the restoration training loop",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -14,6 +14,7 @@
     "node": ">=20"
   },
   "bin": {
+    "client": "./dist/bin/jinn.js",
     "jinn": "./dist/bin/jinn.js",
     "jinn-mcp": "./dist/bin/jinn-mcp.js"
   },
@@ -25,6 +26,7 @@
     "skills/",
     "docker-compose.yml",
     "CONTRIBUTING.md",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],

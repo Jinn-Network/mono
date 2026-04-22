@@ -22,26 +22,21 @@ import type { RestorerImpl, EnableResult, ReadyStatus } from '../../restorer/typ
 import {
   buildIntentsCliRegistry,
   isImplDisabled,
+  resetImplForKindInConfig,
   resolveConfigPath,
+  resolveEffectiveByKind,
+  setImplForKindInConfig,
   setImplEnabledInConfig,
 } from '../intent-registry-access.js';
 
 // ── Kind/impl surface helpers ─────────────────────────────────────────────────
 
-/**
- * Static map of intent kind → responsible impl name. Must stay in sync with
- * the `byKind` map hard-coded in `main.ts` and `intent-registry-access.ts`.
- * Centralised so `jinn intents list` enumerates kinds even when the operator
- * has no active registry. The `legacy` pseudo-kind is not listed because
- * legacy-claude is always-on and operators don't toggle it.
- */
-const KIND_TO_IMPL: Record<string, string> = {
-  'portfolio.v0': 'claude-mcp-hyperliquid',
-  'prediction.v0': 'prediction-v0-baseline',
-};
-
-function implFor(kind: string, registry: ReturnType<typeof buildIntentsCliRegistry>): RestorerImpl | null {
-  const implName = KIND_TO_IMPL[kind];
+function implFor(
+  kind: string,
+  registry: ReturnType<typeof buildIntentsCliRegistry>,
+  byKind: Record<string, string>,
+): RestorerImpl | null {
+  const implName = byKind[kind];
   if (!implName) return null;
   return registry.list().find((i) => i.name === implName) ?? null;
 }
@@ -110,10 +105,11 @@ async function runList(ctx: CommandContext, rest: string[]): Promise<void> {
   const { flags } = splitSubverbArgs(rest);
   const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
   const registry = buildIntentsCliRegistry(config);
+  const byKind = resolveEffectiveByKind(config);
 
   const rows: KindRow[] = [];
-  for (const kind of Object.keys(KIND_TO_IMPL)) {
-    const impl = implFor(kind, registry);
+  for (const kind of Object.keys(byKind)) {
+    const impl = implFor(kind, registry, byKind);
     if (!impl) continue;
     const enabled = !isImplDisabled(impl.name, config);
     const readyStatus = await readinessOrDefault(impl);
@@ -160,29 +156,31 @@ function renderListHuman(rows: KindRow[]): string {
 
 async function runStatus(ctx: CommandContext, rest: string[]): Promise<void> {
   const { kind, flags } = splitSubverbArgs(rest);
+  const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
+  const byKind = resolveEffectiveByKind(config);
+  const expectedKinds = Object.keys(byKind);
   if (!kind) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
         message: 'jinn intents status requires a kind argument.',
         exampleCli: 'jinn intents status portfolio.v0',
-        details: { field: 'kind', expected: Object.keys(KIND_TO_IMPL).join('|') },
+        details: { field: 'kind', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
   }
 
-  const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
   const registry = buildIntentsCliRegistry(config);
-  const impl = implFor(kind, registry);
+  const impl = implFor(kind, registry, byKind);
   if (!impl) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
         message: `Unknown intent kind: ${kind}`,
         exampleCli: 'jinn intents list',
-        details: { field: 'kind', expected: Object.keys(KIND_TO_IMPL).join('|') },
+        details: { field: 'kind', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -219,63 +217,128 @@ async function runStatus(ctx: CommandContext, rest: string[]): Promise<void> {
 
 async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
   const { kind, rawArgs, flags } = splitSubverbArgs(rest);
+  const configPath = resolveConfigPath(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
+  const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
+  const byKind = resolveEffectiveByKind(config);
+  const expectedKinds = Object.keys(byKind);
   if (!kind) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
         message: 'jinn intents enable requires a kind argument.',
         exampleCli: 'jinn intents enable portfolio.v0 --hl-master 0x...',
-        details: { field: 'kind', expected: Object.keys(KIND_TO_IMPL).join('|') },
+        details: { field: 'kind', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
   }
 
-  const configPath = resolveConfigPath(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
-  const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
   const registry = buildIntentsCliRegistry(config);
-  const impl = implFor(kind, registry);
-  if (!impl) {
+  const currentImpl = implFor(kind, registry, byKind);
+  if (!currentImpl) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
         message: `Unknown intent kind: ${kind}`,
         exampleCli: 'jinn intents list',
-        details: { field: 'kind', expected: Object.keys(KIND_TO_IMPL).join('|') },
+        details: { field: 'kind', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
   }
 
-  if (!impl.onEnable) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: `Impl '${impl.name}' does not support enable via this command. Edit config.restorers.disabled[] manually.`,
-        exampleCli: 'jinn intents list',
-        details: { field: 'impl', impl: impl.name },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
+  const requestedImplName = rawArgs['impl'];
+  let impl = currentImpl;
+  let previousImpl: string | undefined;
+  let swapPrepared = false;
+
+  if (requestedImplName && requestedImplName !== currentImpl.name) {
+    const requested = registry.list().find((i) => i.name === requestedImplName) ?? null;
+    if (!requested || !requested.supports({ kind, type: 'restoration' })) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `Impl '${requestedImplName}' is not registered or does not support '${kind}'.`,
+          exampleCli: `jinn intents enable ${kind}`,
+          details: {
+            field: 'impl',
+            impl: requestedImplName,
+            expected: registry
+              .list()
+              .filter((candidate) => candidate.supports({ kind, type: 'restoration' }))
+              .map((candidate) => candidate.name)
+              .join('|'),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    // Prepare the swap but do NOT persist `restorers.byKind` yet. We only
+    // commit the mapping after the new impl's `onEnable` completes without
+    // throwing — otherwise a transient failure would leave the operator with
+    // a rewritten config pointing at an impl they never successfully opted
+    // in to. `onDisable` on the previous impl is best-effort.
+    if (currentImpl.onDisable) {
+      try {
+        await currentImpl.onDisable();
+      } catch (err) {
+        console.error(`[intents] ${currentImpl.name}.onDisable threw during swap: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    previousImpl = currentImpl.name;
+    impl = requested;
+    swapPrepared = true;
   }
+
+  const enableArgs: Record<string, string | undefined> = { ...rawArgs };
+  delete enableArgs['impl'];
 
   let result: EnableResult;
   try {
-    result = await impl.onEnable(rawArgs);
+    result = impl.onEnable ? await impl.onEnable(enableArgs) : { status: 'ready' };
   } catch (err) {
     emitEnvelope(
       {
         code: 'fatal',
         message: err instanceof Error ? err.message : String(err),
         exampleCli: `jinn intents status ${kind}`,
-        details: { impl: impl.name, kind },
+        details: {
+          impl: impl.name,
+          kind,
+          ...(swapPrepared ? { previousImpl, swapRolledBack: true } : {}),
+        },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
     return;
+  }
+
+  // onEnable succeeded (ready OR waiting_for_external_action). Commit the
+  // byKind swap now so that subsequent invocations (including the operator
+  // following `nextInvocation` from a waiting result) keep using the new
+  // impl without needing to re-pass --impl.
+  let byKindUpdated = false;
+  if (swapPrepared) {
+    try {
+      setImplForKindInConfig(kind, impl.name, configPath);
+      byKindUpdated = true;
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'fatal',
+          message: `Failed to persist impl swap to config: ${err instanceof Error ? err.message : String(err)}`,
+          exampleCli: `jinn intents status ${kind}`,
+          details: { impl: impl.name, kind, previousImpl, swapRolledBack: true },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
   }
 
   if (result.status === 'ready') {
@@ -292,7 +355,9 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
         kind,
         impl: impl.name,
         status: 'ready',
-        configUpdated: wasDisabled,
+        configUpdated: wasDisabled || byKindUpdated,
+        ...(previousImpl ? { previousImpl } : {}),
+        ...(byKindUpdated ? { byKindUpdated: true } : {}),
         ...(result.details ? { details: result.details } : {}),
       },
       (v) => JSON.stringify(v, null, 2),
@@ -307,27 +372,33 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
 
-  // Non-ready: emit the impl's result verbatim under the envelope. Agents
-  // parse `status` and act on `action` / `nextInvocation` / `required`.
+  // Non-ready: emit the impl's result verbatim under the envelope. Include
+  // swap bookkeeping so agents following `nextInvocation` know the byKind
+  // mapping already changed.
   ctx.writer.write(JSON.stringify({
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     verb: 'intents enable',
     kind,
     impl: impl.name,
+    ...(previousImpl ? { previousImpl } : {}),
+    ...(byKindUpdated ? { byKindUpdated: true, configUpdated: true } : {}),
     ...result,
   }) + '\n');
 }
 
 async function runDisable(ctx: CommandContext, rest: string[]): Promise<void> {
   const { kind, flags } = splitSubverbArgs(rest);
+  const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
+  const byKind = resolveEffectiveByKind(config);
+  const expectedKinds = Object.keys(byKind);
   if (!kind) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
         message: 'jinn intents disable requires a kind argument.',
         exampleCli: 'jinn intents disable portfolio.v0',
-        details: { field: 'kind', expected: Object.keys(KIND_TO_IMPL).join('|') },
+        details: { field: 'kind', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -335,16 +406,15 @@ async function runDisable(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 
   const configPath = resolveConfigPath(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
-  const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
   const registry = buildIntentsCliRegistry(config);
-  const impl = implFor(kind, registry);
+  const impl = implFor(kind, registry, byKind);
   if (!impl) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
         message: `Unknown intent kind: ${kind}`,
         exampleCli: 'jinn intents list',
-        details: { field: 'kind', expected: Object.keys(KIND_TO_IMPL).join('|') },
+        details: { field: 'kind', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -385,6 +455,68 @@ async function runDisable(ctx: CommandContext, rest: string[]): Promise<void> {
   );
 }
 
+async function runReset(ctx: CommandContext, rest: string[]): Promise<void> {
+  const { kind, flags } = splitSubverbArgs(rest);
+  const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
+  const byKind = resolveEffectiveByKind(config);
+  const expectedKinds = Object.keys(byKind);
+  if (!kind) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: 'jinn intents reset requires a kind argument.',
+        exampleCli: 'jinn intents reset prediction.v0',
+        details: { field: 'kind', expected: expectedKinds.join('|') },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+  if (!expectedKinds.includes(kind)) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: `Unknown intent kind: ${kind}`,
+        exampleCli: 'jinn intents list',
+        details: { field: 'kind', expected: expectedKinds.join('|') },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const configPath = resolveConfigPath(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
+  const hadOverride = Boolean(
+    config.restorers?.byKind && Object.prototype.hasOwnProperty.call(config.restorers.byKind, kind),
+  );
+  const previousImpl = hadOverride ? (config.restorers?.byKind as Record<string, string>)[kind] : null;
+  if (hadOverride) {
+    resetImplForKindInConfig(kind, configPath);
+  }
+  const reloaded = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
+  const nextByKind = resolveEffectiveByKind(reloaded);
+
+  emitResult(
+    {
+      schemaVersion: 1 as const,
+      generatedAt: new Date().toISOString(),
+      verb: 'intents reset',
+      kind,
+      previousImpl,
+      impl: nextByKind[kind] ?? null,
+      configUpdated: hadOverride,
+    },
+    (v) => JSON.stringify(v, null, 2),
+    {
+      json: flags.json,
+      human: flags.human,
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env['NO_COLOR']),
+    },
+  );
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 async function run(ctx: CommandContext): Promise<void> {
@@ -402,9 +534,9 @@ async function run(ctx: CommandContext): Promise<void> {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'jinn intents requires a subverb: list, status, enable, disable',
+        message: 'jinn intents requires a subverb: list, status, enable, disable, reset',
         exampleCli: 'jinn intents list',
-        details: { field: 'subverb', expected: 'list|status|enable|disable' },
+        details: { field: 'subverb', expected: 'list|status|enable|disable|reset' },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -416,13 +548,14 @@ async function run(ctx: CommandContext): Promise<void> {
     case 'status':   return runStatus(ctx, rest);
     case 'enable':   return runEnable(ctx, rest);
     case 'disable':  return runDisable(ctx, rest);
+    case 'reset':    return runReset(ctx, rest);
     default:
       emitEnvelope(
         {
           code: 'invalid_invocation',
           message: `Unknown intents subverb: ${subverb}`,
           exampleCli: 'jinn intents list',
-          details: { field: 'subverb', expected: 'list|status|enable|disable' },
+          details: { field: 'subverb', expected: 'list|status|enable|disable|reset' },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
@@ -435,10 +568,12 @@ const command: CommandModule = {
   helpText: `Usage:
   jinn intents list                          Show every intent kind and its enable/ready state
   jinn intents status <kind>                 Detailed status for one kind
-  jinn intents enable <kind> [--key=value…]  Idempotent opt-in flow; dispatches to impl.onEnable
+  jinn intents enable <kind> [--impl <name>] [--key=value…]
+                                              Idempotent opt-in flow; dispatches to impl.onEnable
   jinn intents disable <kind>                Opt out; preserves any generated state
+  jinn intents reset <kind>                  Reset kind->impl override to ship default
 
-Intent kinds are resolved to impls via the hard-coded byKind map in main.ts.
+Intent kinds are resolved to impls via ship defaults merged with config.restorers.byKind.
 Each impl controls its own enable flow — see \`jinn intents list\` for
 kind-specific arg requirements.
 
@@ -446,9 +581,11 @@ Examples:
   jinn intents list --human
   jinn intents status portfolio.v0 --human
   jinn intents enable prediction.v0
+  jinn intents enable prediction.v0 --impl claude-mcp-prediction
   jinn intents enable portfolio.v0 --hl-master 0xYOUR_HL_MASTER
   jinn intents enable portfolio.v0 --confirm-approved
   jinn intents disable portfolio.v0
+  jinn intents reset prediction.v0
 `,
   run,
 };

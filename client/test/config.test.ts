@@ -155,6 +155,13 @@ describe('loadConfig RPC override handling', () => {
     expect(config.targetServices).toBe(1);
   });
 
+  it('defaults desiredStates to an empty list', () => {
+    return writeConfigFile({}).then((configPath) => {
+      const config = loadConfig(configPath);
+      expect(config.desiredStates).toEqual([]);
+    });
+  });
+
   it('preserves portfolio.v0 DesiredState fields (window, spec, eligibility) through config parsing', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',

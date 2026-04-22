@@ -41,6 +41,8 @@ import { PortfolioV0Evaluator } from './restorer/impls/portfolio-v0-evaluator/in
 import { PredictionV0BaselineImpl } from './restorer/impls/prediction-v0-baseline/index.js';
 import { PredictionV0Evaluator } from './restorer/impls/prediction-v0-evaluator/index.js';
 import { ClaudeMcpPredictionImpl } from './restorer/impls/claude-mcp-prediction/index.js';
+import { PredictionApyV0BaselineImpl } from './restorer/impls/prediction-apy-v0-baseline/index.js';
+import { PredictionApyV0Evaluator } from './restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { makePredictionV0Generator } from './intents/prediction-v0-auto.js';
@@ -316,12 +318,9 @@ export async function main(): Promise<DaemonStartupInfo> {
   // `config.restorers.disabled[]` fully overrides this default when present,
   // so `jinn intents enable <kind>` persists the opt-in by writing to that
   // list in ~/.jinn-client/config.json.
-  const { DEFAULT_DISABLED_IMPLS } = await import('./cli/intent-registry-access.js');
+  const { DEFAULT_DISABLED_IMPLS, DEFAULT_BY_KIND } = await import('./cli/intent-registry-access.js');
   const implRegistry = new RestorerImplRegistry({
-    byKind: {
-      'portfolio.v0': 'claude-mcp-hyperliquid',
-      'prediction.v0': 'prediction-v0-baseline',
-    },
+    byKind: { ...DEFAULT_BY_KIND },
     default: 'legacy-claude',
     disabled: [...DEFAULT_DISABLED_IMPLS],
     ...(config.restorers ?? {}),
@@ -364,6 +363,16 @@ export async function main(): Promise<DaemonStartupInfo> {
     evaluatorPk: agentPrivateKey,
     evaluatorSafeAddress: safeAddress,
     rpcUrl: config.rpcUrl,
+  }));
+  implRegistry.register(new PredictionApyV0BaselineImpl({
+    rpcUrl: config.rpcUrl,
+    archiveRpcUrl: config.archiveRpcUrl,
+  }));
+  implRegistry.register(new PredictionApyV0Evaluator({
+    evaluatorPk: agentPrivateKey,
+    evaluatorSafeAddress: safeAddress,
+    rpcUrl: config.rpcUrl,
+    archiveRpcUrl: config.archiveRpcUrl,
   }));
 
   console.log(`[main] RestorerImplRegistry: ${implRegistry.list().map(i => i.name).join(', ')}`);

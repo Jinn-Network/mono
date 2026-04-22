@@ -18,7 +18,10 @@ import { homedir } from 'node:os';
 import { RestorerImplRegistry } from '../restorer/engine/registry.js';
 import { PredictionV0BaselineImpl } from '../restorer/impls/prediction-v0-baseline/index.js';
 import { PredictionV0Evaluator } from '../restorer/impls/prediction-v0-evaluator/index.js';
+import { PredictionApyV0BaselineImpl } from '../restorer/impls/prediction-apy-v0-baseline/index.js';
+import { PredictionApyV0Evaluator } from '../restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { ClaudeMcpHyperliquidImpl } from '../restorer/impls/claude-mcp-hyperliquid/index.js';
+import { ClaudeMcpPredictionImpl } from '../restorer/impls/claude-mcp-prediction/index.js';
 import { PortfolioV0Evaluator } from '../restorer/impls/portfolio-v0-evaluator/index.js';
 import type { JinnConfig } from '../config.js';
 
@@ -28,6 +31,11 @@ import type { JinnConfig } from '../config.js';
  * one place so `main.ts` and the `intents` CLI share a single source of truth.
  */
 export const DEFAULT_DISABLED_IMPLS = ['claude-mcp-hyperliquid'] as const;
+export const DEFAULT_BY_KIND = {
+  'portfolio.v0': 'claude-mcp-hyperliquid',
+  'prediction.v0': 'prediction-v0-baseline',
+  'prediction.apy.v0': 'prediction-apy-v0-baseline',
+} as const;
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -44,10 +52,7 @@ export function resolveConfigPath(explicit?: string): string {
  */
 export function buildIntentsCliRegistry(config: JinnConfig): RestorerImplRegistry {
   const registry = new RestorerImplRegistry({
-    byKind: {
-      'portfolio.v0': 'claude-mcp-hyperliquid',
-      'prediction.v0': 'prediction-v0-baseline',
-    },
+    byKind: resolveEffectiveByKind(config),
     default: 'legacy-claude',
     disabled: resolveEffectiveDisabled(config),
   });
@@ -58,9 +63,24 @@ export function buildIntentsCliRegistry(config: JinnConfig): RestorerImplRegistr
     evaluatorSafeAddress: '0x0000000000000000000000000000000000000000',
     rpcUrl: config.rpcUrl,
   }));
+  registry.register(new PredictionApyV0BaselineImpl({
+    rpcUrl: config.rpcUrl,
+    archiveRpcUrl: config.archiveRpcUrl,
+  }));
+  registry.register(new PredictionApyV0Evaluator({
+    evaluatorPk: '0x' + '00'.repeat(32) as `0x${string}`,
+    evaluatorSafeAddress: '0x0000000000000000000000000000000000000000',
+    rpcUrl: config.rpcUrl,
+    archiveRpcUrl: config.archiveRpcUrl,
+  }));
   registry.register(new ClaudeMcpHyperliquidImpl({
     claudePath: config.claudePath,
     claudeModel: config.claudeModel,
+  }));
+  registry.register(new ClaudeMcpPredictionImpl({
+    claudePath: config.claudePath,
+    claudeModel: config.claudeModel,
+    rpcUrl: config.rpcUrl,
   }));
   registry.register(new PortfolioV0Evaluator());
 
@@ -77,6 +97,14 @@ export function resolveEffectiveDisabled(config: JinnConfig): string[] {
   const userDisabled = config.restorers?.disabled;
   if (userDisabled !== undefined) return [...userDisabled];
   return [...DEFAULT_DISABLED_IMPLS];
+}
+
+/** Resolve effective kind → impl mapping, applying operator overrides over ship defaults. */
+export function resolveEffectiveByKind(config: JinnConfig): Record<string, string> {
+  return {
+    ...DEFAULT_BY_KIND,
+    ...(config.restorers?.byKind ?? {}),
+  };
 }
 
 /** Is an impl currently disabled in the effective config? */
@@ -144,4 +172,54 @@ export function setImplEnabledInConfig(
   writeFileSync(configPath, JSON.stringify(current, null, 2) + '\n', { encoding: 'utf-8' });
 
   return next;
+}
+
+/** Persist an explicit impl mapping for a specific intent kind. */
+export function setImplForKindInConfig(
+  kind: string,
+  implName: string,
+  configPath: string = DEFAULT_CONFIG_PATH,
+): void {
+  let current: Record<string, unknown> = {};
+  if (existsSync(configPath)) {
+    try {
+      current = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      current = {};
+    }
+  }
+
+  const restorers = (current['restorers'] ?? {}) as RestorersPatch;
+  restorers.byKind = {
+    ...(restorers.byKind ?? {}),
+    [kind]: implName,
+  };
+  current['restorers'] = restorers;
+
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify(current, null, 2) + '\n', { encoding: 'utf-8' });
+}
+
+/** Remove an explicit impl mapping for one kind, reverting to ship default. */
+export function resetImplForKindInConfig(
+  kind: string,
+  configPath: string = DEFAULT_CONFIG_PATH,
+): void {
+  let current: Record<string, unknown> = {};
+  if (existsSync(configPath)) {
+    try {
+      current = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      current = {};
+    }
+  }
+
+  const restorers = (current['restorers'] ?? {}) as RestorersPatch;
+  const byKind = { ...(restorers.byKind ?? {}) };
+  delete byKind[kind];
+  restorers.byKind = byKind;
+  current['restorers'] = restorers;
+
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify(current, null, 2) + '\n', { encoding: 'utf-8' });
 }

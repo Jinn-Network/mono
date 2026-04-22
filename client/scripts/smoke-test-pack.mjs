@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
  * Validates the tarball produced by `yarn pack -o jinn-client.tgz`.
- * Installs the pack with npm (same shape as consumers) then runs `jinn version`.
+ * Installs the pack with npm (same shape as consumers) then validates:
+ * 1) local bin execution via `npm exec jinn ...`
+ * 2) no-install package execution via package-name bin alias (`npm exec --package <tarball> -- client ...`)
+ * 3) legacy `npx -p <tarball> jinn ...`
  * Expects cwd to be client/ (see package.json pack:smoke).
  */
 import { spawnSync } from 'node:child_process';
@@ -20,6 +23,28 @@ if (!existsSync(tarball)) {
 }
 
 const smokeDir = mkdtempSync(join(tmpdir(), 'jinn-pack-smoke-'));
+
+function parseJsonOrExit(stdout, context) {
+  try {
+    return JSON.parse((stdout || '').trim());
+  } catch {
+    console.error(`smoke-test-pack: ${context} stdout was not JSON`);
+    console.error(stdout);
+    process.exit(1);
+  }
+}
+
+function assertVersionPayload(payload, context) {
+  if (payload.schemaVersion !== 1) {
+    console.error(`smoke-test-pack: expected schemaVersion 1 (${context})`);
+    process.exit(1);
+  }
+  if (!payload.client?.version) {
+    console.error(`smoke-test-pack: expected client.version (${context})`);
+    process.exit(1);
+  }
+}
+
 try {
   const init = spawnSync('npm', ['init', '-y'], {
     cwd: smokeDir,
@@ -45,23 +70,30 @@ try {
     process.exit(run.status ?? 1);
   }
 
-  let payload;
-  try {
-    payload = JSON.parse((run.stdout || '').trim());
-  } catch {
-    console.error('smoke-test-pack: version stdout was not JSON');
-    console.error(run.stdout);
-    process.exit(1);
-  }
+  const payload = parseJsonOrExit(run.stdout, 'npm exec');
+  assertVersionPayload(payload, 'npm exec');
 
-  if (payload.schemaVersion !== 1) {
-    console.error('smoke-test-pack: expected schemaVersion 1');
-    process.exit(1);
+  const npxDirect = spawnSync('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], {
+    cwd: smokeDir,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  if (npxDirect.status !== 0) {
+    console.error(npxDirect.stderr || npxDirect.stdout);
+    process.exit(npxDirect.status ?? 1);
   }
-  if (!payload.client?.version) {
-    console.error('smoke-test-pack: expected client.version');
-    process.exit(1);
+  assertVersionPayload(parseJsonOrExit(npxDirect.stdout, 'npx direct'), 'npx direct');
+
+  const npxLegacy = spawnSync('npx', ['-p', tarball, 'jinn', 'version', '--json'], {
+    cwd: smokeDir,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  if (npxLegacy.status !== 0) {
+    console.error(npxLegacy.stderr || npxLegacy.stdout);
+    process.exit(npxLegacy.status ?? 1);
   }
+  assertVersionPayload(parseJsonOrExit(npxLegacy.stdout, 'npx -p'), 'npx -p');
 
   console.log('smoke-test-pack: ok', payload.client.version);
 } finally {

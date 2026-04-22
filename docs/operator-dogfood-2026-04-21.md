@@ -93,6 +93,13 @@ Cycle-level detail:
 - None blocking the validated `prediction.v0` operator flow.
 - Remaining UX follow-up: legacy health-check should probably not depend on Claude quota in the default external-operator smoke path.
 
+### Postscript (0.1.2 prep)
+
+After this run, the default operator path was updated so `desiredStates` now
+defaults to `[]` and testnet relies on the deterministic auto-generated
+`prediction.v0` intent stream. That removes the legacy health-check/Claude
+quota dependency from first-boot operator experience.
+
 ## Blockers I couldn't resolve
 
 - Claude Code quota is exhausted until Apr 23 at 22:00 Europe/Brussels, so the legacy free-form health-check restoration cannot run right now.

@@ -25,6 +25,7 @@ import {
   formatEnvFile,
   resolveDockerAcceptanceBaseEnv,
 } from './lib/docker-acceptance.mjs';
+import { PASSWORD_RESOLUTION_HINT, resolveAcceptancePassword } from './lib/resolve-acceptance-password.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
@@ -133,11 +134,14 @@ async function main() {
   }
 
   const baseEnv = resolveDockerAcceptanceBaseEnv({ clientRoot, env: process.env });
-  const password = baseEnv['JINN_TESTNET_ACCEPTANCE_PASSWORD'] ?? baseEnv['JINN_PASSWORD'];
+  const password = resolveAcceptancePassword(baseEnv);
   if (!password) {
-    fail('Set JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD in client/.env.acceptance or your environment.');
+    fail(
+      `Missing keystore password. ${PASSWORD_RESOLUTION_HINT} You can also put it in client/.env.acceptance.`,
+    );
   }
-  const rpcUrl = resolveAcceptanceRpcUrl(baseEnv);
+  const gateEnv = { ...baseEnv, JINN_PASSWORD: password };
+  const rpcUrl = resolveAcceptanceRpcUrl(gateEnv);
   if (!rpcUrl) {
     fail('Set JINN_TESTNET_ACCEPTANCE_RPC_URL or BASE_SEPOLIA_RPC_URL before setup.');
   }
@@ -153,13 +157,13 @@ async function main() {
     rpcUrl,
     clientHome: '/data',
     runIdSuffix: RUN_ID_SETUP,
-    env: baseEnv,
+    env: gateEnv,
   });
   writeJson(configPath, config);
 
   const composeEnv = buildDockerComposeEnv({
     clientRoot,
-    env: baseEnv,
+    env: gateEnv,
     imageTag,
     configPath,
   });

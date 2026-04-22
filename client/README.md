@@ -103,12 +103,8 @@ treat the wallet as hot and keep funds to the gas + rewards minimum.
 ## Try without installing
 
 ```bash
-npx -p @jinn-network/client@latest jinn doctor
+npx @jinn-network/client@latest doctor
 ```
-
-> The `-p` flag is required because the package ships two bins (`jinn` and
-> `jinn-mcp`); without it npx refuses to pick and exits with
-> `could not determine executable to run`.
 
 ## Let your agent do it
 
@@ -121,7 +117,7 @@ jinn plugin install
 ```
 
 This detects every supported tool on your machine and, for each one, adds the
-`jinn-mcp` MCP server plus a copy of the `jinn-operator` skill. Supported:
+`jinn mcp` MCP server plus a copy of the `jinn-operator` skill. Supported:
 Claude Code, Claude Desktop, Cursor, VS Code, Gemini CLI, Antigravity, Codex.
 Run `jinn plugin list --human` to see what's detected.
 
@@ -137,8 +133,9 @@ daemon lifecycle. You stay in the loop for funding decisions.
 
 ## Opting in to specific intent kinds
 
-After `quickstart`, your daemon participates in `legacy` (health-check) and
-`prediction.v0` intents by default. Other kinds — like `portfolio.v0`, which
+After `quickstart`, your daemon participates in deterministic `prediction.v0`
+intents by default on testnet (via the auto-intent generator). Other kinds —
+like `portfolio.v0`, which
 executes trades against a Hyperliquid master account — are **off by default**
 because they need credentials only you can provide. This prevents your daemon
 from claiming a request it can't actually fulfill.
@@ -148,9 +145,11 @@ Inspect and toggle participation with `jinn intents`:
 ```bash
 jinn intents list --human                          # every kind, current state
 jinn intents status portfolio.v0 --human           # details for one kind
+jinn intents enable prediction.v0 --impl claude-mcp-prediction
 jinn intents enable portfolio.v0 --hl-master 0x... # start the opt-in flow
 jinn intents enable portfolio.v0 --confirm-approved
 jinn intents disable portfolio.v0                  # opt out, keep state
+jinn intents reset prediction.v0                   # reset kind->impl override
 ```
 
 Each `enable` is an idempotent state machine. Rerun until the envelope reports
@@ -270,7 +269,8 @@ All action verbs support `--dry-run` and `--yes`.
 - Add `--human` for readable terminal output.
 - `stderr` is reserved for progress, warnings, and runtime logs.
 - Non-zero exits emit a structured error envelope on stdout with `schemaVersion`, `code`, `exitCode`, `message`, `hint`, and `exampleCli`.
-- Without a global install, use `npx -p @jinn-network/client@latest jinn <verb> ...` instead of `jinn ...`. The `-p` form is required because the package publishes two bins (`jinn` and `jinn-mcp`); plain `npx @jinn-network/client@latest` exits with `could not determine executable to run`.
+- Without a global install, use `npx @jinn-network/client@latest <verb> ...`.
+- Backward-compatible legacy form still works: `npx -p @jinn-network/client@latest jinn <verb> ...`.
 
 See the [client surface spec](https://github.com/Jinn-Network/mono/blob/main/spec/2026-04-14-client-surface.md) for the full CLI reference.
 
@@ -293,7 +293,7 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | dbPath | JINN_DB_PATH | ~/.jinn-client/jinn.db |
 | earningDir | JINN_EARNING_DIR | ~/.jinn-client/earning |
 | peers | JINN_PEERS | [] |
-| desiredStates | JINN_DESIRED_STATES | [health-check] |
+| desiredStates | JINN_DESIRED_STATES | [] (testnet auto-intent generator posts `prediction.v0`) |
 
 `JINN_PASSWORD` is env-only (keystore encryption, never in config files). Alternatively, use `--password-fd <N>` to read from a file descriptor.
 

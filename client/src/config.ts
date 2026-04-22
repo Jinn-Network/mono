@@ -39,6 +39,7 @@ export const JinnConfigSchema = z.object({
    * https://sepolia.base.org for 'testnet'. Set explicitly to override.
    */
   rpcUrl: z.string().optional(),
+  archiveRpcUrl: z.string().optional(),
 
   /** Earning state directory */
   earningDir: z.string().default(join(homedir(), '.jinn-client', 'earning')),
@@ -95,13 +96,8 @@ export const JinnConfigSchema = z.object({
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint: z.string().optional(),
 
-  /** Desired states to create and restore */
-  desiredStates: z.array(DesiredStateSchema).default([
-    {
-      id: 'health-check',
-      description: 'The service is running and participating in the Jinn protocol loop.',
-    },
-  ]),
+  /** Desired states to create and restore. Empty by default; testnet auto-intents fill the loop. */
+  desiredStates: z.array(DesiredStateSchema).default([]),
 
   /** IPFS upload endpoint */
   ipfsRegistryUrl: z.string().default('https://registry.autonolas.tech'),
@@ -278,6 +274,9 @@ export function loadConfig(configPath?: string): JinnConfig {
     }
   } else if (env['BASE_RPC_URL']) {
     merged.rpcUrl = env['BASE_RPC_URL'];
+  }
+  if (env['JINN_ARCHIVE_RPC_URL']) {
+    merged.archiveRpcUrl = env['JINN_ARCHIVE_RPC_URL'];
   }
 
   // desiredStates from env points to a JSON file

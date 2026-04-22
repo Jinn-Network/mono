@@ -3,7 +3,8 @@
 This package is published from the monorepo, but operators consume it as a standalone artifact:
 
 - installed CLI: `npm install -g @jinn-network/client@latest`
-- no-install trial: `npx -p @jinn-network/client@latest jinn <verb>` (the `-p` flag is required: the package ships two bins, `jinn` and `jinn-mcp`, and plain `npx @jinn-network/client@latest` exits with `could not determine executable to run`)
+- no-install trial: `npx @jinn-network/client@latest <verb>`
+- legacy no-install form (still supported): `npx -p @jinn-network/client@latest jinn <verb>`
 - container: `ghcr.io/jinn-network/client:<version>`
 
 The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `client-vX.Y.Z`.
@@ -43,8 +44,8 @@ Do this once because the package did not exist on npm initially.
 4. Verify the registry artifact:
    ```bash
    npm view @jinn-network/client version
-   npx -p @jinn-network/client@latest jinn version --json
-   npx -p @jinn-network/client@latest jinn --help
+   npx @jinn-network/client@latest version --json
+   npx @jinn-network/client@latest --help
    ```
 
 ## Configure trusted publishing
@@ -69,8 +70,8 @@ Every push to `main` that touches `client/**` triggers [`.github/workflows/npm-p
 Post-publish verification:
 
 ```bash
-npx -p @jinn-network/client@canary jinn version --json
-npx -p @jinn-network/client@canary jinn --help
+npx @jinn-network/client@canary version --json
+npx @jinn-network/client@canary --help
 ```
 
 ## Stable releases

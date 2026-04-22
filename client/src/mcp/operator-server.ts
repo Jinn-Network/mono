@@ -4,7 +4,7 @@
  * Exposes tools that let an external agent (e.g. Claude Desktop) manage a jinn
  * fleet: read status, bootstrap, submit intents, start/stop the daemon.
  *
- * Entry point: client/src/bin/jinn-mcp.ts calls createOperatorServer().
+ * Entry points: `jinn mcp` command (canonical) and `jinn-mcp` (compat shim).
  *
  * Design: wraps CLI command modules directly (Option B from the research doc).
  * Each command already accepts an injectable { writer, exit } context, so we

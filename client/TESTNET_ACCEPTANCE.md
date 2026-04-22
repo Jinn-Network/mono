@@ -30,11 +30,11 @@ cd client
 cp .env.acceptance.example .env.acceptance
 ```
 
-Required in `.env.acceptance` or your shell:
+**Keystore password** — set `JINN_PASSWORD` (or `JINN_TESTNET_ACCEPTANCE_PASSWORD`) in `.env.acceptance` *or* rely on the same file the CLI uses after `jinn quickstart`:
 
-```bash
-JINN_PASSWORD=your-keystore-password
-```
+- `~/.jinn-client/keystore-password`
+
+The acceptance scripts read that file automatically when the env vars are unset, so you do not need to paste the password into `.env` on every run.
 
 RPC source:
 

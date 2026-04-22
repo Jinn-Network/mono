@@ -31,6 +31,7 @@ import {
   acceptanceXdgPaths,
   resolveAcceptanceRpcUrl,
 } from './lib/acceptance-operator-config.mjs';
+import { PASSWORD_RESOLUTION_HINT, resolveAcceptancePassword } from './lib/resolve-acceptance-password.mjs';
 import { readArtifactProgress } from './lib/acceptance-artifacts.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -69,8 +70,10 @@ Options:
   --help                            Show this help
 
 Required environment:
-  JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD
   JINN_TESTNET_ACCEPTANCE_RPC_URL or BASE_SEPOLIA_RPC_URL   Base Sepolia RPC
+
+Keystore password: JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD, or
+  <home>/.jinn-client/keystore-password / ~/.jinn-client/keystore-password
 
 Optional environment:
   JINN_TESTNET_ACCEPTANCE_HOME
@@ -208,20 +211,19 @@ async function main() {
   }
 
   const env = process.env;
-  const password = env['JINN_TESTNET_ACCEPTANCE_PASSWORD'] ?? env['JINN_PASSWORD'];
-  if (!password) {
-    fail('Set JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD before running acceptance.');
-  }
-  const rpcUrl = resolveAcceptanceRpcUrl(env);
-  if (!rpcUrl) {
-    fail('Set JINN_TESTNET_ACCEPTANCE_RPC_URL or BASE_SEPOLIA_RPC_URL to a Base Sepolia RPC endpoint.');
-  }
-
   const acceptanceHome = resolve(
     parsed.values.home
       ?? env['JINN_TESTNET_ACCEPTANCE_HOME']
       ?? defaultAcceptanceHome(),
   );
+  const password = resolveAcceptancePassword(env, { acceptanceHome });
+  if (!password) {
+    fail(`Missing keystore password. ${PASSWORD_RESOLUTION_HINT}`);
+  }
+  const rpcUrl = resolveAcceptanceRpcUrl(env);
+  if (!rpcUrl) {
+    fail('Set JINN_TESTNET_ACCEPTANCE_RPC_URL or BASE_SEPOLIA_RPC_URL to a Base Sepolia RPC endpoint.');
+  }
   const clientHome = acceptanceClientHome(acceptanceHome);
   const xdg = acceptanceXdgPaths(acceptanceHome);
   const evidenceDir = resolve(
