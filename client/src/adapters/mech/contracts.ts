@@ -506,6 +506,109 @@ export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
   return results;
 }
 
+const LOG_SCAN_CHUNK = 9999n;
+
+/**
+ * Most recent `requestData` for `requestId` from MarketplaceRequest events on
+ * `marketplaceAddress` in [fromBlock, toBlock] (inclusive), by block then log index.
+ */
+export async function findLatestRequestDataHexForMarketplaceRequest(
+  publicClient: PublicClient,
+  marketplaceAddress: Address,
+  requestId: string,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<Hex | null> {
+  const rid = requestId.toLowerCase();
+  let best: { bn: number; li: number; sub: number; data: Hex } | null = null;
+
+  for (let start = fromBlock; start <= toBlock; start += LOG_SCAN_CHUNK + 1n) {
+    const end = start + LOG_SCAN_CHUNK > toBlock ? toBlock : start + LOG_SCAN_CHUNK;
+    const logs = await publicClient.getLogs({
+      address: marketplaceAddress,
+      fromBlock: start,
+      toBlock: end,
+    });
+    for (const log of logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: MECH_MARKETPLACE_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        if (decoded.eventName !== 'MarketplaceRequest') continue;
+        const args = decoded.args as {
+          requestIds: readonly Hex[] | undefined;
+          requestDatas: readonly Hex[] | undefined;
+        };
+        if (!args.requestIds?.length || !args.requestDatas?.length) continue;
+        const bn = log.blockNumber != null ? Number(log.blockNumber) : 0;
+        const li = log.logIndex != null ? Number(log.logIndex) : 0;
+        for (let i = 0; i < args.requestIds.length; i++) {
+          if (String(args.requestIds[i]).toLowerCase() !== rid) continue;
+          const data = args.requestDatas[i]!;
+          if (
+            !best ||
+            bn > best.bn ||
+            (bn === best.bn && li > best.li) ||
+            (bn === best.bn && li === best.li && i > best.sub)
+          ) {
+            best = { bn, li, sub: i, data };
+          }
+        }
+      } catch {
+        // skip
+      }
+    }
+  }
+  return best?.data ?? null;
+}
+
+/**
+ * `data` field of the most recent Deliver event for `requestId` on the mech contract
+ * in [fromBlock, toBlock] (inclusive).
+ */
+export async function findLatestDeliveryDataHexForRequest(
+  publicClient: PublicClient,
+  mechContractAddress: Address,
+  requestId: string,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<Hex | null> {
+  const rid = requestId.toLowerCase();
+  let best: { bn: number; li: number; data: Hex } | null = null;
+
+  for (let start = fromBlock; start <= toBlock; start += LOG_SCAN_CHUNK + 1n) {
+    const end = start + LOG_SCAN_CHUNK > toBlock ? toBlock : start + LOG_SCAN_CHUNK;
+    const logs = await publicClient.getLogs({
+      address: mechContractAddress,
+      fromBlock: start,
+      toBlock: end,
+    });
+    for (const log of logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: MECH_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        if (decoded.eventName !== 'Deliver') continue;
+        const args = decoded.args as { requestId: Hex; data: Hex };
+        if (String(args.requestId).toLowerCase() !== rid) continue;
+        const bn = log.blockNumber != null ? Number(log.blockNumber) : 0;
+        const li = log.logIndex != null ? Number(log.logIndex) : 0;
+        const data = args.data;
+        if (!best || bn > best.bn || (bn === best.bn && li > best.li)) {
+          best = { bn, li, data };
+        }
+      } catch {
+        // skip
+      }
+    }
+  }
+  return best?.data ?? null;
+}
+
 // ── Delivery ─────────────────────────────────────────────────────────────────
 
 // Error names reported by the Mech Marketplace contract for duplicate delivery.
