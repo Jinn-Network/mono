@@ -25,7 +25,8 @@ import { join } from 'node:path';
 import { keccak256, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../types.js';
+import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { DesiredState } from '../../../types/desired-state.js';
 import type { HlFill, HlGridPoint } from '../../../venues/hyperliquid/types.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
@@ -257,6 +258,11 @@ export class PortfolioV0Evaluator implements RestorerImpl {
     return ctx.kind === 'portfolio.v0' && ctx.type === 'evaluation';
   }
 
+  async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
+    return { ready: true };
+  }
+
   async canAttempt(
     intent: DesiredState,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -277,6 +283,9 @@ export class PortfolioV0Evaluator implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    if (this.config.stub) {
+      throw new Error('portfolio-v0-evaluator: stub registry cannot run evaluation (requires live daemon)');
+    }
     const { intent, log } = ctx;
 
     // ── Step 1: Parse restorer's manifest from inlined context ────────────────

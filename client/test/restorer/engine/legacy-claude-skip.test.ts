@@ -1,8 +1,12 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { Store } from '../../../src/store/store.js';
 import { RestorationEngine, type RestorationEngineOptions } from '../../../src/restorer/engine/engine.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
 import type { RestorerImpl } from '../../../src/restorer/types.js';
+import { SkippableError } from '../../../src/restorer/types.js';
 
 class ExposedEngine extends RestorationEngine {
   async invokeRunImpl(requestId: string): Promise<void> {
@@ -12,6 +16,7 @@ class ExposedEngine extends RestorationEngine {
 }
 
 async function buildEngineWith(run: RestorerImpl['run'], implName = 'legacy-claude') {
+  const root = mkdtempSync(join(tmpdir(), 'jinn-eng-skip-'));
   const store = new Store(':memory:');
   const impl: RestorerImpl = {
     name: implName,
@@ -27,7 +32,7 @@ async function buildEngineWith(run: RestorerImpl['run'], implName = 'legacy-clau
     store,
     registry,
     implRegistry: registry,
-    paths: { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
+    paths: { workingDirRoot: join(root, 'work'), implStateDirRoot: join(root, 'impl') },
   });
   const now = Date.now();
   await engine.observe({
@@ -51,15 +56,16 @@ async function buildEngineWith(run: RestorerImpl['run'], implName = 'legacy-clau
 }
 
 describe('legacy-claude skip handling', () => {
-  it('treats claude quota/auth errors as a skipped output instead of hard failure', async () => {
+  it('treats SkippableError from an impl as a skipped output instead of hard failure', async () => {
     const store = new Store(':memory:');
+    const root = mkdtempSync(join(tmpdir(), 'jinn-skip-'));
     try {
       const legacyClaude: RestorerImpl = {
         name: 'legacy-claude',
         version: '1.0.0',
         supports: () => true,
         run: async () => {
-          throw new Error('Claude quota exhausted. Please login again.');
+          throw new SkippableError('claude_unavailable', 'Claude quota exhausted. Please login again.');
         },
       };
       const registry = {
@@ -71,8 +77,8 @@ describe('legacy-claude skip handling', () => {
         registry,
         implRegistry: registry,
         paths: {
-          workingDirRoot: '/tmp/work',
-          implStateDirRoot: '/tmp/impl',
+          workingDirRoot: join(root, 'work'),
+          implStateDirRoot: join(root, 'impl'),
         },
       };
       const engine = new ExposedEngine(opts);
@@ -129,7 +135,7 @@ describe('legacy-claude skip handling', () => {
     }
   });
 
-  it('does NOT skip when a non-legacy-claude impl throws a claude-sounding error', async () => {
+  it('does NOT skip when a non-legacy impl throws a normal Error (not SkippableError)', async () => {
     const { engine, persistence, store } = await buildEngineWith(
       async () => {
         throw new Error('Claude quota exhausted (but we are not legacy-claude).');
@@ -140,6 +146,23 @@ describe('legacy-claude skip handling', () => {
       await expect(engine.invokeRunImpl('req-1')).rejects.toThrow(/Claude quota exhausted/);
       const intent = persistence.getOrThrow('req-1');
       expect(intent.state).toBe(IntentState.RUNNING);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('skips for SkippableError from any impl name (engine does not name-check)', async () => {
+    const { engine, persistence, store } = await buildEngineWith(
+      async () => {
+        throw new SkippableError('claude_unavailable', 'auth failed');
+      },
+      'some-other-impl',
+    );
+    try {
+      await engine.invokeRunImpl('req-1');
+      const intent = persistence.getOrThrow('req-1');
+      expect(intent.state).toBe(IntentState.POST_SNAPSHOT);
+      expect(intent.gatingClaim).toMatchObject({ skipped: true, reason: 'claude_unavailable' });
     } finally {
       store.close();
     }

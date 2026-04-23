@@ -163,4 +163,35 @@ describe('submit-intent command', () => {
     expect(parsed.plan[0].spec?.kind).toBe('prediction.v0');
     vi.doUnmock('../../../src/cli/introspection-context.js');
   });
+
+  it('--spec-file with unknown spec.kind emits invalid_invocation', async () => {
+    vi.resetModules();
+    vi.doMock('../../../src/cli/introspection-context.js', () => ({
+      gatherIntrospectionRaw: vi.fn(async () => mockRaw),
+    }));
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-submit-intent-'));
+    const tmpFile = join(tmp, 'bad-kind.json');
+    writeFileSync(tmpFile, JSON.stringify({
+      window: { startTs: 1, endTs: 2 },
+      spec: { kind: 'demo.v0', foo: 1 },
+      eligibility: {},
+    }));
+    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const { ctx, writes, exits } = makeCtx([
+      '--id', 'x',
+      '--description', 'y',
+      '--spec-file', tmpFile,
+      '--dry-run',
+    ]);
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.message).toMatch(/unknown intent kind: demo\.v0/);
+    expect(parsed.message).toMatch(/known kinds:/);
+    expect(exits).toEqual([11]);
+    vi.doUnmock('../../../src/cli/introspection-context.js');
+  });
 });

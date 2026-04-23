@@ -64,6 +64,8 @@ export interface ClaudeMcpPredictionConfig {
   sessionMaxMs?: number;
   /** Injected deps for test mode — bypasses the real Claude spawn. */
   _testDeps?: TestDeps;
+  /** CLI `jinn intents` registry without a live daemon */
+  stub?: boolean;
 }
 
 export interface TestDeps {

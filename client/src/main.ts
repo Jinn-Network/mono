@@ -35,22 +35,13 @@ import { ClaudeRunner } from './runner/claude.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
 import { RestorerImplRegistry } from './restorer/engine/registry.js';
-import { LegacyClaudeImpl } from './restorer/impls/legacy-claude/index.js';
-import { ClaudeMcpHyperliquidImpl } from './restorer/impls/claude-mcp-hyperliquid/index.js';
-import { PortfolioV0Evaluator } from './restorer/impls/portfolio-v0-evaluator/index.js';
-import { PredictionV0BaselineImpl } from './restorer/impls/prediction-v0-baseline/index.js';
-import { PredictionV0Evaluator } from './restorer/impls/prediction-v0-evaluator/index.js';
-import { ClaudeMcpPredictionImpl } from './restorer/impls/claude-mcp-prediction/index.js';
-import { PredictionApyV0BaselineImpl } from './restorer/impls/prediction-apy-v0-baseline/index.js';
-import { ClaudeMcpPredictionApyImpl } from './restorer/impls/claude-mcp-prediction-apy/index.js';
-import { PredictionApyV0Evaluator } from './restorer/impls/prediction-apy-v0-evaluator/index.js';
+import { buildRestorerImpls } from './restorer/impls/index.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
-import { makePredictionV0Generator } from './intents/prediction-v0-auto.js';
-import { makePredictionApyV0Generator } from './intents/prediction-apy-v0-auto.js';
-import { BASE_SEPOLIA_FEEDS, BASE_FEEDS } from './venues/chainlink/feeds.js';
+import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
+import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import type { IntentGenerator } from './daemon/creator.js';
-import { checkRpcNetwork, rpcNetworkFailureHint } from './preflight/rpc-network.js';
+import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -258,6 +249,8 @@ export async function main(): Promise<DaemonStartupInfo> {
         reason: rpcPreflight.reason,
       },
     });
+  } else {
+    logRpcLocalDevToStderr(rpcPreflight);
   }
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);
@@ -364,59 +357,19 @@ export async function main(): Promise<DaemonStartupInfo> {
   });
 
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) intents
-  implRegistry.register(new LegacyClaudeImpl({
+  for (const impl of buildRestorerImpls({
+    rpcUrl: config.rpcUrl,
+    archiveRpcUrl: config.archiveRpcUrl,
+    claudePath: config.claudePath,
+    claudeModel: config.claudeModel,
+    pk: agentPrivateKey,
+    safe: safeAddress,
     runner,
-    workingDirectory: '/tmp',
-    timeoutMs: 300_000,
     daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
-  }));
-
-  // claude-mcp-hyperliquid: portfolio.v0 trader
-  implRegistry.register(new ClaudeMcpHyperliquidImpl({
-    claudePath: config.claudePath,
-    claudeModel: config.claudeModel,
-  }));
-
-  // portfolio-v0-evaluator: deterministic verifier — dispatched via type='evaluation' for portfolio.v0 kind
-  implRegistry.register(new PortfolioV0Evaluator());
-
-  // prediction-v0-baseline: reference restorer for prediction.v0 intents
-  implRegistry.register(new PredictionV0BaselineImpl({
-    rpcUrl: config.rpcUrl,
-  }));
-
-  // claude-mcp-prediction: opt-in alternative that spawns Claude via MCP.
-  // Only chosen when config.restorers.byKind['prediction.v0'] names it.
-  // Registered unconditionally so the registry's byKind dispatch can find
-  // it when opted-in; baseline stays default via the byKind map above.
-  implRegistry.register(new ClaudeMcpPredictionImpl({
-    claudePath: config.claudePath,
-    claudeModel: config.claudeModel,
-    rpcUrl: config.rpcUrl,
-  }));
-
-  // prediction-v0-evaluator: deterministic verifier for prediction.v0 evaluation jobs
-  implRegistry.register(new PredictionV0Evaluator({
-    evaluatorPk: agentPrivateKey,
-    evaluatorSafeAddress: safeAddress,
-    rpcUrl: config.rpcUrl,
-  }));
-  implRegistry.register(new PredictionApyV0BaselineImpl({
-    rpcUrl: config.rpcUrl,
-    archiveRpcUrl: config.archiveRpcUrl,
-  }));
-  implRegistry.register(new ClaudeMcpPredictionApyImpl({
-    claudePath: config.claudePath,
-    claudeModel: config.claudeModel,
-    rpcUrl: config.rpcUrl,
-    archiveRpcUrl: config.archiveRpcUrl,
-  }));
-  implRegistry.register(new PredictionApyV0Evaluator({
-    evaluatorPk: agentPrivateKey,
-    evaluatorSafeAddress: safeAddress,
-    rpcUrl: config.rpcUrl,
-    archiveRpcUrl: config.archiveRpcUrl,
-  }));
+    implStateDirRoot: config.engine.implStateDirRoot,
+  })) {
+    implRegistry.register(impl);
+  }
 
   console.log(`[main] RestorerImplRegistry: ${implRegistry.list().map(i => i.name).join(', ')}`);
 
@@ -470,22 +423,18 @@ export async function main(): Promise<DaemonStartupInfo> {
   }
 
   // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
-  const intentGenerators: IntentGenerator[] = [];
   const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
-  if (config.network === 'testnet' && !autoIntentsDisabled) {
-    intentGenerators.push(makePredictionV0Generator({
-      feed: BASE_SEPOLIA_FEEDS['ETH / USD'],
-      feedDescription: 'ETH / USD',
-      venue: 'chainlink-base-sepolia',
-      rpcUrl: config.rpcUrl,
-    }));
-    console.log('[main] auto-intent generator enabled: prediction.v0 (testnet, ETH/USD coin-flip+0.5%)');
-    if (process.env['JINN_ENABLE_APY_AUTO_INTENTS'] === '1') {
-      intentGenerators.push(makePredictionApyV0Generator());
-      console.log('[main] auto-intent generator enabled: prediction.apy.v0 (JINN_ENABLE_APY_AUTO_INTENTS=1)');
-    }
-  } else if (config.network === 'mainnet' && !autoIntentsDisabled && BASE_FEEDS['ETH / USD']) {
-    // Mainnet opt-in only; default is OFF. Reserved for a future flag.
+  const { generators: intentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
+    network: config.network,
+    rpcUrl: config.rpcUrl,
+    autoIntentsDisabled,
+    env: process.env,
+  });
+  for (const line of autoIntentLogLines) {
+    console.log(line);
+  }
+  if (config.network === 'mainnet' && !autoIntentsDisabled && BASE_FEEDS['ETH / USD']) {
+    // Mainnet auto-intent opt-in only; default is OFF. Reserved for a future flag.
   }
 
   const daemon = new Daemon({
@@ -512,6 +461,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
       testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
+      engine: config.engine,
     },
     rewardClaim:
       config.rewardClaimIntervalMs > 0
@@ -529,8 +479,8 @@ export async function main(): Promise<DaemonStartupInfo> {
       // fields. Engine refactor should consolidate to one. Locked in this PR.
       registry: implRegistry,
       paths: {
-        workingDirRoot: '/tmp/jinn-engine-working',
-        implStateDirRoot: '/tmp/jinn-engine-impl-state',
+        workingDirRoot: config.engine.workingDirRoot,
+        implStateDirRoot: config.engine.implStateDirRoot,
       },
       claimDeps,
       packagingDeps,

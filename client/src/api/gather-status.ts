@@ -21,7 +21,10 @@ import {
   resolveMasterDailyEstimateWei,
 } from './status-build.js';
 import { listStolasClaimTargets } from '../earning/stolas-claim.js';
-import { gatherPortfolioV0Status } from './portfolio-v0-build.js';
+import {
+  gatherPortfolioV0Status,
+  DEFAULT_ENGINE_WORKING_DIR_ROOT,
+} from './portfolio-v0-build.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 
 const ERC20_BALANCE_OF_ABI = [
@@ -46,6 +49,8 @@ export interface StatusGatherConfig {
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
   testnetClaimRegistryDeploymentPath?: string;
+  /** Engine paths — used for portfolio.v0 Claude outcome scan, etc. */
+  engine?: { workingDirRoot: string; implStateDirRoot: string };
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -261,7 +266,10 @@ export async function gatherGatheredStatusRaw(
   // portfolio.v0 lifecycle data — best-effort, never throws
   let portfolioV0: ReturnType<typeof gatherPortfolioV0Status> | undefined;
   try {
-    portfolioV0 = gatherPortfolioV0Status(store);
+    portfolioV0 = gatherPortfolioV0Status(
+      store,
+      status?.engine?.workingDirRoot ?? DEFAULT_ENGINE_WORKING_DIR_ROOT,
+    );
   } catch {
     portfolioV0 = undefined;
   }

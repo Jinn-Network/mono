@@ -5,7 +5,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import { resolveCliPassword } from '../password.js';
-import { checkRpcNetwork, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
+import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
 
 /** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
 function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
@@ -93,6 +93,9 @@ async function run(ctx: CommandContext): Promise<void> {
     );
     return;
   }
+  // Log to real stderr; `ctx.writer` is stdout and must stay a single JSON (or
+  // human) line for `emitResult` / `emitEnvelope` contracts.
+  logRpcLocalDevToStderr(rpcPreflight);
   const bootstrapper = new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: config.network === 'testnet' ? 'base-sepolia' : 'base',

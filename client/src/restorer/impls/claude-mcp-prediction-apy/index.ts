@@ -21,6 +21,7 @@ import type {
   EnableResult,
   IntentEnableMetadata,
 } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { DesiredState } from '../../../types/desired-state.js';
 import { PredictionApyV0IntentSchema } from '../../../types/prediction-apy.js';
 
@@ -45,6 +46,7 @@ export class ClaudeMcpPredictionApyImpl implements RestorerImpl {
   }
 
   async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
     return { ready: true };
   }
 
@@ -66,6 +68,9 @@ export class ClaudeMcpPredictionApyImpl implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    if (this.config.stub) {
+      throw new Error('claude-mcp-prediction-apy: stub registry cannot run (requires live daemon)');
+    }
     const { intent, workingDir, log } = ctx;
     const parsed = PredictionApyV0IntentSchema.parse(intent);
     const testDeps = this.config._testDeps;

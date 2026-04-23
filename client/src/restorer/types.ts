@@ -61,6 +61,16 @@ export interface ReadyStatus {
   nextStep?: { description: string; cli?: string; url?: string };
 }
 
+/** Use when an impl is built in CLI `stub` mode (no live fleet / signer). */
+export const REQUIRES_LIVE_DAEMON_READINESS: ReadyStatus = {
+  ready: false,
+  reason: 'requires live daemon',
+  nextStep: {
+    description: 'Run the daemon with a configured fleet and wallet',
+    cli: 'jinn run',
+  },
+};
+
 /**
  * Argument a kind-specific enable flow wants from the operator, surfaced
  * via `enableMetadata()`. The generic `jinn intents enable <kind>` verb
@@ -116,6 +126,22 @@ export type EnableResult =
       message: string;
       details?: Record<string, unknown>;
     };
+
+// ── Sentinel errors (impl → engine) ───────────────────────────────────────────
+
+/**
+ * Thrown by a {@link RestorerImpl} when the attempt should be recorded as a
+ * deliberate skip (no failure / no claim retry), e.g. Claude CLI unavailable.
+ */
+export class SkippableError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string, message?: string) {
+    super(message ?? reason);
+    this.name = 'SkippableError';
+    this.reason = reason;
+  }
+}
 
 // ── RestorerImpl ──────────────────────────────────────────────────────────────
 

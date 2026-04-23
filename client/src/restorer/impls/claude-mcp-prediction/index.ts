@@ -16,7 +16,8 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from 'n
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../types.js';
+import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { DesiredState } from '../../../types/desired-state.js';
 import { PredictionV0IntentSchema } from '../../../types/prediction.js';
 
@@ -36,6 +37,11 @@ export class ClaudeMcpPredictionImpl implements RestorerImpl {
     return ctx.kind === 'prediction.v0' && ctx.type !== 'evaluation';
   }
 
+  async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
+    return { ready: true };
+  }
+
   async canAttempt(
     intent: DesiredState,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -46,6 +52,9 @@ export class ClaudeMcpPredictionImpl implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    if (this.config.stub) {
+      throw new Error('claude-mcp-prediction: stub registry cannot run (requires live daemon)');
+    }
     const { intent, workingDir, log } = ctx;
     const parsed = PredictionV0IntentSchema.parse(intent);
     const testDeps = this.config._testDeps;

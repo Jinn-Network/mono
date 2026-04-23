@@ -35,6 +35,7 @@ import {
   type DeliveryDeps,
 } from './delivery.js';
 import type { RestorerImpl, RestorationOutput } from '../types.js';
+import { SkippableError } from '../types.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -531,17 +532,17 @@ export class RestorationEngine {
       try {
         output = await impl.run(ctx);
       } catch (err) {
-        if (impl.name === 'legacy-claude' && isClaudeUnavailableError(err)) {
+        if (err instanceof SkippableError) {
           const skippedAt = Date.now();
-          const detail = err instanceof Error ? err.message : String(err);
+          const detail = err.message;
           console.warn(
-            `[restorer-engine] ${intent.requestId}: legacy-claude unavailable, skipping intent (${detail})`,
+            `[restorer-engine] ${intent.requestId}: impl=${impl.name} skipped (${err.reason}): ${detail}`,
           );
           output = {
             venueRef: { name: 'legacy' },
             gating: {
               skipped: true,
-              reason: 'claude_unavailable',
+              reason: err.reason,
               skippedAt: String(skippedAt),
             },
             informational: {
@@ -904,42 +905,4 @@ export class RestorationEngine {
         break;
     }
   }
-}
-
-// Narrow heuristic: only match phrases that unambiguously indicate the Claude
-// CLI is unavailable (not logged in, quota exhausted, API key rejected). This
-// is intentionally narrow so that transient failures surfaced *through* a
-// Claude-orchestrated tool call (network errors, RPC timeouts, upstream 5xx
-// that happens to carry a generic "rate limit exceeded") still propagate as
-// hard failures. Callers additionally gate this behind
-// `impl.name === 'legacy-claude'`.
-function isClaudeUnavailableError(err: unknown): boolean {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  // Phrases that unambiguously point at the Claude CLI itself.
-  const claudeSpecificPhrases = [
-    'claude auth',
-    'claude not authenticated',
-    'claude cli not found',
-    'claude: command not found',
-    'claude quota',
-    'claude rate limit',
-    'claude credit',
-    'anthropic api key',
-  ];
-  if (claudeSpecificPhrases.some((p) => msg.includes(p))) return true;
-  // Secondary: message must mention claude AND a clearly-availability phrase.
-  if (msg.includes('claude')) {
-    const availabilityPhrases = [
-      'not logged in',
-      'please login',
-      'please log in',
-      'quota exhausted',
-      'quota exceeded',
-      'credit limit',
-      'invalid api key',
-      'api key not found',
-    ];
-    return availabilityPhrases.some((p) => msg.includes(p));
-  }
-  return false;
 }

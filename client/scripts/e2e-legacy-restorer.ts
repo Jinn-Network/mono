@@ -1,12 +1,23 @@
-import type { ExecutionAdapter } from '../adapters/adapter.js';
-import type { Runner } from '../runner/runner.js';
-import type { Store } from '../store/store.js';
-import { PermanentError, TransientError } from '../types/index.js';
-import { isRecoverableTransactionError } from '../tx-retry.js';
-import type { RestorationRequest } from '../types/index.js';
-import { emitEvent } from '../observability/emit-event.js';
+/**
+ * E2E-only stand-in for the removed production {@link RestorerLoop}.
+ * Full {@link RestorationEngine} path requires two-layer claim deps (ClaimRegistry
+ * on fork); these phases assert adapter + runner delivery without engine wiring.
+ *
+ * @internal — do not import from `src/`.
+ */
+import type { ExecutionAdapter } from '../src/adapters/adapter.js';
+import type { Runner } from '../src/runner/runner.js';
+import type { Store } from '../src/store/store.js';
+import type { RestorationRequest } from '../src/types/index.js';
+import { PermanentError, TransientError } from '../src/types/index.js';
+import { isRecoverableTransactionError } from '../src/tx-retry.js';
+import { emitEvent } from '../src/observability/emit-event.js';
 
-export class RestorerLoop {
+/**
+ * @deprecated Production uses {@link RestorationEngine}; this class exists for
+ * `e2e-validate.ts` only.
+ */
+export class E2eRestorerLoop {
   private stopped = false;
   private requestIterator: AsyncIterator<RestorationRequest> | null = null;
   private stopResolve: (() => void) | null = null;
@@ -17,7 +28,7 @@ export class RestorerLoop {
     private readonly runner: Runner,
     private readonly store: Store,
     private readonly workingDirectory: string = '/tmp',
-    private readonly timeoutMs: number = 300000,
+    private readonly timeoutMs: number = 300_000,
     private readonly daemonApiUrl?: string,
   ) {
     this.stopPromise = new Promise(resolve => {
@@ -71,7 +82,7 @@ export class RestorerLoop {
       }, 'restorer');
     } catch (err) {
       if (!(err instanceof TransientError)) {
-        console.error(`[restorer] Failed to restore ${request.requestId}:`, err);
+        console.error(`[e2e-legacy-restorer] Failed to restore ${request.requestId}:`, err);
         emitEvent(this.store, {
           kind: 'tick_error',
           requestId: request.requestId,
@@ -93,7 +104,7 @@ export class RestorerLoop {
         if (err instanceof TransientError) {
           await Promise.race([new Promise(r => setTimeout(r, 5000)), this.stopPromise]);
         } else {
-          console.error('[restorer] Error:', err);
+          console.error('[e2e-legacy-restorer] Error:', err);
           emitEvent(this.store, {
             kind: 'tick_error',
             outcome: 'failed',

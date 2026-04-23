@@ -16,12 +16,22 @@ import { getChainConfig, ERC20_ABI } from '../../earning/contracts.js';
 import { runPortfolioV0DoctorChecks } from '../../api/portfolio-v0-doctor.js';
 import { mnemonicKeystorePath } from '../../earning/store.js';
 import { checkRpcNetwork, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
+import { SPEC_KINDS } from '../../intents/kinds/index.js';
 
 interface CheckResult {
   name: string;
   ok: boolean;
   detail: string;
   remedy?: string;
+  /** `rpc_network` only: preflight used loopback Anvil/Hardhat chain id, not Base. */
+  rpcStatus?: 'matched' | 'local_dev_override';
+  /** `rpc_network` only: machine-readable context (avoid parsing `detail` for automation). */
+  rpc?: {
+    host: string;
+    network: 'mainnet' | 'testnet';
+    expectedChainId: number;
+    actualChainId: number;
+  };
 }
 
 async function checkNodeVersion(): Promise<CheckResult> {
@@ -204,10 +214,20 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
 async function checkRpcNetworkForDoctor(config: JinnConfig): Promise<CheckResult> {
   const result = await checkRpcNetwork(config);
   if (result.ok) {
+    const detail = result.localDev
+      ? `${result.rpcHost} reports chainId ${result.actualChainId} for config network ${result.network} (local loopback; Anvil/Hardhat id, not Base ${result.expectedChainId} — expected for local forks).`
+      : `${result.rpcHost} reports chain ${result.actualChainId} for ${result.network}`;
     return {
       name: 'rpc_network',
       ok: true,
-      detail: `${result.rpcHost} reports chain ${result.actualChainId} for ${result.network}`,
+      detail,
+      rpcStatus: result.localDev ? 'local_dev_override' : 'matched',
+      rpc: {
+        host: result.rpcHost,
+        network: result.network,
+        expectedChainId: result.expectedChainId,
+        actualChainId: result.actualChainId,
+      },
     };
   }
   return {
@@ -278,9 +298,10 @@ async function run(ctx: CommandContext): Promise<void> {
   // on a fresh operator who hasn't submitted an HL intent is false-alarm
   // noise. Operators who want the HL-specific preflight in isolation can
   // run those checks under a dedicated verb once one exists.
-  const hasPortfolioV0 = config.desiredStates.some((d) => d.spec?.kind === 'portfolio.v0');
+  const portfolioKind = SPEC_KINDS['portfolio.v0']!.kind;
+  const hasPortfolioV0 = config.desiredStates.some((d) => d.spec?.kind === portfolioKind);
   if (hasPortfolioV0) {
-    const implStateDirRoot = '/tmp/jinn-engine-impl-state';
+    const implStateDirRoot = config.engine.implStateDirRoot;
     const hlImplStateDir = join(implStateDirRoot, 'claude-mcp-hyperliquid');
     const portfolioChecks = runPortfolioV0DoctorChecks(hlImplStateDir);
     checks.push(...portfolioChecks);

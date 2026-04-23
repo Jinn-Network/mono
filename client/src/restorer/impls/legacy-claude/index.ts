@@ -18,6 +18,8 @@ import type {
   EnableResult,
   IntentEnableMetadata,
 } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from '../../types.js';
+import type { RestorationResult } from '../../../types/index.js';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +33,11 @@ export interface LegacyClaudeConfig {
   storePath?: string;
   /** Daemon API URL for MCP server */
   daemonApiUrl?: string;
+  /**
+   * When true (e.g. synthetic registry), `isReady` reports the daemon is required.
+   * Production daemon should omit.
+   */
+  stub?: boolean;
 }
 
 // ── Impl ──────────────────────────────────────────────────────────────────────
@@ -57,6 +64,7 @@ export class LegacyClaudeImpl implements RestorerImpl {
   }
 
   async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
     return { ready: true };
   }
 
@@ -84,7 +92,16 @@ export class LegacyClaudeImpl implements RestorerImpl {
       daemonApiUrl: this.config.daemonApiUrl,
     };
 
-    const result = await this.config.runner.run(intent, runnerCtx);
+    let result: RestorationResult;
+    try {
+      result = await this.config.runner.run(intent, runnerCtx);
+    } catch (err) {
+      if (isClaudeUnavailableError(err)) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new SkippableError('claude_unavailable', detail);
+      }
+      throw err;
+    }
 
     log({ level: 'info', msg: 'legacy-claude: runner completed', data: { hasData: !!result.data } });
 
@@ -105,3 +122,37 @@ export class LegacyClaudeImpl implements RestorerImpl {
 }
 
 export default LegacyClaudeImpl;
+
+/**
+ * Narrow heuristic: only match phrases that unambiguously indicate the Claude
+ * CLI is unavailable (not logged in, quota exhausted, API key rejected).
+ * Mirrors the former engine-level check (jinn-mono-7ee.4).
+ */
+function isClaudeUnavailableError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const claudeSpecificPhrases = [
+    'claude auth',
+    'claude not authenticated',
+    'claude cli not found',
+    'claude: command not found',
+    'claude quota',
+    'claude rate limit',
+    'claude credit',
+    'anthropic api key',
+  ];
+  if (claudeSpecificPhrases.some((p) => msg.includes(p))) return true;
+  if (msg.includes('claude')) {
+    const availabilityPhrases = [
+      'not logged in',
+      'please login',
+      'please log in',
+      'quota exhausted',
+      'quota exceeded',
+      'credit limit',
+      'invalid api key',
+      'api key not found',
+    ];
+    return availabilityPhrases.some((p) => msg.includes(p));
+  }
+  return false;
+}

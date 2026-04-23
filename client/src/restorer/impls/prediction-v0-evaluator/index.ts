@@ -13,7 +13,8 @@ import { baseSepolia, base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
 import type { PublicClient } from 'viem';
-import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../types.js';
+import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { DesiredState } from '../../../types/desired-state.js';
 import {
   PredictionV0IntentSchema,
@@ -43,10 +44,12 @@ import { resolveExpectedRestorationIntentCid } from '../evaluation-context.js';
 import { checkQuestionKindSupported } from './checks/spec.js';
 
 export interface PredictionV0EvaluatorConfig {
+  /** Set by {@link buildRestorerImpls} for CLI registries (no real signer). */
+  stub?: boolean;
   /** Evaluator's private key — used to sign the verdict manifest. */
-  evaluatorPk: `0x${string}`;
+  evaluatorPk?: `0x${string}`;
   /** Evaluator's Safe multisig address — written into verdict.evaluator.safeAddress. */
-  evaluatorSafeAddress: `0x${string}`;
+  evaluatorSafeAddress?: `0x${string}`;
   rpcUrl?: string;
   _testDeps?: {
     oraclePriceAtResolveTs?: (feed: `0x${string}`, resolveTs: number) => Promise<SpanningResult>;
@@ -97,6 +100,11 @@ export class PredictionV0Evaluator implements RestorerImpl {
     return ctx.kind === 'prediction.v0' && ctx.type === 'evaluation';
   }
 
+  async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
+    return { ready: true };
+  }
+
   async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (intent.spec?.kind !== 'prediction.v0') return { ok: false, reason: 'spec.kind is not prediction.v0' };
     if (intent.type !== 'evaluation') return { ok: false, reason: 'type is not evaluation' };
@@ -108,6 +116,12 @@ export class PredictionV0Evaluator implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    if (this.config.stub) {
+      throw new Error('prediction-v0-evaluator: stub registry cannot run evaluation (requires live daemon)');
+    }
+    if (!this.config.evaluatorPk || !this.config.evaluatorSafeAddress) {
+      throw new Error('prediction-v0-evaluator: evaluatorPk and evaluatorSafeAddress are required');
+    }
     const { intent, workingDir, log } = ctx;
     // Support _testDeps injection from ctx (test) or config (constructor).
     const testDeps = (ctx as any)._testDeps ?? this.config._testDeps;
@@ -181,7 +195,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
     const { score, scoreBasis, scoreVersion } = computeScore(verdict, manifest.prediction.probability, groundTruth);
 
     // 7. Assemble + sign verdict manifest
-    const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk);
+    const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
     const verdictManifestBase: Omit<PredictionVerdictManifest, 'signature'> = {
       schemaVersion: 'prediction.v0.verdict.v1',
       generatedAt: Date.now(),

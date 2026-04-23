@@ -57,7 +57,6 @@ import {
 import { MechAdapter } from '../src/adapters/mech/adapter.js';
 import { FleetBootstrapper } from '../src/earning/bootstrap.js';
 import { getChainConfig } from '../src/earning/contracts.js';
-
 const __dirname = join(fileURLToPath(import.meta.url), '..');
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -830,9 +829,13 @@ async function main(): Promise<void> {
       }),
     );
 
-    // ── Phase 5: Restorer delivers via ClaudeRunner ──────────────────────────
+    // ── Phase 5: Restorer delivers via ClaudeRunner (E2E legacy loop) ───────
+    //
+    // Full RestorationEngine is wired in Phase 11 and requires two-layer
+    // ClaimRegistry deps on the fork. Phases 5–8 use {@link E2eRestorerLoop} —
+    // same behavior as the former production `RestorerLoop` (adapter + runner).
 
-    const { RestorerLoop } = await import('../src/daemon/restorer.js');
+    const { E2eRestorerLoop } = await import('./e2e-legacy-restorer.js');
     const { ClaudeRunner } = await import('../src/runner/claude.js');
     const { Store } = await import('../src/store/store.js');
 
@@ -854,7 +857,7 @@ async function main(): Promise<void> {
     const daemonApiUrl = `http://127.0.0.1:${restorerApiServer.port}`;
 
     const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
-    const restorer = new RestorerLoop(adapter!, runner, store, '/tmp', agentTimeoutMs, daemonApiUrl);
+    const restorer = new E2eRestorerLoop(adapter!, runner, store, join(tmpDir!, 'e2e-work'), agentTimeoutMs, daemonApiUrl);
 
     // Create the delivery iterator once — it is infinite and carries state
     const deliveryIter = adapter!.watchForDeliveries()[Symbol.asyncIterator]();
@@ -881,7 +884,7 @@ async function main(): Promise<void> {
           clearInterval(miningInterval);
         }
 
-        console.log('    RestorerLoop.processOne() completed');
+        console.log('    E2eRestorerLoop.processOne() completed');
 
         // Mine a block to confirm the delivery transaction
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
@@ -1004,7 +1007,7 @@ async function main(): Promise<void> {
           clearInterval(miningInterval);
         }
 
-        console.log('    RestorerLoop.processOne() completed for evaluation');
+        console.log('    E2eRestorerLoop.processOne() completed for evaluation');
 
         // Mine a block to confirm
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
@@ -1283,6 +1286,12 @@ async function main(): Promise<void> {
         }
 
         const { Daemon } = await import('../src/daemon/daemon.js');
+        const { ClaudeRunner } = await import('../src/runner/claude.js');
+        const { createClients } = await import('../src/adapters/mech/safe.js');
+        const { RestorerImplRegistry } = await import('../src/restorer/engine/registry.js');
+        const { buildRestorerImpls } = await import('../src/restorer/impls/index.js');
+        const { DEFAULT_BY_KIND, DEFAULT_DISABLED_IMPLS } = await import('../src/cli/intent-registry-access.js');
+        const { ClaimRegistryClient } = await import('../src/adapters/claim-registry/client.js');
 
         const daemonAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
@@ -1299,13 +1308,71 @@ async function main(): Promise<void> {
         });
 
         const daemonDbPath = join(tmpDir!, 'daemon-loop.db');
+        const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
+        const agentClients = createClients(ANVIL_RPC, agentEoaPrivateKey as Hex, base);
+
+        const implRegistry = new RestorerImplRegistry({
+          byKind: { ...DEFAULT_BY_KIND },
+          default: 'legacy-claude',
+          disabled: [...DEFAULT_DISABLED_IMPLS],
+        });
+        for (const impl of buildRestorerImpls({
+          rpcUrl: ANVIL_RPC,
+          claudePath: agentPath,
+          claudeModel: agentModel,
+          pk: agentEoaPrivateKey as `0x${string}`,
+          safe: safeAddress as `0x${string}`,
+          runner,
+          daemonApiUrl: 'http://127.0.0.1:7331',
+        })) {
+          implRegistry.register(impl);
+        }
+
+        const claimRegistryAddress = (
+          process.env['JINN_CLAIM_REGISTRY_ADDRESS'] ?? CHAIN_CONFIG.claimRegistry ?? ''
+        ) as string;
+        const claimDeps = claimRegistryAddress
+          ? {
+              registryClient: new ClaimRegistryClient(
+                agentClients.publicClient,
+                agentClients.walletClient,
+                claimRegistryAddress as `0x${string}`,
+                safeAddress as `0x${string}`,
+              ),
+              marketplaceClaimer: daemonAdapter,
+            }
+          : undefined;
+
         const daemon = new Daemon({
           adapter: daemonAdapter,
-          runner: new ClaudeRunner({ claudePath: agentPath, model: agentModel }),
+          runner,
           desiredStates: [{ id: 'daemon-loop-test', description: 'Daemon loop E2E test' }],
           dbPath: daemonDbPath,
           shutdownTimeoutMs: 10000,
           apiPort: 7331,
+          restorationEngine: {
+            registry: implRegistry,
+            implRegistry,
+            paths: {
+              workingDirRoot: join(tmpDir!, 'e2e-engine-work'),
+              implStateDirRoot: join(tmpDir!, 'e2e-engine-impl-state'),
+            },
+            claimDeps,
+            packagingDeps: { ipfsRegistryUrl: 'https://registry.autonolas.tech' },
+            manifestDeps: {
+              ipfsRegistryUrl: 'https://registry.autonolas.tech',
+              agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
+              safeAddress: safeAddress as `0x${string}`,
+            },
+            deliveryDeps: {
+              publicClient: agentClients.publicClient,
+              walletClient: agentClients.walletClient,
+              safeAddress: safeAddress as `0x${string}`,
+              mechContractAddress: mechAddress as `0x${string}`,
+              routerAddress: ROUTER_ADDRESS,
+              claimDeliveryVariant: 'v1',
+            },
+          },
         });
 
         await daemon.start();
@@ -1529,8 +1596,16 @@ async function main(): Promise<void> {
         console.log(`    Cross-operator requestId: ${crossRequestId}`);
 
         // B picks up the request and delivers
-        const storeB = new Store(':memory:');
-        const restorerB = new RestorerLoop(restorerAdapterB, runner, storeB, '/tmp', agentTimeoutMs);
+        const { E2eRestorerLoop: E2eRestorerB } = await import('./e2e-legacy-restorer.js');
+        const { Store: StoreB } = await import('../src/store/store.js');
+        const storeB = new StoreB(':memory:');
+        const restorerB = new E2eRestorerB(
+          restorerAdapterB,
+          runner,
+          storeB,
+          join(tmpDir2!, 'e2e-b-work'),
+          agentTimeoutMs,
+        );
 
         const miningInterval = setInterval(async () => {
           try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /* ignore */ }
@@ -1766,10 +1841,16 @@ async function main(): Promise<void> {
           transport: http(ANVIL_RPC),
         });
 
-        // Read compiled bytecode
-        const { readFileSync: readFS } = await import('node:fs');
+        // Read compiled bytecode (requires `forge build` / contracts sync in repo root)
+        const { readFileSync: readFS, existsSync } = await import('node:fs');
         const { join: joinPath } = await import('node:path');
         const artifactPath = joinPath(__dirname, '..', '..', 'contracts', 'artifacts', 'src', 'claiming', 'ClaimRegistry.sol', 'ClaimRegistry.json');
+        if (!existsSync(artifactPath)) {
+          console.log(
+            `    SKIP: ClaimRegistry artifact not found (${artifactPath}) — run contracts build to enable Phase 13b`,
+          );
+          return;
+        }
         const artifact = JSON.parse(readFS(artifactPath, 'utf-8'));
 
         // Deploy with 60s TTL (short for testing)
@@ -2473,9 +2554,12 @@ async function main(): Promise<void> {
         const failScript = join(tmpDir!, 'fail-agent.sh');
         writeFS2(failScript, '#!/bin/bash\nexit 1\n', { mode: 0o755 });
 
+        const { ClaudeRunner } = await import('../src/runner/claude.js');
+        const { E2eRestorerLoop: E2eFail } = await import('./e2e-legacy-restorer.js');
+        const { Store: StoreFail } = await import('../src/store/store.js');
         const failRunner = new ClaudeRunner({ claudePath: failScript });
-        const failStore = new Store(join(tmpDir!, 'fail-test.db'));
-        const failRestorer = new RestorerLoop(failAdapter, failRunner, failStore);
+        const failStore = new StoreFail(join(tmpDir!, 'fail-test.db'));
+        const failRestorer = new E2eFail(failAdapter, failRunner, failStore, join(tmpDir!, 'fail-work'), 30_000);
 
         const miningInterval = setInterval(async () => {
           try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /* ignore */ }

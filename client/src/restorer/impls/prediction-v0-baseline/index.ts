@@ -16,6 +16,7 @@ import type {
   EnableResult,
   IntentEnableMetadata,
 } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { PublicClient } from 'viem';
 import { PredictionV0IntentSchema } from '../../../types/prediction.js';
 import {
@@ -27,6 +28,8 @@ import { spotCarryPredict } from './strategy.js';
 
 export interface PredictionV0BaselineConfig {
   rpcUrl?: string;
+  /** CLI registries that cannot execute intents without the daemon. */
+  stub?: boolean;
   _testDeps?: {
     readChainlink?: (feed: `0x${string}`) => Promise<RoundReading>;
   };
@@ -43,6 +46,7 @@ export class PredictionV0BaselineImpl implements RestorerImpl {
   }
 
   async isReady(): Promise<ReadyStatus> {
+    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
     // Zero external deps — prediction.v0 runs against on-chain oracles only.
     return { ready: true };
   }
@@ -70,6 +74,9 @@ export class PredictionV0BaselineImpl implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    if (this.config.stub) {
+      throw new Error('prediction-v0-baseline: stub registry cannot run (requires live daemon)');
+    }
     const { intent, workingDir, log } = ctx;
     const parsed = PredictionV0IntentSchema.parse(intent);
     const { feed, venue } = parsed.spec.oracle;

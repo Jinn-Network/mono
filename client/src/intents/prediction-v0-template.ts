@@ -29,6 +29,7 @@ import {
   PredictionV0IntentSchema,
   type PredictionV0Intent,
 } from '../types/prediction.js';
+import { PREDICTION_V0_KIND } from './kinds/constants.js';
 
 // ── Sentinel parsers ──────────────────────────────────────────────────────────
 
@@ -77,10 +78,10 @@ export function isCurrentSentinel(value: unknown): boolean {
 export interface TemplateReaderDeps {
   /**
    * Read the current price of the Chainlink feed referenced in the template.
-   * The helper passes `{feed, venue}` so the reader can build the right client.
-   * Returns a decimal string (scaled from int256 via scaleToDecimal).
+   * Required only when the template uses a `current[±…]` threshold sentinel
+   * (see {@link predictionV0TemplateNeedsReadCurrent}).
    */
-  readCurrent: (args: {
+  readCurrent?: (args: {
     feed: `0x${string}`;
     venue: 'chainlink-base' | 'chainlink-base-sepolia';
   }) => Promise<string>;
@@ -101,6 +102,26 @@ export interface TemplateReaderDeps {
 export const DEFAULT_WINDOW_DURATION_MS = 600_000;
 /** Default resolve gap for the startTs-sentinel fill. Tuned for fast-test. */
 export const DEFAULT_RESOLVE_GAP_MS = 300_000;
+
+/**
+ * True if {@link resolvePredictionV0Template} will call `readCurrent` for this
+ * template (Chainlink). `window.startTs === 0` does not need `readCurrent`.
+ */
+export function predictionV0TemplateNeedsReadCurrent(template: unknown): boolean {
+  if (typeof template !== 'object' || template === null) return false;
+  const t = template as Record<string, unknown>;
+  const spec = t['spec'] as
+    | {
+        kind?: string;
+        question?: { kind?: string; threshold?: unknown };
+      }
+    | undefined;
+  if (spec?.kind !== PREDICTION_V0_KIND) return false;
+  if (spec.question?.kind === 'threshold' && typeof spec.question.threshold === 'string') {
+    return isCurrentSentinel(spec.question.threshold);
+  }
+  return false;
+}
 
 /**
  * Resolve all supported sentinels in a raw prediction.v0 template + return a
@@ -145,12 +166,17 @@ export async function resolvePredictionV0Template(
     | undefined;
 
   if (
-    spec?.kind === 'prediction.v0' &&
+    spec?.kind === PREDICTION_V0_KIND &&
     spec.question?.kind === 'threshold' &&
     typeof spec.question.threshold === 'string'
   ) {
     const t = spec.question.threshold;
     if (isCurrentSentinel(t)) {
+      if (!deps.readCurrent) {
+        throw new Error(
+          'resolvePredictionV0Template: readCurrent is required when spec.question.threshold uses a current[±…] sentinel',
+        );
+      }
       if (!spec.oracle?.feed || !spec.oracle.venue) {
         throw new Error(
           'cannot resolve threshold sentinel: spec.oracle.feed and spec.oracle.venue are required',

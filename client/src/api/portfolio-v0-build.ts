@@ -10,12 +10,14 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Store } from '../store/store.js';
 import { IntentPersistence } from '../restorer/engine/persistence.js';
 import type { PersistedIntent } from '../restorer/engine/persistence.js';
 
-const WORKING_DIR_ROOT = '/tmp/jinn-engine-working';
+/** Default per-intent engine work root; kept in sync with `config.engine.workingDirRoot`. */
+export const DEFAULT_ENGINE_WORKING_DIR_ROOT = join(homedir(), '.jinn-client', 'engine', 'work');
 const RECENT_CLAUDE_OUTCOMES_LIMIT = 10;
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -129,7 +131,10 @@ function toVerdict(intent: PersistedIntent): VerdictSummary {
  * restoration_intents table does not exist yet (table created on first Store
  * construction, so this is always present when the daemon is running).
  */
-export function gatherPortfolioV0Status(store: Store): PortfolioV0Status {
+export function gatherPortfolioV0Status(
+  store: Store,
+  workingDirRoot: string = DEFAULT_ENGINE_WORKING_DIR_ROOT,
+): PortfolioV0Status {
   const persistence = new IntentPersistence(store.db);
 
   // In-flight: all non-terminal intents
@@ -162,29 +167,29 @@ export function gatherPortfolioV0Status(store: Store): PortfolioV0Status {
     recentSnapshots = [];
   }
 
-  const recentClaudeOutcomes = gatherRecentClaudeOutcomes();
+  const recentClaudeOutcomes = gatherRecentClaudeOutcomes(workingDirRoot);
 
   return { inFlight, recentVerdicts, recentSnapshots, recentClaudeOutcomes };
 }
 
 /**
- * Scan the session outcome files under `/tmp/jinn-engine-working/*\/sessions/*\/outcome.json`
- * and return the most recent N. Swallows all filesystem errors so a missing or
- * malformed working dir never breaks the status endpoint.
+ * Scan session outcome files: each intent dir under `workingDirRoot` may contain
+ * `sessions/<id>/outcome.json`. Return the most recent N. Swallows all filesystem
+ * errors so a missing or malformed working dir never breaks the status endpoint.
  */
-function gatherRecentClaudeOutcomes(): ClaudeOutcomeSummary[] {
-  if (!existsSync(WORKING_DIR_ROOT)) return [];
+function gatherRecentClaudeOutcomes(workingDirRoot: string): ClaudeOutcomeSummary[] {
+  if (!existsSync(workingDirRoot)) return [];
   const outcomes: ClaudeOutcomeSummary[] = [];
 
   let intentDirs: string[];
   try {
-    intentDirs = readdirSync(WORKING_DIR_ROOT);
+    intentDirs = readdirSync(workingDirRoot);
   } catch {
     return [];
   }
 
   for (const intentDir of intentDirs) {
-    const sessionsDir = join(WORKING_DIR_ROOT, intentDir, 'sessions');
+    const sessionsDir = join(workingDirRoot, intentDir, 'sessions');
     if (!existsSync(sessionsDir)) continue;
     let sessionDirs: string[];
     try {

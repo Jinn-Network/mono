@@ -23,6 +23,7 @@ const passwordResult = vi.hoisted(() => ({
 
 const loadConfigMock = vi.fn();
 const checkRpcNetworkMock = vi.fn();
+const logRpcLocalDevToStderrMock = vi.hoisted(() => vi.fn());
 let constructorOptions: Record<string, unknown> | undefined;
 
 vi.mock('../../../src/config.js', () => ({
@@ -31,6 +32,7 @@ vi.mock('../../../src/config.js', () => ({
 
 vi.mock('../../../src/preflight/rpc-network.js', () => ({
   checkRpcNetwork: checkRpcNetworkMock,
+  logRpcLocalDevToStderr: logRpcLocalDevToStderrMock,
   rpcNetworkFailureHint: () => 'fix rpc',
 }));
 
@@ -173,6 +175,39 @@ describe('bootstrap command', () => {
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.master).toBe('0xmaster');
     expect(parsed.services).toEqual([{ index: 0, step: 'complete', serviceId: 7 }]);
+    expect(exits).toEqual([0]);
+  });
+
+  it('does not write local-dev preflight notice to stdout; uses logRpcLocalDevToStderr', async () => {
+    checkRpcNetworkMock.mockResolvedValueOnce({
+      ok: true,
+      network: 'testnet',
+      expectedChainId: 84532,
+      actualChainId: 31337,
+      rpcHost: '127.0.0.1:8545',
+      localDev: true,
+    });
+    passwordResult.val = { ok: true, password: 'test' };
+    bootstrapReturn.val = {
+      ok: true,
+      message: 'ok',
+      fleet_state: {
+        master_address: '0xmaster',
+        services: [],
+      },
+    };
+    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    const { ctx, writes, exits } = makeCtx();
+    await bootstrap.run(ctx);
+    expect(logRpcLocalDevToStderrMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        localDev: true,
+        actualChainId: 31337,
+      }),
+    );
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0]).schemaVersion).toBe(1);
+    expect(writes[0].trimStart().startsWith('{')).toBe(true);
     expect(exits).toEqual([0]);
   });
 

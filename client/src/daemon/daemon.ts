@@ -3,7 +3,6 @@ import type { Runner } from '../runner/runner.js';
 import type { DesiredState } from '../types/index.js';
 import { Store } from '../store/store.js';
 import { CreatorLoop, type IntentGenerator } from './creator.js';
-import { RestorerLoop } from './restorer.js';
 import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
@@ -66,23 +65,18 @@ export interface DaemonConfig {
   creatorSafeAddress?: string;
 
   /**
-   * When provided, the daemon uses RestorationEngine (new engine path) instead
-   * of the legacy RestorerLoop for intent dispatch.
-   *
-   * Required for portfolio.v0 spec kind (both restoration and evaluation).
-   * Evaluation intents (type === 'evaluation') are dispatched via supports() to
-   * portfolio-v0-evaluator; legacy health-check intents (no spec) fall back to
-   * legacy-claude via the default impl in the registry.
+   * RestorationEngine — sole path for marketplace request → claim → run → deliver.
+   * Evaluation intents (`type === 'evaluation'`) dispatch via `supports()` to
+   * evaluator impls; health-check intents with no spec use `legacy-claude` via
+   * the registry default.
    */
-  restorationEngine?: Omit<RestorationEngineOptions, 'store'>;
+  restorationEngine: Omit<RestorationEngineOptions, 'store'>;
 }
 
 export class Daemon {
   private store: Store;
   private creatorLoop: CreatorLoop;
-  /** @deprecated Kept for backwards compatibility (test suite). Not started when restorationEngine is configured. */
-  private restorerLoop: RestorerLoop;
-  private restorationEngine?: RestorationEngine;
+  private restorationEngine: RestorationEngine;
   private engineStopped = false;
   private deliveryWatcherLoop: DeliveryWatcherLoop;
   private adapter: ExecutionAdapter;
@@ -106,15 +100,12 @@ export class Daemon {
       config.intentGenerators ?? [],
       config.creatorSafeAddress,
     );
-    this.restorerLoop = new RestorerLoop(this.adapter, config.runner, this.store, '/tmp', 300000, `http://127.0.0.1:${this.apiPort}`);
     this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter, this.store);
 
-    if (config.restorationEngine) {
-      this.restorationEngine = new RestorationEngine({
-        ...config.restorationEngine,
-        store: this.store,
-      });
-    }
+    this.restorationEngine = new RestorationEngine({
+      ...config.restorationEngine,
+      store: this.store,
+    });
 
     if (config.rewardClaim && config.rewardClaim.intervalMs > 0) {
       this.rewardClaimLoop = new RewardClaimLoop({
@@ -180,24 +171,14 @@ export class Daemon {
       );
     }
 
-    if (this.restorationEngine) {
-      // Engine path: recover in-flight intents, then run event-watching loop.
-      const engine = this.restorationEngine;
-      await engine.recoverInFlight();
-      this.loopPromises.push(
-        this.creatorLoop.run().catch(err => console.error('[daemon] creator crashed:', err)),
-        this._runEngineWatcherLoop(engine).catch(err => console.error('[daemon] engine-watcher crashed:', err)),
-        engine.runTickLoop(this.config.pollIntervalMs ?? 5000).catch(err => console.error('[daemon] engine-tick crashed:', err)),
-        this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
-      );
-    } else {
-      // Legacy path: RestorerLoop handles claim + run + submitResult.
-      this.loopPromises.push(
-        this.creatorLoop.run().catch(err => console.error('[daemon] creator crashed:', err)),
-        this.restorerLoop.run().catch(err => console.error('[daemon] restorer crashed:', err)),
-        this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
-      );
-    }
+    const engine = this.restorationEngine;
+    await engine.recoverInFlight();
+    this.loopPromises.push(
+      this.creatorLoop.run().catch(err => console.error('[daemon] creator crashed:', err)),
+      this._runEngineWatcherLoop(engine).catch(err => console.error('[daemon] engine-watcher crashed:', err)),
+      engine.runTickLoop(this.config.pollIntervalMs ?? 5000).catch(err => console.error('[daemon] engine-tick crashed:', err)),
+      this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
+    );
 
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
@@ -213,14 +194,11 @@ export class Daemon {
 
   async stop(): Promise<void> {
     this.creatorLoop.stop();
-    this.restorerLoop.stop();
     this.engineStopped = true;
-    if (this.restorationEngine) {
-      this.restorationEngine.stop();
-      await this.restorationEngine.releaseClaimedNotStarted().catch(err =>
-        console.error('[daemon] engine releaseClaimedNotStarted failed (non-fatal):', err),
-      );
-    }
+    this.restorationEngine.stop();
+    await this.restorationEngine.releaseClaimedNotStarted().catch(err =>
+      console.error('[daemon] engine releaseClaimedNotStarted failed (non-fatal):', err),
+    );
     this.deliveryWatcherLoop.stop();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();

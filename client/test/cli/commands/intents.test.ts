@@ -33,6 +33,23 @@ describe('jinn intents command', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('lists all kinds as not ready with requires live daemon in stub CLI registry', async () => {
+    const io = captureIo();
+    await runCli(
+      ['intents', 'list', '--config', configPath],
+      { writer: io.writer, exit: io.exit, stdoutIsTty: false },
+    );
+    expect(io.exits).toEqual([]);
+    const listPayload = JSON.parse(io.writes.at(-1) ?? '{}');
+    expect(listPayload.verb).toBe('intents list');
+    const rows = listPayload.intents as Array<{ kind: string; ready: boolean; reason?: string }>;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.ready, `kind ${row.kind}`).toBe(false);
+      expect(row.reason, `kind ${row.kind}`).toBe('requires live daemon');
+    }
+  });
+
   it('supports swapping prediction.v0 impl via --impl and reflects it in list output', async () => {
     const ioEnable = captureIo();
     await runCli(

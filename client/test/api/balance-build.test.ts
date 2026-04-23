@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { assembleBalanceV1 } from '../../src/api/balance-build.js';
 import type { GatheredStatusRaw } from '../../src/api/status-build.js';
@@ -5,7 +7,7 @@ import type { GatheredStatusRaw } from '../../src/api/status-build.js';
 function makeRaw(): GatheredStatusRaw {
   return {
     shutdownState: null,
-    dbPath: '/tmp/jinn.db',
+    dbPath: join(tmpdir(), 'balance-build-test.db'),
     activityCounts: {},
     recentActivity: [],
     lastRewardClaimTickAt: null,

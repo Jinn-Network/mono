@@ -29,9 +29,8 @@ client/          TypeScript daemon — the main runnable component
         ipfs.ts          IPFS upload/download via Autonolas gateway
         safe.ts          Safe wallet creation + viem clients
     daemon/
-      daemon.ts          Orchestrates creator, restorer, delivery-watcher loops
+      daemon.ts          Orchestrates creator, engine-watcher, delivery-watcher loops
       creator.ts         Posts desired states via adapter
-      restorer.ts        Claims requests, runs Claude, submits results
       delivery-watcher.ts  Claims deliveries, creates evaluation jobs
     runner/
       runner.ts          Runner interface
@@ -183,6 +182,8 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | desiredStates    | JINN_DESIRED_STATES      | [health-check]                    |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
+| engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
+| engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
 
 `JINN_PASSWORD` is env-only — never in config files.
 
@@ -209,7 +210,7 @@ Three layers, top to bottom:
 The daemon runs three concurrent loops:
 
 1. **CreatorLoop** — posts each desired state once via `JinnRouter.createRestorationJob()`
-2. **RestorerLoop** — watches marketplace for requests, claims them, spawns Claude CLI to attempt restoration, submits result via `mech.deliverToMarketplace()`
+2. **Engine watcher + `RestorationEngine`** — consumes `adapter.watchForRequests()`, drives the restorer state machine (claim → run via registered `RestorerImpl` → package → `mech.deliverToMarketplace()` + `JinnRouter.claimDelivery()`)
 3. **DeliveryWatcherLoop** — watches for deliveries, calls `JinnRouter.claimDelivery()`, then creates evaluation jobs via `JinnRouter.createEvaluationJob()`
 
 Each JinnRouter call increments activity counters for the Safe multisig. The OLAS staking contract reads these counters at checkpoints to determine reward eligibility.
@@ -262,6 +263,10 @@ cd contracts
 yarn install
 yarn test            # Hardhat tests
 ```
+
+## Adding intent kinds
+
+To add a new **in-repo** `spec.kind` (typed spec, `jinn submit-intent --spec-file`, optional auto-generators, and restorer/evaluator pairing), follow [`docs/runbooks/add-intent-kind.md`](docs/runbooks/add-intent-kind.md). Kind parsing dispatches through `client/src/intents/kinds/index.ts` (`SPEC_KINDS`); testnet auto-posting is wired via `getTestnetAutoConfig` + `collectTestnetAutoIntentGenerators` in the same module. Restorer selection is separate — see `client/src/cli/intent-registry-access.ts` and `client/src/restorer/impls/index.ts` (`buildRestorerImpls`).
 
 ## Spec Conventions
 
