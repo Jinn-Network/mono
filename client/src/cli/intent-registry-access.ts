@@ -49,12 +49,15 @@ export function buildIntentsCliRegistry(config: JinnConfig): RestorerImplRegistr
     disabled: resolveEffectiveDisabled(config),
   });
 
+  // `implStateDirRoot` matches daemon/doctor construction; stub `isReady()` is
+  // not HL disk-sensitive today, but the path is consistent if that changes.
   for (const impl of buildRestorerImpls({
     stub: true,
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
     claudePath: config.claudePath,
     claudeModel: config.claudeModel,
+    implStateDirRoot: config.engine.implStateDirRoot,
   })) {
     registry.register(impl);
   }

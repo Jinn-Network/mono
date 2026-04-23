@@ -144,6 +144,11 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
     return this.config.implStateDir ?? DEFAULT_IMPL_STATE_DIR;
   }
 
+  /** Exposed for tests and operator diagnostics; same as internal resolve path. */
+  resolvedImplStateDir(): string {
+    return this.resolveImplStateDir();
+  }
+
   async isReady(): Promise<ReadyStatus> {
     if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
     const implStateDir = this.resolveImplStateDir();

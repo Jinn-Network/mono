@@ -1,19 +1,35 @@
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ClaudeMcpHyperliquidImpl } from '../../src/restorer/impls/claude-mcp-hyperliquid/index.js';
+import type { RestorerEnv } from '../../src/restorer/impls/index.js';
 
 import {
+  buildIntentsCliRegistry,
   DEFAULT_BY_KIND,
   DEFAULT_DISABLED_IMPLS,
+  isImplDisabled,
   resetImplForKindInConfig,
   resolveEffectiveByKind,
+  resolveEffectiveDisabled,
   setImplEnabledInConfig,
   setImplForKindInConfig,
-  resolveEffectiveDisabled,
-  isImplDisabled,
 } from '../../src/cli/intent-registry-access.js';
-import type { JinnConfig } from '../../src/config.js';
+import { loadConfig, type JinnConfig } from '../../src/config.js';
+
+const captured = vi.hoisted(() => ({ lastEnv: null as RestorerEnv | null }));
+
+vi.mock('../../src/restorer/impls/index.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../src/restorer/impls/index.js')>();
+  return {
+    ...mod,
+    buildRestorerImpls: (env: RestorerEnv) => {
+      captured.lastEnv = env;
+      return mod.buildRestorerImpls(env);
+    },
+  };
+});
 
 describe('setImplEnabledInConfig', () => {
   let dir: string;
@@ -48,15 +64,18 @@ describe('setImplEnabledInConfig', () => {
 
   it('preserves operator-added non-default disabled impls across enable flips', () => {
     // Operator hand-disables something that isn't a ship default.
-    writeFileSync(configPath, JSON.stringify({
-      restorers: { disabled: ['claude-mcp-hyperliquid', 'custom-evil-impl'] },
-    }));
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        restorers: { disabled: ['claude-mcp-hyperliquid', 'custom-evil-impl'] },
+      }),
+    );
     const result = setImplEnabledInConfig('claude-mcp-hyperliquid', true, configPath);
     expect(result).not.toContain('claude-mcp-hyperliquid');
     expect(result).toContain('custom-evil-impl');
   });
 
-  it('rebuilds from defaults, not from the user\'s last list, so future default-disables stay off', () => {
+  it("rebuilds from defaults, not from the user's last list, so future default-disables stay off", () => {
     // Operator had previously enabled the one default impl.
     writeFileSync(configPath, JSON.stringify({ restorers: { disabled: [] } }));
     // Suppose we add a new default-disabled impl in code. We simulate by
@@ -67,11 +86,14 @@ describe('setImplEnabledInConfig', () => {
   });
 
   it('preserves unrelated top-level config keys', () => {
-    writeFileSync(configPath, JSON.stringify({
-      network: 'testnet',
-      rpcUrl: 'http://example.com',
-      restorers: { disabled: [...DEFAULT_DISABLED_IMPLS] },
-    }));
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        network: 'testnet',
+        rpcUrl: 'http://example.com',
+        restorers: { disabled: [...DEFAULT_DISABLED_IMPLS] },
+      }),
+    );
     setImplEnabledInConfig('claude-mcp-hyperliquid', true, configPath);
     const after = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(after.network).toBe('testnet');
@@ -134,5 +156,50 @@ describe('byKind config helpers', () => {
     const byKind = resolveEffectiveByKind(config);
     expect(byKind['portfolio.v0']).toBe(DEFAULT_BY_KIND['portfolio.v0']);
     expect(byKind['prediction.v0']).toBe('claude-mcp-prediction');
+  });
+});
+
+describe('buildIntentsCliRegistry', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'jinn-intent-reg-'));
+    configPath = join(dir, 'config.json');
+    captured.lastEnv = null;
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('wires config.engine.implStateDirRoot to the hyperliquid impl state path', () => {
+    const customImplRoot = join(dir, 'custom-impl-state');
+    const expectedHlStateDir = join(customImplRoot, 'claude-mcp-hyperliquid');
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          network: 'testnet',
+          rpcUrl: 'https://sepolia.base.org',
+          desiredStates: [],
+          engine: {
+            workingDirRoot: join(dir, 'custom-work'),
+            implStateDirRoot: customImplRoot,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const config = loadConfig(configPath);
+    expect(config.engine.implStateDirRoot).toBe(customImplRoot);
+    const registry = buildIntentsCliRegistry(config);
+    expect(captured.lastEnv).not.toBeNull();
+    expect(captured.lastEnv?.implStateDirRoot).toBe(customImplRoot);
+    expect(captured.lastEnv?.stub).toBe(true);
+    const hl = registry.list().find((i) => i.name === 'claude-mcp-hyperliquid');
+    expect(hl).toBeInstanceOf(ClaudeMcpHyperliquidImpl);
+    expect(hl.resolvedImplStateDir()).toBe(expectedHlStateDir);
   });
 });

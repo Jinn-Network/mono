@@ -10,6 +10,12 @@ export interface RpcNetworkPreflightOk {
   expectedChainId: number;
   actualChainId: number;
   rpcHost: string;
+  /**
+   * True when the RPC reports an Anvil/Hardhat default chain id that does not
+   * match the configured network, but the endpoint is on loopback — we only
+   * allow this for local dev to avoid misreading a remote 313/1337 as healthy.
+   */
+  localDev?: true;
 }
 
 export interface RpcNetworkPreflightFail {
@@ -26,6 +32,60 @@ export type RpcNetworkPreflightResult = RpcNetworkPreflightOk | RpcNetworkPrefli
 
 export function expectedChainIdForNetwork(network: ExpectedRpcNetwork): number {
   return network === 'testnet' ? 84532 : 8453;
+}
+
+/**
+ * Anvil / Hardhat default chain IDs. Fork workflows point `rpcUrl` at a local
+ * node without reconfiguring the chain; `eth_chainId` then reports these
+ * values instead of Base (8453 / 84532). We treat them as valid for preflight
+ * only for loopback RPCs so a misconfigured public URL cannot silently pass.
+ */
+const LOCAL_EVM_DEV_CHAIN_IDS = new Set([31337, 1337]);
+
+/**
+ * True when the RPC host is a loopback address. Remote endpoints that return
+ * Anvil/Hardhat chain ids are still treated as a mismatch.
+ */
+export function isLoopbackRpcUrl(rpcUrl: string): boolean {
+  try {
+    const h = new URL(rpcUrl).hostname;
+    return h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Used by tests: whether checkRpcNetwork would take the Anvil/Hardhat override path.
+ * Not used by production code beyond the equivalent inline check in {@link checkRpcNetwork}.
+ */
+export function evmLocalDevOverrideAcceptable(
+  expectedChainId: number,
+  actualChainId: number,
+  rpcUrl: string,
+): boolean {
+  return (
+    actualChainId !== expectedChainId &&
+    LOCAL_EVM_DEV_CHAIN_IDS.has(actualChainId) &&
+    isLoopbackRpcUrl(rpcUrl)
+  );
+}
+
+/**
+ * When {@link checkRpcNetwork} returns ok with `localDev: true`, log a single stderr line
+ * (also surfaced in `jinn doctor` detail) so run/bootstrap are not silent about the mismatch.
+ */
+export function logRpcLocalDevToStderr(
+  r: RpcNetworkPreflightOk,
+  write: (m: string) => void = (m) => {
+    process.stderr.write(m.endsWith('\n') ? m : `${m}\n`);
+  },
+): void {
+  if (!r.localDev) return;
+  write(
+    `[jinn] Local dev: ${r.rpcHost} has chainId ${r.actualChainId} (config expects Base ${r.network} id ` +
+      `${r.expectedChainId} from a live or forked-with-matching-id RPC). Continuing.\n`,
+  );
 }
 
 export function rpcHostForDisplay(rpcUrl: string): string {
@@ -71,6 +131,16 @@ export async function checkRpcNetwork(
   }
 
   if (actualChainId !== expectedChainId) {
+    if (evmLocalDevOverrideAcceptable(expectedChainId, actualChainId, config.rpcUrl)) {
+      return {
+        ok: true,
+        network: config.network,
+        expectedChainId,
+        actualChainId,
+        rpcHost,
+        localDev: true,
+      };
+    }
     return {
       ok: false,
       network: config.network,

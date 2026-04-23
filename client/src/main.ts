@@ -41,7 +41,7 @@ import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import type { IntentGenerator } from './daemon/creator.js';
-import { checkRpcNetwork, rpcNetworkFailureHint } from './preflight/rpc-network.js';
+import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -249,6 +249,8 @@ export async function main(): Promise<DaemonStartupInfo> {
         reason: rpcPreflight.reason,
       },
     });
+  } else {
+    logRpcLocalDevToStderr(rpcPreflight);
   }
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);

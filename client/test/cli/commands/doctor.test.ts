@@ -1,15 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import doctor from '../../../src/cli/commands/doctor.js';
 import type { CommandContext } from '../../../src/cli/command.js';
 
+const defaultRpcNetworkResult = () => ({
+  ok: true as const,
+  network: 'mainnet' as const,
+  expectedChainId: 8453,
+  actualChainId: 8453,
+  rpcHost: 'mainnet.base.org',
+});
+
+const checkRpcNetworkMock = vi.hoisted(() => vi.fn(async () => defaultRpcNetworkResult()));
+
 vi.mock('../../../src/preflight/rpc-network.js', () => ({
-  checkRpcNetwork: vi.fn(async () => ({
-    ok: true,
-    network: 'mainnet',
-    expectedChainId: 8453,
-    actualChainId: 8453,
-    rpcHost: 'mainnet.base.org',
-  })),
+  checkRpcNetwork: checkRpcNetworkMock,
   rpcNetworkFailureHint: vi.fn(() => 'Set rpcUrl to a matching Base RPC endpoint.'),
 }));
 
@@ -29,6 +33,14 @@ function makeCtx(env: Record<string, string> = {}): {
 }
 
 describe('doctor command', () => {
+  beforeEach(() => {
+    checkRpcNetworkMock.mockImplementation(async () => defaultRpcNetworkResult());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('emits a checks array and an ok/blockingCount roll-up', async () => {
     const { ctx, writes } = makeCtx();
     await doctor.run(ctx);
@@ -45,6 +57,44 @@ describe('doctor command', () => {
       expect(typeof check.ok).toBe('boolean');
       expect(typeof check.detail).toBe('string');
     }
+  });
+
+  it('includes structured rpcStatus and rpc for rpc_network when preflight matches Base', async () => {
+    const { ctx, writes } = makeCtx();
+    await doctor.run(ctx);
+    const parsed = JSON.parse(writes[0]);
+    const rpc = parsed.checks.find((c: { name: string }) => c.name === 'rpc_network');
+    expect(rpc).toBeDefined();
+    expect(rpc.rpcStatus).toBe('matched');
+    expect(rpc.rpc).toEqual({
+      host: 'mainnet.base.org',
+      network: 'mainnet',
+      expectedChainId: 8453,
+      actualChainId: 8453,
+    });
+  });
+
+  it('marks rpc_network as local_dev_override when loopback preflight uses Anvil chain id', async () => {
+    checkRpcNetworkMock.mockResolvedValueOnce({
+      ok: true,
+      network: 'testnet',
+      expectedChainId: 84532,
+      actualChainId: 31337,
+      rpcHost: '127.0.0.1:8545',
+      localDev: true,
+    });
+    const { ctx, writes } = makeCtx();
+    await doctor.run(ctx);
+    const parsed = JSON.parse(writes[0]);
+    const rpc = parsed.checks.find((c: { name: string }) => c.name === 'rpc_network');
+    expect(rpc).toBeDefined();
+    expect(rpc.rpcStatus).toBe('local_dev_override');
+    expect(rpc.rpc).toEqual({
+      host: '127.0.0.1:8545',
+      network: 'testnet',
+      expectedChainId: 84532,
+      actualChainId: 31337,
+    });
   });
 
   it('includes the claude_binary check', async () => {
