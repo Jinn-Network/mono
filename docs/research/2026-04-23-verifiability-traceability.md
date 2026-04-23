@@ -1,57 +1,9 @@
 # Verifiability and Traceability in Jinn
 
-**Date:** 2026-04-23
-**Author:** Research note (follow-up to the "WP1/WP2/WP3" verifiable-execution discussion)
-**Status:** Research — grounds an abstract "executor packaging + verifiable execution + learning client" conversation against the actual Jinn codebase. Not a spec, not a commitment.
+**Date:** 2026-04-23  
+**Status:** Research — grounds verifiable execution and packaging questions against the Jinn codebase. Not a spec, not a commitment.
 
-## Why this note exists
-
-An external brainstorm framed Jinn as a network of operators executing arbitrary
-intents, and asked three work-package questions: what must the executor
-*package* contain (WP1), how much of execution can be made *verifiable* today
-(WP2), and what does a *learning* executor look like (WP3). The brainstorm
-concluded — correctly — that full cryptographic proof of open-ended agent
-execution is not achievable today, that Succinct/SP1 is a strong fit for
-deterministic kernels, and that the realistic V1 is a layered model of signed
-packaging + transparency logs + TEEs for sensitive modes + zkVM receipts for
-selected subroutines.
-
-That reasoning is sound in the abstract. It needed two corrections once
-grounded in what Jinn actually is:
-
-1. **WP1 is largely shipped** — at least for `portfolio.v0` — and the real
-   WP1 work is generalizing the envelope across kinds, not defining it.
-2. **Verifiability has two layers, not one.** Outcome verifiability (did
-   the intent complete?) is solvable by the evaluator re-deriving from the
-   venue. Trajectory verifiability (did the execution happen the way the
-   operator claims?) is *not* re-derivable; it must be attested at
-   production time. For Jinn's data-substrate thesis, trajectory
-   attestation is the load-bearing primitive, and TEEs — not zk — are the
-   right tool for it.
-
-The first draft of this note got (1) right and got (2) wrong by collapsing
-both into the evaluator. This version corrects that.
-
-## What the abstract framing got right
-
-The brainstorm's ladder of guarantees maps cleanly onto work we'd want to do:
-
-1. Signed packaging + content-addressed artifacts + transparency logs — cheap,
-   available today, covers tamper-evidence for 100% of runs.
-2. TEEs / remote attestation — available today, useful for premium or
-   sensitive modes, not the default.
-3. zkVM receipts (Succinct/SP1) — available today for deterministic kernels
-   only, expensive relative to cheap evidence, reserve for high-value or
-   sampled/challenged executions.
-4. External action verification — unsolved in the general case, partially
-   solvable via TLSNotary / signed-HTTP / issuer receipts per venue.
-
-The layered framing and the "hybrid cheap-default + expensive-when-challenged"
-economic model are correct. The split between verifiable *computation* and
-verifiable *external state* is correct. The observation that Succinct is the
-engine block and not the whole vehicle is correct.
-
-## Where the framing misfires for Jinn specifically
+## Grounding in Jinn
 
 ### 1. WP1 is mostly already built, and it's built per *intent kind*, not universally
 
@@ -81,9 +33,9 @@ So for portfolio.v0 today, every restoration run already produces:
 - a full deterministic workingDir tarball for replay
 - a keccak256 commitment posted on-chain
 
-That is materially most of what the brainstorm called "WP1: verifiable
-packaging" and what the layered model called "Tier 1: auditable execution
-packaging." The missing pieces are real but incremental, not greenfield:
+That is materially a full **verifiable packaging** layer: signed artifacts,
+content addressing, tarball, and on-chain commitment — the usual "Tier 1"
+auditable packaging story. The missing pieces are real but incremental, not greenfield:
 
 - schema is per-kind; there is no *generic* `jinn.execution.v1` envelope that
   wraps arbitrary intent kinds with a common provenance shell
@@ -97,14 +49,14 @@ packaging." The missing pieces are real but incremental, not greenfield:
   [`client/src/x402/`](../../client/src/x402/), gates fetch access but does
   not encrypt in place)
 
-The framing that treats WP1 as "define the package" undersells Jinn.
+Treating WP1 only as "define the package" undersells Jinn.
 Jinn already has a package. The real WP1 question is: what is the generic
 envelope that subsumes `portfolio.v0.manifest.v1`, `prediction.v0.manifest`,
 and future kinds, while keeping kind-specific gating fields free?
 
 ### 2. Verifiability in Jinn is a gradient by intent kind, not a single property
 
-The brainstorm kept asking whether "execution" can be verified. In Jinn,
+Abstract "is execution verifiable?" discourse often treats `execute` as a monolith. In Jinn,
 execution-verifiability is a function of **what the intent is about**. There
 are four distinct regimes already visible in the codebase, and each wants a
 different verification story:
@@ -140,8 +92,7 @@ This matters for three reasons:
 
 ### 3. Two verifiability questions, not one — and the trajectory is the product
 
-The subtle mistake in the first pass of this note was collapsing "verifiable
-execution" into a single question. For Jinn there are two, and the answers
+Those questions are often collapsed into one. For Jinn there are two, and the answers
 are very different.
 
 **Question A — outcome verifiability.** *Did the claimed gating actually
@@ -172,7 +123,7 @@ trace that ends at a real on-chain outcome, and no amount of re-derivation
 finds the lie. Trajectory integrity has to be enforced at production time
 or it cannot be enforced at all.
 
-The first pass of this note underweighted this. For `portfolio.v0` viewed as
+Those two pictures diverge sharply. For `portfolio.v0` viewed as
 a trading product, outcome verification is sufficient; the trajectory
 doesn't affect correctness. For Jinn viewed as a data substrate, trajectory
 integrity is the thing buyers pay for, and it *must* be attested at
@@ -187,19 +138,21 @@ the rest is consistent. The trajectory's integrity is owned by the
 execution layer; the evaluator owns the intent-completion judgment; the
 network grades both.
 
-**Where zkVMs fit in this split.** Proving the evaluator kernel (my
-earlier recommendation) is still real work with real value — it defends
-against evaluator collusion, which is a known systemic risk for the
-data-substrate thesis once evaluators have real stake. But it is the
-*secondary* zk target, not the primary one. The primary trust gap for the
-data substrate is the trajectory, and zk proving the trajectory of an
-open-ended LLM agent is not feasible today at cost. Attestation is.
+**Where TEE and zk fit in this split.** The primary trust gap for the data
+substrate is the **trajectory**. zk proving the trajectory of an open-ended
+LLM agent is not feasible today at cost; it needs production-time
+**attestation** (TEE). The evaluator kernel is small and deterministic; at
+V2 it should run in the **same TEE substrate** as the restorer (§V2b) so
+evaluator collusion — a real risk once evaluators have stake — is covered
+without a parallel proving stack. **zkVM** proofs of the evaluator re-enter
+as a **V3+ insurance** option (hardware-trust diversification, cheap on-chain
+settlement) where they add capability beyond TEE; see §V2b.
 
 ### 4. Economic verification is already doing most of the work
 
 JinnRouter + OLAS staking + claim deposits + on-chain `evidenceHash`
-commitment already gives Jinn the trust substrate the brainstorm called
-"sampling-and-slashing." Specifically:
+commitment already gives Jinn the trust substrate of **"sampling-and-slashing"**
+economics. Specifically:
 
 - `evidenceHash` on chain means nobody can rewrite the manifest after claim
   without producing a visibly inconsistent IPFS resolution.
@@ -221,9 +174,9 @@ all. It is:
 Cryptographic proofs become interesting as a Phase 2+ upgrade over a working
 economic layer, not a replacement for one.
 
-### 5. The "learning client" framing is the wrong Jinn reading of WP3
+### 5. WP3 as corpus economics, not a self-rewiring default client
 
-The brainstorm suggested the default executor could *rewrite its own code*
+One tempting WP3 picture is a default executor that *rewrites its own code*
 based on observed network outcomes. That is a product framing borrowed from
 another problem. For Jinn, what actually matters from WP3 is already in the
 Ritsu data-substrate spec: the accumulated (intent, attempt, evaluation)
@@ -231,7 +184,7 @@ corpus is the asset. Whether any single client modifies itself from it is
 secondary. The corpus is worth more (and to more people) than a
 self-rewriting agent is.
 
-So the right framing of WP3 for Jinn is: **evidence-weighted trajectory
+The productive reading of WP3 for Jinn is: **evidence-weighted trajectory
 corpus**, where each trajectory's training value depends on the verification
 tier of its packaging and verdict. A rough tier ladder:
 
@@ -389,10 +342,8 @@ declared-stack model, MCPs are just part of whatever the operator
 declared. Their hashes are part of the operator's published measurement.
 There is no protocol-level "measured vs unmeasured MCP" distinction to
 make; operators publish their full stack including tools, and buyers
-reading the published source can see what the tools do. This is
-substantially simpler than the hybrid TCB story an earlier version of
-this note sketched, and it comes out of taking the diversity thesis
-seriously.
+reading the published source can see what the tools do. This is substantially simpler than a hybrid "measured canonical client vs
+unmeasured MCP" TCB story, and it comes from taking operator diversity seriously.
 
 **Challenger mechanics work cleanly under this model.** A challenger
 who suspects a trajectory is fraudulent:
@@ -501,15 +452,13 @@ network gets evaluator-collusion defense from the same mechanism that
 gives it trajectory integrity, reusing the verifier code, the key-binding
 flow, and the evidence-tier schema.
 
-This is a deliberate revision of the earlier framing of this section.
-The previous draft positioned zkVM proofs of the evaluator kernel as
-secondary V2 work in parallel with TEE attestation of the restorer. That
-framing is wrong for Jinn today: TEE is ~four orders of magnitude cheaper
-than zk for the same deterministic kernel, and once the network has a
-TEE substrate for restorers the marginal cost of also attesting the
-evaluator is close to zero. Running two verifiability stacks in parallel
-would only make sense if one of them had a capability the other lacks.
-For Jinn at V2, they don't.
+Standing up a **parallel** zk proving pipeline for the evaluator would
+duplicate what the TEE substrate already provides for a deterministic
+kernel. TEE is roughly four orders of magnitude cheaper than zk for that
+class of computation, and once the network has attested restorers the
+marginal cost of also attesting the evaluator is close to zero. A second
+stack only pays for itself if it adds a capability TEE does not; at V2
+for Jinn, it does not.
 
 **Explicit non-goal: do not try to prove the restorer's internal
 computation.** The restorer runs an open-ended LLM agent. The right
@@ -571,10 +520,9 @@ intent kind.
 
 ## What about the "learning client"?
 
-Restating the earlier point with a recommendation. The WP3 framing in the
-brainstorm is a specific product — a self-rewriting default executor. That
-is a fine product to build *on top of* Jinn; it is not the protocol's
-verifiability or substrate concern. The protocol-level version of WP3 is:
+A self-rewriting default executor is a specific product — a fine thing to
+build *on top of* Jinn — but it is not the protocol's verifiability or
+substrate concern. The protocol-level version of WP3 is:
 
 1. Emit an evidence-tier column on every trajectory in the dataset.
 2. Make trajectories queryable by kind + tier + outcome + challenge status.
@@ -597,10 +545,11 @@ feasible today with Nitro Enclaves, Intel TDX, or Phala — with the
 evaluator kernel running in the same TEE substrate rather than a
 parallel zk proving pipeline.
 The right V3 is closing the LLM-call seam through enclave-recorded TLS
-transcripts and, where justified, TLSNotary-style receipts. The framing to
+transcripts and, where justified, TLSNotary-style receipts. The mistake to
 avoid is "prove the restorer's computation" — that is the wrong tool
 applied to an open-ended LLM runtime; use attestation for open-ended
-runtimes and zk for deterministic kernels. The evaluator's job shrinks to
+runtimes, TEE for the evaluator kernel at V2, and optional zk only where
+it adds capability beyond TEE (§V2b). The evaluator's job shrinks to
 "did the intent complete," which is actually the right size for it.
 
 ## Related material
