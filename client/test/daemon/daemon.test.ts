@@ -25,7 +25,7 @@ describe('Daemon', () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
-      desiredStates: [],
+      intentSources: [],
       dbPath: ':memory:',
       restorationEngine: minimalEngineConfig(),
     };
@@ -39,7 +39,7 @@ describe('Daemon', () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
-      desiredStates: [],
+      intentSources: [],
       dbPath: ':memory:',
       restorationEngine: minimalEngineConfig(),
     };

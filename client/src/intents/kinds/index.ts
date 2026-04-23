@@ -2,7 +2,7 @@
  * Single dispatch table for in-repo intent kinds — jinn-mono-6q1.1.
  */
 
-import type { IntentGenerator } from '../../daemon/creator.js';
+import type { IntentGenerator } from '../sources.js';
 import { portfolioV0 } from './portfolio-v0.js';
 import { predictionV0 } from './prediction-v0.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
@@ -37,8 +37,8 @@ export function collectTestnetAutoIntentGenerators(opts: {
   rpcUrl: string;
   autoIntentsDisabled: boolean;
   env: NodeJS.ProcessEnv;
-}): { generators: IntentGenerator[]; logLines: string[] } {
-  const generators: IntentGenerator[] = [];
+}): { generators: Array<{ kind: string; generator: IntentGenerator }>; logLines: string[] } {
+  const generators: Array<{ kind: string; generator: IntentGenerator }> = [];
   const logLines: string[] = [];
   if (opts.autoIntentsDisabled || opts.network !== 'testnet') {
     return { generators, logLines };
@@ -54,7 +54,7 @@ export function collectTestnetAutoIntentGenerators(opts: {
     if (genConfig === undefined) continue;
     const g = entry.buildGenerator?.(genConfig as never);
     if (g) {
-      generators.push(g);
+      generators.push({ kind: entry.kind, generator: g });
       logLines.push(`[main] auto-intent generator enabled: ${entry.kind} (testnet)`);
     }
   }

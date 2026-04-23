@@ -32,4 +32,29 @@ describe('Store', () => {
     expect(store.getRecentOwnActivity(5)).toHaveLength(2);
     expect(store.getConfigValue('last_reward_claim_tick_at')).toBe('2026-01-02T00:00:00.000Z');
   });
+
+  it('stores durable intent post records', () => {
+    store.upsertIntentPostRecord({
+      creatorSafeAddress: '0x00112233445566778899AABbCCdDeeFf00112233',
+      sourceKey: 'manual:test-1',
+      policyType: 'once_per_safe',
+      scopeKey: '',
+      desiredStateId: 'test-1',
+      requestId: 'req-1',
+      firstPostedAt: '2026-04-23T10:00:00.000Z',
+      lastPostedAt: '2026-04-23T10:00:00.000Z',
+      postCount: 1,
+    });
+
+    expect(store.getIntentPostRecord({
+      creatorSafeAddress: '0x00112233445566778899AABbCCdDeeFf00112233',
+      sourceKey: 'manual:test-1',
+      policyType: 'once_per_safe',
+      scopeKey: '',
+    })).toMatchObject({
+      requestId: 'req-1',
+      desiredStateId: 'test-1',
+      postCount: 1,
+    });
+  });
 });

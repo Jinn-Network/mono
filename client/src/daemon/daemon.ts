@@ -1,8 +1,7 @@
 import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
-import type { DesiredState } from '../types/index.js';
 import { Store } from '../store/store.js';
-import { CreatorLoop, type IntentGenerator } from './creator.js';
+import { CreatorLoop } from './creator.js';
 import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
@@ -15,13 +14,13 @@ import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop
 import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
+import type { IntentSource } from '../intents/sources.js';
 
 const DEFAULT_API_PORT = 7331;
 
 export interface DaemonConfig {
   adapter: ExecutionAdapter;
   runner: Runner;
-  desiredStates: DesiredState[];
   dbPath: string;
   shutdownTimeoutMs?: number;
   /** Engine tick interval (ms) for re-driving in-flight intents. Defaults to 5000. */
@@ -50,12 +49,8 @@ export interface DaemonConfig {
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
 
-  /**
-   * Extra intent generators called each CreatorLoop tick. Each returns a
-   * freshly-built DesiredState (or null to skip this tick). Used e.g. for
-   * auto-posting price-aware prediction.v0 intents on testnet.
-   */
-  intentGenerators?: IntentGenerator[];
+  /** Restoration intent sources polled by CreatorLoop. */
+  intentSources?: IntentSource[];
 
   /**
    * Creator Safe address — used to scope CreatorLoop's SQLite idempotency
@@ -95,9 +90,8 @@ export class Daemon {
     this.apiPort = config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
     this.creatorLoop = new CreatorLoop(
       this.adapter,
-      config.desiredStates,
+      config.intentSources ?? [],
       this.store,
-      config.intentGenerators ?? [],
       config.creatorSafeAddress,
     );
     this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter, this.store);
