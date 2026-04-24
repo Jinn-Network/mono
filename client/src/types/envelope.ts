@@ -1,0 +1,159 @@
+/**
+ * jinn.execution.v1 — generic signed envelope.
+ *
+ * Scope: docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md
+ * §3.1 (D5 + K1 knowledge tree), §3.2 (K3 executor provenance), §3.4 migration.
+ *
+ * One envelope shape covers restoration manifests (role='restoration') and
+ * verdict manifests (role='verdict'). Payload is typed per (kind, role) via
+ * the registry in `./payloads/`.
+ */
+
+import { z } from 'zod';
+import { WindowSchema } from './window.js';
+
+const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/);
+
+export const EvidenceTierSchema = z.enum([
+  'self-signed',
+  'committed',
+  'consensus',
+  'attested',
+  'proved',
+]);
+export type EvidenceTier = z.infer<typeof EvidenceTierSchema>;
+
+export const RoleSchema = z.enum(['restoration', 'verdict']);
+export type Role = z.infer<typeof RoleSchema>;
+
+const IntentProvenanceSchema = z.object({
+  cid: z.string().min(1),
+  onchainCreationTx: HexStringSchema,
+  onchainCreationBlock: z.number().int(),
+  requestId: HexStringSchema,
+});
+
+const ParticipantSchema = z.object({
+  safeAddress: HexStringSchema,
+  agentEoa: HexStringSchema,
+});
+
+const SigningKeySchema = z.object({
+  kind: z.enum(['agent-eoa', 'enclave-bound']),
+  pubkey: HexStringSchema,
+});
+
+const SourceBundleSchema = z.object({
+  bundleCid: z.string().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  humanUrl: z.string().optional(),
+  buildRecipe: z.object({
+    kind: z.enum(['dockerfile', 'nix', 'bazel']),
+    path: z.string(),
+  }),
+  measurement: HexStringSchema,
+});
+
+const ExecutorSchema = z.object({
+  implName: z.string().min(1),
+  implVersion: z.string().min(1),
+  clientGitSha: z.string().min(1),
+  codeDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  signingKey: SigningKeySchema,
+  source: SourceBundleSchema.optional(),
+});
+
+const AttestationSchema = z.object({
+  profile: z.string().min(1),
+  quote: z.string(),
+  reportData: HexStringSchema,
+  measurement: HexStringSchema,
+});
+
+const TrajectoryRefSchema = z.object({
+  cid: z.string().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  access: z
+    .object({
+      kind: z.enum(['open', 'x402-gated']),
+      endpoint: z.string().optional(),
+      priceUsdc: z.string().optional(),
+    })
+    .optional(),
+});
+
+const ArtifactSchema = z.object({
+  cid: z.string().min(1),
+  artifactType: z.string().min(1),
+  sha256: z.string().optional(),
+  metadata: z
+    .object({
+      description: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      producedBy: z
+        .object({
+          spanId: z.string(),
+          trajectoryCid: z.string(),
+        })
+        .optional(),
+    })
+    .optional(),
+  access: z
+    .object({
+      kind: z.enum(['open', 'x402-gated']),
+      endpoint: z.string().optional(),
+      priceUsdc: z.string().optional(),
+    })
+    .optional(),
+});
+
+export type Artifact = z.infer<typeof ArtifactSchema>;
+
+const SignatureSchema = z.object({
+  algo: z.literal('secp256k1'),
+  signer: HexStringSchema,
+  hash: HexStringSchema,
+  sig: HexStringSchema,
+});
+
+const BaseEnvelopeFields = {
+  schemaVersion: z.literal('jinn.execution.v1'),
+  kind: z.string().min(1),
+  role: RoleSchema,
+  generatedAt: z.number().int(),
+  intent: IntentProvenanceSchema,
+  participant: ParticipantSchema,
+  window: WindowSchema,
+  executor: ExecutorSchema,
+  evidenceTier: EvidenceTierSchema,
+  attestation: AttestationSchema.nullable(),
+  trajectory: TrajectoryRefSchema.nullable(),
+  artifacts: z.array(ArtifactSchema),
+  payload: z.record(z.unknown()),
+};
+
+export const UnsignedEnvelopeSchema = z
+  .object(BaseEnvelopeFields)
+  .refine(
+    (e) => e.evidenceTier !== 'attested' || e.executor.source !== undefined,
+    { message: 'attested tier requires executor.source', path: ['executor', 'source'] },
+  )
+  .refine(
+    (e) => e.evidenceTier !== 'attested' || e.attestation !== null,
+    { message: 'attested tier requires attestation', path: ['attestation'] },
+  );
+
+export type UnsignedEnvelope = z.infer<typeof UnsignedEnvelopeSchema>;
+
+export const SignedEnvelopeSchema = z
+  .object({ ...BaseEnvelopeFields, signature: SignatureSchema })
+  .refine(
+    (e) => e.evidenceTier !== 'attested' || e.executor.source !== undefined,
+    { message: 'attested tier requires executor.source', path: ['executor', 'source'] },
+  )
+  .refine(
+    (e) => e.evidenceTier !== 'attested' || e.attestation !== null,
+    { message: 'attested tier requires attestation', path: ['attestation'] },
+  );
+
+export type SignedEnvelope = z.infer<typeof SignedEnvelopeSchema>;
