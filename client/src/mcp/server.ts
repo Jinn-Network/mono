@@ -43,7 +43,12 @@ const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
 
 server.tool(
   'get_desired_state',
-  'Get the current desired state that needs to be restored',
+  // NOTE: Returns the RUNTIME shape (RestorationJob fields + attempt/request metadata),
+  // NOT the signed wire format (SignedIntentV1). The signed intent, if present, was
+  // uploaded to IPFS at job creation time and is referenced by the on-chain CID.
+  // Claude receives this runtime shape to understand what objective to pursue —
+  // it does not need to verify or re-sign the intent envelope.
+  'Get the current desired state that needs to be restored. Returns runtime job context: id, description, type (restoration|evaluation), restorationRequestId, requestId, and optional context bag. This is the RUNTIME shape — not the signed intent.v1 wire format.',
   {},
   async () => ({
     content: [{

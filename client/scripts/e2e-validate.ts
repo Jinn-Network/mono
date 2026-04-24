@@ -23,6 +23,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
+import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -57,6 +58,8 @@ import {
 import { MechAdapter } from '../src/adapters/mech/adapter.js';
 import { FleetBootstrapper } from '../src/earning/bootstrap.js';
 import { getChainConfig } from '../src/earning/contracts.js';
+import type { IntentV1 } from '../src/types/intent.js';
+import { signIntentV1 } from '../src/intents/signing.js';
 const __dirname = join(fileURLToPath(import.meta.url), '..');
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -796,12 +799,35 @@ async function main(): Promise<void> {
           await sleep(100);
         }
 
+        if (!agentEoaPrivateKey || !safeAddress) {
+          throw new Error('Missing agentEoaPrivateKey or safeAddress for intent signing');
+        }
+        const { privateKeyToAccount: intentPrivKeyToAccount } = await import('viem/accounts');
+        const intentAccount = intentPrivKeyToAccount(agentEoaPrivateKey as `0x${string}`);
+        const now = Date.now();
+        const e2eIntent: IntentV1 = {
+          schemaVersion: 'intent.v1',
+          id: randomUUID(),
+          kind: 'restoration.v0',
+          description: 'E2E router flow test',
+          window: { startTs: now, endTs: now + 3_600_000 },
+          spec: { kind: 'restoration.v0' },
+          eligibility: {},
+          creator: {
+            safeAddress: safeAddress as `0x${string}`,
+            agentEoa: intentAccount.address as `0x${string}`,
+          },
+          createdAt: now,
+        };
+        const signedE2eIntent = await signIntentV1(e2eIntent, agentEoaPrivateKey as `0x${string}`);
+
         restorationRequestId = await adapter.postRestorationJob({
           id: 'e2e-test',
           description: 'E2E router flow test',
           type: 'restoration',
           attemptId: 'e2e-test/1',
           attemptNumber: 1,
+          intent: signedE2eIntent,
         });
 
         // Mine a block to make events visible
