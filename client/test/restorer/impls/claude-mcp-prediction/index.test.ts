@@ -101,6 +101,19 @@ describe('ClaudeMcpPredictionImpl (mocked session)', () => {
     expect(payload.probability).toBe('0.6200');
     expect(payload.rationale).toBe('Current price suggests upside');
     expect(payload.modelId).toContain('claude-mcp-prediction');
+
+    // restorationPayload must match PredictionV0RestorationPayloadSchema
+    const { PredictionV0RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-v0.js');
+    expect(out.restorationPayload).toBeDefined();
+    const parsed = PredictionV0RestorationPayloadSchema.safeParse(out.restorationPayload);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.prediction.probability).toBe('0.6200');
+      expect(typeof parsed.data.prediction.submittedAt).toBe('number');
+      expect(parsed.data.prediction.modelId).toContain('claude-mcp-prediction');
+      // rationale is in informational only (free-form string, not the schema's { ts, note }[] shape)
+      expect(out.restorationPayload!['rationale']).toBeUndefined();
+    }
   });
 
   it('throws descriptively when session ends without submit_prediction', async () => {

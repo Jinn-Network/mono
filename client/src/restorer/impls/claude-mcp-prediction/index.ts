@@ -211,6 +211,16 @@ export class ClaudeMcpPredictionImpl implements RestorerImpl {
         venue: intent.spec.oracle.venue,
         sessionDurationMs: endedAt - startedAt,
       },
+      restorationPayload: {
+        prediction: {
+          probability: submission.probability,
+          submittedAt,
+          modelId,
+        },
+        // rationale is a free-form string from the LLM; the schema expects
+        // Array<{ ts: number; note: string }>, so we do not include it here
+        // (it lives in informational only). A future task can parse / wrap it.
+      },
       artifacts: [
         { path: 'prediction.json', artifactType: 'prediction_submission' },
         {

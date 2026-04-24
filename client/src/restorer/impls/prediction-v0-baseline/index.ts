@@ -110,6 +110,13 @@ export class PredictionV0BaselineImpl implements RestorerImpl {
 
     log({ level: 'info', msg: 'prediction-v0-baseline: submitted', data: { currentPrice, probability, modelId } });
 
+    const oracleSnapshot = {
+      feed: feed as `0x${string}`,
+      roundId: String(snapshot.roundId),
+      answer: String(snapshot.answer),
+      updatedAt: snapshot.updatedAt,
+    };
+
     return {
       venueRef: { name: 'chainlink' },
       gating: {
@@ -118,13 +125,16 @@ export class PredictionV0BaselineImpl implements RestorerImpl {
         modelId,
       },
       informational: {
-        oracleSnapshot: {
-          feed,
-          roundId: String(snapshot.roundId),
-          answer: String(snapshot.answer),
-          updatedAt: snapshot.updatedAt,
-        },
+        oracleSnapshot,
         currentPrice,
+      },
+      restorationPayload: {
+        prediction: {
+          probability,
+          submittedAt,
+          modelId,
+        },
+        oracleSnapshot,
       },
       artifacts: [
         { path: 'prediction.json', artifactType: 'prediction_submission' },

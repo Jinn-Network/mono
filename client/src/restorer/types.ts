@@ -43,6 +43,17 @@ export interface RestorationOutput {
   informational?: Record<string, unknown>;
 
   /**
+   * Full restoration payload for impls whose kind has a non-portfolio payload
+   * schema (e.g. prediction.v0, prediction.apy.v0).
+   *
+   * When set, engine.pack() uses this directly as the envelope payload
+   * (validated against the kind's restoration schema) instead of building the
+   * portfolio-shaped { preSnapshot, postSnapshot, fills, gating } wrapper.
+   * Portfolio impls MUST leave this undefined (engine falls back to legacy shape).
+   */
+  restorationPayload?: Record<string, unknown>;
+
+  /**
    * Full verdict payload for evaluator impls (intentType === 'evaluation').
    *
    * When set, engine.pack() uses role='verdict' and passes this as the

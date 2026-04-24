@@ -687,8 +687,14 @@ export class RestorationEngine {
       } else {
         envelopePayload = verdictPayload;
       }
+    } else if (implOutput?.restorationPayload) {
+      // ── Non-portfolio restoration envelope payload ────────────────────────────
+      // Impls for kinds with a non-portfolio payload schema (e.g. prediction.v0)
+      // declare their own fully-formed payload. Engine passes it through directly
+      // so validatePayload() can check it against the per-kind schema.
+      envelopePayload = implOutput.restorationPayload;
     } else {
-      // ── Restoration envelope payload ──────────────────────────────────────────
+      // ── Portfolio restoration envelope payload (legacy / portfolio.v0) ─────────
       envelopePayload = {
         preSnapshot: {
           capturedAt: intent.preSnapshotCapturedAt ?? Date.now(),
