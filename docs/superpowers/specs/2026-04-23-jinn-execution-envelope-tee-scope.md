@@ -7,7 +7,6 @@
 **Related:**
 
 - `docs/research/2026-04-23-verifiability-traceability.md` — outcome vs trajectory, evidence tiers, non-goals
-- `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md` — default restorer whose OTel emission drives the trajectory profile; its promotion gate interacts with attested-tier measurement (TEE measures the *starting* binary, not post-promotion state). **Note:** this doc currently exists only as an unpushed local commit; must be either included in this PR or pushed separately before the scope PR merges, otherwise the reference is dangling.
 - `spec/2026-04-21-agentic-data-substrate.md` — substrate thesis; knowledge unit is a tree rooted at intent
 - `spec/2026-03-23-jinn-implementation-spec-proposal.md` — §4.2 ERC-8004, §4.3 x402
 - `client/src/types/portfolio.ts`, `prediction.ts`, `prediction-apy.ts` — current manifest schemas per kind (all collapsing into `jinn.execution.v1`)
@@ -38,7 +37,7 @@
 - **V1 minimum secret-scrub conformance** added to trajectory profile — distinct from the IP-protection redaction in the deferred gating epic. Safety, not access control.
 - **`evidenceHash` mechanics** promoted to an explicit §4 design-spec deliverable — hash scope (pre-signature), signature non-recursion, attestation binding point, sha256/CID/keccak256 relationships.
 - **§6 reframed** from "no open decisions" (premature) to "scope decisions locked; design-spec decisions enumerated in §4" — design spec still has real work (Phala quote layout, reproducible-build tooling choice, evidence-tier machine rules, SDK verification policy, exact signing/hash order).
-- **Missing `default-learning-restorer-design.md` reference** flagged for resolution before PR.
+- **Removed overreaching reference to learning-restorer design.** That dependency was wrong scope-boundary: our scope is executor-agnostic; the universal property it was gesturing at (TEE measurement captures launch state, mid-run mutation falls outside the attested boundary) is now a general rule in §3.2, applicable to any executor.
 
 **Scope decisions are locked; design-spec decisions are enumerated in §4. No scope-level open questions remain.**
 
@@ -153,7 +152,7 @@ The full design spec (separate doc) should cover:
 
 11. **Migration execution plan** — Concrete file-by-file cutover: type-file deletions and replacements, `manifest-assembly.ts` refactor, restorer / evaluator impl updates, `DesiredState` → `intent.v1` migration, 8004 registration extensions, subgraph redeployment, test-fixture regeneration. One-shot per §3; no compatibility paths.
 
-12. **Interaction with default learning restorer** — Its promotion gate mutates `implStateDir` mid-run. TEE measurement covers the *starting* binary; trajectory must capture every promotion transition via `promotion_record` artifacts + span events, or `implStateDir` must live outside the measured surface. Design spec resolves.
+12. **Mid-run state mutation boundary (executor-agnostic)** — TEE measurement captures code identity at enclave launch. Any executor that mutates its own state/config/code mid-run (e.g. a learning-style executor's promotion gate, a phased restorer that loads new prompts) faces the same choice: (a) every mutation emits a span event (or `promotion_record` artifact) so the trajectory makes the mutation visible — the attested claim is narrowed to "measured code ran AND mutations were logged"; or (b) the mutable region (e.g. an `implStateDir`) lives *outside* the measured surface — the attested claim covers only the invariant code; mutations are not claimed to be trustworthy. Design spec picks the default (likely (a) — logged mutations) and documents that (b) is an operator opt-out that lowers effective tier. Applies to any restorer, not a specific one.
 
 13. **Canonical training-record extractor** — A companion (non-normative) library: "given a knowledge tree, extract standard training records." Optional but high-leverage for buyer adoption. Prevents each frontier lab from reinventing extraction.
 
