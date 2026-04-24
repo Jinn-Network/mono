@@ -272,3 +272,17 @@ To add a new **in-repo** `spec.kind` (typed spec, `jinn submit-intent --spec-fil
 ## Spec Conventions
 
 Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a version, date, and author in the header.
+
+## Design Context
+
+Before producing anything user-facing — essays, slides, mocks, marketing surfaces, product UI, SVG assets — read the two root-level context files:
+
+- [`PRODUCT.md`](PRODUCT.md) — strategic context. Register (`brand` by default, override to `product` inside `client/`, `ui_kits/explorer/`, or any dashboard surface), users, product purpose, brand personality, anti-references, and the five design principles. The lead principles, restated briefly:
+  1. Keep the words, loosen the visuals.
+  2. The words do the magic; the visuals stay stark.
+  3. Clarity beats mood when consequences are real.
+  4. Participants are co-authors, not users.
+  5. Protocol before narrative.
+- [`DESIGN.md`](DESIGN.md) — visual spec in [Google Stitch format](https://stitch.withgoogle.com/docs/design-md/format/). YAML frontmatter with colours, typography, radii, spacing, and component tokens; prose body with six fixed sections (Overview, Colors, Typography, Elevation, Components, Do's and Don'ts). Pair file [`DESIGN.json`](DESIGN.json) extends the frontmatter with tonal ramps, canonical OKLCH, shadows, motion, breakpoints, and drop-in component HTML/CSS.
+
+These files are the root-level precipitate of [`docs/design/jinn-design-system/`](docs/design/jinn-design-system/), which remains the canonical long-form source.

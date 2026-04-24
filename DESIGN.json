@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-04-24T00:00:00Z",
+  "title": "Design System: Jinn",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Deep Night",
+        "canonical": "oklch(17% 0.035 258)",
+        "tonalRamp": ["#070d18", "#0c1628", "#142340", "#1f3a66", "#2f5598", "#4a7bc4", "#7aa7dc", "#e4eefa"]
+      },
+      "bg-elevated": {
+        "role": "neutral",
+        "displayName": "Elevated Night",
+        "canonical": "oklch(23% 0.05 258)",
+        "tonalRamp": ["#070d18", "#0c1628", "#142340", "#1f3a66", "#2f5598", "#4a7bc4", "#7aa7dc", "#e4eefa"]
+      },
+      "bg-sunken": {
+        "role": "neutral",
+        "displayName": "Void",
+        "canonical": "oklch(13% 0.028 258)",
+        "tonalRamp": ["#070d18", "#0c1628", "#142340", "#1f3a66", "#2f5598", "#4a7bc4", "#7aa7dc", "#e4eefa"]
+      },
+      "fg": {
+        "role": "neutral",
+        "displayName": "Moon-bone",
+        "canonical": "oklch(97% 0.008 250)",
+        "tonalRamp": ["#f2f7fc", "#e4eefa", "#cbdef3", "#a8c8ea", "#7aa7dc", "#4a7bc4", "#2f5598", "#1f3a66"]
+      },
+      "fg-muted": {
+        "role": "neutral",
+        "displayName": "Smoke 300",
+        "canonical": "oklch(72% 0.02 248)",
+        "tonalRamp": ["#33394a", "#444c60", "#5c6b82", "#7d8ba3", "#a4b0c2", "#c3cbd8", "#dce1e9", "#eff2f6"]
+      },
+      "fg-dim": {
+        "role": "neutral",
+        "displayName": "Smoke 400",
+        "canonical": "oklch(60% 0.03 250)",
+        "tonalRamp": ["#33394a", "#444c60", "#5c6b82", "#7d8ba3", "#a4b0c2", "#c3cbd8", "#dce1e9", "#eff2f6"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Dark Hairline",
+        "canonical": "oklch(33% 0.07 260)",
+        "tonalRamp": ["#070d18", "#0c1628", "#142340", "#1f3a66", "#2f5598", "#4a7bc4", "#7aa7dc", "#e4eefa"]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Sky Hairline",
+        "canonical": "oklch(70% 0.10 250)",
+        "tonalRamp": ["#070d18", "#0c1628", "#142340", "#1f3a66", "#2f5598", "#4a7bc4", "#7aa7dc", "#e4eefa"]
+      },
+      "border-accent": {
+        "role": "secondary",
+        "displayName": "Gold Hairline",
+        "canonical": "oklch(73% 0.13 85)",
+        "tonalRamp": ["#6b5020", "#8d6d2b", "#a88438", "#c9a048", "#dcb866", "#ead08e", "#f3e2b0", "#faf1d8"]
+      },
+      "accent-sky": {
+        "role": "primary",
+        "displayName": "Sky",
+        "canonical": "oklch(70% 0.10 250)",
+        "tonalRamp": ["#070d18", "#0c1628", "#142340", "#1f3a66", "#2f5598", "#4a7bc4", "#7aa7dc", "#e4eefa"]
+      },
+      "accent-sky-hover": {
+        "role": "primary",
+        "displayName": "Bright Sky",
+        "canonical": "oklch(80% 0.08 248)",
+        "tonalRamp": ["#070d18", "#0c1628", "#142340", "#1f3a66", "#2f5598", "#4a7bc4", "#a8c8ea", "#e4eefa"]
+      },
+      "accent-gold": {
+        "role": "secondary",
+        "displayName": "Lamplight Gold",
+        "canonical": "oklch(79% 0.11 85)",
+        "tonalRamp": ["#6b5020", "#8d6d2b", "#a88438", "#c9a048", "#dcb866", "#ead08e", "#f3e2b0", "#faf1d8"]
+      },
+      "accent-gold-hover": {
+        "role": "secondary",
+        "displayName": "Bright Lamplight",
+        "canonical": "oklch(85% 0.10 85)",
+        "tonalRamp": ["#6b5020", "#8d6d2b", "#a88438", "#c9a048", "#dcb866", "#ead08e", "#f3e2b0", "#faf1d8"]
+      },
+      "vow-green": {
+        "role": "success",
+        "displayName": "Vow Green",
+        "canonical": "oklch(63% 0.06 180)",
+        "tonalRamp": ["#1f2f2b", "#2e4640", "#3f5e56", "#527a70", "#6a9b8f", "#8bb6ab", "#b0cdc5", "#d8e8e4"]
+      },
+      "wane": {
+        "role": "warning",
+        "displayName": "Wane",
+        "canonical": "oklch(61% 0.13 62)",
+        "tonalRamp": ["#3a2710", "#5a3c18", "#7d5521", "#9a6c28", "#b8802f", "#d0994a", "#e2b878", "#f0dcb0"]
+      },
+      "break-red": {
+        "role": "danger",
+        "displayName": "Break Red",
+        "canonical": "oklch(55% 0.10 20)",
+        "tonalRamp": ["#3a1e1e", "#5a2e2e", "#7d3f3f", "#934c4c", "#a85a5a", "#c27c7c", "#daa4a4", "#edcccc"]
+      },
+      "seer-violet": {
+        "role": "info",
+        "displayName": "Seer Violet",
+        "canonical": "oklch(55% 0.10 290)",
+        "tonalRamp": ["#26213c", "#3b3459", "#544b79", "#6a5f96", "#7a6db0", "#988dc3", "#b6add6", "#d7d0e9"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Marketing hero headlines only. Instrument Serif." },
+      "display-xl": { "displayName": "Display XL", "purpose": "The single biggest mark on a landing page." },
+      "headline": { "displayName": "Headline", "purpose": "Section heads in long-form content." },
+      "title": { "displayName": "Title", "purpose": "In-product section titles. JetBrains Mono." },
+      "body": { "displayName": "Body", "purpose": "Default body copy. Cap at ~72ch." },
+      "label": { "displayName": "Label", "purpose": "ALL CAPS MONO eyebrows, column headers, status chips." },
+      "wish": { "displayName": "Wish", "purpose": "The one decorative flourish, italic serif pull-quote." }
+    },
+    "shadows": [
+      { "name": "hard-sm", "value": "2px 2px 0 0 #070d18", "purpose": "Optional accent on interactive cards." },
+      { "name": "hard", "value": "4px 4px 0 0 #070d18", "purpose": "Pressed/held states on buttons or tiles." },
+      { "name": "hard-lg", "value": "6px 6px 0 0 #070d18", "purpose": "Rare. Marketing hero tiles only." },
+      { "name": "float", "value": "0 12px 32px -8px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.3)", "purpose": "The one soft blur. Overlays only (menus, toasts, modals). Never on chrome." }
+    ],
+    "motion": [
+      { "name": "dur-fast", "value": "80ms", "purpose": "Hover, focus, small state changes." },
+      { "name": "dur-base", "value": "140ms", "purpose": "Default transition duration." },
+      { "name": "dur-slow", "value": "240ms", "purpose": "Panel reveals, page transitions." },
+      { "name": "dur-wish", "value": "600ms", "purpose": "The permitted 'magical' slow fade, reserved for the .wish display element on first appearance." },
+      { "name": "ease-linear", "value": "linear", "purpose": "Default easing. Things appear." },
+      { "name": "ease-in-out", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Rare. Never bounce, overshoot, or spring." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "0px", "purpose": "Single-column mobile layout." },
+      { "name": "tablet", "value": "768px", "purpose": "4-column grid." },
+      { "name": "desktop", "value": "1200px", "purpose": "8-column grid, 24px gutters." },
+      { "name": "max-content", "value": "1440px", "purpose": "Maximum content width. Long-form copy caps at ~72ch." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Sky-blue call-to-action. Sentence case. The default affordance for a primary action.",
+      "html": "<button class=\"ds-btn-primary\">Bind vessel</button>",
+      "css": ".ds-btn-primary { background: #7aa7dc; color: #070d18; font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 500; font-size: 14px; letter-spacing: -0.01em; padding: 10px 20px; border: 1px solid #7aa7dc; border-radius: 6px; cursor: pointer; transition: background 80ms linear, color 80ms linear; } .ds-btn-primary:hover { background: #a8c8ea; border-color: #a8c8ea; } .ds-btn-primary:focus-visible { outline: 2px solid #7aa7dc; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Transparent background, moon-bone text. Secondary action that doesn't compete with a primary.",
+      "html": "<button class=\"ds-btn-ghost\">Read the scrying</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: #f2f7fc; font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 500; font-size: 14px; letter-spacing: -0.01em; padding: 10px 20px; border: 1px solid #1f3a66; border-radius: 6px; cursor: pointer; transition: color 80ms linear, border-color 80ms linear; } .ds-btn-ghost:hover { color: #7aa7dc; border-color: #7aa7dc; } .ds-btn-ghost:focus-visible { outline: 2px solid #7aa7dc; outline-offset: 2px; }"
+    },
+    {
+      "name": "Status Chip (Accent)",
+      "kind": "chip",
+      "refersTo": "chip-accent",
+      "description": "ALL CAPS MONO status marker with sky border. Used for state labels in tables and headers.",
+      "html": "<span class=\"ds-chip-accent\">In smoke</span>",
+      "css": ".ds-chip-accent { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: transparent; color: #7aa7dc; font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 500; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; border: 1px solid #7aa7dc; border-radius: 4px; }"
+    },
+    {
+      "name": "Panel Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The workhorse container. Flat elevated surface, hairline border, no shadow at rest. Hover darkens the border to sky.",
+      "html": "<article class=\"ds-card\"><h3 class=\"ds-card-title\">Vessel 0x4a7f</h3><p class=\"ds-card-body\">Bound. Three wishes in smoke. Last seer: 0x2d91.</p></article>",
+      "css": ".ds-card { background: #142340; color: #f2f7fc; border: 1px solid #1f3a66; border-radius: 10px; padding: 24px; transition: border-color 140ms linear; } .ds-card:hover { border-color: #7aa7dc; } .ds-card-title { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 500; font-size: 17px; line-height: 1.2; letter-spacing: -0.01em; margin: 0 0 12px 0; color: #f2f7fc; } .ds-card-body { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 400; font-size: 14px; line-height: 1.7; letter-spacing: -0.01em; margin: 0; color: #a4b0c2; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Mono-typed input with hairline border. Focus draws a 2px sky outline with 2px offset; visible, sharp, no glow.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Outcome</span><input class=\"ds-input\" type=\"text\" placeholder=\"Speak your first wish\\u2026\"></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; } .ds-field-label { font-weight: 500; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #a4b0c2; } .ds-input { background: #0c1628; color: #f2f7fc; font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 400; font-size: 14px; letter-spacing: -0.01em; padding: 10px 12px; border: 1px solid #1f3a66; border-radius: 6px; outline: none; transition: border-color 80ms linear; } .ds-input::placeholder { color: #7d8ba3; } .ds-input:focus-visible { outline: 2px solid #7aa7dc; outline-offset: 2px; }"
+    },
+    {
+      "name": "Sigil — Node",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Brand sigil for a participant vessel. ≥40px as a mark, 16/20/24 as an icon. Always currentColor.",
+      "html": "<svg class=\"ds-sigil-node\" viewBox=\"0 0 120 120\" role=\"img\" aria-label=\"Node sigil\"><rect x=\"8\" y=\"8\" width=\"104\" height=\"104\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"/><circle cx=\"60\" cy=\"60\" r=\"34\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"/><circle cx=\"60\" cy=\"60\" r=\"8\" fill=\"currentColor\"/></svg>",
+      "css": ".ds-sigil-node { width: 64px; height: 64px; color: #7aa7dc; display: block; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Protocol Brutalism",
+    "overview": "Jinn is protocol brutalism. The surface is a deep night-blue (#0c1628). Hierarchy is carried by hairline 1px borders, not shadows. The type system is two voices only — Instrument Serif for feeling, JetBrains Mono for doing — with no sans anywhere. Sky-blue ink threads structure; lamplight gold is reserved for a single point of emphasis on any surface. The contrast between evocative copy (summon, bind, vow, vessel, wish, smoke, seer, wane) and stark engineering-diagram UI is the brand. The system is headless by design: palette, sigils, and wordmark are expected to be forked by node operators and community contributors. The protocol invariants — the lexicon, the two-voice type system, the no-emoji / no-gradient / no-sans rules — are fixed. The narrative layer is not.",
+    "keyCharacteristics": [
+      "Dark-first. Canonical rendering is sky-blue ink on moon-bone, touched by lamplight.",
+      "Hairline borders are the primary hierarchy. Shadows are rare; blurs are banned for UI chrome.",
+      "Two type voices: serif for feeling, mono for doing. No sans.",
+      "Softened-brutalist radii (4 / 6 / 10). Never razor-square, never pillowy.",
+      "Linear motion. No bounce, overshoot, or spring.",
+      "Emoji never. The sigils and the words are the iconography."
+    ],
+    "rules": [
+      { "name": "The Gold-as-Hint Rule", "body": "Gold is a hint, not a fill. One gold element of emphasis per surface. If a design has gold in two places, one of them is wrong.", "section": "colors" },
+      { "name": "The No-Pure-Neutral Rule", "body": "Never #000 or #fff. Every neutral carries a sky-blue tint.", "section": "colors" },
+      { "name": "The One-Voice Rule", "body": "A screen has one primary accent. Sky carries structure; gold carries emphasis. Never both loud at once.", "section": "colors" },
+      { "name": "The Two-Voices Rule", "body": "Serif for feeling, mono for doing. If a string is neither display headline nor mystical pull-quote, it is mono.", "section": "typography" },
+      { "name": "The Labels-in-Caps, Actions-in-Sentence Rule", "body": "ALL CAPS MONO is for status. Sentence case is for action.", "section": "typography" },
+      { "name": "The Hairline-over-Shadow Rule", "body": "Hierarchy is carried by more borders and less shadow than a typical system.", "section": "elevation" },
+      { "name": "The No-Float-on-Chrome Rule", "body": "--shadow-float is for overlays only. Never on cards, buttons, inputs, or any resting-state container.", "section": "elevation" },
+      { "name": "The No-Glass Rule", "body": "backdrop-filter: blur() is banned for UI chrome. If a designer feels they need glass, they need a border instead.", "section": "elevation" },
+      { "name": "The No-Emoji Rule", "body": "Never. Not in product. Not in marketing. Not in docs. The sigils, the typography, and the words are the iconography.", "section": "components" },
+      { "name": "The Sigil-before-Lucide Rule", "body": "For Jinn-native concepts (node, vow, smoke, wish, seer), use the brand sigil. Lucide at stroke 1.5 is a stand-in for generic UI affordances only.", "section": "components" }
+    ],
+    "dos": [
+      "Do use JetBrains Mono for every label, value, body line, and code block.",
+      "Do use Instrument Serif only for display headlines, section heads, and the italic pull-quote (.wish).",
+      "Do use hairline 1px borders as the primary hierarchy. More borders, less shadow.",
+      "Do use gold as a single point of emphasis per surface.",
+      "Do use sentence case for titles, headlines, and button labels (Bind vessel).",
+      "Do use ALL CAPS MONO with letter-spacing 0.14em for labels, eyebrows, and status chips; never for anything read at length.",
+      "Do use softened-brutalist radii: chip 4px, default 6px, panel 10px.",
+      "Do tint every neutral toward #0c1628. No pure gray.",
+      "Do drop the vow-language whenever money, safety, or legal consent is on the line. Clarity beats mood.",
+      "Do document any change you make. The brand is headless; you're a co-author, not a user."
+    ],
+    "donts": [
+      "Don't use emoji. Ever. Not in product. Not in marketing. Not in docs.",
+      "Don't use #000 or #fff. The darkest permitted neutral is #070d18; the lightest is #f2f7fc.",
+      "Don't use a sans font. The two-voices rule is the system.",
+      "Don't use gradients as decoration. The one exception is the top/bottom protection gradient over imagery.",
+      "Don't use backdrop-filter: blur() for UI chrome. If you want glass, use a border.",
+      "Don't use ease-out-back, ease-out-elastic, or any spring curve.",
+      "Don't use --shadow-float on cards, buttons, or inputs. Overlays only.",
+      "Don't nest cards inside cards. Ever.",
+      "Don't stack gold on gold. One gold element of emphasis per surface.",
+      "Don't use dark-mode-plus-purple-gradient crypto chrome.",
+      "Don't use Material-style filled icons or multi-color iconography.",
+      "Don't invent new vow-language without marking it as a proposal. The lexicon is protocol, not narrative."
+    ]
+  }
+}

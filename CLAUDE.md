@@ -274,6 +274,15 @@ Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a v
 
 ## Design System
 
+**Root-level quick reference** (for `impeccable` and other skill consumers):
+- [`PRODUCT.md`](PRODUCT.md) — register (default `brand`; override to `product` inside `client/`, `ui_kits/explorer/`, or any dashboard surface), users, brand personality, anti-references, and five strategic principles.
+- [`DESIGN.md`](DESIGN.md) — visual spec in [Google Stitch format](https://stitch.withgoogle.com/docs/design-md/format/): YAML frontmatter with colours, typography, radii, spacing, and component tokens; six-section prose body (Overview, Colors, Typography, Elevation, Components, Do's and Don'ts).
+- [`DESIGN.json`](DESIGN.json) — sidecar extending the frontmatter with tonal ramps, canonical OKLCH, shadow/motion/breakpoint tokens, and drop-in component HTML/CSS.
+
+These three files are the root-level precipitate of `docs/design/jinn-design-system/`. If you're writing marketing copy, docs, slides, or product UI, start with PRODUCT.md + DESIGN.md. If you're extending the brand itself (new sigil, new palette variant, new surface treatment), continue to the long-form source below.
+
+---
+
 Jinn's design system lives at [`docs/design/jinn-design-system/`](docs/design/jinn-design-system/). **Read it before building any UI, slide, mock, docs page, marketing surface, or other user-facing artifact** — it's the source of truth for colors, type, voice, iconography, and surface rules.
 
 Entry points, in order:
