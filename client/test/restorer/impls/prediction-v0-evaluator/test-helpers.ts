@@ -1,6 +1,7 @@
 import { privateKeyToAccount } from 'viem/accounts';
-import type { PredictionSubmissionManifest, PredictionV0Intent } from '../../../../src/types/prediction.js';
+import type { PredictionV0Intent } from '../../../../src/types/prediction.js';
 import type { RestorationJob } from '../../../../src/types/desired-state.js';
+import type { SignedEnvelope } from '../../../../src/types/envelope.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
 
@@ -19,17 +20,23 @@ export function makeValidIntent(overrides: Partial<PredictionV0Intent> = {}): Pr
   } as PredictionV0Intent;
 }
 
+/**
+ * Build a signed jinn.execution.v1 envelope for prediction.v0/restoration.
+ * Replaces the old makeSignedManifest that produced a PredictionSubmissionManifest.
+ */
 export async function makeSignedManifest(overrides: {
   probability?: string;
   submittedAt?: number;
   signerPk?: `0x${string}`;
   intentCid?: string;
   corruptSignature?: boolean;
-} = {}): Promise<PredictionSubmissionManifest> {
+} = {}): Promise<SignedEnvelope> {
   const pk = overrides.signerPk ?? ('0x' + '1'.repeat(64) as `0x${string}`);
   const account = privateKeyToAccount(pk);
-  const base: Omit<PredictionSubmissionManifest, 'signature'> = {
-    schemaVersion: 'prediction.v0.submission.v1',
+  const unsigned = {
+    schemaVersion: 'jinn.execution.v1' as const,
+    kind: 'prediction.v0',
+    role: 'restoration' as const,
     generatedAt: 1000,
     intent: {
       cid: overrides.intentCid ?? 'intent-cid',
@@ -37,28 +44,44 @@ export async function makeSignedManifest(overrides: {
       onchainCreationBlock: 1,
       requestId: ('0x' + '0'.repeat(64)) as `0x${string}`,
     },
-    restorer: {
+    participant: {
       safeAddress: ('0x' + '0'.repeat(40)) as `0x${string}`,
       agentEoa: account.address,
     },
     window: { startTs: 0, endTs: 3_600_000 },
-    prediction: {
-      probability: overrides.probability ?? '0.55',
-      submittedAt: overrides.submittedAt ?? 1_000_000,
-      modelId: 'spot-carry.v1',
+    executor: {
+      implName: 'claude-mcp-prediction',
+      implVersion: '1.0.0',
+      clientGitSha: 'dev',
+      codeDigest: ('sha256:' + '0'.repeat(64)) as string,
+      signingKey: { kind: 'agent-eoa' as const, pubkey: account.address },
+    },
+    evidenceTier: 'self-signed' as const,
+    attestation: null,
+    trajectory: null,
+    artifacts: [] as unknown[],
+    payload: {
+      prediction: {
+        probability: overrides.probability ?? '0.55',
+        submittedAt: overrides.submittedAt ?? 1_000_000,
+        modelId: 'spot-carry.v1',
+      },
     },
   };
-  const s = await signCanonical(base, pk, account.address);
+  const s = await signCanonical(unsigned, pk, account.address);
   const sig = overrides.corruptSignature ? (('0x' + 'a'.repeat(130)) as `0x${string}`) : s.sig;
-  return { ...base, signature: { algo: 'secp256k1' as const, signer: account.address, hash: s.hash, sig } };
+  return {
+    ...unsigned,
+    signature: { algo: 'secp256k1' as const, signer: account.address, hash: s.hash, sig },
+  } as SignedEnvelope;
 }
 
 export function makeEvalRestorationJob(
-  manifest: PredictionSubmissionManifest | Record<string, unknown>,
+  envelope: SignedEnvelope | Record<string, unknown>,
   intent: PredictionV0Intent,
   options?: { omitRestorationIntentCid?: boolean },
 ): RestorationJob {
-  const m = manifest as { intent: { cid: string } };
+  const e = envelope as { intent: { cid: string } };
   return {
     id: 'eval',
     description: 'evaluate',
@@ -68,10 +91,10 @@ export function makeEvalRestorationJob(
     spec: intent.spec,
     eligibility: intent.eligibility,
     context: {
-      restorationResult: JSON.stringify(manifest),
+      restorationResult: JSON.stringify(envelope),
       ...(options?.omitRestorationIntentCid
         ? {}
-        : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: m.intent.cid }),
+        : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: e.intent.cid }),
     },
   } as unknown as RestorationJob;
 }

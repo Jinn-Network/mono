@@ -18,10 +18,9 @@ import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { RestorationJob } from '../../../types/desired-state.js';
 import {
   PredictionV0IntentSchema,
-  PredictionSubmissionManifestSchema,
-  type PredictionSubmissionManifest,
-  type PredictionVerdictManifest,
 } from '../../../types/prediction.js';
+import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { PredictionV0RestorationPayloadSchema, type PredictionV0RestorationPayload } from '../../../types/payloads/prediction-v0.js';
 import {
   oraclePriceAtResolveTs,
   scaleToDecimal,
@@ -58,37 +57,6 @@ export interface PredictionV0EvaluatorConfig {
   };
 }
 
-function parseRestorationSubmissionManifest(manifestJson: string): PredictionSubmissionManifest {
-  const raw = JSON.parse(manifestJson) as Record<string, unknown>;
-  const direct = PredictionSubmissionManifestSchema.safeParse(raw);
-  if (direct.success) return direct.data;
-
-  if (raw['schemaVersion'] !== 'portfolio.v0.manifest.v1') {
-    return PredictionSubmissionManifestSchema.parse(raw);
-  }
-
-  const gating = raw['gating'] as Record<string, unknown> | undefined;
-  const informational = raw['informational'] as Record<string, unknown> | undefined;
-  const oracleSnapshot = informational?.['oracleSnapshot'];
-  const normalized = {
-    schemaVersion: 'prediction.v0.submission.v1',
-    generatedAt: raw['generatedAt'],
-    intent: raw['intent'],
-    restorer: raw['restorer'],
-    window: raw['window'],
-    prediction: {
-      probability: String(gating?.['probability'] ?? ''),
-      submittedAt: Number(gating?.['submittedAt']),
-      modelId: String(gating?.['modelId'] ?? ''),
-    },
-    ...(oracleSnapshot && typeof oracleSnapshot === 'object'
-      ? { oracleSnapshot }
-      : {}),
-    signature: raw['signature'],
-  };
-
-  return PredictionSubmissionManifestSchema.parse(normalized);
-}
 
 export class PredictionV0Evaluator implements RestorerImpl {
   readonly name = 'prediction-v0-evaluator';
@@ -131,10 +99,16 @@ export class PredictionV0Evaluator implements RestorerImpl {
     const predictionIntent = PredictionV0IntentSchema.parse(intent);
     const { feed, venue } = predictionIntent.spec.oracle;
 
-    // 2. Parse restorer's manifest from inlined context
+    // 2. Parse restorer's SignedEnvelope from inlined context
     const manifestJson = intent.context!['restorationResult'] as string;
     const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
-    const manifest = parseRestorationSubmissionManifest(manifestJson);
+    const envelope = SignedEnvelopeSchema.parse(rawPayload);
+    if (envelope.kind !== 'prediction.v0' || envelope.role !== 'restoration') {
+      throw new Error(
+        `Unexpected envelope kind/role: ${envelope.kind}/${envelope.role}; expected prediction.v0/restoration`,
+      );
+    }
+    const payload: PredictionV0RestorationPayload = PredictionV0RestorationPayloadSchema.parse(envelope.payload);
 
     // 3. Fetch Chainlink spanning round
     let spanning: SpanningResult;
@@ -168,19 +142,19 @@ export class PredictionV0Evaluator implements RestorerImpl {
     checks.push(checkOracleRoundCoversResolveTs(spanning));
 
     // eligibility
-    checks.push(checkSubmissionWithinWindow(manifest.prediction.submittedAt, predictionIntent.window));
+    checks.push(checkSubmissionWithinWindow(payload.prediction.submittedAt, predictionIntent.window));
 
     // integrity
     checks.push(checkWindowBounds(predictionIntent));
-    checks.push(checkManifestFieldsPresent(manifest.prediction));
+    checks.push(checkManifestFieldsPresent(payload.prediction));
     {
       const recomputed = recomputeTopLevelSignatureHash(rawPayload);
-      checks.push(await checkManifestSignature(recomputed, manifest.signature));
+      checks.push(await checkManifestSignature(recomputed, envelope.signature));
     }
     if (expectedRef.kind === 'missing') {
       checks.push(checkIntentRefMissingExpected());
     } else {
-      checks.push(checkIntentRef(manifest.intent.cid, expectedRef.cid));
+      checks.push(checkIntentRef(envelope.intent.cid, expectedRef.cid));
     }
 
     // spec
@@ -192,14 +166,14 @@ export class PredictionV0Evaluator implements RestorerImpl {
     // 6. Derive ground truth + score
     const priceAtResolve = scaleToDecimal(spanning.round.answer, spanning.round.decimals);
     const groundTruth = resolveGroundTruth(predictionIntent.spec.question, priceAtResolve);
-    const { score, scoreBasis, scoreVersion } = computeScore(verdict, manifest.prediction.probability, groundTruth);
+    const { score, scoreBasis, scoreVersion } = computeScore(verdict, payload.prediction.probability, groundTruth);
 
     // 7. Assemble + sign verdict manifest
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
-    const verdictManifestBase: Omit<PredictionVerdictManifest, 'signature'> = {
+    const verdictManifestBase: Record<string, unknown> = {
       schemaVersion: 'prediction.v0.verdict.v1',
       generatedAt: Date.now(),
-      intent: manifest.intent,
+      intent: envelope.intent,
       evaluator: { safeAddress: this.config.evaluatorSafeAddress, agentEoa: evaluatorAccount.address },
       window: predictionIntent.window,
       verdict,
@@ -214,9 +188,9 @@ export class PredictionV0Evaluator implements RestorerImpl {
         ...(spanning.nextRound ? { nextRoundUpdatedAt: spanning.nextRound.updatedAt } : {}),
       },
       claimed: {
-        probability: manifest.prediction.probability,
-        submittedAt: manifest.prediction.submittedAt,
-        modelId: manifest.prediction.modelId,
+        probability: payload.prediction.probability,
+        submittedAt: payload.prediction.submittedAt,
+        modelId: payload.prediction.modelId,
         // Omitted when no IPFS submission CID is available (inline / dev).
       },
       groundTruth,
@@ -226,7 +200,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
     const hash = keccak256(stringToHex(canonical));
     // Raw ECDSA — no EIP-191 prefix. recoverAddress (not recoverMessageAddress) on verify.
     const sig = await evaluatorAccount.sign({ hash });
-    const verdictManifest: PredictionVerdictManifest = {
+    const verdictManifest: Record<string, unknown> = {
       ...verdictManifestBase,
       signature: { algo: 'secp256k1', signer: evaluatorAccount.address, hash, sig },
     };
@@ -267,11 +241,11 @@ export class PredictionV0Evaluator implements RestorerImpl {
       score,
       scoreBasis,
       scoreVersion,
-      oracleReading: verdictManifestBase.oracleReading,
+      oracleReading: verdictManifestBase['oracleReading'],
       claimed: {
-        probability: manifest.prediction.probability,
-        submittedAt: manifest.prediction.submittedAt,
-        modelId: manifest.prediction.modelId,
+        probability: payload.prediction.probability,
+        submittedAt: payload.prediction.submittedAt,
+        modelId: payload.prediction.modelId,
         // submissionManifestCid omitted — not available from inline manifest context
         // TODO(plan-d): populate once IPFS submission CID is resolved
       },
@@ -292,8 +266,8 @@ export class PredictionV0Evaluator implements RestorerImpl {
         skipCount: checks.filter(c => c.status === 'SKIP').length,
       },
       informational: {
-        claimedProbability: manifest.prediction.probability,
-        oracleReading: verdictManifestBase.oracleReading,
+        claimedProbability: payload.prediction.probability,
+        oracleReading: verdictManifestBase['oracleReading'],
       },
       verdictPayload,
       artifacts: [

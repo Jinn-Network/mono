@@ -7,7 +7,7 @@ import type { PublicClient } from 'viem';
 import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { RestorationJob } from '../../../types/desired-state.js';
-import { PredictionApyV0IntentSchema, type PredictionApyVerdictManifest } from '../../../types/prediction-apy.js';
+import { PredictionApyV0IntentSchema } from '../../../types/prediction-apy.js';
 import { twApyBpsOverWindow } from '../../../venues/aave-v3/client.js';
 import {
   checkIntentRef,
@@ -17,7 +17,7 @@ import {
 } from '../prediction-v0-evaluator/checks/integrity.js';
 import { resolveExpectedRestorationIntentCid } from '../evaluation-context.js';
 import { deriveGroundTruthBps } from './canonical-metrics.js';
-import { parsePredictionApySubmissionManifest } from './parse-submission.js';
+import { parsePredictionApySubmissionEnvelope } from './parse-submission.js';
 import { computeScore } from './score.js';
 import type { Check, Verdict } from './types.js';
 
@@ -83,7 +83,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     const intent = PredictionApyV0IntentSchema.parse(ctx.intent);
     const manifestJson = ctx.intent.context!['restorationResult'] as string;
     const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
-    const submission = parsePredictionApySubmissionManifest(manifestJson);
+    const { envelope: submissionEnvelope, payload: submission } = parsePredictionApySubmissionEnvelope(manifestJson);
     const checks: Check[] = [];
     const { venue, pool, reserve } = intent.spec.oracle;
     const { chain, chainId } = chainForVenue(venue);
@@ -152,12 +152,12 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
 
     {
       const recomputed = recomputeTopLevelSignatureHash(rawPayload);
-      checks.push(await checkManifestSignature(recomputed, submission.signature));
+      checks.push(await checkManifestSignature(recomputed, submissionEnvelope.signature));
     }
     if (expectedRef.kind === 'missing') {
       checks.push(checkIntentRefMissingExpected());
     } else {
-      checks.push(checkIntentRef(submission.intent.cid, expectedRef.cid));
+      checks.push(checkIntentRef(submissionEnvelope.intent.cid, expectedRef.cid));
     }
 
     if (intent.spec.metric.toleranceBps > 0) {
@@ -171,10 +171,10 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     const scored = computeScore(verdict, submission.prediction.predictedBps, groundTruthBps, intent.spec.metric.toleranceBps);
 
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
-    const baseManifest: Omit<PredictionApyVerdictManifest, 'signature'> = {
+    const baseManifest: Record<string, unknown> = {
       schemaVersion: 'prediction.apy.v0.verdict.v1',
       generatedAt: Date.now(),
-      intent: submission.intent,
+      intent: submissionEnvelope.intent,
       evaluator: { safeAddress: this.config.evaluatorSafeAddress, agentEoa: evaluatorAccount.address },
       window: intent.window,
       verdict,
@@ -201,7 +201,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     };
     const hash = keccak256(stringToHex(JSON.stringify(baseManifest)));
     const sig = await evaluatorAccount.sign({ hash });
-    const verdictManifest: PredictionApyVerdictManifest = {
+    const verdictManifest: Record<string, unknown> = {
       ...baseManifest,
       signature: { algo: 'secp256k1', signer: evaluatorAccount.address, hash, sig },
     };
@@ -240,7 +240,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
       score: scored.score,
       scoreBasis: scored.scoreBasis,
       scoreVersion: scored.scoreVersion,
-      oracleReading: baseManifest.oracleReading,
+      oracleReading: baseManifest['oracleReading'],
       claimed: {
         predictedBps: submission.prediction.predictedBps,
         submittedAt: submission.prediction.submittedAt,
@@ -287,5 +287,5 @@ function deriveVerdict(checks: Check[]): Verdict {
   return 'PASS';
 }
 
-export { parsePredictionApySubmissionManifest } from './parse-submission.js';
+export { parsePredictionApySubmissionEnvelope } from './parse-submission.js';
 export default PredictionApyV0Evaluator;

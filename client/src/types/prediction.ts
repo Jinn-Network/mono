@@ -1,31 +1,16 @@
 /**
- * prediction.v0 — typed intent spec, submission manifest, verdict manifest.
+ * prediction.v0 — typed intent spec.
  *
  * §4 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
+ *
+ * Legacy manifest schemas (prediction.v0.submission.v1, prediction.v0.verdict.v1)
+ * have been removed per scope §3.4. Use jinn.execution.v1 SignedEnvelope with
+ * PredictionV0RestorationPayloadSchema / PredictionV0VerdictPayloadSchema instead.
  */
 import { z } from 'zod';
 import { WindowSchema } from './desired-state.js';
 
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, 'must be a 0x-prefixed hex string');
-
-const SignatureSchema = z.object({
-  algo: z.literal('secp256k1'),
-  signer: HexStringSchema,
-  hash: HexStringSchema,
-  sig: HexStringSchema,
-});
-
-const IntentProvenanceSchema = z.object({
-  cid: z.string().min(1),
-  onchainCreationTx: HexStringSchema,
-  onchainCreationBlock: z.number().int(),
-  requestId: HexStringSchema,
-});
-
-const ParticipantSchema = z.object({
-  safeAddress: HexStringSchema,
-  agentEoa: HexStringSchema,
-});
 
 // ── Question kinds ────────────────────────────────────────────────────────────
 
@@ -93,76 +78,3 @@ export const PredictionV0IntentSchema = z
   });
 
 export type PredictionV0Intent = z.infer<typeof PredictionV0IntentSchema>;
-
-// ── Submission manifest ───────────────────────────────────────────────────────
-
-export const PredictionSubmissionManifestSchema = z.object({
-  schemaVersion: z.literal('prediction.v0.submission.v1'),
-  generatedAt: z.number().int(),
-  intent: IntentProvenanceSchema,
-  restorer: ParticipantSchema,
-  window: WindowSchema,
-  prediction: z.object({
-    probability: z.string().regex(/^(0(\.\d+)?|1(\.0+)?)$/, 'must be a decimal in [0,1]'),
-    submittedAt: z.number().int(),
-    modelId: z.string().min(1),
-  }),
-  oracleSnapshot: z
-    .object({
-      feed: HexStringSchema,
-      roundId: z.string(),
-      answer: z.string(),
-      updatedAt: z.number().int(),
-    })
-    .optional(),
-  rationale: z
-    .array(
-      z.object({
-        ts: z.number().int(),
-        note: z.string(),
-      }),
-    )
-    .optional(),
-  signature: SignatureSchema,
-});
-
-export type PredictionSubmissionManifest = z.infer<typeof PredictionSubmissionManifestSchema>;
-
-// ── Verdict manifest ──────────────────────────────────────────────────────────
-
-const CheckSchema = z.object({
-  name: z.string(),
-  status: z.enum(['PASS', 'FAIL', 'SKIP', 'INDETERMINATE']),
-  detail: z.union([z.string(), z.record(z.unknown())]).optional(),
-});
-
-export const PredictionVerdictManifestSchema = z.object({
-  schemaVersion: z.literal('prediction.v0.verdict.v1'),
-  generatedAt: z.number().int(),
-  intent: IntentProvenanceSchema,
-  evaluator: ParticipantSchema,
-  window: WindowSchema,
-  verdict: z.enum(['PASS', 'FAIL', 'REJECTED', 'INDETERMINATE']),
-  score: z.string(),
-  scoreBasis: z.literal('brier.v1'),
-  scoreVersion: z.string(),
-  oracleReading: z.object({
-    feed: HexStringSchema,
-    roundId: z.string(),
-    answer: z.string(),
-    updatedAt: z.number().int(),
-    nextRoundUpdatedAt: z.number().int().optional(),
-  }),
-  claimed: z.object({
-    probability: z.string(),
-    submittedAt: z.number().int(),
-    modelId: z.string(),
-    /** Present when the submission was registered on IPFS; omitted for inline/dev. */
-    submissionManifestCid: z.string().min(1).optional(),
-  }),
-  groundTruth: z.enum(['YES', 'NO']),
-  checks: z.array(CheckSchema),
-  signature: SignatureSchema,
-});
-
-export type PredictionVerdictManifest = z.infer<typeof PredictionVerdictManifestSchema>;

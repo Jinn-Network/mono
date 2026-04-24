@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   PredictionV0SpecSchema,
   PredictionV0IntentSchema,
-  PredictionSubmissionManifestSchema,
-  PredictionVerdictManifestSchema,
 } from '../../src/types/prediction.js';
 
 const validThresholdSpec = {
@@ -99,33 +97,5 @@ describe('PredictionV0IntentSchema', () => {
       spec: { ...validThresholdSpec, question: { ...validThresholdSpec.question, resolveTs: 3_600_000 + 3_600_001 } },
     };
     expect(() => PredictionV0IntentSchema.parse(bad)).toThrow(/≤ 1 hour/);
-  });
-});
-
-describe('PredictionSubmissionManifestSchema', () => {
-  it('accepts a probability in [0,1]', () => {
-    const m = {
-      schemaVersion: 'prediction.v0.submission.v1' as const,
-      generatedAt: 1000,
-      intent: { cid: 'c', onchainCreationTx: '0x01', onchainCreationBlock: 1, requestId: '0x' + '0'.repeat(64) },
-      restorer: { safeAddress: '0x' + '0'.repeat(40), agentEoa: '0x' + '0'.repeat(40) },
-      window: { startTs: 0, endTs: 3_600_000 },
-      prediction: { probability: '0.55', submittedAt: 100, modelId: 'm' },
-      signature: { algo: 'secp256k1' as const, signer: '0x' + '0'.repeat(40), hash: '0x' + '0'.repeat(64), sig: '0x' + '0'.repeat(130) },
-    };
-    expect(() => PredictionSubmissionManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it('rejects probability outside [0,1]', () => {
-    const base = {
-      schemaVersion: 'prediction.v0.submission.v1' as const,
-      generatedAt: 1000,
-      intent: { cid: 'c', onchainCreationTx: '0x01', onchainCreationBlock: 1, requestId: '0x' + '0'.repeat(64) },
-      restorer: { safeAddress: '0x' + '0'.repeat(40), agentEoa: '0x' + '0'.repeat(40) },
-      window: { startTs: 0, endTs: 3_600_000 },
-      prediction: { probability: '1.5', submittedAt: 100, modelId: 'm' },
-      signature: { algo: 'secp256k1' as const, signer: '0x' + '0'.repeat(40), hash: '0x' + '0'.repeat(64), sig: '0x' + '0'.repeat(130) },
-    };
-    expect(() => PredictionSubmissionManifestSchema.parse(base)).toThrow();
   });
 });

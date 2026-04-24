@@ -67,7 +67,9 @@ const POST_SNAPSHOT = {
 };
 
 const MOCK_MANIFEST = {
-  schemaVersion: 'portfolio.v0.manifest.v1',
+  schemaVersion: 'jinn.execution.v1',
+  kind: 'portfolio.v0',
+  role: 'restoration',
   generatedAt: NOW,
   intent: {
     cid: 'QmINTENT',
@@ -75,21 +77,33 @@ const MOCK_MANIFEST = {
     onchainCreationBlock: 100,
     requestId: '0x0000000000000000000000000000000000000000000000000000000000000001',
   },
-  restorer: {
+  participant: {
     safeAddress: '0x1111111111111111111111111111111111111111',
     agentEoa: '0x2222222222222222222222222222222222222222',
   },
   window: { startTs: START_TS, endTs: END_TS },
-  preSnapshot: PRE_SNAPSHOT,
-  postSnapshot: POST_SNAPSHOT,
-  fills: MOCK_FILLS,
-  gating: {
-    equityReturnPct: '6.0',
-    maxDrawdownPct: '0.0',
-    closedTradesCount: 25,
-    tradedNotionalMultiple: '5.0',
+  executor: {
+    implName: 'portfolio-v0',
+    implVersion: '1.0.0',
+    clientGitSha: 'dev',
+    codeDigest: 'sha256:' + '0'.repeat(64),
+    signingKey: { kind: 'agent-eoa', pubkey: '0x2222222222222222222222222222222222222222' },
   },
+  evidenceTier: 'self-signed',
+  attestation: null,
+  trajectory: null,
   artifacts: [],
+  payload: {
+    preSnapshot: PRE_SNAPSHOT,
+    postSnapshot: POST_SNAPSHOT,
+    fills: MOCK_FILLS,
+    gating: {
+      equityReturnPct: '6.0',
+      maxDrawdownPct: '0.0',
+      closedTradesCount: 25,
+      tradedNotionalMultiple: '5.0',
+    },
+  },
   signature: {
     algo: 'secp256k1',
     signer: '0x2222222222222222222222222222222222222222',
@@ -437,8 +451,11 @@ describe('PortfolioV0Evaluator', () => {
       };
       const unifiedManifest = {
         ...MOCK_MANIFEST,
-        preSnapshot: unifiedPreSnapshot,
-        postSnapshot: unifiedPostSnapshot,
+        payload: {
+          ...MOCK_MANIFEST.payload,
+          preSnapshot: unifiedPreSnapshot,
+          postSnapshot: unifiedPostSnapshot,
+        },
       };
 
       const ctx = makeCtx(wd, impl, { manifest: unifiedManifest });
@@ -557,9 +574,12 @@ describe('PortfolioV0Evaluator', () => {
       // Net result: FAIL driven by consistency.gating.max_drawdown.
       const manifestWithDrawdown = {
         ...MOCK_MANIFEST,
-        gating: {
-          ...MOCK_MANIFEST.gating,
-          maxDrawdownPct: '15.0',  // 15% drawdown claimed — inconsistent with rederived ~0%
+        payload: {
+          ...MOCK_MANIFEST.payload,
+          gating: {
+            ...MOCK_MANIFEST.payload.gating,
+            maxDrawdownPct: '15.0',  // 15% drawdown claimed — inconsistent with rederived ~0%
+          },
         },
       };
 
@@ -679,7 +699,10 @@ describe('PortfolioV0Evaluator', () => {
 
       const manifestWithLatePost = {
         ...MOCK_MANIFEST,
-        postSnapshot: latePostSnapshot,
+        payload: {
+          ...MOCK_MANIFEST.payload,
+          postSnapshot: latePostSnapshot,
+        },
       };
 
       const impl = makeEvaluator();

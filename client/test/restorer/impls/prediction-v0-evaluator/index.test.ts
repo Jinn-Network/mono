@@ -2,9 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionV0Evaluator } from '../../../../src/restorer/impls/prediction-v0-evaluator/index.js';
-import { signCanonical } from '../../../../src/restorer/engine/signing.js';
 import { makeValidIntent, makeSignedManifest, makeEvalRestorationJob } from './test-helpers.js';
 
 function makeCtx(intent: any, deps: any) {
@@ -49,29 +47,10 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     expect(out.gating.groundTruth).toBe('YES');
   });
 
-  it('accepts the engine outer manifest produced by prediction restorations', async () => {
+  it('verdict artifact has correct schemaVersion metadata', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
-    const pk = ('0x' + '1'.repeat(64)) as `0x${string}`;
-    const account = privateKeyToAccount(pk);
-    const unsignedOuter: Record<string, unknown> = {
-      schemaVersion: 'portfolio.v0.manifest.v1',
-      generatedAt: manifest.generatedAt,
-      intent: manifest.intent,
-      restorer: manifest.restorer,
-      window: manifest.window,
-      preSnapshot: { schemaVersion: 1, capturedAt: 0, venue: { name: 'chainlink' }, account: {}, positions: [], openOrders: [] },
-      postSnapshot: { schemaVersion: 1, capturedAt: 0, venue: { name: 'chainlink' }, account: {}, positions: [], openOrders: [] },
-      fills: [],
-      gating: manifest.prediction,
-      artifacts: [],
-    };
-    const s = await signCanonical(unsignedOuter, pk, account.address);
-    const outerManifest = {
-      ...unsignedOuter,
-      signature: { algo: 'secp256k1' as const, signer: account.address, hash: s.hash, sig: s.sig },
-    };
-    const evalIntent = makeEvalRestorationJob(outerManifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',

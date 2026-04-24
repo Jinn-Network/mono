@@ -23,15 +23,30 @@ const intentProv = (cid: string) => ({
 async function makeSignedApyManifestJson(overrides: { submittedAt?: number; intentCid?: string; corruptSignature?: boolean } = {}) {
   const account = privateKeyToAccount(AGENT_PK);
   const unsigned: Record<string, unknown> = {
-    schemaVersion: 'prediction.apy.v0.submission.v1',
+    schemaVersion: 'jinn.execution.v1',
+    kind: 'prediction.apy.v0',
+    role: 'restoration',
     generatedAt: 1_000,
     intent: intentProv(overrides.intentCid ?? 'expected-cid'),
-    restorer: { safeAddress: '0x' + '44'.repeat(20), agentEoa: account.address },
+    participant: { safeAddress: '0x' + '44'.repeat(20), agentEoa: account.address },
     window: { startTs: 0, endTs: 600_000 },
-    prediction: {
-      predictedBps: '100',
-      submittedAt: overrides.submittedAt ?? 100_000,
-      modelId: 'apy-persistence.v1',
+    executor: {
+      implName: 'claude-mcp-prediction-apy',
+      implVersion: '1.0.0',
+      clientGitSha: 'dev',
+      codeDigest: 'sha256:' + '0'.repeat(64),
+      signingKey: { kind: 'agent-eoa', pubkey: account.address },
+    },
+    evidenceTier: 'self-signed',
+    attestation: null,
+    trajectory: null,
+    artifacts: [],
+    payload: {
+      prediction: {
+        predictedBps: '100',
+        submittedAt: overrides.submittedAt ?? 100_000,
+        modelId: 'apy-persistence.v1',
+      },
     },
   };
   const s = await signCanonical(unsigned, AGENT_PK, account.address);
