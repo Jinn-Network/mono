@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Jinn — Explorer</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<link rel="stylesheet" href="../../foundations.css">
+<style>
+  body { padding: 0; margin: 0; background: var(--bg); color: var(--fg); }
+  .app { min-height: 100vh; padding-bottom: 40px; }
+  .shell { max-width: 1440px; margin: 0 auto; padding: 28px 28px 60px; }
+  .hero { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--border); padding-bottom: 24px; }
+  .hero h1 { margin: 0 0 10px; font-size: 64px; line-height: 1; }
+  .hero .sub { color: var(--fg-muted); font-size: 13px; max-width: 58ch; letter-spacing: -0.01em; }
+  .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-top: 28px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .left  { border-right: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; }
+  .btn, .btn-primary { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.02em; padding: 8px 14px; border: 1px solid var(--border-strong); background: transparent; color: var(--fg); cursor: pointer; border-radius: 6px; transition: all 140ms linear; }
+  .btn:hover { background: var(--blue-50); color: var(--blue-900); border-color: var(--blue-50); }
+  .btn-primary { background: var(--gold-500); border-color: var(--gold-500); color: var(--blue-50); }
+  .btn-primary:hover { background: var(--gold-400); border-color: var(--gold-400); }
+  .section-head { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="Chrome.jsx"></script>
+<script type="text/babel" src="Data.jsx"></script>
+<script type="text/babel" src="WishDetail.jsx"></script>
+
+<script type="text/babel">
+const WISHES = [
+  { id: '0x4A91', title: 'Translate 12k subtitles, SRT → JSON.', binder: 'binder.eth', status: 'smoke', statusLabel: 'in smoke', seers: 3, bond: '420 JN', age: '00:14:22', block: '2,419,011',
+    body: 'Twelve thousand SRT files, mixed Arabic and Farsi sources, to be normalized into a single JSON schema with timecode offsets preserved.',
+    log: [
+      { t: '14:22:01', level: 'vow',   msg: 'Wish bound. 3 seers elected (0xE8, 0x4A, 0xC2).' },
+      { t: '14:22:04', level: 'smoke', msg: 'Vessel 0x91A opened. Preparing shard 1/12.' },
+      { t: '14:22:08', level: 'smoke', msg: 'Gradient received from 0x91A at step 0040.' },
+      { t: '14:22:11', level: 'smoke', msg: 'Vessel 0xB02 joined. Mirror of shard 3.' },
+    ]
+  },
+  { id: '0x4A87', title: 'Fine-tune Qwen on a dialect corpus.', binder: 'nasreen.eth', status: 'smoke', statusLabel: 'in smoke', seers: 8, bond: '2,400 JN', age: '00:22:08', block: '2,418,988',
+    body: 'A 40GB corpus of Levantine Arabic to produce a LoRA adapter for Qwen-14B. Target: perplexity ≤ 7.5 on held-out.',
+    log: [
+      { t: '14:00:12', level: 'vow', msg: 'Wish bound. 8 seers elected.' },
+      { t: '14:07:40', level: 'smoke', msg: 'Epoch 1/3 complete. Loss 2.14.' },
+    ]
+  },
+  { id: '0x4A62', title: 'Label 50k satellite tiles (forest ↔ clear).', binder: 'arboreal.dao', status: 'bound', statusLabel: 'bound', seers: 5, bond: '180 JN', age: '02:11:00', block: '2,418,412',
+    body: 'Binary labels on 512×512 Sentinel-2 tiles for the Atlantic Forest biome.',
+    log: [{ t: '12:11:00', level: 'vow', msg: 'All shards returned. Consensus at 99.2%.' }]
+  },
+  { id: '0x4A31', title: 'Spin up a support agent for a small bookshop.', binder: 'rumi.eth', status: 'wane', statusLabel: 'waning', seers: 2, bond: '40 JN', age: '04:08:11', block: '2,416,200',
+    body: 'A customer-service agent with knowledge of inventory and return policy.',
+    log: [{ t: '10:11:04', level: 'wane', msg: 'Two seers disagree on tool-use path. Awaiting third.' }]
+  },
+  { id: '0x3F18', title: 'Benchmark a new quantization kernel on 4 GPUs.', binder: 'operator.eth', status: 'broken', statusLabel: 'broken', seers: 4, bond: '600 JN', age: '01:03:45', block: '2,417,008',
+    body: 'MXFP4 vs NF4 on Llama-3-70B, throughput + quality.',
+    log: [{ t: '13:15:45', level: 'broken', msg: 'Vessel 0xD9 returned malformed output. Wish voided.' }]
+  },
+  { id: '0x3F02', title: 'Curate a dataset of 10k lullabies.', binder: 'leyla.eth', status: 'reading', statusLabel: 'scrying', seers: 1, bond: '20 JN', age: '00:03:04', block: '2,419,095',
+    body: 'Multilingual corpus of recorded lullabies with transcripts.',
+    log: [{ t: '14:33:04', level: 'vow', msg: 'Wish posted. Awaiting binding.' }]
+  },
+];
+
+function App() {
+  const [route, setRoute] = React.useState('wishes');
+  const [filter, setFilter] = React.useState('all');
+  const [selected, setSelected] = React.useState(WISHES[0]);
+
+  const filtered = filter === 'all' ? WISHES : WISHES.filter(w => w.status === filter);
+
+  return (
+    <div className="app">
+      <TopNav route={route} onNav={setRoute} />
+      <div className="shell">
+
+        <div className="hero">
+          <div>
+            <div className="label" style={{ marginBottom: 12 }}>the ether &middot; epoch 14,820</div>
+            <h1>Every wish leaves a trace.</h1>
+            <div className="sub">Read the network. Bind to a wish. Offer a vessel. The explorer is read-only; to summon an outcome, run the agent harness.</div>
+          </div>
+          <img src="../../assets/mark-smoke.svg" style={{ width: 96, height: 96, filter: 'brightness(0) invert(1) sepia(1) hue-rotate(5deg) saturate(5) brightness(1.1)' }} alt="" />
+        </div>
+
+        <KPIRow>
+          <KPI label="Vessels online" value="12,408" delta="+184" />
+          <KPI label="Wishes in smoke" value="147" delta="+12" />
+          <KPI label="Bonded this epoch" value="2.4M" unit="JN" delta="+4.2%" />
+          <KPI label="Seers active" value="4,012" delta="-8" />
+        </KPIRow>
+
+        <div className="layout">
+          <div className="left">
+            <div className="section-head">
+              <div className="label">Recent wishes</div>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {['all', 'smoke', 'bound', 'wane', 'broken'].map(f => (
+                  <button key={f} onClick={() => setFilter(f)} style={{
+                    fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.14em',
+                    padding: '4px 10px', background: filter === f ? 'var(--fg)' : 'transparent',
+                    color: filter === f ? 'var(--bg)' : 'var(--fg-muted)',
+                    border: '1px solid ' + (filter === f ? 'var(--fg)' : 'var(--border)'),
+                    textTransform: 'uppercase', cursor: 'pointer', marginLeft: -1, borderRadius: 4,
+                  }}>{f}</button>
+                ))}
+              </div>
+            </div>
+            <table>
+              <TableHead cols={[
+                { label: 'Id' }, { label: 'Wish' }, { label: 'State' },
+                { label: 'Seers', right: true }, { label: 'Bond', right: true }, { label: 'Age', right: true }
+              ]}/>
+              <tbody>
+                {filtered.map(w => (
+                  <WishRow key={w.id} wish={w} selected={selected?.id === w.id} onClick={() => setSelected(w)} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <WishDetail wish={selected} />
+          </div>
+        </div>
+
+      </div>
+      <StatusBar blockHeight={2419095} vessels={12408} smoke={147} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('app')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 24px; margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-mono); }
+  .field { display: block; margin-bottom: 16px; }
+  .label { display:block; font-size:10px; letter-spacing: 0.14em; text-transform:uppercase; color: var(--fg-muted); margin-bottom: 6px;}
+  .input {
+    width: 100%; background: transparent; color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; font-family: var(--font-mono); font-size: 13px;
+    outline: none; transition: border-color 140ms linear;
+  }
+  .input:focus { border-color: var(--gold-400); }
+  .input::placeholder { color: var(--fg-dim); }
+  .textarea { height: 60px; resize: none; }
+  .help { font-size: 10px; color: var(--fg-muted); margin-top: 4px; letter-spacing: 0.05em; }
+</style>
+</head>
+<body>
+  <div class="field">
+    <span class="label">Vessel address</span>
+    <input class="input" placeholder="0x...">
+  </div>
+  <div class="field">
+    <span class="label">The wish</span>
+    <textarea class="input textarea" placeholder="Speak plainly. The ether hears intent, not decoration."></textarea>
+    <div class="help">Describe the outcome you want fulfilled. Markdown is ignored.</div>
+  </div>
+</body>
+</html>

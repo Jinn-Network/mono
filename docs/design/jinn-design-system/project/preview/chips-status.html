@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 24px; margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-mono); }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .chip {
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+    padding: 4px 10px; border: 1px solid currentColor; border-radius: 999px;
+    font-family: var(--font-mono);
+  }
+  .c-bound { color: var(--vow-green); }
+  .c-smoke { color: var(--slate-400); border-style: dashed; }
+  .c-wane  { color: var(--wane); }
+  .c-broken{ color: var(--break-red); }
+  .c-reading { color: var(--seer-violet); }
+  .c-solid { background: var(--blue-50); color: var(--blue-900); border-color: var(--blue-50); }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: currentColor; margin-right: 6px; vertical-align: middle; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <span class="chip c-bound"><span class="dot"></span>bound</span>
+    <span class="chip c-smoke"><span class="dot"></span>in smoke</span>
+    <span class="chip c-wane"><span class="dot"></span>waning</span>
+    <span class="chip c-broken"><span class="dot"></span>broken</span>
+    <span class="chip c-reading"><span class="dot"></span>scrying</span>
+    <span class="chip c-solid">seer &middot; 0xE8C2</span>
+    <span class="chip" style="color:var(--fg-muted);">12 peers</span>
+  </div>
+</body>
+</html>

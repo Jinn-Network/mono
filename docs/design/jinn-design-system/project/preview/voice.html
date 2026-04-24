@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 28px; margin: 0; background: var(--blue-900); color: var(--blue-50); font-family: var(--font-mono); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .ex { padding: 16px; border: 1px solid var(--border); }
+  .bad { color: var(--break-red); border-color: var(--break-red); }
+  .good { color: var(--vow-green); border-color: var(--vow-green); }
+  .tag { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 8px; display: block; opacity: 0.8; }
+  .t { font-family: var(--font-display); font-size: 22px; line-height: 1.15; color: var(--blue-50); font-style: italic; }
+  .bad .t { font-style: normal; font-family: var(--font-mono); font-size: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="grid">
+    <div class="ex bad">
+      <span class="tag">&times; avoid</span>
+      <div class="t">"Error: job failed after 3 retries."</div>
+    </div>
+    <div class="ex good">
+      <span class="tag">&check; jinn</span>
+      <div class="t">The wish waned. Three attempts, no smoke.</div>
+    </div>
+    <div class="ex bad">
+      <span class="tag">&times; avoid</span>
+      <div class="t">"🎉 Welcome! Let's set you up."</div>
+    </div>
+    <div class="ex good">
+      <span class="tag">&check; jinn</span>
+      <div class="t">Welcome, vessel. Speak your first wish.</div>
+    </div>
+  </div>
+</body>
+</html>

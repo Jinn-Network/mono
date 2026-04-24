@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 28px; margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-mono); }
+  .row { display: flex; gap: 28px; align-items: flex-end; }
+  .demo { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .box { width: 90px; height: 60px; background: var(--bg-elevated); border: 1px solid var(--border); }
+  .s1 { box-shadow: var(--shadow-hard-sm); }
+  .s2 { box-shadow: var(--shadow-hard); }
+  .s3 { box-shadow: var(--shadow-hard-lg); }
+  .sf { box-shadow: var(--shadow-float); }
+  .tag { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-muted); }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="demo"><div class="box"></div><span class="tag">none</span></div>
+    <div class="demo"><div class="box s1"></div><span class="tag">hard-sm &middot; 2px</span></div>
+    <div class="demo"><div class="box s2"></div><span class="tag">hard &middot; 4px</span></div>
+    <div class="demo"><div class="box s3"></div><span class="tag">hard-lg &middot; 6px</span></div>
+    <div class="demo"><div class="box sf"></div><span class="tag">float &middot; overlays only</span></div>
+  </div>
+</body>
+</html>

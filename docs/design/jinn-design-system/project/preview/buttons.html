@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 24px; margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-mono); }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.02em;
+    padding: 10px 18px; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--fg); cursor: pointer; border-radius: 6px; transition: all 140ms linear;
+  }
+  .btn:hover { background: var(--blue-50); color: var(--blue-900); }
+  .btn.primary { background: var(--gold-500); border-color: var(--gold-500); color: var(--blue-50); }
+  .btn.primary:hover { background: var(--gold-400); border-color: var(--gold-400); }
+  .btn.ghost { border-color: var(--border); color: var(--fg-muted); }
+  .btn.ghost:hover { border-color: var(--border-strong); color: var(--fg); }
+  .btn.danger { border-color: var(--break-red); color: var(--break-red); }
+  .btn.danger:hover { background: var(--break-red); color: var(--blue-50); }
+  .btn.sm { font-size: 11px; padding: 6px 12px; }
+  .btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .btn .arrow { margin-left: 8px; display: inline-block; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <button class="btn primary">Summon outcome <span class="arrow">→</span></button>
+    <button class="btn">Bind vessel</button>
+    <button class="btn ghost">Release</button>
+    <button class="btn danger">Break vow</button>
+    <button class="btn" disabled>Unavailable</button>
+    <button class="btn sm">Small</button>
+  </div>
+</body>
+</html>

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 24px; margin: 0; background: var(--bg); color: var(--fg); }
+  .scale { display: flex; align-items: flex-end; gap: 8px; }
+  .box { background: var(--gold-500); position: relative; }
+  .box::after { content: attr(data-label); position: absolute; top: calc(100% + 6px); left: 0; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--fg-muted); }
+  .box .size { position: absolute; bottom: 4px; left: 4px; font-family: var(--font-mono); font-size: 9px; color: var(--blue-50); letter-spacing: 0.1em; }
+</style>
+</head>
+<body>
+  <div class="scale">
+    <div class="box" style="width:4px;height:4px" data-label="1"></div>
+    <div class="box" style="width:8px;height:8px" data-label="2"></div>
+    <div class="box" style="width:12px;height:12px" data-label="3"></div>
+    <div class="box" style="width:16px;height:16px" data-label="4"></div>
+    <div class="box" style="width:24px;height:24px" data-label="5"></div>
+    <div class="box" style="width:32px;height:32px" data-label="6"><span class="size">32</span></div>
+    <div class="box" style="width:48px;height:48px" data-label="7"><span class="size">48</span></div>
+    <div class="box" style="width:64px;height:64px" data-label="8"><span class="size">64</span></div>
+    <div class="box" style="width:96px;height:96px" data-label="9"><span class="size">96</span></div>
+  </div>
+</body>
+</html>
