@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { RestorationJob, RestorationResult } from '../types/index.js';
 import type { Runner, RunnerContext } from './runner.js';
 import { Store } from '../store/store.js';
+import { tracedSpawn } from '../trajectory/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -73,7 +74,27 @@ export class ClaudeRunner implements Runner {
     }));
 
     try {
-      await spawnAgent(this.claudePath, prompt, mcpConfigPath, this.model, context.timeoutMs);
+      if (context.trajectory) {
+        // Traced path — wrap spawn with tracedSpawn so the subprocess lifetime
+        // surfaces as a jinn.state_transition span in the run's trajectory.
+        const agentEnv = buildAgentEnv();
+        const args = buildAgentArgs(prompt, mcpConfigPath, this.model);
+        console.log(`[runner] Spawning agent (traced): ${this.claudePath} ${args.slice(0, 3).join(' ')} ... (timeout: ${context.timeoutMs}ms)`);
+        const result = await tracedSpawn({
+          collector: context.trajectory,
+          cmd: this.claudePath,
+          args,
+          env: agentEnv,
+          stateFrom: 'PREPARED',
+          stateTo: 'RAN_CLAUDE',
+        });
+        console.log(`[runner] Agent process exited (exitCode: ${result.exitCode})`);
+        if (result.exitCode !== 0) {
+          throw new Error(`Agent exited with code ${result.exitCode}: ${result.stderr.slice(0, 500)}`);
+        }
+      } else {
+        await spawnAgent(this.claudePath, prompt, mcpConfigPath, this.model, context.timeoutMs);
+      }
 
       // Read result from store — the MCP tool published it as an artifact
       if (context.storePath) {
@@ -184,11 +205,16 @@ function buildAgentEnv(): Record<string, string> {
   return env;
 }
 
+function buildAgentArgs(prompt: string, mcpConfigPath: string, model?: string): string[] {
+  const args = ['-p', prompt, '--mcp-config', mcpConfigPath, '--strict-mcp-config'];
+  if (model) args.push('--model', model);
+  args.push('--allowedTools', 'mcp__jinn-client__*');
+  return args;
+}
+
 function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, model?: string, timeoutMs?: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = ['-p', prompt, '--mcp-config', mcpConfigPath, '--strict-mcp-config'];
-    if (model) args.push('--model', model);
-    args.push('--allowedTools', 'mcp__jinn-client__*');
+    const args = buildAgentArgs(prompt, mcpConfigPath, model);
 
     console.log(`[runner] Spawning agent: ${claudePath} ${args.slice(0, 3).join(' ')} ... (timeout: ${timeoutMs}ms)`);
 
