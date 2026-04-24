@@ -6,6 +6,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionApyV0Evaluator } from '../../../../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
+import { PredictionApyV0VerdictPayloadSchema } from '../../../../src/types/payloads/prediction-apy-v0.js';
 import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
 
@@ -179,5 +180,32 @@ describe('PredictionApyV0Evaluator', () => {
       }),
     );
     expect(out.gating.verdict).toBe('FAIL');
+  });
+
+  it('verdictPayload conforms to PredictionApyV0VerdictPayloadSchema on PASS', async () => {
+    const manifest = await makeSignedApyManifestJson();
+    const evalIntent = makeEvalIntent(manifest);
+    const ev = new PredictionApyV0Evaluator({
+      evaluatorPk: PK,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const out = await ev.run(
+      makeCtx(evalIntent, 'expected-cid', {
+        twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
+      }),
+    );
+    expect(out.verdictPayload).toBeDefined();
+    const parsed = PredictionApyV0VerdictPayloadSchema.safeParse(out.verdictPayload);
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.verdict).toBe('PASS');
+      expect(parsed.data.scoreBasis).toBe('absolute-error-linear.v1');
+      expect(parsed.data.restorationEnvelope.cid).toBe('bafy-unknown');
+      expect(parsed.data.restorationEnvelope.sha256).toMatch(/^0{64}$/);
+      expect(parsed.data.verificationOfRestoration.claimedTier).toBe('self-signed');
+      expect(parsed.data.verificationOfRestoration.overall).toBe('valid');
+      expect(parsed.data.claimed.predictedBps).toBe('100');
+      expect(parsed.data.claimed.modelId).toBe('apy-persistence.v1');
+    }
   });
 });
