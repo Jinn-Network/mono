@@ -13,7 +13,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
 }));
 
 const TEST_PK: `0x${string}` = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
-const TEST_ADDRESS = '0x71bE63f3384f5fb98995898A86B02Fb2426c5788';
+const TEST_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
 const baseInputs: EnvelopeInputs = {
   kind: 'portfolio.v0',

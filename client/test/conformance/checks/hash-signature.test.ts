@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { checkPayload } from '../../../src/conformance/checks/payload.js';
+import { checkHashAndSignature } from '../../../src/conformance/checks/hash-signature.js';
 import type { ConformanceContext } from '../../../src/conformance/types.js';
 import { assembleAndSignEnvelope } from '../../../src/restorer/engine/envelope-assembly.js';
 import type { EnvelopeInputs, EnvelopeAssemblyDeps } from '../../../src/restorer/engine/envelope-assembly.js';
@@ -68,54 +68,85 @@ async function buildGoodCtx(): Promise<ConformanceContext> {
   };
 }
 
-describe('checkPayload', () => {
-  it('passes when payload parses against KIND_PAYLOADS[kind][role]', async () => {
+describe('checkHashAndSignature', () => {
+  it('passes on a valid envelope with correct hash and signature', async () => {
     const ctx = await buildGoodCtx();
-    const result = checkPayload(ctx);
+    const result = await checkHashAndSignature(ctx);
     expect(result.passed).toBe(true);
-    expect(result.id).toBe('envelope.payload');
+    expect(result.id).toBe('envelope.hash-signature');
     expect(result.layer).toBe(1);
   });
 
-  it('fails when payload is malformed for the declared kind+role', async () => {
+  it('fails when signature.hash does not match recomputed hash', async () => {
     const ctx = await buildGoodCtx();
     const bad: ConformanceContext = {
       ...ctx,
-      envelope: { ...ctx.envelope!, payload: { bogus: 'data' } },
+      envelope: {
+        ...ctx.envelope!,
+        signature: {
+          ...ctx.envelope!.signature,
+          hash: ('0x' + '00'.repeat(32)) as `0x${string}`,
+        },
+      },
     };
-    const result = checkPayload(bad);
+    const result = await checkHashAndSignature(bad);
     expect(result.passed).toBe(false);
-    expect(result.detail).toBeTruthy();
+    expect(result.detail).toMatch(/hash/i);
   });
 
-  it('fails when kind is not in KIND_PAYLOADS registry', async () => {
+  it('fails when a non-signature field is tampered (hash becomes stale)', async () => {
     const ctx = await buildGoodCtx();
     const bad: ConformanceContext = {
       ...ctx,
-      envelope: { ...ctx.envelope!, kind: 'unknown.kind' },
+      envelope: {
+        ...ctx.envelope!,
+        generatedAt: ctx.envelope!.generatedAt + 1,
+      },
     };
-    const result = checkPayload(bad);
+    const result = await checkHashAndSignature(bad);
     expect(result.passed).toBe(false);
-    expect(result.detail).toMatch(/unknown/i);
   });
 
-  it('fails when envelope is not loaded', () => {
+  it('fails when signer does not match recovered address', async () => {
+    const ctx = await buildGoodCtx();
+    const bad: ConformanceContext = {
+      ...ctx,
+      envelope: {
+        ...ctx.envelope!,
+        signature: {
+          ...ctx.envelope!.signature,
+          signer: '0x0000000000000000000000000000000000000001' as `0x${string}`,
+        },
+      },
+    };
+    const result = await checkHashAndSignature(bad);
+    expect(result.passed).toBe(false);
+    expect(result.detail).toMatch(/signer/i);
+  });
+
+  it('fails when sig is malformed', async () => {
+    const ctx = await buildGoodCtx();
+    const bad: ConformanceContext = {
+      ...ctx,
+      envelope: {
+        ...ctx.envelope!,
+        signature: {
+          ...ctx.envelope!.signature,
+          sig: '0xbeef' as `0x${string}`,
+        },
+      },
+    };
+    const result = await checkHashAndSignature(bad);
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails when envelope is not loaded', async () => {
     const ctx: ConformanceContext = {
       envelopeCid: 'bafy-test',
       options: {},
     };
-    const result = checkPayload(ctx);
+    const result = await checkHashAndSignature(ctx);
     expect(result.passed).toBe(false);
     expect(result.detail).toMatch(/not loaded/);
-  });
-
-  it('fails when role has no schema in KIND_PAYLOADS', async () => {
-    const ctx = await buildGoodCtx();
-    const bad: ConformanceContext = {
-      ...ctx,
-      envelope: { ...ctx.envelope!, role: 'verdict' as any, kind: 'unknown.kind' },
-    };
-    const result = checkPayload(bad);
-    expect(result.passed).toBe(false);
   });
 });
