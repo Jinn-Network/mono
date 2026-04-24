@@ -1,6 +1,6 @@
 # Execution envelope + trajectory + TEE — **Scope** (pre-design)
 
-**Version:** 0.4 (scope — JCS locked; `role` → `artifactType`; operator-secrets guidance)  
+**Version:** 0.5 (scope — D1 ship order and D4 first TEE target locked; only D8 remains open)  
 **Date:** 2026-04-24  
 **Status:** scope locked for follow-on design work (open decisions in §6)  
 **Beads:** `jinn-mono-38o` (epic: execution envelope + TEE integration)  
@@ -23,7 +23,9 @@
 
 **v0.4 locks (via terminology + secrets discussion):** D2 resolved to **RFC 8785 JCS** for canonical JSON; rename `role` → `artifactType` in the envelope schema (free rename under one-shot migration); explicit **operator-secrets guidance** in §3.2 (three categories: runtime credentials never in source, proprietary IP published at attested tier or operator runs at lower tier, optional V2 `config_bundle` pattern for keep-IP-private-while-still-attested); §2.5 amended to distinguish schema-uniformity (required fields) from verifiability-tier-gating (actual fetchability of declared bundles).
 
-**Still open:** D1 (ship order), D4 (first TEE target), D8 (access / gating / redaction / monetization — deferred for separate discussion).
+**v0.5 locks (via sequencing + platform discussion):** D1 resolved to **(A) envelope + trajectory first**, with an optional narrow parallel Phala spike to de-risk reproducible-build tooling + REPORTDATA binding before full TEE integration lands. D4 resolved to **Phala Dstack** (TDX-under-the-hood + Phala protocol identity layer) — enables on-chain attestation verification at V2, aligns with the diverse-decentralized-executor thesis, managed TEE lifecycle reduces operator DevOps burden. §4.5 updated: on-chain verification is now a live V2 option (Phala exposes quote verification as on-chain primitives) rather than deferred.
+
+**Still open:** D8 (access / gating / redaction / monetization — deferred for separate discussion).
 
 ## 1. Purpose of this document
 
@@ -99,6 +101,8 @@ These are **directional** commitments for the design doc; field-level details co
 | Topic | Decision |
 |--------|-----------|
 | **Canonical JSON (D2)** | Normatively use **RFC 8785 JCS** for envelope signing input. Swap `client/src/restorer/engine/canonical-json.ts` (≈JCS-equivalent today) for a standard JCS library (e.g. `canonicalize` on npm) during the one-shot cutover. Rationale: third-party verifiers (frontier labs, challenger tooling) can use any off-the-shelf JCS library without reimplementing Jinn-specific rules. Migration cost is ~10 lines; no risk of silent divergence on number-formatting edge cases between Jinn's impl and JCS. |
+| **Ship order (D1)** | **(A) Envelope + trajectory first, TEE at V2.** Rationale: TEE work depends on the envelope (attestation `REPORTDATA` binds envelope hash; source bundle needs a schema; trajectory must be schema-valid for "attested trajectory" to mean anything). Shipping (A) unblocks `self-signed` + `committed` tiers immediately and lets Phase 1b operators start producing uniform-schema trajectories the day it lands. Optional: in parallel with (A), a narrow 1–2 week Phala spike against a minimal echo-executor to validate reproducible-build tooling + REPORTDATA binding + Phala Dstack quote shape before the full TEE integration lands — de-risks the hard parts without blocking envelope work. |
+| **First TEE target (D4)** | **Phala Dstack** (TDX + DCAP under Phala's protocol identity layer). Rationale: (i) on-chain attestation verification is viable from day one — Phala exposes quote verification as on-chain primitives; (ii) aligns with the diverse-decentralized-executor thesis (not AWS-dependent); (iii) managed TEE lifecycle reduces operator DevOps burden. Attestation `profile` string reflects the Phala layer; verifiers must understand both Phala's protocol identity and the underlying TDX quote. Trust surface includes Phala as an entity in addition to Intel TDX roots + operator source honesty — V3 "trust diversification" can add self-hosted TDX (automata-dcap) or Nitro as alternate profiles. Reproducible-build workstream is language-level, not TEE-level — Phala doesn't let us skip Node/TS reproducibility. |
 | **Migration** | **One-shot cutover** in Phase 1b. `jinn.execution.v1` replaces `portfolio.v0.manifest.v1`, `.eval.manifest.v1`, `prediction.v0.submission.v1` / `.verdict.v1`, and `prediction.apy.v0.submission.v1` / `.verdict.v1` in a single pass. `DesiredState` formalizes to `intent.v1`. Artifact entries rename `role` → `artifactType`. Canonical-JSON impl swaps to JCS. Old schemas deleted; **no back-compat shims, no dual-write, no feature flags.** `JinnRouter.claimDelivery(evidenceHash)` is opaque `bytes32` — **no contract change** (evidenceHash = envelope canonical hash under JCS). Testnet dogfood data pre-v1 is disposable. |
 | **Optional rigor (deferred)** | **SCITT** transparency services, standalone transparency logs, **DSSE / in-toto** envelopes, **C2PA** — out of scope for V1. Rationale: `evidenceHash` on-chain already provides Jinn's tamper-evidence. These standards become relevant **only** if Jinn later needs third-party-verifier interop without Jinn-specific verifier code. |
 
@@ -114,7 +118,7 @@ The full design spec (separate doc) should cover:
 
 4. **Artifact-type vocabulary specification** — Required `artifactType` values (`trajectory`, `system_snapshot`, `output.<kind>`), reserved standard types with their semantic contracts (what `code_patch` / `research_note` / `promotion_record` etc. mean and what metadata each should carry), custom-type conventions, clarification that `session_transcript` and `trajectory` are complementary (not overlapping).
 
-5. **TEE integration (phased)** — First target platform (D4), deployment shape (image → enclave), key sealing / execution-signing-key lifecycle, quote verification path. Nitro is likely first target and has no production-grade on-chain quote verifier; **V2 assumes off-chain verification**. Explicit binding of envelope hash to attestation `REPORTDATA` per §3.
+5. **TEE integration (phased)** — Target platform: **Phala Dstack** (D4). Deployment shape (Docker image → Phala-managed enclave), key sealing / execution-signing-key lifecycle, quote verification path. Phala exposes on-chain attestation verification as a primitive, so **V2 can do on-chain verification** — design spec should evaluate whether to do on-chain verification at V2 (Phala-native) or start off-chain and add on-chain as a follow-up. Explicit binding of envelope hash to attestation `REPORTDATA` per §3.
 
 6. **Operator-declared builds + reproducibility tooling** — Reproducible image from published source is the gate for `attested`. **For Node.js / TypeScript operators specifically**, this is a multi-week workstream (lockfile-only installs, native-module determinism, `SOURCE_DATE_EPOCH`, tarball ordering, base-image digest pinning); design spec must call out tooling choice (Nix / buildkit / Bazel) and the **challenger-side rebuild pipeline** (fetch `bundleCid` → rebuild → compare measurement). Challenger narrative: "does published source honestly emit `jinn.trajectory.v1`?"
 
@@ -152,8 +156,6 @@ The full design spec (separate doc) should cover:
 
 | ID | Question | Notes |
 |----|-----------|--------|
-| **D1** | **Ship order:** envelope + trajectory first **(A)**, or TEE on `portfolio.v0` first **(B)**? | Epic opening question. Research doc §V1 makes the directional case for **(A)**. Design spec should confirm (A) or explicitly push back. |
-| **D4** | **First TEE target** | Nitro (fastest to ship, AWS-only, off-chain verification only) vs TDX (broader coverage, DCAP verifier path) vs Phala (opinionated on-chain integration, stateful operators). Selection constrains §4.5's on-chain verification story. |
 | **D8** | **Trajectory / verdict / artifact access + gating + redaction + protocol monetization** | Three candidate access models (open / x402-pinned-plaintext / x402-encrypted-at-rest); per-item pricing enforcement (current handler is flat); closing the "free route always exists" gap; evaluator access policy for gated content; normative redaction allowlist at `attested` tier; verdict envelope gating defaults; triple-as-bundle x402 fetch primitive; protocol fee-split (operator / evaluator / Treasury / challenge pool) on x402 payments. **Reserved for separate discussion** — does not block the envelope / knowledge-graph design. |
 
 **Resolved since v0.1** (all documented in §3):
@@ -161,8 +163,10 @@ The full design spec (separate doc) should cover:
 - **D3a** — manifest signing identity (single field, two kinds)
 - **D3b** — operator-level identity (Safe address)
 - **D3c** — source-code identity (`executor.source` IPFS bundle)
+- **D1** — ship order (envelope + trajectory first; optional parallel Phala spike)
 - **D2** — canonical JSON (RFC 8785 JCS)
 - **D3d** — ERC-8004 three-registry separation (Identity / Validation / Reputation)
+- **D4** — first TEE target (Phala Dstack)
 - **D5** — envelope vs envelope+verdict (single envelope, role-discriminated)
 - **D6** — enclave-direct vs host-mediated signing (host-mediated)
 - **K1–K9** — full knowledge-data-model decisions (see §3.1–§3.3)
@@ -196,6 +200,7 @@ The full design spec (separate doc) should cover:
 | **Measurement** | A hash of the code actually running inside the enclave. The attestation quote declares it; challengers reproduce it by rebuilding `executor.source.bundleCid`. Non-TEE operators still declare an expected measurement — they just can't prove it at runtime. |
 | **EAT** | IETF **Entity Attestation Token** — vendor-agnostic framing for TEE quotes / evidence; informs the `attestation` field shape. |
 | **ERC-8004 three registries** | (a) **Identity Registry** — what is this entity (agent, intent, envelope, artifact, source bundle). (b) **Validation Registry** — request/response for verification events (e.g. challenger re-verifies attestation). (c) **Reputation Registry** — aggregated signals on operators (emergent, not hand-edited). |
+| **Phala Dstack** | The TEE substrate selected for V2 (D4). TDX hardware + DCAP attestation under Phala's protocol-level identity layer. Exposes on-chain attestation verification as a primitive; operates as a decentralized network rather than cloud-provider-specific. Trust surface includes Intel TDX roots + Phala protocol + operator source honesty. Design spec: EAT `profile` string reflects the Phala layer; verifiers understand both Phala's protocol identity and the underlying TDX quote. |
 | **SCITT / Transparency Service** | IETF **supply-chain** pattern: log **signed statements**, issue **receipts**. Useful **later** for third-party verifiers; **not** required for Jinn V1 trajectory storage. |
 | **DSSE / in-toto** | Standard **signing envelopes** for attestations; optional future interop, not core to V1. |
 
@@ -212,4 +217,4 @@ The full design spec (separate doc) should cover:
 
 ---
 
-*End of scope doc. Full design: create `2026-04-24-jinn-execution-envelope-tee-design.md` (or later) after D1, D4, D8 are resolved.*
+*End of scope doc. Full design: create `2026-04-24-jinn-execution-envelope-tee-design.md` (or later) once D8 is resolved (or explicitly scoped out into a sibling epic).*
