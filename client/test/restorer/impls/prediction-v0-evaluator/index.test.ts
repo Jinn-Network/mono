@@ -59,7 +59,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
 
     expect(out.gating.verdict).toBe('PASS');
-    expect(out.artifacts[0]?.metadata).toMatchObject({ schemaVersion: 'prediction.v0.verdict.v1' });
+    expect(out.artifacts[0]?.metadata).toMatchObject({ verdict: 'PASS' });
   });
 
   it('REJECTED when submittedAt > window.endTs', async () => {

@@ -475,7 +475,6 @@ describe('PortfolioV0Evaluator', () => {
       expect(existsSync(verdictPath)).toBe(true);
 
       const verdict = JSON.parse(readFileSync(verdictPath, 'utf-8'));
-      expect(verdict.schemaVersion).toBe('portfolio.v0.eval.manifest.v1');
       expect(verdict.verdict).toBe('PASS');
       expect(verdict.checks).toBeDefined();
       expect(Array.isArray(verdict.checks)).toBe(true);
@@ -778,7 +777,7 @@ describe('PortfolioV0Evaluator', () => {
       expect(verdict.scoreVersion).toBe('v1');
     });
 
-    it('verdict.json has correct schemaVersion', async () => {
+    it('verdict.json has no legacy schemaVersion field', async () => {
       const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
       const ctx = makeCtx(wd, impl);
@@ -786,7 +785,8 @@ describe('PortfolioV0Evaluator', () => {
       await impl.run(ctx);
 
       const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
-      expect(verdict.schemaVersion).toBe('portfolio.v0.eval.manifest.v1');
+      expect(verdict.schemaVersion).toBeUndefined();
+      expect(verdict.verdict).toBeDefined();
     });
 
     it('verdict.json carries onchainCreationBlock from manifest intent provenance', async () => {

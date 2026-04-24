@@ -171,7 +171,6 @@ export class PredictionV0Evaluator implements RestorerImpl {
     // 7. Assemble + sign verdict manifest
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
     const verdictManifestBase: Record<string, unknown> = {
-      schemaVersion: 'prediction.v0.verdict.v1',
       generatedAt: Date.now(),
       intent: envelope.intent,
       evaluator: { safeAddress: this.config.evaluatorSafeAddress, agentEoa: evaluatorAccount.address },
@@ -274,7 +273,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
         {
           path: 'verdict.json',
           artifactType: 'evaluation_verdict',
-          metadata: { verdict, score, schemaVersion: 'prediction.v0.verdict.v1' },
+          metadata: { verdict, score },
           access: { kind: 'open' },
         },
       ],

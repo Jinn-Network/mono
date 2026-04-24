@@ -450,7 +450,7 @@ describe('Engine packaging integration', () => {
     mkdirSync(join(workingDir, 'env'), { recursive: true });
     writeFileSync(join(workingDir, 'intent.json'), '{}');
     // verdict.json must exist so walkArtifacts picks it up (evaluator impl writes it)
-    writeFileSync(join(workingDir, 'verdict.json'), JSON.stringify({ schemaVersion: 'portfolio.v0.eval.manifest.v1', verdict: 'PASS' }));
+    writeFileSync(join(workingDir, 'verdict.json'), JSON.stringify({ verdict: 'PASS' }));
 
     // Build a minimal valid PortfolioV0VerdictPayload
     const verdictPayload = {

@@ -5,8 +5,8 @@
  * No LLM. Pure deterministic verification per spec §7.
  *
  * Architecture decision (T7):
- *   The engine (locked) builds portfolio.v0.manifest.v1. The verdict manifest
- *   shape is portfolio.v0.eval.manifest.v1 (§5.2). Since the engine cannot be
+ *   The engine (locked) builds the restoration envelope. The eval impl assembles
+ *   and signs the verdict manifest itself (§5.2). Since the engine cannot be
  *   modified, the eval impl assembles and signs the verdict manifest itself,
  *   writes it as verdict.json in workingDir, and declares it as an artifact
  *   with role "evaluation_verdict". The engine's outer manifest becomes the
@@ -167,7 +167,6 @@ function _assembleUnsignedManifest(params: {
   })();
 
   return {
-    schemaVersion: 'portfolio.v0.eval.manifest.v1',
     intent: intentProvenance,
     evaluator: {
       safeAddress: evaluatorSafeAddress,
@@ -644,7 +643,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
         {
           path: 'verdict.json',
           artifactType: 'evaluation_verdict',
-          metadata: { verdict, score, schemaVersion: 'portfolio.v0.eval.manifest.v1' },
+          metadata: { verdict, score },
           tags: ['verdict', 'evaluation'],
           access: { kind: 'open' },
         },

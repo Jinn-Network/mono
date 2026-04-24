@@ -172,7 +172,6 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
 
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
     const baseManifest: Record<string, unknown> = {
-      schemaVersion: 'prediction.apy.v0.verdict.v1',
       generatedAt: Date.now(),
       intent: submissionEnvelope.intent,
       evaluator: { safeAddress: this.config.evaluatorSafeAddress, agentEoa: evaluatorAccount.address },
@@ -271,7 +270,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
         {
           path: 'verdict.json',
           artifactType: 'evaluation_verdict',
-          metadata: { verdict, score: scored.score, schemaVersion: 'prediction.apy.v0.verdict.v1' },
+          metadata: { verdict, score: scored.score },
           access: { kind: 'open' },
         },
       ],
