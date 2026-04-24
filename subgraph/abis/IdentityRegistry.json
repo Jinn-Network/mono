@@ -1,0 +1,40 @@
+[
+  {
+    "type": "function",
+    "name": "register",
+    "inputs": [
+      { "name": "agentURI", "type": "string" },
+      {
+        "name": "metadata",
+        "type": "tuple[]",
+        "components": [
+          { "name": "metadataKey", "type": "string" },
+          { "name": "metadataValue", "type": "bytes" }
+        ]
+      }
+    ],
+    "outputs": [
+      { "name": "agentId", "type": "uint256" }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "Register",
+    "inputs": [
+      { "name": "agentId", "type": "uint256", "indexed": true },
+      { "name": "owner", "type": "address", "indexed": true },
+      { "name": "agentURI", "type": "string", "indexed": false },
+      {
+        "name": "metadata",
+        "type": "tuple[]",
+        "components": [
+          { "name": "metadataKey", "type": "string" },
+          { "name": "metadataValue", "type": "bytes" }
+        ],
+        "indexed": false
+      }
+    ],
+    "anonymous": false
+  }
+]
