@@ -1,6 +1,6 @@
 # Execution envelope + trajectory + TEE — **Scope** (pre-design)
 
-**Version:** 0.7 (scope — verification topology explicit; evaluator puts verification on critical path)  
+**Version:** 0.8 (scope — access/gating/monetization deferred out of epic; scope fully locked for design spec)  
 **Date:** 2026-04-24  
 **Status:** scope locked for follow-on design work (open decisions in §6)  
 **Beads:** `jinn-mono-38o` (epic: execution envelope + TEE integration)  
@@ -13,7 +13,7 @@
 - `client/src/types/portfolio.ts`, `prediction.ts`, `prediction-apy.ts` — current manifest schemas per kind (all collapsing into `jinn.execution.v1`)
 - `client/src/restorer/engine/` — packaging, manifest assembly, signing, `evidenceHash` path
 - `client/src/discovery/registry.ts`, `subgraph.ts` — current ERC-8004 Identity-Registry-only integration
-- `client/src/x402/` — payment-gated artifacts (access/gating design deferred to D8)
+- `client/src/x402/` — payment-gated artifacts (remains a testing/dev capability in V1; protocol-level access/gating/monetization deferred to a sibling epic)
 
 ## Changes since v0.1
 
@@ -29,7 +29,9 @@
 
 **v0.7 locks (via "who runs verification" discussion):** **Jinn-the-protocol operates no verification infrastructure.** Verification is a distributed, self-service capability — the SDK is a shared library; participants load it into their own processes based on incentive (buyers on ingestion, evaluators before producing verdicts, challengers opportunistically, indexers during indexing). Critically: **evaluators are required to verify the restoration envelope's attestation before producing a verdict**, and to attach the verification result to their verdict payload. This puts attestation verification on the Jinn loop's critical path without centralizing it — every restoration→verdict pair carries its own verification record, produced by whoever runs the evaluator.
 
-**Still open:** D8 (access / gating / redaction / monetization — deferred for separate discussion).
+**v0.8 defers D8 entirely out of this epic.** Access / gating / redaction / monetization is a separable concern — the V1 envelope schema already has an optional `access` field that keeps x402 usable as a testing tool without committing to a specific monetization model. Land the envelope + trajectory + knowledge model + TEE first; revisit access/gating/monetization as its own sibling epic once the corpus exists and buyer consumption patterns surface real pressure. V1 ships: plaintext IPFS by default, x402 remains a testing/dev capability, no Treasury rake, no protocol-level monetization. This is an intentional "ship the substrate first, monetize later" sequencing.
+
+**Scope is now fully locked for design-spec drafting.** No open decisions.
 
 ## 1. Purpose of this document
 
@@ -119,9 +121,9 @@ The full design spec (separate doc) should cover:
 
 1. **`intent.v1` schema** — Concrete field list (see §3.1 K2); canonical JSON shape; migration of `DesiredState` consumers to the new type.
 
-2. **`jinn.execution.v1` schema** — Concrete field list: `schemaVersion`, `kind`, `role` (restoration | verdict), `generatedAt`, `intent`, `participant`, `window`, `executor` (incl. `signingKey`, `source`), `evidenceTier`, `attestation` (nullable), `trajectory` (required per §2.5, with optional access/encryption blocks — shape pending D8), `artifacts[]` (each with `artifactType`, `cid`, `sha256`, optional metadata), kind-/role-typed `payload`, `signature`. Signing input normatively uses **RFC 8785 JCS** (D2). Verdict payload includes `restorationEnvelope: { cid, sha256 }` AND `verificationOfRestoration: { sdkVersion, timestamp, valid, measurement, failureReason? }` (see §3.3 evaluator-critical-path row).
+2. **`jinn.execution.v1` schema** — Concrete field list: `schemaVersion`, `kind`, `role` (restoration | verdict), `generatedAt`, `intent`, `participant`, `window`, `executor` (incl. `signingKey`, `source`), `evidenceTier`, `attestation` (nullable), `trajectory` (required per §2.5, with optional `access` field carrying today's `{kind, endpoint?, priceUsdc?}` shape for forward-compat with a future gating epic), `artifacts[]` (each with `artifactType`, `cid`, `sha256`, optional metadata, optional `access`), kind-/role-typed `payload`, `signature`. Signing input normatively uses **RFC 8785 JCS** (D2). Verdict payload includes `restorationEnvelope: { cid, sha256 }` AND `verificationOfRestoration: { sdkVersion, timestamp, valid, measurement, failureReason? }` (see §3.3 evaluator-critical-path row).
 
-3. **`jinn.trajectory.v1` profile** — OTLP-JSON constraints, required attributes per `jinn.span.kind`, minimum coverage thresholds, conformance test obligations. Trajectory↔artifact linkage (span attribute `jinn.artifact.cid` + artifact metadata `producedBy`). Attested-tier additions for TLS-transcript CIDs inside LLM / venue spans. Max size / chunking guidance even under one-shot signing.
+3. **`jinn.trajectory.v1` profile** — OTLP-JSON constraints, required attributes per `jinn.span.kind`, minimum coverage thresholds, conformance test obligations. Trajectory↔artifact linkage (span attribute `jinn.artifact.cid` + artifact metadata `producedBy`). Attested-tier additions for TLS-transcript CIDs inside LLM / venue spans. Max size / chunking guidance even under one-shot signing. Redaction semantics (operator-local secret scrubbing) are in scope as a mechanism; a normative redaction allowlist is deferred to the gating sibling epic.
 
 4. **Artifact-type vocabulary specification** — Required `artifactType` values (`trajectory`, `system_snapshot`, `output.<kind>`), reserved standard types with their semantic contracts (what `code_patch` / `research_note` / `promotion_record` etc. mean and what metadata each should carry), custom-type conventions, clarification that `session_transcript` and `trajectory` are complementary (not overlapping).
 
@@ -149,6 +151,7 @@ The full design spec (separate doc) should cover:
 
 ## 5. Explicitly out of scope (this epic / V1)
 
+- **Access / gating / redaction / monetization** (the scope of former D8) — explicitly deferred to a sibling epic. V1 envelope carries an optional `access` field with today's `{kind, endpoint?, priceUsdc?}` shape for forward-compat; plaintext IPFS remains the default; x402 remains a testing/dev capability; no Treasury rake, no protocol-level monetization. The gating epic will revisit encryption-at-rest, normative redaction allowlists, evaluator-access policies, verdict gating defaults, query-engine patterns, and facilitator-level rake once the corpus exists and buyer pressure is legible.
 - **SCITT architecture end-to-end** (Issuer / Transparency Service / Receipts) as a **requirement** for shipping trajectory storage.
 - **Sigstore Rekor**, **hosted SCITT TS**, or **custom Merkle transparency log** unless we later add a dedicated "interop" milestone.
 - **C2PA** for non-media agent traces (unless we explicitly decide media artifacts need it).
@@ -159,11 +162,11 @@ The full design spec (separate doc) should cover:
 - **Trajectory content indexing** (querying over span content) — V1 indexes metadata only; content-level indexing is a buyer-side or V2 service.
 - **`did:*` identity layer** — deferred to V3 if a concrete need appears.
 
-## 6. Open decisions (must be resolved in the design spec)
+## 6. Open decisions
 
-| ID | Question | Notes |
-|----|-----------|--------|
-| **D8** | **Trajectory / verdict / artifact access + gating + redaction + protocol monetization** | Three candidate access models (open / x402-pinned-plaintext / x402-encrypted-at-rest); per-item pricing enforcement (current handler is flat); closing the "free route always exists" gap; evaluator access policy for gated content; normative redaction allowlist at `attested` tier; verdict envelope gating defaults; triple-as-bundle x402 fetch primitive; protocol fee-split (operator / evaluator / Treasury / challenge pool) on x402 payments. **Reserved for separate discussion** — does not block the envelope / knowledge-graph design. |
+**None.** Scope is fully locked for design-spec drafting. D8 (access / gating / redaction / monetization) was deferred out of this epic in v0.8 — see §5.
+
+A sibling epic for access/gating/monetization should be filed when the corpus exists and buyer consumption patterns surface real pressure. Seeds for that epic, carried forward from discussion: layered model (subgraph free + query engines paid + operator content-serving), facilitator-level rake (Jinn facilitator wraps `@x402/evm/exact/facilitator`, rakes on settlement), encryption-at-rest for attested-tier trajectories, evaluator-access policy (free-as-commitment-path vs pay-and-reimburse), normative redaction allowlist.
 
 **Resolved since v0.1** (all documented in §3):
 
@@ -222,8 +225,8 @@ The full design spec (separate doc) should cover:
 - **ERC-8004** wiring is explicit across all three registries (Identity / Validation / Reputation); subgraph schema compiles against the design.
 - **Migration** is a concrete, executable plan — not "future work."
 - **Conformance suite** ships with the design, not after.
-- **x402 / access / gating / monetization** (D8) will require a separate design pass — the envelope must accommodate it without re-design.
+- The envelope's optional `access` field accommodates a future gating epic without schema re-design.
 
 ---
 
-*End of scope doc. Full design: create `2026-04-24-jinn-execution-envelope-tee-design.md` (or later) once D8 is resolved (or explicitly scoped out into a sibling epic).*
+*End of scope doc. Scope is ready for design-spec drafting — create `2026-04-24-jinn-execution-envelope-tee-design.md` (or later). A sibling epic for access / gating / monetization is recommended as follow-up.*
