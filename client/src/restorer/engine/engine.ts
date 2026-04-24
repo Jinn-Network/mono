@@ -8,6 +8,7 @@
  */
 
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { IntentPersistence, type PersistedIntent, type PersistedIntentInput } from './persistence.js';
 import { IntentState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
@@ -37,6 +38,7 @@ import {
 import type { RestorerImpl, RestorationOutput } from '../types.js';
 import { SkippableError } from '../types.js';
 import type { Role } from '../../types/envelope.js';
+import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -127,6 +129,10 @@ export class RestorationEngine {
   // Transient storage for impl output between runImpl and pack transitions.
   // Keyed by requestId; cleared after successful pack.
   private readonly implOutputs = new Map<string, RestorationOutput>();
+
+  // Transient storage for trajectory CID+sha256 refs produced by runImpl.
+  // Keyed by requestId; cleared after successful pack.
+  private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string } | null>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
   private stopped = false;
@@ -515,6 +521,12 @@ export class RestorationEngine {
     const msUntilEndTs = () => Math.max(0, windowEndTs - Date.now());
     const endTimer = setTimeout(() => abort.abort(), msUntilEndTs());
 
+    // Create a trajectory collector for this run.
+    const trajectory = new TrajectoryCollector({
+      intentCid: intent.intentCid ?? '',
+      runId: randomUUID(),
+    });
+
     try {
       const ctx = {
         intent: (intent.restorationJob ?? {
@@ -531,6 +543,7 @@ export class RestorationEngine {
         },
         abort: abort.signal,
         msUntilEndTs,
+        trajectory,
       };
 
       let output: RestorationOutput;
@@ -561,6 +574,31 @@ export class RestorationEngine {
         }
       }
       this.implOutputs.set(intent.requestId, output);
+
+      // Emit trajectory to IPFS (non-fatal — envelope assembly continues even if
+      // upload fails; trajectoryRef stays null and envelope.trajectory is null).
+      let trajectoryRef: { cid: string; sha256: string } | null = null;
+      if (this.envelopeDeps && trajectory.snapshot().spans.length > 0) {
+        try {
+          const { privateKeyToAccount } = await import('viem/accounts');
+          const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
+          const { cid, sha256 } = await emitTrajectory({
+            collector: trajectory,
+            runId: trajectory.runId,
+            signerPrivateKey: this.envelopeDeps.agentEoaPrivateKey,
+            signerAddress: account.address as `0x${string}`,
+            ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
+          });
+          trajectoryRef = { cid, sha256 };
+          console.log(`[restorer-engine] ${intent.requestId}: trajectory emitted cid=${cid}`);
+        } catch (err) {
+          console.warn(
+            `[restorer-engine] ${intent.requestId}: trajectory emit failed (non-fatal):`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
+      this.trajectoryRefs.set(intent.requestId, trajectoryRef);
 
       // Persist impl output BEFORE the state transition so that a crash after
       // the transition (RUNNING → POST_SNAPSHOT) but before pack() runs will
@@ -730,6 +768,13 @@ export class RestorationEngine {
     // 5. Assemble + sign envelope → envelope CID now known
     // TODO(build-info): replace 'dev' and the zero digest with real build-time
     // constants from a future build-info.ts module generated at CI time.
+    // Retrieve the trajectory ref emitted by runImpl (may be null if no spans
+    // were collected or if IPFS upload failed non-fatally).
+    const trajectoryRef = this.trajectoryRefs.get(intent.requestId) ?? null;
+    const envelopeTrajectory = trajectoryRef
+      ? { cid: trajectoryRef.cid, sha256: trajectoryRef.sha256 }
+      : null;
+
     const envelopeInputs: EnvelopeInputs = {
       kind: specKind,
       role,
@@ -749,6 +794,7 @@ export class RestorationEngine {
         codeDigest: 'sha256:' + '0'.repeat(64),
         signingKey: { kind: 'agent-eoa', pubkey: agentEoa },
       },
+      trajectory: envelopeTrajectory,
       artifacts,
       payload: envelopePayload,
       generatedAt,
@@ -779,8 +825,9 @@ export class RestorationEngine {
     });
     console.log(`[restorer-engine] ${intent.requestId} PACKAGING → DELIVERING manifestCid=${manifestCid}`);
 
-    // Clean up impl output (no longer needed)
+    // Clean up impl output and trajectory ref (no longer needed)
     this.implOutputs.delete(intent.requestId);
+    this.trajectoryRefs.delete(intent.requestId);
   }
 
   /**
