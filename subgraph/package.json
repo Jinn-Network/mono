@@ -1,0 +1,23 @@
+{
+  "name": "@jinn/subgraph",
+  "version": "0.1.0",
+  "description": "ERC-8004 subgraph indexing Jinn intents, execution envelopes, artifacts, and source bundles into a queryable knowledge graph.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build",
+    "test": "graph test",
+    "create-local": "graph create --node http://localhost:8020/ jinn/jinn-v1",
+    "remove-local": "graph remove --node http://localhost:8020/ jinn/jinn-v1",
+    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 jinn/jinn-v1",
+    "deploy-studio": "graph deploy --studio jinn-v1"
+  },
+  "dependencies": {
+    "@graphprotocol/graph-cli": "0.80.0",
+    "@graphprotocol/graph-ts": "0.35.1"
+  },
+  "devDependencies": {
+    "matchstick-as": "0.6.0"
+  }
+}
