@@ -6,6 +6,7 @@ import type { Store } from '../store/store.js';
 import type { IntentPostRecord, IntentPostingPolicyType } from '../store/store.js';
 import { TransientError, type RestorationJob, type RequestId } from '../types/index.js';
 import type { IntentCandidate, IntentPostingPolicy } from './sources.js';
+import type { Registry8004 } from '../discovery/registry.js';
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
 const POST_LOCK_STALE_AFTER_MS = 60_000;
@@ -53,6 +54,7 @@ export class IntentPostingService {
   constructor(
     private readonly adapter: ExecutionAdapter,
     private readonly store: Store,
+    private readonly registry?: Registry8004,
   ) {}
 
   async postCandidate(
@@ -144,6 +146,32 @@ export class IntentPostingService {
         outcome: 'ok',
         detail: `Posted intent for desired state ${candidate.restorationJob.id} via ${candidate.sourceKey}`,
       }, 'creator');
+
+      // ERC-8004 Identity Registry registration (Plan E). Best-effort: a failure
+      // here logs + emits a warning but does not roll back the on-chain post.
+      const intentCid = candidate.intentCid;
+      if (this.registry && intentCid && candidate.restorationJob.spec?.kind) {
+        const creator = opts.creatorSafeAddress ?? creatorSafeAddress;
+        const kind = candidate.restorationJob.spec.kind;
+        this.registry.registerIntent({
+          intentCid,
+          kind,
+          creator: creator === GLOBAL_CREATOR_SCOPE ? '' : creator,
+          createdAt: nowMs,
+          requestId: requestId as `0x${string}`,
+        }).catch((err: unknown) => {
+          console.warn(
+            `[posting-service] registerIntent failed for ${requestId}: ${err instanceof Error ? err.message : err}`,
+          );
+          emitEvent(this.store, {
+            kind: 'intent_registry_failed',
+            requestId,
+            specKind: kind,
+            outcome: 'failed',
+            detail: err instanceof Error ? err.message : String(err),
+          }, 'creator');
+        });
+      }
       this.store.upsertIntentPostRecord({
         creatorSafeAddress,
         sourceKey: candidate.sourceKey,

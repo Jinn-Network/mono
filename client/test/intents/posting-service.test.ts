@@ -180,4 +180,96 @@ describe('IntentPostingService', () => {
     store.close();
     await adapter.stop();
   });
+
+  describe('ERC-8004 registry integration (Plan E)', () => {
+    it('calls registerIntent after a successful post when intentCid + spec.kind are provided', async () => {
+      const adapter = new LocalAdapter();
+      await adapter.initialize();
+      const store = new Store(':memory:');
+
+      const registerIntent = vi.fn().mockResolvedValue(1n);
+      const mockRegistry = { registerIntent } as any;
+
+      const service = new IntentPostingService(adapter, store, mockRegistry);
+      const candidate = {
+        restorationJob: {
+          id: 'registry-test',
+          description: 'registry test',
+          spec: { kind: 'portfolio.v0' },
+        },
+        sourceKey: 'manual:registry-test',
+        postingPolicy: { kind: 'once_per_safe' } as const,
+        intentCid: 'bafy-test-cid',
+      };
+
+      await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+
+      // Give the fire-and-forget promise a chance to settle.
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(registerIntent).toHaveBeenCalledTimes(1);
+      const args = registerIntent.mock.calls[0][0];
+      expect(args.intentCid).toBe('bafy-test-cid');
+      expect(args.kind).toBe('portfolio.v0');
+
+      store.close();
+      await adapter.stop();
+    });
+
+    it('skips registry call when intentCid is absent', async () => {
+      const adapter = new LocalAdapter();
+      await adapter.initialize();
+      const store = new Store(':memory:');
+
+      const registerIntent = vi.fn().mockResolvedValue(1n);
+      const mockRegistry = { registerIntent } as any;
+
+      const service = new IntentPostingService(adapter, store, mockRegistry);
+      const candidate = {
+        restorationJob: {
+          id: 'no-cid-test',
+          description: 'no cid',
+          spec: { kind: 'portfolio.v0' },
+        },
+        sourceKey: 'manual:no-cid-test',
+        postingPolicy: { kind: 'once_per_safe' } as const,
+        // No intentCid
+      };
+
+      await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(registerIntent).not.toHaveBeenCalled();
+
+      store.close();
+      await adapter.stop();
+    });
+
+    it('does not throw if registerIntent rejects (best-effort)', async () => {
+      const adapter = new LocalAdapter();
+      await adapter.initialize();
+      const store = new Store(':memory:');
+
+      const registerIntent = vi.fn().mockRejectedValue(new Error('rpc error'));
+      const mockRegistry = { registerIntent } as any;
+
+      const service = new IntentPostingService(adapter, store, mockRegistry);
+      const candidate = {
+        restorationJob: {
+          id: 'fail-registry-test',
+          description: 'fail test',
+          spec: { kind: 'portfolio.v0' },
+        },
+        sourceKey: 'manual:fail-registry-test',
+        postingPolicy: { kind: 'once_per_safe' } as const,
+        intentCid: 'bafy-fail',
+      };
+
+      // Should not throw even though registerIntent rejects
+      await expect(service.postCandidate(candidate, { creatorSafeAddress: SAFE_A })).resolves.toBeDefined();
+
+      store.close();
+      await adapter.stop();
+    });
+  });
 });

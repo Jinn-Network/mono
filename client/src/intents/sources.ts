@@ -12,6 +12,13 @@ export interface IntentCandidate {
   restorationJob: RestorationJob;
   sourceKey: string;
   postingPolicy: IntentPostingPolicy;
+  /**
+   * IPFS CID of the signed intent document, if already uploaded by the caller
+   * (e.g. `jinn submit-intent --spec-file`). When present, the posting service
+   * uses it to register the intent on the ERC-8004 Identity Registry after a
+   * successful on-chain post (best-effort, Plan E).
+   */
+  intentCid?: string;
   sourceMeta?: {
     kind?: string;
     bucketKey?: string;
