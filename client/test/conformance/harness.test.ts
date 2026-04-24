@@ -246,6 +246,32 @@ describe('runConformance — known-bad matrix', () => {
     expect(backRefCheck?.detail).toMatch(/sha256/i);
   });
 
+  it('FAIL: verdict verificationOfRestoration has empty checks[] → verdict.verification-record fails', async () => {
+    const vfx = await buildGoodVerdictFixture();
+    const badPayload = {
+      ...(vfx.envelope.payload as Record<string, unknown>),
+      verificationOfRestoration: {
+        claimedTier: 'self-signed',
+        sdkVersion: '1.0.0',
+        timestamp: 1700000000000,
+        checks: [], // empty — should fail
+        overall: 'valid',
+      },
+    };
+    const badEnvelope = { ...vfx.envelope, payload: badPayload };
+    const report = await runConformance({
+      envelopeCid: vfx.envelopeCid,
+      options: {
+        envelopeBytes: new TextEncoder().encode(JSON.stringify(badEnvelope)),
+        restorationEnvelopeBytes: vfx.restorationEnvelopeBytes,
+      },
+    });
+    expect(report.overall).toBe('FAIL');
+    const verCheck = report.checks.find((c) => c.id === 'verdict.verification-record');
+    expect(verCheck?.passed).toBe(false);
+    expect(verCheck?.detail).toMatch(/checks/i);
+  });
+
   it('FAIL: raw credential in trajectory → secret-scrub fails', async () => {
     const fx = await buildGoodRestorationFixture();
     const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
