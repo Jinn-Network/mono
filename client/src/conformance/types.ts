@@ -79,6 +79,10 @@ export interface ConformanceContext {
   trajectoryBytes?: Uint8Array;
   trajectory?: unknown; // typed after Plan D schema lands
   sourceBundle?: { files: Map<string, string>; manifest?: Record<string, unknown> };
+  /** Pre-fetched bytes of the referenced restoration envelope (for verdict checks). */
+  restorationEnvelopeBytes?: Uint8Array;
+  /** Pre-loaded restoration envelope object (for verdict checks). */
+  restorationEnvelope?: SignedEnvelope;
   options: ConformanceOptions;
 }
 
