@@ -228,6 +228,13 @@ export class ClaudeMcpPredictionApyImpl implements RestorerImpl {
         reserveSymbol,
         sessionDurationMs: endedAt - startedAt,
       },
+      restorationPayload: {
+        prediction: {
+          predictedBps: submission.predictedBps,
+          submittedAt,
+          modelId,
+        },
+      },
       artifacts: [
         { path: 'prediction-apy.json', artifactType: 'prediction_submission' },
         {

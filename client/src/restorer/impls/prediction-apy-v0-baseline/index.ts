@@ -127,6 +127,13 @@ export class PredictionApyV0BaselineImpl implements RestorerImpl {
         twApyBps,
         sampleCount,
       },
+      restorationPayload: {
+        prediction: {
+          predictedBps: prediction.predictedBps,
+          submittedAt,
+          modelId: prediction.modelId,
+        },
+      },
       artifacts: [{ path: 'prediction-apy.json', artifactType: 'prediction_submission' }],
     };
   }

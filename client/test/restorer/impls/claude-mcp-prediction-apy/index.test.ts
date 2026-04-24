@@ -99,6 +99,17 @@ describe('ClaudeMcpPredictionApyImpl (mocked session)', () => {
     expect(payload.predictedBps).toBe('350');
     expect(payload.rationale).toBe('observed rate');
     expect(payload.modelId).toContain('claude-mcp-prediction-apy');
+
+    // restorationPayload must match PredictionApyV0RestorationPayloadSchema
+    const { PredictionApyV0RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-apy-v0.js');
+    expect(out.restorationPayload).toBeDefined();
+    const parsed = PredictionApyV0RestorationPayloadSchema.safeParse(out.restorationPayload);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.prediction.predictedBps).toBe('350');
+      expect(typeof parsed.data.prediction.submittedAt).toBe('number');
+      expect(parsed.data.prediction.modelId).toContain('claude-mcp-prediction-apy');
+    }
   });
 
   it('throws when session ends without submit_apy_prediction', async () => {
