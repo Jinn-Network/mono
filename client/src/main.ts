@@ -424,11 +424,16 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
   const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
+  const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
+  const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
   const { generators: autoIntentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
     network: config.network,
     rpcUrl: config.rpcUrl,
     autoIntentsDisabled,
     env: process.env,
+    agentEoa: agentEoaAddress,
+    safeAddress,
+    agentPrivateKey,
   });
   for (const line of autoIntentLogLines) {
     console.log(line);

@@ -12,11 +12,14 @@
  * with JINN_DISABLE_AUTO_INTENTS=1.
  */
 
+import { randomUUID } from 'node:crypto';
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import { readChainlinkLatest, scaleToDecimal } from '../venues/chainlink/client.js';
 import type { RestorationJob } from '../types/desired-state.js';
+import type { IntentV1, SignedIntentV1 } from '../types/intent.js';
 import { resolvePredictionV0Template } from './prediction-v0-template.js';
+import { signIntentV1 } from './signing.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -50,6 +53,16 @@ export interface PredictionV0AutoConfig {
   rpcUrl?: string;
   /** Injected publicClient — tests pass a mock; production leaves unset. */
   _publicClient?: PublicClient;
+  /**
+   * Agent EOA address. When provided alongside `safeAddress` and
+   * `agentPrivateKey`, the generator produces a `SignedIntentV1` embedded in
+   * the returned RestorationJob's `intent` field.
+   */
+  agentEoa?: `0x${string}`;
+  /** Safe address — embedded in `intent.creator.safeAddress`. */
+  safeAddress?: `0x${string}`;
+  /** Agent private key — used to sign the IntentV1. */
+  agentPrivateKey?: `0x${string}`;
 }
 
 export type PredictionV0Generator = () => Promise<RestorationJob | null>;
@@ -109,14 +122,38 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
     };
 
     try {
-      const intent = await resolvePredictionV0Template(template, {
+      const resolved = await resolvePredictionV0Template(template, {
         readCurrent: async ({ feed }) => {
           const reading = await readChainlinkLatest(feed, getPublicClient());
           return scaleToDecimal(reading.answer, reading.decimals);
         },
       });
-      // Return the resolved RestorationJob shape (intent is already valid).
-      return intent as unknown as RestorationJob;
+
+      // When signing credentials are available, produce a SignedIntentV1 and
+      // embed it in the RestorationJob's `intent` field so MechAdapter's
+      // `state.intent ?? buildRestorationJobPayload(...)` path picks it up.
+      if (config.agentEoa && config.safeAddress && config.agentPrivateKey) {
+        const intentDoc: IntentV1 = {
+          schemaVersion: 'intent.v1',
+          id: resolved.id ?? randomUUID(),
+          kind: 'prediction.v0',
+          description: resolved.description,
+          window: resolved.window,
+          spec: resolved.spec as IntentV1['spec'],
+          eligibility: resolved.eligibility ?? {},
+          creator: {
+            safeAddress: config.safeAddress,
+            agentEoa: config.agentEoa,
+          },
+          createdAt: Date.now(),
+        };
+        const signed: SignedIntentV1 = await signIntentV1(intentDoc, config.agentPrivateKey);
+        const job: RestorationJob = resolved as unknown as RestorationJob;
+        return { ...job, intent: signed };
+      }
+
+      // No signing credentials — return the resolved shape without a signed intent.
+      return resolved as unknown as RestorationJob;
     } catch {
       // Chainlink read failure or schema mismatch — skip this tick, try next.
       return null;
