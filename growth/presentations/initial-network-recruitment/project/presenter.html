@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Presenter — Jinn Initial Network Recruitment</title>
+<style>
+  :root {
+    --bg: #000;
+    --fg: #eaeaea;
+    --dim: #8a8a8a;
+    --accent: #d4b36a;
+    --panel: #0c0c0c;
+    --rule: #1f1f1f;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  .wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
+    height: 100%;
+    box-sizing: border-box;
+  }
+  .stage-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .notes-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .frame-box {
+    background: #000;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .frame-box.next { flex: 0 0 24%; }
+  iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: #000;
+  }
+  .label {
+    position: absolute;
+    top: 6px; left: 8px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+    background: rgba(0,0,0,0.55);
+    padding: 2px 6px;
+    border-radius: 3px;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .status {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--panel);
+    font-variant-numeric: tabular-nums;
+  }
+  .status .counter { color: var(--accent); font-size: 14px; letter-spacing: 0.06em; }
+  .status .clock { color: var(--fg); font-size: 14px; }
+  .status .elapsed { color: var(--dim); font-size: 12px; margin-left: 10px; }
+  .status .hint { color: var(--dim); font-size: 11px; }
+  .notes {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 18px 22px;
+    font-size: 18px;
+    line-height: 1.55;
+    color: var(--fg);
+  }
+  .notes .slide-title {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .notes p { margin: 0 0 12px 0; }
+  .notes em { color: var(--dim); font-style: normal; }
+  button.ctrl {
+    background: transparent;
+    color: var(--dim);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button.ctrl:hover { color: var(--fg); border-color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage-col">
+    <div class="frame-box">
+      <span class="label">Current</span>
+      <iframe id="current" src="Jinn - initial network recruitment.html" allow="fullscreen" title="Current slide"></iframe>
+    </div>
+    <div class="status">
+      <div>
+        <span class="counter" id="counter">—</span>
+        <span class="elapsed" id="elapsed">00:00 elapsed</span>
+      </div>
+      <div>
+        <span class="clock" id="clock">--:--</span>
+        <button class="ctrl" id="reset-timer" title="Reset elapsed timer">reset</button>
+        <button class="ctrl" id="open-audience" title="Open audience window (fullscreen-ready, no notes)">audience ↗</button>
+      </div>
+    </div>
+  </div>
+  <div class="notes-col">
+    <div class="frame-box next">
+      <span class="label">Next</span>
+      <iframe id="next" src="Jinn - initial network recruitment.html?role=next" title="Next slide" aria-hidden="true"></iframe>
+    </div>
+    <div class="notes" id="notes">
+      <div class="slide-title" id="slide-title">Loading…</div>
+      <div id="note-body"><em>Speaker notes will appear here.</em></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const current = document.getElementById('current');
+  const next = document.getElementById('next');
+  const counter = document.getElementById('counter');
+  const noteBody = document.getElementById('note-body');
+  const slideTitle = document.getElementById('slide-title');
+  const clockEl = document.getElementById('clock');
+  const elapsedEl = document.getElementById('elapsed');
+  const resetBtn = document.getElementById('reset-timer');
+  const audienceBtn = document.getElementById('open-audience');
+
+  let notes = [];
+  let total = 0;
+  let labels = [];
+  let activeIndex = 0;
+  let startTime = Date.now();
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  function tickClocks() {
+    const now = new Date();
+    clockEl.textContent = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+    const s = Math.floor((Date.now() - startTime) / 1000);
+    const mm = Math.floor(s / 60);
+    const ss = s % 60;
+    elapsedEl.textContent = `${pad2(mm)}:${pad2(ss)} elapsed`;
+  }
+  setInterval(tickClocks, 1000);
+  tickClocks();
+
+  resetBtn.addEventListener('click', () => { startTime = Date.now(); tickClocks(); });
+
+  audienceBtn.addEventListener('click', () => {
+    const w = window.open('Jinn - initial network recruitment.html', 'jinn-audience',
+      'width=1920,height=1080,menubar=no,toolbar=no,location=no,status=no');
+    if (!w) alert('Popup blocked — allow popups for this site.');
+  });
+
+  function renderNote(i) {
+    activeIndex = i;
+    counter.textContent = `${pad2(i + 1)} / ${pad2(total || notes.length)}`;
+    const label = labels[i] || `Slide ${i + 1}`;
+    slideTitle.textContent = `${pad2(i + 1)} · ${label}`;
+    const text = notes[i];
+    if (text) {
+      noteBody.innerHTML = '';
+      text.split(/\n\n+/).forEach(p => {
+        const el = document.createElement('p');
+        el.textContent = p;
+        noteBody.appendChild(el);
+      });
+    } else {
+      noteBody.innerHTML = '<em>(no speaker note for this slide)</em>';
+    }
+  }
+
+  function setNextIframe(i) {
+    try {
+      const nextIdx = Math.min(i + 1, total - 1);
+      const nextWin = next.contentWindow;
+      const stage = next.contentDocument?.querySelector('deck-stage');
+      if (stage && typeof stage.goTo === 'function') {
+        stage.goTo(nextIdx);
+      } else if (nextWin) {
+        // Fallback: dispatch a key event equivalent to goto
+        // deck-stage listens on window; simplest: set localStorage and reload? too jarring.
+        // Try calling the internal API if exposed:
+        try {
+          nextWin.postMessage({ gotoSlide: nextIdx }, '*');
+        } catch (e) {}
+      }
+    } catch (e) { /* cross-origin or not ready */ }
+  }
+
+  function hookDeck(win, { onChange }) {
+    try {
+      win.addEventListener('message', (e) => {
+        const d = e.data;
+        if (d && typeof d.slideIndexChanged === 'number') {
+          onChange(d.slideIndexChanged);
+        }
+      });
+    } catch (e) { console.warn('hookDeck failed:', e); }
+  }
+
+  function pullMeta(win) {
+    try {
+      const doc = win.document;
+      const tag = doc.getElementById('speaker-notes');
+      if (tag) {
+        try { notes = JSON.parse(tag.textContent) || []; } catch (e) { notes = []; }
+      }
+      const stage = doc.querySelector('deck-stage');
+      if (stage) {
+        const slides = stage.children ? Array.from(stage.children) : [];
+        total = slides.length;
+        labels = slides.map((el, i) => {
+          const lbl = el.getAttribute('data-label') || el.id || '';
+          return lbl || `Slide ${i + 1}`;
+        });
+      }
+    } catch (e) { console.warn('pullMeta failed:', e); }
+  }
+
+  function waitForDeck(frame, cb) {
+    const tryIt = () => {
+      try {
+        const win = frame.contentWindow;
+        const doc = frame.contentDocument;
+        if (doc && doc.readyState === 'complete' && doc.querySelector('deck-stage')) {
+          cb(win);
+          return;
+        }
+      } catch (e) {}
+      setTimeout(tryIt, 100);
+    };
+    tryIt();
+  }
+
+  current.addEventListener('load', () => {
+    waitForDeck(current, (win) => {
+      pullMeta(win);
+      renderNote(0);
+      hookDeck(win, { onChange: (i) => { renderNote(i); setNextIframe(i); } });
+      // Focus iframe so arrow-key nav works immediately.
+      setTimeout(() => { try { win.focus(); } catch (e) {} }, 50);
+    });
+  });
+
+  next.addEventListener('load', () => {
+    waitForDeck(next, (win) => {
+      try {
+        const doc = win.document;
+        // Disable interaction in the "next" preview — it's a peek, not a control.
+        doc.body.style.pointerEvents = 'none';
+        // Advance to slide 1 on first load.
+        const stage = doc.querySelector('deck-stage');
+        if (stage && typeof stage.goTo === 'function') stage.goTo(Math.min(1, (stage.children?.length || 2) - 1));
+      } catch (e) {}
+    });
+  });
+
+  // Parent-level keyboard fallback: if user clicks in notes panel and loses
+  // iframe focus, arrow keys from the parent refocus the deck.
+  window.addEventListener('keydown', (e) => {
+    if (['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','PageUp','PageDown',' ','Home','End'].includes(e.key)) {
+      try { current.contentWindow.focus(); } catch (err) {}
+    }
+  });
+})();
+</script>
+</body>
+</html>

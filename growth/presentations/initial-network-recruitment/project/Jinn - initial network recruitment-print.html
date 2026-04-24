@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Jinn — Initial Network Recruitment</title>
+<link rel="stylesheet" href="colors_and_type.css">
+<link rel="stylesheet" href="foundations.css">
+<style>
+  html, body { background: #000; margin: 0; }
+  deck-stage section { display: flex; }
+</style>
+
+<script type="application/json" id="speaker-notes">
+[
+  "Thanks for making the time, both of you. I know you've seen more of these than almost anyone on earth, so I'll keep it tight. This is the sales pitch, but the sales pitch is to two people we've worked with for years. So treat this as a conversation — interrupt whenever something doesn't smell right. The one headline: we're about to launch, and we think you being on the network at launch is what makes the launch mean anything. Ten operators at go-live are worth a thousand at month six.",
+
+  "Before the thesis, the context. Agentic AI is no longer a demo category — it's the dominant mode of AI consumption right now. Cursor crossed two billion ARR in February, doubling in three months. Claude Code is at two-and-a-half. Around eighty percent of Anthropic's revenue now comes through the API, which means the direct consumer of the tokens is an agent, not a chat user. And seventy-three percent of engineering teams use these tools daily — up from forty-one a year ago. This isn't a trend line we're extrapolating into. This is the market right now.",
+
+  "Fine — the market is huge. Why not just build a centralised coordination layer with venture money? Three reasons. Any one of them is enough; all three is why it's worth doing under hard constraints. Economic: we cannot out-build Anthropic, OpenAI, or Google — and we don't need to. A thin protocol under the agentic market captures value across the whole space at low rates rather than fighting for share inside one vendor's product. At Cursor- and Claude-Code-adjacent volumes, a fractional take on verified outcomes is a tasty return profile — and we get there at a fraction of the headcount. Impact: agentic fulfilment is civilisationally large. A protocol that decides which agents get paid for doing things in the world is the rails. If that's true, doing it in a way that can be credibly owned by the operators running it is worth the extra engineering cost. Ethos: the centralising force in AI is already severe, and agents becoming the direct consumer of tokens makes the concentration worse. A network whose trust assumptions don't reduce to a single safe is a counterweight. Not the only one that will exist, but one that should.",
+
+  "Here's the frame. Benchmarks score outputs — did A's answer look better than B's? Peer-ranked, voted on, plausible. That made sense in a pre-agentic world where most language tasks had no ground truth. But agents now act on the world. There's a lending pool. It has a realised APY. Either the prediction matched or it didn't. You don't need to vote — you can check. Outputs are what models produce. Outcomes are what users actually pay for. That's the whole frame.",
+
+  "And the timing on the decentralisation side is that output-scoring's central-party problem is live, not theoretical. Covalent exited Bittensor this month. The Jacob Steeves multisig row put the single-safe problem on the front page. Whatever you think of either story, there is a real opening right now for a protocol whose trust assumptions don't reduce to one party in the middle. That's the opening Jinn is aimed at.",
+
+  "So — the thesis, stated plainly. Jinn is a protocol for producing verified solutions to outcomes. A creator posts an outcome — a state of the world they want to be true. Solvers produce solutions — a plan plus evidence from running it. Independent evaluators check the evidence. Solutions that work accumulate as the network's output. Verified means evidence, independently checked. Not votes on plausibility. That's the whole thing.",
+
+  "One loop, four roles, one structural rule. Creators post outcomes and fund them. Solvers produce a plan, run it, supply evidence. Evaluators independently check the evidence. And the knowledge — verified solution-outcome pairs — accumulates as the network's memory of what actually works. The rule at the bottom is the one worth pausing on: evaluator is never the same party as solver. That's a structural trust rule, not a game-theoretic bond. We didn't want the loop to collapse into 'solvers vote on solvers.'",
+
+  "A quick note on protocol versus service, because this is where it usually gets confused. Jinn is the protocol layer. A service is one contract plus one activity checker, specialised to a domain. The first service is PIS — Prediction Intelligence Service. Its first concrete outcome is predicting the APY of a specific lending pool over a specific window, resolved against on-chain data. A Hyperliquid-style financial-outcomes service is a candidate next. The protocol's job is to make solutions trustworthy — how they get executed sits downstream, and can vary.",
+
+  "The on-chain surface is deliberately thin. Roughly two-hundred-thirty lines of bespoke Solidity across four contracts. Everything else is OpenZeppelin and OLAS. The JINN token — ERC-20, Permit, Votes, one-billion cap over ten years, two percent perpetual thereafter. A distributor contract on Base that reads OLAS staking rewards and mints at three-to-one operator-to-DAO. OpenZeppelin Governor plus Timelock. And cross-chain admin between mainnet governance and the Base distributor — bridge selection still open. Small surface, legible, auditable.",
+
+  "Now the part that matters for the conversation we're about to have. There are no team keys. No pre-mine. No allocation. No VC round. Every JINN ever minted — including whatever the two of us end up with — comes from operator work, measured by the same activity checker every other operator runs against. Co-founders have the same token access as the next ten operators, who have the same access as the next thousand. No insider multiplier, no discount, no vesting cliff. We can't design the shape of the network after the fact. The shape of the distribution is the whole point.",
+
+  "Governance is on Ethereum mainnet from day one. Two-day voting delay, fourteen-day voting period, four percent quorum, two-day timelock. Eighteen days of public observation on every change. No testnet DAO that graduates to mainnet later. Canonical JINN on mainnet, distributor on Base, Governor on mainnet. From the first proposal.",
+
+  "Where we are. Phase 0 is shipped. The client daemon and on-chain contracts are deployed on Base mainnet. We've validated the full loop against an Anvil fork of Base. Thirty-three passing client tests. No live mainnet executions yet — Phase 0 proved the contracts work and the client runs. Phase 1a is in design — token, Governor, Timelock, cross-chain bridge, on Sepolia and Base Sepolia first and then mainnet. We will not deploy the mainnet distributor with two operators on it. The launch is gated on enough independent credible operators running the client on testnet. That's why we're here.",
+
+  "A word directly to the two of you. OLAS is the bootstrap. It is not the lock-in. We use the Mech Marketplace for request and delivery. We use the staking and activity-checker pattern for emissions. But the DAO and token are separate and direct which solutions the network pays for. The loop, the evaluator-not-equal-solver rule — those are Jinn's contribution on top. And if a better substrate emerges, the Governor can redirect emissions. We'd rather it not. But the protocol isn't married to the ecosystem the three of us grew up in. And we wanted to say that to your faces before the doc does.",
+
+  "This is why we're talking to you before Phase 1a is deployed, not after. You being on the network at mainnet launch is part of what makes the launch legitimate. Ten operators at go-live — where each one is independent, identifiable, and technically credible — are worth a thousand at month six. Launching wide and thin would put us on exactly the same footing as the thing we're critiquing. We want it narrow and dense.",
+
+  "So — the ask. Three options, any one is enough. First, run the client on testnet when Phase 1a is up. You are exactly the kind of operator the mainnet launch is gated on. Second, open a PR against any surface — protocol, client, docs. The monorepo is at github.com/jinn-network/mono. Third, file an issue. Tell us where the argument breaks. None of this is an operator contract — same token access as us, same mechanism, operator work. That's the whole deal.",
+
+  "That's all we have. The eval doc has everything — the specs, the addresses, the reading list. We'd rather land on your questions than our slides, so: read it when you get a minute, and tell us where it breaks. Thank you both."
+]
+</script>
+</head>
+<body>
+<deck-stage>
+  <div id="s01"></div>
+  <div id="s02"></div>
+  <div id="s03"></div>
+  <div id="s04"></div>
+  <div id="s05"></div>
+  <div id="s06"></div>
+  <div id="s07"></div>
+  <div id="s08"></div>
+  <div id="s09"></div>
+  <div id="s10"></div>
+  <div id="s11"></div>
+  <div id="s12"></div>
+  <div id="s13"></div>
+  <div id="s14"></div>
+  <div id="s15"></div>
+  <div id="s16"></div>
+</deck-stage>
+
+<script src="deck-stage.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="Slides.jsx"></script>
+<script type="text/babel" src="Slides2.jsx"></script>
+<script type="text/babel">
+  const mounts = [
+    ['s01', <S01_Title/>],
+    ['s02', <S02_WhyNow/>],
+    ['s03', <S03_WhyDecentralised/>],
+    ['s04', <S03_OutputVsOutcome/>],
+    ['s05', <S04_Centralisation/>],
+    ['s06', <S05_Thesis/>],
+    ['s07', <S06_Loop/>],
+    ['s08', <S07_Services/>],
+    ['s09', <S08_Architecture/>],
+    ['s10', <S09_FairLaunch/>],
+    ['s11', <S10_Governance/>],
+    ['s12', <S11_Phase/>],
+    ['s13', <S12_Olas/>],
+    ['s14', <S13_WhyYou/>],
+    ['s15', <S14_Ask/>],
+    ['s16', <S15_Close/>],
+  ];
+  const total = mounts.length;
+  mounts.forEach(([id, comp], i) => {
+    const props = { index: i, total };
+    const cloned = React.cloneElement(comp, props);
+    ReactDOM.createRoot(document.getElementById(id)).render(cloned);
+  });
+</script>
+<script>
+(async () => {
+  try { await customElements.whenDefined('deck-stage'); } catch (e) {}
+  try { await document.fonts.ready; } catch (e) {}
+  setTimeout(() => { try { window.print(); } catch (e) {} }, 500);
+})();
+</script>
+</body>
+</html>
