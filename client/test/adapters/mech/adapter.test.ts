@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ZodError } from 'zod';
 import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../src/restorer/impls/evaluation-context.js';
 
@@ -30,6 +31,12 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn().mockResolvedValue('QmFakeCid'),
   cidToDigestHex: vi.fn().mockReturnValue('0x' + 'cc'.repeat(32)),
   fetchFromIpfs: vi.fn().mockResolvedValue({ data: 'result' }),
+  // Default: simulate legacy (pre-envelope) IPFS data by throwing ZodError so the
+  // adapter falls back to parseRestorationJobFromPayload. Tests that want to exercise
+  // the signed-envelope path can override this mock per-test.
+  fetchSignedIntentFromIpfs: vi.fn().mockImplementation(() => {
+    throw new ZodError([]);
+  }),
   parseRestorationJobFromPayload: vi.fn().mockReturnValue({ id: 'ds-1', description: 'test' }),
   digestHexToGatewayUrl: vi.fn(),
 }));

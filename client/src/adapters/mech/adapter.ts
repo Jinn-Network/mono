@@ -1,3 +1,4 @@
+import { ZodError } from 'zod';
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import type { ExecutionAdapter } from '../adapter.js';
@@ -322,8 +323,13 @@ export class MechAdapter implements ExecutionAdapter {
               try {
                 const signed = await fetchSignedIntentFromIpfs(this.config.ipfsGatewayUrl, intentCid);
                 restorationJob = parseRestorationJob({ intent: signed });
-              } catch {
-                const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid) as Record<string, unknown>;
+              } catch (err) {
+                if (!(err instanceof ZodError)) throw err;
+                // Fallback: pre-envelope legacy payload. Will be removed in Plan C (one-shot cutover).
+                console.debug(
+                  `[adapters/mech] intent.v1 parse failed for CID ${intentCid}; falling back to legacy payload parser`,
+                );
+                const payload = (await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid)) as Record<string, unknown>;
                 restorationJob = parseRestorationJobFromPayload(payload);
               }
 
