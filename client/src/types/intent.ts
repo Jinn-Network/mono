@@ -17,7 +17,7 @@
  */
 
 import { z } from 'zod';
-import { WindowSchema } from './desired-state.js';
+import { WindowSchema } from './window.js';
 
 const HexStringSchema = z
   .string()
