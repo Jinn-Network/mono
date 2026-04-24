@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 720" role="img" aria-labelledby="mia-title mia-desc" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block" font-family="'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace">
+  <title id="mia-title">Marketplace-agnostic ingress to Jinn</title>
+  <desc id="mia-desc">Outcome requests from ERC-8183, OLAS Mech, MPP, and other upstream marketplaces pass through a single Jinn ingress boundary that normalises their schema, feeding one unified solver network downstream.</desc>
+
+  <defs>
+    <g id="solver-node">
+      <rect x="-18" y="-18" width="36" height="36" fill="none" stroke="#7aa7dc" stroke-width="1"/>
+      <circle cx="0" cy="0" r="10" fill="none" stroke="#7aa7dc" stroke-width="1"/>
+      <circle cx="0" cy="0" r="2.5" fill="#7aa7dc"/>
+    </g>
+  </defs>
+
+  <!-- TOP EYEBROW LABELS -->
+  <g font-size="10" letter-spacing="1.4" fill="#a4b0c2">
+    <text x="52" y="58">SOURCES</text>
+    <text x="600" y="58" text-anchor="middle">INGRESS</text>
+    <text x="1375" y="58" text-anchor="middle">SOLVER NETWORK</text>
+  </g>
+
+  <!-- SOURCE DIFFERENTIATING GLYPHS (hairline, same palette, -51 offset from band centers 180/310/440/570) -->
+  <g stroke="#a4b0c2" stroke-width="1" fill="none" stroke-linejoin="miter">
+    <rect x="55" y="124" width="10" height="10"/>
+    <circle cx="60" cy="259" r="5"/>
+    <path d="M60,384 L66,395 L54,395 Z"/>
+  </g>
+  <g fill="#a4b0c2">
+    <circle cx="54" cy="519" r="1.2"/>
+    <circle cx="60" cy="519" r="1.2"/>
+    <circle cx="66" cy="519" r="1.2"/>
+  </g>
+
+  <!-- SOURCE LABELS (uniform -24 offset from band center, unified eyebrow size) -->
+  <g font-size="10" letter-spacing="1.4" fill="#a4b0c2">
+    <text x="52" y="156">ERC-8183</text>
+    <text x="52" y="286">OLAS MECH</text>
+    <text x="52" y="416">MPP</text>
+    <text x="52" y="546">...</text>
+  </g>
+
+  <!-- SOURCE COLUMN DIVIDER -->
+  <line x1="128" y1="110" x2="128" y2="650" stroke="#1f3a66" stroke-width="1"/>
+
+  <!-- SOURCE OUTCOME RECTS — source-native schema, muted -->
+  <g font-size="10" fill="#a4b0c2">
+    <!-- Band 1 — ERC-8183 — 4 rects -->
+    <g>
+      <rect x="144" y="166" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="152" y="182">intent#4a7f2e</text>
+      <rect x="238" y="174" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="246" y="190">intent#8c13ab</text>
+      <rect x="332" y="166" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="340" y="182">intent#2d91f4</text>
+      <rect x="426" y="184" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="434" y="200">intent#b37e08</text>
+    </g>
+    <!-- Band 2 — OLAS MECH — 5 rects with one trailing below the row -->
+    <g>
+      <rect x="144" y="296" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="152" y="312">mech#6a2c5d</text>
+      <rect x="238" y="304" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="246" y="320">mech#9f44a1</text>
+      <rect x="332" y="296" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="340" y="312">mech#3b7210</text>
+      <rect x="426" y="288" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="434" y="304">mech#c05b94</text>
+      <rect x="190" y="332" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="198" y="348">mech#1e83d7</text>
+    </g>
+    <!-- Band 3 — MPP — 4 rects -->
+    <g>
+      <rect x="144" y="426" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="152" y="442">req#72f04d</text>
+      <rect x="238" y="434" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="246" y="450">req#abd728</text>
+      <rect x="332" y="426" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="340" y="442">req#5d3b91</text>
+      <rect x="426" y="418" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="434" y="434">req#e091c5</text>
+    </g>
+    <!-- Band 4 — ... — 3 rects, last one stepped down for a visible arrow turn -->
+    <g>
+      <rect x="144" y="558" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="152" y="574">task#0147bd</text>
+      <rect x="238" y="564" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="246" y="580">task#f5e022</text>
+      <rect x="332" y="570" width="84" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="340" y="586">task#9ab43c</text>
+    </g>
+  </g>
+
+  <!-- RIGHT-ANGLE FEEDS — last source rect → its gate -->
+  <g stroke="#1f3a66" stroke-width="1" fill="none">
+    <path d="M510,196 H560 V180 H592"/>
+    <path d="M510,300 H560 V310 H592"/>
+    <path d="M510,430 H560 V440 H592"/>
+    <path d="M416,582 H560 V570 H592"/>
+  </g>
+
+  <!-- JINN INGRESS WALL — hairline vertical in sky, broken at four square gates -->
+  <g stroke="#7aa7dc" stroke-width="1" fill="none">
+    <line x1="600" y1="96" x2="600" y2="172"/>
+    <line x1="600" y1="188" x2="600" y2="302"/>
+    <line x1="600" y1="318" x2="600" y2="432"/>
+    <line x1="600" y1="448" x2="600" y2="562"/>
+    <line x1="600" y1="578" x2="600" y2="680"/>
+    <rect x="592" y="172" width="16" height="16"/>
+    <rect x="592" y="302" width="16" height="16"/>
+    <rect x="592" y="432" width="16" height="16"/>
+    <rect x="592" y="562" width="16" height="16"/>
+  </g>
+
+  <!-- JINN INGRESS — vertical label alongside the wall's spine -->
+  <g transform="translate(586,388) rotate(-90)">
+    <text x="0" y="0" text-anchor="middle" font-size="9" letter-spacing="2" fill="#a4b0c2">JINN INGRESS</text>
+  </g>
+
+  <!-- POST-INGRESS — normalised outcome rects, unified schema, fg -->
+  <g font-size="10" fill="#f2f7fc">
+    <!-- Band 1 -->
+    <g>
+      <rect x="660" y="168" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="668" y="184">outcome#0x4a7f2e</text>
+      <rect x="796" y="168" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="804" y="184">outcome#0x8c13ab</text>
+      <rect x="932" y="168" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="940" y="184">outcome#0x2d91f4</text>
+    </g>
+    <!-- Band 2 -->
+    <g>
+      <rect x="660" y="298" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="668" y="314">outcome#0x6a2c5d</text>
+      <rect x="796" y="298" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="804" y="314">outcome#0x9f44a1</text>
+      <rect x="932" y="298" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="940" y="314">outcome#0x3b7210</text>
+    </g>
+    <!-- Band 3 -->
+    <g>
+      <rect x="660" y="428" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="668" y="444">outcome#0xc05b94</text>
+      <rect x="796" y="428" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="804" y="444">outcome#0x1e83d7</text>
+      <rect x="932" y="428" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="940" y="444">outcome#0xb37e08</text>
+    </g>
+    <!-- Band 4 -->
+    <g>
+      <rect x="660" y="558" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="668" y="574">outcome#0x72f04d</text>
+      <rect x="796" y="558" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="804" y="574">outcome#0xabd728</text>
+      <rect x="932" y="558" width="120" height="24" fill="none" stroke="#1f3a66" stroke-width="1"/>
+      <text x="940" y="574">outcome#0x5d3b91</text>
+    </g>
+  </g>
+
+  <!-- MERGE TRUNK — four band feeds consolidate into one exit into the solver network -->
+  <g stroke="#1f3a66" stroke-width="1" fill="none">
+    <line x1="1052" y1="180" x2="1160" y2="180"/>
+    <line x1="1052" y1="310" x2="1160" y2="310"/>
+    <line x1="1052" y1="440" x2="1160" y2="440"/>
+    <line x1="1052" y1="570" x2="1160" y2="570"/>
+    <line x1="1160" y1="180" x2="1160" y2="570"/>
+    <line x1="1160" y1="350" x2="1222" y2="350"/>
+  </g>
+
+  <!-- SOLVER NETWORK — one cluster, entry node on the merge axis -->
+  <g stroke="#1f3a66" stroke-width="1">
+    <line x1="1240" y1="200" x2="1360" y2="180"/>
+    <line x1="1360" y1="180" x2="1470" y2="220"/>
+    <line x1="1240" y1="200" x2="1240" y2="350"/>
+    <line x1="1470" y1="220" x2="1510" y2="320"/>
+    <line x1="1240" y1="350" x2="1380" y2="340"/>
+    <line x1="1380" y1="340" x2="1510" y2="320"/>
+    <line x1="1240" y1="350" x2="1300" y2="470"/>
+    <line x1="1380" y1="340" x2="1430" y2="490"/>
+    <line x1="1510" y1="320" x2="1520" y2="450"/>
+    <line x1="1300" y1="470" x2="1430" y2="490"/>
+    <line x1="1430" y1="490" x2="1520" y2="450"/>
+  </g>
+  <g>
+    <use href="#solver-node" x="1240" y="200"/>
+    <use href="#solver-node" x="1360" y="180"/>
+    <use href="#solver-node" x="1470" y="220"/>
+    <use href="#solver-node" x="1240" y="350"/>
+    <use href="#solver-node" x="1380" y="340"/>
+    <use href="#solver-node" x="1510" y="320"/>
+    <use href="#solver-node" x="1300" y="470"/>
+    <use href="#solver-node" x="1430" y="490"/>
+    <use href="#solver-node" x="1520" y="450"/>
+  </g>
+
+  <!-- THE ONE GOLD — hairline underline beneath the solver cluster -->
+  <line x1="1210" y1="538" x2="1540" y2="538" stroke="#dcb866" stroke-width="1"/>
+</svg>
