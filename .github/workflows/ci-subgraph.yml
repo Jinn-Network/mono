@@ -1,0 +1,32 @@
+name: Subgraph Build
+
+on:
+  pull_request:
+    paths: ["subgraph/**"]
+  push:
+    branches: [main]
+    paths: ["subgraph/**"]
+
+defaults:
+  run:
+    working-directory: subgraph
+
+jobs:
+  build:
+    name: graph build (AssemblyScript compile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: graph codegen
+        run: npx graph codegen
+
+      - name: graph build
+        run: npx graph build
