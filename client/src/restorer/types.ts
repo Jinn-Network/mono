@@ -6,6 +6,7 @@
 
 import type { RestorationJob } from '../types/desired-state.js';
 import type { OutputArtifact, RationaleEntry, Snapshot } from '../types/portfolio.js';
+import type { TrajectoryCollector } from '../trajectory/index.js';
 
 // ── RestorationContext ────────────────────────────────────────────────────────
 
@@ -26,6 +27,13 @@ export interface RestorationContext {
   /** Fires at window.endTs. */
   abort: AbortSignal;
   msUntilEndTs: () => number;
+  /**
+   * In-run trajectory collector. Impls call ctx.trajectory.addSpan(...)
+   * (or use the traced wrappers) to emit spans. The engine emits the
+   * collected trajectory to IPFS before envelope assembly and populates
+   * envelope.trajectory with the resulting { cid, sha256 }.
+   */
+  trajectory: TrajectoryCollector;
 }
 
 // ── RestorationOutput ─────────────────────────────────────────────────────────
