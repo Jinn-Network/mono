@@ -8,7 +8,7 @@ import type {
   RestorationResult,
   DeliveredResult,
 } from '../../types/index.js';
-import { TransientError, PermanentError } from '../../types/index.js';
+import { TransientError, PermanentError, parseRestorationJob } from '../../types/index.js';
 import { createClients } from './safe.js';
 import {
   buildRestorationJobPayload,
@@ -16,6 +16,7 @@ import {
   uploadToIpfs,
   cidToDigestHex,
   fetchFromIpfs,
+  fetchSignedIntentFromIpfs,
   digestHexToGatewayUrl,
   parseRestorationJobFromPayload,
 } from './ipfs.js';
@@ -315,8 +316,16 @@ export class MechAdapter implements ExecutionAdapter {
               // IPFS_GATEWAY_PREFIX constant (f01551220) which has worked in production.
               // If the gateway ever switches to dag-pb (0x70) the prefix would be f01701220.
               const intentCid = `f01551220${digest}`;
-              const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid) as Record<string, unknown>;
-              const restorationJob = parseRestorationJobFromPayload(payload);
+              // Try to parse as a typed SignedIntentV1 first (Plan B envelope).
+              // Fall back to the legacy loose payload shape for older on-chain data.
+              let restorationJob: RestorationJob;
+              try {
+                const signed = await fetchSignedIntentFromIpfs(this.config.ipfsGatewayUrl, intentCid);
+                restorationJob = parseRestorationJob({ intent: signed });
+              } catch {
+                const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid) as Record<string, unknown>;
+                restorationJob = parseRestorationJobFromPayload(payload);
+              }
 
               yield {
                 requestId,

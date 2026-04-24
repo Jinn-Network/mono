@@ -1,5 +1,6 @@
 import type { Hex } from 'viem';
 import type { RestorationJob, RestorationResult } from '../../types/index.js';
+import { parseSignedIntentV1, type SignedIntentV1 } from '../../types/intent.js';
 import { IPFS_GATEWAY_PREFIX } from './types.js';
 
 export interface RestorationJobPayload {
@@ -182,6 +183,21 @@ export async function fetchFromIpfs(gatewayUrl: string, cid: string): Promise<un
     }
   }
   throw new Error(`IPFS JSON fetch failed after all candidates: ${errors.join(' | ')}`);
+}
+
+/**
+ * Fetch an intent CID from IPFS and parse it through `parseSignedIntentV1`.
+ *
+ * Use this whenever you have an intent CID and want a typed `SignedIntentV1`
+ * document. Throws `ZodError` if the fetched bytes don't conform to the
+ * `intent.v1` schema.
+ */
+export async function fetchSignedIntentFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<SignedIntentV1> {
+  const raw = await fetchFromIpfs(gatewayUrl, cid);
+  return parseSignedIntentV1(raw);
 }
 
 /**
