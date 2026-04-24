@@ -12,11 +12,8 @@ import { createCliExecutionContext } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { DesiredState } from '../../types/desired-state.js';
 import { SPEC_KINDS, unknownKindMessage } from '../../intents/kinds/index.js';
+import { IntentPostingService } from '../../intents/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
-
-function intentCacheKey(safe: string, intentId: string): string {
-  return `cli_intent:${getAddress(safe)}:${intentId}`;
-}
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -186,49 +183,25 @@ async function run(ctx: CommandContext): Promise<void> {
 
   const { adapter, jinnStore, primaryService } = built.ctx;
   const safe = primaryService.safe_address!;
-  const cacheKey = intentCacheKey(safe, id);
-  const cached = jinnStore.getConfigValue(cacheKey);
-  if (cached) {
-    emitResult(
-      {
-        schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
-        verb: 'submit-intent',
-        id,
-        creatorMultisig: getAddress(safe),
-        requestId: cached,
-        status: 'already_submitted',
-        idempotent: true,
-      },
-      (v) => {
-        const value = v as { id: string; requestId: string; creatorMultisig: string };
-        return `Intent already submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`;
-      },
-      {
-        json: Boolean(parsed.values.json),
-        human: Boolean(parsed.values.human),
-        writer: ctx.writer,
-        stdoutIsTty: ctx.stdoutIsTty,
-        noColor: Boolean(ctx.env['NO_COLOR']),
-      },
-    );
-    return;
-  }
-
-  const attemptNumber = 1;
-  const attemptId = `${id}/${attemptNumber}`;
+  const postingService = new IntentPostingService(adapter, jinnStore);
   try {
     const desiredState: DesiredState = {
       id,
       description,
-      type: 'restoration',
-      attemptId,
-      attemptNumber,
       ...(specOverlay ?? {}),
     };
-    const requestId = await adapter.postDesiredState(desiredState);
-    jinnStore.recordOwnActivity(requestId, 'created');
-    jinnStore.setConfigValue(cacheKey, requestId);
+    const postResult = await postingService.postCandidate(
+      {
+        desiredState,
+        sourceKey: `manual:${id}`,
+        postingPolicy: { kind: 'once_per_safe' },
+        sourceMeta: { kind: desiredState.spec?.kind, note: 'manual' },
+      },
+      {
+        creatorSafeAddress: safe,
+        legacyConfigKeys: [`cli_intent:${getAddress(safe)}:${id}`],
+      },
+    );
     emitResult(
       {
         schemaVersion: 1,
@@ -236,14 +209,17 @@ async function run(ctx: CommandContext): Promise<void> {
         verb: 'submit-intent',
         id,
         creatorMultisig: getAddress(safe),
-        requestId,
-        status: 'submitted',
-        attemptId,
-        attemptNumber,
+        requestId: postResult.requestId,
+        status: postResult.idempotent ? 'already_submitted' : 'submitted',
+        attemptId: postResult.attemptId,
+        attemptNumber: postResult.attemptNumber,
+        idempotent: postResult.idempotent,
       },
       (v) => {
         const value = v as { id: string; requestId: string; creatorMultisig: string };
-        return `Intent submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`;
+        return postResult.idempotent
+          ? `Intent already submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`
+          : `Intent submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`;
       },
       {
         json: Boolean(parsed.values.json),
@@ -284,7 +260,8 @@ const command: CommandModule = {
   helpText: `Usage: jinn submit-intent --id <id> --description <text> [--spec-file <path>] [--dry-run] [--yes] [--human]
 
 Idempotent: re-posting the same (--id) from the same creator Safe returns the
-cached request id (local SQLite) without sending a new transaction.
+existing request id from the shared intent-posting store without sending a new
+transaction.
 
 Options:
   --spec-file <path>  Path to a JSON file containing typed intent fields (window, spec, eligibility).

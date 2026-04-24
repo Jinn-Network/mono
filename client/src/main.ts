@@ -40,7 +40,7 @@ import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
-import type { IntentGenerator } from './daemon/creator.js';
+import { GeneratedIntentSource, StaticConfiguredIntentSource } from './intents/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 
@@ -424,7 +424,7 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
   const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
-  const { generators: intentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
+  const { generators: autoIntentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
     network: config.network,
     rpcUrl: config.rpcUrl,
     autoIntentsDisabled,
@@ -436,18 +436,22 @@ export async function main(): Promise<DaemonStartupInfo> {
   if (config.network === 'mainnet' && !autoIntentsDisabled && BASE_FEEDS['ETH / USD']) {
     // Mainnet auto-intent opt-in only; default is OFF. Reserved for a future flag.
   }
+  const intentSources = [
+    new StaticConfiguredIntentSource(config.desiredStates),
+    ...autoIntentGenerators.map(({ kind, generator }) =>
+      new GeneratedIntentSource(`generated:${kind}`, generator)),
+  ];
 
   const daemon = new Daemon({
     adapter,
     runner,
-    desiredStates: config.desiredStates,
+    intentSources,
     dbPath: config.dbPath,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
     peers: config.peers.length > 0 ? config.peers : undefined,
     subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
-    intentGenerators,
     creatorSafeAddress: safeAddress,
     status: {
       earningDir: config.earningDir,

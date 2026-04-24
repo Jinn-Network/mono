@@ -3,7 +3,7 @@
  * See jinn-mono-6q1.1.
  */
 
-import type { IntentGenerator } from '../../daemon/creator.js';
+import type { IntentGenerator } from '../sources.js';
 
 /** Overlay fields merged into DesiredState when posting from --spec-file. */
 export type ParsedSpecOverlay = {

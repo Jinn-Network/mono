@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { CreatorLoop } from '../../src/daemon/creator.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
+import { GeneratedIntentSource, StaticConfiguredIntentSource } from '../../src/intents/sources.js';
 import { Store } from '../../src/store/store.js';
 import { PermanentError, type DesiredState } from '../../src/types/index.js';
+
+const SAFE = '0x00112233445566778899aabbccddeeff00112233';
 
 describe('CreatorLoop', () => {
   it('posts desired states with type and attemptId', async () => {
@@ -15,7 +18,7 @@ describe('CreatorLoop', () => {
     ];
 
     const postSpy = vi.spyOn(adapter, 'postDesiredState');
-    const loop = new CreatorLoop(adapter, states, store);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store);
 
     await loop.tick();
 
@@ -42,7 +45,7 @@ describe('CreatorLoop', () => {
     ];
 
     const postSpy = vi.spyOn(adapter, 'postDesiredState');
-    const loop = new CreatorLoop(adapter, states, store);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store);
 
     await loop.tick();
     await loop.tick();
@@ -65,7 +68,11 @@ describe('CreatorLoop', () => {
     const generator = vi.fn(async () => generated);
 
     const postSpy = vi.spyOn(adapter, 'postDesiredState');
-    const loop = new CreatorLoop(adapter, [], store, [generator]);
+    const loop = new CreatorLoop(
+      adapter,
+      [new GeneratedIntentSource('generated:prediction.v0', generator)],
+      store,
+    );
 
     await loop.tick();
     expect(generator).toHaveBeenCalledTimes(1);
@@ -82,7 +89,11 @@ describe('CreatorLoop', () => {
 
     const generator = vi.fn(async () => null);
     const postSpy = vi.spyOn(adapter, 'postDesiredState');
-    const loop = new CreatorLoop(adapter, [], store, [generator]);
+    const loop = new CreatorLoop(
+      adapter,
+      [new GeneratedIntentSource('generated:prediction.v0', generator)],
+      store,
+    );
 
     await loop.tick();
     expect(generator).toHaveBeenCalledTimes(1);
@@ -102,12 +113,13 @@ describe('CreatorLoop', () => {
     const postSpy = vi.spyOn(adapter, 'postDesiredState');
 
     // First loop instance posts.
-    const loop1 = new CreatorLoop(adapter, states, store, [], '0xSafeAddr');
+    const source = new StaticConfiguredIntentSource(states);
+    const loop1 = new CreatorLoop(adapter, [source], store, SAFE);
     await loop1.tick();
     expect(postSpy).toHaveBeenCalledTimes(1);
 
     // New loop instance (fresh in-memory Map) reusing the same store.
-    const loop2 = new CreatorLoop(adapter, states, store, [], '0xSafeAddr');
+    const loop2 = new CreatorLoop(adapter, [source], store, SAFE);
     await loop2.tick();
     expect(postSpy).toHaveBeenCalledTimes(1); // no double-post
 
@@ -128,7 +140,11 @@ describe('CreatorLoop', () => {
     });
 
     const postSpy = vi.spyOn(adapter, 'postDesiredState');
-    const loop = new CreatorLoop(adapter, [], store, [generator]);
+    const loop = new CreatorLoop(
+      adapter,
+      [new GeneratedIntentSource('generated:prediction.v0', generator)],
+      store,
+    );
 
     await loop.tick(); // generator throws; no post
     expect(postSpy).not.toHaveBeenCalled();
@@ -149,12 +165,44 @@ describe('CreatorLoop', () => {
     const postSpy = vi
       .spyOn(adapter, 'postDesiredState')
       .mockRejectedValue(new PermanentError('No request IDs returned from router'));
-    const loop = new CreatorLoop(adapter, states, store, [], '0xSafeAddr');
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store, SAFE);
 
     await expect(loop.tick()).rejects.toThrow(/No request IDs/);
     await loop.tick();
 
     expect(postSpy).toHaveBeenCalledTimes(1);
+    store.close();
+    await adapter.stop();
+  });
+
+  it('posts generated intents once per bucket and again in a new bucket', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+
+    let bucketStart = 0;
+    const generator = vi.fn(async () => ({
+      id: `auto-${bucketStart}`,
+      description: 'bucketed',
+      window: { startTs: bucketStart, endTs: bucketStart + 600_000 },
+    } satisfies DesiredState));
+
+    const postSpy = vi.spyOn(adapter, 'postDesiredState');
+    const loop = new CreatorLoop(
+      adapter,
+      [new GeneratedIntentSource('generated:prediction.v0', generator)],
+      store,
+      SAFE,
+    );
+
+    await loop.tick();
+    await loop.tick();
+    expect(postSpy).toHaveBeenCalledTimes(1);
+
+    bucketStart = 600_000;
+    await loop.tick();
+    expect(postSpy).toHaveBeenCalledTimes(2);
+
     store.close();
     await adapter.stop();
   });

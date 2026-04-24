@@ -47,6 +47,20 @@ export interface BalanceCacheEntry {
   error?: string | null;
 }
 
+export type IntentPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
+
+export interface IntentPostRecord {
+  creatorSafeAddress: string;
+  sourceKey: string;
+  policyType: IntentPostingPolicyType;
+  scopeKey: string;
+  desiredStateId: string;
+  requestId: string;
+  firstPostedAt: string;
+  lastPostedAt: string;
+  postCount: number;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS own_activity (
   request_id TEXT PRIMARY KEY,
@@ -116,6 +130,30 @@ CREATE TABLE IF NOT EXISTS balance_cache (
   error TEXT
 );
 
+CREATE TABLE IF NOT EXISTS intent_posts (
+  creator_safe_address TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  policy_type TEXT NOT NULL CHECK (policy_type IN ('once_per_safe', 'once_per_bucket', 'interval')),
+  scope_key TEXT NOT NULL DEFAULT '',
+  desired_state_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  first_posted_at TEXT NOT NULL,
+  last_posted_at TEXT NOT NULL,
+  post_count INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
+);
+CREATE INDEX IF NOT EXISTS idx_intent_posts_desired_state ON intent_posts (desired_state_id);
+
+CREATE TABLE IF NOT EXISTS intent_post_locks (
+  creator_safe_address TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  policy_type TEXT NOT NULL CHECK (policy_type IN ('once_per_safe', 'once_per_bucket', 'interval')),
+  scope_key TEXT NOT NULL DEFAULT '',
+  owner_token TEXT NOT NULL,
+  locked_at TEXT NOT NULL,
+  PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
+);
+
 `;
 
 export class Store {
@@ -182,6 +220,131 @@ export class Store {
 
   setConfigValue(key: string, value: string): void {
     this.db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
+  }
+
+  getIntentPostRecord(args: {
+    creatorSafeAddress: string;
+    sourceKey: string;
+    policyType: IntentPostingPolicyType;
+    scopeKey: string;
+  }): IntentPostRecord | null {
+    const row = this.db.prepare(
+      `SELECT creator_safe_address, source_key, policy_type, scope_key, desired_state_id, request_id,
+              first_posted_at, last_posted_at, post_count
+       FROM intent_posts
+       WHERE creator_safe_address = @creatorSafeAddress
+         AND source_key = @sourceKey
+         AND policy_type = @policyType
+         AND scope_key = @scopeKey`,
+    ).get(args) as {
+      creator_safe_address: string;
+      source_key: string;
+      policy_type: IntentPostingPolicyType;
+      scope_key: string;
+      desired_state_id: string;
+      request_id: string;
+      first_posted_at: string;
+      last_posted_at: string;
+      post_count: number;
+    } | undefined;
+    if (!row) return null;
+    return {
+      creatorSafeAddress: row.creator_safe_address,
+      sourceKey: row.source_key,
+      policyType: row.policy_type,
+      scopeKey: row.scope_key,
+      desiredStateId: row.desired_state_id,
+      requestId: row.request_id,
+      firstPostedAt: row.first_posted_at,
+      lastPostedAt: row.last_posted_at,
+      postCount: row.post_count,
+    };
+  }
+
+  upsertIntentPostRecord(record: IntentPostRecord): void {
+    this.db.prepare(
+      `INSERT INTO intent_posts
+         (creator_safe_address, source_key, policy_type, scope_key, desired_state_id, request_id,
+          first_posted_at, last_posted_at, post_count)
+       VALUES
+         (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @desiredStateId, @requestId,
+          @firstPostedAt, @lastPostedAt, @postCount)
+       ON CONFLICT(creator_safe_address, source_key, policy_type, scope_key) DO UPDATE SET
+         desired_state_id = excluded.desired_state_id,
+         request_id = excluded.request_id,
+         first_posted_at = excluded.first_posted_at,
+         last_posted_at = excluded.last_posted_at,
+         post_count = excluded.post_count`,
+    ).run(record);
+  }
+
+  acquireIntentPostLock(args: {
+    creatorSafeAddress: string;
+    sourceKey: string;
+    policyType: IntentPostingPolicyType;
+    scopeKey: string;
+    ownerToken: string;
+    lockedAt: string;
+    staleAfterMs: number;
+  }): boolean {
+    const tx = this.db.transaction((params: typeof args) => {
+      const existing = this.db.prepare(
+        `SELECT owner_token, locked_at
+         FROM intent_post_locks
+         WHERE creator_safe_address = @creatorSafeAddress
+           AND source_key = @sourceKey
+           AND policy_type = @policyType
+           AND scope_key = @scopeKey`,
+      ).get(params) as { owner_token: string; locked_at: string } | undefined;
+
+      if (!existing) {
+        this.db.prepare(
+          `INSERT INTO intent_post_locks
+             (creator_safe_address, source_key, policy_type, scope_key, owner_token, locked_at)
+           VALUES
+             (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @ownerToken, @lockedAt)`,
+        ).run(params);
+        return true;
+      }
+
+      const lockedAtMs = Date.parse(existing.locked_at);
+      const nowMs = Date.parse(params.lockedAt);
+      const isStale = Number.isFinite(lockedAtMs)
+        && Number.isFinite(nowMs)
+        && (nowMs - lockedAtMs) >= params.staleAfterMs;
+      if (!isStale) {
+        return false;
+      }
+
+      this.db.prepare(
+        `UPDATE intent_post_locks
+         SET owner_token = @ownerToken, locked_at = @lockedAt
+         WHERE creator_safe_address = @creatorSafeAddress
+           AND source_key = @sourceKey
+           AND policy_type = @policyType
+           AND scope_key = @scopeKey`,
+      ).run(params);
+      return true;
+    });
+
+    return tx(args);
+  }
+
+  releaseIntentPostLock(args: {
+    creatorSafeAddress: string;
+    sourceKey: string;
+    policyType: IntentPostingPolicyType;
+    scopeKey: string;
+    ownerToken: string;
+  }): void {
+    this.db.prepare(
+      `DELETE FROM intent_post_locks
+       WHERE creator_safe_address = @creatorSafeAddress
+         AND source_key = @sourceKey
+         AND policy_type = @policyType
+         AND scope_key = @scopeKey
+         AND owner_token = @ownerToken`,
+    ).run(args);
   }
 
   /** Counts of protocol roles recorded for this node (best-effort activity hints). */

@@ -136,6 +136,7 @@ describe('SPEC_KINDS manifest', () => {
       env: { ...process.env, JINN_ENABLE_APY_AUTO_INTENTS: '1' },
     });
     expect(generators.length).toBe(2);
+    expect(generators.map((g) => g.kind)).toEqual(['prediction.v0', 'prediction.apy.v0']);
     expect(logLines.some((l) => l.includes('prediction.v0'))).toBe(true);
     expect(logLines.some((l) => l.includes('prediction.apy.v0'))).toBe(true);
   });
