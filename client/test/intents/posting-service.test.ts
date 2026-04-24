@@ -3,6 +3,7 @@ import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { IntentPostingService } from '../../src/intents/posting-service.js';
 import { Store } from '../../src/store/store.js';
 import { TransientError } from '../../src/types/index.js';
+import type { SignedIntentV1 } from '../../src/types/intent.js';
 
 const SAFE_A = '0x00112233445566778899aabbccddeeff00112233';
 const SAFE_B = '0x1111222233334444555566667777888899990000';
@@ -125,6 +126,56 @@ describe('IntentPostingService', () => {
     expect(firstResult.idempotent).toBe(false);
     expect(firstResult.requestId).toBe('req-race-1');
     expect(postSpy).toHaveBeenCalledTimes(1);
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('propagates SignedIntentV1 on RestorationJob through to the adapter unchanged', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new IntentPostingService(adapter, store);
+
+    const stubIntent: SignedIntentV1 = {
+      schemaVersion: 'intent.v1',
+      id: 'intent-propagation-test',
+      kind: 'health_check',
+      description: 'propagation test',
+      window: { startTs: '2026-01-01T00:00:00.000Z', endTs: '2026-12-31T23:59:59.999Z' },
+      spec: { kind: 'health_check' },
+      eligibility: {},
+      creator: {
+        safeAddress: '0x0000000000000000000000000000000000000001',
+        agentEoa: '0x0000000000000000000000000000000000000002',
+      },
+      createdAt: 1_700_000_000_000,
+      signature: {
+        algo: 'secp256k1',
+        signer: '0x0000000000000000000000000000000000000002',
+        hash: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        sig: '0xcafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe01',
+      },
+    };
+
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const candidate = {
+      restorationJob: {
+        id: 'intent-propagation-test',
+        description: 'propagation test',
+        intent: stubIntent,
+      },
+      sourceKey: 'manual:intent-propagation-test',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+    };
+
+    const result = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+
+    expect(result.idempotent).toBe(false);
+    expect(result.restorationJob.intent).toBe(stubIntent);
+    expect(postSpy).toHaveBeenCalledOnce();
+    const posted = postSpy.mock.calls[0][0];
+    expect(posted.intent).toBe(stubIntent);
 
     store.close();
     await adapter.stop();
