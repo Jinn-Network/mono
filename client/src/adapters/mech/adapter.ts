@@ -64,6 +64,9 @@ export class MechAdapter implements ExecutionAdapter {
   // Original desired states keyed by request ID (restoration and evaluation)
   // so we can yield accurate desiredState in DeliveredResult
   private originalStates = new Map<string, DesiredState>();
+  // Most recently posted intent CID (IPFS); surfaced via getLastPostedIntentCid()
+  // for ERC-8004 registration in the posting service.
+  private _lastPostedIntentCid: string | undefined;
   private store?: Store;
   private claimPolicy: ClaimPolicy;
 
@@ -236,6 +239,10 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
+  getLastPostedIntentCid(): string | undefined {
+    return this._lastPostedIntentCid;
+  }
+
   async postDesiredState(state: DesiredState): Promise<RequestId> {
     const restorationState: DesiredState = {
       ...state,
@@ -248,6 +255,8 @@ export class MechAdapter implements ExecutionAdapter {
     const restorationDataHex = cidToDigestHex(restorationCid);
     const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
     const restorationIntentCid = `f01551220${digestNo0x}`;
+    // Expose for ERC-8004 registration (posting service reads this right after postDesiredState).
+    this._lastPostedIntentCid = restorationIntentCid;
 
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);

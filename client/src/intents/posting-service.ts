@@ -6,6 +6,7 @@ import type { Store } from '../store/store.js';
 import type { IntentPostRecord, IntentPostingPolicyType } from '../store/store.js';
 import { TransientError, type DesiredState, type RequestId } from '../types/index.js';
 import type { IntentCandidate, IntentPostingPolicy } from './sources.js';
+import type { Registry8004 } from '../discovery/registry.js';
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
 const POST_LOCK_STALE_AFTER_MS = 60_000;
@@ -53,6 +54,7 @@ export class IntentPostingService {
   constructor(
     private readonly adapter: ExecutionAdapter,
     private readonly store: Store,
+    private readonly registry?: Registry8004,
   ) {}
 
   async postCandidate(
@@ -135,6 +137,40 @@ export class IntentPostingService {
         attemptNumber,
       };
       const requestId = await this.adapter.postDesiredState(desiredState);
+
+      // ERC-8004 Intent registration (Plan E Task 10). Best-effort: a failure here
+      // does NOT roll back the post. Registration fires only when a registry is
+      // injected and the adapter surfaces the intent CID (IPFS-backed adapters only).
+      if (this.registry && candidate.desiredState.spec?.kind) {
+        const intentCid = this.adapter.getLastPostedIntentCid?.();
+        if (intentCid) {
+          const creator = opts.creatorSafeAddress
+            ? getAddress(opts.creatorSafeAddress)
+            : creatorSafeAddress === GLOBAL_CREATOR_SCOPE
+              ? ''
+              : creatorSafeAddress;
+          try {
+            await this.registry.registerIntent({
+              intentCid,
+              kind: candidate.desiredState.spec.kind,
+              creator,
+              createdAt: nowMs,
+              requestId: requestId as `0x${string}`,
+            });
+          } catch (err) {
+            // Registration is best-effort; a failure here should not prevent the
+            // intent from being posted. Log + emit but don't throw.
+            console.warn(`[posting-service] registerIntent failed: ${err instanceof Error ? err.message : err}`);
+            emitEvent(this.store, {
+              kind: 'intent_registry_failed',
+              requestId,
+              specKind: candidate.desiredState.spec?.kind,
+              outcome: 'failed',
+              detail: err instanceof Error ? err.message : String(err),
+            }, 'creator');
+          }
+        }
+      }
 
       this.store.recordOwnActivity(requestId, 'created');
       emitEvent(this.store, {

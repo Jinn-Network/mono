@@ -2,6 +2,8 @@ import type { Store } from '../store/store.js';
 
 export type LifecycleKind =
   | 'intent_posted'
+  | 'intent_registry_failed'
+  | 'envelope_registry_failed'
   | 'request_claimed'
   | 'delivery_submitted'
   | 'evaluation_submitted'
@@ -18,7 +20,7 @@ export interface LifecycleEvent {
   serviceIndex?: number;
   txHash?: string;
   specKind?: string;
-  outcome?: 'ok' | 'failed';
+  outcome?: 'ok' | 'failed' | 'warn';
   detail?: string;
 }
 
@@ -41,7 +43,7 @@ export function emitEvent(
 
   const payload = {
     ts,
-    level: event.outcome === 'failed' ? 'error' : 'info',
+    level: event.outcome === 'failed' ? 'error' : event.outcome === 'warn' ? 'warn' : 'info',
     component,
     msg: event.detail ?? event.kind,
     requestId: event.requestId ?? null,

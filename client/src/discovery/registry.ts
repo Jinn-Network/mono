@@ -138,4 +138,110 @@ export class Registry8004 {
     ];
     return this._register(`artifact:${artifact.id}`, metadata);
   }
+
+  /**
+   * Register a signed intent (adw:Intent) on the 8004 Identity Registry.
+   *
+   * Plan E Task 10 wiring: called after successful IPFS upload of SignedIntentV1.
+   */
+  async registerIntent(intent: {
+    intentCid: string;
+    kind: string;
+    creator: string;
+    createdAt: number;
+    requestId: `0x${string}`;
+  }): Promise<bigint> {
+    const metadata = [
+      { metadataKey: 'documentType', metadataValue: encodeMetadataValue('adw:Intent') },
+      { metadataKey: 'kind', metadataValue: encodeMetadataValue(intent.kind) },
+      { metadataKey: 'creator', metadataValue: encodeMetadataValue(intent.creator) },
+      { metadataKey: 'createdAt', metadataValue: encodeMetadataValue(String(intent.createdAt)) },
+      { metadataKey: 'requestId', metadataValue: encodeMetadataValue(intent.requestId) },
+    ];
+    return this._register(`intent:${intent.intentCid}`, metadata);
+  }
+
+  /**
+   * Register an execution envelope (adw:ExecutionEnvelope) on the 8004 Identity Registry.
+   *
+   * Plan E Task 11 wiring: called after envelope assembly in pack().
+   */
+  async registerEnvelope(envelope: {
+    envelopeCid: string;
+    kind: string;
+    role: 'restoration' | 'verdict';
+    evidenceTier: string;
+    intentCid: string;
+    parentEnvelopeCid?: string;
+    measurement?: string;
+    participant: string;
+    generatedAt: number;
+  }): Promise<bigint> {
+    const metadata: Array<{ metadataKey: string; metadataValue: Hex }> = [
+      { metadataKey: 'documentType', metadataValue: encodeMetadataValue('adw:ExecutionEnvelope') },
+      { metadataKey: 'kind', metadataValue: encodeMetadataValue(envelope.kind) },
+      { metadataKey: 'role', metadataValue: encodeMetadataValue(envelope.role) },
+      { metadataKey: 'evidenceTier', metadataValue: encodeMetadataValue(envelope.evidenceTier) },
+      { metadataKey: 'intentCid', metadataValue: encodeMetadataValue(envelope.intentCid) },
+      { metadataKey: 'participant', metadataValue: encodeMetadataValue(envelope.participant) },
+      { metadataKey: 'generatedAt', metadataValue: encodeMetadataValue(String(envelope.generatedAt)) },
+    ];
+    if (envelope.parentEnvelopeCid !== undefined) {
+      metadata.push({ metadataKey: 'parentEnvelopeCid', metadataValue: encodeMetadataValue(envelope.parentEnvelopeCid) });
+    }
+    if (envelope.measurement !== undefined) {
+      metadata.push({ metadataKey: 'measurement', metadataValue: encodeMetadataValue(envelope.measurement) });
+    }
+    return this._register(`envelope:${envelope.envelopeCid}`, metadata);
+  }
+
+  /**
+   * Register an artifact with a back-pointer to its parent envelope CID
+   * (adw:Artifact with parentEnvelopeCid) on the 8004 Identity Registry.
+   *
+   * Plan E Task 11 wiring: called for each artifact after pack().
+   */
+  async registerArtifactWithParent(artifact: {
+    id: string;
+    title: string;
+    tags: string[];
+    outcome: string;
+    endpoint: string;
+    parentEnvelopeCid: string;
+  }): Promise<bigint> {
+    const metadata = [
+      { metadataKey: 'documentType', metadataValue: encodeMetadataValue('adw:Artifact') },
+      { metadataKey: 'artifactId', metadataValue: encodeMetadataValue(artifact.id) },
+      { metadataKey: 'title', metadataValue: encodeMetadataValue(artifact.title) },
+      { metadataKey: 'outcome', metadataValue: encodeMetadataValue(artifact.outcome) },
+      { metadataKey: 'tags', metadataValue: encodeMetadataValue(JSON.stringify(artifact.tags)) },
+      { metadataKey: 'endpoint', metadataValue: encodeMetadataValue(artifact.endpoint) },
+      { metadataKey: 'parentEnvelopeCid', metadataValue: encodeMetadataValue(artifact.parentEnvelopeCid) },
+    ];
+    return this._register(`artifact:${artifact.id}`, metadata);
+  }
+
+  /**
+   * Register a source bundle (adw:SourceBundle) on the 8004 Identity Registry.
+   *
+   * One-off operator setup for publishing a release.
+   */
+  async registerSourceBundle(bundle: {
+    bundleCid: string;
+    measurement: string;
+    buildRecipeKind: 'dockerfile' | 'nix' | 'bazel';
+    publishedBy: string;
+    humanUrl?: string;
+  }): Promise<bigint> {
+    const metadata: Array<{ metadataKey: string; metadataValue: Hex }> = [
+      { metadataKey: 'documentType', metadataValue: encodeMetadataValue('adw:SourceBundle') },
+      { metadataKey: 'measurement', metadataValue: encodeMetadataValue(bundle.measurement) },
+      { metadataKey: 'buildRecipeKind', metadataValue: encodeMetadataValue(bundle.buildRecipeKind) },
+      { metadataKey: 'publishedBy', metadataValue: encodeMetadataValue(bundle.publishedBy) },
+    ];
+    if (bundle.humanUrl !== undefined) {
+      metadata.push({ metadataKey: 'humanUrl', metadataValue: encodeMetadataValue(bundle.humanUrl) });
+    }
+    return this._register(`source-bundle:${bundle.bundleCid}`, metadata);
+  }
 }
