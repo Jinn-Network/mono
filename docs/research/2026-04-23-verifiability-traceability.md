@@ -117,8 +117,8 @@ trajectory is fabricated.
 The distinction matters because Jinn's packaged product, per
 [`spec/2026-04-21-agentic-data-substrate.md`](../../spec/2026-04-21-agentic-data-substrate.md),
 is the trajectory corpus, not the outcome set. An outcome-verified but
-trajectory-unverified record is approximately worthless to frontier labs
-buying training data — an operator can post-hoc fabricate a plausible
+trajectory-unverified record is approximately worthless to for training data for frontier 
+labs or path recommendation services — an operator can post-hoc fabricate a plausible
 trace that ends at a real on-chain outcome, and no amount of re-derivation
 finds the lie. Trajectory integrity has to be enforced at production time
 or it cannot be enforced at all.
@@ -220,7 +220,13 @@ Concrete, ordered, grounded in the existing code:
    `jinn.execution.v1`, with a typed `payload` slot that's kind-specific.
    This is a schema refactor, not new infrastructure. The goal is that every
    kind's manifest shares the outer shape, so a data-substrate consumer can
-   query across kinds without kind-specific adapters.
+   query across kinds without kind-specific adapters. The envelope should
+   **compose with the knowledge system the client already ships**: **x402**
+   payment-gated HTTP access to packaged artifacts (see
+   [`client/src/x402/`](../../client/src/x402/)) and **ERC-8004**-style
+   knowledge discovery and reputation for published artifacts—so execution
+   manifests, IPFS CIDs, evidence tiers, and monetized knowledge exposure
+   stay one coherent story rather than parallel ad-hoc paths.
 2. **Executor provenance.** Add `executor` metadata to the envelope: code
    digest of the registered `RestorerImpl` (already versioned —
    `RestorerImpl.version`), git SHA of the client, executor name. Thin
@@ -261,9 +267,10 @@ operators supply are deliberately separated:
 - **Jinn owns the envelope.** The `jinn.execution.v1` manifest schema,
   the `jinn.trajectory.v1` structured log format, the attestation-to-
   manifest binding rules, the canonical-JSON serialization, the on-chain
-  commitment protocol. These are the protocol-level guarantees that make
-  any attested trajectory uniformly ingestible by buyers regardless of
-  who produced it.
+  commitment protocol, and how artifact CIDs and access policies line up
+  with **x402** + **ERC-8004** knowledge flows already used for operator
+  artifacts. These are the protocol-level guarantees that make any attested
+  trajectory uniformly ingestible by buyers regardless of who produced it.
 - **Operators own the implementation.** Which LLM, which agent harness,
   which MCP servers, which tools, which reasoning strategy. Operators
   publish their own stack (source + reproducible build + measurement)
@@ -406,9 +413,10 @@ operators earn at self-signed, and buyers price the difference. For
 live-money intents like `portfolio.v0` the venue-outcome check is
 usually enough and TEE is a premium. For training-data intents — where
 the trajectory *is* the product and a sophisticated adversary can use a
-real LLM to generate a plausible-but-synthetic trace — TEE production
-is the only mechanism that distinguishes real execution from
-well-crafted fabrication.
+real LLM to generate a plausible-but-synthetic trace — **production-time**
+attestation is required; **TEE is the practical V2 mechanism** (with
+composed **zk + zkTLS** as a plausible long-run alternative once cost and
+tooling catch up; see **zk + zkTLS vs TEE** below).
 
 **The LLM-call seam.** The enclave can attest that the client ran and
 that it sent/received specific bytes over TLS, but it cannot attest that
@@ -433,6 +441,26 @@ Practical options, in increasing order of strength:
 The honest answer is that trajectory attestation via TEE + (1) gets us
 ~95% of the way to a training-grade trace today, and closing the last
 5% depends on upstream decisions at the model providers.
+
+**zk + zkTLS vs TEE — same claim shape, different trust root and cost.**
+Abstractly, a **composed** proof — zkTLS (or TLSNotary-style) receipts for
+each external API call **plus** a zkVM proof that measured program *P*
+consumed those authenticated bytes and produced the trajectory — proves
+the same *class* of statement as TEE attestation: *this code ran over real
+external I/O and emitted this trace.* The difference is the trust root
+(hardware vendor attestation vs proof-system soundness + TLS PKI +
+notary where applicable), not a different logical guarantee. **Today**
+that composition is not a practical default: production Node/agent stacks
+in zkVMs, per-call proving latency and cost for zkTLS, and recursive
+composition of many receipts still lose badly to “run the Docker image in
+a TEE and log TLS inside the enclave.” As zkVM and zkTLS tooling keep
+getting cheaper, **zk + zkTLS may become the better endgame** — especially
+for buyers who want math-trust instead of Intel/AWS/AMD roots and for
+cheap on-chain verification — without changing what is structurally
+possible. **Neither** TEE nor zk + zkTLS closes the *provider honesty* gap
+above: both only get you to “bytes from `api.anthropic.com`,” not “this
+exact model revision produced them honestly,” until labs sign or attest
+inference upstream.
 
 ### V2b — evaluator attestation via the same TEE substrate
 
@@ -463,8 +491,11 @@ for Jinn, it does not.
 **Explicit non-goal: do not try to prove the restorer's internal
 computation.** The restorer runs an open-ended LLM agent. The right
 guarantee over it is *attestation of the environment and the I/O*, not a
-proof of its internal computation. TEE attestation is the tool; zk is
-not.
+proof of its internal computation alone. **V2:** TEE attestation is the
+shipping tool for that (see **zk + zkTLS vs TEE** above for the long-run
+structural analogue). A zkVM proof of the *whole* unconstrained agent loop
+is not practical yet at cost; reserve zk for deterministic slices
+(evaluator kernel) or insurance paths until tooling matures.
 
 **When zk re-enters the picture (V3+, insurance-shaped).** There are two
 real arguments for adding zkVM proofs on top of a TEE substrate, both
@@ -518,7 +549,7 @@ None of these are blocked by Succinct, Jinn's own architecture, or token
 economics. They are per-integration work that compounds with each new
 intent kind.
 
-## What about the "learning client"?
+## What about the default learning restorer?
 
 A self-rewriting default executor is a specific product — a fine thing to
 build *on top of* Jinn — but it is not the protocol's verifiability or
