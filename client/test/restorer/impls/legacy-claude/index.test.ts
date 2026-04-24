@@ -9,11 +9,11 @@ import { tmpdir } from 'node:os';
 import { LegacyClaudeImpl } from '../../../../src/restorer/impls/legacy-claude/index.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
 import type { Runner, RunnerContext } from '../../../../src/runner/runner.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function makeIntent(overrides: Partial<DesiredState> = {}): DesiredState {
+function makeIntent(overrides: Partial<RestorationJob> = {}): RestorationJob {
   return {
     id: 'test-request-id',
     description: 'The service should be healthy.',
@@ -21,7 +21,7 @@ function makeIntent(overrides: Partial<DesiredState> = {}): DesiredState {
   };
 }
 
-function makeContext(intent: DesiredState, workingDir: string): RestorationContext {
+function makeContext(intent: RestorationJob, workingDir: string): RestorationContext {
   return {
     intent,
     implStateDir: join(workingDir, 'impl-state'),
@@ -100,7 +100,7 @@ describe('LegacyClaudeImpl', () => {
 
       // Runner was called with the intent and a correct context
       expect(runner.run).toHaveBeenCalledOnce();
-      const [calledIntent, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [DesiredState, RunnerContext];
+      const [calledIntent, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [RestorationJob, RunnerContext];
       expect(calledIntent.id).toBe('test-request-id');
       expect(calledCtx.requestId).toBe('test-request-id');
       expect(calledCtx.timeoutMs).toBe(60_000);
@@ -149,7 +149,7 @@ describe('LegacyClaudeImpl', () => {
       const ctx = makeContext(makeIntent(), workingDir);
       await impl.run(ctx);
 
-      const [, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [DesiredState, RunnerContext];
+      const [, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [RestorationJob, RunnerContext];
       // workingDir from context takes priority over config default
       expect(calledCtx.workingDirectory).toBe(workingDir);
     });
@@ -165,7 +165,7 @@ describe('LegacyClaudeImpl', () => {
       const ctxNoDir = { ...ctx, workingDir: undefined as unknown as string };
       await impl.run(ctxNoDir);
 
-      const [, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [DesiredState, RunnerContext];
+      const [, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [RestorationJob, RunnerContext];
       expect(calledCtx.workingDirectory).toBe('/custom-default');
     });
   });

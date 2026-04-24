@@ -21,7 +21,7 @@ function seedIntent(
     specKind: 'portfolio.v0',
     windowStartTs,
     windowEndTs,
-    desiredState: { id: requestId, description: 'test' },
+    restorationJob: { id: requestId, description: 'test' },
   });
 }
 

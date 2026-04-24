@@ -1,6 +1,6 @@
-import type { DesiredState } from '../../types/desired-state.js';
+import type { RestorationJob } from '../../types/desired-state.js';
 
-/** Eval `DesiredState.context` key for the restoration job’s intended-state IPFS CID (not the eval job’s). */
+/** Eval `RestorationJob.context` key for the restoration job’s intended-state IPFS CID (not the eval job’s). */
 export const RESTORATION_INTENT_CID_CONTEXT_KEY = 'restorationIntentCid' as const;
 
 /**
@@ -9,7 +9,7 @@ export const RESTORATION_INTENT_CID_CONTEXT_KEY = 'restorationIntentCid' as cons
  * There is no fallback to the evaluation job’s `intentCid` (wrong reference).
  */
 export function resolveExpectedRestorationIntentCid(
-  intent: DesiredState,
+  intent: RestorationJob,
   testDeps?: { expectedIntentCid?: string },
 ): { kind: 'resolved'; cid: string } | { kind: 'missing' } {
   if (testDeps?.expectedIntentCid) {

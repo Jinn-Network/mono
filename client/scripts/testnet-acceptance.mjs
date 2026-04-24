@@ -345,7 +345,7 @@ async function main() {
   writeJson(join(evidenceDir, 'baseline-summary.json'), {
     historyCounts: baselineCounts,
     desiredStateIds,
-    artifactProgress: baselineArtifacts.byDesiredState,
+    artifactProgress: baselineArtifacts.byRestorationJob,
     pendingRewardsWei: sumPendingRewards(baselineRewards).toString(),
     status: baselineStatus,
   });
@@ -425,7 +425,7 @@ async function main() {
         at: new Date().toISOString(),
         desiredStateIds,
         completedCycles: artifactProgress.completedCycles,
-        artifactProgress: artifactProgress.byDesiredState,
+        artifactProgress: artifactProgress.byRestorationJob,
         blocking: status.exit?.blocking ?? false,
         daemonShutdownState: status.daemon?.shutdownState ?? null,
       };
@@ -481,9 +481,9 @@ async function main() {
       stop,
       desiredStateIds,
       observedCompletedCycles: observed.artifactProgress.completedCycles,
-      observedArtifactProgress: observed.artifactProgress.byDesiredState,
+      observedArtifactProgress: observed.artifactProgress.byRestorationJob,
       baselineHistoryCounts: baselineCounts,
-      baselineArtifactProgress: baselineArtifacts.byDesiredState,
+      baselineArtifactProgress: baselineArtifacts.byRestorationJob,
       pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
       claim,
       fleet,

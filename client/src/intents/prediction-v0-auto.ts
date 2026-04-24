@@ -1,7 +1,7 @@
 /**
  * Auto-generator for prediction.v0 intents.
  *
- * Produces a fresh DesiredState per hour bucket: reads current Chainlink
+ * Produces a fresh RestorationJob per hour bucket: reads current Chainlink
  * price, builds a template with the configured threshold sentinel
  * (default "current+0.5%" — coin-flip-ish, slightly biased NO), and resolves
  * it via the shared template helper. Stable ID per hour prevents duplicate
@@ -15,7 +15,7 @@
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import { readChainlinkLatest, scaleToDecimal } from '../venues/chainlink/client.js';
-import type { DesiredState } from '../types/desired-state.js';
+import type { RestorationJob } from '../types/desired-state.js';
 import { resolvePredictionV0Template } from './prediction-v0-template.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -52,13 +52,13 @@ export interface PredictionV0AutoConfig {
   _publicClient?: PublicClient;
 }
 
-export type PredictionV0Generator = () => Promise<DesiredState | null>;
+export type PredictionV0Generator = () => Promise<RestorationJob | null>;
 
 // ── Generator factory ──────────────────────────────────────────────────────────
 
 /**
  * Build a generator closure. Calling the closure returns a freshly-resolved
- * DesiredState for the current hour bucket, or null if Chainlink is
+ * RestorationJob for the current hour bucket, or null if Chainlink is
  * unreachable (caller skips this tick).
  */
 export function makePredictionV0Generator(config: PredictionV0AutoConfig): PredictionV0Generator {
@@ -79,7 +79,7 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
     return publicClient;
   };
 
-  return async (): Promise<DesiredState | null> => {
+  return async (): Promise<RestorationJob | null> => {
     // Bucket start = windowDurationMs boundary ≤ now. Stable ID per bucket
     // prevents duplicate posts within the same window.
     const now = Date.now();
@@ -115,8 +115,8 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
           return scaleToDecimal(reading.answer, reading.decimals);
         },
       });
-      // Return the resolved DesiredState shape (intent is already valid).
-      return intent as unknown as DesiredState;
+      // Return the resolved RestorationJob shape (intent is already valid).
+      return intent as unknown as RestorationJob;
     } catch {
       // Chainlink read failure or schema mismatch — skip this tick, try next.
       return null;

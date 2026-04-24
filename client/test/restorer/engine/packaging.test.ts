@@ -8,7 +8,7 @@ import {
   provisionImplStateDir,
   walkArtifacts,
 } from '../../../src/restorer/engine/packaging.js';
-import type { DesiredState } from '../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../src/types/desired-state.js';
 
 /**
  * Extract file paths from a gzipped tar buffer using raw ustar header parsing.
@@ -50,7 +50,7 @@ function cleanTmp(dir: string): void {
   } catch { /* ignore */ }
 }
 
-const sampleIntent: DesiredState = {
+const sampleIntent: RestorationJob = {
   id: 'req-001',
   description: 'Test intent',
   spec: { kind: 'portfolio.v0' },
@@ -64,7 +64,7 @@ describe('provisionWorkingDir', () => {
   beforeEach(() => { tmp = mkTmp(); });
   afterEach(() => cleanTmp(tmp));
 
-  it('creates intent.json with serialised DesiredState', () => {
+  it('creates intent.json with serialised RestorationJob', () => {
     const workingDir = join(tmp, 'work');
     provisionWorkingDir(workingDir, sampleIntent);
     const intentJson = JSON.parse(readFileSync(join(workingDir, 'intent.json'), 'utf-8'));
@@ -297,7 +297,7 @@ describe('system_snapshot tarball excludes env/ directory', () => {
 
   it('env/ exclusion survives provisionWorkingDir (integration)', async () => {
     const workDir = join(tmp, 'workdir2');
-    const intent: DesiredState = { id: 'test', description: 'Test' };
+    const intent: RestorationJob = { id: 'test', description: 'Test' };
     provisionWorkingDir(workDir, intent, { API_KEY: 'supersecret' });
 
     const artifacts = await walkArtifacts(workDir);

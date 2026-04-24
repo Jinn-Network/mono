@@ -174,7 +174,7 @@ describe('loadConfig RPC override handling', () => {
     });
   });
 
-  it('preserves portfolio.v0 DesiredState fields (window, spec, eligibility) through config parsing', async () => {
+  it('preserves portfolio.v0 RestorationJob fields (window, spec, eligibility) through config parsing', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       desiredStates: [

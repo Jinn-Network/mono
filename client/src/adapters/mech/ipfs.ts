@@ -1,8 +1,8 @@
 import type { Hex } from 'viem';
-import type { DesiredState, RestorationResult } from '../../types/index.js';
+import type { RestorationJob, RestorationResult } from '../../types/index.js';
 import { IPFS_GATEWAY_PREFIX } from './types.js';
 
-export interface DesiredStatePayload {
+export interface RestorationJobPayload {
   desiredStateId: string;
   description: string;
   context?: Record<string, unknown>;
@@ -22,7 +22,7 @@ export interface RestorationResultPayload {
   artifacts?: string[];
 }
 
-export function buildDesiredStatePayload(state: DesiredState): DesiredStatePayload {
+export function buildRestorationJobPayload(state: RestorationJob): RestorationJobPayload {
   return {
     desiredStateId: state.id,
     description: state.description,
@@ -37,8 +37,8 @@ export function buildDesiredStatePayload(state: DesiredState): DesiredStatePaylo
   };
 }
 
-export function parseDesiredStateFromPayload(payload: Record<string, unknown>): DesiredState {
-  const spec = payload.spec as DesiredState['spec'] | undefined;
+export function parseRestorationJobFromPayload(payload: Record<string, unknown>): RestorationJob {
+  const spec = payload.spec as RestorationJob['spec'] | undefined;
   const rawWindow = payload.window as { startTs?: unknown; endTs?: unknown } | undefined;
   const window =
     rawWindow && typeof rawWindow.startTs === 'number' && typeof rawWindow.endTs === 'number'

@@ -2,7 +2,7 @@ import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import type { ExecutionAdapter } from '../adapter.js';
 import type {
-  DesiredState,
+  RestorationJob,
   RequestId,
   RestorationRequest,
   RestorationResult,
@@ -11,13 +11,13 @@ import type {
 import { TransientError, PermanentError } from '../../types/index.js';
 import { createClients } from './safe.js';
 import {
-  buildDesiredStatePayload,
+  buildRestorationJobPayload,
   buildResultPayload,
   uploadToIpfs,
   cidToDigestHex,
   fetchFromIpfs,
   digestHexToGatewayUrl,
-  parseDesiredStateFromPayload,
+  parseRestorationJobFromPayload,
 } from './ipfs.js';
 import {
   submitRestorationJob,
@@ -51,7 +51,7 @@ export class MechAdapter implements ExecutionAdapter {
   private stopped = false;
   private requestBlockCursor = 0n;
   private deliveryBlockCursor = 0n;
-  private pendingEvaluations = new Map<string, import('../../types/index.js').DesiredState>();
+  private pendingEvaluations = new Map<string, import('../../types/index.js').RestorationJob>();
   private pendingEvaluationClaims = new Set<string>();
   // Restoration requests where claimDelivery succeeded but evaluation creation failed.
   // Swept on each poll cycle so they don't require a new Deliver event.
@@ -62,8 +62,8 @@ export class MechAdapter implements ExecutionAdapter {
   // RIDs with no delivery found in backfill window; avoids repeated 500k-block rescans.
   private backfillMissRids = new Set<string>();
   // Original desired states keyed by request ID (restoration and evaluation)
-  // so we can yield accurate desiredState in DeliveredResult
-  private originalStates = new Map<string, DesiredState>();
+  // so we can yield accurate restorationJob in DeliveredResult
+  private originalStates = new Map<string, RestorationJob>();
   private store?: Store;
   private claimPolicy: ClaimPolicy;
 
@@ -236,14 +236,14 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  async postDesiredState(state: DesiredState): Promise<RequestId> {
-    const restorationState: DesiredState = {
+  async postRestorationJob(state: RestorationJob): Promise<RequestId> {
+    const restorationState: RestorationJob = {
       ...state,
       type: state.type ?? 'restoration',
       attemptId: state.attemptId,
       attemptNumber: state.attemptNumber,
     };
-    const restorationPayload = buildDesiredStatePayload(restorationState);
+    const restorationPayload = buildRestorationJobPayload(restorationState);
     const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, restorationPayload);
     const restorationDataHex = cidToDigestHex(restorationCid);
     const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
@@ -277,7 +277,7 @@ export class MechAdapter implements ExecutionAdapter {
     // Store for evaluation creation after delivery is claimed. The evaluation
     // job’s IPFS CID is different from the restoration intended-state CID; evaluators
     // need the latter to verify submission.intent.cid (see context.restorationIntentCid).
-    const stateForEval: DesiredState = {
+    const stateForEval: RestorationJob = {
       ...state,
       context: { ...(state.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: restorationIntentCid },
     };
@@ -313,11 +313,11 @@ export class MechAdapter implements ExecutionAdapter {
               // If the gateway ever switches to dag-pb (0x70) the prefix would be f01701220.
               const intentCid = `f01551220${digest}`;
               const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid) as Record<string, unknown>;
-              const desiredState = parseDesiredStateFromPayload(payload);
+              const restorationJob = parseRestorationJobFromPayload(payload);
 
               yield {
                 requestId,
-                desiredState,
+                restorationJob,
                 intentCid,
                 onchainCreationTx: transactionHash,
                 onchainCreationBlock: blockNumber,
@@ -470,14 +470,14 @@ export class MechAdapter implements ExecutionAdapter {
               };
 
               // Use the original desired state — not the result payload
-              const desiredState = this.originalStates.get(requestId) ?? {
+              const restorationJob = this.originalStates.get(requestId) ?? {
                 id: requestId,
                 description: '',
               };
 
               yield {
                 requestId,
-                desiredState,
+                restorationJob,
                 result: restorationResult,
                 deliveryMechAddress: mechAddress,
               };
@@ -574,7 +574,7 @@ export class MechAdapter implements ExecutionAdapter {
       return;
     }
     try {
-      const evaluationState: DesiredState = {
+      const evaluationState: RestorationJob = {
         ...originalState,
         type: 'evaluation',
         restorationRequestId: requestId,
@@ -583,7 +583,7 @@ export class MechAdapter implements ExecutionAdapter {
           restorationResult: cachedRestorationResultData,
         },
       };
-      const evaluationPayload = buildDesiredStatePayload(evaluationState);
+      const evaluationPayload = buildRestorationJobPayload(evaluationState);
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
       const evaluationDataHex = cidToDigestHex(evaluationCid);
 

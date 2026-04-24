@@ -3,7 +3,7 @@ import { existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import type { DesiredState, RestorationResult } from '../types/index.js';
+import type { RestorationJob, RestorationResult } from '../types/index.js';
 import type { Runner, RunnerContext } from './runner.js';
 import { Store } from '../store/store.js';
 
@@ -43,8 +43,8 @@ export class ClaudeRunner implements Runner {
     this.mcpLauncher = resolveJinnMcpLauncher(config.mcpServerPath);
   }
 
-  async run(desiredState: DesiredState, context: RunnerContext): Promise<RestorationResult> {
-    const prompt = buildPrompt(desiredState);
+  async run(restorationJob: RestorationJob, context: RunnerContext): Promise<RestorationResult> {
+    const prompt = buildPrompt(restorationJob);
 
     // Write MCP config to temp dir
     const tmpDir = mkdtempSync(join(tmpdir(), 'jinn-runner-'));
@@ -56,14 +56,14 @@ export class ClaudeRunner implements Runner {
           command: this.mcpLauncher.command,
           args: this.mcpLauncher.args,
           env: {
-            DESIRED_STATE_ID: desiredState.id,
-            DESIRED_STATE_DESCRIPTION: desiredState.description,
-            DESIRED_STATE_CONTEXT: desiredState.context ? JSON.stringify(desiredState.context) : '',
-            DESIRED_STATE_TYPE: desiredState.type ?? '',
-            RESTORATION_REQUEST_ID: desiredState.restorationRequestId ?? '',
+            DESIRED_STATE_ID: restorationJob.id,
+            DESIRED_STATE_DESCRIPTION: restorationJob.description,
+            DESIRED_STATE_CONTEXT: restorationJob.context ? JSON.stringify(restorationJob.context) : '',
+            DESIRED_STATE_TYPE: restorationJob.type ?? '',
+            RESTORATION_REQUEST_ID: restorationJob.restorationRequestId ?? '',
             REQUEST_ID: context.requestId,
-            RESTORATION_DELIVERY_DATA: desiredState.type === 'evaluation' && desiredState.context?.restorationResult
-              ? JSON.stringify(desiredState.context.restorationResult)
+            RESTORATION_DELIVERY_DATA: restorationJob.type === 'evaluation' && restorationJob.context?.restorationResult
+              ? JSON.stringify(restorationJob.context.restorationResult)
               : '',
             STORE_PATH: context.storePath ?? '',
             DAEMON_API_URL: context.daemonApiUrl ?? '',
@@ -79,7 +79,7 @@ export class ClaudeRunner implements Runner {
       if (context.storePath) {
         const store = new Store(context.storePath);
         try {
-          const isEvaluation = desiredState.type === 'evaluation';
+          const isEvaluation = restorationJob.type === 'evaluation';
           const tag = isEvaluation ? 'evaluation-verdict' : 'restoration-result';
           const artifact = store.getArtifactByRequestId(context.requestId, tag);
           if (artifact) {
@@ -97,13 +97,13 @@ export class ClaudeRunner implements Runner {
   }
 }
 
-export function buildPrompt(desiredState: DesiredState): string {
+export function buildPrompt(restorationJob: RestorationJob): string {
   let contextSection = '';
-  if (desiredState.context && Object.keys(desiredState.context).length > 0) {
-    contextSection = `\n## Context\n${JSON.stringify(desiredState.context, null, 2)}\n`;
+  if (restorationJob.context && Object.keys(restorationJob.context).length > 0) {
+    contextSection = `\n## Context\n${JSON.stringify(restorationJob.context, null, 2)}\n`;
   }
 
-  const isEvaluation = desiredState.type === 'evaluation';
+  const isEvaluation = restorationJob.type === 'evaluation';
 
   const instructions = isEvaluation
     ? `## Instructions
@@ -123,8 +123,8 @@ export function buildPrompt(desiredState: DesiredState): string {
   return `You are ${isEvaluation ? 'evaluating a restoration' : 'restoring a desired state'}.
 
 ## Desired State
-ID: ${desiredState.id}
-Description: ${desiredState.description}
+ID: ${restorationJob.id}
+Description: ${restorationJob.description}
 ${contextSection}
 ${instructions}
 

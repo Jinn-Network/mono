@@ -26,11 +26,11 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
 
 // Mock IPFS
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
-  buildDesiredStatePayload: vi.fn().mockReturnValue({ desiredStateId: 'ds-1', description: 'test' }),
+  buildRestorationJobPayload: vi.fn().mockReturnValue({ desiredStateId: 'ds-1', description: 'test' }),
   uploadToIpfs: vi.fn().mockResolvedValue('QmFakeCid'),
   cidToDigestHex: vi.fn().mockReturnValue('0x' + 'cc'.repeat(32)),
   fetchFromIpfs: vi.fn().mockResolvedValue({ data: 'result' }),
-  parseDesiredStateFromPayload: vi.fn().mockReturnValue({ id: 'ds-1', description: 'test' }),
+  parseRestorationJobFromPayload: vi.fn().mockReturnValue({ id: 'ds-1', description: 'test' }),
   digestHexToGatewayUrl: vi.fn(),
 }));
 
@@ -67,14 +67,14 @@ describe('MechAdapter with JinnRouter', () => {
     vi.clearAllMocks();
   });
 
-  it('postDesiredState calls submitRestorationJob with router address', async () => {
+  it('postRestorationJob calls submitRestorationJob with router address', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitRestorationJob } = await import('../../../src/adapters/mech/contracts.js');
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
 
-    const requestId = await adapter.postDesiredState({ id: 'ds-1', description: 'test' });
+    const requestId = await adapter.postRestorationJob({ id: 'ds-1', description: 'test' });
 
     expect(requestId).toBe('0x' + 'aa'.repeat(32));
     expect(submitRestorationJob).toHaveBeenCalledWith(
@@ -104,21 +104,21 @@ describe('MechAdapter with JinnRouter', () => {
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
 
-    await expect(adapter.postDesiredState({ id: 'ds-1', description: 'test' })).rejects.toThrow(
+    await expect(adapter.postRestorationJob({ id: 'ds-1', description: 'test' })).rejects.toThrow(
       new RegExp(`tx=0x9999.*router=${TEST_CONFIG.routerAddress}.*receiptLogs=3`),
     );
 
     await adapter.stop();
   });
 
-  it('postDesiredState does NOT call submitEvaluationJob upfront', async () => {
+  it('postRestorationJob does NOT call submitEvaluationJob upfront', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitEvaluationJob } = await import('../../../src/adapters/mech/contracts.js');
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
 
-    await adapter.postDesiredState({ id: 'ds-1', description: 'test' });
+    await adapter.postRestorationJob({ id: 'ds-1', description: 'test' });
 
     expect(submitEvaluationJob).not.toHaveBeenCalled();
 
@@ -128,7 +128,7 @@ describe('MechAdapter with JinnRouter', () => {
   it('populates on-chain provenance fields from MarketplaceRequest log metadata', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { decodeMarketplaceRequestLogs } = await import('../../../src/adapters/mech/contracts.js');
-    const { fetchFromIpfs, parseDesiredStateFromPayload } = await import('../../../src/adapters/mech/ipfs.js');
+    const { fetchFromIpfs, parseRestorationJobFromPayload } = await import('../../../src/adapters/mech/ipfs.js');
 
     const fakeTxHash = ('0x' + 'ab'.repeat(32)) as `0x${string}`;
     const fakeBlockNumber = 42_000;
@@ -142,7 +142,7 @@ describe('MechAdapter with JinnRouter', () => {
       blockNumber: fakeBlockNumber,
     }]);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ description: 'test intent' });
-    vi.mocked(parseDesiredStateFromPayload).mockReturnValueOnce({ id: 'ds-prov', description: 'test intent' });
+    vi.mocked(parseRestorationJobFromPayload).mockReturnValueOnce({ id: 'ds-prov', description: 'test intent' });
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
@@ -165,7 +165,7 @@ describe('MechAdapter with JinnRouter', () => {
   it('preserves restoration result context across evaluation-job retries', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitEvaluationJob } = await import('../../../src/adapters/mech/contracts.js');
-    const { buildDesiredStatePayload } = await import('../../../src/adapters/mech/ipfs.js');
+    const { buildRestorationJobPayload } = await import('../../../src/adapters/mech/ipfs.js');
 
     vi.mocked(submitEvaluationJob)
       .mockRejectedValueOnce(new Error('GS013'))
@@ -188,8 +188,8 @@ describe('MechAdapter with JinnRouter', () => {
     await (adapter as any).tryCreateEvaluationJob(requestId, 'restoration output');
     await (adapter as any).tryCreateEvaluationJob(requestId);
 
-    expect(vi.mocked(buildDesiredStatePayload)).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(buildDesiredStatePayload).mock.calls[1]?.[0]).toMatchObject({
+    expect(vi.mocked(buildRestorationJobPayload)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(buildRestorationJobPayload).mock.calls[1]?.[0]).toMatchObject({
       type: 'evaluation',
       restorationRequestId: requestId,
       context: {
@@ -203,7 +203,7 @@ describe('MechAdapter with JinnRouter', () => {
   it('defers evaluation job when restoration result is not in cache and chain backfill finds nothing', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitEvaluationJob, findLatestDeliveryDataHexForRequest } = await import('../../../src/adapters/mech/contracts.js');
-    const { buildDesiredStatePayload } = await import('../../../src/adapters/mech/ipfs.js');
+    const { buildRestorationJobPayload } = await import('../../../src/adapters/mech/ipfs.js');
 
     vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValue(null);
 
@@ -218,7 +218,7 @@ describe('MechAdapter with JinnRouter', () => {
 
     await (adapter as any).tryCreateEvaluationJob(requestId);
 
-    expect(vi.mocked(buildDesiredStatePayload)).not.toHaveBeenCalled();
+    expect(vi.mocked(buildRestorationJobPayload)).not.toHaveBeenCalled();
     expect(submitEvaluationJob).not.toHaveBeenCalled();
     expect((adapter as any).claimedButNotEvaluated.has(requestId)).toBe(true);
 
@@ -275,7 +275,7 @@ describe('MechAdapter with JinnRouter', () => {
   it('tryCreateEvaluationJob uses chain backfill result when cache is cold', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitEvaluationJob, findLatestDeliveryDataHexForRequest } = await import('../../../src/adapters/mech/contracts.js');
-    const { buildDesiredStatePayload, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { buildRestorationJobPayload, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
     vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValueOnce(('0x' + 'ef'.repeat(32)) as `0x${string}`);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'backfilled restoration output' });
@@ -292,7 +292,7 @@ describe('MechAdapter with JinnRouter', () => {
 
     await (adapter as any).tryCreateEvaluationJob(requestId);
 
-    expect(vi.mocked(buildDesiredStatePayload).mock.calls.at(-1)?.[0]).toMatchObject({
+    expect(vi.mocked(buildRestorationJobPayload).mock.calls.at(-1)?.[0]).toMatchObject({
       context: { restorationResult: 'backfilled restoration output' },
     });
     expect(submitEvaluationJob).toHaveBeenCalled();

@@ -62,7 +62,7 @@ export class PredictionV0BaselineImpl implements RestorerImpl {
     return { status: 'ready' };
   }
 
-  async canAttempt(intent: import('../../../types/desired-state.js').DesiredState):
+  async canAttempt(intent: import('../../../types/desired-state.js').RestorationJob):
     Promise<{ ok: true } | { ok: false; reason: string }>
   {
     const parsed = PredictionV0IntentSchema.safeParse(intent);

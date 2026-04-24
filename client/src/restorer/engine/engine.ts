@@ -458,16 +458,16 @@ export class RestorationEngine {
     const implStateName = intent.implName ?? resolvedImpl?.name ?? intent.specKind ?? 'default';
     const implStateDir = join(this.paths.implStateDirRoot, implStateName);
 
-    // Prefer the persisted full DesiredState; fall back to a stub for legacy
+    // Prefer the persisted full RestorationJob; fall back to a stub for legacy
     // (pre-migration) rows so the engine still works for health-check intents.
-    const desiredState = intent.desiredState ?? {
+    const restorationJob = intent.restorationJob ?? {
       id: intent.requestId,
       description: '',
       ...(intent.specKind ? { spec: { kind: intent.specKind } } : {}),
       window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
     };
 
-    provisionWorkingDir(workingDir, desiredState as import('../../types/desired-state.js').DesiredState);
+    provisionWorkingDir(workingDir, restorationJob as import('../../types/desired-state.js').RestorationJob);
     provisionImplStateDir(implStateDir);
 
     // takePreSnapshot transitions directly to RUNNING with the snapshot payload
@@ -512,12 +512,12 @@ export class RestorationEngine {
 
     try {
       const ctx = {
-        intent: (intent.desiredState ?? {
+        intent: (intent.restorationJob ?? {
           id: intent.requestId,
           description: '',
           ...(intent.specKind ? { spec: { kind: intent.specKind } } : {}),
           window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
-        }) as import('../../types/desired-state.js').DesiredState,
+        }) as import('../../types/desired-state.js').RestorationJob,
         intentCid: intent.intentCid,
         implStateDir,
         workingDir,

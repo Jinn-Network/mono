@@ -95,13 +95,13 @@ export const PortfolioV0EligibilitySchema = z.object({
 export type PortfolioV0Eligibility = z.infer<typeof PortfolioV0EligibilitySchema>;
 
 /**
- * Full portfolio.v0 intent — composes the generic DesiredState fields with the
+ * Full portfolio.v0 intent — composes the generic RestorationJob fields with the
  * portfolio-specific spec + eligibility fields.  The 24 h window constraint is
  * enforced by a Zod refinement.
  */
 export const PortfolioV0IntentSchema = z
   .object({
-    // id is required here — generic DesiredState parsing assigns a UUID if missing; portfolio.v0 intents must already have one assigned.
+    // id is required here — generic RestorationJob parsing assigns a UUID if missing; portfolio.v0 intents must already have one assigned.
     id: z.string(),
     description: z.string().min(1),
     window: WindowSchema,

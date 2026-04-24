@@ -23,7 +23,7 @@ import { execFileSync } from 'node:child_process';
 
 import { ClaudeMcpPredictionImpl } from '../../../../src/restorer/impls/claude-mcp-prediction/index.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 
 const enabled = process.env['JINN_TEST_CLAUDE_PREDICTION'] === '1';
 
@@ -64,7 +64,7 @@ describe.skipIf(!enabled)('claude-mcp-prediction (isolation)', () => {
     const windowEndTs = windowStartTs + 3_600_000;
     const resolveTs = windowEndTs + 900_000;
 
-    const intent: DesiredState = {
+    const intent: RestorationJob = {
       id: 'iso-test-1',
       description: 'ETH > 3000 at T (isolation test)',
       window: { startTs: windowStartTs, endTs: windowEndTs },
@@ -83,7 +83,7 @@ describe.skipIf(!enabled)('claude-mcp-prediction (isolation)', () => {
         },
       },
       eligibility: { maxSubmissionDelayMs: 60_000 },
-    } as unknown as DesiredState;
+    } as unknown as RestorationJob;
 
     const impl = new ClaudeMcpPredictionImpl({
       rpcUrl: process.env['BASE_SEPOLIA_RPC_URL'] ?? 'https://sepolia.base.org',

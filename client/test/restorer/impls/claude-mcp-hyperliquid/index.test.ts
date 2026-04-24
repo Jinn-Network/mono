@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ClaudeMcpHyperliquidImpl, _writeHlMcpServerScript } from '../../../../src/restorer/impls/claude-mcp-hyperliquid/index.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { HlClearinghouseState, HlFill, HlSpotClearinghouseState } from '../../../../src/venues/hyperliquid/types.js';
 
 // ── Shared test data ───────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ function mockFills(preValue = 10_000): HlFill[] {
   }));
 }
 
-function makePortfolioV0Intent(): DesiredState {
+function makePortfolioV0Intent(): RestorationJob {
   return {
     id: 'test-portfolio-v0-intent',
     description: 'Grow HL portfolio by 5% over 24h with max 10% drawdown.',

@@ -14,9 +14,9 @@ describe('IntentPostingService', () => {
     const store = new Store(':memory:');
     const service = new IntentPostingService(adapter, store);
 
-    const postSpy = vi.spyOn(adapter, 'postDesiredState');
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
     const candidate = {
-      desiredState: { id: 'manual-1', description: 'test manual submission' },
+      restorationJob: { id: 'manual-1', description: 'test manual submission' },
       sourceKey: 'manual:manual-1',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
@@ -41,10 +41,10 @@ describe('IntentPostingService', () => {
 
     store.setConfigValue(`cli_intent:${SAFE_A}:manual-legacy`, 'legacy-request-id');
 
-    const postSpy = vi.spyOn(adapter, 'postDesiredState');
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
     const result = await service.postCandidate(
       {
-        desiredState: { id: 'manual-legacy', description: 'legacy' },
+        restorationJob: { id: 'manual-legacy', description: 'legacy' },
         sourceKey: 'manual:manual-legacy',
         postingPolicy: { kind: 'once_per_safe' },
       },
@@ -74,9 +74,9 @@ describe('IntentPostingService', () => {
     const store = new Store(':memory:');
     const service = new IntentPostingService(adapter, store);
 
-    const postSpy = vi.spyOn(adapter, 'postDesiredState');
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
     const candidate = {
-      desiredState: { id: 'shared-id', description: 'same logical id' },
+      restorationJob: { id: 'shared-id', description: 'same logical id' },
       sourceKey: 'manual:shared-id',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
@@ -102,13 +102,13 @@ describe('IntentPostingService', () => {
       releasePost = resolve;
     });
 
-    const postSpy = vi.spyOn(adapter, 'postDesiredState').mockImplementation(async (state) => {
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob').mockImplementation(async (state) => {
       await postingGate;
       return `req-${state.id}`;
     });
 
     const candidate = {
-      desiredState: { id: 'race-1', description: 'race test' },
+      restorationJob: { id: 'race-1', description: 'race test' },
       sourceKey: 'manual:race-1',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };

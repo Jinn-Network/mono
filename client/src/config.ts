@@ -18,8 +18,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { DesiredStateSchema, parseDesiredState } from './types/desired-state.js';
-import type { DesiredState } from './types/desired-state.js';
+import { RestorationJobSchema, parseRestorationJob } from './types/desired-state.js';
+import type { RestorationJob } from './types/desired-state.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ export const JinnConfigSchema = z.object({
   nodeEndpoint: z.string().optional(),
 
   /** Desired states to create and restore. Empty by default; testnet auto-intents fill the loop. */
-  desiredStates: z.array(DesiredStateSchema).default([]),
+  desiredStates: z.array(RestorationJobSchema).default([]),
 
   /** IPFS upload endpoint */
   ipfsRegistryUrl: z.string().default('https://registry.autonolas.tech'),
@@ -179,7 +179,7 @@ const DEFAULT_ENGINE = {
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and desiredStates with id always assigned. */
 export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'desiredStates' | 'engine'> & {
   rpcUrl: string;
-  desiredStates: DesiredState[];
+  desiredStates: RestorationJob[];
   engine: { workingDirRoot: string; implStateDirRoot: string };
 };
 
@@ -356,8 +356,8 @@ export function loadConfig(configPath?: string): JinnConfig {
   return {
     ...parsed,
     rpcUrl: parsed.rpcUrl ?? defaultRpcUrl,
-    // parseDesiredState assigns a UUID to any entry missing an id
-    desiredStates: parsed.desiredStates.map(parseDesiredState),
+    // parseRestorationJob assigns a UUID to any entry missing an id
+    desiredStates: parsed.desiredStates.map(parseRestorationJob),
     engine: {
       workingDirRoot: parsed.engine?.workingDirRoot ?? DEFAULT_ENGINE.workingDirRoot,
       implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,

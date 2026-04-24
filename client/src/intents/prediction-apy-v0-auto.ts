@@ -1,4 +1,4 @@
-import type { DesiredState } from '../types/desired-state.js';
+import type { RestorationJob } from '../types/desired-state.js';
 import { resolvePredictionApyV0Template } from './prediction-apy-v0-template.js';
 import { AAVE_V3_USDC } from '../venues/aave-v3/addresses.js';
 
@@ -11,7 +11,7 @@ export interface PredictionApyV0AutoConfig {
   toleranceBps?: number;
 }
 
-export type PredictionApyV0Generator = () => Promise<DesiredState | null>;
+export type PredictionApyV0Generator = () => Promise<RestorationJob | null>;
 
 export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig = {}): PredictionApyV0Generator {
   const venue = config.venue ?? 'aave-v3-base-sepolia';
@@ -22,7 +22,7 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
   const sampleCount = config.sampleCount ?? 12;
   const toleranceBps = config.toleranceBps ?? 50;
 
-  return async (): Promise<DesiredState | null> => {
+  return async (): Promise<RestorationJob | null> => {
     const now = Date.now();
     const startTs = Math.floor(now / windowDurationMs) * windowDurationMs;
     const endTs = startTs + windowDurationMs;
@@ -50,7 +50,7 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
         },
         eligibility: { maxSubmissionDelayMs: windowDurationMs },
       });
-      return intent as unknown as DesiredState;
+      return intent as unknown as RestorationJob;
     } catch {
       return null;
     }

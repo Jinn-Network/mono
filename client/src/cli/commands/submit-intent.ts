@@ -10,7 +10,7 @@ import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { createCliExecutionContext } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
-import type { DesiredState } from '../../types/desired-state.js';
+import type { RestorationJob } from '../../types/desired-state.js';
 import { SPEC_KINDS, unknownKindMessage } from '../../intents/kinds/index.js';
 import { IntentPostingService } from '../../intents/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
@@ -185,17 +185,17 @@ async function run(ctx: CommandContext): Promise<void> {
   const safe = primaryService.safe_address!;
   const postingService = new IntentPostingService(adapter, jinnStore);
   try {
-    const desiredState: DesiredState = {
+    const restorationJob: RestorationJob = {
       id,
       description,
       ...(specOverlay ?? {}),
     };
     const postResult = await postingService.postCandidate(
       {
-        desiredState,
+        restorationJob,
         sourceKey: `manual:${id}`,
         postingPolicy: { kind: 'once_per_safe' },
-        sourceMeta: { kind: desiredState.spec?.kind, note: 'manual' },
+        sourceMeta: { kind: restorationJob.spec?.kind, note: 'manual' },
       },
       {
         creatorSafeAddress: safe,

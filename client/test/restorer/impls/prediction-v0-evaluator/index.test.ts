@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionV0Evaluator } from '../../../../src/restorer/impls/prediction-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
-import { makeValidIntent, makeSignedManifest, makeEvalDesiredState } from './test-helpers.js';
+import { makeValidIntent, makeSignedManifest, makeEvalRestorationJob } from './test-helpers.js';
 
 function makeCtx(intent: any, deps: any) {
   const tmp = mkdtempSync(join(tmpdir(), 'pred-eval-'));
@@ -38,7 +38,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('PASS with correct prediction (p=0.55, oracle > threshold)', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
@@ -71,7 +71,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
       ...unsignedOuter,
       signature: { algo: 'secp256k1' as const, signer: account.address, hash: s.hash, sig: s.sig },
     };
-    const evalIntent = makeEvalDesiredState(outerManifest, intent);
+    const evalIntent = makeEvalRestorationJob(outerManifest, intent);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
@@ -86,7 +86,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('REJECTED when submittedAt > window.endTs', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ submittedAt: intent.window.endTs + 1, intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('REJECTED');
@@ -96,7 +96,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('FAIL on bad signature', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ corruptSignature: true, intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('FAIL');
@@ -106,7 +106,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('INDETERMINATE when context.restorationIntentCid is missing (legacy eval payload)', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent, { omitRestorationIntentCid: true });
+    const evalIntent = makeEvalRestorationJob(manifest, intent, { omitRestorationIntentCid: true });
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('INDETERMINATE');
@@ -115,7 +115,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('INDETERMINATE when oracle has no spanning round', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, {
       oraclePriceAtResolveTs: async () => ({

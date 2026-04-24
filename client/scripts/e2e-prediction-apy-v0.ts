@@ -23,13 +23,13 @@ import { MechAdapter } from '../src/adapters/mech/adapter.js';
 import { FleetBootstrapper } from '../src/earning/bootstrap.js';
 import { getChainConfig } from '../src/earning/contracts.js';
 import { decodeMarketplaceRequestLogs, getMechDeliveryRate, getTimeoutBounds, submitRestorationJob } from '../src/adapters/mech/contracts.js';
-import { buildDesiredStatePayload, uploadToIpfs, cidToDigestHex } from '../src/adapters/mech/ipfs.js';
+import { buildRestorationJobPayload, uploadToIpfs, cidToDigestHex } from '../src/adapters/mech/ipfs.js';
 import { createClients } from '../src/adapters/mech/safe.js';
 import { PredictionApyV0BaselineImpl } from '../src/restorer/impls/prediction-apy-v0-baseline/index.js';
 import { PredictionApyV0Evaluator } from '../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../src/restorer/engine/signing.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../src/restorer/impls/evaluation-context.js';
-import type { DesiredState } from '../src/types/desired-state.js';
+import type { RestorationJob } from '../src/types/desired-state.js';
 import type { RestorationContext } from '../src/restorer/types.js';
 import type { PredictionApySubmissionManifest } from '../src/types/prediction-apy.js';
 import { JINN_ROUTER_ABI, MECH_ABI, MECH_MARKETPLACE_ABI, NATIVE_PAYMENT_TYPE } from '../src/adapters/mech/types.js';
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   let adapter!: MechAdapter;
   let restorationRequestId!: string;
   let evalRequestId!: string;
-  let intent!: DesiredState;
+  let intent!: RestorationJob;
   let intentCid!: string;
   let window!: { startTs: number; endTs: number };
 
@@ -220,10 +220,10 @@ async function main(): Promise<void> {
           question: { resolveTs: window.endTs + 900_000 },
         },
         eligibility: { maxSubmissionDelayMs: 3_600_000 },
-      } as unknown as DesiredState;
+      } as unknown as RestorationJob;
 
       // Use the same path production uses for createRestorationJob payload.
-      const payload = buildDesiredStatePayload(intent);
+      const payload = buildRestorationJobPayload(intent);
       const cid = await uploadToIpfs('https://registry.autonolas.tech', payload);
       intentCid = `f01551220${cidToDigestHex(cid).slice(2)}`;
       const intentDataHex = cidToDigestHex(cid) as Hex;
@@ -246,7 +246,7 @@ async function main(): Promise<void> {
       restorationRequestId = reqIds[0]!;
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-      // Ensure adapter tracks this restoration for eval creation path, just like postDesiredState.
+      // Ensure adapter tracks this restoration for eval creation path, just like postRestorationJob.
       (adapter as any).pendingEvaluations.set(restorationRequestId, {
         ...intent,
         context: { ...(intent.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: intentCid },
@@ -348,15 +348,15 @@ async function main(): Promise<void> {
 
     results.push(await runPhase('Phase 7: Watch eval request, run APY evaluator, deliver verdict', async () => {
       const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
-      let evalReq: { requestId: string; desiredState: DesiredState; intentCid?: string } | undefined;
+      let evalReq: { requestId: string; restorationJob: RestorationJob; intentCid?: string } | undefined;
       const deadline = Date.now() + 60_000;
       while (!evalReq && Date.now() < deadline) {
         const next = await Promise.race([
           iter.next(),
           sleep(3_000).then(() => ({ done: true, value: undefined })),
         ]);
-        if (!next.done && next.value?.desiredState?.type === 'evaluation') {
-          evalReq = next.value as { requestId: string; desiredState: DesiredState; intentCid?: string };
+        if (!next.done && next.value?.restorationJob?.type === 'evaluation') {
+          evalReq = next.value as { requestId: string; restorationJob: RestorationJob; intentCid?: string };
         }
       }
       if (!evalReq) throw new Error('no evaluation request');
@@ -375,7 +375,7 @@ async function main(): Promise<void> {
         },
       });
       const out = await evaluator.run({
-        intent: evalReq.desiredState,
+        intent: evalReq.restorationJob,
         intentCid: evalReq.intentCid ?? '',
         implStateDir,
         workingDir,

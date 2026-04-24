@@ -27,7 +27,7 @@ function makeInput(id: string, overrides: Partial<PersistedIntentInput> = {}): P
     onchainCreationBlock: 100,
     windowStartTs: now + 60_000,
     windowEndTs: now + 60_000 + 86_400_000,
-    desiredState: { id, description: 'test' },
+    restorationJob: { id, description: 'test' },
     ...overrides,
   };
 }
@@ -356,7 +356,7 @@ describe('PACKAGING recovery: implOutputs persisted and hydrated on restart', ()
         onchainCreationBlock: 1,
         windowStartTs: now,
         windowEndTs: now + 86_400_000,
-        desiredState: { id: requestId, description: 'test' },
+        restorationJob: { id: requestId, description: 'test' },
       });
 
       // Advance to PACKAGING state, with implOutputsJson persisted
@@ -433,7 +433,7 @@ describe('PACKAGING recovery: implOutputs persisted and hydrated on restart', ()
         onchainCreationBlock: 1,
         windowStartTs: now,
         windowEndTs: now + 86_400_000,
-        desiredState: { id: requestId, description: 'test' },
+        restorationJob: { id: requestId, description: 'test' },
       });
 
       const output: RestorationOutput = {

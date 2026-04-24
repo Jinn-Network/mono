@@ -25,7 +25,7 @@ describe('makePredictionV0Generator', () => {
     vi.useRealTimers();
   });
 
-  it('produces a valid prediction.v0 DesiredState with sentinel-resolved threshold', async () => {
+  it('produces a valid prediction.v0 RestorationJob with sentinel-resolved threshold', async () => {
     vi.setSystemTime(new Date('2026-04-21T18:23:45Z')); // mid-hour
     const gen = makePredictionV0Generator({
       feed: '0x000000000000000000000000000000000000feed',

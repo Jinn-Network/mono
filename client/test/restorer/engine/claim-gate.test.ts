@@ -48,7 +48,7 @@ function makeInput(id = 'req-gate'): PersistedIntentInput {
     specKind: 'portfolio.v0',
     windowStartTs: now + 1000,
     windowEndTs: now + 60_000,
-    desiredState: { id, description: 'test' },
+    restorationJob: { id, description: 'test' },
   };
 }
 

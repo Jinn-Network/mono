@@ -5,7 +5,7 @@
 
 import type { IntentGenerator } from '../sources.js';
 
-/** Overlay fields merged into DesiredState when posting from --spec-file. */
+/** Overlay fields merged into RestorationJob when posting from --spec-file. */
 export type ParsedSpecOverlay = {
   window: unknown;
   spec: unknown;

@@ -24,7 +24,7 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { createWriteStream } from 'node:fs';
 import { z } from 'zod';
-import type { DesiredState } from '../../types/desired-state.js';
+import type { RestorationJob } from '../../types/desired-state.js';
 import type { Artifact, OutputArtifact } from '../../types/portfolio.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 
@@ -80,13 +80,13 @@ export interface PackagingDeps {
  * Provision the working directory at PRE_SNAPSHOT time.
  *
  * Creates:
- *   <workingDir>/intent.json     — canonical DesiredState JSON
+ *   <workingDir>/intent.json     — canonical RestorationJob JSON
  *   <workingDir>/env/<VAR>       — one file per env var (mode 0600)
  *   <workingDir>/sessions/       — directory for session transcripts
  */
 export function provisionWorkingDir(
   workingDir: string,
-  intent: DesiredState,
+  intent: RestorationJob,
   envVars: Record<string, string> = {},
 ): void {
   mkdirSync(workingDir, { recursive: true, mode: 0o755 });

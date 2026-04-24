@@ -1,3 +1,7 @@
+/**
+ * Runtime shape of a restoration / evaluation job — wraps SignedIntentV1
+ * (see ./intent.ts) plus runtime fields (attempt number, type, etc.).
+ */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
@@ -12,9 +16,9 @@ export const WindowSchema = z.object({
 
 export type Window = z.infer<typeof WindowSchema>;
 
-// ── DesiredState schema ───────────────────────────────────────────────────────
+// ── RestorationJob schema ─────────────────────────────────────────────────────
 
-export const DesiredStateSchema = z.object({
+export const RestorationJobSchema = z.object({
   id: z.string().optional(),
   description: z.string().min(1),
   context: z.record(z.unknown()).optional(),
@@ -34,7 +38,7 @@ export const DesiredStateSchema = z.object({
   eligibility: z.record(z.unknown()).optional(),
 });
 
-export interface DesiredState {
+export interface RestorationJob {
   id: string;
   description: string;
   context?: Record<string, unknown>;
@@ -49,26 +53,26 @@ export interface DesiredState {
   eligibility?: Record<string, unknown>;
 }
 
-export function parseDesiredState(input: unknown): DesiredState {
-  const parsed = DesiredStateSchema.parse(input);
+export function parseRestorationJob(input: unknown): RestorationJob {
+  const parsed = RestorationJobSchema.parse(input);
   return {
     id: parsed.id ?? randomUUID(),
     description: parsed.description,
     context: parsed.context,
     window: parsed.window,
-    spec: parsed.spec as DesiredState['spec'],
+    spec: parsed.spec as RestorationJob['spec'],
     eligibility: parsed.eligibility,
   };
 }
 
 export interface RestorationRequest {
   requestId: RequestId;
-  desiredState: DesiredState;
+  restorationJob: RestorationJob;
   payment?: string;
   timeout?: number;
 
   // On-chain provenance from the RestorationJobCreated / MarketplaceRequest event
-  intentCid?: string;                 // IPFS CID of the DesiredState payload
+  intentCid?: string;                 // IPFS CID of the RestorationJob payload
   onchainCreationTx?: `0x${string}`; // tx hash of JinnRouter.createRestorationJob
   onchainCreationBlock?: number;      // block number containing the tx
 }
@@ -80,7 +84,7 @@ export interface RestorationResult {
 
 export interface DeliveredResult {
   requestId: RequestId;
-  desiredState: DesiredState;
+  restorationJob: RestorationJob;
   result: RestorationResult;
   deliveryMechAddress: string;
 }

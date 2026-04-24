@@ -1,6 +1,6 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import type { PredictionSubmissionManifest, PredictionV0Intent } from '../../../../src/types/prediction.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
 
@@ -53,11 +53,11 @@ export async function makeSignedManifest(overrides: {
   return { ...base, signature: { algo: 'secp256k1' as const, signer: account.address, hash: s.hash, sig } };
 }
 
-export function makeEvalDesiredState(
+export function makeEvalRestorationJob(
   manifest: PredictionSubmissionManifest | Record<string, unknown>,
   intent: PredictionV0Intent,
   options?: { omitRestorationIntentCid?: boolean },
-): DesiredState {
+): RestorationJob {
   const m = manifest as { intent: { cid: string } };
   return {
     id: 'eval',
@@ -73,5 +73,5 @@ export function makeEvalDesiredState(
         ? {}
         : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: m.intent.cid }),
     },
-  } as unknown as DesiredState;
+  } as unknown as RestorationJob;
 }

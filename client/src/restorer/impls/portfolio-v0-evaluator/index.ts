@@ -27,7 +27,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 
 import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { DesiredState } from '../../../types/desired-state.js';
+import type { RestorationJob } from '../../../types/desired-state.js';
 import type { HlFill, HlGridPoint } from '../../../venues/hyperliquid/types.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
 import { bracketGridPoints } from '../../../venues/hyperliquid/grid.js';
@@ -116,7 +116,7 @@ function _assembleUnsignedManifest(params: {
   onchainCreationTx: string;
   onchainCreationBlock: number;
   restorationRequestId: string;
-  intent: DesiredState;
+  intent: RestorationJob;
   checks: Check[];
   verdict: Verdict;
   score: string;
@@ -264,13 +264,13 @@ export class PortfolioV0Evaluator implements RestorerImpl {
   }
 
   async canAttempt(
-    intent: DesiredState,
+    intent: RestorationJob,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (intent.spec?.kind !== 'portfolio.v0') {
       return { ok: false, reason: 'spec.kind is not portfolio.v0' };
     }
     if (intent.type !== 'evaluation') {
-      return { ok: false, reason: 'DesiredState.type is not evaluation' };
+      return { ok: false, reason: 'RestorationJob.type is not evaluation' };
     }
     if (!intent.restorationRequestId) {
       return { ok: false, reason: 'restorationRequestId is required' };

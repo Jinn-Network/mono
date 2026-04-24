@@ -22,7 +22,7 @@ import type {
   IntentEnableMetadata,
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { DesiredState } from '../../../types/desired-state.js';
+import type { RestorationJob } from '../../../types/desired-state.js';
 import { PredictionApyV0IntentSchema } from '../../../types/prediction-apy.js';
 
 import { buildSessionPrompt } from './prompt.js';
@@ -60,7 +60,7 @@ export class ClaudeMcpPredictionApyImpl implements RestorerImpl {
     return { status: 'ready' };
   }
 
-  async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async canAttempt(intent: RestorationJob): Promise<{ ok: true } | { ok: false; reason: string }> {
     const parsed = PredictionApyV0IntentSchema.safeParse(intent);
     if (!parsed.success) return { ok: false, reason: `Invalid prediction.apy.v0 intent: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) return { ok: false, reason: 'window already closed' };

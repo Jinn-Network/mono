@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PortfolioV0Evaluator } from '../../../../src/restorer/impls/portfolio-v0-evaluator/index.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { HlFill, HlGridPoint } from '../../../../src/venues/hyperliquid/types.js';
 
 // ── Shared test data ──────────────────────────────────────────────────────────
@@ -199,7 +199,7 @@ function makeCtx(
     manifest = MOCK_MANIFEST,
   } = overrides;
 
-  const ds: DesiredState = {
+  const ds: RestorationJob = {
     id: 'eval-intent-1',
     description: 'Evaluate portfolio.v0 restoration result',
     type: 'evaluation',
@@ -315,7 +315,7 @@ describe('PortfolioV0Evaluator', () => {
 
     it('returns ok=false when spec.kind is wrong', async () => {
       const impl = makeEvaluator();
-      const intent: DesiredState = {
+      const intent: RestorationJob = {
         id: 'x',
         description: 'x',
         type: 'evaluation',
@@ -329,7 +329,7 @@ describe('PortfolioV0Evaluator', () => {
 
     it('returns ok=false when type is not evaluation', async () => {
       const impl = makeEvaluator();
-      const intent: DesiredState = {
+      const intent: RestorationJob = {
         id: 'x',
         description: 'x',
         type: 'restoration',
@@ -343,7 +343,7 @@ describe('PortfolioV0Evaluator', () => {
 
     it('returns ok=false when context.restorationResult is missing', async () => {
       const impl = makeEvaluator();
-      const intent: DesiredState = {
+      const intent: RestorationJob = {
         id: 'x',
         description: 'x',
         type: 'evaluation',
@@ -357,7 +357,7 @@ describe('PortfolioV0Evaluator', () => {
 
     it('returns ok=false when restorationRequestId is missing', async () => {
       const impl = makeEvaluator();
-      const intent: DesiredState = {
+      const intent: RestorationJob = {
         id: 'x',
         description: 'x',
         type: 'evaluation',

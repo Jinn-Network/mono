@@ -6,7 +6,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionApyV0Evaluator } from '../../../../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
 
 const PK = ('0x' + 'e'.repeat(64)) as `0x${string}`;
@@ -49,7 +49,7 @@ async function makeSignedApyManifestJson(overrides: { submittedAt?: number; inte
 function makeEvalIntent(
   manifestJson: string,
   options?: { omitRestorationIntentCid?: boolean; restorationIntentCid?: string },
-): DesiredState {
+): RestorationJob {
   return {
     id: 'eval-apy',
     description: 'e',
@@ -73,10 +73,10 @@ function makeEvalIntent(
         ? {}
         : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: options?.restorationIntentCid ?? 'expected-cid' }),
     },
-  } as unknown as DesiredState;
+  } as unknown as RestorationJob;
 }
 
-function makeCtx(intent: DesiredState, intentCid: string, testDeps: Record<string, unknown> = {}): RestorationContext {
+function makeCtx(intent: RestorationJob, intentCid: string, testDeps: Record<string, unknown> = {}): RestorationContext {
   const d = mkdtempSync(join(tmpdir(), 'apy-eval-'));
   return {
     intent,

@@ -238,9 +238,9 @@ export class Daemon {
       if (this.engineStopped) break;
       if (!request.requestId) continue;
 
-      const specKind = request.desiredState.spec?.kind ?? undefined;
-      const windowStartTs = request.desiredState.window?.startTs ?? Date.now();
-      const windowEndTs = request.desiredState.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
+      const specKind = request.restorationJob.spec?.kind ?? undefined;
+      const windowStartTs = request.restorationJob.window?.startTs ?? Date.now();
+      const windowEndTs = request.restorationJob.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
 
       // Warn on missing provenance — legacy intents may legitimately lack it.
       if (!request.intentCid) {
@@ -260,10 +260,10 @@ export class Daemon {
           onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
           onchainCreationBlock: request.onchainCreationBlock ?? 0,
           specKind,
-          intentType: (request.desiredState.type ?? 'restoration') as 'restoration' | 'evaluation',
+          intentType: (request.restorationJob.type ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,
           windowEndTs,
-          desiredState: request.desiredState,
+          restorationJob: request.restorationJob,
         });
 
         // Drive the engine state machine for this request.

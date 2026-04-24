@@ -796,7 +796,7 @@ async function main(): Promise<void> {
           await sleep(100);
         }
 
-        restorationRequestId = await adapter.postDesiredState({
+        restorationRequestId = await adapter.postRestorationJob({
           id: 'e2e-test',
           description: 'E2E router flow test',
           type: 'restoration',
@@ -933,14 +933,14 @@ async function main(): Promise<void> {
         if (del.requestId !== restorationRequestId) {
           throw new Error(`Expected requestId ${restorationRequestId}, got ${del.requestId}`);
         }
-        if (del.desiredState.type !== 'restoration') {
-          throw new Error(`Expected type 'restoration', got '${del.desiredState.type}'`);
+        if (del.restorationJob.type !== 'restoration') {
+          throw new Error(`Expected type 'restoration', got '${del.restorationJob.type}'`);
         }
         if (!del.result.data) {
           throw new Error('Expected result.data to be present');
         }
         console.log(`    Delivery claimed for requestId: ${del.requestId}`);
-        console.log(`    desiredState.type: ${del.desiredState.type}`);
+        console.log(`    restorationJob.type: ${del.restorationJob.type}`);
         console.log(`    result.data: "${del.result.data.slice(0, 80)}"`);
 
         // Mine to ensure evaluation creation tx is confirmed
@@ -1038,11 +1038,11 @@ async function main(): Promise<void> {
         if (delivery.done || !delivery.value) throw new Error('watchForDeliveries ended unexpectedly');
         const del = delivery.value;
 
-        if (del.desiredState.type !== 'evaluation') {
-          throw new Error(`Expected type 'evaluation', got '${del.desiredState.type}'`);
+        if (del.restorationJob.type !== 'evaluation') {
+          throw new Error(`Expected type 'evaluation', got '${del.restorationJob.type}'`);
         }
         console.log(`    Evaluation delivery claimed for requestId: ${del.requestId}`);
-        console.log(`    desiredState.type: ${del.desiredState.type}`);
+        console.log(`    restorationJob.type: ${del.restorationJob.type}`);
 
         // Verify the evaluation verdict contains restoration delivery data
         // (proves get_restoration_delivery tool worked in the mock agent)
@@ -1151,11 +1151,11 @@ async function main(): Promise<void> {
         console.log(`    Search by requestId: ${byRequestId.length} result(s) ✓`);
 
         // Gap 1: Verify search by desiredStateId
-        const byDesiredState = store.searchArtifacts({ desiredStateId: 'e2e-test' });
-        if (byDesiredState.length === 0) {
+        const byRestorationJob = store.searchArtifacts({ desiredStateId: 'e2e-test' });
+        if (byRestorationJob.length === 0) {
           throw new Error('Search by desiredStateId returned no results');
         }
-        console.log(`    Search by desiredStateId: ${byDesiredState.length} result(s) ✓`);
+        console.log(`    Search by desiredStateId: ${byRestorationJob.length} result(s) ✓`);
 
         // Gap 1: Verify time range filters
         const beforeEverything = store.searchArtifacts({ before: '2020-01-01T00:00:00' });
@@ -1585,7 +1585,7 @@ async function main(): Promise<void> {
         await restorerAdapterB.initialize();
 
         // A posts a restoration request targeting B's mech
-        const crossRequestId = await creatorAdapter.postDesiredState({
+        const crossRequestId = await creatorAdapter.postRestorationJob({
           id: 'cross-operator-test',
           description: 'Cross-operator E2E test',
           type: 'restoration',
@@ -1650,7 +1650,7 @@ async function main(): Promise<void> {
           crossDeliveryIter.next().then(r => r.value),
           sleep(USE_REAL_AGENT ? 120000 : 30000).then(() => { throw new Error('Cross-operator watchForDeliveries timed out'); }),
         ]);
-        console.log(`    A claimed restoration, type: ${crossDelivery?.desiredState?.type}`);
+        console.log(`    A claimed restoration, type: ${crossDelivery?.restorationJob?.type}`);
 
         await waitForRouterEvaluationJobForRestoration(
           publicClient,
@@ -1673,7 +1673,7 @@ async function main(): Promise<void> {
           sleep(USE_REAL_AGENT ? 120000 : 30000).then(() => { throw new Error('Cross-operator eval watchForDeliveries timed out'); }),
         ]);
         clearInterval(miningInterval2);
-        console.log(`    A claimed evaluation, type: ${crossEvalDelivery?.desiredState?.type}`);
+        console.log(`    A claimed evaluation, type: ${crossEvalDelivery?.restorationJob?.type}`);
         console.log('    Cross-operator full lifecycle complete');
 
         await creatorAdapter.stop();
@@ -1715,7 +1715,7 @@ async function main(): Promise<void> {
         });
         await windowAdapter.initialize();
 
-        const priorityRequestId = await windowAdapter.postDesiredState({
+        const priorityRequestId = await windowAdapter.postRestorationJob({
           id: 'priority-window-test',
           description: 'Priority window E2E test',
           type: 'restoration',
@@ -1895,7 +1895,7 @@ async function main(): Promise<void> {
         });
         await claimTestAdapter.initialize();
 
-        const claimTestRequestId = await claimTestAdapter.postDesiredState({
+        const claimTestRequestId = await claimTestAdapter.postRestorationJob({
           id: 'claim-registry-test',
           description: 'ClaimRegistry E2E test',
           type: 'restoration',
@@ -2021,7 +2021,7 @@ async function main(): Promise<void> {
 
         // Now claiming should fail — the checker has no code so staticcall reverts
         // Post a new request to claim
-        const eligTestRequestId = await claimTestAdapter.postDesiredState({
+        const eligTestRequestId = await claimTestAdapter.postRestorationJob({
           id: 'eligibility-reject-test',
           description: 'Eligibility rejection test',
           type: 'restoration',
@@ -2452,7 +2452,7 @@ async function main(): Promise<void> {
         });
         await compAdapter.initialize();
 
-        const compRequestId = await compAdapter.postDesiredState({
+        const compRequestId = await compAdapter.postRestorationJob({
           id: 'competition-test',
           description: 'Claim competition test',
           type: 'restoration',
@@ -2534,7 +2534,7 @@ async function main(): Promise<void> {
         });
         await failAdapter.initialize();
 
-        const failRequestId = await failAdapter.postDesiredState({
+        const failRequestId = await failAdapter.postRestorationJob({
           id: 'agent-failure-test',
           description: 'Agent failure test',
           type: 'restoration',
@@ -2635,7 +2635,7 @@ async function main(): Promise<void> {
         crashStore.setLastProcessedBlock(prePostBlock);
 
         // Post a request
-        const crashRequestId = await crashAdapter.postDesiredState({
+        const crashRequestId = await crashAdapter.postRestorationJob({
           id: 'crash-recovery-test',
           description: 'Crash recovery E2E test',
           type: 'restoration',

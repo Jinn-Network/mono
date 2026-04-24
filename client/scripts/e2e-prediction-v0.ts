@@ -66,7 +66,7 @@ import { getChainConfig } from '../src/earning/contracts.js';
 import { PredictionV0BaselineImpl } from '../src/restorer/impls/prediction-v0-baseline/index.js';
 import { PredictionV0Evaluator } from '../src/restorer/impls/prediction-v0-evaluator/index.js';
 import type { RestorationContext } from '../src/restorer/types.js';
-import type { DesiredState } from '../src/types/desired-state.js';
+import type { RestorationJob } from '../src/types/desired-state.js';
 import type {
   PredictionV0Intent,
   PredictionSubmissionManifest,
@@ -641,12 +641,12 @@ async function main(): Promise<void> {
 
       const { createClients: createClientsLocal } = await import('../src/adapters/mech/safe.js');
       const { submitRestorationJob, getMechDeliveryRate, getTimeoutBounds } = await import('../src/adapters/mech/contracts.js');
-      const { buildDesiredStatePayload, uploadToIpfs, cidToDigestHex } = await import('../src/adapters/mech/ipfs.js');
+      const { buildRestorationJobPayload, uploadToIpfs, cidToDigestHex } = await import('../src/adapters/mech/ipfs.js');
 
       const { walletClient: creatorWalletClient } = createClientsLocal(ANVIL_RPC, creatorAgentPk as Hex, base);
 
       // Build intent payload + upload to IPFS
-      const intentPayload = buildDesiredStatePayload(predictionIntent as unknown as import('../src/types/desired-state.js').DesiredState);
+      const intentPayload = buildRestorationJobPayload(predictionIntent as unknown as import('../src/types/desired-state.js').RestorationJob);
       const intentCid = await uploadToIpfs('https://registry.autonolas.tech', intentPayload);
       const intentDataHex = cidToDigestHex(intentCid) as Hex;
 
@@ -715,7 +715,7 @@ async function main(): Promise<void> {
       }
 
       if (!reqValue) throw new Error('No request received by restorer');
-      const req = reqValue as { requestId: string; desiredState: DesiredState; intentCid: string; onchainCreationTx?: string; onchainCreationBlock?: number };
+      const req = reqValue as { requestId: string; restorationJob: RestorationJob; intentCid: string; onchainCreationTx?: string; onchainCreationBlock?: number };
 
       console.log(`    Restorer claimed request: ${req.requestId}, intentCid: ${req.intentCid}`);
       capturedIntentCid = req.intentCid;
@@ -727,10 +727,10 @@ async function main(): Promise<void> {
       // Run PredictionV0BaselineImpl
       const impl = new PredictionV0BaselineImpl({ rpcUrl: ANVIL_RPC });
 
-      const intentForImpl: DesiredState = {
+      const intentForImpl: RestorationJob = {
         ...capturedIntent,
         window: capturedWindow,
-      } as unknown as DesiredState;
+      } as unknown as RestorationJob;
 
       const implStateDir = join(tmpDir, 'impl-state', req.requestId);
       const workingDir = join(tmpDir, 'working', req.requestId);
@@ -951,7 +951,7 @@ async function main(): Promise<void> {
       // restoration request is also on the marketplace, we skip requests that are
       // not of type 'evaluation' until we find the eval request from Phase 7.
       const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
-      let evalReqValue: { requestId: string; desiredState: DesiredState } | undefined;
+      let evalReqValue: { requestId: string; restorationJob: RestorationJob } | undefined;
       try {
         const iter = evaluatorAdapter.watchForRequests()[Symbol.asyncIterator]();
         const deadline = Date.now() + 45000;
@@ -962,11 +962,11 @@ async function main(): Promise<void> {
           ]);
           if (result.done) break;
           if (result.value) {
-            const req = result.value as { requestId: string; desiredState: DesiredState };
-            if (req.desiredState.type === 'evaluation') {
+            const req = result.value as { requestId: string; restorationJob: RestorationJob };
+            if (req.restorationJob.type === 'evaluation') {
               evalReqValue = req;
             } else {
-              console.log(`    Evaluator skipping non-evaluation request (type: ${req.desiredState.type ?? 'restoration'})`);
+              console.log(`    Evaluator skipping non-evaluation request (type: ${req.restorationJob.type ?? 'restoration'})`);
               // Continue to next iteration to find the eval request
             }
           }
@@ -976,8 +976,8 @@ async function main(): Promise<void> {
       }
 
       if (!evalReqValue) throw new Error('No eval request received by evaluator (timed out)');
-      const req = evalReqValue as { requestId: string; desiredState: DesiredState };
-      console.log(`    Evaluator claimed eval request: ${req.requestId}, type: ${req.desiredState.type}`);
+      const req = evalReqValue as { requestId: string; restorationJob: RestorationJob };
+      console.log(`    Evaluator claimed eval request: ${req.requestId}, type: ${req.restorationJob.type}`);
 
       // Claim on-chain via evaluator's adapter
       await evaluatorAdapter.claimRequest(req.requestId);
@@ -987,7 +987,7 @@ async function main(): Promise<void> {
       const capturedWindow2 = capturedWindow;
       const capturedIntent2 = capturedIntent;
 
-      const evalIntent: DesiredState = {
+      const evalIntent: RestorationJob = {
         id: 'pred-v0-e2e-eval',
         description: 'Evaluate prediction.v0 restoration attempt',
         type: 'evaluation',

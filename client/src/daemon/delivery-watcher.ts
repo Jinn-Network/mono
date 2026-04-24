@@ -24,7 +24,7 @@ export class DeliveryWatcherLoop {
           if (this.stopped) break;
           // The adapter handles claim + evaluation creation internally.
           // We just drive the iteration and log for observability.
-          const type = delivery.desiredState.type ?? 'unknown';
+          const type = delivery.restorationJob.type ?? 'unknown';
           console.error(`[delivery-watcher] Processed ${type} delivery: ${delivery.requestId.slice(0, 10)}...`);
           if (this.store) {
             emitEvent(this.store, {

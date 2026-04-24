@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDesiredState } from '../../src/types/desired-state.js';
+import { parseRestorationJob } from '../../src/types/desired-state.js';
 import {
   PortfolioV0IntentSchema,
   RestorationManifestSchema,
@@ -68,9 +68,9 @@ const postSnapshot = {
 
 // ── Legacy backwards compat ───────────────────────────────────────────────────
 
-describe('DesiredState legacy backwards compat', () => {
+describe('RestorationJob legacy backwards compat', () => {
   it('parses {id, description} (minimal legacy)', () => {
-    const result = parseDesiredState({ id: 'abc', description: 'Check health.' });
+    const result = parseRestorationJob({ id: 'abc', description: 'Check health.' });
     expect(result.id).toBe('abc');
     expect(result.description).toBe('Check health.');
     expect(result.context).toBeUndefined();
@@ -80,7 +80,7 @@ describe('DesiredState legacy backwards compat', () => {
   });
 
   it('parses {id, description, context} (legacy with context)', () => {
-    const result = parseDesiredState({
+    const result = parseRestorationJob({
       id: 'def',
       description: 'API health check.',
       context: { endpoint: 'https://api.example.com/health' },
@@ -90,21 +90,21 @@ describe('DesiredState legacy backwards compat', () => {
   });
 
   it('assigns a UUID when id is omitted', () => {
-    const result = parseDesiredState({ description: 'No id provided.' });
+    const result = parseRestorationJob({ description: 'No id provided.' });
     expect(typeof result.id).toBe('string');
     expect(result.id.length).toBeGreaterThan(0);
   });
 
   it('rejects a missing description', () => {
-    expect(() => parseDesiredState({ id: 'x' })).toThrow();
+    expect(() => parseRestorationJob({ id: 'x' })).toThrow();
   });
 });
 
-// ── DesiredState with new optional fields ─────────────────────────────────────
+// ── RestorationJob with new optional fields ─────────────────────────────────────
 
-describe('DesiredState with window / spec / eligibility', () => {
+describe('RestorationJob with window / spec / eligibility', () => {
   it('parses a portfolio.v0 desired state', () => {
-    const result = parseDesiredState(portfolioV0Intent);
+    const result = parseRestorationJob(portfolioV0Intent);
     expect(result.window).toEqual({ startTs: START_TS, endTs: END_TS });
     expect(result.spec?.kind).toBe('portfolio.v0');
     expect(result.eligibility).toBeDefined();

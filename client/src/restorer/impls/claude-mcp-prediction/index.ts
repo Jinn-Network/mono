@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { DesiredState } from '../../../types/desired-state.js';
+import type { RestorationJob } from '../../../types/desired-state.js';
 import { PredictionV0IntentSchema } from '../../../types/prediction.js';
 
 import { buildSessionPrompt } from './prompt.js';
@@ -43,7 +43,7 @@ export class ClaudeMcpPredictionImpl implements RestorerImpl {
   }
 
   async canAttempt(
-    intent: DesiredState,
+    intent: RestorationJob,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     const parsed = PredictionV0IntentSchema.safeParse(intent);
     if (!parsed.success) return { ok: false, reason: `Invalid prediction.v0 intent: ${parsed.error.message}` };

@@ -1,5 +1,5 @@
 import type {
-  DesiredState,
+  RestorationJob,
   RequestId,
   RestorationRequest,
   RestorationResult,
@@ -12,7 +12,7 @@ export interface ExecutionAdapter {
   initialize(): Promise<void>;
 
   // Creator
-  postDesiredState(state: DesiredState): Promise<RequestId>;
+  postRestorationJob(state: RestorationJob): Promise<RequestId>;
 
   // Restorer
   watchForRequests(): AsyncIterable<RestorationRequest>;

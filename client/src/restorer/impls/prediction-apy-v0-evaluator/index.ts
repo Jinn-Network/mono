@@ -6,7 +6,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import type { PublicClient } from 'viem';
 import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { DesiredState } from '../../../types/desired-state.js';
+import type { RestorationJob } from '../../../types/desired-state.js';
 import { PredictionApyV0IntentSchema, type PredictionApyVerdictManifest } from '../../../types/prediction-apy.js';
 import { twApyBpsOverWindow } from '../../../venues/aave-v3/client.js';
 import {
@@ -60,7 +60,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     return { ready: true };
   }
 
-  async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async canAttempt(intent: RestorationJob): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (intent.spec?.kind !== 'prediction.apy.v0') return { ok: false, reason: 'spec.kind is not prediction.apy.v0' };
     if (intent.type !== 'evaluation') return { ok: false, reason: 'type is not evaluation' };
     if (typeof intent.context?.['restorationResult'] !== 'string') {

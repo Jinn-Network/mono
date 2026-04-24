@@ -1,4 +1,4 @@
-import type { DesiredState, RestorationResult, RequestId } from '../types/index.js';
+import type { RestorationJob, RestorationResult, RequestId } from '../types/index.js';
 
 export interface RunnerContext {
   requestId: RequestId;
@@ -9,5 +9,5 @@ export interface RunnerContext {
 }
 
 export interface Runner {
-  run(desiredState: DesiredState, context: RunnerContext): Promise<RestorationResult>;
+  run(restorationJob: RestorationJob, context: RunnerContext): Promise<RestorationResult>;
 }

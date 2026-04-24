@@ -25,7 +25,7 @@ function makeIntent() {
       },
     },
     eligibility: { maxSubmissionDelayMs: 60_000 },
-  } as unknown as import('../../../../src/types/desired-state.js').DesiredState;
+  } as unknown as import('../../../../src/types/desired-state.js').RestorationJob;
 }
 
 function makeCtx(): RestorationContext {

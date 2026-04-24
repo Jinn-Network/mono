@@ -4,13 +4,13 @@
  * Pure type definitions; no runtime side effects.
  */
 
-import type { DesiredState } from '../types/desired-state.js';
+import type { RestorationJob } from '../types/desired-state.js';
 import type { OutputArtifact, RationaleEntry, Snapshot } from '../types/portfolio.js';
 
 // ── RestorationContext ────────────────────────────────────────────────────────
 
 export interface RestorationContext {
-  intent: DesiredState;
+  intent: RestorationJob;
   /**
    * IPFS CID of this job's desired state (from Marketplace / observe).
    * Restorers' submission manifests should reference the same CID; evaluators
@@ -152,7 +152,7 @@ export interface RestorerImpl {
   /**
    * Return true if this impl should handle the given (kind, type) pair.
    *
-   * `type` reflects DesiredState.type:
+   * `type` reflects RestorationJob.type:
    *   - 'restoration' (or undefined — legacy default): the impl runs a restoration attempt
    *   - 'evaluation': the impl runs as an evaluator producing a verdict
    *
@@ -160,7 +160,7 @@ export interface RestorerImpl {
    * An evaluator impl for kind=X should return true for type === 'evaluation'.
    */
   supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean;
-  canAttempt?(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }>;
+  canAttempt?(intent: RestorationJob): Promise<{ ok: true } | { ok: false; reason: string }>;
   run(ctx: RestorationContext): Promise<RestorationOutput>;
 
   /**

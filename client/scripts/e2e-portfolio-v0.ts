@@ -63,7 +63,7 @@ import { ClaudeMcpHyperliquidImpl } from '../src/restorer/impls/claude-mcp-hyper
 import { PortfolioV0Evaluator } from '../src/restorer/impls/portfolio-v0-evaluator/index.js';
 import type { RestorationContext } from '../src/restorer/types.js';
 import type { HlClearinghouseState, HlFill, HlGridPoint } from '../src/venues/hyperliquid/types.js';
-import type { DesiredState } from '../src/types/desired-state.js';
+import type { RestorationJob } from '../src/types/desired-state.js';
 import type { RestorationManifest } from '../src/types/portfolio.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -419,7 +419,7 @@ async function main(): Promise<void> {
       // Dummy masterAddress — HL is mocked so no real account needed
       const masterAddress = '0x0000000000000000000000000000000000000001';
 
-      const portfolioIntent: DesiredState = {
+      const portfolioIntent: RestorationJob = {
         id: 'pf-v0-e2e-test',
         description: 'portfolio.v0 e2e: grow equity by 1% over 24h window on Hyperliquid testnet',
         type: 'restoration',
@@ -438,7 +438,7 @@ async function main(): Promise<void> {
       // Mine fresh blocks to avoid stale nonce
       for (let i = 0; i < 3; i++) { await jsonRpc(ANVIL_RPC, 'evm_mine', []); await sleep(100); }
 
-      restorationRequestId = await adapter.postDesiredState(portfolioIntent);
+      restorationRequestId = await adapter.postRestorationJob(portfolioIntent);
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
       console.log(`    portfolio.v0 intent posted, requestId: ${restorationRequestId}`);
 
@@ -473,7 +473,7 @@ async function main(): Promise<void> {
       }
 
       if (!reqValue) throw new Error('No request received');
-      const req = reqValue as { requestId: string; desiredState: DesiredState; intentCid: string; onchainCreationTx?: string; onchainCreationBlock?: number };
+      const req = reqValue as { requestId: string; restorationJob: RestorationJob; intentCid: string; onchainCreationTx?: string; onchainCreationBlock?: number };
 
       console.log(`    Claimed request: ${req.requestId}, intentCid: ${req.intentCid}`);
       intentCid = req.intentCid;
@@ -497,17 +497,17 @@ async function main(): Promise<void> {
       mkdirSync(implStateDir, { recursive: true });
       mkdirSync(workingDir, { recursive: true });
 
-      // Restore spec + window from context (they may not be in desiredState parsed from legacy IPFS payload)
-      const intentWithSpec: DesiredState = {
-        ...req.desiredState,
-        window: req.desiredState.window ?? capturedWindow,
-        spec: req.desiredState.spec ?? {
+      // Restore spec + window from context (they may not be in restorationJob parsed from legacy IPFS payload)
+      const intentWithSpec: RestorationJob = {
+        ...req.restorationJob,
+        window: req.restorationJob.window ?? capturedWindow,
+        spec: req.restorationJob.spec ?? {
           kind: 'portfolio.v0',
           account: { venue: 'hyperliquid-testnet', masterAddress: '0x0000000000000000000000000000000000000001' },
           target: { metric: 'equity_return_pct', minReturnPct: 1.0 },
           constraint: { maxDrawdownPct: 10.0 },
         },
-        eligibility: req.desiredState.eligibility ?? { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 },
+        eligibility: req.restorationJob.eligibility ?? { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 },
       };
 
       const abort = new AbortController();
@@ -631,9 +631,9 @@ async function main(): Promise<void> {
       }
 
       if (!evalReqValue) throw new Error('No eval request received');
-      const req = evalReqValue as { requestId: string; desiredState: DesiredState };
+      const req = evalReqValue as { requestId: string; restorationJob: RestorationJob };
 
-      console.log(`    Eval request: ${req.requestId}, type: ${req.desiredState.type}`);
+      console.log(`    Eval request: ${req.requestId}, type: ${req.restorationJob.type}`);
 
       // Claim on-chain
       await adapter.claimRequest(req.requestId);
@@ -645,7 +645,7 @@ async function main(): Promise<void> {
       const capturedWindow2 = capturedWindow;
       const capturedManifest2 = capturedManifest;
 
-      const evalIntent: DesiredState = {
+      const evalIntent: RestorationJob = {
         id: 'pf-v0-e2e-eval',
         description: 'Evaluate portfolio.v0 restoration attempt',
         type: 'evaluation',
@@ -738,7 +738,7 @@ async function main(): Promise<void> {
 
       if (delivery.done || !delivery.value) throw new Error('watchForDeliveries ended unexpectedly');
       const del = delivery.value;
-      if (del.desiredState.type !== 'evaluation') throw new Error(`Expected type 'evaluation', got '${del.desiredState.type}'`);
+      if (del.restorationJob.type !== 'evaluation') throw new Error(`Expected type 'evaluation', got '${del.restorationJob.type}'`);
       console.log(`    Eval delivery claimed. requestId: ${del.requestId}`);
 
       // Parse + assert verdict

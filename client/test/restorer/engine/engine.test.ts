@@ -36,7 +36,7 @@ function makeInput(overrides: Partial<PersistedIntentInput> = {}): PersistedInte
     specKind: 'portfolio.v0',
     windowStartTs: now + 60_000,
     windowEndTs: now + 60_000 + 86_400_000,
-    desiredState: { id: 'req-001', description: 'test' },
+    restorationJob: { id: 'req-001', description: 'test' },
     ...overrides,
   };
 }

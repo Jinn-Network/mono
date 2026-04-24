@@ -69,7 +69,7 @@ function makeInput(requestId: string, tmp: string): PersistedIntentInput {
     specKind: 'portfolio.v0',
     windowStartTs: now,
     windowEndTs: now + 86_400_000,
-    desiredState: { id: requestId, description: 'test' },
+    restorationJob: { id: requestId, description: 'test' },
   };
 }
 
