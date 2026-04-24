@@ -43,6 +43,7 @@ import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedIntentSource, StaticConfiguredIntentSource } from './intents/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
+import { Registry8004 } from './discovery/registry.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -422,6 +423,21 @@ export async function main(): Promise<DaemonStartupInfo> {
     console.log('[main] ClaimRegistry: not configured (claim step will use NotImplementedError fallback)');
   }
 
+  // ── ERC-8004 Identity Registry (optional — gated by config.identityRegistryAddress) ─
+  const chainIdStr = config.network === 'testnet' ? 'eip155:84532' : 'eip155:8453';
+  const erc8004Registry = config.identityRegistryAddress
+    ? new Registry8004({
+        chainId: chainIdStr,
+        contractAddress: config.identityRegistryAddress,
+        privateKey: agentPrivateKey,
+        rpcUrl: config.rpcUrl,
+      })
+    : undefined;
+
+  if (erc8004Registry) {
+    console.log(`[main] ERC-8004 Identity Registry: ${config.identityRegistryAddress}`);
+  }
+
   // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
   const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
   const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
@@ -458,6 +474,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
+    erc8004RegistryForPosting: erc8004Registry,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
@@ -496,6 +513,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       envelopeDeps,
       deliveryDeps,
       implRegistry,
+      erc8004Registry,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

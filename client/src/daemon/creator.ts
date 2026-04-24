@@ -6,6 +6,7 @@ import { isRecoverableTransactionError } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { IntentPostingService } from '../intents/posting-service.js';
 import type { IntentSource } from '../intents/sources.js';
+import type { Registry8004 } from '../discovery/registry.js';
 
 export interface ActiveAttempt {
   restorationJob: RestorationJob;
@@ -33,8 +34,9 @@ export class CreatorLoop {
     private readonly intentSources: IntentSource[],
     private readonly store: Store,
     private readonly safeAddress?: string,
+    private readonly erc8004Registry?: Registry8004,
   ) {
-    this.postingService = new IntentPostingService(adapter, store);
+    this.postingService = new IntentPostingService(adapter, store, erc8004Registry);
     this.stopPromise = new Promise(resolve => {
       this.stopResolve = resolve;
     });

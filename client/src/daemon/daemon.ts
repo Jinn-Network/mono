@@ -60,6 +60,14 @@ export interface DaemonConfig {
   creatorSafeAddress?: string;
 
   /**
+   * ERC-8004 Identity Registry client for intent registration via the posting
+   * service. When provided, CreatorLoop passes it to IntentPostingService so
+   * each successful on-chain post is also registered on the Identity Registry.
+   * When absent, registration is skipped (best-effort, no-op).
+   */
+  erc8004RegistryForPosting?: Registry8004;
+
+  /**
    * RestorationEngine — sole path for marketplace request → claim → run → deliver.
    * Evaluation intents (`type === 'evaluation'`) dispatch via `supports()` to
    * evaluator impls; health-check intents with no spec use `legacy-claude` via
@@ -93,6 +101,7 @@ export class Daemon {
       config.intentSources ?? [],
       this.store,
       config.creatorSafeAddress,
+      config.erc8004RegistryForPosting,
     );
     this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter, this.store);
 

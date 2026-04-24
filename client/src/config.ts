@@ -169,6 +169,30 @@ export const JinnConfigSchema = z.object({
       implStateDirRoot: z.string().optional(),
     })
     .optional(),
+
+  /**
+   * ERC-8004 Identity Registry contract address on the configured chain.
+   * When set, the daemon registers intents, envelopes, and artifacts on-chain
+   * after successful posts/packs. When unset, ERC-8004 registration is skipped
+   * (no-op) — e2e / test environments that don't deploy the registry still work.
+   * Env: JINN_IDENTITY_REGISTRY_ADDRESS
+   */
+  identityRegistryAddress: z.string().optional(),
+
+  /**
+   * ERC-8004 Validation Registry contract address on the configured chain.
+   * When set, the challenger workflow can submit validation requests/responses.
+   * When unset, the Validation Registry client is not constructed.
+   * Env: JINN_VALIDATION_REGISTRY_ADDRESS
+   */
+  validationRegistryAddress: z.string().optional(),
+
+  /**
+   * Whether to enable the read-only reputation surface (query-time flag).
+   * When true, the operator dashboard and API endpoints expose reputation data.
+   * Env: JINN_REPUTATION_ENABLED
+   */
+  reputationEnabled: z.boolean().default(false),
 });
 
 const DEFAULT_ENGINE = {
@@ -278,6 +302,13 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   if (env['JINN_MASTER_ETH_DAILY_WEI']) {
     merged.masterEthDailyEstimateWei = env['JINN_MASTER_ETH_DAILY_WEI'].trim();
+  }
+
+  if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
+  if (env['JINN_VALIDATION_REGISTRY_ADDRESS']) merged.validationRegistryAddress = env['JINN_VALIDATION_REGISTRY_ADDRESS'];
+  if (env['JINN_REPUTATION_ENABLED'] !== undefined) {
+    const rv = env['JINN_REPUTATION_ENABLED'].trim().toLowerCase();
+    merged.reputationEnabled = rv === '1' || rv === 'true' || rv === 'yes';
   }
 
   if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
