@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 24px; margin: 0; background: var(--bg); }
+  .row { display: flex; gap: 0; border: 1px solid var(--border); }
+  .sw { flex: 1; aspect-ratio: 2/1; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #f2f7fc;}
+  .hex { font-size: 10px; opacity: 0.7; }
+  .meaning { font-family: var(--font-display); font-style: italic; font-size: 18px; letter-spacing: 0; text-transform: none; }
+  .foot { margin-top: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); letter-spacing: 0.06em; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="sw" style="background:#6a9b8f;"><span class="meaning">bound</span><span>vow-green<br><span class="hex">#6a9b8f &middot; success</span></span></div>
+    <div class="sw" style="background:#b8802f;"><span class="meaning">wanes</span><span>wane<br><span class="hex">#b8802f &middot; warning</span></span></div>
+    <div class="sw" style="background:#a85a5a;"><span class="meaning">broken</span><span>break-red<br><span class="hex">#a85a5a &middot; error</span></span></div>
+    <div class="sw" style="background:#7a6db0;"><span class="meaning">scrying</span><span>seer-violet<br><span class="hex">#7a6db0 &middot; info</span></span></div>
+  </div>
+  <div class="foot">
+    Derived from the palette family, not pulled from a generic R/Y/G/B lookup. Warning is a deeper lamplight (lives on the same hue axis as gold). Info is violet to stay distinct from the primary blue. Bound is a cool teal-green. All four share the palette&rsquo;s desaturated, nocturnal register.
+  </div>
+</body>
+</html>

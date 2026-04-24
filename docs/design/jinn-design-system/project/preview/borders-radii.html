@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 24px; margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .demo { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .square { width: 80px; height: 80px; background: var(--bg-elevated); }
+  .square.b { border: 1px solid var(--border); }
+  .square.bs { border: 1px solid var(--border-strong); }
+  .square.ba { border: 1px solid var(--border-accent); }
+  .square.bd { border: 1px dashed var(--border); }
+  .tag { text-transform: uppercase; color: var(--fg-muted); font-size: 9px; letter-spacing: 0.14em; }
+  .row2 { display: flex; gap: 20px; margin-top: 20px; align-items: flex-end;}
+  .card-ex { padding: 16px; }
+  .radius-1 { border-radius: 4px; }
+  .radius-2 { border-radius: 6px; }
+  .radius-3 { border-radius: 10px; }
+  .radius-pill { border-radius: 999px; padding: 4px 14px; }
+</style>
+</head>
+<body>
+  <div class="grid">
+    <div class="demo"><div class="square b"></div><span class="tag">hair</span></div>
+    <div class="demo"><div class="square bs"></div><span class="tag">strong</span></div>
+    <div class="demo"><div class="square ba"></div><span class="tag">accent</span></div>
+    <div class="demo"><div class="square bd"></div><span class="tag">dashed</span></div>
+  </div>
+  <div class="row2">
+    <div class="demo"><div class="square b radius-1"></div><span class="tag">radius-1 / chip 4px</span></div>
+    <div class="demo"><div class="square b radius-2"></div><span class="tag">radius-2 / button 6px</span></div>
+    <div class="demo"><div class="square b radius-3"></div><span class="tag">radius-3 / card 10px</span></div>
+    <div class="demo"><div class="radius-pill" style="border:1px solid var(--border-accent); color:var(--accent); text-transform:uppercase; font-size:10px; letter-spacing:0.14em;">bound</div><span class="tag">pill / status</span></div>
+  </div>
+</body>
+</html>

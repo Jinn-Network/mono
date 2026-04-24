@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 0; margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-mono); }
+  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; height: 220px; }
+  .cell { padding: 18px; position: relative; overflow: hidden; border-right: 1px solid var(--border); }
+  .cell:last-child { border-right: 0; }
+  .cell.grid { background-color: var(--blue-900); }
+  .cell.grid::after { content: ''; position: absolute; inset: 0; background-image: linear-gradient(to right, rgba(168,154,124,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(168,154,124,0.08) 1px, transparent 1px); background-size: 24px 24px; }
+  .cell.dots { background-color: var(--blue-900); }
+  .cell.dots::after { content: ''; position: absolute; inset: 0; background-image: radial-gradient(rgba(168,154,124,0.18) 1px, transparent 1px); background-size: 16px 16px; }
+  .cell.scan { background-color: var(--blue-800); }
+  .cell.scan::after { content: ''; position: absolute; inset: 0; background-image: repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(0,0,0,0.22) 2px, rgba(0,0,0,0.22) 3px); }
+  .tag { position: relative; z-index: 1; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-muted); }
+  .label-big { position: absolute; bottom: 18px; left: 18px; z-index: 1; font-family: var(--font-display); font-size: 24px; font-style: italic;}
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="cell grid"><span class="tag">texture-grid</span><span class="label-big">24px hairline</span></div>
+    <div class="cell dots"><span class="tag">texture-dots</span><span class="label-big">16px lamplight</span></div>
+    <div class="cell scan"><span class="tag">texture-scan</span><span class="label-big">in smoke</span></div>
+  </div>
+</body>
+</html>

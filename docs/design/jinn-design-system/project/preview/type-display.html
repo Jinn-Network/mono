@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link rel="stylesheet" href="../foundations.css">
+<style>
+  body { padding: 32px; margin: 0; background: var(--bg); color: var(--fg); }
+  .specimen { display: grid; grid-template-columns: 80px 1fr; gap: 16px; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .specimen:last-child { border-bottom: 0; }
+  .tag { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-muted); padding-top: 8px; }
+</style>
+</head>
+<body>
+  <div class="specimen">
+    <div class="tag">display</div>
+    <div class="display" style="font-size: 72px; line-height: 1;">Summon the smoke</div>
+  </div>
+  <div class="specimen">
+    <div class="tag">h2</div>
+    <h2 style="margin:0;">A wish without a vessel is only weather.</h2>
+  </div>
+  <div class="specimen">
+    <div class="tag">wish</div>
+    <div class="wish">Bind me, and I will carry it.</div>
+  </div>
+  <div class="specimen" style="border-top:1px solid var(--border); padding-top:14px; margin-top:4px;">
+    <div class="tag">license</div>
+    <div class="body-sm" style="color:var(--fg-muted);">
+      Instrument Serif &amp; JetBrains Mono &mdash; free via Google Fonts (SIL Open Font License). No paid webfonts.
+    </div>
+  </div>
+</body>
+</html>

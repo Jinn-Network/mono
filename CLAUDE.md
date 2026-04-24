@@ -271,3 +271,38 @@ To add a new **in-repo** `spec.kind` (typed spec, `jinn submit-intent --spec-fil
 ## Spec Conventions
 
 Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a version, date, and author in the header.
+
+## Design System
+
+Jinn's design system lives at [`docs/design/jinn-design-system/`](docs/design/jinn-design-system/). **Read it before building any UI, slide, mock, docs page, marketing surface, or other user-facing artifact** — it's the source of truth for colors, type, voice, iconography, and surface rules.
+
+Entry points, in order:
+- [`docs/design/jinn-design-system/BRAND_POSTURE.md`](docs/design/jinn-design-system/BRAND_POSTURE.md) — what "headless" means here (grounded in Other Internet's [*Headless Brands*](https://otherinter.net/research/headless-brands/)); which parts are protocol vs. narrative
+- [`docs/design/jinn-design-system/project/README.md`](docs/design/jinn-design-system/project/README.md) — brand posture, voice/lexicon, visual foundations (colors, type, spacing, borders, shadows, radii, motion, layout), iconography
+- [`docs/design/jinn-design-system/project/SKILL.md`](docs/design/jinn-design-system/project/SKILL.md) — short operational manifest and non-negotiables
+- [`docs/design/jinn-design-system/project/colors_and_type.css`](docs/design/jinn-design-system/project/colors_and_type.css) + [`foundations.css`](docs/design/jinn-design-system/project/foundations.css) — copy these into any new HTML artifact; treat the CSS variables as the canonical tokens
+- [`docs/design/jinn-design-system/project/assets/`](docs/design/jinn-design-system/project/assets/) — sigils and wordmark SVGs; reuse, don't redraw
+- [`docs/design/jinn-design-system/project/preview/`](docs/design/jinn-design-system/project/preview/) — reference cards for every token (colors, type, buttons, chips, cards, shadows, textures, sigils, voice)
+- [`docs/design/jinn-design-system/project/ui_kits/explorer/`](docs/design/jinn-design-system/project/ui_kits/explorer/) and [`slides/`](docs/design/jinn-design-system/project/slides/) — reference implementations; match visual output, not internal structure
+- [`docs/design/jinn-design-system/chats/chat1.md`](docs/design/jinn-design-system/chats/chat1.md) — design chat transcript where decisions (blue+gold palette, softened-brutalism radii, rederived semantic colors) were made
+
+**Non-negotiables** (from `SKILL.md`, with one correction):
+- Never use emoji in product, marketing, or docs.
+- Never use gradients as decoration (protection gradients over imagery are the only exception).
+- Never invent new vow-language (`summon / bind / vow / vessel / wish / smoke / seer / wane`) without marking it as a proposal.
+- Drop the metaphor and speak plainly whenever money, safety, or legal consent is on the line.
+- **Corners are softened-brutalist, not square.** `SKILL.md` still says "never rounded"; the README supersedes it — use `--radius-1` (4px chips/inputs), `--radius-2` (6px default for buttons, small cards), `--radius-3` (10px panels/large cards), `--radius-pill` for status chips only.
+
+### Brand posture — "headless" in the Other Internet sense
+
+Jinn's brand is **headless** in the specific sense defined by Other Internet's [*Headless Brands*](https://otherinter.net/research/headless-brands/) (read it before doing brand work). That means:
+
+1. **No central brand authority.** No one owns Jinn's narrative. The design system is a Schelling point for coordination, not a corporate style guide. Participants — creators, vessels, seers, BD, node operators — are expected to fork, remix, and re-skin.
+2. **Immutable protocol foundations.** The parts that *don't* move are the protocol-level commitments: the loop (Creation → Execution → Evaluation → Knowledge), the lexicon (*summon, bind, vow, vessel, wish, smoke, seer, wane*), the content non-negotiables (no emoji, plain speech on money/safety/legal). These are the "21M supply + proof-of-work" of the brand — fixed so narratives can layer on top.
+3. **Narratives layer on top.** Palette, typography, sigils, surface treatment — all of it is narrative, and narrative is allowed (expected) to fork per surface, operator, product, or community. Multiple visual dialects of Jinn can coexist on the same protocol.
+4. **Brand lives in participants' minds.** Consistency emerges from convergent narratives on shared protocol primitives, not from enforcement. A node operator's dashboard and a creator's pitch deck can look nothing alike and both still be Jinn — as long as they share the words and the loop.
+5. **User-stakeholders are brand workers.** Anyone with a stake in the network (tokens, reputation, deployed vessels) has standing to propose brand direction. Contribution to the brand is a first-class form of participation, not marketing overhead.
+
+**Operational rule, restated:** **keep the words, loosen the visuals.** The lexicon and non-negotiables are the protocol; everything else is narrative. If you're about to invent new vow-language, that's a protocol change — mark it as a proposal. If you're about to change a color or swap a sigil, that's a narrative move — just document what you changed.
+
+The received design bundle (palette, sigils, type pairing) is one narrative — a well-reasoned starting point, not the canonical Jinn. Treat it as such.
