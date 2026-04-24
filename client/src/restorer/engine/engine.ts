@@ -26,10 +26,10 @@ import {
   type PackagingDeps,
 } from './packaging.js';
 import {
-  assembleAndSignManifest,
-  type ManifestAssemblyDeps,
-  type ManifestAssemblyOptions,
-} from './manifest-assembly.js';
+  assembleAndSignEnvelope,
+  type EnvelopeAssemblyDeps,
+  type EnvelopeInputs,
+} from './envelope-assembly.js';
 import {
   deliverAndClaim,
   type DeliveryDeps,
@@ -80,10 +80,14 @@ export interface RestorationEngineOptions {
    */
   packagingDeps?: PackagingDeps;
   /**
-   * Manifest assembly dependencies. When provided, pack() can assemble + sign.
+   * Envelope assembly dependencies. When provided, pack() can assemble + sign.
    * When absent, pack() falls back to NotImplementedError.
+   *
+   * Replaces the old `manifestDeps` (ManifestAssemblyDeps). The safeAddress
+   * field that was on ManifestAssemblyDeps is now sourced from deliveryDeps
+   * or passed directly in EnvelopeInputs.participant.
    */
-  manifestDeps?: ManifestAssemblyDeps;
+  envelopeDeps?: EnvelopeAssemblyDeps & { safeAddress?: `0x${string}` };
   /**
    * Delivery dependencies. When provided, deliver() is functional.
    * When absent, deliver() falls back to NotImplementedError.
@@ -115,7 +119,7 @@ export class RestorationEngine {
   protected readonly paths: RestorationEngineOptions['paths'];
   protected readonly claimDeps: RestorationEngineOptions['claimDeps'];
   protected readonly packagingDeps: RestorationEngineOptions['packagingDeps'];
-  protected readonly manifestDeps: RestorationEngineOptions['manifestDeps'];
+  protected readonly envelopeDeps: RestorationEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: RestorationEngineOptions['deliveryDeps'];
   protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
 
@@ -132,7 +136,7 @@ export class RestorationEngine {
     this.paths = opts.paths;
     this.claimDeps = opts.claimDeps;
     this.packagingDeps = opts.packagingDeps;
-    this.manifestDeps = opts.manifestDeps;
+    this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
   }
@@ -582,9 +586,9 @@ export class RestorationEngine {
 
   /**
    * PACKAGING transition: walk workingDir, upload artifacts, assemble + sign
-   * manifest, upload manifest, persist manifest CID + artifact CIDs.
+   * envelope, upload envelope, persist envelope CID + artifact CIDs.
    *
-   * Requires packagingDeps + manifestDeps. When absent, falls back to
+   * Requires packagingDeps + envelopeDeps. When absent, falls back to
    * NotImplementedError.
    */
   protected async pack(intent: PersistedIntent): Promise<void> {
@@ -602,7 +606,7 @@ export class RestorationEngine {
       }
     }
 
-    if (!this.packagingDeps || !this.manifestDeps) {
+    if (!this.packagingDeps || !this.envelopeDeps) {
       throw new NotImplementedError('pack');
     }
 
@@ -620,33 +624,27 @@ export class RestorationEngine {
 
     // 2. Derive agentEoa from private key
     const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(this.manifestDeps.agentEoaPrivateKey);
+    const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
     const agentEoa = account.address;
 
-    // Safe multisig address — sourced from manifestDeps (preferred) or deliveryDeps.
+    // Safe multisig address — sourced from envelopeDeps (preferred) or deliveryDeps.
     // Hard throw if absent: falling back to agentEoa would produce a
-    // protocol-invalid manifest (safeAddress MUST differ from agentEoa, §5.1).
-    const safeAddress = this.manifestDeps.safeAddress ?? this.deliveryDeps?.safeAddress;
+    // protocol-invalid envelope (safeAddress MUST differ from agentEoa, §5.1).
+    const safeAddress = this.envelopeDeps.safeAddress ?? this.deliveryDeps?.safeAddress;
     if (!safeAddress) {
-      throw new Error('pack: safeAddress not configured in manifestDeps or deliveryDeps');
+      throw new Error('pack: safeAddress not configured in envelopeDeps or deliveryDeps');
     }
 
-    // 3. Assemble + sign manifest
-    const provenance = {
-      intentCid: intent.intentCid,
-      onchainCreationTx: intent.onchainCreationTx,
-      onchainCreationBlock: intent.onchainCreationBlock,
-      requestId: intent.requestId,
-      safeAddress,
-      agentEoa,
-      windowStartTs: intent.windowStartTs,
-      windowEndTs: intent.windowEndTs,
-    };
-
+    // 3. Build envelope payload from impl output (kind-typed, wrapped into payload field)
     const preSnapshotPayload = intent.preSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
     const postSnapshotPayload = intent.postSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
 
-    const manifestImplOutput = {
+    // The specKind drives payload schema selection. Fall back to a passthrough
+    // for legacy health-check intents (no kind) by skipping validation — those
+    // use the old manifest path and will be migrated separately.
+    const specKind = intent.specKind ?? 'portfolio.v0';
+
+    const envelopePayload: Record<string, unknown> = {
       preSnapshot: {
         capturedAt: intent.preSnapshotCapturedAt ?? Date.now(),
         hlTime: preSnapshotPayload?.hlTime ?? 0,
@@ -663,8 +661,10 @@ export class RestorationEngine {
       },
       fills: (intent.fillsPayload as unknown[]) ?? [],
       gating: (intent.gatingClaim as Record<string, unknown>) ?? {},
-      informational: (intent.informationalClaim as Record<string, unknown>) ?? undefined,
-      rationale: implOutput?.rationale ?? undefined,
+      ...(intent.informationalClaim != null
+        ? { informational: intent.informationalClaim as Record<string, unknown> }
+        : {}),
+      ...(implOutput?.rationale != null ? { rationale: implOutput.rationale } : {}),
     };
 
     // 4. Persist generatedAt once (first pack); reuse on retry for CID determinism.
@@ -675,16 +675,39 @@ export class RestorationEngine {
       this.persistence.setManifestGeneratedAt(intent.requestId, generatedAt);
     }
 
-    const manifestOpts: ManifestAssemblyOptions = { generatedAt };
-
-    // 5. Sign + upload manifest → manifest CID now known
-    const { manifest: _manifest, manifestCid, signatureHash } = await assembleAndSignManifest(
-      provenance,
-      manifestImplOutput,
+    // 5. Assemble + sign envelope → envelope CID now known
+    // TODO(build-info): replace 'dev' and the zero digest with real build-time
+    // constants from a future build-info.ts module generated at CI time.
+    const envelopeInputs: EnvelopeInputs = {
+      kind: specKind,
+      role: 'restoration',
+      intent: {
+        cid: intent.intentCid,
+        onchainCreationTx: intent.onchainCreationTx,
+        onchainCreationBlock: intent.onchainCreationBlock,
+        requestId: intent.requestId,
+      },
+      participant: { safeAddress, agentEoa },
+      window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
+      executor: {
+        implName: intent.implName ?? specKind,
+        implVersion: '1.0.0',
+        // TODO(build-info): populate from a build-time constants module.
+        clientGitSha: 'dev',
+        codeDigest: 'sha256:' + '0'.repeat(64),
+        signingKey: { kind: 'agent-eoa', pubkey: agentEoa },
+      },
       artifacts,
-      this.manifestDeps,
-      manifestOpts,
+      payload: envelopePayload,
+      generatedAt,
+    };
+
+    const { envelopeCid, envelopeHash } = await assembleAndSignEnvelope(
+      envelopeInputs,
+      this.envelopeDeps,
     );
+    const manifestCid = envelopeCid;
+    const signatureHash = envelopeHash;
 
     // 6. Register artifacts with back-pointer to parent manifest CID (spec §6.1)
     registerArtifacts(uploadedArtifacts, manifestCid, this.packagingDeps);

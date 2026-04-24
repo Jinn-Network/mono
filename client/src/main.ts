@@ -380,8 +380,8 @@ export async function main(): Promise<DaemonStartupInfo> {
     ipfsRegistryUrl: config.ipfsRegistryUrl,
   };
 
-  // Manifest assembly deps: sign manifests with agent EOA private key
-  const manifestDeps = {
+  // Envelope assembly deps: sign envelopes with agent EOA private key
+  const envelopeDeps = {
     ipfsRegistryUrl: config.ipfsRegistryUrl,
     agentEoaPrivateKey: agentPrivateKey,
     safeAddress,
@@ -493,7 +493,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       },
       claimDeps,
       packagingDeps,
-      manifestDeps,
+      envelopeDeps,
       deliveryDeps,
       implRegistry,
     },

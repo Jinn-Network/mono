@@ -2,7 +2,7 @@
  * Integration tests for engine.ts packaging + delivery integration.
  *
  * Tests that pack() and deliver() stubs are replaced with real behaviour when
- * packagingDeps + manifestDeps + deliveryDeps are injected.
+ * packagingDeps + envelopeDeps + deliveryDeps are injected.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -85,7 +85,7 @@ function makeOpts(store: Store, tmp: string): RestorationEngineOptions {
       ipfsRegistryUrl: 'http://ipfs.test',
       registerArtifact: vi.fn(),
     },
-    manifestDeps: {
+    envelopeDeps: {
       ipfsRegistryUrl: 'http://ipfs.test',
       agentEoaPrivateKey: TEST_PRIVATE_KEY,
       safeAddress: '0xsafe' as `0x${string}`,
@@ -178,7 +178,7 @@ describe('Engine packaging integration', () => {
     await expect(eng.process('req-002')).rejects.toThrow(NotImplementedError);
   });
 
-  it('pack() succeeds with packagingDeps + manifestDeps and advances to DELIVERING', async () => {
+  it('pack() succeeds with packagingDeps + envelopeDeps and advances to DELIVERING', async () => {
     // Provision working dir manually so pack() has something to walk
     const requestId = 'req-003';
     const workingDir = join(tmp, 'restorations', requestId);
@@ -213,19 +213,19 @@ describe('Engine packaging integration', () => {
     expect(intent!.state).toBe(IntentState.DELIVERING);
     expect(intent!.manifestCid).toBe('bafymock123');
 
-    // Assert restorer provenance: safeAddress must be the Safe multisig,
+    // Assert participant provenance: safeAddress must be the Safe multisig,
     // agentEoa must be derived from the private key — they MUST differ.
     const uploadCalls = (uploadToIpfs as ReturnType<typeof vi.fn>).mock.calls;
-    const manifestCall = uploadCalls.find(
+    const envelopeCall = uploadCalls.find(
       ([, payload]: [string, Record<string, unknown>]) =>
-        typeof payload === 'object' && payload !== null && 'restorer' in payload,
+        typeof payload === 'object' && payload !== null && 'participant' in payload,
     );
-    expect(manifestCall).toBeDefined();
-    const manifest = manifestCall![1] as Record<string, unknown>;
-    const restorer = manifest.restorer as Record<string, unknown>;
-    expect(restorer.safeAddress).toBe('0xsafe');
-    expect(restorer.agentEoa).not.toBe('0xsafe');
-    expect(restorer.safeAddress).not.toBe(restorer.agentEoa);
+    expect(envelopeCall).toBeDefined();
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+    const participant = envelope.participant as Record<string, unknown>;
+    expect(participant.safeAddress).toBe('0xsafe');
+    expect(participant.agentEoa).not.toBe('0xsafe');
+    expect(participant.safeAddress).not.toBe(participant.agentEoa);
   });
 
   it('deliver() throws NotImplementedError when deliveryDeps absent', async () => {
@@ -270,7 +270,7 @@ describe('Engine packaging integration', () => {
   });
 
   it('pack() throws when safeAddress is not configured', async () => {
-    // Engine with manifestDeps missing safeAddress and no deliveryDeps
+    // Engine with envelopeDeps missing safeAddress and no deliveryDeps
     const optsNoSafe: RestorationEngineOptions = {
       store,
       registry: noopRegistry,
@@ -281,7 +281,7 @@ describe('Engine packaging integration', () => {
       packagingDeps: {
         ipfsRegistryUrl: 'http://ipfs.test',
       },
-      manifestDeps: {
+      envelopeDeps: {
         ipfsRegistryUrl: 'http://ipfs.test',
         agentEoaPrivateKey: TEST_PRIVATE_KEY,
         // safeAddress intentionally absent
@@ -315,7 +315,7 @@ describe('Engine packaging integration', () => {
     p.transition(requestId, IntentState.PACKAGING);
 
     await expect(eng.process(requestId)).rejects.toThrow(
-      'pack: safeAddress not configured in manifestDeps or deliveryDeps',
+      'pack: safeAddress not configured in envelopeDeps or deliveryDeps',
     );
   });
 
@@ -341,7 +341,7 @@ describe('Engine packaging integration', () => {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
-      gatingClaim: {},
+      gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
     });
     p.transition(requestId, IntentState.PACKAGING);
 
@@ -383,7 +383,7 @@ describe('Engine packaging integration', () => {
         postSnapshotCapturedAt: 2000,
         postSnapshotPayload: { capturedAt: 2000, hlTime: 0 },
         fillsPayload: [],
-        gatingClaim: { equityReturnPct: '5' },
+        gatingClaim: { equityReturnPct: '5', maxDrawdownPct: '2', closedTradesCount: 10, tradedNotionalMultiple: '3' },
       });
       p.transition(requestId, IntentState.PACKAGING);
     };

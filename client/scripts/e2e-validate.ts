@@ -1385,7 +1385,7 @@ async function main(): Promise<void> {
             },
             claimDeps,
             packagingDeps: { ipfsRegistryUrl: 'https://registry.autonolas.tech' },
-            manifestDeps: {
+            envelopeDeps: {
               ipfsRegistryUrl: 'https://registry.autonolas.tech',
               agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
               safeAddress: safeAddress as `0x${string}`,
