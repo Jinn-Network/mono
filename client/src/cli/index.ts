@@ -37,6 +37,7 @@ import pluginCommand from './commands/plugin-install.js';
 import updateCommand from './commands/update.js';
 import intentsCommand from './commands/intents.js';
 import mcpCommand from './commands/mcp.js';
+import registerSourceBundleCommand from './commands/register-source-bundle.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -63,6 +64,7 @@ const COMMANDS: CommandModule[] = [
   updateCommand,
   intentsCommand,
   mcpCommand,
+  registerSourceBundleCommand,
 ];
 
 function publicCommandNames(commands: CommandModule[]): string[] {
