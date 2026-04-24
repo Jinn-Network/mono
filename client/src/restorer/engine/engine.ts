@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { IntentPersistence, type PersistedIntent, type PersistedIntentInput } from './persistence.js';
 import { IntentState, MissingEvidenceHashError } from './state.js';
+import type { Registry8004 } from '../../discovery/registry.js';
 import type { Store } from '../../store/store.js';
 import {
   executeTwoLayerClaim,
@@ -103,6 +104,15 @@ export interface RestorationEngineOptions {
   implRegistry?: {
     findFor(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): RestorerImpl | undefined;
   };
+  /**
+   * ERC-8004 Identity Registry client. When provided, the engine registers
+   * the envelope (adw:ExecutionEnvelope) and each artifact (adw:Artifact with
+   * parentEnvelopeCid) after successful pack().
+   *
+   * Optional — tests and development modes may skip registration.
+   * When absent, on-chain ERC-8004 registration is skipped (no-op).
+   */
+  erc8004Registry?: Registry8004;
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -125,6 +135,7 @@ export class RestorationEngine {
   protected readonly envelopeDeps: RestorationEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: RestorationEngineOptions['deliveryDeps'];
   protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
+  protected readonly erc8004Registry: Registry8004 | undefined;
 
   // Transient storage for impl output between runImpl and pack transitions.
   // Keyed by requestId; cleared after successful pack.
@@ -153,6 +164,7 @@ export class RestorationEngine {
     this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
+    this.erc8004Registry = opts.erc8004Registry;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -842,6 +854,52 @@ export class RestorationEngine {
 
     // 6. Register artifacts with back-pointer to parent manifest CID (spec §6.1)
     registerArtifacts(uploadedArtifacts, manifestCid, this.packagingDeps);
+
+    // 6b. ERC-8004 Identity Registry registration (Plan E). Best-effort: failures
+    // emit a warning but do not fail the pack() transition — the envelope + on-chain
+    // claimDelivery evidenceHash remain the canonical substrate. Subgraph
+    // eventually-consistency handles ordering.
+    if (this.erc8004Registry) {
+      const reg = this.erc8004Registry;
+      const envelopeRegistrationPromise = reg.registerEnvelope({
+        envelopeCid: manifestCid,
+        kind: specKind,
+        role,
+        evidenceTier: 'self-signed',
+        intentCid: intent.intentCid ?? '',
+        // parentEnvelopeCid for verdict envelopes: read from persisted restorationJob context if set by the evaluator impl.
+        ...(isEvaluation && typeof (intent.restorationJob?.context as Record<string, unknown> | undefined)?.['parentEnvelopeCid'] === 'string'
+          ? { parentEnvelopeCid: (intent.restorationJob!.context as Record<string, unknown>)['parentEnvelopeCid'] as string }
+          : {}),
+        participant: safeAddress,
+        generatedAt,
+      }).catch((err: unknown) => {
+        console.warn(
+          `[restorer-engine] registerEnvelope failed for ${intent.requestId}: ${err instanceof Error ? err.message : err}`,
+        );
+        return null;
+      });
+
+      const artifactRegistrationPromises = uploadedArtifacts.map((art) =>
+        reg.registerArtifactWithParent({
+          id: art.cid,
+          title: art.artifactType ?? 'unknown',
+          tags: [specKind],
+          outcome: 'restored',
+          endpoint: `ipfs://${art.cid}`,
+          parentEnvelopeCid: manifestCid,
+        }).catch((err: unknown) => {
+          console.warn(
+            `[restorer-engine] registerArtifactWithParent failed for ${art.cid}: ${err instanceof Error ? err.message : err}`,
+          );
+          return null;
+        }),
+      );
+
+      // Fire-and-resolve — we don't block the state transition on these,
+      // but await to prevent unhandled-promise warnings.
+      await Promise.all([envelopeRegistrationPromise, ...artifactRegistrationPromises]);
+    }
 
     // 7. Build artifact CID map for persistence
     const artifactCids: Record<string, string> = {};
