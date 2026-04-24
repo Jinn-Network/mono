@@ -1,52 +1,57 @@
 /**
- * Canonical JSON serialisation — sorted keys, no whitespace.
+ * Canonical JSON serialisation — RFC 8785 JCS.
+ *
+ * Uses the `canonicalize` npm package (≈30 LOC, zero deps) so third-party
+ * verifiers can reproduce our signing input with any standard JCS library.
+ *
+ * Rules per RFC 8785:
+ * - Object keys sorted lexicographically by UTF-16 code-unit order.
+ * - No insignificant whitespace.
+ * - I-JSON number formatting (integer-preferred, scientific notation for
+ *   values outside ±[1e-6, 1e21], -0 serialises as 0).
+ * - String escape rules per JSON spec (control chars as \\uXXXX; only ", \
+ *   and control chars must be escaped).
+ * - `undefined` values in objects are dropped (matches JSON.stringify).
+ * - `NaN` / `Infinity` serialise to `null` (matches JSON.stringify).
+ *
+ * BigInt is **not** supported — JCS is a canonicalization of standard JSON,
+ * which has no BigInt type. Callers must convert BigInt to string or number
+ * before calling. Passing BigInt throws.
  *
  * Used for manifest signing: produce a deterministic byte string that two
  * independent parties can reproduce from the same object graph.
- *
- * Rules:
- * - Object keys are sorted lexicographically (UTF-16 code-unit order, same as
- *   Array.prototype.sort() on strings — matches JSON.stringify key insertion
- *   order when we control insertion).
- * - Arrays preserve element order.
- * - Numbers: JS default toString (no special formatting).
- * - null, boolean, string: standard JSON encoding.
- * - undefined values in objects are dropped (same as JSON.stringify).
- * - NaN and Infinity are not valid JSON; this function will produce "null" for
- *   those values, matching JSON.stringify behaviour.
  */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const canonicalize = require('canonicalize') as (value: unknown) => string | undefined;
+
+/**
+ * Recursively replace NaN / ±Infinity with null so that canonicalize does not
+ * throw — matching the JSON.stringify behaviour that the rest of the codebase
+ * expects. BigInt is intentionally left unhandled so that canonicalize throws
+ * a clear error when a caller passes one.
+ */
+function coerceNonFinite(value: unknown): unknown {
+  if (typeof value === 'number' && !isFinite(value)) return null;
+  if (Array.isArray(value)) return value.map(coerceNonFinite);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = coerceNonFinite(v);
+    }
+    return out;
+  }
+  return value;
+}
 
 export function canonicalJson(value: unknown): string {
-  if (value === null) return 'null';
-  if (value === undefined) return 'null';
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'number') {
-    // NaN / Infinity → null, matching JSON.stringify
-    if (!isFinite(value)) return 'null';
-    return String(value);
+  const coerced = coerceNonFinite(value);
+
+  const result = canonicalize(coerced);
+  if (result === undefined) {
+    // canonicalize returns undefined for top-level undefined input (matches
+    // JSON.stringify). Match Jinn's previous behaviour: emit "null" so the
+    // return type is always a string.
+    return 'null';
   }
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    const items = value.map((v) => canonicalJson(v)).join(',');
-    return `[${items}]`;
-  }
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    const pairs = Object.keys(obj)
-      .sort()
-      .flatMap((key) => {
-        const v = obj[key];
-        if (v === undefined) return []; // drop undefined (matches JSON.stringify)
-        return [`${JSON.stringify(key)}:${canonicalJson(v)}`];
-      });
-    return `{${pairs.join(',')}}`;
-  }
-  // Bigint: emit raw decimal digits WITHOUT quotes, matching RFC 8785 and other
-  // canonical-JSON libs. JSON.stringify would throw; converting through String()
-  // would produce a quoted "12345" instead of the unquoted integer 12345.
-  // We do NOT convert through Number() because bigints can exceed JS number precision.
-  if (typeof value === 'bigint') return value.toString();
-  // Fallback: other exotic types — JSON.stringify would throw;
-  // we convert to string to avoid hard failures.
-  return JSON.stringify(String(value));
+  return result;
 }
