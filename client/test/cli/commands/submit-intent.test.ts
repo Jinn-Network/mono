@@ -164,6 +164,87 @@ describe('submit-intent command', () => {
     vi.doUnmock('../../../src/cli/introspection-context.js');
   });
 
+  it('uploads a SignedIntentV1 document, not a raw spec', async () => {
+    vi.resetModules();
+    vi.doMock('../../../src/cli/introspection-context.js', () => ({
+      gatherIntrospectionRaw: vi.fn(async () => mockRaw),
+    }));
+
+    // Capture what gets passed to postRestorationJob via the adapter
+    const postedJobs: unknown[] = [];
+    const mockAdapter = {
+      name: 'mock',
+      initialize: vi.fn(async () => {}),
+      postRestorationJob: vi.fn(async (job: unknown) => {
+        postedJobs.push(job);
+        return 'mock-request-id-1';
+      }),
+      watchForRequests: vi.fn(),
+      claimRequest: vi.fn(),
+      submitResult: vi.fn(),
+      watchForDeliveries: vi.fn(),
+      stop: vi.fn(async () => {}),
+    };
+
+    vi.doMock('../../../src/cli/execution-context.js', () => ({
+      createCliExecutionContext: vi.fn(async () => ({
+        ok: true,
+        ctx: {
+          adapter: mockAdapter,
+          jinnStore: {
+            getIntentPostRecord: vi.fn(() => null),
+            acquireIntentPostLock: vi.fn(() => true),
+            releaseIntentPostLock: vi.fn(),
+            upsertIntentPostRecord: vi.fn(),
+            getConfigValue: vi.fn(() => null),
+            recordOwnActivity: vi.fn(),
+            recordActivityEvent: vi.fn(),
+          },
+          primaryService: {
+            index: 1,
+            step: 'complete',
+            safe_address: '0x00112233445566778899aabbccddeeff00112233',
+            mech_address: '0xmech',
+            agent_address: '0xagent',
+            service_id: 42,
+            staking_address: null,
+            error: null,
+          },
+          mnemonic: 'test test test test test test test test test test test junk',
+          config: { ipfsRegistryUrl: 'https://registry.autonolas.tech', ipfsGatewayUrl: 'https://gateway.autonolas.tech' },
+        },
+      })),
+      pickPrimaryMechService: vi.fn(),
+    }));
+
+    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const { ctx, writes } = makeCtx([
+      '--id', 'signed-1',
+      '--description', 'Test signed intent upload',
+      '--yes',
+    ]);
+    await cmd.run(ctx);
+
+    // Should have posted exactly one job
+    expect(postedJobs.length).toBeGreaterThanOrEqual(1);
+    const posted = postedJobs[0] as Record<string, unknown>;
+    // The restorationJob must carry a SignedIntentV1 on .intent
+    const intent = posted.intent as Record<string, unknown> | undefined;
+    expect(intent).toBeDefined();
+    expect(intent!.schemaVersion).toBe('intent.v1');
+    expect(intent!.signature).toBeDefined();
+    expect(intent!.creator).toBeDefined();
+    expect((intent!.creator as Record<string, unknown>).safeAddress).toBeDefined();
+
+    // The CLI should emit a success result (not an error envelope)
+    const lastWrite = JSON.parse(writes[writes.length - 1]!);
+    expect(lastWrite.verb).toBe('submit-intent');
+    expect(lastWrite.requestId).toBe('mock-request-id-1');
+
+    vi.doUnmock('../../../src/cli/execution-context.js');
+    vi.doUnmock('../../../src/cli/introspection-context.js');
+  });
+
   it('--spec-file with unknown spec.kind emits invalid_invocation', async () => {
     vi.resetModules();
     vi.doMock('../../../src/cli/introspection-context.js', () => ({

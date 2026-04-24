@@ -243,8 +243,11 @@ export class MechAdapter implements ExecutionAdapter {
       attemptId: state.attemptId,
       attemptNumber: state.attemptNumber,
     };
-    const restorationPayload = buildRestorationJobPayload(restorationState);
-    const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, restorationPayload);
+    // When a pre-built SignedIntentV1 is attached, upload it directly so the
+    // on-chain CID points to the canonical signed intent document rather than
+    // the legacy RestorationJobPayload shape.
+    const ipfsDoc: unknown = state.intent ?? buildRestorationJobPayload(restorationState);
+    const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, ipfsDoc);
     const restorationDataHex = cidToDigestHex(restorationCid);
     const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
     const restorationIntentCid = `f01551220${digestNo0x}`;

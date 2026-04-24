@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createPublicClient, getAddress, http, type PublicClient } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
 import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
@@ -11,9 +12,12 @@ import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { createCliExecutionContext } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { RestorationJob } from '../../types/desired-state.js';
+import type { IntentV1 } from '../../types/intent.js';
 import { SPEC_KINDS, unknownKindMessage } from '../../intents/kinds/index.js';
+import { signIntentV1 } from '../../intents/signing.js';
 import { IntentPostingService } from '../../intents/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
+import { walletPrivateKeyAtIndex } from '../../earning/wallet.js';
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -181,14 +185,37 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const { adapter, jinnStore, primaryService } = built.ctx;
+  const { adapter, jinnStore, primaryService, mnemonic } = built.ctx;
   const safe = primaryService.safe_address!;
   const postingService = new IntentPostingService(adapter, jinnStore);
   try {
+    // Build and sign a SignedIntentV1 so the IPFS-uploaded document is the
+    // canonical intent envelope rather than a loose RestorationJobPayload.
+    const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
+    const agentEoaAddress = privateKeyToAccount(agentEoaPrivateKey).address;
+    const overlay = specOverlay ?? {};
+    const intentKind = (overlay.spec as { kind?: string } | undefined)?.kind ?? 'restoration.v0';
+    const intentWindow = overlay.window ?? { startTs: Date.now(), endTs: Date.now() + 86_400_000 };
+    const intent: IntentV1 = {
+      schemaVersion: 'intent.v1',
+      id,
+      kind: intentKind,
+      description,
+      window: intentWindow,
+      spec: (overlay.spec as IntentV1['spec']) ?? { kind: intentKind },
+      eligibility: overlay.eligibility ?? {},
+      creator: {
+        safeAddress: getAddress(safe),
+        agentEoa: agentEoaAddress,
+      },
+      createdAt: Date.now(),
+    };
+    const signedIntent = await signIntentV1(intent, agentEoaPrivateKey);
     const restorationJob: RestorationJob = {
       id,
       description,
       ...(specOverlay ?? {}),
+      intent: signedIntent,
     };
     const postResult = await postingService.postCandidate(
       {
