@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PredictionV0Evaluator } from '../../../../src/restorer/impls/prediction-v0-evaluator/index.js';
 import { makeValidIntent, makeSignedManifest, makeEvalRestorationJob } from './test-helpers.js';
+import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
 function makeCtx(intent: any, deps: any) {
   const tmp = mkdtempSync(join(tmpdir(), 'pred-eval-'));
@@ -15,6 +16,7 @@ function makeCtx(intent: any, deps: any) {
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 0,
+    trajectory: new TrajectoryCollector({ intentCid: 'test-intent-cid', runId: 'test-run-id' }),
     _testDeps: deps,
   } as any;
 }
@@ -89,6 +91,37 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('INDETERMINATE');
+  });
+
+  it('emits venue_io + state_transition + artifact.emit spans on success', async () => {
+    const intent = makeValidIntent();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
+    const evaluator = new PredictionV0Evaluator({
+      evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const ctx = makeCtx(evalIntent, spanningDeps('3501'));
+    await evaluator.run(ctx);
+
+    const { spans } = ctx.trajectory.snapshot();
+    const kinds = spans.map((s: any) => s.attributes['jinn.span.kind']);
+
+    expect(kinds).toContain('jinn.venue_io');
+    expect(kinds).toContain('jinn.state_transition');
+    expect(kinds).toContain('jinn.artifact.emit');
+
+    const venueSpan = spans.find((s: any) => s.attributes['jinn.span.kind'] === 'jinn.venue_io');
+    expect(venueSpan!.attributes['http.response.status_code']).toBe(200);
+    expect(venueSpan!.attributes['venue.id']).toBe('chainlink');
+
+    const stateSpan = spans.find((s: any) => s.attributes['jinn.span.kind'] === 'jinn.state_transition');
+    expect(stateSpan!.attributes['jinn.state.from']).toBe('FETCHED');
+    expect(stateSpan!.attributes['jinn.state.to']).toBe('SCORED');
+
+    const artifactSpan = spans.find((s: any) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
+    expect(artifactSpan!.attributes['jinn.artifact.artifactType']).toBe('evaluation_verdict');
+    expect(typeof artifactSpan!.attributes['jinn.artifact.sha256']).toBe('string');
   });
 
   it('INDETERMINATE when oracle has no spanning round', async () => {

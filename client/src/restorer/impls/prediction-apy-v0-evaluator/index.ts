@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { createPublicClient, http, keccak256, stringToHex } from 'viem';
 import { base, baseSepolia, mainnet } from 'viem/chains';
@@ -37,6 +38,10 @@ export interface PredictionApyV0EvaluatorConfig {
     }) => Promise<{ twApyBps: number; sampleCount: number }>;
     expectedIntentCid?: string;
   };
+}
+
+function nowNanos(): string {
+  return `${BigInt(Date.now()) * 1_000_000n}`;
 }
 
 function chainForVenue(venue: 'aave-v3-base-sepolia' | 'aave-v3-base' | 'aave-v3-mainnet') {
@@ -90,6 +95,8 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
 
     let twApyBps: number;
     let sampleCount: number;
+    const aaveFetchStart = nowNanos();
+    const aavePeerName = `aave-v3.${venue}`;
     try {
       if (testDeps?.twApyBpsOverWindow) {
         const result = await testDeps.twApyBpsOverWindow({
@@ -119,9 +126,52 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
         twApyBps = result.twApyBps;
         sampleCount = result.sampleCount;
       }
+      ctx.trajectory.addSpan({
+        name: `aave-v3.twApyBpsOverWindow ${aavePeerName}`,
+        kind: 'CLIENT',
+        startTimeUnixNano: aaveFetchStart,
+        endTimeUnixNano: nowNanos(),
+        attributes: {
+          'jinn.span.kind': 'jinn.venue_io',
+          'net.peer.name': aavePeerName,
+          'http.request.method': 'POST',
+          'http.response.status_code': 200,
+          'url.full': this.config.archiveRpcUrl ?? this.config.rpcUrl ?? 'rpc',
+          'venue.id': 'aave-v3',
+          'aave.pool': pool,
+          'aave.reserve': reserve,
+        },
+        events: [],
+        status: { code: 'OK' },
+      });
       checks.push({ name: 'availability.aave_readable', status: 'PASS' });
     } catch (error) {
-      checks.push({ name: 'availability.aave_readable', status: 'FAIL', detail: String(error) });
+      const msg = String(error);
+      ctx.trajectory.addSpan({
+        name: `aave-v3.twApyBpsOverWindow ${aavePeerName}`,
+        kind: 'CLIENT',
+        startTimeUnixNano: aaveFetchStart,
+        endTimeUnixNano: nowNanos(),
+        attributes: {
+          'jinn.span.kind': 'jinn.venue_io',
+          'net.peer.name': aavePeerName,
+          'http.request.method': 'POST',
+          'http.response.status_code': 0,
+          'url.full': this.config.archiveRpcUrl ?? this.config.rpcUrl ?? 'rpc',
+          'venue.id': 'aave-v3',
+          'aave.pool': pool,
+          'aave.reserve': reserve,
+        },
+        events: [
+          {
+            timeUnixNano: nowNanos(),
+            name: 'exception',
+            attributes: { 'exception.message': msg },
+          },
+        ],
+        status: { code: 'ERROR', message: msg },
+      });
+      checks.push({ name: 'availability.aave_readable', status: 'FAIL', detail: msg });
       twApyBps = 0;
       sampleCount = 0;
     }
@@ -166,9 +216,26 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
       checks.push({ name: 'spec.tolerance_positive', status: 'FAIL' });
     }
 
+    const scoreStart = nowNanos();
     const verdict = deriveVerdict(checks);
     const groundTruthBps = deriveGroundTruthBps(intent, twApyBps);
     const scored = computeScore(verdict, submission.prediction.predictedBps, groundTruthBps, intent.spec.metric.toleranceBps);
+    const scoreEnd = nowNanos();
+    ctx.trajectory.addSpan({
+      name: 'score.absolute-error-linear.v1',
+      kind: 'INTERNAL',
+      startTimeUnixNano: scoreStart,
+      endTimeUnixNano: scoreEnd,
+      attributes: {
+        'jinn.span.kind': 'jinn.state_transition',
+        'jinn.state.from': 'FETCHED',
+        'jinn.state.to': 'SCORED',
+        'verdict': verdict,
+        'score.basis': scored.scoreBasis,
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
     const baseManifest: Record<string, unknown> = {
@@ -204,7 +271,25 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
       ...baseManifest,
       signature: { algo: 'secp256k1', signer: evaluatorAccount.address, hash, sig },
     };
-    writeFileSync(join(ctx.workingDir, 'verdict.json'), JSON.stringify(verdictManifest, null, 2));
+    const verdictJson = JSON.stringify(verdictManifest, null, 2);
+    const verdictSha256 = createHash('sha256').update(verdictJson).digest('hex');
+    writeFileSync(join(ctx.workingDir, 'verdict.json'), verdictJson);
+    const artifactEmitNs = nowNanos();
+    ctx.trajectory.addSpan({
+      name: 'artifact.emit verdict.json',
+      kind: 'INTERNAL',
+      startTimeUnixNano: artifactEmitNs,
+      endTimeUnixNano: artifactEmitNs,
+      attributes: {
+        'jinn.span.kind': 'jinn.artifact.emit',
+        'jinn.artifact.cid': 'pending',
+        'jinn.artifact.artifactType': 'evaluation_verdict',
+        'jinn.artifact.sha256': verdictSha256,
+        'artifact.path': 'verdict.json',
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
     // Assembles the PredictionApyV0VerdictPayload from the already-computed fields.

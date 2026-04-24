@@ -9,6 +9,7 @@ import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/imp
 import { PredictionApyV0VerdictPayloadSchema } from '../../../../src/types/payloads/prediction-apy-v0.js';
 import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
+import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
 const PK = ('0x' + 'e'.repeat(64)) as `0x${string}`;
 const AGENT_PK = ('0x' + '1'.repeat(64)) as `0x${string}`;
@@ -92,7 +93,7 @@ function makeEvalIntent(
   } as unknown as RestorationJob;
 }
 
-function makeCtx(intent: RestorationJob, intentCid: string, testDeps: Record<string, unknown> = {}): RestorationContext {
+function makeCtx(intent: RestorationJob, intentCid: string, testDeps: Record<string, unknown> = {}): RestorationContext & { trajectory: TrajectoryCollector } {
   const d = mkdtempSync(join(tmpdir(), 'apy-eval-'));
   return {
     intent,
@@ -102,8 +103,9 @@ function makeCtx(intent: RestorationJob, intentCid: string, testDeps: Record<str
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 0,
+    trajectory: new TrajectoryCollector({ intentCid: 'test-intent-cid', runId: 'test-run-id' }),
     _testDeps: testDeps,
-  } as unknown as RestorationContext;
+  } as unknown as RestorationContext & { trajectory: TrajectoryCollector };
 }
 
 describe('PredictionApyV0Evaluator', () => {
@@ -195,6 +197,38 @@ describe('PredictionApyV0Evaluator', () => {
       }),
     );
     expect(out.gating.verdict).toBe('FAIL');
+  });
+
+  it('emits venue_io + state_transition + artifact.emit spans on successful run', async () => {
+    const manifest = await makeSignedApyManifestJson();
+    const evalIntent = makeEvalIntent(manifest);
+    const ev = new PredictionApyV0Evaluator({
+      evaluatorPk: PK,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const ctx = makeCtx(evalIntent, 'expected-cid', {
+      twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
+    });
+    await ev.run(ctx);
+
+    const { spans } = ctx.trajectory.snapshot();
+    const kinds = spans.map((s) => s.attributes['jinn.span.kind']);
+
+    expect(kinds).toContain('jinn.venue_io');
+    expect(kinds).toContain('jinn.state_transition');
+    expect(kinds).toContain('jinn.artifact.emit');
+
+    const venueSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.venue_io');
+    expect(venueSpan!.attributes['http.response.status_code']).toBe(200);
+    expect(venueSpan!.attributes['venue.id']).toBe('aave-v3');
+
+    const stateSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.state_transition');
+    expect(stateSpan!.attributes['jinn.state.from']).toBe('FETCHED');
+    expect(stateSpan!.attributes['jinn.state.to']).toBe('SCORED');
+
+    const artifactSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
+    expect(artifactSpan!.attributes['jinn.artifact.artifactType']).toBe('evaluation_verdict');
+    expect(typeof artifactSpan!.attributes['jinn.artifact.sha256']).toBe('string');
   });
 
   it('verdictPayload conforms to PredictionApyV0VerdictPayloadSchema on PASS', async () => {

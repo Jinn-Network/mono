@@ -21,6 +21,7 @@
  */
 
 import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { keccak256, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -73,6 +74,12 @@ import {
 import { checkEquityReturnTarget, checkMaxDrawdownConstraint } from './checks/spec.js';
 
 import type { Check, Verdict, PortfolioV0EvaluatorConfig } from './types.js';
+
+// ── Span helpers ──────────────────────────────────────────────────────────────
+
+function nowNanos(): string {
+  return `${BigInt(Date.now()) * 1_000_000n}`;
+}
 
 // ── Verdict derivation per §7.3 ───────────────────────────────────────────────
 
@@ -362,19 +369,62 @@ export class PortfolioV0Evaluator implements RestorerImpl {
     let startTimeClamped = false;
     let hlReachable = false;
 
-    try {
-      const [portfolioResp, fillsResult] = await Promise.all([
-        hlPortfolioPeriodFn(masterAddress),
-        hlUserFillsByTimeFn(masterAddress, startTs, endTs),
-      ]);
+    {
+      const hlFetchStart = nowNanos();
+      try {
+        const [portfolioResp, fillsResult] = await Promise.all([
+          hlPortfolioPeriodFn(masterAddress),
+          hlUserFillsByTimeFn(masterAddress, startTs, endTs),
+        ]);
 
-      grid = portfolioResp?.accountValueHistory ?? [];
-      rederivFills = fillsResult.fills;
-      startTimeClamped = fillsResult.startTimeClamped;
-      hlReachable = true;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log({ level: 'error', msg: 'portfolio-v0-evaluator: HL API call failed', data: { err: msg } });
+        grid = portfolioResp?.accountValueHistory ?? [];
+        rederivFills = fillsResult.fills;
+        startTimeClamped = fillsResult.startTimeClamped;
+        hlReachable = true;
+        ctx.trajectory.addSpan({
+          name: 'GET api.hyperliquid.xyz',
+          kind: 'CLIENT',
+          startTimeUnixNano: hlFetchStart,
+          endTimeUnixNano: nowNanos(),
+          attributes: {
+            'jinn.span.kind': 'jinn.venue_io',
+            'net.peer.name': 'api.hyperliquid.xyz',
+            'http.request.method': 'POST',
+            'http.response.status_code': 200,
+            'url.full': 'https://api.hyperliquid.xyz/info',
+            'venue.id': 'hyperliquid',
+            'venue.fetch.kind': 'portfolio_period+fills',
+          },
+          events: [],
+          status: { code: 'OK' },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        ctx.trajectory.addSpan({
+          name: 'GET api.hyperliquid.xyz',
+          kind: 'CLIENT',
+          startTimeUnixNano: hlFetchStart,
+          endTimeUnixNano: nowNanos(),
+          attributes: {
+            'jinn.span.kind': 'jinn.venue_io',
+            'net.peer.name': 'api.hyperliquid.xyz',
+            'http.request.method': 'POST',
+            'http.response.status_code': 0,
+            'url.full': 'https://api.hyperliquid.xyz/info',
+            'venue.id': 'hyperliquid',
+            'venue.fetch.kind': 'portfolio_period+fills',
+          },
+          events: [
+            {
+              timeUnixNano: nowNanos(),
+              name: 'exception',
+              attributes: { 'exception.message': msg },
+            },
+          ],
+          status: { code: 'ERROR', message: msg },
+        });
+        log({ level: 'error', msg: 'portfolio-v0-evaluator: HL API call failed', data: { err: msg } });
+      }
     }
 
     // ── Availability checks ───────────────────────────────────────────────────
@@ -519,11 +569,29 @@ export class PortfolioV0Evaluator implements RestorerImpl {
     const postRederivableSkipped = checks.some(
       (c) => c.name === 'availability.hl_post_snapshot_rederivable' && c.status === 'SKIP',
     );
+    const scoreStart = nowNanos();
     const verdict: Verdict = postRederivableSkipped ? 'INDETERMINATE' : deriveVerdict(checks);
 
     const equityReturn = rederived?.equityReturn ?? 0;
     const maxDrawdown = rederived?.maxDrawdown ?? 0;
     const score = scoreCalmarV1(equityReturn, maxDrawdown, verdict);
+    const scoreEnd = nowNanos();
+
+    ctx.trajectory.addSpan({
+      name: 'score.calmar.v1',
+      kind: 'INTERNAL',
+      startTimeUnixNano: scoreStart,
+      endTimeUnixNano: scoreEnd,
+      attributes: {
+        'jinn.span.kind': 'jinn.state_transition',
+        'jinn.state.from': 'FETCHED',
+        'jinn.state.to': 'SCORED',
+        'verdict': verdict,
+        'score.basis': 'calmar.v1',
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: verdict derived', data: { verdict, score, checkCount: checks.length } });
 
@@ -575,7 +643,26 @@ export class PortfolioV0Evaluator implements RestorerImpl {
 
     // ── Write verdict.json ────────────────────────────────────────────────────
 
+    const verdictJson = JSON.stringify(verdictManifest, null, 2);
+    const verdictSha256 = createHash('sha256').update(verdictJson).digest('hex');
     _writeVerdictArtifact(workingDir, verdictManifest);
+
+    const artifactEmitNs = nowNanos();
+    ctx.trajectory.addSpan({
+      name: 'artifact.emit verdict.json',
+      kind: 'INTERNAL',
+      startTimeUnixNano: artifactEmitNs,
+      endTimeUnixNano: artifactEmitNs,
+      attributes: {
+        'jinn.span.kind': 'jinn.artifact.emit',
+        'jinn.artifact.cid': 'pending',
+        'jinn.artifact.artifactType': 'evaluation_verdict',
+        'jinn.artifact.sha256': verdictSha256,
+        'artifact.path': 'verdict.json',
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: verdict.json written', data: { path: join(workingDir, 'verdict.json') } });
 

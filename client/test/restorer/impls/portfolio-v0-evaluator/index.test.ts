@@ -22,6 +22,7 @@ import { PortfolioV0Evaluator } from '../../../../src/restorer/impls/portfolio-v
 import type { RestorationContext } from '../../../../src/restorer/types.js';
 import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { HlFill, HlGridPoint } from '../../../../src/venues/hyperliquid/types.js';
+import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
 // ── Shared test data ──────────────────────────────────────────────────────────
 
@@ -250,6 +251,7 @@ function makeCtx(
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 60_000,
+    trajectory: new TrajectoryCollector({ intentCid: 'test-intent-cid', runId: 'test-run-id' }),
   };
 }
 
@@ -640,6 +642,20 @@ describe('PortfolioV0Evaluator', () => {
   // ── run() — INDETERMINATE scenario ───────────────────────────────────────────
 
   describe('run() — INDETERMINATE scenario', () => {
+    it('emits venue_io span with ERROR status when HL API fails', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const impl = makeEvaluator({ hlError: true });
+      const ctx = makeCtx(wd, impl);
+
+      await impl.run(ctx);
+
+      const { spans } = ctx.trajectory.snapshot();
+      const venueSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.venue_io');
+      expect(venueSpan).toBeDefined();
+      expect(venueSpan!.status.code).toBe('ERROR');
+      expect(venueSpan!.attributes['http.response.status_code']).toBe(0);
+    });
+
     it('produces INDETERMINATE verdict when HL API fails', async () => {
       const wd = makeTmpDir(); dirs.push(wd);
 
@@ -805,6 +821,36 @@ describe('PortfolioV0Evaluator', () => {
     // ── Finding #12: generatedAt determinism ────────────────────────────────
     // Two evaluations of identical inputs at different wall-clock times must
     // produce the same signed hash but different generatedAt values.
+
+    it('trajectory collector receives venue_io + state_transition + artifact.emit spans', async () => {
+      const impl = makeEvaluator();
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd, impl);
+
+      await impl.run(ctx);
+
+      const { spans } = ctx.trajectory.snapshot();
+      const kinds = spans.map((s) => s.attributes['jinn.span.kind']);
+
+      expect(kinds).toContain('jinn.venue_io');
+      expect(kinds).toContain('jinn.state_transition');
+      expect(kinds).toContain('jinn.artifact.emit');
+
+      const venueSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.venue_io');
+      expect(venueSpan).toBeDefined();
+      expect(venueSpan!.attributes['net.peer.name']).toBe('api.hyperliquid.xyz');
+      expect(venueSpan!.attributes['http.response.status_code']).toBe(200);
+
+      const stateSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.state_transition');
+      expect(stateSpan).toBeDefined();
+      expect(stateSpan!.attributes['jinn.state.from']).toBe('FETCHED');
+      expect(stateSpan!.attributes['jinn.state.to']).toBe('SCORED');
+
+      const artifactSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
+      expect(artifactSpan).toBeDefined();
+      expect(artifactSpan!.attributes['jinn.artifact.artifactType']).toBe('evaluation_verdict');
+      expect(typeof artifactSpan!.attributes['jinn.artifact.sha256']).toBe('string');
+    });
 
     it('two evaluations at different times produce the same signed hash (finding #12)', async () => {
       const T1 = 1_750_000_000_000;

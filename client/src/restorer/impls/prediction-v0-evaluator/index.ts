@@ -7,6 +7,7 @@
  * Score: brier.v1 scaled to 1e18 fixed-point.
  */
 import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { createPublicClient, http, keccak256, stringToHex } from 'viem';
 import { baseSepolia, base } from 'viem/chains';
@@ -41,6 +42,10 @@ import {
 } from './checks/integrity.js';
 import { resolveExpectedRestorationIntentCid } from '../evaluation-context.js';
 import { checkQuestionKindSupported } from './checks/spec.js';
+
+function nowNanos(): string {
+  return `${BigInt(Date.now()) * 1_000_000n}`;
+}
 
 export interface PredictionV0EvaluatorConfig {
   /** Set by {@link buildRestorerImpls} for CLI registries (no real signer). */
@@ -112,26 +117,75 @@ export class PredictionV0Evaluator implements RestorerImpl {
 
     // 3. Fetch Chainlink spanning round
     let spanning: SpanningResult;
-    if (testDeps?.oraclePriceAtResolveTs) {
-      spanning = await testDeps.oraclePriceAtResolveTs(feed as `0x${string}`, predictionIntent.spec.question.resolveTs);
-    } else {
-      const expectedChainId = venue === 'chainlink-base' ? 8453 : 84532;
-      const chain = venue === 'chainlink-base' ? base : baseSepolia;
-      const publicClient = createPublicClient({
-        chain,
-        transport: http(this.config.rpcUrl),
-      }) as unknown as PublicClient;
-      const actualChainId = await publicClient.getChainId();
-      if (actualChainId !== expectedChainId) {
-        throw new Error(
-          `oracle venue mismatch: spec says ${venue} (chainId ${expectedChainId}) but RPC chainId is ${actualChainId}`,
+    const oracleFetchStart = nowNanos();
+    const oraclePeerName = venue === 'chainlink-base' ? 'base-rpc' : 'base-sepolia-rpc';
+    try {
+      if (testDeps?.oraclePriceAtResolveTs) {
+        spanning = await testDeps.oraclePriceAtResolveTs(feed as `0x${string}`, predictionIntent.spec.question.resolveTs);
+      } else {
+        const expectedChainId = venue === 'chainlink-base' ? 8453 : 84532;
+        const chain = venue === 'chainlink-base' ? base : baseSepolia;
+        const publicClient = createPublicClient({
+          chain,
+          transport: http(this.config.rpcUrl),
+        }) as unknown as PublicClient;
+        const actualChainId = await publicClient.getChainId();
+        if (actualChainId !== expectedChainId) {
+          throw new Error(
+            `oracle venue mismatch: spec says ${venue} (chainId ${expectedChainId}) but RPC chainId is ${actualChainId}`,
+          );
+        }
+        spanning = await oraclePriceAtResolveTs(
+          feed as `0x${string}`,
+          predictionIntent.spec.question.resolveTs,
+          publicClient,
         );
       }
-      spanning = await oraclePriceAtResolveTs(
-        feed as `0x${string}`,
-        predictionIntent.spec.question.resolveTs,
-        publicClient,
-      );
+      ctx.trajectory.addSpan({
+        name: `chainlink.oraclePriceAtResolveTs ${oraclePeerName}`,
+        kind: 'CLIENT',
+        startTimeUnixNano: oracleFetchStart,
+        endTimeUnixNano: nowNanos(),
+        attributes: {
+          'jinn.span.kind': 'jinn.venue_io',
+          'net.peer.name': oraclePeerName,
+          'http.request.method': 'POST',
+          'http.response.status_code': 200,
+          'url.full': this.config.rpcUrl ?? 'rpc',
+          'venue.id': 'chainlink',
+          'chainlink.feed': feed,
+          'chainlink.resolveTs': predictionIntent.spec.question.resolveTs,
+        },
+        events: [],
+        status: { code: 'OK' },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.trajectory.addSpan({
+        name: `chainlink.oraclePriceAtResolveTs ${oraclePeerName}`,
+        kind: 'CLIENT',
+        startTimeUnixNano: oracleFetchStart,
+        endTimeUnixNano: nowNanos(),
+        attributes: {
+          'jinn.span.kind': 'jinn.venue_io',
+          'net.peer.name': oraclePeerName,
+          'http.request.method': 'POST',
+          'http.response.status_code': 0,
+          'url.full': this.config.rpcUrl ?? 'rpc',
+          'venue.id': 'chainlink',
+          'chainlink.feed': feed,
+          'chainlink.resolveTs': predictionIntent.spec.question.resolveTs,
+        },
+        events: [
+          {
+            timeUnixNano: nowNanos(),
+            name: 'exception',
+            attributes: { 'exception.message': msg },
+          },
+        ],
+        status: { code: 'ERROR', message: msg },
+      });
+      throw err;
     }
 
     // 4. Run checks (order matters: availability → eligibility → integrity → spec)
@@ -161,12 +215,29 @@ export class PredictionV0Evaluator implements RestorerImpl {
     checks.push(checkQuestionKindSupported(predictionIntent.spec.question));
 
     // 5. Derive verdict
+    const scoreStart = nowNanos();
     const verdict = deriveVerdict(checks);
 
     // 6. Derive ground truth + score
     const priceAtResolve = scaleToDecimal(spanning.round.answer, spanning.round.decimals);
     const groundTruth = resolveGroundTruth(predictionIntent.spec.question, priceAtResolve);
     const { score, scoreBasis, scoreVersion } = computeScore(verdict, payload.prediction.probability, groundTruth);
+    const scoreEnd = nowNanos();
+    ctx.trajectory.addSpan({
+      name: 'score.brier.v1',
+      kind: 'INTERNAL',
+      startTimeUnixNano: scoreStart,
+      endTimeUnixNano: scoreEnd,
+      attributes: {
+        'jinn.span.kind': 'jinn.state_transition',
+        'jinn.state.from': 'FETCHED',
+        'jinn.state.to': 'SCORED',
+        'verdict': verdict,
+        'score.basis': scoreBasis,
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     // 7. Assemble + sign verdict manifest
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
@@ -203,7 +274,26 @@ export class PredictionV0Evaluator implements RestorerImpl {
       ...verdictManifestBase,
       signature: { algo: 'secp256k1', signer: evaluatorAccount.address, hash, sig },
     };
-    writeFileSync(join(workingDir, 'verdict.json'), JSON.stringify(verdictManifest, null, 2));
+    const verdictJson = JSON.stringify(verdictManifest, null, 2);
+    const verdictSha256 = createHash('sha256').update(verdictJson).digest('hex');
+    writeFileSync(join(workingDir, 'verdict.json'), verdictJson);
+
+    const artifactEmitNs = nowNanos();
+    ctx.trajectory.addSpan({
+      name: 'artifact.emit verdict.json',
+      kind: 'INTERNAL',
+      startTimeUnixNano: artifactEmitNs,
+      endTimeUnixNano: artifactEmitNs,
+      attributes: {
+        'jinn.span.kind': 'jinn.artifact.emit',
+        'jinn.artifact.cid': 'pending',
+        'jinn.artifact.artifactType': 'evaluation_verdict',
+        'jinn.artifact.sha256': verdictSha256,
+        'artifact.path': 'verdict.json',
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     log({ level: 'info', msg: 'prediction-v0-evaluator: verdict', data: { verdict, score, groundTruth } });
 
