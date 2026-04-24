@@ -1198,6 +1198,46 @@ async function main(): Promise<void> {
       }),
     );
 
+    // ── Phase 8c: Conformance gate ───────────────────────────────────────────
+    // Builds a known-good envelope fixture in-process and runs the full
+    // conformance harness against it. This verifies the harness is functional
+    // end-to-end in the e2e environment. We use --skip-layer2 because the e2e
+    // does not produce an attested-tier source bundle.
+
+    results.push(
+      await runPhase('Phase 8c: Conformance — harness passes on a known-good envelope', async () => {
+        const { runConformance } = await import('../src/conformance/harness.js');
+        const { buildGoodRestorationFixture } = await import('./lib/e2e-conformance-fixture.js');
+
+        const fx = await buildGoodRestorationFixture();
+        const report = await runConformance({
+          envelopeCid: fx.envelopeCid,
+          options: {
+            envelopeBytes: fx.envelopeBytes,
+            intent: fx.intent,
+            trajectory: fx.trajectory,
+            skipLayer2: true, // e2e does not produce an attested-tier source bundle
+          },
+        });
+
+        console.log(`    Conformance: ${report.summary.passed}/${report.summary.total} passed, ` +
+          `${report.summary.failed} failed, ${report.summary.skipped} skipped`);
+        for (const c of report.checks) {
+          if (!c.skipped && !c.passed) {
+            console.error(`    FAIL [L${c.layer}] ${c.id}: ${c.detail ?? '(no detail)'}`);
+          }
+        }
+
+        if (report.overall !== 'PASS') {
+          throw new Error(
+            `Conformance FAILED (${report.summary.failed} check(s) failed). ` +
+              `See above for details.`,
+          );
+        }
+        console.log('    Conformance PASSED.');
+      }),
+    );
+
     // ── Phase 9: Checkpoint + verify rewards ─────────────────────────────────
 
     results.push(
