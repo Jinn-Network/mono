@@ -253,6 +253,57 @@ export async function fetchFromDigest(digestHex: string): Promise<unknown> {
   return fetchFromIpfs('https://gateway.autonolas.tech', `f01551220${hex}`);
 }
 
+// ── Conformance harness IPFS fetch helpers ───────────────────────────────────
+
+/**
+ * Fetch a SignedEnvelope from IPFS by CID.
+ * Returns the raw parsed JSON object (caller must validate schema).
+ */
+export async function fetchSignedEnvelopeFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<unknown> {
+  return fetchFromIpfs(gatewayUrl, cid);
+}
+
+/**
+ * Fetch a JinnTrajectoryV1 from IPFS by CID.
+ * Returns the raw parsed JSON object (caller must validate schema).
+ */
+export async function fetchTrajectoryFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<unknown> {
+  return fetchFromIpfs(gatewayUrl, cid);
+}
+
+/**
+ * Fetch a source bundle from IPFS by CID.
+ *
+ * V1 acceptable impl: the bundle root is a JSON manifest listing files by
+ * relative path and CID. We fetch the manifest then fetch each file.
+ * Format: `{ files: Array<{ path: string; cid: string }> }`
+ */
+export async function fetchSourceBundleFromIpfs(
+  gatewayUrl: string,
+  bundleCid: string,
+): Promise<{ files: Map<string, string>; manifest?: Record<string, unknown> }> {
+  const manifest = await fetchFromIpfs(gatewayUrl, bundleCid) as Record<string, unknown>;
+  const fileEntries = manifest['files'] as Array<{ path: string; cid: string }> | undefined;
+
+  const files = new Map<string, string>();
+  if (Array.isArray(fileEntries)) {
+    await Promise.all(
+      fileEntries.map(async ({ path, cid }) => {
+        const content = await fetchFromIpfs(gatewayUrl, cid) as string;
+        files.set(path, typeof content === 'string' ? content : JSON.stringify(content));
+      }),
+    );
+  }
+
+  return { files, manifest };
+}
+
 // ── Base encoding helpers ────────────────────────────────────────────────────
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
