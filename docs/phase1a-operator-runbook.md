@@ -112,6 +112,46 @@ npx hardhat run scripts/phase1a-vote-staking-weight.ts --network sepolia
 npx hardhat run scripts/status-phase1a-live.ts --network sepolia
 ```
 
+#### Fast-test heartbeat requirement (jinn-mono-5hc)
+
+On the `fast-test` timing profile, `VoteWeightingFast._period = 900s` and
+`_maxNumPeriods = 10_000`, giving the internal `_getSum()` walker a
+quiet-tolerance window of ~104 days. If no one invokes
+`VoteWeighting.checkpoint()` (directly, or via any function that calls it)
+for longer than that window, `timeSum` falls too far behind
+`block.timestamp` for the iteration cap to catch up, and the contract
+bricks permanently — there is no admin reset. Run the heartbeat at least
+weekly on fast-test:
+
+```bash
+PHASE1A_TIMING_PROFILE=fast-test \
+  npx hardhat run scripts/phase1a-heartbeat-vote-weighting.ts --network sepolia
+```
+
+The heartbeat is gas-trivial once caught up (the walker only iterates the
+few periods that elapsed). Fold it into whatever cron already runs
+`checkpoint-and-verify.ts`, or add a dedicated scheduled workflow.
+
+#### Recovery if the gauge is already bricked
+
+If `status-phase1a-live.ts` reports the staking nominee with zero relative
+weight despite a valid on-chain vote, or `probe-timesum.ts` shows `timeSum`
+more than `MAX_NUM_WEEKS` periods behind `now`, the gauge is stuck.
+`VoteWeighting` is not behind a proxy and has no admin reset — recovery is
+a one-contract redeploy. Only `VoteWeightingFast` moves; everything else
+(JINN, Treasury, Tokenomics, Depository, Dispenser, veJINN, bridge, L2)
+stays. State lost: nominee registrations and vote history inside
+VoteWeighting (must re-register + re-vote post-redeploy).
+
+```bash
+# From the deployer key (owner of JINN/Dispenser/VoteWeighting):
+PHASE1A_TIMING_PROFILE=fast-test \
+  npx hardhat run scripts/phase1a-redeploy-vote-weighting.ts --network sepolia
+
+# The script deploys, rewires Dispenser ↔ new VW, re-registers the nominee,
+# and rewrites the fast-test artifact JSON. Next steps print on success.
+```
+
 ### Step 6: Seed L2 with JINN
 
 ```bash
