@@ -7,8 +7,9 @@
  * Rules per RFC 8785:
  * - Object keys sorted lexicographically by UTF-16 code-unit order.
  * - No insignificant whitespace.
- * - I-JSON number formatting (integer-preferred, scientific notation for
- *   values outside ±[1e-6, 1e21], -0 serialises as 0).
+ * - I-JSON number formatting per ECMAScript `Number.prototype.toString(10)`
+ *   (integer-preferred; scientific notation when |x| ≥ 1e21 or |x| < 5e-7;
+ *   -0 serialises as 0).
  * - String escape rules per JSON spec (control chars as \\uXXXX; only ", \
  *   and control chars must be escaped).
  * - `undefined` values in objects are dropped (matches JSON.stringify).
@@ -34,10 +35,16 @@ function coerceNonFinite(value: unknown): unknown {
   if (typeof value === 'number' && !isFinite(value)) return null;
   if (Array.isArray(value)) return value.map(coerceNonFinite);
   if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = coerceNonFinite(v);
+    // Preserve toJSON() — canonicalize would otherwise call it itself;
+    // by pre-processing we must not strip it. Invoke it here and recurse
+    // on its return value so NaN/Infinity inside toJSON results are still
+    // coerced.
+    const toJson = (value as { toJSON?: () => unknown }).toJSON;
+    if (typeof toJson === 'function') {
+      return coerceNonFinite(toJson.call(value));
     }
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = coerceNonFinite(v);
     return out;
   }
   return value;
