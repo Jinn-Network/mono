@@ -27,6 +27,7 @@ import { z } from 'zod';
 import type { RestorationJob } from '../../types/desired-state.js';
 import type { Artifact, OutputArtifact } from '../../types/portfolio.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
+import type { TrajectoryCollector } from '../../trajectory/collector.js';
 
 // ── OUTPUTS.json schema ───────────────────────────────────────────────────────
 
@@ -79,6 +80,13 @@ export interface PackagingDeps {
     outcome: string;
     parentManifestCid?: string;
   }) => void;
+  /**
+   * Optional trajectory collector. When provided, a `jinn.artifact.emit` span
+   * is added to the trajectory for each successfully uploaded artifact, and
+   * `artifact.metadata.producedBy` is set to `{ spanId, trajectoryCid: '' }`.
+   * The engine backfills `trajectoryCid` after `emitTrajectory` completes.
+   */
+  collector?: TrajectoryCollector;
 }
 
 // ── WorkingDir provisioning ───────────────────────────────────────────────────
@@ -430,6 +438,33 @@ export async function uploadArtifacts(
         access: art.access,
         localPath: art.localPath,
       };
+
+      // Forward linkage: emit a jinn.artifact.emit span and attach a producedBy
+      // back-reference so readers can look up which span produced this artifact.
+      // trajectoryCid is unknown at packaging time — the engine backfills it after
+      // emitTrajectory completes (Task 16 backward linkage).
+      if (deps.collector) {
+        const nowNano = String(BigInt(Date.now()) * 1_000_000n);
+        const span = deps.collector.addSpan({
+          name: 'artifact.emit',
+          kind: 'INTERNAL',
+          startTimeUnixNano: nowNano,
+          endTimeUnixNano: nowNano,
+          attributes: {
+            'jinn.span.kind': 'jinn.artifact.emit',
+            'jinn.artifact.cid': cid,
+            'jinn.artifact.artifactType': art.artifactType,
+            'jinn.artifact.sha256': hash,
+          },
+          events: [],
+          status: { code: 'OK' },
+        });
+        uploaded.metadata = {
+          ...uploaded.metadata,
+          producedBy: { spanId: span.spanId, trajectoryCid: '' },
+        };
+      }
+
       results.push(uploaded);
     } catch (err) {
       console.error(`[restorer-engine] artifact upload failed for ${art.localPath}: ${err instanceof Error ? err.message : err}`);

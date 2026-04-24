@@ -130,6 +130,13 @@ export class RestorationEngine {
   // Keyed by requestId; cleared after successful pack.
   private readonly implOutputs = new Map<string, RestorationOutput>();
 
+  // Transient storage for trajectory collectors produced in runImpl.
+  // emitTrajectory is deferred to pack() so that artifact spans can be added
+  // before the trajectory is finalised and uploaded (Task 16 bidirectional linkage).
+  // Keyed by requestId; cleared after successful pack.
+  // Protected (not private) to allow test subclasses to inject collectors.
+  protected readonly trajectoryCollectors = new Map<string, TrajectoryCollector>();
+
   // Transient storage for trajectory CID+sha256 refs produced by runImpl.
   // Keyed by requestId; cleared after successful pack.
   private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string } | null>();
@@ -575,30 +582,12 @@ export class RestorationEngine {
       }
       this.implOutputs.set(intent.requestId, output);
 
-      // Emit trajectory to IPFS (non-fatal — envelope assembly continues even if
-      // upload fails; trajectoryRef stays null and envelope.trajectory is null).
-      let trajectoryRef: { cid: string; sha256: string } | null = null;
-      if (this.envelopeDeps && trajectory.snapshot().spans.length > 0) {
-        try {
-          const { privateKeyToAccount } = await import('viem/accounts');
-          const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
-          const { cid, sha256 } = await emitTrajectory({
-            collector: trajectory,
-            runId: trajectory.runId,
-            signerPrivateKey: this.envelopeDeps.agentEoaPrivateKey,
-            signerAddress: account.address as `0x${string}`,
-            ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
-          });
-          trajectoryRef = { cid, sha256 };
-          console.log(`[restorer-engine] ${intent.requestId}: trajectory emitted cid=${cid}`);
-        } catch (err) {
-          console.warn(
-            `[restorer-engine] ${intent.requestId}: trajectory emit failed (non-fatal):`,
-            err instanceof Error ? err.message : err,
-          );
-        }
-      }
-      this.trajectoryRefs.set(intent.requestId, trajectoryRef);
+      // Store the trajectory collector so pack() can:
+      //   1. pass it to uploadArtifacts (artifact.emit spans + producedBy metadata)
+      //   2. call emitTrajectory AFTER artifact upload so spans are included
+      //   3. backfill trajectoryCid on artifacts before envelope assembly
+      // emitTrajectory is intentionally deferred to pack() (Task 16).
+      this.trajectoryCollectors.set(intent.requestId, trajectory);
 
       // Persist impl output BEFORE the state transition so that a crash after
       // the transition (RUNNING → POST_SNAPSHOT) but before pack() runs will
@@ -654,9 +643,55 @@ export class RestorationEngine {
     const implOutput = this.implOutputs.get(intent.requestId);
     const implArtifacts = implOutput?.artifacts ?? [];
 
-    // 1. Walk + upload artifacts (NO registration yet — manifest CID not known)
+    // 1. Walk + upload artifacts (NO registration yet — manifest CID not known).
+    // Pass the trajectory collector (if present) so uploadArtifacts can emit
+    // jinn.artifact.emit spans and attach producedBy back-refs (Task 16 forward
+    // linkage). emitTrajectory is called AFTER upload so artifact spans are included.
+    const collector = this.trajectoryCollectors.get(intent.requestId);
+    const packagingDepsWithCollector = collector
+      ? { ...this.packagingDeps, collector }
+      : this.packagingDeps;
     const rawArtifacts = await walkArtifacts(workingDir, implArtifacts);
-    const uploadedArtifacts = await uploadArtifacts(rawArtifacts, this.packagingDeps);
+    const uploadedArtifacts = await uploadArtifacts(rawArtifacts, packagingDepsWithCollector);
+
+    // 1b. Emit trajectory to IPFS now that all artifact spans have been added.
+    // Non-fatal — envelope assembly continues with envelope.trajectory = null if upload fails.
+    let trajectoryRef: { cid: string; sha256: string } | null =
+      this.trajectoryRefs.get(intent.requestId) ?? null;
+    if (!trajectoryRef && collector && this.envelopeDeps) {
+      try {
+        const { privateKeyToAccount } = await import('viem/accounts');
+        const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
+        const { cid, sha256 } = await emitTrajectory({
+          collector,
+          runId: collector.runId,
+          signerPrivateKey: this.envelopeDeps.agentEoaPrivateKey,
+          signerAddress: account.address as `0x${string}`,
+          ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
+        });
+        trajectoryRef = { cid, sha256 };
+        console.log(`[restorer-engine] ${intent.requestId}: trajectory emitted cid=${cid}`);
+      } catch (err) {
+        console.warn(
+          `[restorer-engine] ${intent.requestId}: trajectory emit failed (non-fatal):`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+    this.trajectoryRefs.set(intent.requestId, trajectoryRef);
+
+    // 1c. Backward linkage: backfill trajectoryCid on all artifacts that have a
+    // producedBy back-ref. This must happen BEFORE assembleAndSignEnvelope so the
+    // signed envelope carries the complete reference (Task 16).
+    if (trajectoryRef) {
+      const trajectoryCid = trajectoryRef.cid;
+      for (const art of uploadedArtifacts) {
+        const pb = (art.metadata as Record<string, unknown> | undefined)?.['producedBy'];
+        if (pb != null && typeof pb === 'object' && 'spanId' in pb) {
+          (pb as Record<string, unknown>)['trajectoryCid'] = trajectoryCid;
+        }
+      }
+    }
 
     // Map to Artifact shape (strip localPath)
     const artifacts = uploadedArtifacts.map(({ localPath: _localPath, ...art }) => art);
@@ -768,9 +803,7 @@ export class RestorationEngine {
     // 5. Assemble + sign envelope → envelope CID now known
     // TODO(build-info): replace 'dev' and the zero digest with real build-time
     // constants from a future build-info.ts module generated at CI time.
-    // Retrieve the trajectory ref emitted by runImpl (may be null if no spans
-    // were collected or if IPFS upload failed non-fatally).
-    const trajectoryRef = this.trajectoryRefs.get(intent.requestId) ?? null;
+    // trajectoryRef was computed in step 1b above (emitted after artifact upload).
     const envelopeTrajectory = trajectoryRef
       ? { cid: trajectoryRef.cid, sha256: trajectoryRef.sha256 }
       : null;
@@ -825,8 +858,9 @@ export class RestorationEngine {
     });
     console.log(`[restorer-engine] ${intent.requestId} PACKAGING → DELIVERING manifestCid=${manifestCid}`);
 
-    // Clean up impl output and trajectory ref (no longer needed)
+    // Clean up transient state (no longer needed after DELIVERING)
     this.implOutputs.delete(intent.requestId);
+    this.trajectoryCollectors.delete(intent.requestId);
     this.trajectoryRefs.delete(intent.requestId);
   }
 

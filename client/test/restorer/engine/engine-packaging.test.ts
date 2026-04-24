@@ -610,3 +610,180 @@ describe('Engine packaging integration', () => {
     );
   });
 });
+
+// ── Task 16: trajectory↔artifact bidirectional linkage ────────────────────────
+
+import { TrajectoryCollector } from '../../../src/trajectory/collector.js';
+
+class TrajectoryTestEngine extends RestorationEngine {
+  get testPersistence(): IntentPersistence {
+    return this.persistence;
+  }
+
+  /** Inject a pre-built TrajectoryCollector for a given requestId (test helper). */
+  injectCollector(requestId: string, collector: TrajectoryCollector): void {
+    this.trajectoryCollectors.set(requestId, collector);
+  }
+}
+
+describe('Engine pack() — trajectory↔artifact bidirectional linkage', () => {
+  let store: Store;
+  let tmp: string;
+  let engine: TrajectoryTestEngine;
+
+  beforeEach(() => {
+    store = new Store(':memory:');
+    tmp = mkTmp();
+    engine = new TrajectoryTestEngine(makeOpts(store, tmp));
+  });
+
+  afterEach(() => {
+    store.close();
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('backfills trajectoryCid on artifact producedBy after emitTrajectory', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockClear();
+
+    // Return a distinct CID for the trajectory upload vs artifact uploads
+    let callIndex = 0;
+    uploadMock.mockImplementation(async (_url: string, payload: unknown) => {
+      callIndex++;
+      // The trajectory upload sends an object with a 'trajectory' field (signed blob)
+      // but more reliably: it has a 'signature' field (from signCanonical in emit.ts).
+      // Artifact uploads send { artifactType, sha256, data }.
+      // Envelope uploads send { schemaVersion: 'jinn.execution.v1', ... }.
+      if (typeof payload === 'object' && payload !== null && 'signature' in (payload as Record<string, unknown>)) {
+        return 'bafy-trajectory-cid';
+      }
+      return `bafy-artifact-${callIndex}`;
+    });
+
+    const requestId = 'req-traj-link';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+    writeFileSync(join(workingDir, 'sessions', 'session.jsonl'), '{"msg":"hi"}');
+
+    await engine.observe(makeInput(requestId, tmp));
+    const p = engine.testPersistence;
+    p.transition(requestId, IntentState.CLAIMED);
+    p.transition(requestId, IntentState.WAITING);
+    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'test'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, IntentState.RUNNING);
+    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
+    });
+    p.transition(requestId, IntentState.PACKAGING);
+
+    // Inject a trajectory collector (simulates what runImpl would have set up)
+    const collector = new TrajectoryCollector({ intentCid: 'bafyintent123', runId: 'run-test-1' });
+    // Add a pre-existing span (simulates impl activity)
+    collector.addSpan({
+      name: 'phase.run',
+      kind: 'INTERNAL',
+      startTimeUnixNano: '1000000000',
+      endTimeUnixNano: '2000000000',
+      attributes: { 'jinn.span.kind': 'jinn.phase', 'jinn.phase.name': 'run' },
+      events: [],
+      status: { code: 'OK' },
+    });
+    engine.injectCollector(requestId, collector);
+
+    // Run pack()
+    await engine.process(requestId);
+
+    // Verify state advanced to DELIVERING
+    const intent = engine.testPersistence.getByRequestId(requestId);
+    expect(intent!.state).toBe(IntentState.DELIVERING);
+
+    // Verify the envelope's artifacts have producedBy.trajectoryCid populated
+    const envelopeCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>)['schemaVersion'] === 'jinn.execution.v1',
+    );
+    expect(envelopeCall).toBeDefined();
+
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+    const envelopeArtifacts = envelope['artifacts'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(envelopeArtifacts)).toBe(true);
+
+    // At least some artifacts should have producedBy set with a non-empty trajectoryCid
+    const artifactsWithProducedBy = envelopeArtifacts.filter((a) => {
+      const meta = a['metadata'] as Record<string, unknown> | undefined;
+      return meta?.['producedBy'] != null;
+    });
+    expect(artifactsWithProducedBy.length).toBeGreaterThan(0);
+
+    // Every producedBy.trajectoryCid must be the trajectory CID (non-empty)
+    for (const art of artifactsWithProducedBy) {
+      const meta = art['metadata'] as Record<string, unknown>;
+      const pb = meta['producedBy'] as Record<string, unknown>;
+      expect(typeof pb['trajectoryCid']).toBe('string');
+      expect(pb['trajectoryCid']).not.toBe('');
+      // The trajectoryCid must be the value returned by the trajectory upload
+      expect(pb['trajectoryCid']).toBe('bafy-trajectory-cid');
+    }
+  });
+
+  it('pack() works without a collector — no producedBy on artifacts', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockResolvedValue('bafymock123');
+    uploadMock.mockClear();
+
+    const requestId = 'req-no-collector';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+
+    await engine.observe(makeInput(requestId, tmp));
+    const p = engine.testPersistence;
+    p.transition(requestId, IntentState.CLAIMED);
+    p.transition(requestId, IntentState.WAITING);
+    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'test'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, IntentState.RUNNING);
+    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { equityReturnPct: '5', maxDrawdownPct: '2', closedTradesCount: 10, tradedNotionalMultiple: '3' },
+    });
+    p.transition(requestId, IntentState.PACKAGING);
+
+    // No collector injected — emitTrajectory should not be called
+    await engine.process(requestId);
+    const intent = engine.testPersistence.getByRequestId(requestId);
+    expect(intent!.state).toBe(IntentState.DELIVERING);
+
+    // Envelope's trajectory field should be null (no collector → no trajectory)
+    const envelopeCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>)['schemaVersion'] === 'jinn.execution.v1',
+    );
+    expect(envelopeCall).toBeDefined();
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+    expect(envelope['trajectory']).toBeNull();
+  });
+});

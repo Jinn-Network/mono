@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -7,8 +7,14 @@ import {
   provisionWorkingDir,
   provisionImplStateDir,
   walkArtifacts,
+  uploadArtifacts,
 } from '../../../src/restorer/engine/packaging.js';
 import type { RestorationJob } from '../../../src/types/desired-state.js';
+import { TrajectoryCollector } from '../../../src/trajectory/collector.js';
+
+vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
+  uploadToIpfs: vi.fn().mockResolvedValue('bafyartifact123'),
+}));
 
 /**
  * Extract file paths from a gzipped tar buffer using raw ustar header parsing.
@@ -309,5 +315,121 @@ describe('system_snapshot tarball excludes env/ directory', () => {
 
     // API_KEY file written by provisionWorkingDir must not appear in the tarball
     expect([...paths].some((p) => p.startsWith('env/'))).toBe(false);
+  });
+});
+
+// ── uploadArtifacts — trajectory collector integration (Task 16) ──────────────
+
+describe('uploadArtifacts — trajectory collector', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = mkTmp(); });
+  afterEach(() => cleanTmp(tmp));
+
+  it('emits a jinn.artifact.emit span per uploaded artifact when collector is provided', async () => {
+    const workDir = join(tmp, 'work');
+    mkdirSync(workDir, { recursive: true });
+    writeFileSync(join(workDir, 'result.json'), '{"ok":true}');
+    writeFileSync(join(workDir, 'notes.md'), '# Notes');
+
+    const collector = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-1' });
+    const deps = {
+      ipfsRegistryUrl: 'http://ipfs.test',
+      collector,
+    };
+
+    const artifacts = await uploadArtifacts(
+      [
+        { localPath: join(workDir, 'result.json'), artifactType: 'generated_file' },
+        { localPath: join(workDir, 'notes.md'), artifactType: 'design_document' },
+      ],
+      deps,
+    );
+
+    // Two artifacts → two spans
+    const { spans } = collector.snapshot();
+    const emitSpans = spans.filter((s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
+    expect(emitSpans).toHaveLength(2);
+
+    // Each span must carry the expected attributes
+    const cidAttr = emitSpans.map((s) => s.attributes['jinn.artifact.cid']);
+    expect(cidAttr.every((c) => typeof c === 'string' && c.length > 0)).toBe(true);
+
+    const typeAttrs = emitSpans.map((s) => s.attributes['jinn.artifact.artifactType']);
+    expect(typeAttrs).toContain('generated_file');
+    expect(typeAttrs).toContain('design_document');
+
+    // sha256 attribute must be a hex string
+    const sha256Attrs = emitSpans.map((s) => s.attributes['jinn.artifact.sha256']);
+    expect(sha256Attrs.every((h) => typeof h === 'string' && /^[0-9a-f]{64}$/.test(h as string))).toBe(true);
+
+    // The returned artifacts must have producedBy back-refs
+    expect(artifacts).toHaveLength(2);
+    for (const art of artifacts) {
+      const pb = (art.metadata as Record<string, unknown> | undefined)?.['producedBy'];
+      expect(pb).toBeDefined();
+      expect(typeof (pb as Record<string, unknown>)['spanId']).toBe('string');
+      expect((pb as Record<string, unknown>)['trajectoryCid']).toBe('');
+    }
+  });
+
+  it('does NOT emit spans when no collector is provided', async () => {
+    const workDir = join(tmp, 'work2');
+    mkdirSync(workDir, { recursive: true });
+    writeFileSync(join(workDir, 'out.txt'), 'data');
+
+    const deps = { ipfsRegistryUrl: 'http://ipfs.test' };
+    const artifacts = await uploadArtifacts(
+      [{ localPath: join(workDir, 'out.txt'), artifactType: 'generated_file' }],
+      deps,
+    );
+
+    // No producedBy metadata when collector is absent
+    expect(artifacts).toHaveLength(1);
+    expect((artifacts[0]!.metadata as Record<string, unknown> | undefined)?.['producedBy']).toBeUndefined();
+  });
+
+  it('each span spanId matches the producedBy.spanId on the corresponding artifact', async () => {
+    const workDir = join(tmp, 'work3');
+    mkdirSync(workDir, { recursive: true });
+    writeFileSync(join(workDir, 'a.txt'), 'aaa');
+    writeFileSync(join(workDir, 'b.txt'), 'bbb');
+
+    const collector = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-x' });
+    const artifacts = await uploadArtifacts(
+      [
+        { localPath: join(workDir, 'a.txt'), artifactType: 'execution_log' },
+        { localPath: join(workDir, 'b.txt'), artifactType: 'execution_log' },
+      ],
+      { ipfsRegistryUrl: 'http://ipfs.test', collector },
+    );
+
+    const { spans } = collector.snapshot();
+    const emitSpans = spans.filter((s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
+    expect(emitSpans).toHaveLength(2);
+
+    // Order must be preserved: first artifact → first emit span
+    for (let i = 0; i < artifacts.length; i++) {
+      const pb = (artifacts[i]!.metadata as Record<string, unknown>)['producedBy'] as Record<string, unknown>;
+      expect(pb['spanId']).toBe(emitSpans[i]!.spanId);
+    }
+  });
+
+  it('preserves existing metadata alongside producedBy', async () => {
+    const workDir = join(tmp, 'work4');
+    mkdirSync(workDir, { recursive: true });
+    writeFileSync(join(workDir, 'file.txt'), 'data');
+
+    const collector = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-y' });
+    const artifacts = await uploadArtifacts(
+      [{ localPath: join(workDir, 'file.txt'), artifactType: 'generated_file', metadata: { custom: 'value' } }],
+      { ipfsRegistryUrl: 'http://ipfs.test', collector },
+    );
+
+    expect(artifacts).toHaveLength(1);
+    const meta = artifacts[0]!.metadata as Record<string, unknown>;
+    // Original metadata key preserved
+    expect(meta['custom']).toBe('value');
+    // producedBy added alongside
+    expect(meta['producedBy']).toBeDefined();
   });
 });
