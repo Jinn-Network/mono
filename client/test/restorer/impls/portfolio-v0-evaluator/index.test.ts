@@ -506,7 +506,7 @@ describe('PortfolioV0Evaluator', () => {
       const output = await impl.run(ctx);
 
       expect(output.artifacts).toBeDefined();
-      const verdictArtifact = output.artifacts!.find((a) => a.role === 'evaluation_verdict');
+      const verdictArtifact = output.artifacts!.find((a) => a.artifactType === 'evaluation_verdict');
       expect(verdictArtifact).toBeDefined();
       expect(verdictArtifact!.path).toBe('verdict.json');
     });

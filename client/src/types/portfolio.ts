@@ -48,7 +48,7 @@ const EvalSnapshotSchema = z.object({
 const ArtifactSchema = z.object({
   cid: z.string().min(1),
   // Open string — see §5.3 for conventions
-  role: z.string(),
+  artifactType: z.string(),
   sha256: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
   tags: z.array(z.string()).optional(),

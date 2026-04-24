@@ -218,7 +218,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
       informational: {
         predictedBps: submission.prediction.predictedBps,
       },
-      artifacts: [{ path: 'verdict.json', role: 'evaluation_verdict' }],
+      artifacts: [{ path: 'verdict.json', artifactType: 'evaluation_verdict' }],
     };
   }
 }

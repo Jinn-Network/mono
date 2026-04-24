@@ -253,7 +253,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
       artifacts: [
         {
           path: 'verdict.json',
-          role: 'evaluation_verdict',
+          artifactType: 'evaluation_verdict',
           metadata: { verdict, score, schemaVersion: 'prediction.v0.verdict.v1' },
           access: { kind: 'open' },
         },

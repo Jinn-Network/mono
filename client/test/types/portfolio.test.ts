@@ -178,7 +178,7 @@ describe('RestorationManifestSchema', () => {
     artifacts: [
       {
         cid: 'bafybeig...',
-        role: 'session_transcript',
+        artifactType: 'session_transcript',
         tags: ['trading'],
       },
     ],
@@ -222,7 +222,7 @@ describe('RestorationManifestSchema', () => {
       artifacts: [
         {
           cid: 'bafybeig...',
-          role: 'generated_file',
+          artifactType: 'generated_file',
           access: { kind: 'x402-gated', endpoint: 'https://api.example.com/artifact', priceUsdc: '1.00' },
         },
       ],

@@ -60,7 +60,7 @@ describe('PredictionV0BaselineImpl', () => {
     expect(predictionJson.modelId).toBe('spot-carry.v1');
     expect(out.artifacts).toHaveLength(1);
     expect(out.artifacts![0].path).toBe('prediction.json');
-    expect(out.artifacts![0].role).toBe('prediction_submission');
+    expect(out.artifacts![0].artifactType).toBe('prediction_submission');
   });
 
   it('returns oracleSnapshot in informational', async () => {

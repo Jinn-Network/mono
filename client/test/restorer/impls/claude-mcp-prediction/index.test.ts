@@ -91,8 +91,8 @@ describe('ClaudeMcpPredictionImpl (mocked session)', () => {
     expect(out.informational?.rationale).toBe('Current price suggests upside');
     expect(out.artifacts).toHaveLength(2);
     expect(out.artifacts![0]!.path).toBe('prediction.json');
-    expect(out.artifacts![0]!.role).toBe('prediction_submission');
-    expect(out.artifacts![1]!.role).toBe('session_transcript');
+    expect(out.artifacts![0]!.artifactType).toBe('prediction_submission');
+    expect(out.artifacts![1]!.artifactType).toBe('session_transcript');
 
     // prediction.json was written to workingDir.
     const predictionPath = join(ctx.workingDir, 'prediction.json');

@@ -229,10 +229,10 @@ export class ClaudeMcpPredictionApyImpl implements RestorerImpl {
         sessionDurationMs: endedAt - startedAt,
       },
       artifacts: [
-        { path: 'prediction-apy.json', role: 'prediction_submission' },
+        { path: 'prediction-apy.json', artifactType: 'prediction_submission' },
         {
           path: transcriptPath,
-          role: 'session_transcript',
+          artifactType: 'session_transcript',
           metadata: { sessionId, startedAt, endedAt },
         },
       ],

@@ -145,7 +145,7 @@ describe('walkArtifacts', () => {
     const workDir = makeWorkdir();
     const artifacts = await walkArtifacts(workDir);
     // Should have at least the system_snapshot tarball
-    const snapshot = artifacts.find((a) => a.role === 'system_snapshot');
+    const snapshot = artifacts.find((a) => a.artifactType === 'system_snapshot');
     expect(snapshot).toBeDefined();
   });
 
@@ -153,7 +153,7 @@ describe('walkArtifacts', () => {
     const workDir = makeWorkdir();
     writeFileSync(join(workDir, 'sessions', 'session-1.jsonl'), '{"msg":"hello"}');
     const artifacts = await walkArtifacts(workDir);
-    const session = artifacts.find((a) => a.role === 'session_transcript');
+    const session = artifacts.find((a) => a.artifactType === 'session_transcript');
     expect(session).toBeDefined();
     expect(session!.localPath).toContain('session-1.jsonl');
     expect(session!.access?.kind).toBe('open');
@@ -163,7 +163,7 @@ describe('walkArtifacts', () => {
     const workDir = makeWorkdir();
     writeFileSync(join(workDir, 'PLAN.md'), '# Plan');
     const artifacts = await walkArtifacts(workDir);
-    const doc = artifacts.find((a) => a.role === 'design_document');
+    const doc = artifacts.find((a) => a.artifactType === 'design_document');
     expect(doc).toBeDefined();
     expect(doc!.localPath).toContain('PLAN.md');
   });
@@ -173,7 +173,7 @@ describe('walkArtifacts', () => {
     mkdirSync(join(workDir, 'logs'), { recursive: true });
     writeFileSync(join(workDir, 'logs', 'run.log'), 'log line');
     const artifacts = await walkArtifacts(workDir);
-    const log = artifacts.find((a) => a.role === 'runtime_log');
+    const log = artifacts.find((a) => a.artifactType === 'runtime_log');
     expect(log).toBeDefined();
     expect(log!.localPath).toContain('run.log');
   });
@@ -182,15 +182,15 @@ describe('walkArtifacts', () => {
     const workDir = makeWorkdir();
     writeFileSync(join(workDir, 'sessions', 'session-1.jsonl'), 'data');
     writeFileSync(join(workDir, 'my-file.txt'), 'content');
-    const outputs = { outputs: [{ path: 'my-file.txt', role: 'generated_file' }] };
+    const outputs = { outputs: [{ path: 'my-file.txt', artifactType: 'generated_file' }] };
     writeFileSync(join(workDir, 'OUTPUTS.json'), JSON.stringify(outputs));
 
     const artifacts = await walkArtifacts(workDir);
     // Only declared artifact + snapshot tarball
-    const declared = artifacts.filter((a) => a.role === 'generated_file');
+    const declared = artifacts.filter((a) => a.artifactType === 'generated_file');
     expect(declared).toHaveLength(1);
     // session_transcript should NOT appear (OUTPUTS.json takes over)
-    const session = artifacts.filter((a) => a.role === 'session_transcript');
+    const session = artifacts.filter((a) => a.artifactType === 'session_transcript');
     expect(session).toHaveLength(0);
   });
 
@@ -199,9 +199,9 @@ describe('walkArtifacts', () => {
     writeFileSync(join(workDir, 'custom.json'), '{}');
     const artifacts = await walkArtifacts(workDir, [
       // impl must supply relative paths; absolute paths are rejected
-      { path: 'custom.json', role: 'execution_log', tags: ['custom'] },
+      { path: 'custom.json', artifactType: 'execution_log', tags: ['custom'] },
     ]);
-    const custom = artifacts.find((a) => a.role === 'execution_log');
+    const custom = artifacts.find((a) => a.artifactType === 'execution_log');
     expect(custom).toBeDefined();
     expect(custom!.tags).toContain('custom');
   });
@@ -210,39 +210,39 @@ describe('walkArtifacts', () => {
     const workDir = makeWorkdir();
     // Write a file in a sibling directory to verify the traversal would reach it
     const artifacts = await walkArtifacts(workDir, [
-      { path: '../../../etc/passwd', role: 'execution_log' },
+      { path: '../../../etc/passwd', artifactType: 'execution_log' },
     ]);
     // Should be skipped — traversal detected
-    const found = artifacts.find((a) => a.role === 'execution_log');
+    const found = artifacts.find((a) => a.artifactType === 'execution_log');
     expect(found).toBeUndefined();
   });
 
   it('rejects impl artifact with absolute path', async () => {
     const workDir = makeWorkdir();
     const artifacts = await walkArtifacts(workDir, [
-      { path: '/etc/passwd', role: 'execution_log' },
+      { path: '/etc/passwd', artifactType: 'execution_log' },
     ]);
     // Should be skipped — absolute paths rejected
-    const found = artifacts.find((a) => a.role === 'execution_log');
+    const found = artifacts.find((a) => a.artifactType === 'execution_log');
     expect(found).toBeUndefined();
   });
 
   it('rejects OUTPUTS.json entry with dotdot traversal path', async () => {
     const workDir = makeWorkdir();
-    const outputs = { outputs: [{ path: '../../../etc/passwd', role: 'stolen' }] };
+    const outputs = { outputs: [{ path: '../../../etc/passwd', artifactType: 'stolen' }] };
     writeFileSync(join(workDir, 'OUTPUTS.json'), JSON.stringify(outputs));
     const artifacts = await walkArtifacts(workDir);
-    const found = artifacts.find((a) => a.role === 'stolen');
+    const found = artifacts.find((a) => a.artifactType === 'stolen');
     expect(found).toBeUndefined();
   });
 
   it('gracefully handles missing OUTPUTS.json paths', async () => {
     const workDir = makeWorkdir();
-    const outputs = { outputs: [{ path: 'nonexistent.txt', role: 'generated_file' }] };
+    const outputs = { outputs: [{ path: 'nonexistent.txt', artifactType: 'generated_file' }] };
     writeFileSync(join(workDir, 'OUTPUTS.json'), JSON.stringify(outputs));
     // Should not throw — just skips missing paths
     const artifacts = await walkArtifacts(workDir);
-    const generated = artifacts.filter((a) => a.role === 'generated_file');
+    const generated = artifacts.filter((a) => a.artifactType === 'generated_file');
     expect(generated).toHaveLength(0);
   });
 
@@ -252,7 +252,7 @@ describe('walkArtifacts', () => {
     writeFileSync(join(workDir, 'OUTPUTS.json'), 'not-json{{{');
     // Should warn but not throw; falls back to default discovery
     const artifacts = await walkArtifacts(workDir);
-    const session = artifacts.find((a) => a.role === 'session_transcript');
+    const session = artifacts.find((a) => a.artifactType === 'session_transcript');
     expect(session).toBeDefined();
   });
 });
@@ -279,7 +279,7 @@ describe('system_snapshot tarball excludes env/ directory', () => {
     writeFileSync(join(workDir, 'work', 'normal.json'), '{"result":true}');
 
     const artifacts = await walkArtifacts(workDir);
-    const snapshot = artifacts.find((a) => a.role === 'system_snapshot');
+    const snapshot = artifacts.find((a) => a.artifactType === 'system_snapshot');
     expect(snapshot).toBeDefined();
 
     // Read the produced tarball and list its contents
@@ -301,7 +301,7 @@ describe('system_snapshot tarball excludes env/ directory', () => {
     provisionWorkingDir(workDir, intent, { API_KEY: 'supersecret' });
 
     const artifacts = await walkArtifacts(workDir);
-    const snapshot = artifacts.find((a) => a.role === 'system_snapshot');
+    const snapshot = artifacts.find((a) => a.artifactType === 'system_snapshot');
     expect(snapshot).toBeDefined();
 
     const tarGzBuffer = readFileSync(snapshot!.localPath);

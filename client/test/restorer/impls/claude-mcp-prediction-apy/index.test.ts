@@ -90,8 +90,8 @@ describe('ClaudeMcpPredictionApyImpl (mocked session)', () => {
     expect(out.informational?.rationale).toBe('observed rate');
     expect(out.artifacts).toHaveLength(2);
     expect(out.artifacts![0]!.path).toBe('prediction-apy.json');
-    expect(out.artifacts![0]!.role).toBe('prediction_submission');
-    expect(out.artifacts![1]!.role).toBe('session_transcript');
+    expect(out.artifacts![0]!.artifactType).toBe('prediction_submission');
+    expect(out.artifacts![1]!.artifactType).toBe('session_transcript');
 
     const predictionPath = join(ctx.workingDir, 'prediction-apy.json');
     expect(existsSync(predictionPath)).toBe(true);

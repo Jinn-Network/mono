@@ -127,7 +127,7 @@ export class PredictionV0BaselineImpl implements RestorerImpl {
         currentPrice,
       },
       artifacts: [
-        { path: 'prediction.json', role: 'prediction_submission' },
+        { path: 'prediction.json', artifactType: 'prediction_submission' },
       ],
     };
   }

@@ -363,7 +363,7 @@ describe('ClaudeMcpHyperliquidImpl', () => {
       const output = await impl.run(ctx);
 
       // Should have at least one artifact with role session_transcript
-      const transcriptArtifacts = output.artifacts?.filter((a) => a.role === 'session_transcript') ?? [];
+      const transcriptArtifacts = output.artifacts?.filter((a) => a.artifactType === 'session_transcript') ?? [];
       expect(transcriptArtifacts.length).toBeGreaterThan(0);
 
       // transcript file should exist

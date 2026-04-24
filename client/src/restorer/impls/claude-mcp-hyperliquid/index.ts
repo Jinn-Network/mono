@@ -639,7 +639,7 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
 
     const artifacts = allSessions.map((session) => ({
       path: `sessions/${session.sessionId}/transcript.txt`,
-      role: 'session_transcript',
+      artifactType: 'session_transcript',
       metadata: {
         sessionId: session.sessionId,
         startedAt: session.startedAt,

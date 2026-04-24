@@ -1,7 +1,7 @@
 /**
  * Restorer engine — workingDir provisioning + artifact walking + IPFS upload.
  *
- * §6.6 workdir layout, §5.3 artifact role conventions.
+ * §6.6 workdir layout, §5.3 artifact artifactType conventions.
  *
  * Responsibilities:
  *   1. Provision workingDir at PRE_SNAPSHOT time: write intent.json, env/ files,
@@ -32,7 +32,7 @@ import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 
 const OutputEntrySchema = z.object({
   path: z.string(),
-  role: z.string(),
+  artifactType: z.string(),
   metadata: z.record(z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
   access: z
@@ -42,6 +42,13 @@ const OutputEntrySchema = z.object({
       priceUsdc: z.string().optional(),
     })
     .optional(),
+}).superRefine((val, ctx) => {
+  if ('role' in val && !('artifactType' in val)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "OUTPUTS.json field 'role' is renamed to 'artifactType' — update your outputs declaration",
+    });
+  }
 });
 
 const OutputsJsonSchema = z.object({
@@ -259,10 +266,10 @@ function sha256Hex(buf: Buffer): string {
 export async function walkArtifacts(
   workingDir: string,
   implArtifacts: OutputArtifact[] = [],
-): Promise<Array<{ localPath: string; role: string; metadata?: Record<string, unknown>; tags?: string[]; access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string } }>> {
+): Promise<Array<{ localPath: string; artifactType: string; metadata?: Record<string, unknown>; tags?: string[]; access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string } }>> {
   const result: Array<{
     localPath: string;
-    role: string;
+    artifactType: string;
     metadata?: Record<string, unknown>;
     tags?: string[];
     access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string };
@@ -284,7 +291,7 @@ export async function walkArtifacts(
         if (existsSync(fullPath) && statSync(fullPath).isFile()) {
           result.push({
             localPath: fullPath,
-            role: entry.role,
+            artifactType: entry.artifactType,
             metadata: entry.metadata,
             tags: entry.tags,
             access: entry.access,
@@ -312,7 +319,7 @@ export async function walkArtifacts(
       if (existsSync(fullPath) && statSync(fullPath).isFile()) {
         result.push({
           localPath: fullPath,
-          role: art.role,
+          artifactType: art.artifactType,
           metadata: art.metadata,
           tags: art.tags,
           access: art.access,
@@ -329,7 +336,7 @@ export async function walkArtifacts(
       for (const name of readdirSync(sessionsDir)) {
         const full = join(sessionsDir, name);
         if (statSync(full).isFile() && !declared.has(full)) {
-          result.push({ localPath: full, role: 'session_transcript', access: { kind: 'open' } });
+          result.push({ localPath: full, artifactType: 'session_transcript', access: { kind: 'open' } });
         }
       }
     }
@@ -343,7 +350,7 @@ export async function walkArtifacts(
         extname(name).toLowerCase() === '.md' &&
         !declared.has(full)
       ) {
-        result.push({ localPath: full, role: 'design_document', access: { kind: 'open' } });
+        result.push({ localPath: full, artifactType: 'design_document', access: { kind: 'open' } });
       }
     }
 
@@ -353,7 +360,7 @@ export async function walkArtifacts(
       for (const name of readdirSync(logsDir)) {
         const full = join(logsDir, name);
         if (statSync(full).isFile() && !declared.has(full)) {
-          result.push({ localPath: full, role: 'runtime_log', access: { kind: 'open' } });
+          result.push({ localPath: full, artifactType: 'runtime_log', access: { kind: 'open' } });
         }
       }
     }
@@ -367,7 +374,7 @@ export async function walkArtifacts(
     await createWorkdirTarball(workingDir, tarballPath, SNAPSHOT_FILENAME);
     result.push({
       localPath: tarballPath,
-      role: 'system_snapshot',
+      artifactType: 'system_snapshot',
       metadata: { description: 'Full workingDir snapshot' },
       access: { kind: 'open' },
     });
@@ -390,7 +397,7 @@ export async function walkArtifacts(
 export async function uploadArtifacts(
   artifacts: Array<{
     localPath: string;
-    role: string;
+    artifactType: string;
     metadata?: Record<string, unknown>;
     tags?: string[];
     access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string };
@@ -407,7 +414,7 @@ export async function uploadArtifacts(
       // Upload raw bytes as base64-encoded JSON envelope so IPFS receives JSON
       // (consistent with how other uploads work via uploadToIpfs).
       const envelope = {
-        role: art.role,
+        artifactType: art.artifactType,
         sha256: hash,
         data: content.toString('base64'),
       };
@@ -417,7 +424,7 @@ export async function uploadArtifacts(
       const uploaded: UploadedArtifact = {
         cid,
         sha256: hash,
-        role: art.role,
+        artifactType: art.artifactType,
         metadata: art.metadata,
         tags: art.tags,
         access: art.access,
@@ -449,7 +456,7 @@ export function registerArtifacts(
     deps.registerArtifact({
       id: art.cid,
       title: art.localPath.split('/').pop() ?? art.cid,
-      tags: art.tags ?? [art.role],
+      tags: art.tags ?? [art.artifactType],
       outcome: 'uploaded',
       parentManifestCid,
     });

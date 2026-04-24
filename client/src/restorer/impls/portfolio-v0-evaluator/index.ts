@@ -592,7 +592,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       artifacts: [
         {
           path: 'verdict.json',
-          role: 'evaluation_verdict',
+          artifactType: 'evaluation_verdict',
           metadata: { verdict, score, schemaVersion: 'portfolio.v0.eval.manifest.v1' },
           tags: ['verdict', 'evaluation'],
           access: { kind: 'open' },

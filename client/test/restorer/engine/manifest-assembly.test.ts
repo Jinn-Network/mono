@@ -83,7 +83,7 @@ describe('assembleAndSignManifest', () => {
   it('includes artifacts array', async () => {
     const { assembleAndSignManifest } = await import('../../../src/restorer/engine/manifest-assembly.js');
     const artifacts = [
-      { cid: 'bafyart1', role: 'session_transcript', sha256: 'abc123', access: { kind: 'open' as const } },
+      { cid: 'bafyart1', artifactType: 'session_transcript', sha256: 'abc123', access: { kind: 'open' as const } },
     ];
     const result = await assembleAndSignManifest(
       makeProvenance(),
