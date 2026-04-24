@@ -36,6 +36,7 @@ import {
 } from './delivery.js';
 import type { RestorerImpl, RestorationOutput } from '../types.js';
 import { SkippableError } from '../types.js';
+import type { Role } from '../../types/envelope.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -644,28 +645,73 @@ export class RestorationEngine {
     // use the old manifest path and will be migrated separately.
     const specKind = intent.specKind ?? 'portfolio.v0';
 
-    const envelopePayload: Record<string, unknown> = {
-      preSnapshot: {
-        capturedAt: intent.preSnapshotCapturedAt ?? Date.now(),
-        hlTime: preSnapshotPayload?.hlTime ?? 0,
-        // Double-fallback: first tries the structured .payload field (normal shape),
-        // then falls back to the whole payload object (handles takePreSnapshot's
-        // synthetic shape where the snapshot IS the top-level object, not nested).
-        payload: preSnapshotPayload?.payload ?? preSnapshotPayload ?? {},
-      },
-      postSnapshot: {
-        capturedAt: intent.postSnapshotCapturedAt ?? Date.now(),
-        hlTime: postSnapshotPayload?.hlTime ?? 0,
-        // Same double-fallback as above.
-        payload: postSnapshotPayload?.payload ?? postSnapshotPayload ?? {},
-      },
-      fills: (intent.fillsPayload as unknown[]) ?? [],
-      gating: (intent.gatingClaim as Record<string, unknown>) ?? {},
-      ...(intent.informationalClaim != null
-        ? { informational: intent.informationalClaim as Record<string, unknown> }
-        : {}),
-      ...(implOutput?.rationale != null ? { rationale: implOutput.rationale } : {}),
-    };
+    // Derive role from intent type. Evaluator intents produce 'verdict' envelopes;
+    // all other intents produce 'restoration' envelopes.
+    const isEvaluation = intent.intentType === 'evaluation';
+    const role: Role = isEvaluation ? 'verdict' : 'restoration';
+
+    let envelopePayload: Record<string, unknown>;
+
+    if (isEvaluation) {
+      // ── Verdict envelope payload ──────────────────────────────────────────────
+      // The evaluator impl populates verdictPayload on RestorationOutput with a
+      // PortfolioV0VerdictPayload-shaped object. Engine passes it through to the
+      // envelope assembler, which runs validatePayload('portfolio.v0', 'verdict', ...).
+      //
+      // If verdictPayload is absent (impl bug / crash recovery), fall back to a
+      // minimal INDETERMINATE stub so the envelope assembly does not silently succeed
+      // with a wrong shape — validatePayload will catch schema mismatches.
+      //
+      // verificationOfRestoration: stubbed — Plan D will connect the real SDK.
+      // restorationEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
+      const verdictPayload = implOutput?.verdictPayload;
+      if (!verdictPayload) {
+        throw new Error(
+          `pack: evaluator impl for ${intent.requestId} did not produce verdictPayload on RestorationOutput; ` +
+          `ensure the impl populates output.verdictPayload`,
+        );
+      }
+
+      // If the (stub) verificationOfRestoration reports 'invalid', downgrade verdict
+      // to REJECTED per scope §3.3.  For V1 the stub always returns 'valid', so this
+      // path does not fire in practice — Plan D makes it real.
+      const verif = verdictPayload['verificationOfRestoration'] as
+        | { overall?: string }
+        | undefined;
+      if (verif?.overall === 'invalid') {
+        // Override verdict to REJECTED; preserve the rest of the payload.
+        envelopePayload = {
+          ...verdictPayload,
+          verdict: 'REJECTED',
+        };
+      } else {
+        envelopePayload = verdictPayload;
+      }
+    } else {
+      // ── Restoration envelope payload ──────────────────────────────────────────
+      envelopePayload = {
+        preSnapshot: {
+          capturedAt: intent.preSnapshotCapturedAt ?? Date.now(),
+          hlTime: preSnapshotPayload?.hlTime ?? 0,
+          // Double-fallback: first tries the structured .payload field (normal shape),
+          // then falls back to the whole payload object (handles takePreSnapshot's
+          // synthetic shape where the snapshot IS the top-level object, not nested).
+          payload: preSnapshotPayload?.payload ?? preSnapshotPayload ?? {},
+        },
+        postSnapshot: {
+          capturedAt: intent.postSnapshotCapturedAt ?? Date.now(),
+          hlTime: postSnapshotPayload?.hlTime ?? 0,
+          // Same double-fallback as above.
+          payload: postSnapshotPayload?.payload ?? postSnapshotPayload ?? {},
+        },
+        fills: (intent.fillsPayload as unknown[]) ?? [],
+        gating: (intent.gatingClaim as Record<string, unknown>) ?? {},
+        ...(intent.informationalClaim != null
+          ? { informational: intent.informationalClaim as Record<string, unknown> }
+          : {}),
+        ...(implOutput?.rationale != null ? { rationale: implOutput.rationale } : {}),
+      };
+    }
 
     // 4. Persist generatedAt once (first pack); reuse on retry for CID determinism.
     const generatedAt: number = intent.manifestGeneratedAt ?? Date.now();
@@ -680,7 +726,7 @@ export class RestorationEngine {
     // constants from a future build-info.ts module generated at CI time.
     const envelopeInputs: EnvelopeInputs = {
       kind: specKind,
-      role: 'restoration',
+      role,
       intent: {
         cid: intent.intentCid,
         onchainCreationTx: intent.onchainCreationTx,

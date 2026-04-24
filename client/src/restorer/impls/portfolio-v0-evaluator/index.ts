@@ -570,6 +570,44 @@ export class PortfolioV0Evaluator implements RestorerImpl {
 
     // ── Build RestorationOutput ───────────────────────────────────────────────
 
+    // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
+    // Assembles the PortfolioV0VerdictPayload from the already-computed fields.
+    //
+    // restorationEnvelope: placeholder — the real CID/sha256 of the restoration
+    // envelope being evaluated. TODO(plan-d): resolve from adapter using
+    // intent.restorationRequestId once restoration envelope lookup is wired.
+    //
+    // verificationOfRestoration: stub — Plan D will connect the real SDK that
+    // fetches + validates the restoration envelope against its claimed tier.
+    // For V1 the stub always reports 'valid' (self-signed tier), which means
+    // the REJECTED-if-invalid path in engine.pack() never fires in practice
+    // until Plan D replaces this stub.
+    const restorationEnvelope = {
+      // TODO(plan-d): resolve real CID from adapter via intent.restorationRequestId
+      cid: restorationRequestId ?? 'bafy-unknown',
+      sha256: '0'.repeat(64),  // TODO(plan-d): derive from fetched envelope bytes
+    };
+
+    const verificationOfRestoration = {
+      claimedTier: 'self-signed' as const,  // TODO(plan-d): read from restoration envelope
+      sdkVersion: '0.0.0-stub',              // TODO(plan-d): real SDK version
+      timestamp: Date.now(),
+      checks: [{ name: 'stub', passed: true }],
+      overall: 'valid' as const,             // TODO(plan-d): real SDK outcome
+    };
+
+    const verdictPayload: Record<string, unknown> = {
+      restorationEnvelope,
+      verificationOfRestoration,
+      verdict,
+      score,
+      scoreBasis: 'calmar.v1',
+      scoreVersion: 'v1',
+      rederived: unsigned['rederived'],
+      claimed: unsigned['claimed'],
+      checks: unsigned['checks'],
+    };
+
     const output: RestorationOutput = {
       venueRef: { name: 'hyperliquid' },
       gating: {
@@ -589,6 +627,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
         closedTradesCount: rederived?.closedTrades ?? 0,
         tradedNotionalMultiple: String(rederived?.notional ?? 0),
       },
+      verdictPayload,
       artifacts: [
         {
           path: 'verdict.json',

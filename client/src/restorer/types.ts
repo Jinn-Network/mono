@@ -42,6 +42,15 @@ export interface RestorationOutput {
   gating: Record<string, unknown>;
   informational?: Record<string, unknown>;
 
+  /**
+   * Full verdict payload for evaluator impls (intentType === 'evaluation').
+   *
+   * When set, engine.pack() uses role='verdict' and passes this as the
+   * envelope payload directly (validated against the kind's verdict schema).
+   * Restoration impls MUST leave this undefined.
+   */
+  verdictPayload?: Record<string, unknown>;
+
   artifacts?: OutputArtifact[];
   rationale?: RationaleEntry[];
 }

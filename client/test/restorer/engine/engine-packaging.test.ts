@@ -437,4 +437,176 @@ describe('Engine packaging integration', () => {
     const gen2 = (manifestUploads[1]![1] as Record<string, unknown>)['generatedAt'];
     expect(gen1).toBe(gen2);
   });
+
+  // ── Verdict envelope (evaluation intent) ─────────────────────────────────────
+
+  it('pack() emits role=verdict envelope for intentType=evaluation with verdictPayload', async () => {
+    // An evaluation intent must produce a 'verdict' envelope, not 'restoration'.
+    // The verdictPayload on implOutputsJson is passed through as the envelope payload
+    // and validated against PortfolioV0VerdictPayloadSchema.
+    const requestId = 'req-eval-001';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+    // verdict.json must exist so walkArtifacts picks it up (evaluator impl writes it)
+    writeFileSync(join(workingDir, 'verdict.json'), JSON.stringify({ schemaVersion: 'portfolio.v0.eval.manifest.v1', verdict: 'PASS' }));
+
+    // Build a minimal valid PortfolioV0VerdictPayload
+    const verdictPayload = {
+      restorationEnvelope: { cid: 'bafy-rest', sha256: '0'.repeat(64) },
+      verificationOfRestoration: {
+        claimedTier: 'self-signed',
+        sdkVersion: '0.0.0-stub',
+        timestamp: Date.now(),
+        checks: [{ name: 'stub', passed: true }],
+        overall: 'valid',
+      },
+      verdict: 'PASS',
+      score: '0.5',
+      scoreBasis: 'calmar.v1',
+      scoreVersion: 'v1',
+      rederived: {
+        preSnapshot: { capturedAt: 1000, payload: {} },
+        postSnapshot: { capturedAt: 2000, payload: {} },
+        fills: [],
+        gating: {},
+      },
+      claimed: {
+        preSnapshot: { capturedAt: 1000, payload: {} },
+        postSnapshot: { capturedAt: 2000, payload: {} },
+        fillsHash: '0xff',
+        fillsCount: 0,
+        gating: {},
+      },
+      checks: [{ name: 'availability.x', status: 'PASS' }],
+    };
+
+    const implOutput = {
+      venueRef: { name: 'hyperliquid' },
+      gating: { verdict: 'PASS', score: '0.5' },
+      verdictPayload,
+      artifacts: [{ path: 'verdict.json', artifactType: 'evaluation_verdict', tags: ['verdict'], access: { kind: 'open' } }],
+    };
+
+    await engine.observe({
+      requestId,
+      intentCid: 'bafyintent123',
+      onchainCreationTx: '0xdeadbeef',
+      onchainCreationBlock: 100,
+      specKind: 'portfolio.v0',
+      intentType: 'evaluation',
+      windowStartTs: Date.now() - 1000,
+      windowEndTs: Date.now() + 86_400_000,
+      restorationJob: { id: requestId, description: 'test', type: 'evaluation' },
+    });
+    const p = engine.testPersistence;
+    p.transition(requestId, IntentState.CLAIMED);
+    p.transition(requestId, IntentState.WAITING);
+    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'portfolio-v0-evaluator'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, IntentState.RUNNING);
+    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { verdict: 'PASS', score: '0.5' },
+      implOutputsJson: JSON.stringify(implOutput),
+    });
+    p.transition(requestId, IntentState.PACKAGING);
+
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    // Reset mock to default implementation (the idempotency test may have patched it)
+    uploadMock.mockResolvedValue('bafymock123');
+    uploadMock.mockClear();
+
+    await engine.process(requestId);
+
+    const intent = engine.testPersistence.getByRequestId(requestId)!;
+    expect(intent.state).toBe(IntentState.DELIVERING);
+    expect(intent.manifestCid).toBe('bafymock123');
+
+    // Find the uploaded envelope (has schemaVersion='jinn.execution.v1')
+    const envelopeCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>)['schemaVersion'] === 'jinn.execution.v1',
+    );
+    expect(envelopeCall).toBeDefined();
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+
+    // role MUST be 'verdict'
+    expect(envelope['role']).toBe('verdict');
+
+    // payload must contain the verdict fields (not restoration snapshot fields)
+    const payload = envelope['payload'] as Record<string, unknown>;
+    expect(payload['verdict']).toBe('PASS');
+    expect(payload['restorationEnvelope']).toBeDefined();
+    expect(payload['verificationOfRestoration']).toBeDefined();
+    expect(payload['rederived']).toBeDefined();
+    expect(payload['claimed']).toBeDefined();
+    expect(payload['checks']).toBeDefined();
+    // Must NOT have restoration-specific fields
+    expect(payload['preSnapshot']).toBeUndefined();
+    expect(payload['postSnapshot']).toBeUndefined();
+    expect(payload['fills']).toBeUndefined();
+  });
+
+  it('pack() throws when evaluation intent has no verdictPayload on implOutput', async () => {
+    // Guard: if an evaluator impl forgot to set verdictPayload, pack() should throw
+    // rather than silently assembling a malformed restoration-role envelope.
+    const requestId = 'req-eval-no-vp';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+
+    // implOutput with no verdictPayload field
+    const implOutput = {
+      venueRef: { name: 'hyperliquid' },
+      gating: { verdict: 'PASS', score: '0.5' },
+      // verdictPayload intentionally absent
+      artifacts: [],
+    };
+
+    await engine.observe({
+      requestId,
+      intentCid: 'bafyintent123',
+      onchainCreationTx: '0xdeadbeef',
+      onchainCreationBlock: 100,
+      specKind: 'portfolio.v0',
+      intentType: 'evaluation',
+      windowStartTs: Date.now() - 1000,
+      windowEndTs: Date.now() + 86_400_000,
+      restorationJob: { id: requestId, description: 'test', type: 'evaluation' },
+    });
+    const p = engine.testPersistence;
+    p.transition(requestId, IntentState.CLAIMED);
+    p.transition(requestId, IntentState.WAITING);
+    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'portfolio-v0-evaluator'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, IntentState.RUNNING);
+    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { verdict: 'PASS' },
+      implOutputsJson: JSON.stringify(implOutput),
+    });
+    p.transition(requestId, IntentState.PACKAGING);
+
+    await expect(engine.process(requestId)).rejects.toThrow(
+      /evaluator impl.*did not produce verdictPayload/,
+    );
+  });
 });
