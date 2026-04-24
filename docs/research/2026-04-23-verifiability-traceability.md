@@ -462,6 +462,46 @@ above: both only get you to “bytes from `api.anthropic.com`,” not “this
 exact model revision produced them honestly,” until labs sign or attest
 inference upstream.
 
+**Switch signal — when to re-open “zk + zkTLS primary” vs TEE-primary.** There
+is no magic universal constant; the useful “threshold” is a **pinned benchmark**
+plus **gates** that must all pass before the network treats composed zk as a
+default for *new* work (buyers/operators opt in; no silent downgrade of
+attested-tier semantics). **First:** define `B` in CI — e.g. one synthetic
+`portfolio.v0`-shaped run with fixed caps on Anthropic-style rounds, HL JSON
+fetches, and tool steps, with witness sizes bounded — and publish `B` as the
+official `zk-bench-trajectory` bundle. **Then** re-measure quarterly on
+Succinct-style proving networks (or equivalent). **Hypothesis gates (all
+required):**
+
+1. **End-to-end economics (composed zk + zkTLS for `B`).** p95 **total**
+   out-of-pocket proving + verification cost ≤ **US $10** per run **and**
+   ≤ **20%** of the modeled **attested-tier** revenue per trajectory for that
+   intent class (use whichever stricter constraint binds for the business).
+2. **End-to-end latency.** p95 wall-clock from “execution finished” to
+   “verifier accepted composed proof” ≤ **8 hours** on commodity provers
+   (stretch target ≤ **1 hour** before flipping any *default*).
+3. **Per-edge zkTLS (one Anthropic-shaped HTTPS receipt in `B`).** p95
+   generate+verify wall-clock ≤ **120 seconds** **and** marginal cost ≤
+   **US $0.25** per receipt (this is the canary for the outer loop; if this
+   fails, the full composition is not competitive regardless of zkVM gains).
+4. **Portability / honesty of closure.** ≥ **99%** of the benchmark’s host
+   interactions are either (a) in-circuit in the chosen zkVM without a trusted
+   custom oracle, or (b) explicitly modeled as zkTLS witness bytes — no
+   hand-waved “fetch” inside the proof.
+
+Until all four hold on `B`, treat **TEE as the default attestation path** and
+use zk only for insurance slices (§V2b) and receipts where justified. When
+all four hold, **re-run the product decision** (not automatic migration):
+prefer zk + zkTLS where buyers explicitly want math-trust over hardware
+trust; keep TEE where latency or operator simplicity dominates.
+
+**Earlier canary (evaluator only, optional).** Before full-trajectory zk is
+viable, if a **single** `portfolio.v0` verdict zk proof for manifest `M` hits
+p95 **≤ US $0.05** and **≤ 10 minutes** wall-clock on `B`’s evaluator slice
+only, enable **sampled/challenged** zk proofs of the evaluator kernel while
+keeping TEE for the restorer trajectory — that is a *partial* switch signal,
+not the composed-trajectory flip.
+
 ### V2b — evaluator attestation via the same TEE substrate
 
 The evaluator kernel — `canonical-metrics.ts` + `checks/*` + `score.ts`
