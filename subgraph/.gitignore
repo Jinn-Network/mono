@@ -3,3 +3,4 @@ build/
 generated/
 *.log
 .DS_Store
+tests/.latest.json
