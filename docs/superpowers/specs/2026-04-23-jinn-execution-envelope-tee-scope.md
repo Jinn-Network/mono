@@ -1,6 +1,6 @@
 # Execution envelope + trajectory + TEE — **Scope** (pre-design)
 
-**Version:** 0.2 (scope — expanded from v0.1 via design discussion)  
+**Version:** 0.3 (scope — knowledge data model locked in; uniform-schema principle)  
 **Date:** 2026-04-24  
 **Status:** scope locked for follow-on design work (open decisions in §6)  
 **Beads:** `jinn-mono-38o` (epic: execution envelope + TEE integration)  
@@ -8,16 +8,20 @@
 
 - `docs/research/2026-04-23-verifiability-traceability.md` — outcome vs trajectory, evidence tiers, non-goals
 - `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md` — default restorer whose OTel emission drives the trajectory profile; its promotion gate interacts with attested-tier measurement (TEE measures the *starting* binary, not post-promotion state)
-- `spec/2026-04-21-agentic-data-substrate.md` — substrate thesis; the commercial unit is the triple (intent, execution, verdict)
+- `spec/2026-04-21-agentic-data-substrate.md` — substrate thesis; knowledge unit is a tree rooted at intent
 - `spec/2026-03-23-jinn-implementation-spec-proposal.md` — §4.2 ERC-8004, §4.3 x402
-- `client/src/types/portfolio.ts` — current `portfolio.v0` manifest schemas (restoration + verdict)
-- `client/src/types/prediction.ts`, `client/src/types/prediction-apy.ts` — parallel patterns for other kinds
+- `client/src/types/portfolio.ts`, `prediction.ts`, `prediction-apy.ts` — current manifest schemas per kind (all collapsing into `jinn.execution.v1`)
 - `client/src/restorer/engine/` — packaging, manifest assembly, signing, `evidenceHash` path
-- `client/src/x402/` — payment-gated artifacts
+- `client/src/discovery/registry.ts`, `subgraph.ts` — current ERC-8004 Identity-Registry-only integration
+- `client/src/x402/` — payment-gated artifacts (access/gating design deferred to D8)
 
 ## Changes since v0.1
 
-Design discussion locked seven directional decisions that were open in v0.1 (now in §3); split the original D3 into four sub-decisions (D3a–c resolved; D3d deferred for further discussion); added a new open-decision area D8 (trajectory / verdict access + gating + redaction) that requires separate discussion before the design spec.
+**v0.2 locked (via initial design discussion):** envelope shape (D5), host-mediated signing (D6), signing-key kinds (D3a), operator identity (D3b), source-code identity (D3c), trajectory signing granularity, migration approach, same-TEE-substrate evaluator (V2b).
+
+**v0.3 locks (via knowledge-data-model discussion):** the full knowledge graph and its storage model — intent formalization (K2), knowledge-tree primitive (K1), executor provenance required at all tiers (K3), source bundle as first-class entity (K4), trajectory↔artifact linkage (K5), normative OTel span profile (K6), verdict→restoration explicit link (K7), ERC-8004 three-registry separation (K8), role vocabulary (K9), and — load-bearing — the **uniform-schema principle** (§2.5). D3d resolved.
+
+**Still open:** D1 (ship order), D2 (canonical JSON), D4 (first TEE target), D8 (access / gating / redaction / monetization — deferred for separate discussion).
 
 ## 1. Purpose of this document
 
@@ -25,53 +29,106 @@ The epic asks for a full **design** (schemas, verification split, TEE path, tier
 
 ## 2. Problem statement (one paragraph)
 
-Jinn already packages `portfolio.v0` runs as signed manifests, IPFS artifacts, and on-chain `evidenceHash` commitments. The network's long-term product is **trajectory-shaped training data** — specifically the **triple** of intent (objective), execution (what happened), and verdict (evaluation / reward signal), not any one piece alone. We need a **protocol-level execution envelope** that works across intent kinds, composes with **x402** (paid artifact fetch) and **ERC-8004-style discovery**, and reserves a path to an **attested** tier where a TEE binds *declared code* to *what ran*. The full design must stay honest about **two verifiability questions**: outcome (re-derivable per kind) vs trajectory (only provable at production time for training-grade claims).
+Jinn already packages `portfolio.v0` runs as signed manifests, IPFS artifacts, and on-chain `evidenceHash` commitments. The network's long-term product is **trajectory-shaped training data** — specifically a **knowledge tree rooted at each intent**, with restoration envelopes, verdict envelopes, trajectories, and artifacts as its branches, not any one piece alone. We need a **protocol-level execution envelope** that works across intent kinds, composes with **x402** (paid artifact fetch) and **ERC-8004** (discovery, validation, reputation), and reserves a path to an **attested** tier where a TEE binds *declared code* to *what ran*. The full design must stay honest about **two verifiability questions**: outcome (re-derivable per kind) vs trajectory (only provable at production time for training-grade claims).
+
+## 2.5. Uniform-schema principle
+
+**Every operator, at every tier, populates the same envelope schema.** The only fields whose *presence* is tier-gated are fields whose existence is definitionally a TEE capability:
+
+- `attestation` — the EAT-shape quote itself. Only a TEE can produce a valid one.
+- TLS-transcript span attributes (`net.tls.transcript.cid`) inside `jinn.llm_call` / `jinn.venue_io` spans — only the enclave can faithfully record these.
+
+Everything else — `executor.source.bundleCid`, `executor.source.measurement`, the full `jinn.trajectory.v1` blob with normative span profile, the artifact set with required roles — **is required of all operators at all tiers**, regardless of TEE.
+
+The semantic difference between tiers is **provability**, not completeness:
+
+- `self-signed` — all required fields present, operator signs. Malicious operators can fabricate any field; honest ones self-report.
+- `committed` — `self-signed` + envelope hash on-chain via `JinnRouter.claimDelivery(evidenceHash)`. Tamper-evident after claim.
+- `attested` — `committed` + valid TEE attestation quote binding `(measurement, execPubkey, envelopeHash)` into `REPORTDATA`. The measurement matches a reproducibly-built source bundle declared in `executor.source`.
+- `consensus` / `proved` — higher tiers built on top of the above (multi-evaluator / zk insurance).
+
+This keeps the data substrate uniform: a buyer ingesting trajectories doesn't care which tier produced them schema-wise; they care about tier as a *credibility weight* on the same structured content.
 
 ## 3. Decisions already made (for the follow-on design)
 
 These are **directional** commitments for the design doc; field-level details come next.
 
+### 3.1 Envelope & knowledge model
+
 | Topic | Decision |
 |--------|-----------|
-| **Envelope shape** | Single `jinn.execution.v1` envelope with `role: "restoration" \| "verdict"` discriminator. Payload is typed per `(kind, role)`. A verdict is structurally an execution of the evaluator kernel over the restoration manifest: different producer, different payload, same envelope. Attestation, trajectory, and evidence-tier fields live on the envelope and apply to both roles. Verdict payload carries a reference back to the restoration envelope (`restorationEnvelope: { cid, sha256 }`). |
-| **Trajectory content (`jinn.trajectory.v1`)** | Use **OpenTelemetry** — traces in **OTLP-JSON**, with **GenAI** and **MCP** semantic conventions where applicable. No bespoke event vocabulary for core spans. |
-| **Trajectory signing granularity (V1)** | **End-of-run one-shot signing.** OTLP-JSON is serialized at run completion, hashed, signed, uploaded as a single IPFS object. A crashed run loses the trajectory — acceptable at Phase 1b where outcomes from crashed runs are already lost. Partial / streamed / append-signed trajectories are explicitly V2+. |
-| **Attestation field** | Shape aligns with **RATS EAT**: generic outer + `profile` string (vendor/TEE-specific evidence inside). First concrete profile targets a single stack (see D4); the field must not hard-code a single vendor forever. |
-| **Signing chain (TEE tier, V2)** | **Host-mediated.** Enclave holds a sealed, measurement-bound **execution-signing key** that signs the envelope. Attestation quote's `REPORTDATA` binds `(measurement, execPubkey, envelopeHash)`. **Host** retains the durable agent EOA / Safe / OLAS infra and submits `claimDelivery(evidenceHash = envelopeHash)` on-chain. Earning bootstrap is unchanged. Enclave-direct on-chain signing deferred to a future revision. |
-| **Manifest signing key (D3a)** | `signature.signer` is a single field. Kind is declared on `executor.signingKey.kind`: `agent-eoa` for `self-signed` / `committed` tiers (today's pattern) or `enclave-bound` for `attested` tier (the key from the Signing-Chain decision above). No schema bifurcation. |
-| **Operator identity (D3b)** | `participant.safeAddress` is the canonical operator ID. It's already the on-chain anchor for staking, rewards, mech service, and ERC-8004-style discovery. `agentEoa` is signing / session identity. `did:*` identity deferred to V3 if a concrete need appears. |
-| **Source-code identity (D3c)** | `executor.source = { bundleCid, sha256, humanUrl?, buildRecipe, measurement }`. IPFS bundle is authoritative (GitHub can rug commits); `humanUrl` is debuggability only. Attestation check: `rebuild(bundleCid) ⇒ measurement` and `quote.measurement == executor.source.measurement`. |
-| **Tamper-evidence for stored artifacts (V1)** | **Signed envelope + digest + on-chain `evidenceHash`** (existing pattern). IPFS provides integrity **for a known CID**; the envelope / commitment binds **which CID** is canonical for a run. |
+| **Envelope shape (D5)** | Single `jinn.execution.v1` envelope with `role: "restoration" \| "verdict"` discriminator. Payload is typed per `(kind, role)`. A verdict is structurally an execution of the evaluator kernel over the restoration envelope: different producer, different payload, same envelope. Attestation, trajectory, and evidence-tier fields live on the envelope and apply to both roles. Verdict payload carries a reference back to the restoration envelope (`payload.restorationEnvelope: { cid, sha256 }`) — **K7**. |
+| **Knowledge primitive (K1)** | **Knowledge tree rooted at an intent**, with 1:N:M fanout over restoration envelopes × verdict envelopes. Per restoration: one trajectory + many artifacts. Each verdict references exactly one restoration via payload link (K7). Not "triple" — triples are the N=1, M=1 special case. |
+| **Intent formalization (K2)** | Promote current implicit `DesiredState` to canonical `intent.v1` schema: `{schemaVersion, id, kind, description, window, spec, eligibility, creator, createdAt, signature}`. Intent CID is the stable root of every knowledge tree query. |
+| **Trajectory content (`jinn.trajectory.v1`)** | Use **OpenTelemetry** — traces in **OTLP-JSON**, with **GenAI** and **MCP** semantic conventions where applicable. No bespoke event vocabulary for core spans. **Required at all tiers** per §2.5. |
+| **Normative span profile (K6)** | `jinn.trajectory.v1` specifies required attributes per `jinn.span.kind` value: `jinn.phase`, `jinn.llm_call`, `jinn.mcp_call`, `jinn.artifact.emit`, `jinn.venue_io`, `jinn.state_transition`. Conformance is a manifest-validation check for every tier; attested tier additionally requires TLS-transcript attributes where spans record external I/O. |
+| **Trajectory signing granularity (V1)** | **End-of-run one-shot signing.** OTLP-JSON serialized at run completion, hashed, signed, uploaded as a single IPFS object. Crashed run loses the trajectory — acceptable at Phase 1b. Partial / streamed / append-signed trajectories explicitly V2+. |
+| **Trajectory↔artifact linkage (K5)** | Bidirectional: span carries `jinn.artifact.cid` attribute for every emitted artifact; artifact metadata optionally carries `producedBy: { spanId, trajectoryCid }`. Required at all tiers. |
+| **Role vocabulary (K9)** | **Required roles** (normative at all tiers): `trajectory`, `system_snapshot`, `output.<kind>`. **Reserved standard roles** (declared, extensible): `design_document`, `session_transcript`, `runtime_log`, `code_patch`, `research_note`, `skill_bundle`, `mcp_config`, `promotion_record`, `source_bundle`. **Custom roles** permitted; buyers filter by role prefix. |
+
+### 3.2 Identity, signing, attestation
+
+| Topic | Decision |
+|--------|-----------|
+| **Attestation field** | Shape aligns with **RATS EAT**: generic outer + `profile` string (vendor/TEE-specific evidence inside). First concrete profile targets a single stack (see D4); the field must not hard-code a single vendor forever. Nullable — **only populated at `attested` tier** (§2.5 exception). |
+| **Signing chain (TEE tier, V2) (D6)** | **Host-mediated.** Enclave holds a sealed, measurement-bound **execution-signing key** that signs the envelope. Attestation quote's `REPORTDATA` binds `(measurement, execPubkey, envelopeHash)`. **Host** retains the durable agent EOA / Safe / OLAS infra and submits `claimDelivery(evidenceHash = envelopeHash)` on-chain. Earning bootstrap unchanged. Enclave-direct on-chain signing deferred. |
+| **Manifest signing key (D3a)** | `signature.signer` is a single field. Kind is declared on `executor.signingKey.kind`: `agent-eoa` for `self-signed` / `committed` / non-TEE `attested`-claims (today's pattern) or `enclave-bound` for enclave-produced signatures. No schema bifurcation. |
+| **Operator identity (D3b)** | `participant.safeAddress` is the canonical operator ID (on-chain anchor for staking, rewards, mech service, ERC-8004 discovery). `agentEoa` is signing / session identity. `did:*` identity deferred to V3 if a concrete need appears. |
+| **Executor provenance (K3)** | `executor = {implName, implVersion, clientGitSha, codeDigest, signingKey, source}`. **Required at all tiers** — every envelope states what code ran. Values are self-reported at `self-signed` / `committed`; provably bound at `attested` via `source.measurement` ↔ attestation quote. |
+| **Source-code identity (D3c, K4)** | `executor.source = { bundleCid, sha256, humanUrl?, buildRecipe, measurement }`. IPFS bundle is authoritative (GitHub can rug commits); `humanUrl` is debuggability only. Required at all tiers. **Source bundle is a first-class ERC-8004 entity** (K8) — registered once per release as `adw:SourceBundle`, referenced by every envelope from that build. Enables "show me envelopes running bundle X" lineage queries. |
 | **TEE ↔ trajectory binding** | Binding is **not automatic** from "ran in TEE" or "uploaded from enclave." The trajectory digest (or CID) is included in the attestation `REPORTDATA` and/or enclave-signed statement so verifiers link quote → bytes. |
-| **Evaluator substrate (V2b)** | **Default is same-TEE-substrate evaluator:** verdict envelopes carry their own attestation quote binding evaluator measurement to inputs (restoration envelope hash, venue snapshot, spec, scoring params) and outputs (verdict, score, checks). Dual-substrate (parallel zk proving pipeline for evaluator) is deferred as a V3-insurance path per research doc §V2b. |
-| **Migration** | **One-shot cutover** in Phase 1b. `jinn.execution.v1` replaces `portfolio.v0.manifest.v1`, `portfolio.v0.eval.manifest.v1`, `prediction.v0.submission.v1` / `.verdict.v1`, and `prediction.apy.v0.submission.v1` / `.verdict.v1` in a single pass. Old schemas deleted; **no back-compat shims, no dual-write, no feature flags.** `JinnRouter.claimDelivery(evidenceHash)` is already opaque `bytes32` — **no contract change** (evidenceHash = envelope canonical hash). Testnet dogfood data from the pre-v1 era is disposable. |
+
+### 3.3 Discovery / storage
+
+| Topic | Decision |
+|--------|-----------|
+| **Tamper-evidence for stored artifacts (V1)** | **Signed envelope + digest + on-chain `evidenceHash`** (existing pattern). IPFS provides integrity for a **known CID**; the envelope / commitment binds **which CID** is canonical for a run. |
+| **ERC-8004 three-registry separation (K8, D3d)** | The client currently uses only the **Identity Registry**. V1 scope wires all three: **(a) Identity Registry** adds `adw:Intent`, `adw:ExecutionEnvelope`, `adw:SourceBundle` entity kinds alongside existing `adw:AgentCard`, `adw:Artifact` (with `parentEnvelopeCid` added to artifact metadata). Attestation evidence lives on the envelope itself (`evidenceTier`, `measurement`) — **not** a separate "attestation field" in the registry. **(b) Validation Registry** hosts challenger verifications — a `validationRequest` ("re-verify this envelope's attestation + reproducible build") and `validationResponse` with the verdict. **(c) Reputation Registry** aggregates operator-level signals (including emergent attestation-track-record: "% of envelopes from Safe X that have been challenger-verified as attested"). Reputation is emergent, not hand-written. |
+| **Envelope registration on ERC-8004** | Every published envelope gets registered on the Identity Registry with metadata `{documentType: 'adw:ExecutionEnvelope', kind, role, evidenceTier, intentCid, parentEnvelopeCid?, measurement?, participant, generatedAt}`. Gas cost: 5–10k per envelope at current field count; acceptable at Phase 1b scale. Design spec may trim metadata density if mainnet scale demands it. |
+| **Subgraph knowledge graph** | Subgraph projects on-chain entities into queryable types: `Intent`, `ExecutionEnvelope`, `Artifact`, `SourceBundle`, `Agent` (node), plus a synthetic **`KnowledgeTree`** rooted at an intent and joining all envelopes by `intent.cid` (restorations) or `payload.restorationEnvelope.cid` (verdicts). Unlocks: "attested restorations for kind X in window T," "verdicts for this restoration," "all envelopes running source bundle Y," "full tree for intent Z." |
+| **Trajectory content indexing** | The subgraph indexes envelope / artifact / trajectory *metadata* (CIDs, sha256, roles). **Queries over trajectory content** ("spans where model = claude-opus-4-7") are out of scope for V1 — require a separate off-chain indexer walking IPFS blobs; deferred to a buyer-side or V2 service. |
+| **Evaluator substrate (V2b)** | **Default is same-TEE-substrate evaluator:** verdict envelopes carry their own attestation quote binding evaluator measurement to inputs (restoration envelope hash, venue snapshot, spec, scoring params) and outputs (verdict, score, checks). Dual-substrate (parallel zk proving pipeline for evaluator) deferred as a V3-insurance path per research doc §V2b. |
+
+### 3.4 Lifecycle
+
+| Topic | Decision |
+|--------|-----------|
+| **Migration** | **One-shot cutover** in Phase 1b. `jinn.execution.v1` replaces `portfolio.v0.manifest.v1`, `.eval.manifest.v1`, `prediction.v0.submission.v1` / `.verdict.v1`, and `prediction.apy.v0.submission.v1` / `.verdict.v1` in a single pass. `DesiredState` formalizes to `intent.v1`. Old schemas deleted; **no back-compat shims, no dual-write, no feature flags.** `JinnRouter.claimDelivery(evidenceHash)` is opaque `bytes32` — **no contract change** (evidenceHash = envelope canonical hash). Testnet dogfood data pre-v1 is disposable. |
 | **Optional rigor (deferred)** | **SCITT** transparency services, standalone transparency logs, **DSSE / in-toto** envelopes, **C2PA** — out of scope for V1. Rationale: `evidenceHash` on-chain already provides Jinn's tamper-evidence. These standards become relevant **only** if Jinn later needs third-party-verifier interop without Jinn-specific verifier code. |
 
 ## 4. In scope for the **next** design deliverable
 
 The full design spec (separate doc) should cover:
 
-1. **`jinn.execution.v1` schema** — Concrete field list: `schemaVersion`, `kind`, `role`, `generatedAt`, `intent`, `participant`, `window`, `executor` (incl. `signingKey`, `source`), `evidenceTier`, `attestation` (nullable), `trajectory` (nullable, with `access` and optional `encryption` blocks — shape pending D8), `artifacts[]` (open vs x402-gated), kind-/role-typed `payload`, `signature`. Signing input normatively uses the existing canonical-JSON impl (`client/src/restorer/engine/canonical-json.ts`, already ≈JCS-equivalent; see D2). Verdict payload includes `restorationEnvelope: { cid, sha256 }`.
+1. **`intent.v1` schema** — Concrete field list (see §3.1 K2); canonical JSON shape; migration of `DesiredState` consumers to the new type.
 
-2. **`jinn.trajectory.v1` profile** — OTLP-JSON constraints, required span kinds / attributes for Jinn grading, minimum coverage thresholds for `self-signed` vs `attested`, how the blob is hashed and referenced from the envelope, max size / chunking considerations (even under V1 one-shot signing, the serialized blob has a ceiling). Redaction semantics are in scope but attested-tier redaction allowlist is pending D8.
+2. **`jinn.execution.v1` schema** — Concrete field list: `schemaVersion`, `kind`, `role`, `generatedAt`, `intent`, `participant`, `window`, `executor` (incl. `signingKey`, `source`), `evidenceTier`, `attestation` (nullable), `trajectory` (required per §2.5, with optional access/encryption blocks — shape pending D8), `artifacts[]`, kind-/role-typed `payload`, `signature`. Signing input normatively uses the existing canonical-JSON impl (≈JCS-equivalent; see D2). Verdict payload includes `restorationEnvelope: { cid, sha256 }`.
 
-3. **TEE integration (phased)** — First target platform (D4), deployment shape (image → enclave), key sealing / execution-signing-key lifecycle, quote verification path. Given Nitro is the likely first target and has no production-grade on-chain quote verifier, **V2 assumes off-chain verification**; on-chain verifier work is deferred to a platform (e.g. TDX via `automata-dcap`) where it's viable. Explicit binding of envelope hash to attestation `REPORTDATA` per §3.
+3. **`jinn.trajectory.v1` profile** — OTLP-JSON constraints, required attributes per `jinn.span.kind`, minimum coverage thresholds, conformance test obligations. Trajectory↔artifact linkage (span attribute `jinn.artifact.cid` + artifact metadata `producedBy`). Attested-tier additions for TLS-transcript CIDs inside LLM / venue spans. Max size / chunking guidance even under one-shot signing.
 
-4. **Operator-declared builds + reproducibility tooling** — Reproducible image from published source as the gate for `attested`. **For Node.js / TypeScript operators specifically**, this is a multi-week workstream (lockfile-only installs, native-module determinism, `SOURCE_DATE_EPOCH`, tarball ordering, base-image digest pinning); the design spec must call out tooling choice (Nix / buildkit / Bazel) and the **challenger-side rebuild pipeline** (fetch `bundleCid` → rebuild → compare measurement). Challenger narrative: "does published source honestly emit `jinn.trajectory.v1`?"
+4. **Role vocabulary specification** — Required roles (`trajectory`, `system_snapshot`, `output.<kind>`), reserved standard roles with their semantic contracts (what `code_patch` / `research_note` / `promotion_record` etc. mean), custom-role conventions.
 
-5. **Evaluator alignment** — Verdict envelopes carry attestation where applicable (per §3 V2b). Same-TEE-substrate is the default path; dual-substrate is only reconsidered under specific V3-insurance conditions. Note: the research doc calls the evaluator a "deterministic kernel," but `portfolio-v0-evaluator` also re-fetches live venue state — design spec should be precise that **TEE attests the full I/O-bound evaluator process**, while a potential future zk-insurance path would prove only the scoring function over recorded inputs.
+5. **TEE integration (phased)** — First target platform (D4), deployment shape (image → enclave), key sealing / execution-signing-key lifecycle, quote verification path. Nitro is likely first target and has no production-grade on-chain quote verifier; **V2 assumes off-chain verification**. Explicit binding of envelope hash to attestation `REPORTDATA` per §3.
 
-6. **Evidence tiers** — Machine-checkable rules for `self-signed` and `committed` (V1); schema hooks present for `consensus` / `attested` / `proved` to land cleanly later. Discovery / subgraph exposes tier as a first-class filter.
+6. **Operator-declared builds + reproducibility tooling** — Reproducible image from published source is the gate for `attested`. **For Node.js / TypeScript operators specifically**, this is a multi-week workstream (lockfile-only installs, native-module determinism, `SOURCE_DATE_EPOCH`, tarball ordering, base-image digest pinning); design spec must call out tooling choice (Nix / buildkit / Bazel) and the **challenger-side rebuild pipeline** (fetch `bundleCid` → rebuild → compare measurement). Challenger narrative: "does published source honestly emit `jinn.trajectory.v1`?"
 
-7. **Conformance test suite** — A harness operators run against their executor to confirm it emits schema-valid `jinn.execution.v1`, produces spec-conformant `jinn.trajectory.v1`, binds attestation correctly, and follows redaction rules. Without this, "envelope compliance enforceable at manifest-validation layer" is aspirational. Deliverable alongside the design spec, not after.
+7. **Evaluator alignment** — Verdict envelopes carry attestation where applicable (per §3 V2b). Same-TEE-substrate is the default path. Note: research doc calls the evaluator a "deterministic kernel," but `portfolio-v0-evaluator` also re-fetches live venue state — design spec should be precise that **TEE attests the full I/O-bound evaluator process**; a potential future zk-insurance path would prove only the scoring function over recorded inputs.
 
-8. **Migration execution plan** — Concrete file-by-file cutover: type-file deletions and replacements, `manifest-assembly.ts` refactor, restorer / evaluator impl updates, subgraph re-indexing, test-fixture regeneration. One-shot per §3; no compatibility paths.
+8. **Evidence tier machine-checkable rules** — `self-signed`, `committed`, `attested`, `consensus`, `proved` — what the manifest-validation layer checks for each. Tier is a credibility weight on uniform-schema content (§2.5).
 
-9. **Interaction with default learning restorer** — Its promotion gate mutates `implStateDir` mid-run. TEE measurement covers the *starting* binary; the trajectory must capture every promotion transition, or `implStateDir` must live outside the measured surface. Design spec resolves.
+9. **ERC-8004 registration + subgraph schema** — Full GraphQL schema for `Intent`, `ExecutionEnvelope`, `Artifact`, `SourceBundle`, `Agent`, synthetic `KnowledgeTree`. Identity Registry metadata tuples per entity kind. Validation Registry request/response shapes for challenger verifications of attestation + reproducibility. Reputation Registry aggregation pattern (emergent attestation-track-record per operator).
 
-10. **Non-goals** — No zk proof of unconstrained agents; no full solution for provider model-honesty without upstream cooperation (TLS transcripts, TLSNotary, future signed responses only as mitigations).
+10. **Conformance test suite** — A harness operators run against their executor to confirm envelope schema, trajectory span profile, artifact roles, and attestation binding. Ships concurrent with the design spec, not after.
 
-**Artifacts the design spec should include** (from the epic): example JSON for each `(kind, role)` pair, verification pseudocode, sequence diagram (operator → enclave → IPFS → chain → buyer), phased rollout recommendation, backlog split (e.g. "reference Nitro path" vs "schema generalization").
+11. **Migration execution plan** — Concrete file-by-file cutover: type-file deletions and replacements, `manifest-assembly.ts` refactor, restorer / evaluator impl updates, `DesiredState` → `intent.v1` migration, 8004 registration extensions, subgraph redeployment, test-fixture regeneration. One-shot per §3; no compatibility paths.
+
+12. **Interaction with default learning restorer** — Its promotion gate mutates `implStateDir` mid-run. TEE measurement covers the *starting* binary; trajectory must capture every promotion transition via `promotion_record` artifacts + span events, or `implStateDir` must live outside the measured surface. Design spec resolves.
+
+13. **Canonical training-record extractor** — A companion (non-normative) library: "given a knowledge tree, extract standard training records." Optional but high-leverage for buyer adoption. Prevents each frontier lab from reinventing extraction.
+
+14. **Non-goals** — No zk proof of unconstrained agents; no full solution for provider model-honesty without upstream cooperation (TLS transcripts, TLSNotary, future signed responses only as mitigations).
+
+**Artifacts the design spec should include** (from the epic): example JSON for each `(kind, role)` pair, verification pseudocode, sequence diagram (operator → enclave → IPFS → chain → buyer), knowledge-tree diagram rooted at intent, phased rollout recommendation, backlog split (e.g. "reference Nitro path" vs "schema generalization" vs "subgraph schema" vs "x402/8004 refactors").
 
 ## 5. Explicitly out of scope (this epic / V1)
 
@@ -82,53 +139,63 @@ The full design spec (separate doc) should cover:
 - **Streaming / partial-run trajectory signing** — V1 is end-of-run one-shot per §3.
 - **Enclave-direct on-chain signing** — V2 is host-mediated per §3.
 - **Dual-substrate evaluator** (parallel zk proving pipeline) — V2b is same-TEE-substrate per §3.
+- **Trajectory content indexing** (querying over span content) — V1 indexes metadata only; content-level indexing is a buyer-side or V2 service.
+- **`did:*` identity layer** — deferred to V3 if a concrete need appears.
 
 ## 6. Open decisions (must be resolved in the design spec)
 
 | ID | Question | Notes |
 |----|-----------|--------|
-| **D1** | **Ship order:** envelope + trajectory first **(A)**, or TEE on `portfolio.v0` first **(B)**? | Epic opening question. Research doc §V1 makes the directional case for **(A)** — land generic envelope + trajectory profile + tier grading before TEE work. Design spec should confirm (A) or explicitly push back. |
+| **D1** | **Ship order:** envelope + trajectory first **(A)**, or TEE on `portfolio.v0` first **(B)**? | Epic opening question. Research doc §V1 makes the directional case for **(A)**. Design spec should confirm (A) or explicitly push back. |
 | **D2** | **Canonical serialization** | Whether `jinn.execution.v1` normatively requires **JCS (RFC 8785)**, or keeps today's `canonical-json.ts` (≈JCS-equivalent — sorted keys, unquoted bigints, `undefined` dropped) with a migration note. Low-risk either way. |
-| **D3d** | **ERC-8004 discovery compatibility / subgraph projection** | How do attestation-aware queries (by measurement / tier / role) surface? Operator-by-Safe stays ERC-8004; attested-build queries live in subgraph; on-chain measurement registry deferred. **Reserved for further discussion — interacts with D8.** |
-| **D4** | **First TEE target** | Nitro (fastest to ship, AWS-only, off-chain verification only) vs TDX (broader coverage, DCAP verifier path) vs Phala (opinionated on-chain integration, stateful operators). Selection constrains §4.3's on-chain verification story. |
-| **D8** | **Trajectory / verdict access + gating + redaction** | Three candidate access models (open / x402-pinned-plaintext / x402-encrypted-at-rest); evaluator access policy for gated trajectories (free as part of commitment path vs pay-and-reimburse); normative redaction allowlist at `attested` tier; verdict envelope gating semantics (not public by default); "triple-as-bundle" query shape in discovery. **Reserved for further discussion — ties to §4.1 envelope access fields, §4.2 trajectory profile, and §4.6 tier rules.** |
+| **D4** | **First TEE target** | Nitro (fastest to ship, AWS-only, off-chain verification only) vs TDX (broader coverage, DCAP verifier path) vs Phala (opinionated on-chain integration, stateful operators). Selection constrains §4.5's on-chain verification story. |
+| **D8** | **Trajectory / verdict / artifact access + gating + redaction + protocol monetization** | Three candidate access models (open / x402-pinned-plaintext / x402-encrypted-at-rest); per-item pricing enforcement (current handler is flat); closing the "free route always exists" gap; evaluator access policy for gated content; normative redaction allowlist at `attested` tier; verdict envelope gating defaults; triple-as-bundle x402 fetch primitive; protocol fee-split (operator / evaluator / Treasury / challenge pool) on x402 payments. **Reserved for separate discussion** — does not block the envelope / knowledge-graph design. |
 
 **Resolved since v0.1** (all documented in §3):
 
 - **D3a** — manifest signing identity (single field, two kinds)
 - **D3b** — operator-level identity (Safe address)
 - **D3c** — source-code identity (`executor.source` IPFS bundle)
+- **D3d** — ERC-8004 three-registry separation (Identity / Validation / Reputation)
 - **D5** — envelope vs envelope+verdict (single envelope, role-discriminated)
 - **D6** — enclave-direct vs host-mediated signing (host-mediated)
+- **K1–K9** — full knowledge-data-model decisions (see §3.1–§3.3)
 - Trajectory signing granularity for V1 (one-shot end-of-run)
 - Migration approach (one-shot cutover, no shims)
 - Evaluator substrate for V2b (same-TEE default)
+- **Uniform-schema principle** (§2.5): all operators produce the same schema at every tier; only `attestation` field and TLS-transcript CIDs differ.
 
-## 7. Mini-glossary (terms that came up in discussion)
+## 7. Mini-glossary
 
 | Term | Meaning |
 |------|--------|
+| **Knowledge tree** | The data structure rooted at an intent: `intent.v1` → N restoration envelopes → M verdict envelopes per restoration; each envelope has its trajectory + artifact descendants. The unit of query via subgraph. |
+| **Triple** | Special case of knowledge tree: (intent, one restoration envelope, one verdict envelope). Commercial shorthand; not the data primitive. |
+| **Uniform-schema principle** | §2.5: all operators at all tiers populate the same envelope and trajectory schemas. Only `attestation` and enclave-recorded TLS-transcript CIDs are tier-gated. Tier = provability, not data completeness. |
 | **Job 1 (trajectory)** | *What* is logged: spans, tool calls, model calls — **OpenTelemetry** addresses this. |
-| **Job 2 (tamper-evidence)** | *Whether the stored blob is the one the protocol committed to* — addressed by **signed envelope + digest + on-chain commitment** (and strengthened by **TEE binding** of that digest). IPFS gives integrity for a **known** CID, not which CID is official without that binding. |
-| **Triple** | The commercial unit of the substrate: `(intent, execution envelope role=restoration, execution envelope role=verdict)`. Buyers pay for bundles of triples; the envelope supports per-piece gating so bundle pricing is emergent rather than requiring a new schema object. |
+| **Job 2 (tamper-evidence)** | *Whether the stored blob is the one the protocol committed to* — addressed by **signed envelope + digest + on-chain commitment** (and strengthened by **TEE binding** of that digest at attested tier). |
 | **Execution envelope** | `jinn.execution.v1`. Shared shell for both restoration manifests (`role: restoration`) and verdict manifests (`role: verdict`). An evaluator is structurally an operator with a different role. |
-| **Role discriminator** | The `role` field on `jinn.execution.v1` selects which payload type applies for a given `(kind, role)` pair. E.g. `(portfolio.v0, restoration)` vs `(portfolio.v0, verdict)`. |
-| **Host-mediated signing** | TEE integration pattern where the enclave signs the envelope with an enclave-bound execution-signing key, and the host retains the durable agent EOA to submit `claimDelivery` on-chain. `evidenceHash` match closes the off-chain verifier loop. |
+| **Role discriminator** | The `role` field on `jinn.execution.v1` selects which payload type applies for a given `(kind, role)` pair. |
+| **Source bundle** | The IPFS-pinned tarball of operator source + build recipe + pinned deps. Referenced from `executor.source.bundleCid`; registered once per release on ERC-8004 as `adw:SourceBundle`; enables "envelopes running bundle X" lineage queries. Required at all tiers. |
+| **Host-mediated signing** | TEE integration pattern where the enclave signs the envelope with an enclave-bound execution-signing key, and the host retains the durable agent EOA to submit `claimDelivery` on-chain. |
 | **Execution-signing key** | The enclave-bound keypair used to sign an `attested`-tier envelope. Distinct from the agent EOA. Publicly bound to measurement via attestation `REPORTDATA`. |
-| **Measurement** | A hash of the code actually running inside the enclave (enclave image measurement, e.g. PCR values). The attestation quote declares it; challengers reproduce it by rebuilding `executor.source.bundleCid`. |
-| **EAT** | IETF **Entity Attestation Token** — vendor-agnostic framing for TEE quotes / evidence; informs the **`attestation`** field shape. |
+| **Measurement** | A hash of the code actually running inside the enclave. The attestation quote declares it; challengers reproduce it by rebuilding `executor.source.bundleCid`. Non-TEE operators still declare an expected measurement — they just can't prove it at runtime. |
+| **EAT** | IETF **Entity Attestation Token** — vendor-agnostic framing for TEE quotes / evidence; informs the `attestation` field shape. |
+| **ERC-8004 three registries** | (a) **Identity Registry** — what is this entity (agent, intent, envelope, artifact, source bundle). (b) **Validation Registry** — request/response for verification events (e.g. challenger re-verifies attestation). (c) **Reputation Registry** — aggregated signals on operators (emergent, not hand-edited). |
 | **SCITT / Transparency Service** | IETF **supply-chain** pattern: log **signed statements**, issue **receipts**. Useful **later** for third-party verifiers; **not** required for Jinn V1 trajectory storage. |
 | **DSSE / in-toto** | Standard **signing envelopes** for attestations; optional future interop, not core to V1. |
 
 ## 8. Success criteria for the follow-on design spec
 
-- A reader can implement **`jinn.execution.v1`** (both roles) and **`jinn.trajectory.v1`** without reading the beads thread or this scope doc.
-- Verifiers can check **`self-signed`** and **`committed`** tiers with written steps.
-- **`attested`** tier has a clear **checklist** (quote, binding digest, reproducible build, OTel profile, conformance).
-- **x402** and **ERC-8004** hooks are called out where they touch artifact entries or discovery, not as parallel ad-hoc fields (pending D3d / D8 resolution).
+- A reader can implement **`intent.v1`**, **`jinn.execution.v1`** (both roles), and **`jinn.trajectory.v1`** without reading the beads thread or this scope doc.
+- The **uniform-schema principle** is demonstrably applied: every field list states "required at all tiers" unless explicitly justified as a TEE-capability exception.
+- Verifiers can check **`self-signed`** and **`committed`** tiers with written steps using only envelope + on-chain `evidenceHash`.
+- **`attested`** tier has a clear **checklist** (quote, binding digest, reproducible build, OTel profile conformance, source-bundle match).
+- **ERC-8004** wiring is explicit across all three registries (Identity / Validation / Reputation); subgraph schema compiles against the design.
 - **Migration** is a concrete, executable plan — not "future work."
 - **Conformance suite** ships with the design, not after.
+- **x402 / access / gating / monetization** (D8) will require a separate design pass — the envelope must accommodate it without re-design.
 
 ---
 
-*End of scope doc. Full design: create `2026-04-24-jinn-execution-envelope-tee-design.md` (or later) after D1, D2, D3d, D4, D8 are resolved.*
+*End of scope doc. Full design: create `2026-04-24-jinn-execution-envelope-tee-design.md` (or later) after D1, D2, D4, D8 are resolved.*
