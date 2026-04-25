@@ -14,6 +14,11 @@
 
 set -euo pipefail
 
+# Derive PLUGIN_ROOT from this script's location, then export so
+# subsequent skills/agents can find the plugin without a hardcoded path.
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PLUGIN_ROOT
+
 if [[ -z "${IMPL_STATE_DIR:-}" ]]; then
   echo "session-start: IMPL_STATE_DIR not set" >&2
   exit 1

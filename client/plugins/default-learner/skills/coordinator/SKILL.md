@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Write, Skill
 
 # Coordinator — default-learner entry point
 
-You are running one Jinn restoration intent end-to-end. This skill is the entry point. Each phase's skill is loaded into your session in turn; each phase skill does its own thin orchestration (typically launching a specialized subagent via the Agent tool).
+You are running one Jinn restoration intent end-to-end. This skill is the entry point. Each phase's skill is loaded into your session in turn; each phase skill does its own thin orchestration — meaning each phase skill's job is to launch a specialized subagent via the Agent tool and collect its output, not to do the deep reasoning itself (typically launching a specialized subagent via the Agent tool).
 
 ## Inputs (from the daemon)
 
@@ -32,16 +32,21 @@ SKILL_BUNDLE_CID=$(find "$PLUGIN_ROOT" -type f \( -name '*.md' -o -name '*.sh' -
 
 (`$PLUGIN_ROOT` is the path to this plugin install; if your harness doesn't expose it, hash the loaded skills from their loaded paths.)
 
-Write `workingDir/.coordinator/boot.json`:
+Write `workingDir/.coordinator/boot.json` (downstream phases — particularly Strategize — read it for the constitution span):
 
-```json
+```bash
+mkdir -p "$WORKING_DIR/.coordinator"
+cat > "$WORKING_DIR/.coordinator/boot.json" <<EOF
 {
-  "implStateDirShaAtStart": "<IMPL_STATE_DIR_SHA>",
-  "skillBundleCid": "sha256:<SKILL_BUNDLE_CID>",
-  "intentId": "<intent.id>",
-  "windowEndTs": <window.endTs>
+  "implStateDirShaAtStart": "$IMPL_STATE_DIR_SHA",
+  "skillBundleCid": "sha256:$SKILL_BUNDLE_CID",
+  "intentId": "$INTENT_ID",
+  "windowEndTs": $WINDOW_END_TS
 }
+EOF
 ```
+
+`windowEndTs` is the intent window's end timestamp in milliseconds since epoch.
 
 ## Pipeline
 
@@ -67,11 +72,12 @@ After Strategize, read `workingDir/.strategize/constitution.json` and emit its f
 
 ## Returning
 
-When all seven phases complete (or one aborts), return. The Jinn daemon's `walkArtifacts` packaging handles delivery. Never modify anything outside `implStateDir/**` or `workingDir/**`.
+When the pipeline finishes — whether all seven phases completed cleanly, an abort signal fired, or a phase reported failure — return. The Jinn daemon's walkArtifacts packaging handles delivery. Never modify anything outside `implStateDir/**` or `workingDir/**`.
 
 ## Failure handling
 
 - Within Execute: that skill judges `continue / retry-step / replan / abort` per its own rules.
+- Execute reporting `abort` is not a coordinator-level abort — continue to Debrief / Improve / Memory consolidation as normal so partial work is analyzed and curated. The Execute skill writes `workingDir/.errors/execute.json` itself.
 - Other phases: if a phase reports a hard problem, write `workingDir/.errors/<phase>.json` and abort the pipeline. Still invoke `memory-consolidation` so partial work gets curated.
 - Abort signal fired (window expired): stop the current phase cleanly, write `workingDir/.errors/abort.json`, invoke `memory-consolidation`, return.
 
