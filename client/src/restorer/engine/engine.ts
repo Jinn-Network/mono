@@ -725,10 +725,11 @@ export class RestorationEngine {
     const preSnapshotPayload = intent.preSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
     const postSnapshotPayload = intent.postSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
 
-    // The specKind drives payload schema selection. Fall back to a passthrough
-    // for legacy health-check intents (no kind) by skipping validation — those
-    // use the old manifest path and will be migrated separately.
-    const specKind = intent.specKind ?? 'portfolio.v0';
+    // The specKind drives payload schema selection. Fall back to 'legacy.v0'
+    // for intents without a spec.kind (legacy health-check / daemon-loop-test
+    // intents that use the legacy-claude impl). The legacy.v0 kind accepts any
+    // Record payload so validatePayload does not reject the output.
+    const specKind = intent.specKind ?? 'legacy.v0';
 
     // Derive role from intent type. Evaluator intents produce 'verdict' envelopes;
     // all other intents produce 'restoration' envelopes.

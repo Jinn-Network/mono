@@ -14,6 +14,12 @@ import {
 import type { Role } from '../envelope.js';
 
 /**
+ * Passthrough payload schema for legacy / untyped intents.
+ * Accepts any object — no structural validation.
+ */
+const LegacyPassthroughSchema = z.record(z.unknown());
+
+/**
  * Registry mapping (kind, role) → payload schema.
  * Update when adding a new kind.
  */
@@ -29,6 +35,12 @@ export const KIND_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
   'prediction.apy.v0': {
     restoration: PredictionApyV0RestorationPayloadSchema,
     verdict: PredictionApyV0VerdictPayloadSchema,
+  },
+  // Passthrough kind for legacy / untyped intents (no spec.kind).
+  // Produced by the legacy-claude impl; no structural validation on payload.
+  'legacy.v0': {
+    restoration: LegacyPassthroughSchema,
+    verdict: LegacyPassthroughSchema,
   },
 };
 

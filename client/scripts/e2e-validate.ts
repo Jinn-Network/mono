@@ -831,7 +831,7 @@ async function main(): Promise<void> {
         const now = Date.now();
         const e2eIntent: IntentV1 = {
           schemaVersion: 'intent.v1',
-          id: randomUUID(),
+          id: 'e2e-test',
           kind: 'restoration.v0',
           description: 'E2E router flow test',
           window: { startTs: now, endTs: now + 3_600_000 },
@@ -2762,21 +2762,22 @@ async function main(): Promise<void> {
         // We'll test the registration data encoding + subgraph mock separately
 
         // --- Part 2: Mock subgraph endpoint ---
+        // Returns V1 schema: artifacts (not legacy agents) for artifact queries,
+        // agents (AgentCard) for node-discovery queries.
         const { createServer: createHttpServer } = await import('node:http');
 
-        const mockArtifacts = [
+        // V1 artifact entity shape (matches queryArtifacts GraphQL selection set)
+        const mockV1Artifacts = [
           {
-            id: '1',
-            agentURI: 'artifact:subgraph-test-artifact',
-            owner: '0xSubgraphOwner',
-            metadata: [
-              { key: 'documentType', value: 'adw:Artifact' },
-              { key: 'artifactId', value: 'subgraph-test-artifact' },
-              { key: 'title', value: 'Subgraph-discovered restoration knowledge' },
-              { key: 'outcome', value: 'SUCCESS' },
-              { key: 'tags', value: '["subgraph","discovery"]' },
-              { key: 'endpoint', value: 'http://remote-node:7331' },
-            ],
+            id: 'subgraph-test-artifact',
+            artifactType: 'restoration-knowledge',
+            parentEnvelope: { id: 'test-parent-envelope' },
+            tags: ['subgraph', 'discovery'],
+            agent: {
+              id: 'agent-1',
+              agentURI: 'http://remote-node:7331',
+              owner: '0xSubgraphOwner',
+            },
           },
         ];
 
@@ -2785,22 +2786,33 @@ async function main(): Promise<void> {
           req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
           req.on('end', () => {
             const parsed = JSON.parse(body) as { query: string };
-            const isArtifactQuery = parsed.query.includes('Artifact');
+            // queryArtifacts uses 'artifacts(' in the query body.
+            // queryNodes uses 'agents(' with AgentCard filter.
+            const isArtifactQuery = parsed.query.includes('artifacts(');
             const isNodeQuery = parsed.query.includes('AgentCard');
 
-            const agents = isArtifactQuery ? mockArtifacts : isNodeQuery ? [{
-              id: '2',
-              agentURI: 'http://discovered-peer:7331',
-              owner: '0xPeerOwner',
-              metadata: [
-                { key: 'documentType', value: 'adw:AgentCard' },
-                { key: 'endpoint', value: 'http://discovered-peer:7331' },
-                { key: 'ownerAddress', value: '0xPeerOwner' },
-              ],
-            }] : [];
+            let responseData: Record<string, unknown>;
+            if (isArtifactQuery) {
+              // V1 queryArtifacts expects { data: { artifacts: [...] } }
+              responseData = { artifacts: mockV1Artifacts };
+            } else if (isNodeQuery) {
+              // queryNodes expects { data: { agents: [...] } } (unchanged)
+              responseData = { agents: [{
+                id: '2',
+                agentURI: 'http://discovered-peer:7331',
+                owner: '0xPeerOwner',
+                metadata: [
+                  { metadataKey: 'documentType', metadataValueString: 'adw:AgentCard' },
+                  { metadataKey: 'endpoint', metadataValueString: 'http://discovered-peer:7331' },
+                  { metadataKey: 'ownerAddress', metadataValueString: '0xPeerOwner' },
+                ],
+              }] };
+            } else {
+              responseData = {};
+            }
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ data: { agents } }));
+            res.end(JSON.stringify({ data: responseData }));
           });
         });
 
@@ -2809,33 +2821,38 @@ async function main(): Promise<void> {
 
         try {
           // --- Part 3: Query mock subgraph for artifacts ---
+          // queryArtifacts projects V1 Artifact entities to SubgraphResult via
+          // artifactToSubgraphResult — metadata keys: documentType, artifactId,
+          // artifactType, parentEnvelopeCid, tags. The agentURI carries the endpoint.
           const artifacts = await querySubgraphArtifacts({ url: 'http://localhost:7350' });
           if (artifacts.length === 0) throw new Error('Subgraph query returned no artifacts');
 
           const firstArtifact = artifacts[0];
           const artifactId = getMeta(firstArtifact, 'artifactId');
-          const title = getMeta(firstArtifact, 'title');
-          const outcome = getMeta(firstArtifact, 'outcome');
-          const endpoint = getMeta(firstArtifact, 'endpoint');
+          const artifactType = getMeta(firstArtifact, 'artifactType');
+          const tagsRaw = getMeta(firstArtifact, 'tags');
+          // In V1 the endpoint comes from the agent's agentURI (used for node endpoint)
+          const endpoint = firstArtifact.agentURI.startsWith('artifact:')
+            ? ''
+            : firstArtifact.agentURI;
 
           if (artifactId !== 'subgraph-test-artifact') throw new Error(`Wrong artifactId: ${artifactId}`);
-          if (outcome !== 'SUCCESS') throw new Error(`Wrong outcome: ${outcome}`);
-          console.log(`    Subgraph artifact: id=${artifactId}, title="${title}", outcome=${outcome}`);
+          if (artifactType !== 'restoration-knowledge') throw new Error(`Wrong artifactType: ${artifactType}`);
+          console.log(`    Subgraph artifact: id=${artifactId}, artifactType="${artifactType}", endpoint=${endpoint}`);
 
           // --- Part 4: Backfill into store ---
           const backfillStore = new Store(join(tmpDir, 'backfill-test.db'));
-          const tagsRaw = getMeta(firstArtifact, 'tags');
           const tags = tagsRaw ? JSON.parse(tagsRaw) as string[] : [];
 
           backfillStore.insertRemoteArtifact({
             id: artifactId!,
             desiredStateId: '',
             requestId: '',
-            title: title ?? '',
+            title: artifactType ?? '',
             tags,
-            outcome: (outcome ?? 'UNKNOWN') as 'SUCCESS' | 'FAILURE' | 'UNKNOWN',
+            outcome: 'UNKNOWN',
             ownerAddress: firstArtifact.owner,
-            endpoint: endpoint ?? '',
+            endpoint,
           });
 
           // Verify it's searchable
@@ -2846,7 +2863,7 @@ async function main(): Promise<void> {
           // Verify it's marked as remote
           const remoteInfo = backfillStore.getRemoteArtifactInfo(artifactId!);
           if (!remoteInfo) throw new Error('Remote info not found');
-          if (remoteInfo.endpoint !== 'http://remote-node:7331') throw new Error(`Wrong endpoint: ${remoteInfo.endpoint}`);
+          if (remoteInfo.endpoint !== endpoint) throw new Error(`Wrong endpoint: ${remoteInfo.endpoint}`);
           console.log(`    Remote info: endpoint=${remoteInfo.endpoint}, owner=${remoteInfo.ownerAddress}`);
 
           // Content should be null (metadata only, not acquired yet)
