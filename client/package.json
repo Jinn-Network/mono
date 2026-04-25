@@ -35,6 +35,7 @@
     "access": "public"
   },
   "scripts": {
+    "validate-plugin": "node plugins/default-learner/scripts/validate-plugin.mjs",
     "jinn": "tsx src/bin/jinn.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build": "tsc && chmod +x dist/bin/jinn.js dist/bin/jinn-mcp.js && mkdir -p dist/dashboard && cp src/dashboard/index.html dist/dashboard/index.html && node scripts/write-dist-build-meta.mjs",
