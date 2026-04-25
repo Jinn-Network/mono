@@ -35,7 +35,7 @@ the consolidation_record.
 
 ## After it returns
 
-Verify the consolidation_record exists and `implStateDirShaAfter` matches `git -C <implStateDir> rev-parse HEAD`.
+Verify the consolidation_record exists. If the consolidator made a commit, `implStateDirShaAfter` must match `git -C <implStateDir> rev-parse HEAD`. If no commit was made (empty curation set), `implStateDirShaAfter` must equal `implStateDirShaBefore` and HEAD remains at that sha.
 
 Return to the coordinator: a one-paragraph summary.
 
