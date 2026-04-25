@@ -38,6 +38,7 @@ For each Debrief recommendation:
 2. For accepted changes, make the change (edit / write the file).
 3. Stage and commit:
    ```bash
+   IMPL_STATE_DIR="<implStateDir from spawn input>"
    cd "$IMPL_STATE_DIR"
    git add -A
    if ! git diff --cached --quiet; then

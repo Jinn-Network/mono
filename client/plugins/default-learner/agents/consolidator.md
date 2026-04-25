@@ -27,6 +27,7 @@ Anything that writes to `implStateDir` happens here, including:
 After all of these, commit ONE consolidation commit:
 
 ```bash
+IMPL_STATE_DIR="<implStateDir from spawn input>"
 cd "$IMPL_STATE_DIR"
 git add -A
 if ! git diff --cached --quiet; then
