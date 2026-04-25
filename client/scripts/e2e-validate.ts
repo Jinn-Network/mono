@@ -582,6 +582,17 @@ async function main(): Promise<void> {
   // API server for DAEMON_API_URL flow
   let restorerApiServer: import('../src/api/server.js').ApiServer | undefined;
 
+  // Phase 11 DB path — hoisted so Phase 11b/11c/11d/11e can access the same path
+  let daemonDbPath = '';
+
+  // Phase 11b/11c/11d/11e — real-daemon envelope + trajectory + verdict + conformance
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let capturedDaemonRestorationEnvelope: import('../src/types/envelope.js').SignedEnvelope | null = null;
+  let capturedDaemonRestorationCid = '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let capturedDaemonVerdictEnvelope: import('../src/types/envelope.js').SignedEnvelope | null = null;
+  let capturedDaemonVerdictCid = '';
+
   try {
     // ── Phase 1: Infrastructure ──────────────────────────────────────────────
 
@@ -1599,7 +1610,7 @@ async function main(): Promise<void> {
           routerClaimDeliveryVariant: 'v1',
         });
 
-        const daemonDbPath = join(tmpDir!, 'daemon-loop.db');
+        daemonDbPath = join(tmpDir!, 'daemon-loop.db');
         const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
         const agentClients = createClients(ANVIL_RPC, agentEoaPrivateKey as Hex, base);
 
@@ -1727,6 +1738,298 @@ async function main(): Promise<void> {
           clearInterval(mineInterval);
           await daemon.stop();
         }
+      }),
+    );
+
+    // ── Phase 11b: Real envelope shape verification ───────────────────────────
+    // Scans the mech contract's Deliver events (last 200 blocks) to recover the
+    // CID of the restoration envelope emitted by the Phase 11 Daemon, then
+    // fetches + validates it as a jinn.execution.v1 SignedEnvelope.
+
+    results.push(
+      await runPhase('Phase 11b: Verify daemon-produced envelope shape', async () => {
+        if (!mechAddress) throw new Error('Missing mech address from Phase 2');
+
+        const { findLatestDeliveryDataHexForRequest: findDelivery11b } = await import('../src/adapters/mech/contracts.js');
+        const { fetchFromIpfs: fetchIpfs11b } = await import('../src/adapters/mech/ipfs.js');
+        const { SignedEnvelopeSchema: EnvSchema11b } = await import('../src/types/envelope.js');
+        const { validatePayload: validatePayload11b } = await import('../src/types/payloads/index.js');
+
+        // Scan the last 200 blocks for ALL Deliver events on the mech and try each
+        // as a candidate jinn.execution.v1 restoration envelope (newest-first).
+        const currentBlock11b = await publicClient.getBlockNumber();
+        const fromBlock11b = currentBlock11b > 200n ? currentBlock11b - 200n : 0n;
+
+        // Gather all Deliver events, decode their data hash, and try each CID.
+        const rawLogs11b = await publicClient.getLogs({
+          address: mechAddress as `0x${string}`,
+          fromBlock: fromBlock11b,
+          toBlock: currentBlock11b,
+        });
+
+        // Build a deduplicated list of (blockNumber, dataHashHex) pairs, newest first.
+        const candidates11b: { dataHashHex: string; blockNumber: bigint }[] = [];
+        for (const log of rawLogs11b) {
+          try {
+            const decoded = decodeEventLog({
+              abi: MECH_ABI,
+              data: log.data,
+              topics: log.topics,
+            });
+            if (decoded.eventName === 'Deliver') {
+              // The Deliver event stores the 32-byte IPFS multihash digest in `data`.
+              const args = decoded.args as Record<string, unknown>;
+              const dataField = args['data'] as string | undefined;
+              if (dataField && typeof dataField === 'string' && dataField !== '0x' + '00'.repeat(32)) {
+                candidates11b.push({ dataHashHex: dataField, blockNumber: log.blockNumber ?? 0n });
+              }
+            }
+          } catch { /* not a Deliver event */ }
+        }
+        // Newest first so we try the daemon's deliveries before older legacy ones.
+        candidates11b.sort((a, b) => Number(b.blockNumber - a.blockNumber));
+
+        if (candidates11b.length === 0) {
+          throw new Error('No Deliver events found on mech contract in last 200 blocks — daemon may not have delivered');
+        }
+
+        console.log(`    Found ${candidates11b.length} Deliver event(s) to scan`);
+
+        for (const c of candidates11b) {
+          const digest = String(c.dataHashHex).startsWith('0x')
+            ? String(c.dataHashHex).slice(2)
+            : String(c.dataHashHex);
+          const cid = `f01551220${digest}`;
+          try {
+            const raw = await fetchIpfs11b('https://gateway.autonolas.tech', cid);
+            const parsed = EnvSchema11b.safeParse(raw);
+            if (parsed.success && parsed.data.role === 'restoration') {
+              capturedDaemonRestorationEnvelope = parsed.data;
+              capturedDaemonRestorationCid = cid;
+              break;
+            }
+          } catch { /* IPFS fetch failed or parse failed — try next */ }
+        }
+
+        if (!capturedDaemonRestorationEnvelope) {
+          throw new Error(
+            `No valid jinn.execution.v1 restoration envelope found among ${candidates11b.length} Deliver event(s). ` +
+            'The daemon may be using the legacy-claude impl which does not emit jinn.execution.v1 envelopes.',
+          );
+        }
+
+        const env = capturedDaemonRestorationEnvelope;
+        console.log('    Daemon produced envelope CID:', capturedDaemonRestorationCid.slice(0, 28) + '...');
+        console.log('    schemaVersion:', env.schemaVersion);
+        console.log('    kind/role:', env.kind + '/' + env.role);
+        console.log('    evidenceTier:', env.evidenceTier);
+        console.log('    executor:', env.executor.implName + '@' + env.executor.implVersion);
+
+        // Per-kind payload validation
+        validatePayload11b(env.kind, env.role, env.payload);
+        console.log('    Payload validates against KIND_PAYLOADS[' + env.kind + '][restoration]');
+      }),
+    );
+
+    // ── Phase 11c: Real trajectory verification ───────────────────────────────
+    // Same logic as Phase 5c but applied to the daemon-produced restoration
+    // envelope. If trajectory is null this is an expected outcome for the
+    // legacy-claude impl which is not wired through the trajectory collector.
+    // Production impls (claude-mcp-hyperliquid etc.) DO emit trajectory.
+
+    results.push(
+      await runPhase('Phase 11c: Verify daemon-produced trajectory (or log legacy skip)', async () => {
+        if (!capturedDaemonRestorationEnvelope) {
+          console.log('    capturedDaemonRestorationEnvelope is null — skipping (Phase 11b did not capture an envelope)');
+          return;
+        }
+
+        if (capturedDaemonRestorationEnvelope.trajectory === null) {
+          console.log('    Trajectory is null on daemon-produced envelope.');
+          console.log('    NOTE: legacy-claude impl is not wired through the trajectory collector.');
+          console.log('    Production impls (claude-mcp-hyperliquid, etc.) must emit trajectory.');
+          console.log('    This is an acceptable outcome for the e2e which uses the legacy-claude scaffold.');
+          return;
+        }
+
+        const { JinnTrajectoryV1Schema: TrajSchema11c } = await import('../src/trajectory/schema.js');
+        const { fetchFromIpfs: fetchIpfs11c } = await import('../src/adapters/mech/ipfs.js');
+        const { validateSpanProfile: validateSpanProfile11c } = await import('../src/trajectory/span-profile.js');
+        const { computeGenesisHash: genesisHash11c, computePrevSpanHash: prevHash11c } = await import('../src/trajectory/hash-chain.js');
+
+        const trajectoryCid = capturedDaemonRestorationEnvelope.trajectory.cid;
+        console.log('    Fetching trajectory CID:', trajectoryCid.slice(0, 28) + '...');
+        const raw = await fetchIpfs11c('https://gateway.autonolas.tech', trajectoryCid);
+
+        const trajectory = TrajSchema11c.parse(raw);
+        console.log('    Trajectory has', trajectory.spans.length, 'spans');
+        console.log('    Redaction manifest:', trajectory.redactionManifest.totalRedactions, 'redactions');
+
+        // Span profile validation
+        for (const span of trajectory.spans) {
+          const result = validateSpanProfile11c(span);
+          if (!result.valid) {
+            throw new Error(`Span profile violation: ${JSON.stringify(result)}`);
+          }
+        }
+
+        // Hash chain integrity
+        let prevHashVal = genesisHash11c(capturedDaemonRestorationEnvelope.intent.cid);
+        for (const span of trajectory.spans) {
+          const expected = span.attributes['jinn.prevSpanHash'];
+          if (expected !== prevHashVal) {
+            throw new Error(`Hash chain break at span ${span.spanId}: expected ${prevHashVal}, got ${expected}`);
+          }
+          prevHashVal = prevHash11c(span);
+        }
+        console.log('    Hash chain intact across', trajectory.spans.length, 'spans');
+      }),
+    );
+
+    // ── Phase 11d: Real verdict envelope verification ─────────────────────────
+    // Looks for a second valid jinn.execution.v1 envelope with role='verdict'
+    // among the candidates scanned in Phase 11b and verifies it back-references
+    // the Phase 11b restoration envelope CID.
+
+    results.push(
+      await runPhase('Phase 11d: Verify daemon-produced verdict envelope shape', async () => {
+        if (!mechAddress) throw new Error('Missing mech address from Phase 2');
+
+        if (!capturedDaemonRestorationCid) {
+          console.log('    No restoration envelope captured from Phase 11b — skipping verdict check');
+          return;
+        }
+
+        const { fetchFromIpfs: fetchIpfs11d } = await import('../src/adapters/mech/ipfs.js');
+        const { SignedEnvelopeSchema: EnvSchema11d } = await import('../src/types/envelope.js');
+        const { validatePayload: validatePayload11d } = await import('../src/types/payloads/index.js');
+
+        const currentBlock11d = await publicClient.getBlockNumber();
+        const fromBlock11d = currentBlock11d > 200n ? currentBlock11d - 200n : 0n;
+
+        const rawLogs11d = await publicClient.getLogs({
+          address: mechAddress as `0x${string}`,
+          fromBlock: fromBlock11d,
+          toBlock: currentBlock11d,
+        });
+
+        const candidates11d: { dataHashHex: string; blockNumber: bigint }[] = [];
+        for (const log of rawLogs11d) {
+          try {
+            const decoded = decodeEventLog({
+              abi: MECH_ABI,
+              data: log.data,
+              topics: log.topics,
+            });
+            if (decoded.eventName === 'Deliver') {
+              const args = decoded.args as Record<string, unknown>;
+              const dataField = args['data'] as string | undefined;
+              if (dataField && typeof dataField === 'string' && dataField !== '0x' + '00'.repeat(32)) {
+                candidates11d.push({ dataHashHex: dataField, blockNumber: log.blockNumber ?? 0n });
+              }
+            }
+          } catch { /* not a Deliver event */ }
+        }
+        candidates11d.sort((a, b) => Number(b.blockNumber - a.blockNumber));
+
+        for (const c of candidates11d) {
+          const digest = String(c.dataHashHex).startsWith('0x')
+            ? String(c.dataHashHex).slice(2)
+            : String(c.dataHashHex);
+          const cid = `f01551220${digest}`;
+          // Skip the restoration CID we already captured
+          if (cid === capturedDaemonRestorationCid) continue;
+          try {
+            const raw = await fetchIpfs11d('https://gateway.autonolas.tech', cid);
+            const parsed = EnvSchema11d.safeParse(raw);
+            if (parsed.success && parsed.data.role === 'verdict') {
+              capturedDaemonVerdictEnvelope = parsed.data;
+              capturedDaemonVerdictCid = cid;
+              break;
+            }
+          } catch { /* skip */ }
+        }
+
+        if (!capturedDaemonVerdictEnvelope) {
+          throw new Error(
+            'No valid jinn.execution.v1 verdict envelope found among recent Deliver events. ' +
+            'The daemon may be using the legacy-claude impl which does not emit jinn.execution.v1 envelopes.',
+          );
+        }
+
+        const venv = capturedDaemonVerdictEnvelope;
+        console.log('    Daemon verdict envelope CID:', capturedDaemonVerdictCid.slice(0, 28) + '...');
+        console.log('    role:', venv.role);
+        console.log('    kind:', venv.kind);
+
+        if (venv.role !== 'verdict') {
+          throw new Error(`Expected role=verdict, got ${venv.role}`);
+        }
+
+        validatePayload11d(venv.kind, 'verdict', venv.payload);
+        console.log('    Verdict payload validates against KIND_PAYLOADS[' + venv.kind + '][verdict]');
+
+        // Verify back-reference to the restoration envelope from Phase 11b
+        const payload = venv.payload as Record<string, unknown>;
+        const restorationRef = payload['restorationEnvelope'] as { cid?: string } | undefined;
+        if (!restorationRef?.cid) {
+          console.log('    WARNING: Verdict payload missing restorationEnvelope.cid back-reference');
+        } else if (restorationRef.cid !== capturedDaemonRestorationCid) {
+          throw new Error(
+            `Verdict references wrong restoration envelope: ${restorationRef.cid} vs ${capturedDaemonRestorationCid}`,
+          );
+        } else {
+          console.log('    Verdict correctly back-references Phase 11b restoration envelope');
+        }
+      }),
+    );
+
+    // ── Phase 11e: Conformance harness against real daemon envelope ───────────
+    // Runs the full conformance harness against the restoration envelope
+    // produced by the Phase 11 Daemon. Uses skipLayer2 because the e2e uses the
+    // self-signed evidence tier (no source bundle). If no envelope was captured
+    // (legacy-claude impl path) the phase logs a skip and exits cleanly.
+
+    results.push(
+      await runPhase('Phase 11e: Conformance harness passes on real daemon envelope', async () => {
+        if (!capturedDaemonRestorationEnvelope || !capturedDaemonRestorationCid) {
+          console.log('    Skipped — no daemon envelope captured in Phase 11b (legacy-claude impl path)');
+          return;
+        }
+
+        const { runConformance: runConformance11e } = await import('../src/conformance/harness.js');
+
+        const envelopeBytes11e = Buffer.from(
+          JSON.stringify(capturedDaemonRestorationEnvelope),
+          'utf-8',
+        );
+
+        const report = await runConformance11e({
+          envelopeCid: capturedDaemonRestorationCid,
+          options: {
+            skipLayer2: true, // self-signed tier; no source bundle in e2e
+            envelopeBytes: envelopeBytes11e,
+            // If trajectory was captured, the harness will fetch it itself via
+            // capturedDaemonRestorationEnvelope.trajectory.cid (no injection needed).
+          },
+        });
+
+        console.log('    Conformance overall:', report.overall);
+        console.log('    Layer 1:', report.layer1Passed ? 'PASS' : 'FAIL');
+        console.log('    Layer 2:', String(report.layer2Passed));
+        console.log(`    Checks: ${report.summary.passed} passed, ${report.summary.failed} failed, ${report.summary.skipped} skipped`);
+
+        if (report.overall !== 'PASS') {
+          console.log('    Failed checks:');
+          for (const c of report.checks) {
+            if (!c.skipped && !c.passed) {
+              console.log(`      - [L${c.layer}] ${c.id}: ${c.detail ?? '(no detail)'}`);
+            }
+          }
+          throw new Error('Conformance failed against real daemon envelope');
+        }
+
+        console.log('    Conformance PASSED against daemon-produced envelope.');
       }),
     );
 
