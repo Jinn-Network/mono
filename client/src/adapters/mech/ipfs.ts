@@ -73,8 +73,17 @@ export function buildResultPayload(requestId: string, result: RestorationResult)
  * jinn-node uses 7–10s; we allow a bit more for slow public gateways.
  */
 const IPFS_FETCH_TIMEOUT_MS = 15_000;
+const IPFS_UPLOAD_TIMEOUT_MS = 60_000;
 
 const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
+
+export function normalizeIpfsRegistryAddUrl(registryUrl: string): string {
+  let t = registryUrl.trim();
+  if (t === '') t = 'https://registry.autonolas.tech';
+  t = t.replace(/\/+$/, '');
+  if (t.endsWith('/api/v0/add')) return t;
+  return `${t}/api/v0/add`;
+}
 
 /**
  * Normalizes operator-configured `ipfsGatewayUrl` into a base that ends with `/ipfs/`
@@ -144,19 +153,59 @@ async function fetchJsonFromUrl(url: string, signal: AbortSignal): Promise<unkno
   }
 }
 
+function parseRegistryUploadCid(responseText: string): string {
+  let lastHash: string | undefined;
+  for (const line of responseText.trim().split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { Hash?: unknown };
+      if (typeof entry.Hash === 'string' && entry.Hash.length > 0) {
+        lastHash = entry.Hash;
+      }
+    } catch {
+      // The registry returns newline-delimited JSON. Ignore non-JSON lines so
+      // callers get the same "no CID" failure as the old mech-client helper.
+    }
+  }
+  if (!lastHash) throw new Error('IPFS registry upload did not return a CID');
+  return lastHash;
+}
+
 /**
  * Fetch JSON from IPFS gateways, mirroring jinn-node:
  * 1) Normalize base URL (avoid `/ipfs//ipfs/` when env already includes `/ipfs/`).
  * 2) Try raw then dag-pb hex CIDs for the same digest.
  * 3) Retry on primary gateway then public ipfs.io fallback.
  *
- * Upload path stays `pushJsonToIpfs` from mech-client-ts (axios, same as jinn-node) — it already
- * enforces a registry timeout; we do not wrap it again here.
+ * Upload JSON to an IPFS registry compatible with Autonolas `/api/v0/add`.
+ * The registry returns newline-delimited JSON and the last `Hash` is the file CID.
  */
-export async function uploadToIpfs(_registryUrl: string, data: unknown): Promise<string> {
-  const { pushJsonToIpfs } = await import('@jinn-network/mech-client-ts/dist/ipfs.js');
-  const [, cidString] = await pushJsonToIpfs(data);
-  return cidString;
+export async function uploadToIpfs(registryUrl: string, data: unknown): Promise<string> {
+  const url = new URL(normalizeIpfsRegistryAddUrl(registryUrl));
+  url.searchParams.set('pin', 'true');
+  url.searchParams.set('cid-version', '1');
+  url.searchParams.set('wrap-with-directory', 'false');
+
+  const formData = new FormData();
+  const body = JSON.stringify(data, null, 2);
+  formData.append('file', new Blob([body], { type: 'application/json' }), 'content.json');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), IPFS_UPLOAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    if (response.status !== 200) {
+      throw new Error(`IPFS registry upload failed with status ${response.status}: ${responseText.slice(0, 200)}`);
+    }
+    return parseRegistryUploadCid(responseText);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function fetchFromIpfs(gatewayUrl: string, cid: string): Promise<unknown> {

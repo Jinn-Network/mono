@@ -20,6 +20,7 @@ import type {
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from '../../types.js';
 import type { RestorationResult } from '../../../types/index.js';
+import { Store } from '../../../store/store.js';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -50,12 +51,10 @@ export class LegacyClaudeImpl implements RestorerImpl {
 
   /**
    * Supports the empty-string kind produced by the engine for intents with no spec.
-   * Also supports explicitly undefined-kind intents routed by registry default config.
+   * Legacy release-acceptance jobs use no spec for both restoration and evaluation,
+   * so both phases route through the Claude runner.
    */
   supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
-    // legacy-claude handles restoration-type health-check intents with no spec.kind.
-    // It never runs as an evaluator.
-    if (ctx.type === 'evaluation') return false;
     return ctx.kind === '' || ctx.kind === 'legacy';
   }
 
@@ -103,21 +102,49 @@ export class LegacyClaudeImpl implements RestorerImpl {
       throw err;
     }
 
-    log({ level: 'info', msg: 'legacy-claude: runner completed', data: { hasData: !!result.data } });
+    const resultTag = intent.type === 'evaluation' ? 'evaluation-verdict' : 'restoration-result';
+    const recoveredData = result.data || await this.recoverPublishedArtifact(intent.id, resultTag);
+    const artifactCount = result.artifacts?.length ?? (recoveredData ? 1 : 0);
+
+    log({ level: 'info', msg: 'legacy-claude: runner completed', data: { hasData: !!recoveredData } });
 
     const output: RestorationOutput = {
       venueRef: { name: 'legacy' },
       gating: {
-        result: result.data,
+        result: recoveredData,
       },
       informational: {
-        runnerResult: result.data,
-        artifactCount: result.artifacts?.length ?? 0,
+        runnerResult: recoveredData,
+        artifactCount,
       },
       artifacts: [],
     };
 
     return output;
+  }
+
+  private async recoverPublishedArtifact(
+    desiredStateId: string,
+    tag: 'restoration-result' | 'evaluation-verdict',
+  ): Promise<string> {
+    if (!this.config.storePath) return '';
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const store = new Store(this.config.storePath);
+      try {
+        const [artifact] = store.searchArtifacts({
+          desiredStateId,
+          tags: [tag],
+          limit: 1,
+        });
+        if (artifact?.content) return artifact.content;
+      } finally {
+        store.close();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    return '';
   }
 }
 

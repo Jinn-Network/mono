@@ -8,7 +8,9 @@ import {
   dockerAcceptanceConfigPath,
   dockerAcceptanceEvidenceRoot,
   dockerAcceptanceWorkspaceRoot,
+  dockerAcceptanceClaudeAuthRemedy,
   formatEnvFile,
+  hasDockerAcceptanceClaudeToken,
   resolveDockerAcceptanceBaseEnv,
 } from '../../scripts/lib/docker-acceptance.mjs';
 import { summarizeArtifactRows } from '../../scripts/lib/acceptance-artifacts.mjs';
@@ -63,6 +65,7 @@ describe('docker acceptance helpers', () => {
     expect(composeEnv.JINN_ACCEPTANCE_IMAGE).toBe('jinn-client:test');
     expect(composeEnv.JINN_PASSWORD).toBe('secret');
     expect(composeEnv.JINN_RPC_URL).toBe('https://public.example');
+    expect(composeEnv.JINN_DISABLE_AUTO_INTENTS).toBe('1');
     expect(composeEnv.JINN_ACCEPTANCE_CONFIG_FILE).toBe(dockerAcceptanceConfigPath(clientRoot));
     expect(dockerAcceptanceWorkspaceRoot(clientRoot)).toBe(join(clientRoot, '.acceptance'));
     expect(dockerAcceptanceComposeEnvPath(clientRoot)).toBe(join(clientRoot, '.acceptance', 'docker-compose.env'));
@@ -76,6 +79,21 @@ describe('docker acceptance helpers', () => {
     });
 
     expect(rendered).toBe('A_KEY=first\nB_KEY=second\n');
+  });
+
+  it('detects whether non-interactive Claude auth is configured', () => {
+    expect(hasDockerAcceptanceClaudeToken({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-token' })).toBe(true);
+    expect(hasDockerAcceptanceClaudeToken({ CLAUDE_CODE_OAUTH_TOKEN: '   ' })).toBe(false);
+    expect(hasDockerAcceptanceClaudeToken({})).toBe(false);
+  });
+
+  it('explains the durable Claude auth fix without treating generated env as persistent', () => {
+    const remedy = dockerAcceptanceClaudeAuthRemedy();
+
+    expect(remedy).toContain('client/.env.acceptance');
+    expect(remedy).toContain('Do not edit that generated file directly');
+    expect(remedy).toContain('claude setup-token');
+    expect(remedy).toContain('auth login');
   });
 });
 

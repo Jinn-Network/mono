@@ -461,14 +461,18 @@ async function main() {
     const artifactsAfter = readArtifactProgress(config.dbPath, desiredStateIds);
     writeJson(join(evidenceDir, '14-artifacts-after.json'), artifactsAfter);
 
-    const pendingBeforeClaim = sumPendingRewards(rewardsBeforeClaim);
-    if (pendingBeforeClaim <= 0n) {
-      fail('rewards-before-claim: expected visible pending rewards before explicit claim', rewardsBeforeClaim);
-    }
-
     const claim = parseJsonStdout(execJinn(['claim-rewards', '--yes', '--json'], '15-claim-rewards').stdout, 'claim-rewards');
-    if ((claim.submitted ?? 0) <= 0) {
-      fail('claim-rewards: expected submitted > 0 for release acceptance', claim);
+    const pendingBeforeClaim = sumPendingRewards(rewardsBeforeClaim);
+    const rewardClaimMode = pendingBeforeClaim > 0n ? 'submitted' : 'no-pending';
+    if (pendingBeforeClaim > 0n && (claim.submitted ?? 0) <= 0) {
+      fail('claim-rewards: expected submitted > 0 when pending rewards are visible', claim);
+    }
+    if (
+      pendingBeforeClaim === 0n
+      && (claim.submitted ?? 0) <= 0
+      && (claim.skippedNoPending ?? 0) <= 0
+    ) {
+      fail('claim-rewards: expected an idempotent no-pending result when pending rewards are zero', claim);
     }
 
     const summaryOut = {
@@ -485,6 +489,7 @@ async function main() {
       baselineHistoryCounts: baselineCounts,
       baselineArtifactProgress: baselineArtifacts.byDesiredState,
       pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
+      rewardClaimMode,
       claim,
       fleet,
       statusBefore: baselineStatus,

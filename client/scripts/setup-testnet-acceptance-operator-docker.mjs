@@ -9,7 +9,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -87,6 +87,25 @@ function readGitCommit() {
     return 'unknown';
   }
   return (result.stdout ?? '').trim() || 'unknown';
+}
+
+function printClaudeAuthNextSteps() {
+  console.log(`
+One-time Claude auth for Docker acceptance:
+  claude setup-token
+  # add the printed token to client/.env.acceptance:
+  CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+
+Do not edit .acceptance/docker-compose.env directly; setup and release scripts regenerate it.
+
+Alternative one-time auth-volume login:
+  docker compose --env-file .acceptance/docker-compose.env \\
+    -f docker-compose.acceptance.yml \\
+    run --rm -it --entrypoint claude ${composeService} auth login
+
+Next:
+  yarn release:testnet-acceptance
+`);
 }
 
 async function sleep(ms) {
@@ -167,7 +186,8 @@ async function main() {
     imageTag,
     configPath,
   });
-  writeFileSync(composeEnvPath, formatEnvFile(composeEnv), 'utf8');
+  writeFileSync(composeEnvPath, formatEnvFile(composeEnv), { encoding: 'utf8', mode: 0o600 });
+  chmodSync(composeEnvPath, 0o600);
 
   const runCompose = (args) => runProcess('docker', composeArgs(composeEnvPath, args), { cwd: clientRoot });
   const runJinnRaw = (args) => runCompose(['run', '--rm', '-T', '--no-deps', composeService, ...args]);
@@ -215,15 +235,7 @@ or:
   }
 
   if (!parsed.values.bootstrap) {
-    console.log(`
-One-time Claude login against the dedicated acceptance auth volume:
-  docker compose --env-file .acceptance/docker-compose.env \\
-    -f docker-compose.acceptance.yml \\
-    run --rm -it --entrypoint claude ${composeService} auth login
-
-Next:
-  yarn release:testnet-acceptance
-`);
+    printClaudeAuthNextSteps();
     return;
   }
 
@@ -239,15 +251,7 @@ Next:
       if (hasComplete) {
         console.log('setup-testnet-acceptance-operator:docker bootstrap complete');
         console.log(JSON.stringify(payload, null, 2));
-        console.log(`
-One-time Claude login against the dedicated acceptance auth volume:
-  docker compose --env-file .acceptance/docker-compose.env \\
-    -f docker-compose.acceptance.yml \\
-    run --rm -it --entrypoint claude ${composeService} auth login
-
-Next:
-  yarn release:testnet-acceptance
-`);
+        printClaudeAuthNextSteps();
         return;
       }
       console.log(`[waiting] bootstrap ok but no complete service yet: ${JSON.stringify(payload)}`);

@@ -365,6 +365,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     pk: agentPrivateKey,
     safe: safeAddress,
     runner,
+    storePath: config.dbPath,
     daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
     implStateDirRoot: config.engine.implStateDirRoot,
   })) {

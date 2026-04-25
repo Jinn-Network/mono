@@ -63,7 +63,6 @@
   "dependencies": {
     "@ethereumjs/wallet": "^10.0.0",
     "@hono/node-server": "^1.19.12",
-    "@jinn-network/mech-client-ts": "^0.0.6",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@msgpack/msgpack": "^3.0.0",
     "@safe-global/protocol-kit": "^6.1.2",
@@ -82,7 +81,7 @@
     "zod": "^3.22.0"
   },
   "optionalDependencies": {
-    "@coinbase/cdp-sdk": "^1.47.0"
+    "@coinbase/cdp-sdk": "^1.48.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

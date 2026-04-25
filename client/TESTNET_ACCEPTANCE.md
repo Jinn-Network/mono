@@ -60,6 +60,12 @@ client/.acceptance/config.json
 client/.acceptance/docker-compose.env
 ```
 
+Do not edit `client/.acceptance/docker-compose.env` by hand. It is regenerated
+from `client/.env`, `client/.env.acceptance`, and the current shell environment
+on every setup or release run. Durable secrets for acceptance, including
+`CLAUDE_CODE_OAUTH_TOKEN`, belong in `client/.env.acceptance` or in the shell
+environment for a single run.
+
 The dedicated Docker acceptance environment persists state in these named volumes:
 
 - `jinn-acceptance-data-volume`
@@ -91,6 +97,8 @@ These are intentionally distinct from the normal operator compose volumes.
    ```bash
    echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
    ```
+   Do not put this only in `.acceptance/docker-compose.env`; the next run will
+   overwrite that file.
 5. Run the steady-state release gate:
    ```bash
    yarn release:testnet-acceptance
@@ -133,6 +141,11 @@ Add the resulting token to `client/.env.acceptance`:
 echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
 ```
 
+The release gate checks this before `jinn doctor`. If the generated compose env
+has no token and the dedicated Claude auth volume is not already logged in, the
+gate stops with the durable `.env.acceptance` fix and the optional volume-login
+command.
+
 ## Modes
 
 - `steady-state` (default): reuse the existing Docker data and auth volumes
@@ -157,8 +170,9 @@ The harness fails unless all of these are true:
 - the daemon starts and emits a `daemon_started` record
 - both run-scoped desired states produce a successful `restoration-result` artifact and a successful `evaluation-verdict` artifact during the run window
 - `jinn status`, `jinn fleet`, `jinn rewards`, and `jinn history` remain coherent after the run
-- pending rewards are visible before claim
-- `jinn claim-rewards --yes` submits at least one claim
+- `jinn claim-rewards --yes` is exercised after the run
+- when pending rewards are visible, the claim submits at least one transaction
+- when no pending rewards are visible, the claim result records the expected idempotent no-pending state
 
 Cycle completion is determined from append-only artifact evidence in the shared
 SQLite store, not from `history` deltas.

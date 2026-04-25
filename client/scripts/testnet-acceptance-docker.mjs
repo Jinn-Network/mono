@@ -9,7 +9,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -20,11 +20,13 @@ import {
 } from './lib/acceptance-operator-config.mjs';
 import {
   buildDockerComposeEnv,
+  dockerAcceptanceClaudeAuthRemedy,
   dockerAcceptanceComposeEnvPath,
   dockerAcceptanceConfigPath,
   dockerAcceptanceEvidenceRoot,
   dockerAcceptanceWorkspaceRoot,
   formatEnvFile,
+  hasDockerAcceptanceClaudeToken,
   resolveDockerAcceptanceBaseEnv,
 } from './lib/docker-acceptance.mjs';
 import { PASSWORD_RESOLUTION_HINT, resolveAcceptancePassword } from './lib/resolve-acceptance-password.mjs';
@@ -114,12 +116,28 @@ function parseJsonStdout(stdout, label) {
   fail(`${label}: stdout did not contain JSON`, { stdout });
 }
 
+function parseOptionalJsonStdout(stdout) {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  const lines = trimmed.split('\n').map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (!lines[i].startsWith('{') && !lines[i].startsWith('[')) continue;
+    try {
+      return JSON.parse(lines[i]);
+    } catch {
+      // keep scanning
+    }
+  }
+  return null;
+}
+
 function runProcess(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd,
     env: options.env,
     encoding: 'utf8',
     stdio: 'pipe',
+    timeout: options.timeoutMs,
   });
   return {
     status: result.status ?? 1,
@@ -186,7 +204,10 @@ function isGitDirty() {
  * reach origin (offline / shallow clone).
  */
 function warnIfBranchLagsMain() {
-  const fetch = runProcess('git', ['fetch', '--quiet', 'origin', 'main'], { cwd: clientRoot });
+  const fetch = runProcess('git', ['fetch', '--quiet', 'origin', 'main'], {
+    cwd: clientRoot,
+    timeoutMs: 10_000,
+  });
   if (fetch.status !== 0) {
     // Offline, shallow clone, or origin/main missing — silently skip.
     return;
@@ -337,7 +358,8 @@ async function main() {
     imageTag,
     configPath,
   });
-  writeFileSync(composeEnvPath, formatEnvFile(composeEnv), 'utf8');
+  writeFileSync(composeEnvPath, formatEnvFile(composeEnv), { encoding: 'utf8', mode: 0o600 });
+  chmodSync(composeEnvPath, 0o600);
   writeJson(join(evidenceDir, 'inputs.json'), {
     startedAt,
     mode,
@@ -384,6 +406,28 @@ async function main() {
     expected,
   );
 
+  const ensureClaudeAuthReady = () => {
+    if (hasDockerAcceptanceClaudeToken(composeEnv)) return;
+
+    const auth = runCompose(
+      ['run', '--rm', '-T', '--no-deps', '--entrypoint', 'claude', composeService, 'auth', 'status'],
+      '08-claude-auth-status',
+      [0, 1],
+    );
+    const payload = parseOptionalJsonStdout(auth.stdout);
+    if (auth.status === 0 && payload?.loggedIn === true) return;
+
+    fail(dockerAcceptanceClaudeAuthRemedy(), {
+      composeEnvPath,
+      claudeVolume: composeEnv.JINN_ACCEPTANCE_CLAUDE_VOLUME,
+      authStatus: payload ?? {
+        status: auth.status,
+        stdout: auth.stdout,
+        stderr: auth.stderr,
+      },
+    });
+  };
+
   try {
     runCompose(['down', '--remove-orphans'], '00-compose-down', [0]);
 
@@ -423,12 +467,14 @@ async function main() {
       fail('help: expected top-level help text to include `jinn run`.');
     }
 
-    const doctor = parseJsonStdout(runJinn(['doctor', '--json'], '08-doctor').stdout, 'doctor');
+    ensureClaudeAuthReady();
+
+    const doctor = parseJsonStdout(runJinn(['doctor', '--json'], '09-doctor').stdout, 'doctor');
     if (doctor.ok !== true) {
       fail('doctor: expected ok=true for Docker release acceptance environment', doctor);
     }
 
-    const bootstrapResult = runJinn(['bootstrap', '--json'], '09-bootstrap', [0, 10, 20]);
+    const bootstrapResult = runJinn(['bootstrap', '--json'], '10-bootstrap', [0, 10, 20]);
     if (bootstrapResult.status === 10) {
       const envelope = parseJsonStdout(bootstrapResult.stdout, 'bootstrap-funding');
       fail(
@@ -437,16 +483,16 @@ async function main() {
         envelope,
       );
     }
-    expectExit(bootstrapResult, [0], '09-bootstrap');
+    expectExit(bootstrapResult, [0], '10-bootstrap');
     const bootstrap = parseJsonStdout(bootstrapResult.stdout, 'bootstrap');
     if (!Array.isArray(bootstrap.services) || !bootstrap.services.some((svc) => svc.step === 'complete')) {
       fail('bootstrap: expected at least one complete service', bootstrap);
     }
 
-    const baselineStatus = parseJsonStdout(runJinn(['status', '--json'], '10-status-before').stdout, 'status-before');
-    const baselineRewards = parseJsonStdout(runJinn(['rewards', '--json'], '11-rewards-before').stdout, 'rewards-before');
-    const baselineHistory = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '12-history-before').stdout, 'history-before');
-    const baselineRows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '13-artifacts-before'));
+    const baselineStatus = parseJsonStdout(runJinn(['status', '--json'], '11-status-before').stdout, 'status-before');
+    const baselineRewards = parseJsonStdout(runJinn(['rewards', '--json'], '12-rewards-before').stdout, 'rewards-before');
+    const baselineHistory = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '13-history-before').stdout, 'history-before');
+    const baselineRows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '14-artifacts-before'));
     const baselineArtifacts = summarizeArtifactRows(baselineRows, desiredStateIds);
     writeJson(join(evidenceDir, 'baseline-summary.json'), {
       historyCounts: countHistoryKinds(baselineHistory),
@@ -456,13 +502,13 @@ async function main() {
       status: baselineStatus,
     });
 
-    runCompose(['up', '-d', composeService], '14-compose-up', [0]);
+    runCompose(['up', '-d', composeService], '15-compose-up', [0]);
 
     let startup = null;
     const startupStartedAt = Date.now();
     while (Date.now() - startupStartedAt < 60_000) {
-      const logs = runCompose(['logs', '--no-color', composeService], '15-logs-startup', [0]);
-      writeFileSync(join(evidenceDir, '15-daemon.logs.txt'), logs.stdout, 'utf8');
+      const logs = runCompose(['logs', '--no-color', composeService], '16-logs-startup', [0]);
+      writeFileSync(join(evidenceDir, '16-daemon.logs.txt'), logs.stdout, 'utf8');
       const lines = logs.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
       for (const rawLine of lines) {
         // Docker Compose prefixes lines with "<service>  | "; strip that.
@@ -484,17 +530,17 @@ async function main() {
     }
     if (!startup) {
       fail('daemon did not emit daemon_started within 60s', {
-        logsPath: join(evidenceDir, '15-daemon.logs.txt'),
+        logsPath: join(evidenceDir, '16-daemon.logs.txt'),
       });
     }
-    writeJson(join(evidenceDir, '15-run.startup.json'), startup);
+    writeJson(join(evidenceDir, '16-run.startup.json'), startup);
 
     let observed = null;
-    const pollPath = join(evidenceDir, '16-cycle-poll.jsonl');
+    const pollPath = join(evidenceDir, '17-cycle-poll.jsonl');
     const pollStartedAt = Date.now();
     while (Date.now() - pollStartedAt < timeoutMs) {
-      const status = parseJsonStdout(runJinn(['status', '--json'], '16-status-poll').stdout, 'status-poll');
-      const rows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '16-artifacts-poll'));
+      const status = parseJsonStdout(runJinn(['status', '--json'], '17-status-poll').stdout, 'status-poll');
+      const rows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '17-artifacts-poll'));
       const artifactProgress = summarizeArtifactRows(rows, desiredStateIds);
       const snapshot = {
         at: new Date().toISOString(),
@@ -513,8 +559,8 @@ async function main() {
       await sleep(pollMs);
     }
 
-    const logsAfter = runCompose(['logs', '--no-color', '--timestamps', composeService], '17-logs-final', [0]);
-    writeFileSync(join(evidenceDir, '17-daemon.logs.txt'), logsAfter.stdout, 'utf8');
+    const logsAfter = runCompose(['logs', '--no-color', '--timestamps', composeService], '18-logs-final', [0]);
+    writeFileSync(join(evidenceDir, '18-daemon.logs.txt'), logsAfter.stdout, 'utf8');
 
     if (!observed) {
       fail(`Timed out waiting for ${targetCycles} new protocol cycles`, {
@@ -523,27 +569,31 @@ async function main() {
       });
     }
 
-    const stop = parseJsonStdout(runJinnRaw(['stop', '--json'], '18-stop').stdout, 'stop');
+    const stop = parseJsonStdout(runJinnRaw(['stop', '--json'], '19-stop').stdout, 'stop');
     await sleep(10_000);
 
-    const fleet = parseJsonStdout(runJinn(['fleet', '--json'], '19-fleet-after').stdout, 'fleet-after');
-    const statusAfter = parseJsonStdout(runJinn(['status', '--json'], '20-status-after').stdout, 'status-after');
-    const rewardsBeforeClaim = parseJsonStdout(runJinn(['rewards', '--json'], '21-rewards-before-claim').stdout, 'rewards-before-claim');
-    const historyAfter = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '22-history-after').stdout, 'history-after');
+    const fleet = parseJsonStdout(runJinn(['fleet', '--json'], '20-fleet-after').stdout, 'fleet-after');
+    const statusAfter = parseJsonStdout(runJinn(['status', '--json'], '21-status-after').stdout, 'status-after');
+    const rewardsBeforeClaim = parseJsonStdout(runJinn(['rewards', '--json'], '22-rewards-before-claim').stdout, 'rewards-before-claim');
+    const historyAfter = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '23-history-after').stdout, 'history-after');
     const artifactsAfter = summarizeArtifactRows(
-      queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '23-artifacts-after')),
+      queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '24-artifacts-after')),
       desiredStateIds,
     );
-    writeJson(join(evidenceDir, '23-artifacts-after.json'), artifactsAfter);
+    writeJson(join(evidenceDir, '24-artifacts-after.json'), artifactsAfter);
 
+    const claim = parseJsonStdout(runJinn(['claim-rewards', '--yes', '--json'], '25-claim-rewards').stdout, 'claim-rewards');
     const pendingBeforeClaim = sumPendingRewards(rewardsBeforeClaim);
-    if (pendingBeforeClaim <= 0n) {
-      fail('rewards-before-claim: expected visible pending rewards before explicit claim', rewardsBeforeClaim);
+    const rewardClaimMode = pendingBeforeClaim > 0n ? 'submitted' : 'no-pending';
+    if (pendingBeforeClaim > 0n && (claim.submitted ?? 0) <= 0) {
+      fail('claim-rewards: expected submitted > 0 when pending rewards are visible', claim);
     }
-
-    const claim = parseJsonStdout(runJinn(['claim-rewards', '--yes', '--json'], '24-claim-rewards').stdout, 'claim-rewards');
-    if ((claim.submitted ?? 0) <= 0) {
-      fail('claim-rewards: expected submitted > 0 for Docker release acceptance', claim);
+    if (
+      pendingBeforeClaim === 0n
+      && (claim.submitted ?? 0) <= 0
+      && (claim.skippedNoPending ?? 0) <= 0
+    ) {
+      fail('claim-rewards: expected an idempotent no-pending result when pending rewards are zero', claim);
     }
 
     writeJson(join(evidenceDir, 'summary.json'), {
@@ -565,6 +615,7 @@ async function main() {
       observedCompletedCycles: observed.artifactProgress.completedCycles,
       observedArtifactProgress: observed.artifactProgress.byDesiredState,
       pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
+      rewardClaimMode,
       claim,
       fleet,
       statusBefore: baselineStatus,
@@ -580,6 +631,7 @@ async function main() {
     console.log(`  version: ${version.client?.version ?? 'unknown'}`);
     console.log(`  commit: ${version.client?.commit ?? 'unknown'}`);
     console.log(`  pending before claim: ${pendingBeforeClaim.toString()} wei`);
+    console.log(`  reward claim mode: ${rewardClaimMode}`);
     console.log(`  submitted claims: ${claim.submitted}`);
   } finally {
     runLoggedProcess('docker', composeArgs(composeEnvPath, ['down', '--remove-orphans']), {

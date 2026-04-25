@@ -68,18 +68,45 @@ export function buildDockerComposeEnv({
     JINN_ACCEPTANCE_CLAUDE_VOLUME: merged['JINN_ACCEPTANCE_CLAUDE_VOLUME'] ?? DEFAULT_ACCEPTANCE_CLAUDE_VOLUME,
     JINN_ACCEPTANCE_CONFIG_FILE: resolve(configPath ?? dockerAcceptanceConfigPath(clientRoot)),
     JINN_PASSWORD: merged['JINN_TESTNET_ACCEPTANCE_PASSWORD'] ?? merged['JINN_PASSWORD'] ?? '',
-    // Non-interactive Claude auth: output of `claude setup-token`. When set,
-    // the daemon inside the container uses it directly and no keychain /
-    // libsecret / browser login is required.
-    CLAUDE_CODE_OAUTH_TOKEN: merged['CLAUDE_CODE_OAUTH_TOKEN'] ?? '',
     JINN_RPC_URL: rpcUrl,
     JINN_NETWORK: merged['JINN_ACCEPTANCE_NETWORK'] ?? merged['JINN_NETWORK'] ?? 'testnet',
     JINN_POLL_INTERVAL_MS: String(pollIntervalMs),
     JINN_REWARD_CLAIM_INTERVAL_MS: String(rewardClaimIntervalMs),
     JINN_TARGET_SERVICES: String(targetServices),
+    // Release acceptance uses its run-scoped desired states only. Testnet
+    // auto-intents add unrelated live-market jobs that can consume gas and
+    // make evidence harder to interpret.
+    JINN_DISABLE_AUTO_INTENTS: merged['JINN_DISABLE_AUTO_INTENTS'] ?? '1',
+    // Non-interactive Claude auth: output of `claude setup-token`. When set,
+    // the daemon inside the container uses it directly and no keychain /
+    // libsecret / browser login is required.
     CLAUDE_CODE_OAUTH_TOKEN: merged['CLAUDE_CODE_OAUTH_TOKEN'] ?? '',
     NO_COLOR: '1',
   };
+}
+
+export function hasDockerAcceptanceClaudeToken(env) {
+  return typeof env?.CLAUDE_CODE_OAUTH_TOKEN === 'string' && env.CLAUDE_CODE_OAUTH_TOKEN.trim().length > 0;
+}
+
+export function dockerAcceptanceClaudeAuthRemedy() {
+  return `Docker acceptance is missing Claude auth.
+
+The generated client/.acceptance/docker-compose.env has an empty CLAUDE_CODE_OAUTH_TOKEN.
+Do not edit that generated file directly; setup and release scripts rewrite it.
+
+Durable fix:
+  cd client
+  cp -n .env.acceptance.example .env.acceptance
+  claude setup-token
+  # add the printed token to client/.env.acceptance:
+  CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+  yarn release:testnet-acceptance
+
+Alternative one-time volume login:
+  docker compose --env-file .acceptance/docker-compose.env \\
+    -f docker-compose.acceptance.yml \\
+    run --rm -it --entrypoint claude jinn-acceptance-daemon auth login`;
 }
 
 export function formatEnvFile(env) {

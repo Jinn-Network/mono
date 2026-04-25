@@ -95,7 +95,15 @@ server.tool(
       outcome: (success ? 'SUCCESS' : 'FAILURE') as 'SUCCESS' | 'FAILURE' | 'UNKNOWN',
     };
 
-    // Publish via daemon API if available, otherwise direct store write
+    // Always write to the local store when available so ClaudeRunner can
+    // synchronously read the submitted result before the engine packages the
+    // marketplace delivery. The daemon API publish path is still used for
+    // runtime notifications.
+    if (store) {
+      store.insertArtifact(artifact);
+    }
+
+    // Publish via daemon API if available.
     if (daemonApiUrl) {
       try {
         const response = await fetch(`${daemonApiUrl}/artifacts`, {
@@ -109,8 +117,6 @@ server.tool(
       } catch (err) {
         console.error(`[mcp] Failed to POST artifact to daemon:`, err);
       }
-    } else if (store) {
-      store.insertArtifact(artifact);
     }
 
     console.error(`[mcp] Result published as artifact: ${id} [${resultTag}]`);

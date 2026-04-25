@@ -10,6 +10,7 @@ import { LegacyClaudeImpl } from '../../../../src/restorer/impls/legacy-claude/i
 import type { RestorationContext } from '../../../../src/restorer/types.js';
 import type { Runner, RunnerContext } from '../../../../src/runner/runner.js';
 import type { DesiredState } from '../../../../src/types/desired-state.js';
+import { Store } from '../../../../src/store/store.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,33 @@ describe('LegacyClaudeImpl', () => {
       expect(output.informational?.['artifactCount']).toBe(0);
     });
 
+    it('recovers submitted MCP artifact content when runner result is empty', async () => {
+      const dbPath = join(workingDir, 'jinn.db');
+      const store = new Store(dbPath);
+      store.insertArtifact({
+        id: 'artifact-1',
+        desiredStateId: 'test-request-id',
+        requestId: 'test-request-id',
+        title: 'restoration-result: recovered',
+        content: 'Recovered artifact content.',
+        tags: ['restoration-result', 'success'],
+        outcome: 'SUCCESS',
+      });
+      store.close();
+
+      const runner: Runner = {
+        run: vi.fn().mockResolvedValue({ data: '' }),
+      };
+
+      const impl = new LegacyClaudeImpl({ runner, storePath: dbPath });
+      const ctx = makeContext(makeIntent(), workingDir);
+      const output = await impl.run(ctx);
+
+      expect(output.gating['result']).toBe('Recovered artifact content.');
+      expect(output.informational?.['runnerResult']).toBe('Recovered artifact content.');
+      expect(output.informational?.['artifactCount']).toBe(1);
+    });
+
     it('uses workingDir from context as runnerCtx.workingDirectory', async () => {
       const runner: Runner = {
         run: vi.fn().mockResolvedValue({ data: '' }),
@@ -184,6 +212,19 @@ describe('RestorerImplRegistry dispatch (integration)', () => {
 
     // spec.kind='' is what the engine passes for specKind=null intents
     const impl = registry.findFor({ kind: '' });
+    expect(impl).toBeDefined();
+    expect(impl?.name).toBe('legacy-claude');
+  });
+
+  it('routes no-spec evaluation intents to legacy-claude for release acceptance', async () => {
+    const { RestorerImplRegistry } = await import('../../../../src/restorer/engine/registry.js');
+    const { LegacyClaudeImpl: LCI } = await import('../../../../src/restorer/impls/legacy-claude/index.js');
+
+    const runner: Runner = { run: vi.fn() };
+    const registry = new RestorerImplRegistry({ default: 'legacy-claude' });
+    registry.register(new LCI({ runner }));
+
+    const impl = registry.findFor({ kind: '', type: 'evaluation' });
     expect(impl).toBeDefined();
     expect(impl?.name).toBe('legacy-claude');
   });

@@ -52,11 +52,6 @@ export async function executeSafeTransaction(
 
   try {
     const hash = await executeSafeTransactionInner(publicClient, walletClient, params);
-    // Wait for the tx to mine before releasing the lock so the next caller sees
-    // the updated Safe nonce. Without this, the next signer reads a stale nonce
-    // (the broadcast tx is still pending) and the resulting signature recovers
-    // a different address at execution time, causing GS026 (invalid owner).
-    await publicClient.waitForTransactionReceipt({ hash });
     return hash;
   } finally {
     releaseLock();
@@ -109,7 +104,7 @@ async function executeSafeTransactionInner(
 
       const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex);
 
-      return walletClient.writeContract({
+      const hash = await walletClient.writeContract({
         address: safeAddress,
         abi: SAFE_ABI,
         functionName: 'execTransaction',
@@ -130,6 +125,13 @@ async function executeSafeTransactionInner(
         value: params.value,
         ...feeOverrides,
       });
+      // Wait inside the retry attempt so reverted Safe executions caused by
+      // stale nonce signatures (GS026/GS013) re-read nonce and re-sign.
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== 'success') {
+        throw new Error(`Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=${hash})`);
+      }
+      return hash;
     },
     {
       onRetry: ({ attempt, message }) => {

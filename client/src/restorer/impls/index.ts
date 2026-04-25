@@ -37,6 +37,8 @@ export interface RestorerEnv {
   runner?: Runner;
   /** e.g. `http://127.0.0.1:${apiPort}` for {@link LegacyClaudeImpl} */
   daemonApiUrl?: string;
+  /** SQLite store path for MCP artifact handoff in {@link LegacyClaudeImpl}. */
+  storePath?: string;
   /**
    * Legacy-claude runner working directory (defaults to /tmp if unset).
    */
@@ -69,6 +71,7 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
         runner: env.runner,
         workingDirectory: env.legacyClaudeWorkingDirectory ?? '/tmp',
         timeoutMs: 300_000,
+        storePath: env.storePath,
         daemonApiUrl: env.daemonApiUrl,
         stub: isStub,
       }),

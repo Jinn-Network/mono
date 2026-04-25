@@ -402,8 +402,20 @@ export class RestorationEngine {
       marketplaceClaimer,
     );
 
-    // Both layers succeeded — advance state.
-    this.persistence.transition(intent.requestId, IntentState.CLAIMED);
+    // Both layers succeeded. The event path and tick loop can race on the same
+    // DISCOVERED row; if another caller already advanced it, treat this claim as
+    // idempotent and do not rewind or fail the intent.
+    const current = this.persistence.getByRequestId(intent.requestId);
+    if (!current) {
+      throw new Error(`claim: intent not found after claim: ${intent.requestId}`);
+    }
+    if (current.state === IntentState.DISCOVERED) {
+      this.persistence.transition(intent.requestId, IntentState.CLAIMED);
+    } else {
+      console.log(
+        `[restorer-engine] ${intent.requestId}: claim completed but state is already ${current.state}; skipping CLAIMED transition`,
+      );
+    }
   }
 
   /**
