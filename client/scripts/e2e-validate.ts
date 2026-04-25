@@ -566,6 +566,19 @@ async function main(): Promise<void> {
   let mechAddressB: Address | undefined;
   let agentEoaPrivateKeyB: Hex | undefined;
 
+  // Phase 5b/5c/7b envelope + trajectory capture (populated only when envelope is jinn.execution.v1)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let capturedRestorationEnvelope: import('../src/types/envelope.js').SignedEnvelope | null = null;
+  let capturedRestorationEnvelopeCid = '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let capturedRestorationTrajectory: import('../src/trajectory/schema.js').JinnTrajectoryV1 | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let capturedVerdictEnvelope: import('../src/types/envelope.js').SignedEnvelope | null = null;
+  let capturedVerdictEnvelopeCid = '';
+
+  // Phase 6 captures the evaluation requestId so Phase 7b can look up its delivery
+  let evaluationRequestId: string | undefined;
+
   // API server for DAEMON_API_URL flow
   let restorerApiServer: import('../src/api/server.js').ApiServer | undefined;
 
@@ -931,6 +944,130 @@ async function main(): Promise<void> {
       }),
     );
 
+    // ── Phase 5b: Envelope shape verification ────────────────────────────────
+    // Reads the Deliver event from the mech contract to recover the delivery CID,
+    // then fetches the IPFS payload and attempts to parse it as a jinn.execution.v1
+    // SignedEnvelope. Phases 5–8 use the legacy E2eRestorerLoop which uploads a
+    // plain RestorationResultPayload (not a SignedEnvelope); if the parse fails the
+    // phase logs a warning and stores null so downstream phases skip gracefully.
+
+    results.push(
+      await runPhase('Phase 5b: Verify envelope is jinn.execution.v1 shape (or log legacy skip)', async () => {
+        if (!adapter || !restorationRequestId || !mechAddress) throw new Error('Missing state');
+
+        const { findLatestDeliveryDataHexForRequest } = await import('../src/adapters/mech/contracts.js');
+        const { fetchFromIpfs } = await import('../src/adapters/mech/ipfs.js');
+        const { SignedEnvelopeSchema } = await import('../src/types/envelope.js');
+        const { validatePayload } = await import('../src/types/payloads/index.js');
+
+        // Scan the mech contract for the Deliver event to recover the delivery CID.
+        const currentBlock = await publicClient.getBlockNumber();
+        const fromBlock = currentBlock > 200n ? currentBlock - 200n : 0n;
+        const deliveryDataHex = await findLatestDeliveryDataHexForRequest(
+          publicClient,
+          mechAddress as `0x${string}`,
+          restorationRequestId,
+          fromBlock,
+          currentBlock,
+        );
+
+        if (!deliveryDataHex) {
+          throw new Error('No Deliver event found for restorationRequestId — cannot recover envelope CID');
+        }
+
+        // Convert deliveryDataHex digest → IPFS CID (same convention as production adapter)
+        const digest = String(deliveryDataHex).startsWith('0x')
+          ? String(deliveryDataHex).slice(2)
+          : String(deliveryDataHex);
+        const envelopeCid = `f01551220${digest}`;
+        console.log(`    Derived envelope CID: ${envelopeCid}`);
+
+        const raw = await fetchFromIpfs('https://gateway.autonolas.tech', envelopeCid);
+
+        // Attempt SignedEnvelope parse — legacy E2eRestorerLoop produces plain
+        // RestorationResultPayload, not a jinn.execution.v1 envelope. If the parse
+        // fails we record null and skip later phases rather than failing the suite.
+        const parsed = SignedEnvelopeSchema.safeParse(raw);
+        if (!parsed.success) {
+          console.log('    Payload is NOT a jinn.execution.v1 SignedEnvelope (legacy E2eRestorerLoop path)');
+          console.log(`    Parse error summary: ${parsed.error.issues[0]?.message ?? 'unknown'}`);
+          console.log('    capturedRestorationEnvelope = null (Phase 5c/7b will skip envelope checks)');
+          capturedRestorationEnvelope = null;
+          capturedRestorationEnvelopeCid = '';
+          return;
+        }
+
+        const envelope = parsed.data;
+        console.log('    Envelope schemaVersion:', envelope.schemaVersion);
+        console.log('    Envelope kind/role:', envelope.kind + '/' + envelope.role);
+        console.log('    Envelope evidenceTier:', envelope.evidenceTier);
+
+        if (envelope.schemaVersion !== 'jinn.execution.v1') {
+          throw new Error(`Expected jinn.execution.v1, got ${envelope.schemaVersion}`);
+        }
+        if (envelope.role !== 'restoration') {
+          throw new Error(`Expected role=restoration, got ${envelope.role}`);
+        }
+
+        // Per-kind payload validation
+        validatePayload(envelope.kind, envelope.role, envelope.payload);
+        console.log('    Payload validates against KIND_PAYLOADS[' + envelope.kind + '][restoration]');
+
+        capturedRestorationEnvelope = envelope;
+        capturedRestorationEnvelopeCid = envelopeCid;
+      }),
+    );
+
+    // ── Phase 5c: Trajectory verification ───────────────────────────────────
+
+    results.push(
+      await runPhase('Phase 5c: Verify trajectory uploaded + parses + spans valid', async () => {
+        if (!capturedRestorationEnvelope) {
+          console.log('    capturedRestorationEnvelope is null — skipping (legacy payload path)');
+          return;
+        }
+
+        if (capturedRestorationEnvelope.trajectory === null) {
+          console.log('    Trajectory is null — restorer did not emit one (acceptable for some impls)');
+          return;
+        }
+
+        const { JinnTrajectoryV1Schema } = await import('../src/trajectory/schema.js');
+        const { fetchFromIpfs } = await import('../src/adapters/mech/ipfs.js');
+        const { validateSpanProfile } = await import('../src/trajectory/span-profile.js');
+        const { computeGenesisHash, computePrevSpanHash } = await import('../src/trajectory/hash-chain.js');
+
+        const trajectoryCid = capturedRestorationEnvelope.trajectory.cid;
+        const raw = await fetchFromIpfs('https://gateway.autonolas.tech', trajectoryCid);
+
+        // Schema parse
+        const trajectory = JinnTrajectoryV1Schema.parse(raw);
+        console.log('    Trajectory has', trajectory.spans.length, 'spans');
+        console.log('    Redaction manifest:', trajectory.redactionManifest.totalRedactions, 'redactions');
+
+        // Span profile validation — every span must conform
+        for (const span of trajectory.spans) {
+          const result = validateSpanProfile(span);
+          if (!result.valid) {
+            throw new Error(`Span profile violation: ${JSON.stringify(result)}`);
+          }
+        }
+
+        // Hash chain integrity
+        let prevHash = computeGenesisHash(capturedRestorationEnvelope.intent.cid);
+        for (const span of trajectory.spans) {
+          const expected = span.attributes['jinn.prevSpanHash'];
+          if (expected !== prevHash) {
+            throw new Error(`Hash chain break at span ${span.spanId}: expected ${prevHash}, got ${expected}`);
+          }
+          prevHash = computePrevSpanHash(span);
+        }
+        console.log('    Hash chain intact across', trajectory.spans.length, 'spans');
+
+        capturedRestorationTrajectory = trajectory;
+      }),
+    );
+
     // ── Phase 6: Creator claims delivery + creates evaluation ────────────────
 
     results.push(
@@ -991,7 +1128,10 @@ async function main(): Promise<void> {
             });
             if (decoded.eventName === 'EvaluationJobCreated') {
               foundEvalJob = true;
+              const evalArgs = decoded.args as unknown as { requestId: string; restorationRequestId: string };
+              evaluationRequestId = evalArgs.requestId;
               console.log('    EvaluationJobCreated event confirmed on-chain');
+              console.log(`    evaluationRequestId: ${evaluationRequestId}`);
             }
             if (decoded.eventName === 'DeliveryClaimed') {
               const claimArgs = decoded.args as unknown as { jobType: number };
@@ -1037,6 +1177,92 @@ async function main(): Promise<void> {
 
         // Mine a block to confirm
         await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      }),
+    );
+
+    // ── Phase 7b: Verdict envelope shape verification ────────────────────────
+    // Reads the Deliver event on the mech contract for the evaluation requestId,
+    // recovers the verdict CID, and verifies it parses as a jinn.execution.v1
+    // SignedEnvelope with role='verdict'. Skips gracefully when the legacy
+    // E2eRestorerLoop is in use (plain RestorationResultPayload, not envelope).
+
+    results.push(
+      await runPhase('Phase 7b: Verify verdict envelope shape (or log legacy skip)', async () => {
+        if (!adapter || !mechAddress) throw new Error('Missing adapter or mechAddress');
+
+        if (!evaluationRequestId) {
+          console.log('    evaluationRequestId not captured from Phase 6 — skipping verdict envelope check');
+          return;
+        }
+
+        const { findLatestDeliveryDataHexForRequest } = await import('../src/adapters/mech/contracts.js');
+        const { fetchFromIpfs } = await import('../src/adapters/mech/ipfs.js');
+        const { SignedEnvelopeSchema } = await import('../src/types/envelope.js');
+        const { validatePayload } = await import('../src/types/payloads/index.js');
+
+        // Scan mech contract for evaluation Deliver event
+        const currentBlock = await publicClient.getBlockNumber();
+        const fromBlock = currentBlock > 200n ? currentBlock - 200n : 0n;
+        const deliveryDataHex = await findLatestDeliveryDataHexForRequest(
+          publicClient,
+          mechAddress as `0x${string}`,
+          evaluationRequestId,
+          fromBlock,
+          currentBlock,
+        );
+
+        if (!deliveryDataHex) {
+          throw new Error('No Deliver event found for evaluationRequestId — cannot recover verdict CID');
+        }
+
+        const digest = String(deliveryDataHex).startsWith('0x')
+          ? String(deliveryDataHex).slice(2)
+          : String(deliveryDataHex);
+        const verdictEnvelopeCid = `f01551220${digest}`;
+        console.log(`    Derived verdict envelope CID: ${verdictEnvelopeCid}`);
+
+        const raw = await fetchFromIpfs('https://gateway.autonolas.tech', verdictEnvelopeCid);
+
+        // Attempt SignedEnvelope parse — gracefully handle legacy plain payload
+        const parsed = SignedEnvelopeSchema.safeParse(raw);
+        if (!parsed.success) {
+          console.log('    Verdict payload is NOT a jinn.execution.v1 SignedEnvelope (legacy E2eRestorerLoop path)');
+          console.log(`    Parse error summary: ${parsed.error.issues[0]?.message ?? 'unknown'}`);
+          capturedVerdictEnvelope = null;
+          capturedVerdictEnvelopeCid = '';
+          return;
+        }
+
+        const envelope = parsed.data;
+        console.log('    Verdict envelope schemaVersion:', envelope.schemaVersion);
+        console.log('    Verdict envelope role:', envelope.role);
+        console.log('    Verdict envelope kind:', envelope.kind);
+
+        if (envelope.role !== 'verdict') {
+          throw new Error(`Expected role=verdict, got ${envelope.role}`);
+        }
+
+        // Per-kind payload validation
+        validatePayload(envelope.kind, 'verdict', envelope.payload);
+        console.log('    Verdict payload validates against KIND_PAYLOADS[' + envelope.kind + '][verdict]');
+
+        // Verify back-reference to restoration envelope (if available)
+        if (capturedRestorationEnvelopeCid) {
+          const payload = envelope.payload as Record<string, unknown>;
+          const restorationRef = payload['restorationEnvelope'] as { cid?: string } | undefined;
+          if (!restorationRef?.cid) {
+            console.log('    WARNING: Verdict payload missing restorationEnvelope.cid back-reference');
+          } else if (restorationRef.cid !== capturedRestorationEnvelopeCid) {
+            throw new Error(
+              `Verdict references wrong restoration: ${restorationRef.cid} vs ${capturedRestorationEnvelopeCid}`,
+            );
+          } else {
+            console.log('    Verdict back-references correct restoration envelope');
+          }
+        }
+
+        capturedVerdictEnvelope = envelope;
+        capturedVerdictEnvelopeCid = verdictEnvelopeCid;
       }),
     );
 
