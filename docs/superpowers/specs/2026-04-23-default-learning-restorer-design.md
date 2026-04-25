@@ -1,226 +1,412 @@
-# Default learning restorer — design spec (alignment draft)
+# Default learning restorer — design spec
 
-**Version:** 1.0-alignment  
-**Date:** 2026-04-23  
-**Author:** adrianobradley + Claude  
-**Tracks:** `jinn-mono-2zk` (default learning restorer — scope + product shape)
+**Version:** 1.1
+**Date:** 2026-04-25
+**Author:** adrianobradley + Claude
+**Tracks:** `jinn-mono-2zk`
+**Supersedes:** v1.0-alignment (2026-04-23) — same file; prior commits in git history.
 
-This document is a **fresh alignment draft**. It supersedes earlier sections of this file that described a long-lived Frink `loop.sh` process, vendored `workingDir/_loop/` materialisation, and multi-day Frink scheduling inside one intent. If anything here disagrees with your intent, call it out explicitly — that is the point of this revision.
+**Related:**
 
----
-
-## 0. Terminology: where “promotion” comes from
-
-**Promotion** is not a Jinn-protocol term. It is borrowed from the **Pi self-improving agent overview** you shared: there, **Learning** produces *candidate* changes (prompts, code, extensions), and a **promotion gate** decides whether those candidates become the **active** system for *future* behaviour.
-
-In this spec it means the same thing, scoped to Jinn directories:
-
-- **Learning** may write proposals and scratch patches under `workingDir` (or a staging subtree).
-- **Promotion** is the governor step that **merges or rejects** those candidates into **`implStateDir`** — the only place durable self-improvement is allowed (see §8).
-- If the word feels opaque in product copy, we can alias it in the UI as **“Persist learner changes”** or **“Apply”**; the spec keeps **promotion** as the precise name for the gate between *candidate* and *durable*.
+- `docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md` — envelope + trajectory + TEE scope (cited throughout)
+- `docs/research/2026-04-23-verifiability-traceability.md` — verifiability framing, executor provenance
+- `client/src/restorer/types.ts` — `RestorerImpl`, `RestorationContext`
+- `client/src/restorer/impls/index.ts` — `buildRestorerImpls` registry
+- `client/src/restorer/engine/engine.ts` — engine driver, `runImpl` dispatch
 
 ---
 
 ## 1. Purpose
 
-Ship a **default `RestorerImpl`** for Jinn that:
+The default learning restorer is a `RestorerImpl` (per `client/src/restorer/types.ts:148`) that:
 
-1. Runs as **one orchestrated execution** per `RestorerImpl.run(ctx)` (one intent, one window, one coherent trace).
-2. Uses a **Pi-based** governor (phases, sub-agents, skills, extensions) rather than a bash `exec` loop as the primary harness.
-3. Emits **OpenTelemetry** for Jinn-side correlation (traces + structured logs), and relies on **Pi’s built-in session JSONL + compaction** for transcripts and summaries — **no second copy** under `workingDir/logs/` (§5).
-4. Produces normal Jinn **working-directory artifacts** (docs, code, declared outputs) for harvest.
-5. **Improves itself for the next intent** by reading and writing **only** under the operator’s **`implStateDir`** (and the ephemeral `workingDir` during the run, with an explicit **promotion** step into `implStateDir`).
+1. Runs as **one coordinated session** per `RestorerImpl.run(ctx)` — one intent, one window, one trajectory.
+2. Decomposes the run into a fixed pipeline of phases, each implemented as a fresh-context subagent coordinated by the session (except `Execute`, which sits at session level — see §2.3).
+3. Improves itself across runs by mutating its own state under `ctx.implStateDir` (git-backed) after each run completes.
+4. Emits artifact types reserved by the execution-envelope scope doc (§3.1 K9: `skill_bundle`, `code_patch`, `mcp_config`, `promotion_record`, `design_document`, `research_note`, `session_transcript`) — its outputs are first-class corpus content, not bespoke shapes.
+5. Is **harness-agnostic**: ships as a coordinator skill + phase-skill bundle + harness adapter. Different harnesses (Claude Code, Pi.dev, Codex, Gemini CLI) provide different self-modification capabilities; the coordinator runs on any of them.
 
 **Non-goals (v0):**
 
-- A separate “memory product” (vector DB, consolidation service, or mandatory Frink-style notebook pipeline). **Persistent state is `implStateDir`.** Optional append-only JSONL under `implStateDir` is allowed but not required.
-- Changing Jinn protocol, on-chain artifacts, or engine state machines.
-- Unrestricted self-modification across the whole monorepo or global install.
+- A separate "memory product" (vector DB, mandatory consolidation pipeline). Persistent state is the operator's git-backed `implStateDir`.
+- Changing the protocol, on-chain artifacts, or engine state machines.
+- Unrestricted self-modification beyond `implStateDir` and (for OSS-harness adapters) the harness install.
+- Operator approval in-run. Access requests are **deferred artifacts only**.
 
 ---
 
-## 2. Product shape: monorepo package + thin client wrapper
+## 2. Architecture
 
-| Piece | Responsibility |
-|--------|-----------------|
-| **New package** in `jinn-mono` (e.g. `packages/jinn-default-learner`, publishable as `@jinn-network/default-learner`) | Pi package: governor extension, phase prompts/skills, **promotion gate** (§0), OTel for Jinn correlation (§5.1), **Pi-native** session/history/compaction (§5.2 — no duplicate log tree), allowed-path enforcement. |
-| **`@jinn-network/client`** | Thin `RestorerImpl`: resolve paths, spawn or embed Pi runner once per `run(ctx)`, forward `AbortSignal`, harvest `RestorationOutput`, ensure OTel export shutdown. |
+### 2.1 Session + coordinator skill
 
-The default restorer **is** this package; the client only adapts Jinn’s `RestorationContext` to the package entrypoint.
+A learner run is **one session of the underlying agent harness**, loaded with a single **coordinator meta-skill** that names the phases, sequences them, propagates state between them, and codifies how the session should react when execution stalls.
 
----
+The coordinator skill is to this learner what `using-superpowers` is to the superpowers plugin: a concise rule set for "given an intent, run these phases in this order, hand each phase these inputs, do these things if a phase reports a problem."
 
-## 3. Execution model: single run, many internal phases
+It is not a port of `using-superpowers`. The phases below are Jinn-native (mission-execution + retrospective improvement), not software-development workflow.
 
-Inside **one** `run(ctx)`:
+### 2.2 Phase pipeline
 
-1. **Governor** starts a trace and loads **run invariants** (constitutional snapshots — see §6).
-2. Phases run in order, with possible **inner loops** (e.g. execute → repair → execute) bounded by time and by governor policy:
-   - Design  
-   - Planning  
-   - Execution  
-   - Evaluation  
-   - Learning  
-   - Promotion (apply or reject candidate changes)  
-   - Finalise (sync promoted state into `implStateDir`, prepare `workingDir` for harvest)
-3. **Sub-agents** (Pi subprocesses / sub-sessions / delegated turns) are allowed with **shallow depth** (e.g. orchestrator → phase agent → worker). They share the same trace via **linked spans** or child spans.
+```
+Session (loaded with coordinator meta-skill)
+  Boot:
+    - load self-state from implStateDir
+    - propagate intent + window {startTs, endTs} + msUntilEndTs() to every subagent
+    - expose wait() / monitor() as harness-adapter-provided tools (required)
 
-This is **not** “one Frink slot = one intent”; it is **one Pi-orchestrated run** that completes before `run()` returns.
+  ├─ Orient     — intent + info + on-demand history; explorers decide what to gather
+  ├─ Strategize — picks approach + commits success criteria + commits timing posture
+  ├─ Plan       — concrete steps; entries may be time-anchored
+  ├─ Execute    — session-level phase (not a subagent — most harnesses don't nest);
+  │               uses subagent-driven-development for workers; session decides
+  │               at runtime: continue, retry-step, replan, abort
+  │               [Delivery handled by engine when run() returns; agent decides when]
+  ├─ Debrief    — post-execution gather + analysis (own run, prior own runs,
+  │               others' runs when accessible, fresh world-state)
+  ├─ Improve    — edit/add skills/hooks/tools; emit operator-access requests; patch
+  │               harness code when adapter permits; CHANGES TAKE EFFECT NEXT RUN
+  └─ Memory     — curate durable (implStateDir) + ephemeral (workingDir public/private)
+   consolidation
+```
 
----
+### 2.3 Subagent pattern
 
-## 4. `workingDir` vs `implStateDir`
+Phases are **fresh-context subagents** spawned by the session — except `Execute`, which runs at session level. Most harnesses (Claude Code's Agent tool, Pi.dev's session model) don't allow nested subagent spawning, so `Execute` itself spawns the per-step worker subagents from the session.
 
-| | **`ctx.workingDir`** | **`ctx.implStateDir`** |
-|---|----------------------|-------------------------|
-| **Lifetime** | Ephemeral per intent attempt; engine may clear between attempts. | Persistent for this operator + this impl across intents. |
-| **Purpose** | **Episode**: scratch, builds, intermediate files, and **deliverables** for the current intent (what packaging / harvest reads). | **Self**: operator-private copy of the learner — prompts, Pi extensions, orchestrator helpers, pinned deps, anything that should make the **next** `run()` better. |
-| **Improvement across intents** | Indirect: only what **promotion** copies or merges into `implStateDir`. | **Direct**: this is the only durable write target for self-improvement (see §8). |
+Each phase subagent receives:
 
-**Bootstrap:** At run start, the governor **reads** `implStateDir` (and optionally seeds `workingDir` from it). At run end, after promotion, **durable changes** must live under `implStateDir`; `workingDir` may still contain ephemeral junk that is not harvested.
+- The intent + remaining window budget
+- A relevant slice of self-state from `implStateDir`
+- Phase-specific inputs (artifacts from prior phases that the orchestrator hands forward)
 
----
+Each phase subagent produces:
 
-## 5. Telemetry: OpenTelemetry (Jinn) + Pi’s own session storage (no duplicate log tree)
+- A **structured summary** returned to the session (the typed handoff)
+- Detailed **artifacts** written under `workingDir/.<phase>/` — these are the corpus signal
 
-Jinn does **not** have Frink’s notion of a long-lived outer loop with discrete `session-*.log` / `lab-notebook.jsonl` files next to `loop.sh`. The harness is **one `run(ctx)`** driving Pi. So we **do not** recreate Frink’s `workingDir/logs/` mirror of session transcripts — **Pi already persists** conversation history, tree structure, and compaction behaviour.
+The session is the message bus. Phases never read each other's contexts directly; they read artifacts and the typed summary the orchestrator hands forward.
 
-### 5.1 OpenTelemetry (Jinn-side correlation)
-
-Use OTel for what Pi does **not** own: tying work to **Jinn** identity and lifecycle.
-
-- **Tracer:** one **root span** per `RestorerImpl.run()` (or per intent attempt id).
-- **Child spans:** governor phases, promotion, sub-agent delegations, as needed.
-- **Attributes (minimum):**  
-  `jinn.intent.kind`, intent id / cid if available, `jinn.working_dir`, `jinn.impl_state_dir`, package name + version, selected agent backend; **`pi.session.path` or `pi.session.id`** once Pi creates a session, so operators can jump from a trace to Pi’s JSONL on disk.
-- **Logs:** engine-relevant events (phase boundaries, promotion outcome, path-policy violations).
-
-**Export:** OTLP / stdout is operator-configured. Optional **small** Jinn-only local sink (e.g. one JSONL line per `run()` under `implStateDir/` with `trace_id` + `pi_session_path`) is allowed if we need grep without a collector — **not** a full duplicate of Pi’s transcript format.
-
-### 5.2 Pi-native logs, summaries, and retention (single source of truth)
-
-Per upstream Pi (`@mariozechner/pi-coding-agent`, documented in [pi-mono `packages/coding-agent` README](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md) and [pi.dev](https://pi.dev/docs)):
-
-- **Sessions** auto-save as **tree-structured JSONL** under **`~/.pi/agent/sessions/`**, organised by working directory (see README **Sessions** section and [`docs/session.md`](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md) for format).
-- **Compaction** (lossy summaries of older context while retaining full history in the JSONL file) is **Pi’s** mechanism — see [`docs/compaction.md`](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/compaction.md). We do **not** ship a parallel `summarize_session.py` unless Pi’s hooks prove insufficient.
-- **Overrides:** operators can set `PI_CODING_AGENT_DIR` (default `~/.pi/agent`) or pass **`--session-dir <path>`** so session files for default-learner runs live under e.g. **`implStateDir/pi-sessions/`** instead of the global home directory — keeps intent-scoped or operator-scoped data next to `implStateDir` without inventing a second log format.
-
-**Time-based compression / pruning** of old session files: if Pi does not ship automatic gzip+retention like Frink’s `find … -delete` on `logs/compressed/`, that is **out of scope for v0** unless implemented as a **Pi extension** or a documented **operator cron** against the chosen `--session-dir`. We do not duplicate Frink’s gzip tree under `workingDir`.
-
-**Frink analogy (intent, not layout):** we still want the *operator experience* of “logs, summaries, long-term trimming” — that maps to **Pi session JSONL + compaction + optional session-dir under `implStateDir`**, not to a second copy under `workingDir/logs/`.
+**Parallelism is a design-time choice, not a principle.** `Orient` typically fans out (multiple explorer subagents); `Debrief` may too. Synthesis phases (`Strategize`, `Plan`, `Improve`) typically run as a single subagent because the work benefits from coherent reasoning.
 
 ---
 
-## 6. Constitutional snapshots (run invariants)
+## 3. Inputs (`RestorationContext`)
 
-To avoid “changing the exam while sitting it,” the governor **freezes** at **run start**:
+The engine hands the learner exactly what `RestorationContext` (`client/src/restorer/types.ts:12`) carries:
 
-- Goal / intent snapshot (from `intent.json` or equivalent).
-- Evaluation rubric snapshot for **this** run (even if minimal in v0).
-- Promotion policy version / thresholds.
-- **Editable scope:** explicit allowlist of path prefixes the learner may write to (see §8).
+| Field | Use |
+|---|---|
+| `intent: DesiredState` | The goal: `{id, description, type, window, spec?{kind,...}, eligibility?}` |
+| `intentCid?` | Provenance anchor for trajectory binding |
+| `implStateDir` | Path to git-backed durable self (§6.2) |
+| `workingDir` | Path to ephemeral episode workspace (engine harvests per `walkArtifacts`) |
+| `log` | Logger callback |
+| `abort: AbortSignal` | Fires at `window.endTs` |
+| `msUntilEndTs()` | Remaining time budget |
 
-During the run, **Learning** may **propose** changes to rubrics or policy for **future** runs; **Promotion** must not swap the active rubric used to judge **this** run’s outcome after evaluation has begun. (Exact ordering of “evaluate → learn → promote” is implementation detail; the invariant is **no mid-run redefinition of success criteria**.)
-
----
-
-## 7. “Memory” — intentional minimalism
-
-There is **no** separate memory subsystem in v0.
-
-- **Longitudinal signal** = files under `implStateDir` (code, prompts, extension manifests, optional `ledger.jsonl`).
-- **Episode signal** = files under `workingDir` + **Pi session JSONL** (path from §5.2, e.g. under `implStateDir/pi-sessions/` if we set `--session-dir`) + OTel `trace_id` / `pi.session.*` attributes for cross-linking.
-- **Frink-inspired sub-agents** may be used for narrow tasks (review, diff sanity, “should we promote?”) but their outputs are **artifacts**, not a dedicated memory layer.
-
-If we add `ledger.jsonl`, it is **optional**, append-only, and lives under `implStateDir`; it is not a prerequisite for v0.
+Everything else (prior history, current world-state) is fetched on-demand by phases that need it.
 
 ---
 
-## 8. Self-modification and allowed paths
+## 4. Phase contracts
 
-The learner **may change its own behaviour**, including **code** and **Pi extensions**, not only prompts.
+### 4.1 Orient
 
-**Writable (promotion targets):**
+**Inputs:** `intent` + relevant self-state slice from `implStateDir`.
 
-- **`ctx.implStateDir/**`** — primary. Treat as the operator’s **private implementation workspace**: full or partial Pi package tree, extensions, skills, local `node_modules` if vendored here, etc.
-- **`ctx.workingDir/**`** — allowed during the episode; anything intended to survive must be **promoted** into `implStateDir` before `run()` returns (or in a final sub-phase).
+**Pattern:** Multi-subagent fan-out. Explorer subagents decide for themselves what to gather (no prescribed shopping list).
 
-**Read-only:**
+**What they typically gather:** intent parse (kind, goal, constraints, window), world-state relevant to the kind (market data, venue state, on-chain state), own run history (on-demand pull from knowledge tree / `implStateDir`), others' run history when accessible.
 
-- Jinn client install (except paths explicitly mirrored into `implStateDir`).
-- Engine, contracts, and the rest of the monorepo **outside** `implStateDir`.
-- Global toolchains except as invoked by the agent (no requirement to sandbox the host).
+**Output:** structured findings bundle for Strategize. Each explorer's raw output lands as an artifact under `workingDir/.orient/<explorer-id>/`; the bundle the orchestrator hands forward is the distillation.
 
-**Pi ecosystem:** The learner may **read** public Pi docs, example extensions, and community patterns to inform proposals. **Writes** from those explorations must land only under **`implStateDir`** (or `workingDir` then promote), never “random” repo paths.
+### 4.2 Strategize
 
-**Published npm package** (`@jinn-network/default-learner`) is the **seed** when `implStateDir` is empty or on first run; after that, **operator truth** is whatever lives in `implStateDir`, upgraded intentionally (e.g. operator runs `yarn` / copies a new seed) — not silently overwritten by the engine on every run.
+**Inputs:** Orient findings + relevant self-state (prior strategies that worked / didn't for this kind).
+
+**Pattern:** Single synthesis subagent. Borrows the diverge-converge structure of the brainstorming pattern: generate multiple candidate strategies, pick one with explicit rationale.
+
+**Output:** strategy artifact carrying:
+
+- Chosen approach + rationale (why this over alternatives)
+- **Success criteria** for this run — the "we'll judge this attempt a success if X" statement, frozen here so Debrief can't move the goalposts
+- **Timing posture** — `early-return` / `hold-and-revise` / `continuous-observation` (see §5)
+- Acknowledged constraints + trade-offs
+
+The frozen success criteria + timing posture are recorded as a run-start `jinn.state_transition` span (per envelope scope §3.1 K6) so they're cryptographically bound into the trajectory. See §10.
+
+### 4.3 Plan
+
+**Inputs:** strategy artifact + Orient findings + relevant self-state.
+
+**Pattern:** Single synthesis subagent. Borrows the decompose-into-checkpointed-steps structure of the writing-plans pattern.
+
+**Output:** plan artifact carrying:
+
+- Ordered steps, with sequential vs parallelizable marked
+- What each step needs (tools, MCPs, inputs, expected outputs)
+- Per-step success signals
+- Abort/recovery conditions
+- **Time-anchored entries** when the strategy calls for them — e.g. "wait until `endTs - 2h`", "monitor event E or 4h whichever first"
+
+### 4.4 Execute
+
+**Pattern:** Session-level phase, NOT a subagent. Most harnesses don't permit nested subagent spawning, so Execute drives directly from the session.
+
+**What the session does:**
+
+- Walks the plan step-by-step, respecting sequential vs parallel markings
+- Spawns one execution worker subagent per step (or parallel batch); each worker gets only its step spec + relevant prior context
+- Collects worker outputs, advances
+- Honors per-step success signals to continue vs retry
+- Honors time-anchored steps via `wait()` / `monitor()` (§5)
+- Writes real outputs to `workingDir` as it goes
+- **Decides at runtime when stuck**: `continue` / `retry-step` / `replan` (loop back to Plan) / `abort`. The coordinator skill names the options + judgment criteria; the session picks. No hardcoded escape hatch.
+
+**Time budget:** Most of `ctx.msUntilEndTs()` is consumed here.
+
+**Delivery:** Engine handles delivery via the existing `walkArtifacts` → `manifest-assembly` → `deliverToMarketplace` pipeline once `run()` returns. The agent decides when to return — early if work is done, late if observation is needed, abort-triggered if the window expires. Delivery never blocks inside Execute.
+
+### 4.5 Debrief
+
+**Mirrors Orient — gather + sense-make in hindsight.** Not "self-assess" — Debrief reads beyond the current run.
+
+**Inputs:** just-completed run's artifacts in `workingDir` (trajectory, outputs, session transcripts) + strategy artifact (with frozen success criteria) + plan artifact + relevant self-state slice + on-demand reads of own run history, others' run history when accessible, and fresh world-state for outcome signals.
+
+**Pattern:** Can fan out (own-run reader, others' reader, world-state prober) with a synthesizer at the end. Design-time call.
+
+**Output:** analysis artifact(s) for Improve, covering:
+
+- Whether this run met the success criteria Strategize committed to
+- Where execution diverged from plan and why
+- Relevant signals from others' runs
+- Trend across prior runs ("am I improving at this kind?")
+
+### 4.6 Improve
+
+**Inputs:** Debrief analysis + current self-state (`implStateDir`) + operator-configured policy on what Improve may touch.
+
+**Action surface:**
+
+- Edit existing skills / hooks / tools / configs under `implStateDir`
+- Add new skills / tools / hooks
+- Create new tools from scratch (code + register)
+- Emit `request_for_access` artifacts under `workingDir/.operator-requests/` for things the operator needs to provide (deferred, never blocks)
+- In OSS-harness adapters (e.g. Pi.dev): patch harness code; no-op on closed-harness adapters (Claude Code)
+
+**Outputs:**
+
+- Mutations to `implStateDir` (and to harness install when adapter permits)
+- One git commit per logical change with a message tying the change back to the run that caused it (see §6.2)
+- `promotion_record` artifact per change (what, why, source diagnosis from Debrief)
+- `request_for_access` artifacts aggregated for the operator
+
+**Effect timing:** changes take effect **next run**. The current run already happened under the old state; Strategize's frozen criteria were judged under it; mid-run mutation invalidates the causal chain Debrief just produced.
+
+### 4.7 Memory consolidation
+
+**Inputs:** Debrief analysis + Improve's just-committed mutations + full `implStateDir` + full `workingDir` + operator retention policy + run history.
+
+**Two workstreams:**
+
+**(1) Curate durable self.** Now that Improve added/edited stuff, what's stale on the other end?
+
+- Skills / hooks / tools unused for N runs — prune or archive
+- Promoted changes that the cross-run trend says made things worse — revert
+- Accumulated notes / records that have become noise — compact
+- Conflicts between recently promoted artifacts — resolve
+
+Writes are a separate git commit on `implStateDir`, distinct from Improve's commit. Same repo, two intents in the audit trail.
+
+**(2) Curate ephemeral run.** Decide what's harvestable vs operator-private before delivery:
+
+- Some artifacts are declared outputs of the kind (must go in delivery)
+- Some are intermediate or contain operator-private reasoning (move to `workingDir/.private/` or migrate to `implStateDir`)
+- Sets the public/private boundary the engine respects when calling `walkArtifacts`
+
+**Output:** `consolidation_record` artifact summarizing what was pruned, archived, kept-but-flagged, moved.
 
 ---
 
-## 9. Borrowing from Frink (content, not harness)
+## 5. Timing model
 
-| From Frink | Use in this design |
-|------------|---------------------|
-| `prompts/modes/*.md`, base prompts | Phase templates in the Pi package (design / plan / execute / evaluate / learn). |
-| Domain hooks, skills | Pi skills or small scripts invoked from Execution / Learning. |
-| Sub-agent patterns | Shallow delegation inside **one** run; outputs = files + OTel child spans. |
-| Session logs / notebook / gzip retention | **Do not duplicate** — use **Pi’s** `~/.pi/agent/sessions/` (or `--session-dir` under `implStateDir`) + compaction; optional operator cron for old files if Pi does not prune. |
-| `loop.sh` / `exec "$0"` scheduling | **Not** the primary model; optional internal “micro-restart” only if Pi supports it without spanning multiple `run()` calls. |
+The intent's `window = {startTs, endTs}` is a **first-class design input**, not a pure deadline.
 
----
+- Boot propagates `intent.window` and `msUntilEndTs()` to every subagent so each phase plans inside its budget.
+- Strategize commits a **timing posture** as part of the frozen criteria:
+  - **`early-return`** — finish work and return `run()` before window end. Default for kinds where late information doesn't help.
+  - **`hold-and-revise`** — do work, wait until late in the window, optionally re-Execute / Improve based on world-state evolution, return.
+  - **`continuous-observation`** — submit something early, monitor across the window, occasionally adjust, return at end.
+- Plan emits time-anchored steps where the strategy calls for them.
+- Execute honors them via `wait(durationMs|untilTs)` and `monitor(condition, {timeoutMs, untilTs})` — both **required primitives** in the harness-adapter contract (§8).
+- Delivery happens when `run()` returns. The agent decides when. Engine has no opinion on early vs late return.
 
-## 10. Client integration
-
-1. **Registry:** `default-learner` is the **default** restorer new operators rely on; exact **precedence** vs kind-specific impls (`claude-mcp-*`, baselines) is a **product decision** documented in `buildRestorerImpls` and operator config. (This spec does **not** mandate “first” vs “last” until product locks it; implementation should match whatever `jinn-mono-2zk` + operator UX agree on.)
-2. **`run(ctx)`:** construct OTel root span → invoke package `runIntent(ctx)` with `workingDir`, `implStateDir`, `abort`, deadlines → harvest → end span → flush exporters.
-3. **Auth:** Agent backend (Claude / Codex / Cursor) is selected per operator environment; auth preflight remains consistent with existing `jinn` UX (exact verbs for non-Claude backends may be follow-up work).
+**Optional kind-spec field:** `minimumObservationMs` — a kind asserts "no matter what, don't deliver before X elapsed since `startTs`." Useful for kinds where buyers want real time-evolution rather than panicked early submission. Out of scope to specify here; flagged for kind-spec authors.
 
 ---
 
-## 11. Harvest and delivery
+## 6. Public/private boundary
 
-- **No change** to the engine packaging contract: harvest reads **`workingDir`** per existing kind conventions (`OUTPUTS.json`, etc.).
-- Internal episode folders (e.g. `workingDir/.episode/`) are **implementation details** unless a kind explicitly includes them in declared outputs.
-- **Self-improvement artifacts** that must **not** appear on-chain stay under **`implStateDir`** only.
+### 6.1 The split
+
+`workingDir` and `implStateDir` are already in `RestorationContext` (`client/src/restorer/types.ts:22-24`). The learner uses them as:
+
+| | `workingDir` | `implStateDir` |
+|---|---|---|
+| **Lifetime** | Ephemeral per attempt | Persistent across attempts |
+| **Audience** | Public — engine harvests for delivery | Operator-private — never shipped to the network |
+| **Purpose** | Episode work product + corpus signal | Durable self (skills, prompts, tools, configs, memory) |
+| **Self-mod target** | No (ephemeral) | **Yes** — primary; git-backed (§6.2) |
+
+Memory consolidation §4.7 sets the boundary by moving artifacts between them.
+
+### 6.2 `implStateDir` is git-backed
+
+Each operator's `implStateDir` is initialized as a git repository on first run. Improve and Memory consolidation each commit changes with messages tying the commit to the run that caused it.
+
+**Why git:**
+
+- Atomic promotion (commit succeeds or it doesn't)
+- Free rollback if Debrief detects a regression across runs (`git revert`)
+- Full audit trail tied to `requestId` per commit
+- Commit SHA is a natural pin for `RestorerImpl.version` / executor-provenance — solves the TEE-scope provenance issue (research doc §220-230, scope doc §3.2 K3) without a schema change.
+
+### 6.3 Mapping to TEE scope §3.2 operator-secrets categories
+
+The TEE scope's three operator-secrets categories cover this learner's `implStateDir` content:
+
+| Category | Learner equivalent |
+|---|---|
+| (a) Runtime credentials — sealed, never in source | `implStateDir/env/`, API wallets, keystores |
+| (b) Proprietary IP — operator choice: publish for attested, or run at lower tier | Promoted skills / prompts / harness patches |
+| (c) Environmental context — local config, not source | Operator config (Safe address, RPC, venue accounts) |
+
+Public/private inheritance is automatic — no learner-specific vocabulary needed.
+
+### 6.4 Mid-run mutation rule (TEE scope §4 item 12)
+
+The TEE scope deliberately generalized the mid-run-mutation rule to be executor-agnostic. It gives two options for a learning-style executor:
+
+- **(a) Log every mutation** as a span event / `promotion_record` artifact. Attested claim narrows to "measured code ran AND mutations were logged."
+- **(b) Mutable region lives outside the measured surface.** Attested claim covers only invariant code; mutations not claimed trustworthy. Lowers effective tier.
+
+**This learner picks default (a).** Improve emits `promotion_record` per change; the trajectory carries every mutation as `jinn.state_transition` span events. Operators who want full `implStateDir` privacy at attested tier can opt into (b) via the harness adapter (sets `implStateDir` outside the measured enclave surface) — accepting the lower-tier consequence.
 
 ---
 
-## 12. v0 acceptance criteria (draft)
+## 7. Self-modification scope
 
-- [ ] One `run()` = one Pi-orchestrated run with governor phases and frozen invariants.  
-- [ ] OTel root span + phase spans for every run; path violations logged; **Pi session** persisted per Pi defaults or `--session-dir` under `implStateDir` (§5.2); **no** duplicate Frink-style `workingDir/logs/` transcript mirror.  
-- [ ] All durable self-edits confined to `implStateDir` (+ promotion from `workingDir`).  
-- [ ] Next run for the same operator loads from `implStateDir` and sees promoted changes.  
-- [ ] Package lives in `jinn-mono` as a separate publishable unit; client depends on it.  
-- [ ] No protocol / engine state-machine changes.
+Improve's action surface is **scoped, not unrestricted**:
 
----
+| Target | Allowed by | Notes |
+|---|---|---|
+| `implStateDir/**` | Always | Primary self-mod target; git-backed |
+| `workingDir/**` | During the run | Anything intended to survive must be promoted to `implStateDir` |
+| Harness install | Only when adapter permits | Pi.dev / Codex etc.; no-op on Claude Code |
+| Anything else | Never | Engine, contracts, monorepo paths outside `implStateDir`, system toolchain |
 
-## 13. Open questions (for you to confirm)
-
-1. **Registry precedence:** Should `default-learner` win every kind until the operator enables a specialised impl, or the inverse?  
-2. **Partitioning `implStateDir`:** By `intent.kind` only (`implStateDir/<kind>/…`), or single tree for all kinds?  
-3. **Pi embedding:** Spawn `pi` CLI vs in-process SDK — preference for v0?  
-4. **Promotion atomicity:** File-level atomic replace, git snapshot, or simple copy-merge?  
-5. **`--session-dir` default:** Global `~/.pi/agent/sessions/` vs `implStateDir/pi-sessions/` (recommended for operator isolation) vs per-intent subdir — pick one for v0.  
-6. **Cross-intent ledger:** Optional one-line append under `implStateDir/` per `run()` with `{ trace_id, pi_session_path }` for grep without OTLP — yes / no for v0?  
-7. **Long-term session pruning:** Rely on Pi / extension / documented cron only — confirm no Jinn-owned gzip mirror.
+The harness adapter is the **enforcer** — closed-harness adapters report no-op for harness-mod actions Improve attempts; OSS-harness adapters apply them. Operator policy (loaded from `implStateDir/policy.json` or equivalent) further narrows what Improve may touch within these defaults.
 
 ---
 
-## 14. Summary
+## 8. Harness adapter contract
 
-| Topic | Decision |
-|--------|-----------|
-| Harness | Pi governor, single `run()` |
-| Telemetry | OpenTelemetry (Jinn correlation) **+** Pi session JSONL / compaction / optional `--session-dir` — **no duplicate** Frink log tree under `workingDir` |
-| Episode workspace | `workingDir` |
-| Durable self | `implStateDir` only |
-| Memory product | None in v0; files + optional JSONL |
-| Self-modification | Allowed (code + extensions), path-restricted |
-| Frink | Prompt/skill patterns; not primary loop |
-| Delivery | Existing harvest / packaging |
+A harness adapter is a thin shim that lets the coordinator skill + phase subagents run on a specific agent harness. Each adapter must provide:
+
+| Capability | Why required |
+|---|---|
+| **Spawn bounded subagent with fresh context** | Phase pattern (§2.3) |
+| **`wait(durationMs|untilTs)`** | Time-anchored Plan steps (§5) |
+| **`monitor(condition, {timeoutMs, untilTs})`** | Event-driven Plan steps (§5) |
+| **Read/write `implStateDir`** | Self-mod target (§7) |
+| **Read/write `workingDir`** | Episode work product (§6.1) |
+| **OTel span emission** | Trajectory (TEE scope §3.1 K6) |
+| **Optional: harness self-modification** | Improve's harness-patch path (§7); enables OSS-harness paths only |
+
+If a harness can't expose the first six, it can't host the learner. The seventh is graceful-degradation.
+
+**v0 ships:** Claude Code adapter (closed-harness, no harness-mod) + Pi.dev adapter (OSS-harness, full self-mod).
 
 ---
 
-*End of alignment draft.*
+## 9. Artifacts emitted (mapping to TEE scope §3.1 K9)
+
+Every learner output maps to a reserved `artifactType`:
+
+| Learner output | `artifactType` |
+|---|---|
+| Loaded skill set at run start | `skill_bundle` |
+| Patches from Improve | `code_patch` |
+| MCP tool config | `mcp_config` |
+| Each promotion event | `promotion_record` |
+| Strategy artifact (success criteria + timing posture) | `design_document` |
+| Debrief analysis | `research_note` |
+| Raw LLM session transcripts | `session_transcript` |
+| Trajectory (OTLP-JSON spans) | `trajectory` (required) |
+| Memory consolidation report | `consolidation_record` (proposed addition to §3.1 K9) |
+
+The learner is a **producer** of the corpus's reserved types. No bespoke vocabulary required — except `consolidation_record`, which we propose adding to the TEE scope's reserved list (trivial PR).
+
+---
+
+## 10. Constitutional snapshot
+
+Strategize's frozen success criteria + timing posture (§4.2) become a **run-start `jinn.state_transition` span** with attributes:
+
+- `jinn.constitution.successCriteriaCid` — content hash of the criteria
+- `jinn.constitution.timingPosture` — `early-return | hold-and-revise | continuous-observation`
+- `jinn.constitution.skillBundleCid` — CID of the loaded `skill_bundle` artifact at run start
+- `jinn.constitution.implStateDirSha` — git SHA of `implStateDir` at run start
+- `jinn.constitution.editableScope[]` — paths the learner may write to (always `implStateDir/**` + `workingDir/**`; harness install when adapter permits)
+
+The TEE scope's per-span hash chain (§3.1 K6, `jinn.prevSpanHash`) makes mid-run rewrites tamper-evident: any later span that contradicts the constitution is detectable by the buyer.
+
+---
+
+## 11. v0 acceptance criteria
+
+- [ ] One `RestorerImpl.run(ctx)` = one session = one coordinated phase pipeline.
+- [ ] All six subagent phases plus session-level Execute implemented with the contracts in §4.
+- [ ] `wait()` / `monitor()` exposed via the harness-adapter contract; Plan can emit time-anchored steps; Execute respects them.
+- [ ] `implStateDir` is git-backed; Improve and Memory consolidation each commit per logical change with traceable messages; `git revert` rollback works.
+- [ ] Run-start `jinn.state_transition` span carries the §10 constitution attributes.
+- [ ] Improve emits `promotion_record` per mutation per TEE scope §4 item 12 default (a).
+- [ ] All durable self-edits confined to `implStateDir`; harness-mod attempts no-op on closed-harness adapter.
+- [ ] Per-phase artifacts land under `workingDir/.<phase>/` with the §9 `artifactType` values.
+- [ ] Acceptance test: a synthetic Execute step that tries to write outside `implStateDir`/`workingDir` is blocked by the adapter.
+- [ ] Acceptance test: portfolio.v0 intent end-to-end on Anvil fork — Orient through Memory consolidation, with non-trivial Improve mutation surviving into the next run.
+- [ ] Acceptance test: a failing Execute step exercises the runtime-judgment branch (replan path).
+- [ ] No protocol or engine state-machine changes.
+
+---
+
+## 12. Open questions
+
+1. **Registry precedence** in `buildRestorerImpls` (`client/src/restorer/impls/index.ts:56`):
+   - **(i) Last-match** — runs only when no specialist impl matches a kind. Safe; under-exercises learning signal.
+   - **(ii) First-match wrapper** — wins for every kind, delegates internally to specialist impl while wrapping in the learning envelope. Most invasive; most valuable.
+   - **(iii) Replace specialists** — retire `claude-mcp-*` impls.
+
+   My lean: **(ii) first-match wrapper** for v0. Preserves battle-tested specialists inside the learning envelope; if the envelope regresses we strip it without losing functionality.
+
+2. **Partitioning `implStateDir`.** Per-kind tree (`implStateDir/<kind>/…`) is safer for v0 (a regression in portfolio-learning doesn't cross-contaminate prediction-learning). Unified is a later optimization. Lock per-kind for v0.
+
+3. **First-kind acceptance target.** `portfolio.v0` is the most mature and has an evaluator; recommended.
+
+4. **Coexistence vs replacement of `claude-mcp-*` impls** during v0 rollout — tied to (1).
+
+5. **`consolidation_record` artifact type** — propose adding to TEE scope §3.1 K9 reserved list.
+
+---
+
+## 13. What this spec does NOT cover
+
+- Phase-skill content (the actual prompts + rules each phase subagent loads). Out of scope; lives in the package implementation.
+- Specific harness-adapter implementations (Claude Code, Pi.dev). Out of scope; downstream design docs.
+- Cross-operator artifact access protocols (when explorers can read others' runs). Deferred — depends on access/gating sibling epic of TEE scope §5.
+- Operator UI for reviewing `request_for_access` artifacts. Out of scope.
+- Concrete schema for `RestorationOutput` payloads per kind. Already kind-specific; unchanged.
+
+---
+
+*End of v1.1.*
