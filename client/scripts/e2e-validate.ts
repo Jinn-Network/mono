@@ -1595,7 +1595,6 @@ async function main(): Promise<void> {
         const { buildRestorerImpls } = await import('../src/restorer/impls/index.js');
         const { DEFAULT_BY_KIND, DEFAULT_DISABLED_IMPLS } = await import('../src/cli/intent-registry-access.js');
         const { ClaimRegistryClient } = await import('../src/adapters/claim-registry/client.js');
-        const { StaticConfiguredIntentSource } = await import('../src/intents/sources.js');
 
         const daemonAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
@@ -1635,26 +1634,17 @@ async function main(): Promise<void> {
         const claimRegistryAddress = (
           process.env['JINN_CLAIM_REGISTRY_ADDRESS'] ?? CHAIN_CONFIG.claimRegistry ?? ''
         ) as string;
-        // When no on-chain ClaimRegistry is deployed (e.g. Base mainnet Anvil fork),
-        // fall back to a passthrough stub so the engine can still claim intents and
-        // exercise the full restoration loop in Phase 11. The marketplace claim
-        // (daemonAdapter.claimRequest) still runs on-chain.
-        const stubRegistryClient = {
-          weAlreadyClaimed: async (_reqId: `0x${string}`) => false,
-          claimJob: async (_reqId: `0x${string}`) => ({ claimed: true, txHash: '' }),
-          releaseClaim: async (_reqId: `0x${string}`) => true,
-        };
-        const claimDeps = {
-          registryClient: claimRegistryAddress
-            ? new ClaimRegistryClient(
+        const claimDeps = claimRegistryAddress
+          ? {
+              registryClient: new ClaimRegistryClient(
                 agentClients.publicClient,
                 agentClients.walletClient,
                 claimRegistryAddress as `0x${string}`,
                 safeAddress as `0x${string}`,
-              )
-            : stubRegistryClient,
-          marketplaceClaimer: daemonAdapter,
-        };
+              ),
+              marketplaceClaimer: daemonAdapter,
+            }
+          : undefined;
 
         const daemon = new Daemon({
           adapter: daemonAdapter,
@@ -1688,26 +1678,16 @@ async function main(): Promise<void> {
           },
         });
 
-        // Capture the current block BEFORE the daemon starts so that the
-        // waitFor below only counts NEW DeliveryClaimed events produced by
-        // this daemon run — not events from phases 5/7/8 still within the
-        // rolling 50-block window.
-        const daemonStartBlock = await publicClient.getBlockNumber();
-
         await daemon.start();
 
         // Mine blocks continuously so on-chain state advances
         const mineInterval = setInterval(() => jsonRpc(ANVIL_RPC, 'evm_mine', []).catch(() => {}), 1000);
 
         try {
-          // Wait for at least 1 DeliveryClaimed event on the router (restoration)
-          // from daemonStartBlock forward so older events from phases 5/7/8 don't
-          // satisfy the condition prematurely. Legacy intents (no spec.kind) use
-          // legacy-claude which has no evaluator impl, so only the restoration
-          // claim is expected.
+          // Wait for 2 DeliveryClaimed events on the router (restoration + evaluation)
           await waitFor('Daemon completes full cycle', async () => {
             const currentBlock = await publicClient.getBlockNumber();
-            const fromBlock = daemonStartBlock;
+            const fromBlock = currentBlock > 50n ? currentBlock - 50n : 0n;
             const logs = await publicClient.getLogs({
               address: ROUTER_ADDRESS,
               fromBlock,
@@ -1729,7 +1709,7 @@ async function main(): Promise<void> {
             }
 
             console.log(`    DeliveryClaimed count: ${claimCount}`);
-            return claimCount >= 1;
+            return claimCount >= 2;
           }, 120000, 3000);
 
           console.log('    Daemon completed full cycle (restoration + evaluation)');
