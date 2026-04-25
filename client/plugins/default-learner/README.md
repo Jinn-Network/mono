@@ -17,6 +17,11 @@ The plugin ships inside the `@jinn-network/client` npm package under `node_modul
 
 ```bash
 mkdir -p ~/.claude/plugins
+
+# From a project where @jinn-network/client is a dependency:
+cp -r node_modules/@jinn-network/client/plugins/default-learner ~/.claude/plugins/
+
+# Or if you installed @jinn-network/client globally:
 cp -r "$(npm root -g)/@jinn-network/client/plugins/default-learner" ~/.claude/plugins/
 ```
 
@@ -24,6 +29,11 @@ cp -r "$(npm root -g)/@jinn-network/client/plugins/default-learner" ~/.claude/pl
 
 ```bash
 mkdir -p ~/.codex/plugins
+
+# From a project where @jinn-network/client is a dependency:
+cp -r node_modules/@jinn-network/client/plugins/default-learner ~/.codex/plugins/
+
+# Or if you installed @jinn-network/client globally:
 cp -r "$(npm root -g)/@jinn-network/client/plugins/default-learner" ~/.codex/plugins/
 ```
 
@@ -39,7 +49,7 @@ These are the runtime primitives the plugin assumes the harness exposes (Claude 
 - `Read`, `Write`, `Edit`, `Glob`, `Grep` — filesystem
 - A wait primitive — block until duration / deadline / condition (Claude Code: `Monitor`)
 
-If your harness lacks any of the first six, the plugin will not run. The wait primitive gates time-anchored plans only — the plugin can run for `early-return` postures without it.
+If the harness lacks `Skill`, `Agent`, `Bash`, or filesystem read/write/edit, the plugin will not run. The wait primitive gates time-anchored plans only — the plugin can run for `early-return` postures without it.
 
 ## What this plugin does NOT contain
 

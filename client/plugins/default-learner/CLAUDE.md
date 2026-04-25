@@ -22,7 +22,7 @@ When a Jinn restoration session starts, invoke the `coordinator` skill via the S
 ## Conventions
 
 - All durable self-modification lives in `implStateDir/**` (git-backed).
-- Episode artifacts live under `workingDir/**`; the engine harvests `workingDir` per the kind's output contract once the coordinator returns.
+- Episode artifacts live under `workingDir/**`; the engine harvests `workingDir` per the kind's output contract once the coordinator returns. (Harvest is the daemon's responsibility — see `walkArtifacts` in `client/src/restorer/engine/packaging.ts`.)
 - Subagents are one level deep only — agents do not spawn further agents.
 - Strategize-frozen success criteria + timing posture must not change during the run.
 

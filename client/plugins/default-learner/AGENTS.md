@@ -4,6 +4,8 @@ This plugin provides the Jinn default learning restorer for any agent harness th
 
 ## Tool name mapping
 
+> Names below are best-effort guidance; harness tool surfaces evolve. The canonical contract is the **capability** described in the Generic column — confirm against your harness's docs before wiring.
+
 The skills and agents in this plugin use Claude Code tool names by default. On other harnesses, substitute equivalents:
 
 | Claude Code | Codex | Pi.dev | Generic |
@@ -12,6 +14,7 @@ The skills and agents in this plugin use Claude Code tool names by default. On o
 | `Agent` | `agent` | (subprocess) | "spawn fresh-context subagent with role + inputs" |
 | `Bash` | `shell` | `bash` | shell tool |
 | `Read`/`Write`/`Edit` | `file_read`/`file_write` | `fs` tools | filesystem |
+| `Glob`/`Grep` | `glob`/`grep` | `fs` search | "filesystem search by pattern / content" |
 | `Monitor` (wait) | (bespoke) | (built-in) | "block until duration/deadline/condition" |
 
 ## Entry point
