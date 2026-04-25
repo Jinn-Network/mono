@@ -23,6 +23,7 @@
   "files": [
     "dist/",
     "deployments/",
+    "plugins/",
     "skills/",
     "docker-compose.yml",
     "CONTRIBUTING.md",
