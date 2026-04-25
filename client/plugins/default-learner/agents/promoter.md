@@ -28,7 +28,7 @@ Act on Debrief by mutating `implStateDir`. Each accepted change is one git commi
 6. **Operator-access requests** — emit deferred artifacts under `workingDir/.operator-requests/<name>.json` describing things you'd like the operator to provide. Never blocks.
 7. **Harness install patches** — only if `policy.json` allows AND the harness adapter permits. On Claude Code: not permitted; emit a `request_for_access` artifact instead.
 
-Anywhere outside `implStateDir/**` and `workingDir/.improve|operator-requests/` is forbidden.
+Allowed write paths: `implStateDir/**`, `workingDir/.improve/**`, `workingDir/.operator-requests/**`. Anywhere else is forbidden.
 
 ## What you do
 
@@ -40,24 +40,33 @@ For each Debrief recommendation:
    ```bash
    cd "$IMPL_STATE_DIR"
    git add -A
-   git diff --cached --quiet || git commit -m "improve: <one-line description>
+   if ! git diff --cached --quiet; then
+     msg_file="$(mktemp)"
+     cat > "$msg_file" <<'MSG'
+   improve: <one-line description>
 
    Run: <intent.id>
    Cause: <attributed cause from analysis>
-   Recommendation: <short pointer into analysis>" --quiet
+   Recommendation: <short pointer into analysis>
+   MSG
+     git commit --quiet -F "$msg_file"
+     rm -f "$msg_file"
+   fi
    ```
 4. Record `<outputDir>/promotions/<n>.json`:
    ```json
    {
      "ts": <unix-ms>,
-     "implStateDirShaBefore": "<from prior commit / git log -1 --skip=1 HEAD>",
+     "implStateDirShaBefore": "<git rev-parse HEAD^ after the commit; null for the first commit on a fresh repo>",
      "implStateDirShaAfter": "<git rev-parse HEAD post-commit>",
-     "changeKind": "skill-edit | hook-edit | config-edit | new-skill | new-tool | operator-request",
+     "changeKind": "skill-edit | hook-edit | config-edit | new-skill | new-hook | new-config | new-tool | operator-request | harness-patch",
      "target": "implStateDir/<path> | workingDir/.operator-requests/<name>.json",
      "summary": "string",
      "analysisSource": "string — pointer into analysis.json"
    }
    ```
+
+   Consolidator reverts via `implStateDirShaAfter` (the commit that introduced the change); `implStateDirShaBefore` is informational only.
 
 One commit per logical change so `git log` and `git revert` operate cleanly.
 
