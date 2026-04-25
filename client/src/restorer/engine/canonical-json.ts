@@ -22,7 +22,8 @@
  * Used for manifest signing: produce a deterministic byte string that two
  * independent parties can reproduce from the same object graph.
  */
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 const canonicalize = require('canonicalize') as (value: unknown) => string | undefined;
 
 /**
