@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Write, Skill
 
 # Coordinator — default-learner entry point
 
-You are running one Jinn restoration intent end-to-end. This skill is the entry point. Each phase's skill is loaded into your session in turn; each phase skill does its own thin orchestration — meaning each phase skill's job is to launch a specialized subagent via the Agent tool and collect its output, not to do the deep reasoning itself (typically launching a specialized subagent via the Agent tool).
+You are running one Jinn restoration intent end-to-end. This skill is the entry point. Each phase's skill is loaded into your session in turn; each phase skill does its own thin orchestration — meaning each phase skill's job is to launch a specialized subagent via the Agent tool and collect its output, not to do the deep reasoning itself.
 
 ## Inputs (from the daemon)
 
@@ -32,9 +32,27 @@ SKILL_BUNDLE_CID=$(find "$PLUGIN_ROOT" -type f \( -name '*.md' -o -name '*.sh' -
 
 (`$PLUGIN_ROOT` is the path to this plugin install; if your harness doesn't expose it, hash the loaded skills from their loaded paths.)
 
-Write `workingDir/.coordinator/boot.json` (downstream phases — particularly Strategize — read it for the constitution span):
+Write `workingDir/.coordinator/boot.json` (downstream phases — particularly Strategize — read it for the constitution span). The shape is:
+
+```json
+{
+  "implStateDirShaAtStart": "<git HEAD sha of implStateDir at run start>",
+  "skillBundleCid": "sha256:<plugin bundle digest>",
+  "intentId": "<intent.id>",
+  "windowEndTs": <window.endTs as milliseconds since epoch>
+}
+```
+
+The daemon hands you `intent`, `workingDir`, and `implStateDir` as session inputs (not POSIX env vars). Bind them to the variables this section uses, then write the file:
 
 ```bash
+# Bind session inputs into shell variables (substitute your harness's
+# mechanism — e.g., values pulled from the initial prompt context or a
+# harness-provided JSON input):
+WORKING_DIR="<workingDir from session inputs>"
+INTENT_ID="<intent.id from session inputs>"
+WINDOW_END_TS="<intent.window.endTs from session inputs>"
+
 mkdir -p "$WORKING_DIR/.coordinator"
 cat > "$WORKING_DIR/.coordinator/boot.json" <<EOF
 {
