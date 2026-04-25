@@ -52,7 +52,7 @@ Session (loaded with coordinator meta-skill)
   Boot:
     - load self-state from implStateDir
     - propagate intent + window {startTs, endTs} + msUntilEndTs() to every subagent
-    - expose wait() / monitor() as harness-adapter-provided tools (required)
+    - expose wait() as a harness-adapter-provided tool (required)
 
   ├─ Orient     — intent + info + on-demand history; explorers decide what to gather
   ├─ Strategize — picks approach + commits success criteria + commits timing posture
@@ -159,7 +159,7 @@ The frozen success criteria + timing posture are recorded as a run-start `jinn.s
 - Spawns one execution worker subagent per step (or parallel batch); each worker gets only its step spec + relevant prior context
 - Collects worker outputs, advances
 - Honors per-step success signals to continue vs retry
-- Honors time-anchored steps via `wait()` / `monitor()` (§5)
+- Honors time-anchored steps via `wait()` (§5)
 - Writes real outputs to `workingDir` as it goes
 - **Decides at runtime when stuck**: `continue` / `retry-step` / `replan` (loop back to Plan) / `abort`. The coordinator skill names the options + judgment criteria; the session picks. No hardcoded escape hatch.
 
@@ -238,7 +238,7 @@ The intent's `window = {startTs, endTs}` is a **first-class design input**, not 
   - **`hold-and-revise`** — do work, wait until late in the window, optionally re-Execute / Improve based on world-state evolution, return.
   - **`continuous-observation`** — submit something early, monitor across the window, occasionally adjust, return at end.
 - Plan emits time-anchored steps where the strategy calls for them.
-- Execute honors them via `wait(durationMs|untilTs)` and `monitor(condition, {timeoutMs, untilTs})` — both **required primitives** in the harness-adapter contract (§8).
+- Execute honors them via a single primitive `wait({durationMs?, untilTs?, condition?})` — wakes when any of duration, timestamp, or condition fires; pure sleeps are the no-condition case, event-driven waits set a condition with a bounded timeout. **Required** in the harness-adapter contract (§8).
 - Delivery happens when `run()` returns. The agent decides when. Engine has no opinion on early vs late return.
 
 **Optional kind-spec field:** `minimumObservationMs` — a kind asserts "no matter what, don't deliver before X elapsed since `startTs`." Useful for kinds where buyers want real time-evolution rather than panicked early submission. Out of scope to specify here; flagged for kind-spec authors.
@@ -316,14 +316,13 @@ A harness adapter is a thin shim that lets the coordinator skill + phase subagen
 | Capability | Why required |
 |---|---|
 | **Spawn bounded subagent with fresh context** | Phase pattern (§2.3) |
-| **`wait(durationMs|untilTs)`** | Time-anchored Plan steps (§5) |
-| **`monitor(condition, {timeoutMs, untilTs})`** | Event-driven Plan steps (§5) |
+| **`wait({durationMs?, untilTs?, condition?})`** | Time- and event-anchored Plan steps; one primitive covers pure sleeps, deadline-bounded waits, and condition-driven waits (§5) |
 | **Read/write `implStateDir`** | Self-mod target (§7) |
 | **Read/write `workingDir`** | Episode work product (§6.1) |
 | **OTel span emission** | Trajectory (TEE scope §3.1 K6) |
 | **Optional: harness self-modification** | Improve's harness-patch path (§7); enables OSS-harness paths only |
 
-If a harness can't expose the first six, it can't host the learner. The seventh is graceful-degradation.
+If a harness can't expose the first five, it can't host the learner. The sixth is graceful-degradation.
 
 **v0 ships:** Claude Code adapter (closed-harness, no harness-mod) + Pi.dev adapter (OSS-harness, full self-mod).
 
@@ -367,7 +366,7 @@ The TEE scope's per-span hash chain (§3.1 K6, `jinn.prevSpanHash`) makes mid-ru
 
 - [ ] One `RestorerImpl.run(ctx)` = one session = one coordinated phase pipeline.
 - [ ] All six subagent phases plus session-level Execute implemented with the contracts in §4.
-- [ ] `wait()` / `monitor()` exposed via the harness-adapter contract; Plan can emit time-anchored steps; Execute respects them.
+- [ ] `wait()` exposed via the harness-adapter contract; Plan can emit time-anchored and event-anchored steps; Execute respects them.
 - [ ] `implStateDir` is git-backed; Improve and Memory consolidation each commit per logical change with traceable messages; `git revert` rollback works.
 - [ ] Run-start `jinn.state_transition` span carries the §10 constitution attributes.
 - [ ] Improve emits `promotion_record` per mutation per TEE scope §4 item 12 default (a).
