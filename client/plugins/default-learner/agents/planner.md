@@ -14,6 +14,8 @@ Turn the strategy into concrete steps Execute can follow.
 - `strategyPath` — read for chosen approach + success criteria + timing posture + constraints
 - `orientSummaryPath` — read for grounding
 - `priorPlanTemplatesPath` — read if non-null
+- `replanContextPath` — read if non-null; contains `{ failedStepId, blockers, partialOutputs[] }` from the prior Execute attempt
+- `priorPlanArchives` — array of paths to prior plan versions (`plan-v<N>.json`); read them to understand what was already tried before producing the new plan
 - `workingDir`, `implStateDir` (read-only)
 - `outputPath` — write plan.json here
 - `msUntilEndTs`
@@ -33,6 +35,8 @@ Each step must be specific enough that a `step-worker` subagent can carry it out
 - Abort/recovery condition
 
 For `hold-and-revise` or `continuous-observation` postures, include `wait`-kind steps where appropriate:
+
+**On replan:** if `replanContextPath` was provided, the new plan must explicitly avoid the failure mode named in `failedStepId` + `blockers` — either skip that step's approach, route around it, or change the inputs that triggered it. Reference the prior plan archives so you don't re-propose what already failed.
 
 ```json
 { "id": "step-3", "kind": "wait", "durationMs": 7200000, "untilTs": null, "condition": null }
