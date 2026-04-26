@@ -153,6 +153,87 @@ In order of dependency:
 - Plan 4 T3's two-cycle e2e harness will need to be updated to use `--plugin-dir` instead of `cp -r`.
 - Plan 1's `validate-plugin.mjs` doesn't catch B1, B5, or B4 (it validates a layout that doesn't match Claude Code's actual requirements). Worth augmenting the validator after we know the right shape.
 
+## Verified findings (after fix batch B1+B3+B4+B5)
+
+After landing the four critical fixes (commit `<TBD>`), the smoke test progressed dramatically. The full cycle was verified end-to-end on real Claude Code 2.1.119.
+
+### Smoke 2: skill + agent discovery + hook fire
+
+After the fix batch, ran the same smoke against the plugin:
+- ✅ All 8 skills discovered as `default-learner:<name>`
+- ✅ All 7 agents registered as spawnable subagent types (`default-learner:explorer`, `:strategist`, `:planner`, `:step-worker`, `:analyst`, `:promoter`, `:consolidator`)
+- ✅ Session-start hook fired: `$IMPL_STATE_DIR/.git` exists, identity `default-learner` configured, initial commit `init implStateDir` present.
+
+### Smoke 3: Orient phase end-to-end
+
+Invoked `Skill default-learner:coordinator` with a synthetic intent and asked it to run only Orient:
+- ✅ Coordinator boot wrote `workingDir/.coordinator/boot.json` with implStateDirShaAtStart, intentId, windowEndTs.
+- ✅ Coordinator decided which Orient topics applied (only intent-parse, correctly skipped world-state/own-history/others-history for the trivial smoke kind).
+- ✅ Spawned `default-learner:explorer` subagent with topic="intent-parse".
+- ✅ Explorer wrote `workingDir/.orient/intent-parse.json` matching the explorer.md output schema.
+- ✅ Coordinator collated `workingDir/.orient/summary.json` matching the orient/SKILL.md schema.
+
+### Smoke 4: full 7-phase cycle (load-bearing test)
+
+Same setup but asked the coordinator to run all seven phases. Test ran to completion in ~10 minutes.
+
+**All 7 phases ran cleanly** (orient → strategize → plan → execute → debrief → improve → memory-consolidation) and produced artifacts under `workingDir/.<phase>/`.
+
+**Improve actually mutated implStateDir** — HEAD advanced through 4 separate git commits:
+```
+4b5e87c improve: persist answers to Orient open questions
+e8a27e4 improve: capture canonical-write + read-back-verify strategy template
+d4d4e8b improve: seed runs/index.json with fullcycle-1 record
+8c2c662 improve: add smoke-test verification note for 2026-04-26
+9210411 init implStateDir
+```
+
+The Improve agent accepted 4 of 5 Debrief recommendations, rejected 1 (premature skill promotion), and committed each accepted change as a separate logical commit per spec §6.2 / promoter.md design.
+
+Memory consolidation correctly chose no-op (no conflicts, no regressions, sub-threshold sizes) — HEAD unchanged at `4b5e87c`.
+
+### Smoke 5: cycle 2 sees cycle 1's state (LOAD-BEARING ASSERTION)
+
+Re-ran the coordinator with the same `implStateDir` (HEAD `4b5e87c` from cycle 1) and a different intent (`fullcycle-2`):
+
+- ✅ **Cycle 2 `boot.json` captured `implStateDirShaAtStart = "4b5e87ca..."`** — cycle 1's final HEAD, NOT the original init commit. **The next run picks up the prior run's mutations.**
+
+This is the headline claim of the entire learner design — and it works end-to-end, verified live, no mocks.
+
+### Bugs the verified test surfaced
+
+#### B7 — coordinator's skillBundleCid computation falls back to a stub
+
+**Symptom:** boot.json `skillBundleCid` shows `"sha256:smoke-test-no-bundle-hash"` (smoke 3) or `"sha256:unknown-no-plugin-root"` (smoke 5), not a real digest.
+**Root cause:** Coordinator's bash recipe references `$PLUGIN_ROOT` to hash the plugin contents, but the env var isn't set inside the coordinator's session (the hook sets it on its own process, which doesn't propagate). Claude Code provides `${CLAUDE_PLUGIN_ROOT}` but the coordinator skill doesn't reference it.
+**Fix needed:** Update coordinator SKILL.md boot section to use `${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}` — Claude Code's variable preferred, hook's fallback for other harnesses.
+**Severity:** Important (constitution span attributes are stub; doesn't break the loop but degrades the constitution's tamper-evidence value).
+**Status:** UNFIXED.
+
+#### B8 — README install path still says `cp -r` (already noted as B2)
+
+Demoted to B2 priority; same bug.
+
+### What is now verified
+
+- Plugin discovery via `--plugin-dir`
+- Plugin manifest validates
+- 8 skills load with namespaced names
+- 7 agents register as spawnable subagents
+- Session-start hook fires on session start; `implStateDir` git-init'd; identity configured
+- Coordinator skill walks the seven-phase pipeline end-to-end on a real Claude Code session
+- Each phase spawns its specialized subagent via the Agent tool
+- Each phase writes its artifacts to `workingDir/.<phase>/` per the spec
+- Improve actually mutates `implStateDir` and git-commits each change
+- **Cycle 2 sees cycle 1's mutations via the updated `implStateDirShaAtStart`**
+- Memory consolidation correctly no-ops when nothing to curate
+
+### What is NOT yet verified
+
+- Skip-execute / phase-range hint flow (the wrapper's specialist-delegation path) — needs a kind with a registered specialist + the wrapper to actually delegate.
+- The full daemon path: engine → wrapper → shim → harness adapter → claude. Smoke tests invoked claude directly via shell; the shim's spawn machinery hasn't been exercised live.
+- Real venue kind end-to-end (portfolio.v0 etc.). Smoke kind is `smoke-test` synthetic.
+
 ## Follow-up bd issues
 
 (Filed in T4 once T1 is done.)
