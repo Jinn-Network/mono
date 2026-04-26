@@ -20,3 +20,4 @@ export { resolvePluginRoot } from './plugin-path.js';
 export { harvestOutput } from './harvest.js';
 export { ClaudeCodeHarnessAdapter } from './adapters/claude-code.js';
 export type { ClaudeCodeHarnessAdapterConfig } from './adapters/claude-code.js';
+export { DefaultLearningWrapper, type DefaultLearningWrapperConfig } from './wrapper.js';

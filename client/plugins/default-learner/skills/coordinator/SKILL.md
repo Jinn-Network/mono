@@ -68,6 +68,8 @@ EOF
 
 ## Pipeline
 
+*Skip-execute hint:* if the env var `JINN_DEFAULT_LEARNER_SKIP_EXECUTE=true` is set (the daemon-side wrapper sets it when delegating Execute to a kind-specific specialist), skip phase 4 entirely. The wrapper will run Execute externally and populate `workingDir/.execute/` itself before invoking Debrief.
+
 For each phase below, in order:
 
 1. Load the phase skill via the `Skill` tool (e.g., `Skill orient`).
