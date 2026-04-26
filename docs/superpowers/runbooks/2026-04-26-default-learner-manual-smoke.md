@@ -194,11 +194,27 @@ Memory consolidation correctly chose no-op (no conflicts, no regressions, sub-th
 
 ### Smoke 5: cycle 2 sees cycle 1's state (LOAD-BEARING ASSERTION)
 
-Re-ran the coordinator with the same `implStateDir` (HEAD `4b5e87c` from cycle 1) and a different intent (`fullcycle-2`):
+Re-ran the coordinator with the same `implStateDir` (HEAD `4b5e87c` from cycle 1) and a different intent (`fullcycle-2`). Full pipeline ran (~10 min) and finished cleanly:
 
-- ✅ **Cycle 2 `boot.json` captured `implStateDirShaAtStart = "4b5e87ca..."`** — cycle 1's final HEAD, NOT the original init commit. **The next run picks up the prior run's mutations.**
+- ✅ **Cycle 2 `boot.json` captured `implStateDirShaAtStart = "4b5e87ca..."`** — cycle 1's final HEAD, NOT the original init commit.
+- ✅ **HEAD advanced again**: `4b5e87c → 1765317` via 4 new Improve commits in cycle 2:
+  ```
+  1765317 improve: promote orient Q1/Q2/Q3 defaults to stable across 2 runs
+  3de24d0 improve: codify spec-wins-over-description rule for smoke-test template
+  c38a41b improve: strengthen smoke-test template evidence to 2/2 runs
+  65c690d improve: append fullcycle-2 run record with clean-run counter
+  ```
+- ✅ **Cycle 2 actually USED cycle 1's promoted state**, not just reading sha. Evidence:
+  - `runs/index.json` now has 2 records; cycle 2's note explicitly says `"reused cycle-1 template wholesale"`.
+  - Improve commit `c38a41b` upgrades cycle 1's `notes/strategy-templates.md` to "2/2 runs" — directly building on the cycle-1 promotion.
+  - New top-level field `cleanRunsByKind: {smoke-test: 2}` added in cycle 2 — a cross-run aggregation that requires reading cycle 1's record.
+  - Improve commit `1765317` "promote orient Q1/Q2/Q3 defaults to stable across 2 runs" — graduating cycle-1 open questions into stable defaults after a second confirming run.
 
-This is the headline claim of the entire learner design — and it works end-to-end, verified live, no mocks.
+The agent is genuinely **building on prior state**, not just adding random commits. This is the actual learning behavior the spec promises, demonstrated end-to-end with no mocks.
+
+Cycle 2 deliverable: `workingDir/output.json` = `{"foo":"world","bar":"world","baz":"world"}` (different value from cycle 1's "hello") — proves both cycles produced kind-correct output independently.
+
+Memory consolidation in both cycles correctly chose mostly no-op (no conflicts, no regressions, sub-threshold sizes); cycle 2 also wrote a `workingDir/PUBLIC.json` manifest declaring the public/private artifact boundary for engine harvest.
 
 ### Bugs the verified test surfaced
 
