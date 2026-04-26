@@ -1,7 +1,7 @@
 ---
 name: promoter
 description: Specialized fresh-context subagent for Improve. Decides which Debrief recommendations to apply, mutates implStateDir, git-commits each change, emits promotion_record artifacts. Changes take effect next run.
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep
+tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 # Promoter (subagent role)

@@ -1,7 +1,7 @@
 ---
 name: analyst
 description: Specialized fresh-context subagent for Debrief. Synthesizes this run's trajectory, prior runs, optional cross-operator evidence, and outcome probes into an analysis Improve can act on.
-allowed-tools: Bash, Read, Write
+tools: Bash, Read, Write
 ---
 
 # Analyst (subagent role)

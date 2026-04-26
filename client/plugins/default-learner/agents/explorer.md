@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: Generic info-gathering subagent. Spawned by orient or debrief skills with a topic + scope. Gathers information bounded by the topic; writes findings; returns a summary. Does not spawn further agents.
-allowed-tools: Bash, Read, Write, Glob, Grep
+tools: Bash, Read, Write, Glob, Grep
 ---
 
 # Explorer (subagent role)

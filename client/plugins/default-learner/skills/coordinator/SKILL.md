@@ -77,19 +77,19 @@ This protocol exists so the daemon's first-match wrapper can wrap kind-specific 
 
 For each phase below, in order:
 
-1. Load the phase skill via the `Skill` tool (e.g., `Skill orient`).
+1. Load the phase skill via the `Skill` tool. Skills are namespaced by plugin: invoke as `default-learner:<phase-name>` (e.g., `Skill default-learner:orient`).
 2. The skill loads into your session; follow its instructions. It will typically launch one or more specialized subagents via the Agent tool, collect their outputs, and write artifacts under `workingDir/.<phase>/`.
 3. Append a JSONL entry to `workingDir/.coordinator/log.jsonl` after each phase: `{ ts, phase, status, summary }`.
 
-Phases in order:
+Phases in order (full skill names shown):
 
-1. `orient` — gather intent + world-state + history
-2. `strategize` — pick approach, freeze success criteria + timing posture
-3. `plan` — concrete steps, optionally time-anchored
-4. `execute` — walk plan, spawn step-workers, decide stuck
-5. `debrief` — post-execution analysis
-6. `improve` — mutate `implStateDir`, commit
-7. `memory-consolidation` — curate, separate commit
+1. `default-learner:orient` — gather intent + world-state + history
+2. `default-learner:strategize` — pick approach, freeze success criteria + timing posture
+3. `default-learner:plan` — concrete steps, optionally time-anchored
+4. `default-learner:execute` — walk plan, spawn step-workers, decide stuck
+5. `default-learner:debrief` — post-execution analysis
+6. `default-learner:improve` — mutate `implStateDir`, commit
+7. `default-learner:memory-consolidation` — curate, separate commit
 
 ## Constitution span
 

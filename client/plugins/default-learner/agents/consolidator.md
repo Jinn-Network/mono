@@ -1,7 +1,7 @@
 ---
 name: consolidator
 description: Specialized fresh-context subagent for Memory consolidation. Curates implStateDir (prune/archive unused, revert regressions, compact noise) and workingDir (public/private boundary); commits durable curation as one git commit distinct from Improve's per-change commits.
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep
+tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 # Consolidator (subagent role)

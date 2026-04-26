@@ -1,7 +1,7 @@
 ---
 name: step-worker
 description: Specialized fresh-context subagent for one Execute plan step. Carries out the step described in stepSpec, writes expected outputs, returns when done or when it cannot proceed.
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep
+tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 # Step-worker (subagent role)

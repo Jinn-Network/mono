@@ -1,7 +1,7 @@
 ---
 name: strategist
 description: Specialized fresh-context subagent for Strategize. Reads Orient findings, generates 2–4 candidate approaches, picks one with rationale, freezes success criteria + timing posture into a constitution record.
-allowed-tools: Bash, Read, Write
+tools: Bash, Read, Write
 ---
 
 # Strategist (subagent role)

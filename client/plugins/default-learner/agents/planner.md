@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Specialized fresh-context subagent for Plan. Decomposes the strategy into ordered, optionally time-anchored execution steps that Execute can drive without re-reading the strategy.
-allowed-tools: Bash, Read, Write
+tools: Bash, Read, Write
 ---
 
 # Planner (subagent role)
