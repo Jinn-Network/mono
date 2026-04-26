@@ -15,3 +15,6 @@ export type {
   IntentSessionInputs,
   DefaultLearningRestorerConfig,
 } from './types.js';
+export { DefaultLearningRestorerImpl } from './restorer.js';
+export { resolvePluginRoot } from './plugin-path.js';
+export { harvestOutput } from './harvest.js';
