@@ -27,10 +27,10 @@ Capture it for the constitution span:
 
 ```bash
 IMPL_STATE_DIR_SHA=$(git -C "$IMPL_STATE_DIR" rev-parse HEAD)
-SKILL_BUNDLE_CID=$(find "$PLUGIN_ROOT" -type f \( -name '*.md' -o -name '*.sh' -o -name '*.mjs' \) | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)
+SKILL_BUNDLE_CID=$(find "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}" -type f \( -name '*.md' -o -name '*.sh' -o -name '*.mjs' \) | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)
 ```
 
-(`$PLUGIN_ROOT` is the path to this plugin install; if your harness doesn't expose it, hash the loaded skills from their loaded paths.)
+The plugin root is provided by Claude Code as `${CLAUDE_PLUGIN_ROOT}`. Other harnesses may set `$PLUGIN_ROOT` from their session-start hook (the default-learner hook does both for portability — sets and exports `PLUGIN_ROOT`). If neither is set, hash the loaded skills from their loaded paths.
 
 Write `workingDir/.coordinator/boot.json` (downstream phases — particularly Strategize — read it for the constitution span). The shape is:
 

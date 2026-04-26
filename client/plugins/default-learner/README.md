@@ -13,31 +13,27 @@ A drop-in plugin for any agent harness that supports skills + subagents + hooks.
 
 The plugin ships inside the `@jinn-network/client` npm package under `node_modules/@jinn-network/client/plugins/default-learner/`. Per harness:
 
-**Claude Code:**
+**Claude Code (local development — recommended for first install):**
+
+Use `--plugin-dir` to load the plugin for a single session without installing into Claude Code's marketplace cache:
 
 ```bash
-mkdir -p ~/.claude/plugins
-
 # From a project where @jinn-network/client is a dependency:
-cp -r node_modules/@jinn-network/client/plugins/default-learner ~/.claude/plugins/
+PLUGIN_PATH=$(npm root)/@jinn-network/client/plugins/default-learner
 
 # Or if you installed @jinn-network/client globally:
-cp -r "$(npm root -g)/@jinn-network/client/plugins/default-learner" ~/.claude/plugins/
+PLUGIN_PATH="$(npm root -g)/@jinn-network/client/plugins/default-learner"
+
+# Validate the plugin manifest before first use:
+claude plugin validate "$PLUGIN_PATH"
+
+# Then for any session where you want default-learner available:
+claude --plugin-dir "$PLUGIN_PATH" [other args]
 ```
 
-**Codex:**
+For a permanent install via the Claude Code marketplace, use `claude plugin install <plugin>@<marketplace>` once a marketplace listing is published. Until then, `--plugin-dir` is the supported path.
 
-```bash
-mkdir -p ~/.codex/plugins
-
-# From a project where @jinn-network/client is a dependency:
-cp -r node_modules/@jinn-network/client/plugins/default-learner ~/.codex/plugins/
-
-# Or if you installed @jinn-network/client globally:
-cp -r "$(npm root -g)/@jinn-network/client/plugins/default-learner" ~/.codex/plugins/
-```
-
-**Pi.dev / other harnesses:** copy the directory into wherever the harness loads plugins from. Each harness reads its own loader file at the plugin root (`CLAUDE.md`, `AGENTS.md`, etc.).
+**Codex / Pi.dev / other harnesses:** consult your harness's documentation for how to point it at a local plugin directory. The plugin layout (`.claude-plugin/plugin.json` + `skills/` + `agents/` + `hooks/` + `hooks/hooks.json`) is Claude-Code-shaped; harnesses with a different convention may need an adapter.
 
 ## What the harness must provide
 
