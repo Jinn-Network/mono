@@ -55,6 +55,7 @@
     "release:testnet-acceptance:host": "node scripts/testnet-acceptance.mjs",
     "status": "tsx scripts/status.ts",
     "e2e": "tsx test/e2e/validate.ts",
+    "e2e:default-learner": "tsx test/e2e/default-learner-portfolio-v0.ts",
     "e2e-portfolio-v0": "tsx test/e2e/portfolio-v0.ts",
     "e2e-prediction-apy-v0": "tsx test/e2e/prediction-apy-v0.ts",
     "e2e:prediction": "cd ../contracts && yarn compile && cd ../client && tsx test/e2e/prediction-v0.ts",
