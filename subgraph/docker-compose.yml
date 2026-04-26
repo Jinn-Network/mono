@@ -21,6 +21,10 @@ services:
       POSTGRES_PASSWORD: let-me-in
       POSTGRES_DB: graph-node
       PGDATA: /var/lib/postgresql/data
+      # graph-node 0.43+ requires C-locale Postgres; without this it panics on
+      # startup with `relation "deployment_schemas" does not exist` because the
+      # default en_US.utf8 locale produces incompatible collation.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
