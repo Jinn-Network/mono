@@ -68,7 +68,12 @@ EOF
 
 ## Pipeline
 
-*Skip-execute hint:* if the env var `JINN_DEFAULT_LEARNER_SKIP_EXECUTE=true` is set (the daemon-side wrapper sets it when delegating Execute to a kind-specific specialist), skip phase 4 entirely. The wrapper will run Execute externally and populate `workingDir/.execute/` itself before invoking Debrief.
+*Phase-range hint:* if the env var `JINN_DEFAULT_LEARNER_PHASE_RANGE` is set, run only the corresponding subset:
+- `all` (or unset) — run all seven phases.
+- `pre-execute` — run only phases 1–3 (Orient, Strategize, Plan), then return. The daemon-side wrapper will run Execute itself and invoke the coordinator again with `post-execute`.
+- `post-execute` — run only phases 5–7 (Debrief, Improve, Memory consolidation). The daemon-side wrapper has already populated `workingDir/.execute/` from a kind-specific specialist before invoking this pass.
+
+This protocol exists so the daemon's first-match wrapper can wrap kind-specific specialist Execute paths in the learning envelope without the specialist needing to know about the wrapper.
 
 For each phase below, in order:
 

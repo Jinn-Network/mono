@@ -23,6 +23,15 @@ export interface IntentSessionInputs {
   msUntilEndTs: number;
   /** Aborted when window.endTs fires */
   abort: AbortSignal;
+  /**
+   * Optional env vars the adapter should propagate to the harness child
+   * process IN ADDITION to its own ENV_ALLOWLIST. Used by the wrapper to
+   * thread phase-range hints (e.g. JINN_DEFAULT_LEARNER_PHASE_RANGE) to
+   * the coordinator skill running inside the spawned harness.
+   *
+   * Pass-through only. Adapters must not silently drop these.
+   */
+  adapterEnv?: Record<string, string>;
 }
 
 /**

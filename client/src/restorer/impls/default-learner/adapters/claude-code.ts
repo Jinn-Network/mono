@@ -125,6 +125,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     const env = buildAgentEnv({
       IMPL_STATE_DIR: inputs.implStateDir,
       JINN_DEFAULT_LEARNER_PLUGIN_ROOT: pluginRoot,
+      ...(inputs.adapterEnv ?? {}),
     });
 
     const spawnOpts: SpawnOptions = {

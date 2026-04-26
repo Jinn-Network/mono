@@ -5,7 +5,15 @@ import { join } from 'node:path';
 import { DefaultLearningWrapper } from '../../../../src/restorer/impls/default-learner/wrapper.js';
 import { DefaultLearningRestorerImpl } from '../../../../src/restorer/impls/default-learner/index.js';
 import { NoOpHarnessAdapter } from '../../../../src/restorer/impls/default-learner/test-utils/noop-adapter.js';
-import { fakeFullPipelineRun } from '../../../../src/restorer/impls/default-learner/test-utils/fake-plugin-outputs.js';
+import {
+  fakeFullPipelineRun,
+  fakeOrientSummary,
+  fakeStrategy,
+  fakePlan,
+  fakeDebriefAnalysis,
+  fakeImproveSummary,
+  fakeMemoryConsolidationRecord,
+} from '../../../../src/restorer/impls/default-learner/test-utils/fake-plugin-outputs.js';
 import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../../../src/restorer/types.js';
 
 function makeFakeSpecialist(kinds: string[]): RestorerImpl & { runCalled: boolean } {
@@ -80,10 +88,20 @@ describe('DefaultLearningWrapper', () => {
   it('delegates Execute to specialist when kind has one (and skips plugin Execute)', async () => {
     const specialist = makeFakeSpecialist(['portfolio.v0']);
     const adapter = new NoOpHarnessAdapter().on(async (inputs) => {
-      // Simulate plugin running outer phases only.
-      fakeFullPipelineRun(inputs.workingDir, { intentKind: inputs.intentKind ?? 'unknown' });
-      // Confirm wrapper set the skip-execute env hint somehow visible to the adapter.
-      // Wrapper passes this via inputs.adapterEnv (extension we add below).
+      const phaseRange = inputs.adapterEnv?.JINN_DEFAULT_LEARNER_PHASE_RANGE ?? 'all';
+      const wd = inputs.workingDir;
+      if (phaseRange === 'pre-execute') {
+        fakeOrientSummary(wd, inputs.intentId, inputs.intentKind ?? 'unknown');
+        fakeStrategy(wd, 'early-return');
+        fakePlan(wd, 1);
+      } else if (phaseRange === 'post-execute') {
+        fakeDebriefAnalysis(wd, 'yes');
+        fakeImproveSummary(wd);
+        fakeMemoryConsolidationRecord(wd);
+      } else {
+        // 'all' — not reachable in this test (specialist path).
+        fakeFullPipelineRun(wd, { intentKind: inputs.intentKind ?? 'unknown' });
+      }
     });
     const shim = new DefaultLearningRestorerImpl({ adapter });
     const wrapper = new DefaultLearningWrapper({ shim, specialists: [specialist] });
@@ -97,6 +115,45 @@ describe('DefaultLearningWrapper', () => {
       executeSpecialist: 'specialist-portfolio.v0',
       executeReturnReason: 'all-steps-completed',
     });
+
+    // Two shim passes: pre-execute (1-3) and post-execute (5-7).
+    const invocations = adapter.getInvocations();
+    expect(invocations).toHaveLength(2);
+    expect(invocations[0].inputs.adapterEnv?.JINN_DEFAULT_LEARNER_PHASE_RANGE).toEqual('pre-execute');
+    expect(invocations[1].inputs.adapterEnv?.JINN_DEFAULT_LEARNER_PHASE_RANGE).toEqual('post-execute');
+  });
+
+  it('the post-Execute pass sees Execute artifacts the specialist produced', async () => {
+    const specialist = makeFakeSpecialist(['portfolio.v0']);
+    let postExecuteCallSawExecuteArtifact = false;
+    const adapter = new NoOpHarnessAdapter().on(async (inputs) => {
+      const phaseRange = inputs.adapterEnv?.JINN_DEFAULT_LEARNER_PHASE_RANGE ?? 'all';
+      const wd = inputs.workingDir;
+      if (phaseRange === 'pre-execute') {
+        fakeOrientSummary(wd, inputs.intentId, inputs.intentKind ?? 'unknown');
+        fakeStrategy(wd, 'early-return');
+        fakePlan(wd, 1);
+      } else if (phaseRange === 'post-execute') {
+        // Verify .execute/summary.json exists at this point.
+        postExecuteCallSawExecuteArtifact = existsSync(join(wd, '.execute', 'summary.json'));
+        fakeDebriefAnalysis(wd, 'yes');
+        fakeImproveSummary(wd);
+        fakeMemoryConsolidationRecord(wd);
+      } else {
+        // 'all' — for non-specialist path; not reachable in this test.
+        fakeFullPipelineRun(wd, { intentKind: inputs.intentKind ?? 'unknown' });
+      }
+    });
+    const shim = new DefaultLearningRestorerImpl({ adapter });
+    const wrapper = new DefaultLearningWrapper({ shim, specialists: [specialist] });
+
+    const ctx = makeCtx(workingDir, implStateDir, 'portfolio.v0');
+    const out = await wrapper.run(ctx);
+
+    expect(specialist.runCalled).toBe(true);
+    expect(postExecuteCallSawExecuteArtifact).toBe(true); // critical: post-Execute pass had Execute artifacts available
+    expect(adapter.getInvocations()).toHaveLength(2); // two shim passes
+    expect(out.gating.executeSpecialist).toEqual('specialist-portfolio.v0');
   });
 
   it('runs full plugin pipeline (including Execute) when no specialist matches', async () => {

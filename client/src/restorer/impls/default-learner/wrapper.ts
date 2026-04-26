@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   RestorerImpl,
   RestorationContext,
@@ -64,34 +66,30 @@ export class DefaultLearningWrapper implements RestorerImpl {
     const specialist = this.findSpecialist(intentSpec);
 
     if (!specialist) {
-      // No specialist — run the plugin's full pipeline.
+      // No specialist — run the plugin's full pipeline in one pass.
       return this.shim.run(ctx);
     }
 
-    // Specialist path: tell the plugin coordinator to skip its own
-    // Execute phase by setting an env hint the coordinator skill reads.
-    const prevSkip = process.env.JINN_DEFAULT_LEARNER_SKIP_EXECUTE;
-    process.env.JINN_DEFAULT_LEARNER_SKIP_EXECUTE = 'true';
-    try {
-      // Run the plugin (it will skip Execute internally, leaving
-      // workingDir/.execute/ empty).
-      await this.shim.run(ctx);
-    } finally {
-      if (prevSkip === undefined) {
-        delete process.env.JINN_DEFAULT_LEARNER_SKIP_EXECUTE;
-      } else {
-        process.env.JINN_DEFAULT_LEARNER_SKIP_EXECUTE = prevSkip;
-      }
-    }
+    // Specialist path: two shim invocations bracketing the specialist.
 
-    // Now the specialist runs. It writes its own workingDir/.execute/
-    // outputs (and any other artifacts the kind contract requires).
+    // Pass 1 — outer pre-Execute phases (Orient, Strategize, Plan).
+    await this.shim.runWithAdapterEnv(ctx, {
+      JINN_DEFAULT_LEARNER_PHASE_RANGE: 'pre-execute',
+    });
+
+    // Specialist runs the actual Execute. It writes its own kind-specific
+    // outputs but does NOT generally populate workingDir/.execute/, so
+    // we synthesize a minimal Execute summary from its RestorationOutput
+    // before invoking the post-Execute phases.
     const specialistOut = await specialist.run(ctx);
+    synthesizeExecuteSummaryFromSpecialist(ctx.workingDir, specialist.name, specialistOut);
 
-    // Re-harvest workingDir to combine the plugin's outer-phase artifacts
-    // with the specialist's Execute outputs into a single
-    // RestorationOutput. We also bring forward the specialist's
-    // venueRef + any kind-specific gating fields.
+    // Pass 2 — outer post-Execute phases (Debrief, Improve, Memory consolidation).
+    await this.shim.runWithAdapterEnv(ctx, {
+      JINN_DEFAULT_LEARNER_PHASE_RANGE: 'post-execute',
+    });
+
+    // Final harvest combines all phases now that workingDir is fully populated.
     const harvested = harvestOutput(ctx.workingDir);
     return {
       ...specialistOut,
@@ -103,4 +101,36 @@ export class DefaultLearningWrapper implements RestorerImpl {
       },
     };
   }
+}
+
+/**
+ * Specialists historically write their kind-specific outputs but do not
+ * populate the workingDir/.execute/ artifacts the plugin's Debrief phase
+ * expects. Synthesize a minimal summary from the specialist's
+ * RestorationOutput so the post-Execute phases have something to read
+ * and the harvester can lift Execute fields.
+ *
+ * If the specialist later writes its own real summary.json, the harvester
+ * picks that up unchanged on the final harvest pass — this synthesizer is
+ * a fallback only.
+ */
+function synthesizeExecuteSummaryFromSpecialist(
+  workingDir: string,
+  specialistName: string,
+  specialistOut: RestorationOutput,
+): void {
+  const path = join(workingDir, '.execute', 'summary.json');
+  if (existsSync(path)) return; // specialist wrote its own; don't clobber.
+  mkdirSync(join(workingDir, '.execute'), { recursive: true });
+  const synthetic = {
+    stepsCompleted: [`specialist:${specialistName}`],
+    stepsFailed: [],
+    decisions: [],
+    elapsedMs: 0,
+    returnReason: 'all-steps-completed',
+    synthesizedFromSpecialist: true,
+    venueRef: specialistOut.venueRef,
+    specialistGating: specialistOut.gating,
+  };
+  writeFileSync(path, JSON.stringify(synthetic, null, 2));
 }

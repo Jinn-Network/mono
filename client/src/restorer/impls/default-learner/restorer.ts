@@ -38,6 +38,20 @@ export class DefaultLearningRestorerImpl implements RestorerImpl {
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    return this.runWithAdapterEnv(ctx, {});
+  }
+
+  /**
+   * Public escape hatch for the DefaultLearningWrapper. Threads
+   * adapterEnv through IntentSessionInputs so the wrapper can hand
+   * the coordinator skill a phase-range hint without mutating
+   * process.env (which would not propagate to the spawned harness
+   * anyway).
+   */
+  async runWithAdapterEnv(
+    ctx: RestorationContext,
+    adapterEnv: Record<string, string>,
+  ): Promise<RestorationOutput> {
     const window = ctx.intent.window ?? { startTs: 0, endTs: 0 };
     const inputs: IntentSessionInputs = {
       intentId: ctx.intent.id,
@@ -49,6 +63,7 @@ export class DefaultLearningRestorerImpl implements RestorerImpl {
       windowEndTs: window.endTs,
       msUntilEndTs: ctx.msUntilEndTs(),
       abort: ctx.abort,
+      adapterEnv: Object.keys(adapterEnv).length > 0 ? adapterEnv : undefined,
     };
 
     await this.adapter.runIntent(inputs, this.pluginRoot);
