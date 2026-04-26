@@ -236,4 +236,15 @@ Demoted to B2 priority; same bug.
 
 ## Follow-up bd issues
 
-(Filed in T4 once T1 is done.)
+Filed under Plan 4 T4 (commit `<TBD>`):
+
+| Issue | Title | Priority |
+|---|---|---|
+| `jinn-mono-4p6` | hook script .sh extension may not be Windows-portable (B6) | P3 |
+| `jinn-mono-e8o` | validate-plugin.mjs doesn't catch real Claude Code plugin requirements | P2 |
+| `jinn-mono-k8s` | formal learner-loop-test intent kind (Plan 4 T2 follow-up) | P3 |
+| `jinn-mono-iee` | automated two-cycle e2e harness (Plan 4 T3 follow-up) | P3 |
+
+T2 (`learner-loop-test` kind) and T3 (automated e2e harness) deferred — the inline `smoke-test` kind used in the manual smoke verified the loop works without needing a formally registered kind, and the manual cycle-1 + cycle-2 demonstration verified the load-bearing claim without an automated harness. Both are useful for CI / regression catching but aren't required for the "does the cycle work" verification that Plan 4 set out to deliver.
+
+T1 is the substantive deliverable of Plan 4. The headline finding: **the default learner's full cycle works end-to-end against real Claude Code, including the next-run-picks-up-prior-mutations claim.**
