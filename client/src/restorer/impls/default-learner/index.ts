@@ -18,3 +18,5 @@ export type {
 export { DefaultLearningRestorerImpl } from './restorer.js';
 export { resolvePluginRoot } from './plugin-path.js';
 export { harvestOutput } from './harvest.js';
+export { ClaudeCodeHarnessAdapter } from './adapters/claude-code.js';
+export type { ClaudeCodeHarnessAdapterConfig } from './adapters/claude-code.js';

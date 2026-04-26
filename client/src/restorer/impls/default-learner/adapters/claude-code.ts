@@ -26,17 +26,31 @@ export interface ClaudeCodeHarnessAdapterConfig {
  * Allowlist of env vars that propagate to the spawned Claude session.
  * We deliberately limit this to avoid leaking unrelated credentials
  * into the agent process.
+ *
+ * Mirror of the canonical allowlist in client/src/runner/claude.ts.
+ * Hard-won from prior auth/runtime issues — keep in sync with that file.
  */
 const ENV_ALLOWLIST = [
   'PATH',
   'HOME',
+  'USER',
+  'SHELL',
   'LANG',
-  'LC_ALL',
-  'TZ',
+  'TERM',
   'TMPDIR',
-  // Claude Code auth-related vars; the adapter does not set these
-  // itself but propagates them if present.
-  'CLAUDE_CODE_SESSION',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'NODE_PATH',
+  'NODE_OPTIONS',
+  'NPM_CONFIG_PREFIX',
+  // Claude Code auth — needed in Docker where keychain is unavailable.
+  // CLAUDE_CODE_OAUTH_TOKEN is the output of `claude setup-token` (subscription
+  // path, year-long validity); ANTHROPIC_API_KEY is the pay-per-request fallback.
+  // Both are Claude credentials, not Jinn operator secrets, so forwarding is
+  // scoped and intentional. Without these the spawned `claude -p …` fails with
+  // "Not logged in · Please run /login".
+  'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_API_KEY',
 ];
 
@@ -121,6 +135,14 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
 
     return new Promise<void>((resolve, reject) => {
       const child: ChildProcess = this.spawnFn(this.claudePath, args, spawnOpts);
+
+      // If the abort signal already fired before we got here (race), kill
+      // the child immediately. Without this, addEventListener below would
+      // never fire (signals only emit on transition to aborted, not when
+      // already aborted).
+      if (inputs.abort.aborted) {
+        if (!child.killed) child.kill('SIGTERM');
+      }
 
       // Window-end abort: kill child, reject.
       const onAbort = () => {
