@@ -15,10 +15,10 @@ import { PredictionApyV0BaselineImpl } from './prediction-apy-v0-baseline/index.
 import { ClaudeMcpPredictionApyImpl } from './claude-mcp-prediction-apy/index.js';
 import { PredictionApyV0Evaluator } from './prediction-apy-v0-evaluator/index.js';
 import {
-  DefaultLearningRestorerImpl,
-  DefaultLearningWrapper,
-} from './default-learner/index.js';
-import { ClaudeCodeHarnessAdapter } from './default-learner/index.js';
+  ClaudeCodeLearnerImpl,
+  ClaudeCodeLearnerWrapper,
+} from './claude-code-learner/index.js';
+import { ClaudeCodeHarnessAdapter } from './claude-code-learner/index.js';
 
 /**
  * Environment passed to {@link buildRestorerImpls} — same shape for daemon
@@ -148,15 +148,15 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
         }),
   );
 
-  // Build the default-learner wrapper LAST (so it sees all other impls
+  // Build the claude-code-learner wrapper LAST (so it sees all other impls
   // as its specialists pool) but register it FIRST so it wins
   // first-match for every kind.
   const learnerAdapter = new ClaudeCodeHarnessAdapter({
     claudePath: env.claudePath,
     claudeModel: env.claudeModel,
   });
-  const learnerShim = new DefaultLearningRestorerImpl({ adapter: learnerAdapter });
-  const learnerWrapper = new DefaultLearningWrapper({
+  const learnerShim = new ClaudeCodeLearnerImpl({ adapter: learnerAdapter });
+  const learnerWrapper = new ClaudeCodeLearnerWrapper({
     shim: learnerShim,
     specialists: [...out], // snapshot of specialists; wrapper does not delegate to itself
   });

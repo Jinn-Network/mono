@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { SpecKind } from './spec-kind.js';
 
 /**
- * Synthetic intent kind for verifying the default-learner full cycle
+ * Synthetic intent kind for verifying the claude-code-learner full cycle
  * end-to-end. NO venue dependencies, NO real money. The intent describes
  * a trivial deterministic task: write a JSON output file with N named
  * fields each containing a fixed value.
@@ -11,7 +11,7 @@ import type { SpecKind } from './spec-kind.js';
  * Strategize → Plan → Execute → Debrief → Improve → Memory consolidation)
  * with real LLM agents but without the cost / fragility of real-venue
  * kinds. Used by:
- *   - manual smoke testing per docs/superpowers/runbooks/2026-04-26-default-learner-manual-smoke.md
+ *   - manual smoke testing per docs/superpowers/runbooks/2026-04-26-claude-code-learner-manual-smoke.md
  *   - automated yarn e2e:full-cycle harness (gated on claude availability)
  *
  * Plan 4 T2 / bd jinn-mono-k8s.
@@ -37,7 +37,7 @@ export const learnerLoopTest: SpecKind = {
     return { window: intent.window, spec: intent.spec, eligibility: intent.eligibility };
   },
   ui: {
-    description: 'Synthetic test kind for default-learner full-cycle verification',
+    description: 'Synthetic test kind for claude-code-learner full-cycle verification',
     category: 'test',
   },
 };

@@ -1,9 +1,0 @@
-{
-  "name": "default-learner",
-  "description": "Jinn default learning restorer — runs intent restorations through a seven-phase pipeline (Orient → Strategize → Plan → Execute → Debrief → Improve → Memory consolidation) and self-improves between runs by mutating implStateDir.",
-  "version": "0.1.0",
-  "author": {
-    "name": "Jinn Network",
-    "url": "https://github.com/Jinn-Network/mono"
-  }
-}
