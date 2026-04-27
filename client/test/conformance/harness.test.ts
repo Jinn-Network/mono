@@ -10,8 +10,22 @@
  * All tests inject pre-loaded objects via ConformanceOptions to avoid IPFS.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { runConformance } from '../../src/conformance/harness.js';
+
+// Mock IPFS so fixture builders and harness don't make real network calls.
+// The fixture builders call assembleAndSignEnvelope → uploadToIpfs; tests
+// inject pre-built objects via ConformanceOptions so fetchSignedEnvelopeBytesRaw
+// is never reached either. This mirrors the pattern in all check-level tests.
+vi.mock('../../src/adapters/mech/ipfs.js', () => ({
+  uploadToIpfs: vi.fn(async () => 'bafy-mock-cid'),
+  normalizeIpfsRegistryAddUrl: vi.fn((url: string) => url),
+  cidToDigestHex: vi.fn().mockReturnValue('0xdeadbeef00000000000000000000000000000000000000000000000000000000'),
+  digestHexToGatewayUrl: vi.fn((hex: string) => `https://gateway.autonolas.tech/ipfs/${hex}`),
+  fetchFromIpfs: vi.fn(),
+  fetchSignedEnvelopeBytesRaw: vi.fn(),
+  fetchSignedEnvelopeFromIpfs: vi.fn(),
+}));
 import {
   buildGoodRestorationFixture,
   buildGoodVerdictFixture,

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
+import { canonicalJson } from '../../../../src/restorer/engine/canonical-json.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -278,7 +279,8 @@ describe('PredictionApyV0Evaluator', () => {
     );
     const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
     expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
-    const expectedSha256 = createHash('sha256').update(manifest).digest('hex');
+    // Evaluator uses JCS canonical bytes (canonicalJson) to match the upload pipeline.
+    const expectedSha256 = createHash('sha256').update(canonicalJson(JSON.parse(manifest))).digest('hex');
     expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
   });
 });

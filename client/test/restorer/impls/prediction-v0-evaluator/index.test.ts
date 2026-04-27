@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
+import { canonicalJson } from '../../../../src/restorer/engine/canonical-json.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -128,7 +129,6 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('restorationEnvelope.cid uses context restorationEnvelopeCid when present', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
-    const manifestJson = JSON.stringify(manifest);
     const evalIntent = makeEvalRestorationJob(manifest, intent, {
       restorationEnvelopeCid: 'f01551220abcdef1234',
     });
@@ -139,7 +139,8 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
     const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
     expect(vp.restorationEnvelope.cid).toBe('f01551220abcdef1234');
-    const expectedSha256 = createHash('sha256').update(manifestJson).digest('hex');
+    // Evaluator uses JCS canonical bytes (canonicalJson) to match the upload pipeline.
+    const expectedSha256 = createHash('sha256').update(canonicalJson(manifest)).digest('hex');
     expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
   });
 
