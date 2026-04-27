@@ -41,7 +41,6 @@ import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
-import { computeEvidenceSimHash, type EvidenceCheckpointV1 } from '../../earning/evidence-simhash.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
 
 export class MechAdapter implements ExecutionAdapter {
@@ -420,17 +419,9 @@ export class MechAdapter implements ExecutionAdapter {
                 const variant = this.config.routerClaimDeliveryVariant;
                 let evidenceHash: `0x${string}` | undefined;
                 if (variant === 'v2') {
-                  try {
-                    const checkpoint: EvidenceCheckpointV1 = {
-                      version: 1,
-                      desiredStateHash: requestId,
-                      toolCalls: [],
-                      externalInteractions: [],
-                      outcome: 'success',
-                    };
-                    evidenceHash = computeEvidenceSimHash(checkpoint);
-                  } catch (err) {
-                    console.error(`[mech] Failed to compute evidence SimHash for ${requestId}:`, err);
+                  const stored = this.store?.getIntentEvidenceHash(requestId);
+                  if (stored) {
+                    evidenceHash = stored as `0x${string}`;
                   }
                 }
                 await claimDelivery(
