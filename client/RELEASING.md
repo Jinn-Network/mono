@@ -78,24 +78,29 @@ npx @jinn-network/client@canary --help
 
 1. Update `client/package.json` to the next stable semver.
 2. Merge that version bump to `main`.
-3. Run the exact release gates on the release commit:
+3. Prepare the release on the exact release commit:
    ```bash
    cd client
-   yarn typecheck
-   yarn test
-   yarn build
-   yarn pack:smoke
-   yarn release:operator-gate
-   yarn setup:testnet-acceptance-operator
-   yarn release:testnet-acceptance
+   yarn release:client --prepare
    ```
-   The Docker acceptance gate is documented in [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md).
-4. Create the Git tag and GitHub release using the package-specific tag shape:
+   This runs the local gates, Docker testnet acceptance, and writes a report
+   under `client/release-runs/<version>-<timestamp>/`.
+4. Publish from that report:
    ```bash
-   git tag client-vX.Y.Z
-   git push origin client-vX.Y.Z
-   gh release create client-vX.Y.Z --title "client vX.Y.Z"
+   yarn release:client --publish --resume release-runs/<version>-<timestamp>
    ```
+   The publish step creates `client-vX.Y.Z`, pushes it, creates the GitHub
+   release, waits for npm/GHCR workflows, and verifies the published artifacts.
+
+For command-flow validation without the live testnet gate:
+
+```bash
+yarn release:client --prepare --skip-acceptance
+```
+
+`--skip-acceptance` is not a stable-release gate; it exists to test the runner
+itself. The Docker acceptance gate is documented in
+[TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md).
 
 Release workflow contract:
 
@@ -106,7 +111,8 @@ Release workflow contract:
   - `ghcr.io/jinn-network/client:sha-<shortsha>`
   - `ghcr.io/jinn-network/client:latest`
 
-Post-release verification:
+Post-release verification is performed by `yarn release:client --publish`.
+The underlying checks are:
 
 ```bash
 npm install -g @jinn-network/client@latest
@@ -122,6 +128,10 @@ Also verify the documented Docker auth flow exactly as shipped:
 
 ```bash
 claude setup-token                          # on host — produces sk-ant-oat01-...
-echo "CLAUDE_CODE_OAUTH_TOKEN=sk-..." >> .env
+echo "CLAUDE_CODE_OAUTH_TOKEN=sk-..." >> .env.acceptance
 docker compose up -d
 ```
+
+Do not paste Claude OAuth tokens into chat or issue trackers. Keep durable
+release auth in ignored local files such as `client/.env.acceptance`, a local
+secret manager, or a one-run shell environment.

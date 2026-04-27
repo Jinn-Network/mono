@@ -9,7 +9,7 @@
 #   docker run jinn-client doctor --json
 
 # ── Build stage ──────────────────────────────────────────────────────────────
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 
 ARG JINN_BUILD_COMMIT=unknown
 ENV JINN_BUILD_COMMIT=$JINN_BUILD_COMMIT
@@ -35,7 +35,7 @@ COPY tsconfig.json ./
 RUN yarn build
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
-FROM node:20-slim
+FROM node:22-slim
 
 ARG JINN_BUILD_COMMIT=unknown
 ENV JINN_BUILD_COMMIT=$JINN_BUILD_COMMIT
