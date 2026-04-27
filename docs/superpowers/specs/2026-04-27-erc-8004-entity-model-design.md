@@ -3,7 +3,7 @@
 **Version:** 1.0 (decision)
 **Date:** 2026-04-27
 **Status:** Decided. Binds PR #37 cleanup and shapes Phase 1b challenge mechanism + reputation surface.
-**Beads:** see §10 — `jinn-mono-2k6`, `jinn-mono-j07`, `jinn-mono-3zk`, `jinn-mono-9jg`, `jinn-mono-2ff`, `jinn-mono-fud`, `jinn-mono-al7`, `jinn-mono-3q8`, `jinn-mono-g7h`.
+**Beads:** see §10 — `jinn-mono-2k6`, `jinn-mono-j07`, `jinn-mono-3zk`, `jinn-mono-9jg`, `jinn-mono-2ff`, `jinn-mono-fud`, `jinn-mono-al7`, `jinn-mono-3q8`, `jinn-mono-g7h`, `jinn-mono-b18`.
 **Related:**
 
 - `spec/2026-04-21-agentic-data-substrate.md` — substrate thesis; ERC-8004 metadata for license/discovery
@@ -21,7 +21,7 @@ Adopt **operator-rooted ERC-8004 with per-execution metadata commitments**:
 - One agent NFT per operator Safe. Minted once at bootstrap.
 - Per-execution artifacts (envelopes, evaluations) are anchored on chain as `setMetadata(agentId, "<kind>:<cid>", payload)` calls on the operator's NFT — not as separate NFTs per CID.
 - Reputation lives on the operator agent NFT via `ReputationRegistry.giveFeedback`, with feedback bodies naming the specific manifest CID.
-- Challenges live on `ValidationRegistry` keyed by `(validator, agentId, requestHash)` where `requestHash = manifest.evidenceHash`.
+- Operator-initiated validation lives on `ValidationRegistry` keyed by `(validator, agentId, requestHash)` where `requestHash = manifest.evidenceHash`. Adversarial third-party challenges layer on top via an operator-installed `DisputeProxy` (separate spec; see §4.4).
 - A Jinn-owned subgraph synthesizes a queryable `Execution` entity from the events emitted across these surfaces. No on-chain "execution NFT" exists; the entity is a subgraph view.
 - The deployed `0x8004…` registries are consumed as-is. No new contracts are deployed.
 
@@ -90,17 +90,30 @@ with the feedback body naming the specific `manifestHash` (or manifest CID) the 
 
 The contract enforces that the feedback caller is not the agent owner / approved / operator (no self-feedback). This is fine for our use: evaluators are independent agents from restorers by protocol design.
 
-### 4.4 Challenges via `ValidationRegistry.validationRequest`
+### 4.4 Validation via `ValidationRegistry.validationRequest` (operator-initiated)
 
-A challenger calls:
+**Correction (2026-04-27, `jinn-mono-b18`).** A close read of the deployed `ValidationRegistryUpgradeable` (staged at `/tmp/erc8004-ref/`) overturns the original framing of this section as a "third-party challenge" primitive. The contract enforces:
 
 ```solidity
-ValidationRegistry.validationRequest(validator, operatorAgentId, evidenceHash)
+require(
+    msg.sender == owner ||
+    registry.isApprovedForAll(owner, msg.sender) ||
+    registry.getApproved(agentId) == msg.sender,
+    "Not authorized"
+);
 ```
 
-where `evidenceHash` is the manifest hash JinnRouter already commits in `claimDelivery`. The validator answers with `validationResponse(requestHash, …)`. This becomes the on-chain shape of Phase 1b's challenge mechanism: per-execution disputes targeting the specific manifest, anchored to the operator's identity.
+`validationRequest(validatorAddress, agentId, requestURI, requestHash)` is therefore an **operator-initiated self-validation** primitive, not an adversarial-challenge primitive. The agent owner — or an address the owner has approved on the IdentityRegistry NFT — submits a manifest hash and a chosen validator; the validator returns a 0–100 score via `validationResponse(requestHash, …)`. An arbitrary third party cannot reach `validationRequest` without prior operator consent.
 
-**Validator selection** (open vs whitelisted vs staked challenger pool) is **deferred** to Phase 1b spec (see §11). The deployed contract allows any address as `validator`; whether Jinn imposes additional gating is a separate decision.
+**Why this is still useful for Jinn.** Operators voluntarily expose their work to chosen validators (e.g. reputable evaluators, hardware-attestation oracles, or domain-specific reviewers) to earn higher-tier evidence grading. Each successful response anchors a numerical score on chain that the subgraph joins back to the per-execution `Execution` row. This **complements**, and does not replace, the multi-evaluator consensus path on JinnRouter: it is an opt-in upgrade signal, comparable in spirit to a credit reference, that strengthens an operator's per-execution trust without changing the consensus layer.
+
+`requestHash` remains `manifest.evidenceHash` (the same 32-byte hash JinnRouter commits in `claimDelivery`), so the on-chain validation record stays cross-checkable against router state and the IPFS-resolved manifest.
+
+**Wiring.** The existing `client/src/validation/registry.ts` (from `jinn-mono-9jg`) is the **operator-side** client: an operator-authorised wallet calls `requestValidation(...)` against their own `agentId`. No daemon path currently issues these calls; UX integration is its own follow-up.
+
+**Third-party-challenge gap.** Adversarial challenges — where any third party can dispute an operator's manifest without prior approval — require an **operator-installed proxy** contract that the operator has approved (via `setApprovalForAll` or `approve` on the IdentityRegistry NFT) and that exposes a public `requestValidation(...)` entry point. See the companion spec `docs/superpowers/specs/2026-04-27-erc8004-dispute-proxy-design.md` (filed under `jinn-mono-b18`) for the trust model, contract shape, and Phase 1b ship/defer recommendation.
+
+**Validator selection** (open vs. whitelisted vs. staked validator pool) remains **deferred** to a follow-up Phase 1b spec (see §11). The deployed contract accepts any address as `validatorAddress`; whether Jinn imposes additional gating is a separate decision orthogonal to the operator-vs-third-party authorisation issue corrected here.
 
 ### 4.5 Trust signals layered, not inherited
 
@@ -145,7 +158,7 @@ The design call started from three options:
 The chosen design is closest to **(A)**, but sharpened by three points the original framing didn't make:
 
 1. **Per-execution payload, not just per-operator agentURI.** Tier + attestation pointers belong inside the per-execution `setMetadata` call's payload bytes, not in the operator's static agentURI. This is what makes per-execution trust queryable cheaply.
-2. **Validation Registry is first-class for Phase 1b.** Its `(validator, agentId, requestHash)` shape is exactly what Jinn's challenge mechanism needs, once you accept that `requestHash = manifest.evidenceHash`. PR #37 had a guessed ABI here; the real one is a near-perfect fit.
+2. **Validation Registry is first-class for Phase 1b — as an operator-initiated grading primitive.** Its `(validator, agentId, requestHash)` shape, once you accept that `requestHash = manifest.evidenceHash`, is a clean fit for **operator-chosen validation** of a specific manifest. PR #37 had a guessed ABI here; the real one is a near-perfect fit *for that use case*. Adversarial third-party challenges, by contrast, require an operator-installed proxy on top of this primitive (`jinn-mono-b18`, see §4.4 and the DisputeProxy spec).
 3. **Subgraph ownership.** We build our own. The synthesized `Execution` entity is what consumers expect; the on-chain primitives are what the spec allows. The subgraph bridges them.
 
 **(B) is dismissed** as a structural mismatch with the deployed contracts.
@@ -161,8 +174,9 @@ The chosen design is closest to **(A)**, but sharpened by three points the origi
 | Publish an envelope | "File this folder under my cabinet, payload carries tier + attestation" | `IdentityRegistry.setMetadata(myAgentId, "envelope:<cid>", encodedPayload)` |
 | Publish an evaluation | Same shape, different kind prefix | `IdentityRegistry.setMetadata(myAgentId, "evaluation:<cid>", encodedPayload)` |
 | Evaluator settles a verdict | "Pin a review on the operator's cabinet, body names the manifest" | `ReputationRegistry.giveFeedback(restorerAgentId, ..., body=manifestHash)` |
-| Challenger disputes a manifest | "Ask validator V to re-check operator O's manifest M" | `ValidationRegistry.validationRequest(validator, operatorAgentId, manifest.evidenceHash)` |
-| Validator responds | "Here is my finding on that dispute" | `ValidationRegistry.validationResponse(requestHash, ...)` |
+| Operator requests validation | "Ask validator V to grade operator O's own manifest M" (caller must be owner / approved / operator-for-all on the agent NFT) | `ValidationRegistry.validationRequest(validator, operatorAgentId, requestURI, manifest.evidenceHash)` |
+| Validator responds | "Here is my 0–100 score for that manifest" | `ValidationRegistry.validationResponse(requestHash, ...)` |
+| Third-party challenge (opt-in) | "Anyone disputes operator O's manifest M, via the operator-installed proxy" | `DisputeProxy.requestValidation(...)` → forwards to `ValidationRegistry` (see `2026-04-27-erc8004-dispute-proxy-design.md`) |
 | Buyer queries | "All attested envelopes from the last 30 days, validation status not challenged" | Jinn subgraph query (synthesizes from events) |
 
 ## 7. Files affected by this decision
@@ -223,12 +237,14 @@ Filed 2026-04-27:
 | `jinn-mono-al7` | E2E test: Phase 1b challenge flow on Base Sepolia | feature | 2 | `3zk`, `9jg`, `fud` |
 | `jinn-mono-3q8` | Decision Record + spec updates: 8004 entity model | task | 1 | — |
 | `jinn-mono-g7h` | Specify the on-chain commitment payload schema (`tier`, `manifestHash`, `quoteCid`, `sourceMeasurement`) | task | 2 | — |
+| `jinn-mono-b18` | Amend §4.4 + design DisputeProxy spec for adversarial third-party challenges | task | 2 | `9jg` |
 
 ## 11. Deferred questions
 
 These are explicitly **out of scope** for this DR. Each becomes its own Phase 1b spec:
 
 - **Validator selection model.** Open today; Phase 1b spec to decide whether to whitelist, stake-gate, or randomize.
+- **Adversarial third-party challenges.** Require an operator-installed `DisputeProxy` on top of `ValidationRegistry`; trust model, contract shape, and Phase 1b ship/defer recommendation are split out into `docs/superpowers/specs/2026-04-27-erc8004-dispute-proxy-design.md` (`jinn-mono-b18`).
 - **Exact payload byte layout.** Beads §10.9. Coordinates with the TEE envelope spec.
 - **License tag schema** for the substrate-thesis Tier 3 §9 work. Same `setMetadata` pattern, separate spec for the body format.
 - **Cross-chain agentId coordination.** Phase 2 question.
