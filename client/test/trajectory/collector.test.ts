@@ -73,7 +73,7 @@ describe('TrajectoryCollector', () => {
     expect(s1.traceId).toBe(s2.traceId);
   });
 
-  it('scrubs secret attributes and records them in the redactionManifest', () => {
+  it('scrubs secret span attributes and records them in the redactionManifest', () => {
     const s = c.addSpan({
       name: 'llm',
       kind: 'CLIENT',
@@ -99,6 +99,85 @@ describe('TrajectoryCollector', () => {
     expect(snap.redactionManifest.spans[0].redactedKeys).toEqual([
       'http.request.header.authorization',
     ]);
+  });
+
+  it('scrubs secret event attributes and records them in the redactionManifest', () => {
+    // A span whose event carries a secret-keyed attribute (e.g. from an MCP
+    // tool invocation that echoes back a token field).
+    const s = c.addSpan({
+      name: 'mcp',
+      kind: 'CLIENT',
+      startTimeUnixNano: '1',
+      endTimeUnixNano: '2',
+      attributes: { 'jinn.span.kind': 'jinn.mcp_call', 'mcp.tool.name': 'fetch' },
+      events: [
+        {
+          timeUnixNano: '1500000000000000000',
+          name: 'mcp.tool.response',
+          attributes: {
+            'mcp.response.token': 'sk-ant-api03-supersecret1234567890abcdef',
+            'mcp.response.status': 'ok',
+          },
+        },
+      ],
+      status: { code: 'OK' },
+    });
+
+    const event = s.events[0];
+    // Secret-keyed attribute must be scrubbed
+    expect(event.attributes!['mcp.response.token']).toBe('<redacted:mcp.response.token>');
+    // Non-secret attribute is untouched
+    expect(event.attributes!['mcp.response.status']).toBe('ok');
+
+    const snap = c.snapshot();
+    expect(snap.redactionManifest.totalRedactions).toBe(1);
+    expect(snap.redactionManifest.spans[0].redactedKeys).toContain('mcp.response.token');
+  });
+
+  it('scrubs both span attributes and event attributes in the same span', () => {
+    const s = c.addSpan({
+      name: 'llm',
+      kind: 'CLIENT',
+      startTimeUnixNano: '1',
+      endTimeUnixNano: '2',
+      attributes: {
+        'jinn.span.kind': 'jinn.llm_call',
+        'gen_ai.system': 'anthropic',
+        'http.request.header.authorization': 'Bearer tok',
+      },
+      events: [
+        {
+          timeUnixNano: '1500000000000000000',
+          name: 'llm.response',
+          attributes: { 'llm.response.apiKey': 'sk-leaked-key', 'llm.response.tokens': 42 },
+        },
+      ],
+      status: { code: 'OK' },
+    });
+
+    expect(s.attributes['http.request.header.authorization']).toBe(
+      '<redacted:http.request.header.authorization>',
+    );
+    expect(s.events[0].attributes!['llm.response.apiKey']).toBe('<redacted:llm.response.apiKey>');
+    expect(s.events[0].attributes!['llm.response.tokens']).toBe(42);
+
+    const snap = c.snapshot();
+    expect(snap.redactionManifest.totalRedactions).toBe(2);
+  });
+
+  it('passes events without attributes unchanged', () => {
+    const s = c.addSpan({
+      name: 'phase',
+      kind: 'INTERNAL',
+      startTimeUnixNano: '1',
+      endTimeUnixNano: '2',
+      attributes: { 'jinn.span.kind': 'jinn.phase', 'jinn.phase.name': 'design' },
+      events: [{ timeUnixNano: '1500000000000000000', name: 'checkpoint' }],
+      status: { code: 'OK' },
+    });
+    expect(s.events[0].name).toBe('checkpoint');
+    expect(s.events[0].attributes).toBeUndefined();
+    expect(c.snapshot().redactionManifest.totalRedactions).toBe(0);
   });
 
   it('threads parentSpanId through explicit parentage', () => {

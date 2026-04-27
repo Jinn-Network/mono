@@ -3,9 +3,9 @@
  *
  * Scope: docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md §4.3.
  *
- * For every span attribute whose NAME matches a sensitive pattern (*.authorization,
- * *.apiKey, *.bearer, *.password, *.secret, *.token, *.privateKey), the VALUE
- * must NOT match well-known raw credential patterns:
+ * For every span attribute (and event attribute) whose NAME matches a sensitive
+ * pattern (*.authorization, *.apiKey, *.bearer, *.password, *.secret, *.token,
+ * *.privateKey), the VALUE must NOT match well-known raw credential patterns:
  *   - Bearer/JWT tokens (eyJ... or "Bearer ..." headers)
  *   - Anthropic API keys (sk-ant-...)
  *   - OpenAI API keys (sk-...)
@@ -59,15 +59,16 @@ function looksLikeRawCredential(attrName: string, value: string): boolean {
 
 // ─── Check ────────────────────────────────────────────────────────────────────
 
-type SpanLike = { spanId: string; attributes: Record<string, unknown> };
+type EventLike = { attributes?: Record<string, unknown> };
+type SpanLike = { spanId: string; attributes: Record<string, unknown>; events?: EventLike[] };
 type TrajLike = { spans: SpanLike[] };
 
 /**
  * Check id: `secret-scrub.compliance`
  * Layer: 1
  *
- * Walks every span's attributes. For attributes whose name matches a sensitive
- * pattern (via `isSecretKey` from trajectory/secret-scrub.ts), verifies that
+ * Walks every span's attributes AND every span event's attributes. For keys
+ * whose name matches a sensitive pattern (via `isSecretKey`), verifies that
  * the value is either:
  *   - a redaction marker (<redacted:...>), or
  *   - an empty string, or
@@ -87,6 +88,7 @@ export function checkSecretScrub(ctx: ConformanceContext): CheckResult {
   const failures: string[] = [];
 
   for (const span of traj.spans) {
+    // Walk span attributes
     for (const [key, value] of Object.entries(span.attributes)) {
       if (!isSecretKey(key)) continue;
       if (typeof value !== 'string') continue;
@@ -96,6 +98,23 @@ export function checkSecretScrub(ctx: ConformanceContext): CheckResult {
         );
         if (failures.length >= 5) break;
       }
+    }
+    if (failures.length >= 5) break;
+
+    // Walk event attributes — span events can carry secret-keyed attributes
+    // (e.g. an MCP event with an authorization field).
+    for (const event of span.events ?? []) {
+      for (const [key, value] of Object.entries(event.attributes ?? {})) {
+        if (!isSecretKey(key)) continue;
+        if (typeof value !== 'string') continue;
+        if (looksLikeRawCredential(key, value)) {
+          failures.push(
+            `span ${span.spanId} event attr "${key}" appears to contain a raw credential`,
+          );
+          if (failures.length >= 5) break;
+        }
+      }
+      if (failures.length >= 5) break;
     }
     if (failures.length >= 5) break;
   }

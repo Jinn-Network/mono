@@ -8,8 +8,9 @@
  *     or the keccak256(JCS(previous finalized span)) on add — callers do NOT
  *     set it.
  *   - span.attributes['jinn.span.kind'] MUST be supplied by the caller.
- *   - secrets are scrubbed before the span is appended; redacted keys are
- *     recorded against this span's spanId in the redactionManifest.
+ *   - secrets are scrubbed from BOTH span.attributes AND span.events[*].attributes
+ *     before the span is appended; redacted keys are recorded against this
+ *     span's spanId in the redactionManifest.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -64,6 +65,19 @@ export class TrajectoryCollector {
 
     const { scrubbed, redactedKeys } = scrubAttributes(input.attributes);
 
+    // Scrub event attributes — raw subprocess output (and any other event data)
+    // can contain tokens, passwords, or private keys in their attribute values.
+    const scrubbedEvents: Span['events'] = input.events.map((event) => {
+      if (!event.attributes || Object.keys(event.attributes).length === 0) return event;
+      const { scrubbed: scrubbedAttrs, redactedKeys: eventRedacted } = scrubAttributes(
+        event.attributes as Record<string, unknown>,
+      );
+      for (const k of eventRedacted) {
+        redactedKeys.push(k);
+      }
+      return { ...event, attributes: scrubbedAttrs };
+    });
+
     const span: Span = {
       traceId: this.traceId,
       spanId: hex(8),
@@ -76,7 +90,7 @@ export class TrajectoryCollector {
         ...scrubbed,
         'jinn.prevSpanHash': this.lastSpanHash,
       },
-      events: input.events,
+      events: scrubbedEvents,
       status: input.status,
     };
 

@@ -2,12 +2,16 @@
  * Traced subprocess wrapper.
  *
  * Emits one jinn.state_transition span per invocation. stdout + stderr
- * chunks arrive as span events (subprocess.stdout.chunk / stderr.chunk)
- * with the chunk bytes in event attributes — lets the span stay small
- * while preserving I/O for later analysis.
+ * chunks are tracked as span events (subprocess.stdout.chunk /
+ * subprocess.stderr.chunk) but ONLY their byte lengths are recorded as
+ * event attributes — NOT the raw bytes. This prevents subprocess output
+ * (which may include API keys, private keys, or JINN_PASSWORD echoes)
+ * from landing in span events and being uploaded to IPFS.
  *
- * Attested-tier extension (V2): chunk attributes encrypted-or-hashed when
- * policy demands it. V1 records plaintext.
+ * The full output is returned to the caller for in-memory use only.
+ *
+ * Attested-tier extension (V2): chunk content encrypted-at-rest if policy
+ * demands it. V1 records metadata only.
  */
 
 import { spawn } from 'node:child_process';
@@ -45,19 +49,22 @@ export async function tracedSpawn(p: TracedSpawnParams): Promise<TracedSpawnResu
   child.stdout.on('data', (chunk: Buffer) => {
     const s = chunk.toString();
     stdout += s;
+    // Record chunk length only — raw bytes must not enter span events as they
+    // may contain API keys, private keys, or other secrets.
     events.push({
       timeUnixNano: nowNanos(),
       name: 'subprocess.stdout.chunk',
-      attributes: { 'subprocess.stdout.bytes': s },
+      attributes: { 'subprocess.stdout.len': s.length },
     });
   });
   child.stderr.on('data', (chunk: Buffer) => {
     const s = chunk.toString();
     stderr += s;
+    // Record chunk length only — same reason as above.
     events.push({
       timeUnixNano: nowNanos(),
       name: 'subprocess.stderr.chunk',
-      attributes: { 'subprocess.stderr.bytes': s },
+      attributes: { 'subprocess.stderr.len': s.length },
     });
   });
 
