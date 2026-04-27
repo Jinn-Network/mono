@@ -33,8 +33,8 @@ export class ClaudeCodeLearnerImpl implements RestorerImpl {
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
   }
 
-  supports(_spec: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
-    return true;
+  supports(spec: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
+    return spec.type !== 'evaluation';
   }
 
   async run(ctx: RestorationContext): Promise<RestorationOutput> {

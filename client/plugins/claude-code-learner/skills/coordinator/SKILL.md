@@ -18,7 +18,7 @@ You are running one Jinn restoration intent end-to-end. This skill is the entry 
 
 ## Boot
 
-The session-start hook (`hooks/session-start.sh`) has already run with `IMPL_STATE_DIR` set, so:
+The session-start hook (`hooks/session-start`) has already run with `IMPL_STATE_DIR` set, so:
 - `implStateDir` is a git repo
 - The claude-code-learner git author identity is configured
 - HEAD sha is the implStateDir state at run start

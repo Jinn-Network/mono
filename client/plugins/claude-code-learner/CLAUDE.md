@@ -17,7 +17,7 @@ When a Jinn restoration session starts, invoke the `coordinator` skill via the S
 - `strategist`, `planner`, `step-worker`, `analyst`, `promoter`, `consolidator` — one per specialized phase role
 
 **Hooks:**
-- `session-start.sh` — runs once at session start; ensures `implStateDir` is a git repo and sets `claude-code-learner` author identity
+- `hooks/session-start` — runs once at session start; ensures `implStateDir` is a git repo and sets `claude-code-learner` author identity
 
 ## Conventions
 

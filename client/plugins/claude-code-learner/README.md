@@ -6,7 +6,7 @@ A drop-in plugin for any agent harness that supports skills + subagents + hooks.
 
 - **8 skills** — `coordinator` (entry point) plus one per phase. Skills are thin: their job is to launch the right specialized subagent and collect results.
 - **7 agents** — `explorer`, `strategist`, `planner`, `step-worker`, `analyst`, `promoter`, `consolidator`. These are the specialized subagents the phase skills launch in fresh contexts.
-- **1 hook** — `session-start.sh` initializes `implStateDir` as a git repo and sets author identity.
+- **1 hook** — `hooks/session-start` initializes `implStateDir` as a git repo and sets author identity.
 - **1 validator** — `validate-plugin.mjs` checks structure + frontmatter.
 
 ## Installing

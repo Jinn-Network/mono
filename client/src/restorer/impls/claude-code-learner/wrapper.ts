@@ -44,17 +44,17 @@ export class ClaudeCodeLearnerWrapper implements RestorerImpl {
     this.version = config.shim.version;
   }
 
-  supports(_spec: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
-    return true;
+  supports(spec: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
+    return spec.type !== 'evaluation';
   }
 
-  async isReady(): Promise<ReadyStatus> {
-    for (const specialist of this.specialists) {
-      if (specialist.isReady) {
-        const status = await specialist.isReady();
-        if (!status.ready) return status;
-      }
+  async isReady(spec?: { kind: string; type?: 'restoration' | 'evaluation' }): Promise<ReadyStatus> {
+    if (spec) {
+      const specialist = this.findSpecialist(spec);
+      if (!specialist?.isReady) return { ready: true };
+      return specialist.isReady();
     }
+    // No spec context — wrapper itself has no external deps; return ready.
     return { ready: true };
   }
 
@@ -66,12 +66,20 @@ export class ClaudeCodeLearnerWrapper implements RestorerImpl {
     return (await this.findSpecialist(spec)?.canAttempt?.(intent)) ?? { ok: true };
   }
 
-  async onEnable(_args: Record<string, string | undefined>): Promise<EnableResult> {
+  async onEnable(args: Record<string, string | undefined>, spec?: { kind: string; type?: 'restoration' | 'evaluation' }): Promise<EnableResult> {
+    if (spec) {
+      const specialist = this.findSpecialist(spec);
+      if (specialist?.onEnable) return specialist.onEnable(args);
+    }
     return { status: 'ready' };
   }
 
-  async onDisable(): Promise<void> {
-    // no-op: wrapper itself has no disable flow
+  async onDisable(spec?: { kind: string; type?: 'restoration' | 'evaluation' }): Promise<void> {
+    if (spec) {
+      const specialist = this.findSpecialist(spec);
+      await specialist?.onDisable?.();
+    }
+    // no-op when no spec or no matching specialist
   }
 
   /**

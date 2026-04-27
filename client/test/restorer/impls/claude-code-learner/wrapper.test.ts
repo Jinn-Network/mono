@@ -92,12 +92,14 @@ describe('ClaudeCodeLearnerWrapper', () => {
     rmSync(implStateDir, { recursive: true, force: true });
   });
 
-  it('supports() always returns true (first-match)', () => {
+  it('supports() returns true for restoration kinds, false for evaluation (restoration-only wrapper)', () => {
     const adapter = new NoOpHarnessAdapter();
     const shim = new ClaudeCodeLearnerImpl({ adapter });
     const wrapper = new ClaudeCodeLearnerWrapper({ shim, specialists: [] });
     expect(wrapper.supports({ kind: 'portfolio.v0' })).toBe(true);
     expect(wrapper.supports({ kind: 'random.kind' })).toBe(true);
+    expect(wrapper.supports({ kind: 'portfolio.v0', type: 'restoration' })).toBe(true);
+    expect(wrapper.supports({ kind: 'portfolio.v0', type: 'evaluation' })).toBe(false);
   });
 
   it('delegates Execute to specialist when kind has one (and skips plugin Execute)', async () => {
@@ -196,7 +198,7 @@ describe('ClaudeCodeLearnerWrapper', () => {
   });
 
   describe('gate method delegation', () => {
-    it('isReady() delegates to specialist and propagates not-ready status', async () => {
+    it('isReady(spec) delegates to kind-matched specialist and propagates not-ready status', async () => {
       const specialist = makeSpecialistWithGates(['portfolio.v0'], {
         async isReady(): Promise<ReadyStatus> {
           return { ready: false, reason: 'no api-wallet' };
@@ -206,22 +208,37 @@ describe('ClaudeCodeLearnerWrapper', () => {
       const shim = new ClaudeCodeLearnerImpl({ adapter });
       const wrapper = new ClaudeCodeLearnerWrapper({ shim, specialists: [specialist] });
 
-      const status = await wrapper.isReady!();
+      const status = await wrapper.isReady!({ kind: 'portfolio.v0', type: 'restoration' });
       expect(status.ready).toBe(false);
       expect(status.reason).toBe('no api-wallet');
     });
 
-    it('isReady() returns ready when no specialist defines isReady', async () => {
+    it('isReady() with no spec returns ready (wrapper has no external deps)', async () => {
+      const specialist = makeSpecialistWithGates(['portfolio.v0'], {
+        async isReady(): Promise<ReadyStatus> {
+          return { ready: false, reason: 'no api-wallet' };
+        },
+      });
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new ClaudeCodeLearnerImpl({ adapter });
+      const wrapper = new ClaudeCodeLearnerWrapper({ shim, specialists: [specialist] });
+
+      // No spec — wrapper itself has no external deps; returns ready regardless of specialist state.
+      const status = await wrapper.isReady!();
+      expect(status.ready).toBe(true);
+    });
+
+    it('isReady(spec) returns ready when no specialist defines isReady', async () => {
       const specialist = makeFakeSpecialist(['portfolio.v0']);
       const adapter = new NoOpHarnessAdapter();
       const shim = new ClaudeCodeLearnerImpl({ adapter });
       const wrapper = new ClaudeCodeLearnerWrapper({ shim, specialists: [specialist] });
 
-      const status = await wrapper.isReady!();
+      const status = await wrapper.isReady!({ kind: 'portfolio.v0', type: 'restoration' });
       expect(status.ready).toBe(true);
     });
 
-    it('isReady() returns ready when all specialists report ready', async () => {
+    it('isReady(spec) returns ready when matching specialist reports ready', async () => {
       const specialist = makeSpecialistWithGates(['portfolio.v0'], {
         async isReady(): Promise<ReadyStatus> {
           return { ready: true };
@@ -231,8 +248,46 @@ describe('ClaudeCodeLearnerWrapper', () => {
       const shim = new ClaudeCodeLearnerImpl({ adapter });
       const wrapper = new ClaudeCodeLearnerWrapper({ shim, specialists: [specialist] });
 
-      const status = await wrapper.isReady!();
+      const status = await wrapper.isReady!({ kind: 'portfolio.v0', type: 'restoration' });
       expect(status.ready).toBe(true);
+    });
+
+    it('isReady(spec) delegates only to the kind-matched specialist — unrelated not-ready specialist does not block', async () => {
+      // Hyperliquid specialist is not-ready (e.g. no api-wallet configured).
+      const hyperliquidSpecialist = makeSpecialistWithGates(['hyperliquid.v0'], {
+        async isReady(): Promise<ReadyStatus> {
+          return { ready: false, reason: 'hyperliquid api-wallet not configured' };
+        },
+      });
+      // Portfolio specialist is ready.
+      const portfolioSpecialist = makeSpecialistWithGates(['portfolio.v0'], {
+        async isReady(): Promise<ReadyStatus> {
+          return { ready: true };
+        },
+      });
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new ClaudeCodeLearnerImpl({ adapter });
+      const wrapper = new ClaudeCodeLearnerWrapper({ shim, specialists: [hyperliquidSpecialist, portfolioSpecialist] });
+
+      // Calling isReady for a portfolio.v0 intent must NOT be blocked by hyperliquid being not-ready.
+      const status = await wrapper.isReady!({ kind: 'portfolio.v0', type: 'restoration' });
+      expect(status.ready).toBe(true);
+    });
+
+    it('isReady(spec) propagates not-ready from the kind-matched specialist', async () => {
+      const hyperliquidSpecialist = makeSpecialistWithGates(['hyperliquid.v0'], {
+        async isReady(): Promise<ReadyStatus> {
+          return { ready: false, reason: 'hyperliquid api-wallet not configured' };
+        },
+      });
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new ClaudeCodeLearnerImpl({ adapter });
+      const wrapper = new ClaudeCodeLearnerWrapper({ shim, specialists: [hyperliquidSpecialist] });
+
+      // Calling isReady for a hyperliquid.v0 intent should propagate not-ready.
+      const status = await wrapper.isReady!({ kind: 'hyperliquid.v0', type: 'restoration' });
+      expect(status.ready).toBe(false);
+      expect(status.reason).toBe('hyperliquid api-wallet not configured');
     });
 
     it('canAttempt() delegates to specialist for matching kind and propagates rejection', async () => {

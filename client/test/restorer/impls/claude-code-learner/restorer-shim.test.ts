@@ -43,11 +43,13 @@ describe('ClaudeCodeLearnerImpl — shim lifecycle (NoOp adapter)', () => {
     expect(impl.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 
-  it('supports() returns true for any kind in Plan 2', () => {
+  it('supports() returns true for restoration kinds but false for evaluation (restoration-only impl)', () => {
     const impl = new ClaudeCodeLearnerImpl({ adapter: new NoOpHarnessAdapter() });
     expect(impl.supports({ kind: 'portfolio.v0' })).toBe(true);
     expect(impl.supports({ kind: 'prediction.v0' })).toBe(true);
-    expect(impl.supports({ kind: 'anything', type: 'evaluation' })).toBe(true);
+    expect(impl.supports({ kind: 'portfolio.v0', type: 'restoration' })).toBe(true);
+    expect(impl.supports({ kind: 'portfolio.v0', type: 'evaluation' })).toBe(false);
+    expect(impl.supports({ kind: 'anything', type: 'evaluation' })).toBe(false);
   });
 
   it('run(ctx) invokes adapter with derived IntentSessionInputs and harvests output', async () => {

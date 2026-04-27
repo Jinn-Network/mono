@@ -51,7 +51,7 @@ When a step fails its success signal or a worker returns without expected output
 
 - **Continue** — accept partial; advance.
 - **Retry-step** — spawn a fresh worker for the same step. Cap at 2 retries unless step `abortCondition` says otherwise.
-- **Replan** — archive the current plan and re-invoke the plan skill, then continue Execute on the new plan. Concretely: rename `workingDir/.plan/plan.json` to `workingDir/.plan/plan-v<N>.json` where N is the next unused integer (start at 1), then load `Skill plan` again. The plan skill writes a fresh `plan.json` based on what's now in `workingDir/` (including the archived prior plans, the execute log up to the failure, and a new `workingDir/.plan/replan-context.json` you write with `{ failedStepId, blockers, partialOutputs[] }`). Continue Execute on the new `plan.json`.
+- **Replan** — archive the current plan and re-invoke the plan skill, then continue Execute on the new plan. Concretely: rename `workingDir/.plan/plan.json` to `workingDir/.plan/plan-v<N>.json` where N is the next unused integer (start at 1), then load `Skill claude-code-learner:plan` again. The plan skill writes a fresh `plan.json` based on what's now in `workingDir/` (including the archived prior plans, the execute log up to the failure, and a new `workingDir/.plan/replan-context.json` you write with `{ failedStepId, blockers, partialOutputs[] }`). Continue Execute on the new `plan.json`.
 - **Abort** — write `workingDir/.errors/execute.json` with failure context; exit Execute. Coordinator continues to Debrief / Improve / Memory consolidation so partial work is harvested.
 
 Explain your judgment in `workingDir/.execute/log.jsonl`.
