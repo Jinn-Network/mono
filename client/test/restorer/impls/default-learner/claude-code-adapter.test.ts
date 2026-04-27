@@ -19,6 +19,13 @@ function makeInputs(overrides: Partial<IntentSessionInputs> = {}): IntentSession
     intentId: 'cc-test-1',
     intentCid: 'bafycc',
     intentKind: 'portfolio.v0',
+    intentBody: {
+      id: 'cc-test-1',
+      description: 'Test portfolio restoration',
+      spec: { kind: 'portfolio.v0', target: 0.5 },
+      type: 'restoration',
+      eligibility: { minBalance: 100 },
+    },
     implStateDir: '/tmp/fake-state',
     workingDir: '/tmp/fake-work',
     windowStartTs: Date.now() - 1000,
@@ -45,8 +52,14 @@ describe('ClaudeCodeHarnessAdapter', () => {
     expect(args).toEqual(expect.arrayContaining(['-p']));
     const promptArg = (args as string[])[1];
     expect(promptArg).toContain('cc-test-1');
-    expect(promptArg).toContain('coordinator');
+    expect(promptArg).toContain('default-learner:coordinator');
+    expect(promptArg).toContain('JINN_DEFAULT_LEARNER_PHASE_RANGE');
+    expect(promptArg).toContain('Test portfolio restoration');
+    expect(promptArg).toContain('portfolio.v0');
+    expect(promptArg).toContain('restoration');
+    expect(promptArg).toContain('minBalance');
     expect(promptArg).toContain('/tmp/fake-work');
+    expect(args).toEqual(expect.arrayContaining(['--plugin-dir', '/path/to/plugin']));
     expect((opts as { env: Record<string, string> }).env.IMPL_STATE_DIR).toEqual('/tmp/fake-state');
     expect((opts as { env: Record<string, string> }).env.JINN_DEFAULT_LEARNER_PLUGIN_ROOT).toEqual('/path/to/plugin');
     expect((opts as { cwd: string }).cwd).toEqual('/tmp/fake-work');

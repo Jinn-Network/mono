@@ -68,7 +68,7 @@ function buildAgentEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
  */
 function buildInitialPrompt(inputs: IntentSessionInputs): string {
   return [
-    'You are running a Jinn restoration intent. Invoke the `coordinator` skill via the Skill tool to begin.',
+    'You are running a Jinn restoration intent. Invoke the `default-learner:coordinator` skill via the Skill tool to begin.',
     '',
     'Session inputs (refer to these when the coordinator skill or any phase asks for them):',
     `- intent.id = ${inputs.intentId}`,
@@ -79,8 +79,11 @@ function buildInitialPrompt(inputs: IntentSessionInputs): string {
     `- window.startTs = ${inputs.windowStartTs} (ms since epoch)`,
     `- window.endTs = ${inputs.windowEndTs} (ms since epoch)`,
     `- msUntilEndTs = ${inputs.msUntilEndTs}`,
+    inputs.intentBody
+      ? `\nintent (full body):\n${JSON.stringify(inputs.intentBody, null, 2)}`
+      : '',
     '',
-    'Run all seven phases and return when complete.',
+    'Run the phases specified by JINN_DEFAULT_LEARNER_PHASE_RANGE (defaults to all seven if unset) and return when complete.',
   ]
     .filter((line) => line !== '')
     .join('\n');
@@ -121,6 +124,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     const prompt = buildInitialPrompt(inputs);
     const args: string[] = ['-p', prompt];
     if (this.claudeModel) args.push('--model', this.claudeModel);
+    args.push('--plugin-dir', pluginRoot);
 
     const env = buildAgentEnv({
       IMPL_STATE_DIR: inputs.implStateDir,

@@ -57,6 +57,7 @@ export class DefaultLearningRestorerImpl implements RestorerImpl {
       intentId: ctx.intent.id,
       intentCid: ctx.intentCid,
       intentKind: ctx.intent.spec?.kind,
+      intentBody: ctx.intent as IntentSessionInputs['intentBody'],
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,
       windowStartTs: window.startTs,

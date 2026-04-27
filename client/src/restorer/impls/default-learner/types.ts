@@ -24,6 +24,20 @@ export interface IntentSessionInputs {
   /** Aborted when window.endTs fires */
   abort: AbortSignal;
   /**
+   * Full intent body from ctx.intent. Passed verbatim into the initial prompt
+   * so the coordinator skill does not need to read workingDir/intent.json.
+   * Includes description, spec, type, eligibility, and window.
+   */
+  intentBody?: {
+    id?: string;
+    description?: string;
+    spec?: { kind: string } & Record<string, unknown>;
+    type?: string;
+    eligibility?: Record<string, unknown>;
+    window?: { startTs: number; endTs: number };
+    [key: string]: unknown;
+  };
+  /**
    * Optional env vars the adapter should propagate to the harness child
    * process IN ADDITION to its own ENV_ALLOWLIST. Used by the wrapper to
    * thread phase-range hints (e.g. JINN_DEFAULT_LEARNER_PHASE_RANGE) to
