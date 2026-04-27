@@ -121,11 +121,20 @@ type Execution @entity(immutable: false) {
   "How many times this exact (agentId, metadataKey) has been (re)published"
   publishCount: Int!
 
-  "JinnRouter request id this execution was filed in response to (if any)"
+  """
+  JinnRouter request id this execution was filed in response to (if any).
+
+  NOT YET POPULATED: Execution.routerJob and Execution.deliveredAt are null
+  for all executions until JinnRouter emits an event that includes evidenceHash,
+  or until ERC-8004 metadata payload v2 includes requestId so the subgraph can
+  build the join deterministically. The previous join (manifestHash vs requestId)
+  compared values from different domains and has been removed. See subgraph
+  handler identity.ts for full explanation.
+  """
   jinnRouterRequestId: Bytes
   routerJob: RouterJob
 
-  "Block timestamp of the on-chain delivery claim, if matched"
+  "Block timestamp of the on-chain delivery claim, if matched. See jinnRouterRequestId note — currently always null."
   deliveredAt: BigInt
 
   validations: [Validation!]! @derivedFrom(field: "execution")

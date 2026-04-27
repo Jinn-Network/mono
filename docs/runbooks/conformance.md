@@ -76,7 +76,7 @@ Conformance report for bafybeiabc123...
 | `envelope.payload` | Payload against `KIND_PAYLOADS[kind][role]` for the declared kind + role. |
 | `envelope.hash-signature` | Recomputes `keccak256(JCS(envelope - signature))` and verifies it matches `signature.hash`; then recovers the signer from `(hash, sig)` and checks it matches `signature.signer`. |
 | `trajectory.schema` | Full trajectory against `JinnTrajectoryV1Schema`. Skipped when `envelope.trajectory` is null. |
-| `trajectory.hash-chain` | Every span's `jinn.prevSpanHash` matches the hash of the previous span (span[0] links to genesis = `keccak256("jinn.trajectory.genesis:<intent.cid>")`). Skipped when trajectory is absent. |
+| `trajectory.hash-chain` | Every span's `jinn.prevSpanHash` matches the hash of the previous span (span[0] links to genesis = `keccak256(JCS({ runStart: intentCid }))`). Skipped when trajectory is absent. |
 | `trajectory.span-profile` | Every span has the required attributes for its `jinn.span.kind` per `SPAN_PROFILE`. Unknown kinds fail immediately. |
 | `artifacts.vocabulary` | Required artifact types are present: `output.<kind>` (always for restoration), `system_snapshot` (restoration), `trajectory` (when `envelope.trajectory` is non-null). |
 | `artifacts.linkage` | Bidirectional: every `artifact.metadata.producedBy.spanId` references a real span; every `jinn.artifact.emit` span's `jinn.artifact.cid` is in `envelope.artifacts[]`. |

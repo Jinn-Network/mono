@@ -606,7 +606,22 @@ export class FleetBootstrapper {
       }
     }
 
-    if (svc.step === 'complete') return state;
+    if (svc.step === 'complete') {
+      // Legacy operator recovery: agent NFT was minted (agent_id set) but the
+      // Safe was never bound via IdentityRegistry.setAgentWallet. This happens
+      // for operators who ran bootstrap after the mint step landed (jinn-mono-j07)
+      // but before the Safe-binding feature shipped (jinn-mono-aev). Without this
+      // check they would remain permanently unbound.
+      if (svc.agent_id && svc.safe_address && svc.safe_bound_to_agent !== true) {
+        console.error(
+          `[fleet-bootstrap] Service ${index}: legacy agent_id=${svc.agent_id} with unbound Safe; running binding step.`,
+        );
+        state = await this.stepRegisterAgent(state, mnemonic, index);
+        // Restore step to complete after the binding sub-step finishes.
+        state = await this.store.updateService(index, { step: 'complete' });
+      }
+      return state;
+    }
 
     if (this.stakingMode === 'standard') {
       return this.resumeServiceStandard(state, mnemonic, index);

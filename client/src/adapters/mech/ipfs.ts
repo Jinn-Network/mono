@@ -368,16 +368,70 @@ export async function fetchTrajectoryFromIpfs(
 }
 
 /**
+ * Fetch raw bytes from IPFS by CID.
+ *
+ * Unlike `fetchFromIpfs`, this does not attempt JSON parsing — it returns
+ * the raw `Uint8Array` from the gateway response. Use for source files
+ * (`.ts`, `.js`, `text/plain`, etc.) that are not JSON documents.
+ */
+export async function fetchRawBytesFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<Uint8Array> {
+  const base = normalizeIpfsGatewayBase(gatewayUrl);
+  const candidates = buildIpfsFetchCidPathCandidates(cid);
+  const errors: string[] = [];
+  for (const cidPath of candidates) {
+    for (const [name, baseUrl] of [
+      ['primary', base] as const,
+      ['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const,
+    ]) {
+      const url = `${baseUrl}${cidPath}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
+      try {
+        return await fetchRawBytesFromUrl(url, controller.signal);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push(`${name}:${url.slice(0, 100)}: ${message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  throw new Error(`IPFS raw bytes fetch failed after all candidates: ${errors.join(' | ')}`);
+}
+
+/**
+ * Fetch a text file from IPFS by CID.
+ *
+ * Fetches raw bytes via `fetchRawBytesFromIpfs` and decodes them as UTF-8.
+ * Use for source files (`.ts`, `.js`, `text/plain`, etc.) that are not JSON.
+ */
+export async function fetchTextFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<string> {
+  const bytes = await fetchRawBytesFromIpfs(gatewayUrl, cid);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+/**
  * Fetch a source bundle from IPFS by CID.
  *
  * V1 acceptable impl: the bundle root is a JSON manifest listing files by
- * relative path and CID. We fetch the manifest then fetch each file.
+ * relative path and CID. We fetch the manifest as JSON, then fetch each
+ * listed source file as raw bytes (decoded to UTF-8 via TextDecoder).
+ * Source files are typically `.ts` / `.js` / `text/plain` — not JSON —
+ * so they must NOT be fetched through the JSON-only `fetchFromIpfs` path.
+ *
  * Format: `{ files: Array<{ path: string; cid: string }> }`
  */
 export async function fetchSourceBundleFromIpfs(
   gatewayUrl: string,
   bundleCid: string,
 ): Promise<{ files: Map<string, string>; manifest?: Record<string, unknown> }> {
+  // Manifest is a JSON document — JSON fetch is correct here.
   const manifest = await fetchFromIpfs(gatewayUrl, bundleCid) as Record<string, unknown>;
   const fileEntries = manifest['files'] as Array<{ path: string; cid: string }> | undefined;
 
@@ -385,8 +439,9 @@ export async function fetchSourceBundleFromIpfs(
   if (Array.isArray(fileEntries)) {
     await Promise.all(
       fileEntries.map(async ({ path, cid }) => {
-        const content = await fetchFromIpfs(gatewayUrl, cid) as string;
-        files.set(path, typeof content === 'string' ? content : JSON.stringify(content));
+        // Source files are raw text, not JSON — use fetchTextFromIpfs.
+        const content = await fetchTextFromIpfs(gatewayUrl, cid);
+        files.set(path, content);
       }),
     );
   }

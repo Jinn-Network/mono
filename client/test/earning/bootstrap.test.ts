@@ -736,6 +736,136 @@ describe('Fleet bootstrap', () => {
     expect(callArgs.chainId).toBe(8453);
   });
 
+  it('resume path: complete service with agent_id + safe_bound_to_agent=false runs binding step', async () => {
+    // Should-fix #3: legacy operator who minted agent NFT (agent_id set) but
+    // never ran the Safe-binding step (safe_bound_to_agent=false). Resuming
+    // with step='complete' must detect this and call stepRegisterAgent once,
+    // then remain 'complete'.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    // Service is 'complete', has an agent_id, but safe was never bound.
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'complete',
+          error: null,
+          agent_id: '555',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'aa'.repeat(32),
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    // On-chain staking state is 1 (staked), so eviction recovery path is skipped.
+    vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(1);
+
+    // Spy on stepRegisterAgent to assert it is called for the binding step.
+    const stepRegisterSpy = vi
+      .spyOn(bootstrapper as any, 'stepRegisterAgent')
+      .mockImplementation(async (_s: any, _m: any, index: number) => {
+        // Simulate the binding completing: safe_bound_to_agent flips to true,
+        // step advances to agent_registered (the real method's exit state).
+        return store.updateService(index, {
+          safe_bound_to_agent: true,
+          step: 'agent_registered',
+        });
+      });
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(true);
+    // stepRegisterAgent must have been called to complete the binding.
+    expect(stepRegisterSpy).toHaveBeenCalledTimes(1);
+    const svc = result.fleet_state.services[0];
+    // Service must remain 'complete' after the binding step runs.
+    expect(svc.step).toBe('complete');
+    // Binding flag persisted.
+    expect(svc.safe_bound_to_agent).toBe(true);
+    // agent_id preserved.
+    expect(svc.agent_id).toBe('555');
+  });
+
+  it('resume path: complete service with agent_id + safe_bound_to_agent=true skips binding (no-op)', async () => {
+    // Counterpart: already-bound legacy operator must NOT re-run binding.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'complete',
+          error: null,
+          agent_id: '555',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'aa'.repeat(32),
+          safe_bound_to_agent: true,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(1);
+
+    const stepRegisterSpy = vi.spyOn(bootstrapper as any, 'stepRegisterAgent');
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(true);
+    // Safe already bound — binding step must NOT run.
+    expect(stepRegisterSpy).not.toHaveBeenCalled();
+    const svc = result.fleet_state.services[0];
+    expect(svc.step).toBe('complete');
+  });
+
   it('agent_registered step short-circuits bind when safe_bound_to_agent already true', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);

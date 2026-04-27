@@ -11,7 +11,6 @@ import {
   Execution,
   MetadataEntry,
   URIUpdate,
-  RouterJob,
 } from "../../generated/schema";
 
 import {
@@ -21,7 +20,6 @@ import {
   executionId,
   executionIdFallback,
   metadataEntryId,
-  routerJobId,
 } from "../utils";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -141,19 +139,17 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
       exec.sourceMeasurement = sm;
     }
 
-    // Best-effort RouterJob join: if a RouterJob with id == manifestHash hex
-    // exists, link it. (The router emits requestId == bytes32; the manifest
-    // hash is published by the operator independently. They may or may not
-    // match — see DR §4.4.)
-    let jobId = routerJobId(decoded.manifestHash);
-    let job = RouterJob.load(jobId);
-    if (job !== null) {
-      exec.jinnRouterRequestId = decoded.manifestHash;
-      exec.routerJob = job.id;
-      if (job.claimedAt !== null) {
-        exec.deliveredAt = job.claimedAt;
-      }
-    }
+    // NOTE: Execution.routerJob and Execution.deliveredAt are intentionally
+    // NOT populated here. The previous code compared manifestHash (an operator-
+    // published keccak256 of envelope bytes) to RouterJob.id (which equals
+    // JinnRouter requestId — a separate bytes32 domain). That join was
+    // incorrect: the two values are from different domains and will rarely
+    // match, producing silent missing or accidental links.
+    //
+    // These fields remain null until JinnRouter emits an event that includes
+    // evidenceHash, or until ERC-8004 metadata payload v2 includes requestId
+    // so the subgraph can build the join deterministically.
+    // See: docs/superpowers/specs — "subgraph routerJob join gap".
   } else {
     exec.tier = "UNKNOWN";
   }
