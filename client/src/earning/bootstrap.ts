@@ -38,6 +38,7 @@ import {
   initDeployedSafe,
   initPredictedSafe,
 } from './safe-adapter.js';
+import { bindAgentWalletToSafe } from './agent-wallet-binding.js';
 import { FleetStateStore } from './store.js';
 import {
   generateMnemonic,
@@ -930,25 +931,33 @@ export class FleetBootstrapper {
   }
 
   /**
-   * ERC-8004 IdentityRegistry mint (jinn-mono-j07).
+   * ERC-8004 IdentityRegistry mint + Safe wallet bind (jinn-mono-j07,
+   * jinn-mono-aev).
    *
-   * Mints one operator agent NFT per service Safe; the agent EOA owns
-   * the token. Persists `agent_id` (and metadata) to state immediately
-   * after the receipt parses, so a crash between register and the
-   * subsequent `setAgentWallet` does not lose the token.
+   * Two on-chain effects, gated independently for idempotency:
    *
-   * v0 uses an empty `agentURI` — operators are expected to populate
-   * it later via `setAgentURI` once an off-chain agent card is in
-   * scope. Bootstrap is not blocked on producing an agent card.
+   * 1. **Mint** (jinn-mono-j07): one operator agent NFT per service Safe;
+   *    the agent EOA owns the token. Persists `agent_id` (and metadata)
+   *    to state immediately after the receipt parses, so a crash between
+   *    register and the subsequent `setAgentWallet` does not lose the
+   *    token. v0 uses an empty `agentURI` — operators are expected to
+   *    populate it later via `setAgentURI`. Re-run with `svc.agent_id`
+   *    already set short-circuits the mint.
    *
-   * Idempotent: a re-run with `svc.agent_id` already set short-circuits
-   * to `step: 'agent_registered'` (or further) without re-mint.
+   * 2. **Bind** (jinn-mono-aev): `IdentityRegistry.setAgentWallet(agentId,
+   *    safe, deadline, sig)` from the agent EOA. The contract recovers
+   *    `sig` against the Safe via ERC-1271; we wrap the EIP-712
+   *    AgentWalletSet digest in Safe's SafeMessage typed-data and
+   *    raw-ECDSA-sign with the sole owner (= agent EOA). On success,
+   *    `safe_bound_to_agent` flips to true. Re-run with
+   *    `svc.safe_bound_to_agent` already true short-circuits the bind.
+   *    See `agent-wallet-binding.ts` + spec §4.1.
    *
-   * `setAgentWallet` is **stubbed** in this revision — the Safe
-   * ERC-1271 / EIP-712 wrapping flow (typed data digest → Safe
-   * `SafeMessage` wrap → owner ECDSA → contract-signature blob) is
-   * tracked separately. `safe_bound_to_agent` is therefore left
-   * `false`. See entity-model spec §4.1 + §6.
+   * Folded into a single step (rather than a discrete state) because the
+   * existing `safe_bound_to_agent` flag already provides per-effect
+   * idempotency, and the order is fixed (mint → bind → complete). Both
+   * sub-steps re-enter cleanly on the existing `mech_deployed |
+   * agent_registered` step guard.
    */
   private async stepRegisterAgent(
     state: FleetState,
@@ -956,7 +965,7 @@ export class FleetBootstrapper {
     index: number,
   ): Promise<FleetState> {
     void state;
-    const svc = (await this.store.load(this.chain)).services.find(s => s.index === index);
+    let svc = (await this.store.load(this.chain)).services.find(s => s.index === index);
     if (!svc) throw new Error(`Service ${index} not found in state`);
 
     const identityRegistry = this.config.identityRegistry
@@ -968,86 +977,131 @@ export class FleetBootstrapper {
       );
     }
 
-    // Idempotency: if we have an agentId already, skip the mint.
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+
+    // ── Sub-step A: mint NFT (skip if agent_id is already set). ─────────
+    let agentId: string;
     if (svc.agent_id) {
       console.error(
         `[fleet-bootstrap] Service ${index}: ERC-8004 agent already registered ` +
         `(agentId=${svc.agent_id}); skipping mint.`,
       );
-      return this.store.updateService(index, {
+      agentId = svc.agent_id;
+      svc = await this.firstServiceUpdate(index, {
         identity_registry_address: svc.identity_registry_address ?? getAddress(identityRegistry),
+        step: 'agent_registered',
+      });
+    } else {
+      // v0: empty agentURI. The richer agent card (per §6 of the spec) is
+      // future work — operators may later call `setAgentURI`.
+      const agentURI = '';
+      const registerData = encodeFunctionData({
+        abi: IDENTITY_REGISTRY_ABI,
+        functionName: 'register',
+        args: [agentURI],
+      }) as Hex;
+
+      console.error(
+        `[fleet-bootstrap] Service ${index}: minting ERC-8004 agent NFT ` +
+        `(IdentityRegistry=${identityRegistry}, agentEOA=${agentSigner.address})`,
+      );
+
+      const mintTxHash = await viemSendTransactionWithRetry(
+        agentWallet,
+        this.publicClient,
+        {
+          account: agentSigner as Account,
+          to: addr(identityRegistry),
+          data: registerData,
+        },
+      );
+
+      const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, mintTxHash);
+      if (receipt.status !== 'success') {
+        throw new Error(`IdentityRegistry.register() tx failed for service ${index}: ${mintTxHash}`);
+      }
+
+      const parsed = this.parseAgentIdFromReceipt(receipt, identityRegistry);
+      if (parsed === null) {
+        throw new Error(
+          `IdentityRegistry.register() succeeded but Registered event was not found ` +
+          `(service ${index}, tx: ${mintTxHash})`,
+        );
+      }
+      agentId = parsed;
+
+      console.error(
+        `[fleet-bootstrap] Service ${index}: ERC-8004 agent registered ` +
+        `(agentId=${agentId}, tx=${mintTxHash})`,
+      );
+
+      // Persist agentId IMMEDIATELY so a crash between this write and the
+      // setAgentWallet call below does not lose the token.
+      svc = await this.firstServiceUpdate(index, {
+        agent_id: agentId,
+        agent_uri: agentURI,
+        identity_registry_address: getAddress(identityRegistry),
+        agent_registered_tx: mintTxHash,
         step: 'agent_registered',
       });
     }
 
-    const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
-
-    // v0: empty agentURI. The richer agent card (per §6 of the spec) is
-    // future work — operators may later call `setAgentURI`.
-    const agentURI = '';
-    const registerData = encodeFunctionData({
-      abi: IDENTITY_REGISTRY_ABI,
-      functionName: 'register',
-      args: [agentURI],
-    }) as Hex;
-
-    console.error(
-      `[fleet-bootstrap] Service ${index}: minting ERC-8004 agent NFT ` +
-      `(IdentityRegistry=${identityRegistry}, agentEOA=${agentSigner.address})`,
-    );
-
-    const txHash = await viemSendTransactionWithRetry(
-      agentWallet,
-      this.publicClient,
-      {
-        account: agentSigner as Account,
-        to: addr(identityRegistry),
-        data: registerData,
-      },
-    );
-
-    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, txHash);
-    if (receipt.status !== 'success') {
-      throw new Error(`IdentityRegistry.register() tx failed for service ${index}: ${txHash}`);
-    }
-
-    const agentId = this.parseAgentIdFromReceipt(receipt, identityRegistry);
-    if (agentId === null) {
-      throw new Error(
-        `IdentityRegistry.register() succeeded but Registered event was not found ` +
-        `(service ${index}, tx: ${txHash})`,
-      );
-    }
-
-    console.error(
-      `[fleet-bootstrap] Service ${index}: ERC-8004 agent registered ` +
-      `(agentId=${agentId}, tx=${txHash})`,
-    );
-
-    // Persist agentId IMMEDIATELY so a crash between this write and the
-    // (currently stubbed) setAgentWallet call does not lose the token.
-    let next = await this.store.updateService(index, {
-      agent_id: agentId,
-      agent_uri: agentURI,
-      identity_registry_address: getAddress(identityRegistry),
-      agent_registered_tx: txHash,
-    });
-
-    // setAgentWallet stubbed — see header comment + jinn-mono-j07 follow-up.
-    if (svc.safe_address) {
+    // ── Sub-step B: bind Safe wallet via ERC-1271 (jinn-mono-aev). ──────
+    // Idempotent: skip when already bound. Requires safe_address — if the
+    // operator is in a topology without a Safe (future), the bind step is
+    // simply not applicable and `safe_bound_to_agent` stays false.
+    if (svc.safe_bound_to_agent) {
       console.error(
-        `[fleet-bootstrap] Service ${index}: setAgentWallet binding deferred ` +
-        `(Safe=${svc.safe_address}, agentId=${agentId}). ` +
-        `Tracked as a follow-up bd task.`,
+        `[fleet-bootstrap] Service ${index}: Safe already bound to agentId=${agentId} ` +
+        `(safe=${svc.safe_address}); skipping setAgentWallet.`,
       );
+    } else if (!svc.safe_address) {
+      console.error(
+        `[fleet-bootstrap] Service ${index}: no safe_address — cannot bind agent NFT ` +
+        `(agentId=${agentId}). Bootstrap will leave safe_bound_to_agent=false; this is ` +
+        `unexpected for the standard staking topology.`,
+      );
+    } else {
+      console.error(
+        `[fleet-bootstrap] Service ${index}: binding Safe ${svc.safe_address} to ` +
+        `agentId=${agentId} via setAgentWallet (ERC-1271).`,
+      );
+      const result = await bindAgentWalletToSafe({
+        identityRegistryAddress: addr(identityRegistry),
+        agentId: BigInt(agentId),
+        safeAddress: addr(svc.safe_address),
+        agentEoaAccount: agentSigner,
+        agentEoaWalletClient: agentWallet,
+        publicClient: this.publicClient,
+        chainId: this.config.chainId,
+      });
+      console.error(
+        `[fleet-bootstrap] Service ${index}: setAgentWallet succeeded ` +
+        `(tx=${result.txHash}, safe=${svc.safe_address}).`,
+      );
+      svc = await this.firstServiceUpdate(index, {
+        safe_bound_to_agent: true,
+      });
     }
-    next = await this.store.updateService(index, {
-      safe_bound_to_agent: false,
-      step: 'agent_registered',
-    });
 
-    return next;
+    return this.store.load(this.chain);
+  }
+
+  /**
+   * Tiny store wrapper: re-loads the service row after `updateService` so
+   * the next sub-step sees the latest persisted shape (including any
+   * fields written by sibling code paths since this fn started).
+   */
+  private async firstServiceUpdate(
+    index: number,
+    patch: Parameters<FleetStateStore['updateService']>[1],
+  ): Promise<ServiceState> {
+    await this.store.updateService(index, patch);
+    const fleet = await this.store.load(this.chain);
+    const svc = fleet.services.find(s => s.index === index);
+    if (!svc) throw new Error(`Service ${index} not found after update`);
+    return svc;
   }
 
   // ── Self-bond step handlers ──────────────────────────────────────────

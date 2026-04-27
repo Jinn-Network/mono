@@ -514,12 +514,14 @@ describe('Fleet bootstrap', () => {
           staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
           step: 'mech_deployed',
           error: null,
-          // Agent was minted on a previous run.
+          // Agent was minted AND bound on a previous run — both
+          // sub-steps of `stepRegisterAgent` (jinn-mono-j07 mint +
+          // jinn-mono-aev setAgentWallet bind) must be no-ops here.
           agent_id: '12345',
           agent_uri: '',
           identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
           agent_registered_tx: '0x' + 'aa'.repeat(32),
-          safe_bound_to_agent: false,
+          safe_bound_to_agent: true,
         },
       ],
     });
@@ -626,7 +628,10 @@ describe('Fleet bootstrap', () => {
           agent_uri: '',
           identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
           agent_registered_tx: '0x' + 'cc'.repeat(32),
-          safe_bound_to_agent: false,
+          // Both sub-steps already done — short-circuit the entire
+          // stepRegisterAgent (jinn-mono-aev folded the bind into the
+          // same step, gated by this flag).
+          safe_bound_to_agent: true,
         },
       ],
     });
@@ -657,5 +662,128 @@ describe('Fleet bootstrap', () => {
       typeof opts === 'object' && opts && (opts.method === 'eth_sendRawTransaction' || opts.method === 'eth_sendTransaction'),
     );
     expect(sendCalls).toHaveLength(0);
+  });
+
+  it('agent_registered step runs setAgentWallet bind when agent_id set but safe_bound_to_agent=false (jinn-mono-aev)', async () => {
+    // Mint already happened; bind didn't. stepRegisterAgent must skip
+    // the mint sub-step but invoke the binding helper exactly once.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    const safeAddr = '0x2222222222222222222222222222222222222222';
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: safeAddr,
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'mech_deployed',
+          error: null,
+          agent_id: '777',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'dd'.repeat(32),
+          // Critical: mint persisted, bind did not.
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    // Stub the binding helper at module-import boundary by intercepting
+    // the dependency through doMock. Vitest's `vi.doMock` requires the
+    // import to be re-fetched; instead, monkey-patch via the helper
+    // module directly.
+    const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
+    const bindSpy = vi
+      .spyOn(bindingMod, 'bindAgentWalletToSafe')
+      .mockResolvedValue({
+        txHash: ('0x' + 'ee'.repeat(32)) as `0x${string}`,
+        identityDigest: ('0x' + '11'.repeat(32)) as `0x${string}`,
+        safeMessageHash: ('0x' + '22'.repeat(32)) as `0x${string}`,
+        signature: ('0x' + '33'.repeat(65)) as `0x${string}`,
+        deadline: 9_999_999_999n,
+      });
+
+    const fleet = await store.load('base');
+    const next = await (bootstrapper as any).stepRegisterAgent(fleet, mnemonic, 1);
+
+    const svc = next.services.find((s: any) => s.index === 1);
+    expect(svc.safe_bound_to_agent).toBe(true);
+    expect(svc.agent_id).toBe('777');
+    expect(bindSpy).toHaveBeenCalledTimes(1);
+    const callArgs = bindSpy.mock.calls[0]![0];
+    expect(callArgs.agentId).toBe(777n);
+    expect(getAddress(callArgs.safeAddress)).toBe(getAddress(safeAddr));
+    expect(callArgs.chainId).toBe(8453);
+  });
+
+  it('agent_registered step short-circuits bind when safe_bound_to_agent already true', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'mech_deployed',
+          error: null,
+          agent_id: '777',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'ee'.repeat(32),
+          safe_bound_to_agent: true,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
+    const bindSpy = vi.spyOn(bindingMod, 'bindAgentWalletToSafe');
+
+    const fleet = await store.load('base');
+    const next = await (bootstrapper as any).stepRegisterAgent(fleet, mnemonic, 1);
+
+    expect(bindSpy).not.toHaveBeenCalled();
+    const svc = next.services.find((s: any) => s.index === 1);
+    expect(svc.safe_bound_to_agent).toBe(true);
   });
 });
