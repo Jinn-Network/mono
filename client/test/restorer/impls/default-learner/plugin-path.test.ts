@@ -9,7 +9,7 @@ describe('resolvePluginRoot', () => {
     expect(existsSync(root)).toBe(true);
     expect(existsSync(join(root, 'skills', 'coordinator', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(root, 'agents', 'explorer.md'))).toBe(true);
-    expect(existsSync(join(root, 'hooks', 'session-start.sh'))).toBe(true);
+    expect(existsSync(join(root, 'hooks', 'session-start'))).toBe(true);
     expect(existsSync(join(root, 'CLAUDE.md'))).toBe(true);
   });
 
