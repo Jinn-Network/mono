@@ -17,9 +17,7 @@ const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/);
 export const EvidenceTierSchema = z.enum([
   'self-signed',
   'committed',
-  'consensus',
   'attested',
-  'proved',
 ]);
 export type EvidenceTier = z.infer<typeof EvidenceTierSchema>;
 

@@ -13,7 +13,7 @@
 
 import { SignedEnvelopeSchema } from '../types/envelope.js';
 import {
-  fetchSignedEnvelopeFromIpfs,
+  fetchSignedEnvelopeBytesRaw,
   fetchSignedIntentFromIpfs,
   fetchTrajectoryFromIpfs,
   fetchSourceBundleFromIpfs,
@@ -268,8 +268,9 @@ async function fetchEnvelopeBytes(
   cid: string,
   options: ConformanceOptions,
 ): Promise<Uint8Array> {
-  const raw = await fetchSignedEnvelopeFromIpfs(options.ipfsGatewayUrl ?? '', cid);
-  return new TextEncoder().encode(JSON.stringify(raw));
+  // Fetch the exact bytes stored at the CID — no JSON parse/re-encode roundtrip
+  // so the bytes hashed here match the bytes hashed at upload time.
+  return fetchSignedEnvelopeBytesRaw(options.ipfsGatewayUrl ?? '', cid);
 }
 
 function buildReport(

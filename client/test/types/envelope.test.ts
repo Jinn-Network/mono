@@ -7,10 +7,14 @@ import {
 } from '../../src/types/envelope.js';
 
 describe('EvidenceTierSchema', () => {
-  it('accepts the five standard tiers', () => {
-    for (const t of ['self-signed', 'committed', 'consensus', 'attested', 'proved']) {
+  it('accepts the three V1 tiers', () => {
+    for (const t of ['self-signed', 'committed', 'attested']) {
       expect(() => EvidenceTierSchema.parse(t)).not.toThrow();
     }
+  });
+  it('rejects V2+ tiers (consensus, proved) at V1', () => {
+    expect(() => EvidenceTierSchema.parse('consensus')).toThrow();
+    expect(() => EvidenceTierSchema.parse('proved')).toThrow();
   });
   it('rejects unknown tier', () => {
     expect(() => EvidenceTierSchema.parse('bronze')).toThrow();

@@ -2,6 +2,7 @@ import type { Hex } from 'viem';
 import type { RestorationJob, RestorationResult } from '../../types/index.js';
 import { parseSignedIntentV1, type SignedIntentV1 } from '../../types/intent.js';
 import { IPFS_GATEWAY_PREFIX } from './types.js';
+import { canonicalJson } from '../../restorer/engine/canonical-json.js';
 
 export interface RestorationJobPayload {
   desiredStateId: string;
@@ -74,8 +75,34 @@ export function buildResultPayload(requestId: string, result: RestorationResult)
  * jinn-node uses 7–10s; we allow a bit more for slow public gateways.
  */
 const IPFS_FETCH_TIMEOUT_MS = 15_000;
+const IPFS_UPLOAD_TIMEOUT_MS = 60_000;
 
 const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
+
+export function normalizeIpfsRegistryAddUrl(registryUrl: string): string {
+  let t = registryUrl.trim();
+  if (t === '') t = 'https://registry.autonolas.tech';
+  t = t.replace(/\/+$/, '');
+  if (t.endsWith('/api/v0/add')) return t;
+  return `${t}/api/v0/add`;
+}
+
+function parseRegistryUploadCid(responseText: string): string {
+  let lastHash: string | undefined;
+  for (const line of responseText.trim().split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { Hash?: unknown };
+      if (typeof entry.Hash === 'string' && entry.Hash.length > 0) {
+        lastHash = entry.Hash;
+      }
+    } catch {
+      // Ignore non-JSON lines — the registry returns newline-delimited JSON.
+    }
+  }
+  if (!lastHash) throw new Error('IPFS registry upload did not return a CID');
+  return lastHash;
+}
 
 /**
  * Normalizes operator-configured `ipfsGatewayUrl` into a base that ends with `/ipfs/`
@@ -151,13 +178,35 @@ async function fetchJsonFromUrl(url: string, signal: AbortSignal): Promise<unkno
  * 2) Try raw then dag-pb hex CIDs for the same digest.
  * 3) Retry on primary gateway then public ipfs.io fallback.
  *
- * Upload path stays `pushJsonToIpfs` from mech-client-ts (axios, same as jinn-node) — it already
- * enforces a registry timeout; we do not wrap it again here.
+ * Upload: serialise to JCS canonical bytes (RFC 8785) so the CID and sha256
+ * fields are reproducible by any third party with a standard JCS library.
  */
-export async function uploadToIpfs(_registryUrl: string, data: unknown): Promise<string> {
-  const { pushJsonToIpfs } = await import('@jinn-network/mech-client-ts/dist/ipfs.js');
-  const [, cidString] = await pushJsonToIpfs(data);
-  return cidString;
+export async function uploadToIpfs(registryUrl: string, data: unknown): Promise<string> {
+  const url = new URL(normalizeIpfsRegistryAddUrl(registryUrl));
+  url.searchParams.set('pin', 'true');
+  url.searchParams.set('cid-version', '1');
+  url.searchParams.set('wrap-with-directory', 'false');
+
+  const jcsBytes = new TextEncoder().encode(canonicalJson(data));
+  const formData = new FormData();
+  formData.append('file', new Blob([jcsBytes], { type: 'application/json' }), 'content.json');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), IPFS_UPLOAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    if (response.status !== 200) {
+      throw new Error(`IPFS registry upload failed with status ${response.status}: ${responseText.slice(0, 200)}`);
+    }
+    return parseRegistryUploadCid(responseText);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function fetchFromIpfs(gatewayUrl: string, cid: string): Promise<unknown> {
@@ -254,6 +303,47 @@ export async function fetchFromDigest(digestHex: string): Promise<unknown> {
 }
 
 // ── Conformance harness IPFS fetch helpers ───────────────────────────────────
+
+async function fetchRawBytesFromUrl(url: string, signal: AbortSignal): Promise<Uint8Array> {
+  const response = await fetch(url, { method: 'GET', signal });
+  if (!response.ok) {
+    throw new Error(`IPFS fetch failed: ${response.status} ${response.statusText} (${url.slice(0, 80)}…)`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+/**
+ * Fetch a SignedEnvelope from IPFS by CID as raw bytes.
+ * Returns the exact bytes stored at the CID — no JSON parse/re-encode roundtrip.
+ * Use this whenever the bytes will be hashed (conformance hash-signature check).
+ */
+export async function fetchSignedEnvelopeBytesRaw(
+  gatewayUrl: string,
+  cid: string,
+): Promise<Uint8Array> {
+  const base = normalizeIpfsGatewayBase(gatewayUrl);
+  const candidates = buildIpfsFetchCidPathCandidates(cid);
+  const errors: string[] = [];
+  for (const cidPath of candidates) {
+    for (const [name, baseUrl] of [
+      ['primary', base] as const,
+      ['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const,
+    ]) {
+      const url = `${baseUrl}${cidPath}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
+      try {
+        return await fetchRawBytesFromUrl(url, controller.signal);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push(`${name}:${url.slice(0, 100)}: ${message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  throw new Error(`IPFS raw bytes fetch failed after all candidates: ${errors.join(' | ')}`);
+}
 
 /**
  * Fetch a SignedEnvelope from IPFS by CID.
