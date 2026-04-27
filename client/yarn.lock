@@ -453,6 +453,7 @@ __metadata:
     "@x402/fetch": "npm:^2.9.0"
     "@x402/hono": "npm:^2.9.0"
     better-sqlite3: "npm:^11.0.0"
+    canonicalize: "npm:^2.0.0"
     dotenv: "npm:^17.4.1"
     hono: "npm:^4.12.10"
     tsx: "npm:^4.0.0"
@@ -2067,6 +2068,15 @@ __metadata:
     call-bind-apply-helpers: "npm:^1.0.2"
     get-intrinsic: "npm:^1.3.0"
   checksum: 10c0/f4796a6a0941e71c766aea672f63b72bc61234c4f4964dc6d7606e3664c307e7d77845328a8f3359ce39ddb377fed67318f9ee203dea1d47e46165dcf2917644
+  languageName: node
+  linkType: hard
+
+"canonicalize@npm:^2.0.0":
+  version: 2.1.0
+  resolution: "canonicalize@npm:2.1.0"
+  bin:
+    canonicalize: bin/canonicalize.js
+  checksum: 10c0/3b1ec612765851e71eeff2868f5ccbf0a06ffd8db8deef36efda89167527f96803b555c4ca8b5f5230f0a13badeeac5541c9244c8996fea97d00cee8dca2bf35
   languageName: node
   linkType: hard
 

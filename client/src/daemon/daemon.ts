@@ -7,7 +7,6 @@ import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
-import { Registry8004, type RegistryConfig } from '../discovery/registry.js';
 import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../discovery/subgraph.js';
 import type { X402Config } from '../x402/handler.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
@@ -28,7 +27,6 @@ export interface DaemonConfig {
   apiPort?: number;
   peers?: string[];
   signer?: EthHttpSigner;
-  registry?: RegistryConfig;
   subgraphUrl?: string;
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint?: string;
@@ -79,7 +77,6 @@ export class Daemon {
   private cachedShutdownState: string | null = null;
   private apiServer?: ApiServer;
   private peerSync?: PeerSync;
-  private registry?: Registry8004;
   private readonly apiPort: number;
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
@@ -126,16 +123,9 @@ export class Daemon {
     this.apiServer = await startApiServer({
       port: this.apiPort,
       store: this.store,
-      onArtifactPublished: (artifact) => this.registerArtifact(artifact),
       x402: this.config.x402,
       status: this.config.status,
     });
-
-    // Initialize 8004 registry if configured
-    if (this.config.registry) {
-      this.registry = new Registry8004(this.config.registry);
-      console.log('[daemon] 8004 registry configured');
-    }
 
     // Backfill remote artifacts from subgraph if configured
     const subgraphUrl = this.config.subgraphUrl ?? process.env['JINN_SUBGRAPH_URL'];
@@ -238,9 +228,9 @@ export class Daemon {
       if (this.engineStopped) break;
       if (!request.requestId) continue;
 
-      const specKind = request.desiredState.spec?.kind ?? undefined;
-      const windowStartTs = request.desiredState.window?.startTs ?? Date.now();
-      const windowEndTs = request.desiredState.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
+      const specKind = request.restorationJob.spec?.kind ?? undefined;
+      const windowStartTs = request.restorationJob.window?.startTs ?? Date.now();
+      const windowEndTs = request.restorationJob.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
 
       // Warn on missing provenance — legacy intents may legitimately lack it.
       if (!request.intentCid) {
@@ -260,10 +250,10 @@ export class Daemon {
           onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
           onchainCreationBlock: request.onchainCreationBlock ?? 0,
           specKind,
-          intentType: (request.desiredState.type ?? 'restoration') as 'restoration' | 'evaluation',
+          intentType: (request.restorationJob.type ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,
           windowEndTs,
-          desiredState: request.desiredState,
+          restorationJob: request.restorationJob,
         });
 
         // Drive the engine state machine for this request.
@@ -294,18 +284,6 @@ export class Daemon {
         }, 'daemon');
       }
     }
-  }
-
-  /**
-   * Register an artifact on the 8004 registry (fire-and-forget).
-   * Called after local artifact publish if registry is configured.
-   */
-  registerArtifact(artifact: { id: string; title: string; tags: string[]; outcome: string }): void {
-    if (!this.registry) return;
-    const endpoint = this.config.nodeEndpoint ?? `http://localhost:${this.config.apiPort ?? DEFAULT_API_PORT}`;
-    this.registry.registerArtifact({ ...artifact, endpoint }).catch(err => {
-      console.error(`[daemon] 8004 artifact registration failed (non-fatal): ${err instanceof Error ? err.message : err}`);
-    });
   }
 
   private async backfillFromSubgraph(config: SubgraphConfig): Promise<void> {

@@ -18,8 +18,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { DesiredStateSchema, parseDesiredState } from './types/desired-state.js';
-import type { DesiredState } from './types/desired-state.js';
+import { RestorationJobSchema, parseRestorationJob } from './types/desired-state.js';
+import type { RestorationJob } from './types/desired-state.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ export const JinnConfigSchema = z.object({
   nodeEndpoint: z.string().optional(),
 
   /** Desired states to create and restore. Empty by default; testnet auto-intents fill the loop. */
-  desiredStates: z.array(DesiredStateSchema).default([]),
+  desiredStates: z.array(RestorationJobSchema).default([]),
 
   /** IPFS upload endpoint */
   ipfsRegistryUrl: z.string().default('https://registry.autonolas.tech'),
@@ -169,6 +169,48 @@ export const JinnConfigSchema = z.object({
       implStateDirRoot: z.string().optional(),
     })
     .optional(),
+
+  /**
+   * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
+   * backfill `agent_id` on `complete` services that pre-date j07).
+   *
+   * Defaults to true — the migrations are no-ops on already-migrated
+   * fleets and cheap on Base. Operators on a flaky RPC or with locked
+   * funds can set this to false and run `jinn migrate-agent-id`
+   * explicitly.
+   *
+   * Env: JINN_RUN_LEGACY_MIGRATIONS=0|1.
+   */
+  runLegacyMigrations: z.boolean().default(true),
+
+  /**
+   * ERC-8004 Identity Registry contract address on the configured chain.
+   * Pre-rebuild config key (PR #37 cleanup left it in place). The post-rebuild
+   * client (jinn-mono-j07/3zk) reads the address from
+   * `client/src/discovery/identity-publisher.ts` constants and from
+   * `EarningState.identity_registry_address`; this config key is currently
+   * unused but kept for backwards-compat with operator config files.
+   * Env: JINN_IDENTITY_REGISTRY_ADDRESS
+   */
+  identityRegistryAddress: z.string().optional(),
+
+  /**
+   * ERC-8004 Validation Registry contract address on the configured chain.
+   * Pre-rebuild config key. The post-rebuild client (jinn-mono-9jg) reads the
+   * address from `client/src/validation/registry.ts:VALIDATION_REGISTRY_ADDRESSES`;
+   * this config key is currently unused but kept for backwards-compat.
+   * Env: JINN_VALIDATION_REGISTRY_ADDRESS
+   */
+  validationRegistryAddress: z.string().optional(),
+
+  /**
+   * Whether to enable the read-only reputation surface (query-time flag).
+   * Pre-rebuild config key. The post-rebuild client (jinn-mono-2ff/yg4) is
+   * always constructed when `agent_id` is set; this flag is currently unused
+   * but kept for backwards-compat.
+   * Env: JINN_REPUTATION_ENABLED
+   */
+  reputationEnabled: z.boolean().default(false),
 });
 
 const DEFAULT_ENGINE = {
@@ -179,7 +221,7 @@ const DEFAULT_ENGINE = {
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and desiredStates with id always assigned. */
 export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'desiredStates' | 'engine'> & {
   rpcUrl: string;
-  desiredStates: DesiredState[];
+  desiredStates: RestorationJob[];
   engine: { workingDirRoot: string; implStateDirRoot: string };
 };
 
@@ -276,8 +318,21 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.debug = v === '1' || v === 'true' || v === 'yes';
   }
 
+  if (env['JINN_RUN_LEGACY_MIGRATIONS'] !== undefined) {
+    const v = env['JINN_RUN_LEGACY_MIGRATIONS'].trim().toLowerCase();
+    merged.runLegacyMigrations =
+      !(v === '0' || v === 'false' || v === 'no' || v === '');
+  }
+
   if (env['JINN_MASTER_ETH_DAILY_WEI']) {
     merged.masterEthDailyEstimateWei = env['JINN_MASTER_ETH_DAILY_WEI'].trim();
+  }
+
+  if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
+  if (env['JINN_VALIDATION_REGISTRY_ADDRESS']) merged.validationRegistryAddress = env['JINN_VALIDATION_REGISTRY_ADDRESS'];
+  if (env['JINN_REPUTATION_ENABLED'] !== undefined) {
+    const rv = env['JINN_REPUTATION_ENABLED'].trim().toLowerCase();
+    merged.reputationEnabled = rv === '1' || rv === 'true' || rv === 'yes';
   }
 
   if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
@@ -356,8 +411,8 @@ export function loadConfig(configPath?: string): JinnConfig {
   return {
     ...parsed,
     rpcUrl: parsed.rpcUrl ?? defaultRpcUrl,
-    // parseDesiredState assigns a UUID to any entry missing an id
-    desiredStates: parsed.desiredStates.map(parseDesiredState),
+    // parseRestorationJob assigns a UUID to any entry missing an id
+    desiredStates: parsed.desiredStates.map(parseRestorationJob),
     engine: {
       workingDirRoot: parsed.engine?.workingDirRoot ?? DEFAULT_ENGINE.workingDirRoot,
       implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,

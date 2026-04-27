@@ -603,6 +603,13 @@ export class Store {
     tx();
   }
 
+  getIntentEvidenceHash(requestId: string): string | null {
+    const row = this.db.prepare(
+      'SELECT evidence_hash FROM restoration_intents WHERE request_id = ?',
+    ).get(requestId) as { evidence_hash: string | null } | undefined;
+    return row?.evidence_hash ?? null;
+  }
+
   getLastProcessedBlock(): bigint | null {
     const row = this.db.prepare('SELECT value FROM config WHERE key = ?').get('last_processed_block') as { value: string } | undefined;
     return row?.value ? BigInt(row.value) : null;

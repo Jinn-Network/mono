@@ -1,7 +1,7 @@
 /**
  * Restorer engine — workingDir provisioning + artifact walking + IPFS upload.
  *
- * §6.6 workdir layout, §5.3 artifact role conventions.
+ * §6.6 workdir layout, §5.3 artifact artifactType conventions.
  *
  * Responsibilities:
  *   1. Provision workingDir at PRE_SNAPSHOT time: write intent.json, env/ files,
@@ -24,15 +24,16 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { createWriteStream } from 'node:fs';
 import { z } from 'zod';
-import type { DesiredState } from '../../types/desired-state.js';
+import type { RestorationJob } from '../../types/desired-state.js';
 import type { Artifact, OutputArtifact } from '../../types/portfolio.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
+import type { TrajectoryCollector } from '../../trajectory/collector.js';
 
 // ── OUTPUTS.json schema ───────────────────────────────────────────────────────
 
 const OutputEntrySchema = z.object({
   path: z.string(),
-  role: z.string(),
+  artifactType: z.string(),
   metadata: z.record(z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
   access: z
@@ -42,6 +43,13 @@ const OutputEntrySchema = z.object({
       priceUsdc: z.string().optional(),
     })
     .optional(),
+}).superRefine((val, ctx) => {
+  if ('role' in val && !('artifactType' in val)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "OUTPUTS.json field 'role' is renamed to 'artifactType' — update your outputs declaration",
+    });
+  }
 });
 
 const OutputsJsonSchema = z.object({
@@ -61,17 +69,12 @@ export interface UploadedArtifact extends Artifact {
 export interface PackagingDeps {
   ipfsRegistryUrl: string;
   /**
-   * Called after artifact registration is ready (after manifest CID is known).
-   * The optional `parentManifestCid` is the IPFS CID of the enclosing manifest,
-   * enabling back-pointer links per spec §6.1. Fire-and-forget is fine.
+   * Optional trajectory collector. When provided, a `jinn.artifact.emit` span
+   * is added to the trajectory for each successfully uploaded artifact, and
+   * `artifact.metadata.producedBy` is set to `{ spanId, trajectoryCid: '' }`.
+   * The engine backfills `trajectoryCid` after `emitTrajectory` completes.
    */
-  registerArtifact?: (artifact: {
-    id: string;
-    title: string;
-    tags: string[];
-    outcome: string;
-    parentManifestCid?: string;
-  }) => void;
+  collector?: TrajectoryCollector;
 }
 
 // ── WorkingDir provisioning ───────────────────────────────────────────────────
@@ -80,13 +83,13 @@ export interface PackagingDeps {
  * Provision the working directory at PRE_SNAPSHOT time.
  *
  * Creates:
- *   <workingDir>/intent.json     — canonical DesiredState JSON
+ *   <workingDir>/intent.json     — canonical RestorationJob JSON
  *   <workingDir>/env/<VAR>       — one file per env var (mode 0600)
  *   <workingDir>/sessions/       — directory for session transcripts
  */
 export function provisionWorkingDir(
   workingDir: string,
-  intent: DesiredState,
+  intent: RestorationJob,
   envVars: Record<string, string> = {},
 ): void {
   mkdirSync(workingDir, { recursive: true, mode: 0o755 });
@@ -259,10 +262,10 @@ function sha256Hex(buf: Buffer): string {
 export async function walkArtifacts(
   workingDir: string,
   implArtifacts: OutputArtifact[] = [],
-): Promise<Array<{ localPath: string; role: string; metadata?: Record<string, unknown>; tags?: string[]; access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string } }>> {
+): Promise<Array<{ localPath: string; artifactType: string; metadata?: Record<string, unknown>; tags?: string[]; access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string } }>> {
   const result: Array<{
     localPath: string;
-    role: string;
+    artifactType: string;
     metadata?: Record<string, unknown>;
     tags?: string[];
     access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string };
@@ -284,7 +287,7 @@ export async function walkArtifacts(
         if (existsSync(fullPath) && statSync(fullPath).isFile()) {
           result.push({
             localPath: fullPath,
-            role: entry.role,
+            artifactType: entry.artifactType,
             metadata: entry.metadata,
             tags: entry.tags,
             access: entry.access,
@@ -312,7 +315,7 @@ export async function walkArtifacts(
       if (existsSync(fullPath) && statSync(fullPath).isFile()) {
         result.push({
           localPath: fullPath,
-          role: art.role,
+          artifactType: art.artifactType,
           metadata: art.metadata,
           tags: art.tags,
           access: art.access,
@@ -329,7 +332,7 @@ export async function walkArtifacts(
       for (const name of readdirSync(sessionsDir)) {
         const full = join(sessionsDir, name);
         if (statSync(full).isFile() && !declared.has(full)) {
-          result.push({ localPath: full, role: 'session_transcript', access: { kind: 'open' } });
+          result.push({ localPath: full, artifactType: 'session_transcript', access: { kind: 'open' } });
         }
       }
     }
@@ -343,7 +346,7 @@ export async function walkArtifacts(
         extname(name).toLowerCase() === '.md' &&
         !declared.has(full)
       ) {
-        result.push({ localPath: full, role: 'design_document', access: { kind: 'open' } });
+        result.push({ localPath: full, artifactType: 'design_document', access: { kind: 'open' } });
       }
     }
 
@@ -353,7 +356,7 @@ export async function walkArtifacts(
       for (const name of readdirSync(logsDir)) {
         const full = join(logsDir, name);
         if (statSync(full).isFile() && !declared.has(full)) {
-          result.push({ localPath: full, role: 'runtime_log', access: { kind: 'open' } });
+          result.push({ localPath: full, artifactType: 'runtime_log', access: { kind: 'open' } });
         }
       }
     }
@@ -367,7 +370,7 @@ export async function walkArtifacts(
     await createWorkdirTarball(workingDir, tarballPath, SNAPSHOT_FILENAME);
     result.push({
       localPath: tarballPath,
-      role: 'system_snapshot',
+      artifactType: 'system_snapshot',
       metadata: { description: 'Full workingDir snapshot' },
       access: { kind: 'open' },
     });
@@ -381,16 +384,14 @@ export async function walkArtifacts(
 // ── Upload pipeline ───────────────────────────────────────────────────────────
 
 /**
- * Upload all collected artifacts to IPFS — NO registration.
+ * Upload all collected artifacts to IPFS.
  *
  * Returns an array of `UploadedArtifact` (= Artifact + localPath).
- * Registration is deferred until the manifest CID is known; call
- * `registerArtifacts(uploaded, parentManifestCid, deps)` afterwards.
  */
 export async function uploadArtifacts(
   artifacts: Array<{
     localPath: string;
-    role: string;
+    artifactType: string;
     metadata?: Record<string, unknown>;
     tags?: string[];
     access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string };
@@ -407,7 +408,7 @@ export async function uploadArtifacts(
       // Upload raw bytes as base64-encoded JSON envelope so IPFS receives JSON
       // (consistent with how other uploads work via uploadToIpfs).
       const envelope = {
-        role: art.role,
+        artifactType: art.artifactType,
         sha256: hash,
         data: content.toString('base64'),
       };
@@ -417,12 +418,39 @@ export async function uploadArtifacts(
       const uploaded: UploadedArtifact = {
         cid,
         sha256: hash,
-        role: art.role,
+        artifactType: art.artifactType,
         metadata: art.metadata,
         tags: art.tags,
         access: art.access,
         localPath: art.localPath,
       };
+
+      // Forward linkage: emit a jinn.artifact.emit span and attach a producedBy
+      // back-reference so readers can look up which span produced this artifact.
+      // trajectoryCid is unknown at packaging time — the engine backfills it after
+      // emitTrajectory completes (Task 16 backward linkage).
+      if (deps.collector) {
+        const nowNano = String(BigInt(Date.now()) * 1_000_000n);
+        const span = deps.collector.addSpan({
+          name: 'artifact.emit',
+          kind: 'INTERNAL',
+          startTimeUnixNano: nowNano,
+          endTimeUnixNano: nowNano,
+          attributes: {
+            'jinn.span.kind': 'jinn.artifact.emit',
+            'jinn.artifact.cid': cid,
+            'jinn.artifact.artifactType': art.artifactType,
+            'jinn.artifact.sha256': hash,
+          },
+          events: [],
+          status: { code: 'OK' },
+        });
+        uploaded.metadata = {
+          ...uploaded.metadata,
+          producedBy: { spanId: span.spanId, trajectoryCid: '' },
+        };
+      }
+
       results.push(uploaded);
     } catch (err) {
       console.error(`[restorer-engine] artifact upload failed for ${art.localPath}: ${err instanceof Error ? err.message : err}`);
@@ -433,25 +461,3 @@ export async function uploadArtifacts(
   return results;
 }
 
-/**
- * Register already-uploaded artifacts with a back-pointer to the parent manifest CID.
- *
- * Call this AFTER the manifest has been assembled, signed, and uploaded so that
- * `parentManifestCid` is known (spec §6.1 requirement). Fire-and-forget.
- */
-export function registerArtifacts(
-  uploaded: UploadedArtifact[],
-  parentManifestCid: string,
-  deps: PackagingDeps,
-): void {
-  if (!deps.registerArtifact) return;
-  for (const art of uploaded) {
-    deps.registerArtifact({
-      id: art.cid,
-      title: art.localPath.split('/').pop() ?? art.cid,
-      tags: art.tags ?? [art.role],
-      outcome: 'uploaded',
-      parentManifestCid,
-    });
-  }
-}

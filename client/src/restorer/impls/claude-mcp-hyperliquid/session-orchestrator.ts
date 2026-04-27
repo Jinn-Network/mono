@@ -12,6 +12,7 @@ import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import type { TrajectoryCollector } from '../../../trajectory/index.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -86,6 +87,12 @@ export interface OrchestratorDeps {
    * In production, omit this field (real spawn is used).
    */
   _spawnFn?: typeof spawn;
+  /**
+   * Trajectory collector — when present, each session spawn emits a
+   * jinn.state_transition span covering the subprocess lifetime.
+   * Scope §3.2 traced-I/O boundary.
+   */
+  trajectory?: TrajectoryCollector;
 }
 
 // ── Session spawn ──────────────────────────────────────────────────────────────
@@ -105,6 +112,7 @@ export async function spawnSession(
 
   const transcriptPath = join(sessionDir, 'transcript.txt');
   const startedAt = Date.now();
+  const startNs = `${BigInt(startedAt) * 1_000_000n}`;
 
   writeFileSync(transcriptPath, `=== Session ${sessionId} started at ${new Date(startedAt).toISOString()} ===\n\n`);
 
@@ -169,12 +177,32 @@ export async function spawnSession(
       deps.abort.removeEventListener('abort', onAbort);
 
       const endedAt = Date.now();
+      const endNs = `${BigInt(endedAt) * 1_000_000n}`;
       appendFileSync(transcriptPath, `\n\n=== Session ended at ${new Date(endedAt).toISOString()} (code: ${code}, signal: ${signal}) ===\n`);
 
       deps.log({
         level: 'info',
         msg: `session-orchestrator: session ${sessionId} exited`,
         data: { code, signal, durationMs: endedAt - startedAt, aborted },
+      });
+
+      const exitCode = code ?? -1;
+      deps.trajectory?.addSpan({
+        name: `subprocess.${deps.claudePath}`,
+        kind: 'INTERNAL',
+        startTimeUnixNano: startNs,
+        endTimeUnixNano: endNs,
+        attributes: {
+          'jinn.span.kind': 'jinn.state_transition',
+          'jinn.state.from': 'PREPARED',
+          'jinn.state.to': 'RAN_CLAUDE',
+          'subprocess.cmd': deps.claudePath,
+          'subprocess.args': args,
+          'subprocess.exit_code': exitCode,
+          'session.id': sessionId,
+        },
+        events: [],
+        status: exitCode === 0 || signal ? { code: 'OK' } : { code: 'ERROR', message: `exit ${exitCode}` },
       });
 
       resolve({
@@ -192,8 +220,27 @@ export async function spawnSession(
       clearTimeout(sessionTimeout);
       deps.abort.removeEventListener('abort', onAbort);
       const endedAt = Date.now();
+      const endNs = `${BigInt(endedAt) * 1_000_000n}`;
       appendFileSync(transcriptPath, `\n\n=== Session spawn error: ${err.message} ===\n`);
       deps.log({ level: 'error', msg: `session-orchestrator: session ${sessionId} spawn error`, data: { err: err.message } });
+
+      deps.trajectory?.addSpan({
+        name: `subprocess.${deps.claudePath}`,
+        kind: 'INTERNAL',
+        startTimeUnixNano: startNs,
+        endTimeUnixNano: endNs,
+        attributes: {
+          'jinn.span.kind': 'jinn.state_transition',
+          'jinn.state.from': 'PREPARED',
+          'jinn.state.to': 'RAN_CLAUDE',
+          'subprocess.cmd': deps.claudePath,
+          'subprocess.args': args,
+          'subprocess.exit_code': -1,
+          'session.id': sessionId,
+        },
+        events: [{ timeUnixNano: endNs, name: 'exception', attributes: { 'exception.message': err.message } }],
+        status: { code: 'ERROR', message: err.message },
+      });
 
       resolve({
         sessionId,

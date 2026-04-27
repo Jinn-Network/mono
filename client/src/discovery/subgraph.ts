@@ -1,11 +1,17 @@
 /**
- * ERC-8004 Subgraph client for artifact and node discovery.
+ * Subgraph client — stub.
  *
- * Queries The Graph subgraph to discover artifacts and nodes registered
- * on the 8004 Identity Registry. Ported from protocol/src/discovery/subgraph.ts.
+ * The real Jinn-specific subgraph (operator-rooted ERC-8004, synthesized
+ * `Operator`/`Execution` entities) is rebuilt under bead `jinn-mono-fud` per
+ * docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md. The
+ * previous V1 schema (`Intent`, `ExecutionEnvelope`, `SourceBundle`,
+ * `Artifact`, `KnowledgeTree`, etc.) was a category error against the deployed
+ * `0x8004…` registries — see the design record §2.
  *
- * NOTE: The GraphQL schema depends on the deployed 8004 subgraph.
- * Field names may need adjustment against the live subgraph.
+ * This stub keeps the surface that `daemon.ts` calls during peer-discovery /
+ * remote-artifact backfill so the daemon compiles and runs without ERC-8004
+ * registration. All queries return empty results until the new subgraph
+ * lands. No new ABIs are introduced here.
  */
 
 export interface SubgraphConfig {
@@ -20,101 +26,31 @@ export interface SubgraphResult {
 }
 
 /**
- * Parse a metadata value from a subgraph result by key.
+ * Parse a metadata value from a SubgraphResult by key. Retained for
+ * backward compatibility with daemon.ts.
  */
 export function getMetadataValue(result: SubgraphResult, key: string): string | undefined {
-  return result.metadata.find(m => m.key === key)?.value;
+  return result.metadata.find((m) => m.key === key)?.value;
 }
 
 /**
- * Query the 8004 subgraph for registered artifact entities.
+ * Stubbed artifact discovery query. Returns no rows until the rebuilt
+ * Jinn subgraph (jinn-mono-fud) ships.
  */
 export async function queryArtifacts(
-  config: SubgraphConfig,
-  filters?: {
-    outcome?: string;
-    owner?: string;
-    limit?: number;
-  },
+  _config: SubgraphConfig,
+  _filters?: { outcome?: string; owner?: string; limit?: number },
 ): Promise<SubgraphResult[]> {
-  const query = filters?.owner
-    ? `query GetArtifacts($first: Int, $skip: Int, $owner: String) {
-        agents(
-          first: $first, skip: $skip,
-          where: { metadata_: { metadataKey: "documentType", metadataValue_contains: "Artifact" }, owner: $owner }
-        ) {
-          id agentURI owner
-          metadata { key: metadataKey value: metadataValue }
-        }
-      }`
-    : `query GetArtifacts($first: Int, $skip: Int) {
-        agents(
-          first: $first, skip: $skip,
-          where: { metadata_: { metadataKey: "documentType", metadataValue_contains: "Artifact" } }
-        ) {
-          id agentURI owner
-          metadata { key: metadataKey value: metadataValue }
-        }
-      }`;
-
-  const variables: Record<string, unknown> = {
-    first: filters?.limit ?? 100,
-    skip: 0,
-  };
-  if (filters?.owner) variables['owner'] = filters.owner;
-
-  const data = await graphqlRequest<{ agents: SubgraphResult[] }>(config.url, query, variables);
-  let results = data.agents;
-
-  if (filters?.outcome) {
-    results = results.filter(r =>
-      r.metadata.some(m => m.key === 'outcome' && m.value === filters.outcome),
-    );
-  }
-
-  return results;
+  return [];
 }
 
 /**
- * Query the 8004 subgraph for registered node (AgentCard) entities.
+ * Stubbed peer-node discovery query. Returns no rows until the rebuilt
+ * Jinn subgraph (jinn-mono-fud) ships.
  */
 export async function queryNodes(
-  config: SubgraphConfig,
-  limit?: number,
+  _config: SubgraphConfig,
+  _limit?: number,
 ): Promise<SubgraphResult[]> {
-  const query = `query GetNodes($first: Int, $skip: Int) {
-    agents(
-      first: $first, skip: $skip,
-      where: { metadata_: { metadataKey: "documentType", metadataValue_contains: "AgentCard" } }
-    ) {
-      id agentURI owner
-      metadata { key: metadataKey value: metadataValue }
-    }
-  }`;
-
-  const data = await graphqlRequest<{ agents: SubgraphResult[] }>(config.url, query, { first: limit ?? 100, skip: 0 });
-  return data.agents;
-}
-
-// ── Minimal GraphQL client (no dependency) ───────────────────────────────────
-
-async function graphqlRequest<T>(url: string, query: string, variables?: Record<string, unknown>): Promise<T> {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Subgraph query failed: ${response.status} ${response.statusText}`);
-  }
-
-  const json = await response.json() as { data?: T; errors?: Array<{ message: string }> };
-  if (json.errors?.length) {
-    throw new Error(`Subgraph errors: ${json.errors.map(e => e.message).join(', ')}`);
-  }
-  if (!json.data) {
-    throw new Error('Subgraph returned no data');
-  }
-  return json.data;
+  return [];
 }

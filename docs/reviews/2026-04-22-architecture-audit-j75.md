@@ -141,7 +141,7 @@ the impls that care.
 | Delivery                   | `MechMarketplace.deliverToMarketplace` + `JinnRouter.claimDelivery`                                                                 | engine `deliver`                             | immutable                                   |
 | Evaluation job             | separate restoration of `type='evaluation'` posted by original creator's mech loop, referencing `restorationRequestId`              | MechAdapter                                  | follows same state machine                  |
 | Verdict manifest           | IPFS (`*.eval.manifest.v1`) delivered like a restoration                                                                            | evaluator impl                               | immutable                                   |
-| Public artifacts           | ERC-8004 Identity Registry (address + metadata back-pointing to manifest CID)                                                       | `Registry8004` at delivery time              | immutable                                   |
+| Public artifacts           | ERC-8004 Identity Registry — `setMetadata(operatorAgentId, "<kind>:<cid>", payload)` per published artifact, where `payload` carries (tier, manifestHash, attestationQuoteCid, sourceMeasurement). One agent NFT per operator Safe; CIDs are metadata keys, not separate entities. See `docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md`. | `IdentityRegistryClient` at delivery time    | append-only via `MetadataSet` events        |
 
 
 ### 2.3 Source of truth

@@ -61,6 +61,7 @@ const STEP_ORDER: ServiceStep[] = [
   'service_staked',
   'staked',
   'mech_deployed',
+  'agent_registered',
   'complete',
 ];
 

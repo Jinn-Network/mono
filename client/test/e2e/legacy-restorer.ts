@@ -57,13 +57,13 @@ export class E2eRestorerLoop {
     emitEvent(this.store, {
       kind: 'request_claimed',
       requestId: request.requestId,
-      specKind: request.desiredState.spec?.kind,
+      specKind: request.restorationJob.spec?.kind,
       outcome: 'ok',
       detail: 'Claimed restoration request',
     }, 'restorer');
 
     try {
-      const result = await this.runner.run(request.desiredState, {
+      const result = await this.runner.run(request.restorationJob, {
         requestId: request.requestId,
         workingDirectory: this.workingDirectory,
         timeoutMs: this.timeoutMs,
@@ -76,7 +76,7 @@ export class E2eRestorerLoop {
       emitEvent(this.store, {
         kind: 'delivery_submitted',
         requestId: request.requestId,
-        specKind: request.desiredState.spec?.kind,
+        specKind: request.restorationJob.spec?.kind,
         outcome: 'ok',
         detail: 'Submitted restoration result',
       }, 'restorer');
@@ -86,7 +86,7 @@ export class E2eRestorerLoop {
         emitEvent(this.store, {
           kind: 'tick_error',
           requestId: request.requestId,
-          specKind: request.desiredState.spec?.kind,
+          specKind: request.restorationJob.spec?.kind,
           outcome: 'failed',
           detail: err instanceof Error ? err.message : String(err),
         }, 'restorer');

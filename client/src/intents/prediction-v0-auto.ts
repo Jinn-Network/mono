@@ -1,7 +1,7 @@
 /**
  * Auto-generator for prediction.v0 intents.
  *
- * Produces a fresh DesiredState per hour bucket: reads current Chainlink
+ * Produces a fresh RestorationJob per hour bucket: reads current Chainlink
  * price, builds a template with the configured threshold sentinel
  * (default "current+0.5%" — coin-flip-ish, slightly biased NO), and resolves
  * it via the shared template helper. Stable ID per hour prevents duplicate
@@ -12,11 +12,14 @@
  * with JINN_DISABLE_AUTO_INTENTS=1.
  */
 
+import { randomUUID } from 'node:crypto';
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import { readChainlinkLatest, scaleToDecimal } from '../venues/chainlink/client.js';
-import type { DesiredState } from '../types/desired-state.js';
+import type { RestorationJob } from '../types/desired-state.js';
+import type { IntentV1, SignedIntentV1 } from '../types/intent.js';
 import { resolvePredictionV0Template } from './prediction-v0-template.js';
+import { signIntentV1 } from './signing.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -50,15 +53,25 @@ export interface PredictionV0AutoConfig {
   rpcUrl?: string;
   /** Injected publicClient — tests pass a mock; production leaves unset. */
   _publicClient?: PublicClient;
+  /**
+   * Agent EOA address. When provided alongside `safeAddress` and
+   * `agentPrivateKey`, the generator produces a `SignedIntentV1` embedded in
+   * the returned RestorationJob's `intent` field.
+   */
+  agentEoa?: `0x${string}`;
+  /** Safe address — embedded in `intent.creator.safeAddress`. */
+  safeAddress?: `0x${string}`;
+  /** Agent private key — used to sign the IntentV1. */
+  agentPrivateKey?: `0x${string}`;
 }
 
-export type PredictionV0Generator = () => Promise<DesiredState | null>;
+export type PredictionV0Generator = () => Promise<RestorationJob | null>;
 
 // ── Generator factory ──────────────────────────────────────────────────────────
 
 /**
  * Build a generator closure. Calling the closure returns a freshly-resolved
- * DesiredState for the current hour bucket, or null if Chainlink is
+ * RestorationJob for the current hour bucket, or null if Chainlink is
  * unreachable (caller skips this tick).
  */
 export function makePredictionV0Generator(config: PredictionV0AutoConfig): PredictionV0Generator {
@@ -79,7 +92,7 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
     return publicClient;
   };
 
-  return async (): Promise<DesiredState | null> => {
+  return async (): Promise<RestorationJob | null> => {
     // Bucket start = windowDurationMs boundary ≤ now. Stable ID per bucket
     // prevents duplicate posts within the same window.
     const now = Date.now();
@@ -109,14 +122,38 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
     };
 
     try {
-      const intent = await resolvePredictionV0Template(template, {
+      const resolved = await resolvePredictionV0Template(template, {
         readCurrent: async ({ feed }) => {
           const reading = await readChainlinkLatest(feed, getPublicClient());
           return scaleToDecimal(reading.answer, reading.decimals);
         },
       });
-      // Return the resolved DesiredState shape (intent is already valid).
-      return intent as unknown as DesiredState;
+
+      // When signing credentials are available, produce a SignedIntentV1 and
+      // embed it in the RestorationJob's `intent` field so MechAdapter's
+      // `state.intent ?? buildRestorationJobPayload(...)` path picks it up.
+      if (config.agentEoa && config.safeAddress && config.agentPrivateKey) {
+        const intentDoc: IntentV1 = {
+          schemaVersion: 'intent.v1',
+          id: resolved.id ?? randomUUID(),
+          kind: 'prediction.v0',
+          description: resolved.description,
+          window: resolved.window,
+          spec: resolved.spec as IntentV1['spec'],
+          eligibility: resolved.eligibility ?? {},
+          creator: {
+            safeAddress: config.safeAddress,
+            agentEoa: config.agentEoa,
+          },
+          createdAt: Date.now(),
+        };
+        const signed: SignedIntentV1 = await signIntentV1(intentDoc, config.agentPrivateKey);
+        const job: RestorationJob = resolved as unknown as RestorationJob;
+        return { ...job, intent: signed };
+      }
+
+      // No signing credentials — return the resolved shape without a signed intent.
+      return resolved as unknown as RestorationJob;
     } catch {
       // Chainlink read failure or schema mismatch — skip this tick, try next.
       return null;

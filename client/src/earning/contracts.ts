@@ -137,6 +137,12 @@ export interface ChainConfig {
   claimRegistry?: string;
   distributorAddress?: string;
   /**
+   * ERC-8004 IdentityRegistry contract — operator agent NFT mint target.
+   * See subgraph/networks.json + /tmp/erc8004-ref/IdentityRegistry.json.
+   * Resolved per chainId from `IDENTITY_REGISTRY_ADDRESSES` below.
+   */
+  identityRegistry?: string;
+  /**
    * Testnet-only JINN faucet (testnet operator onboarding). Absent on mainnet.
    * Resolved from the deployment-jinn-testnet-faucet-baseSepolia artifact.
    */
@@ -192,6 +198,9 @@ const BASE_CONFIG: ChainConfig = {
   // stOLAS ExternalStakingDistributor (LemonTree, Base mainnet)
   distributorAddress: '0x40abf47B926181148000DbCC7c8DE76A3a61a66f',
 
+  // ERC-8004 IdentityRegistry (Base mainnet, vanity 0x8004…)
+  identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+
   // Service package
   agentId: 103,
   serviceHash: 'bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae',
@@ -231,6 +240,9 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
 
   // Phase 1a staking proxy (Base Sepolia)
   stakingContract: '0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0',
+
+  // ERC-8004 IdentityRegistry (Base Sepolia, vanity 0x8004…)
+  identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
 
   // Reuse the current service package defaults unless testnet-specific overrides are supplied.
   agentId: 103,
@@ -600,7 +612,87 @@ export const MECH_MARKETPLACE_CREATE_ABI = [
 export const EVENT_TOPICS = {
   CreateService: keccak256(stringToBytes('CreateService(uint256,bytes32)')),
   CreateMultisigWithAgents: keccak256(stringToBytes('CreateMultisigWithAgents(uint256,address)')),
+  // ERC-8004 IdentityRegistry mint event (jinn-mono-j07).
+  Registered: keccak256(stringToBytes('Registered(uint256,string,address)')),
 } as const;
+
+// ---------------------------------------------------------------------------
+// ERC-8004 IdentityRegistry (vanity 0x8004… on every supported chain)
+// ---------------------------------------------------------------------------
+//
+// Source of truth: subgraph/networks.json (cross-checked against
+// erc-8004/erc-8004-contracts/scripts/addresses.ts and used by
+// jinn-mono-fud's subgraph). Only the chains the client compiles for
+// are mirrored here; the registry is also deployed on Sepolia/Mainnet
+// for completeness, but the bootstrap currently runs against Base or
+// Base Sepolia.
+
+export const IDENTITY_REGISTRY_ADDRESSES: Record<number, string> = {
+  8453: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',  // Base mainnet
+  84532: '0x8004A818BFB912233c491871b3d84c89A494BD9e', // Base Sepolia
+  // Mainnet (1) and Sepolia (11155111) share the Base mainnet / Base
+  // Sepolia vanity addresses respectively; recorded in subgraph/networks.json
+  // but not currently consumed from the client.
+  1: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+  11155111: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+};
+
+/**
+ * Minimal ABI surface used by the bootstrap mint step. The full
+ * subgraph/abis/IdentityRegistry.json carries the same definitions —
+ * we keep only what the bootstrap touches to avoid drift if the
+ * subgraph ABI is regenerated. Per-execution `setMetadata` lives in
+ * a separate client (`jinn-mono-3zk`) and re-derives its own ABI.
+ */
+export const IDENTITY_REGISTRY_ABI = [
+  // Mint without an agentURI — emits Registered(agentId, "", owner).
+  {
+    inputs: [],
+    name: 'register',
+    outputs: [{ name: 'agentId', type: 'uint256' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  // Mint with an agentURI string — emits Registered(agentId, agentURI, owner).
+  {
+    inputs: [{ name: 'agentURI', type: 'string' }],
+    name: 'register',
+    outputs: [{ name: 'agentId', type: 'uint256' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  // Bind a wallet to an agentId. msg.sender must be owner / approved /
+  // operator; the inner `signature` is recovered against `newWallet`
+  // (ECDSA EOA path, ERC-1271 contract-wallet path).
+  {
+    inputs: [
+      { name: 'agentId', type: 'uint256' },
+      { name: 'newWallet', type: 'address' },
+      { name: 'deadline', type: 'uint256' },
+      { name: 'signature', type: 'bytes' },
+    ],
+    name: 'setAgentWallet',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'agentId', type: 'uint256' }],
+    name: 'getAgentWallet',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    type: 'event',
+    name: 'Registered',
+    inputs: [
+      { name: 'agentId', type: 'uint256', indexed: true },
+      { name: 'agentURI', type: 'string', indexed: false },
+      { name: 'owner', type: 'address', indexed: true },
+    ],
+  },
+] as const;
 
 // ---------------------------------------------------------------------------
 // stOLAS ExternalStakingDistributor (Base mainnet)

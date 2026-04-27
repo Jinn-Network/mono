@@ -42,7 +42,7 @@ async function buildEngineWith(store: Store, run: RestorerImpl['run'], implName 
     onchainCreationBlock: 1,
     windowStartTs: now - 10_000,
     windowEndTs: now + 600_000,
-    desiredState: { id: 'health-check', description: 'legacy intent' },
+    restorationJob: { id: 'health-check', description: 'legacy intent' },
   });
   const persistence = (engine as any).persistence;
   persistence.transition('req-1', IntentState.CLAIMED);
@@ -90,7 +90,7 @@ describe('legacy-claude skip handling', () => {
         onchainCreationBlock: 1,
         windowStartTs: now - 10_000,
         windowEndTs: now + 600_000,
-        desiredState: {
+        restorationJob: {
           id: 'health-check',
           description: 'legacy intent',
         },

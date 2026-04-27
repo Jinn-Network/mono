@@ -62,7 +62,7 @@ export class PredictionApyV0BaselineImpl implements RestorerImpl {
     return { status: 'ready' };
   }
 
-  async canAttempt(intent: import('../../../types/desired-state.js').DesiredState) {
+  async canAttempt(intent: import('../../../types/desired-state.js').RestorationJob) {
     const parsed = PredictionApyV0IntentSchema.safeParse(intent);
     if (!parsed.success) return { ok: false as const, reason: `Invalid prediction.apy.v0 intent: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) return { ok: false as const, reason: 'window already closed' };
@@ -127,7 +127,14 @@ export class PredictionApyV0BaselineImpl implements RestorerImpl {
         twApyBps,
         sampleCount,
       },
-      artifacts: [{ path: 'prediction-apy.json', role: 'prediction_submission' }],
+      restorationPayload: {
+        prediction: {
+          predictedBps: prediction.predictedBps,
+          submittedAt,
+          modelId: prediction.modelId,
+        },
+      },
+      artifacts: [{ path: 'prediction-apy.json', artifactType: 'prediction_submission' }],
     };
   }
 }

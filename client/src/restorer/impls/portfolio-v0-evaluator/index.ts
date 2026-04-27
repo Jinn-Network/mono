@@ -5,8 +5,8 @@
  * No LLM. Pure deterministic verification per spec §7.
  *
  * Architecture decision (T7):
- *   The engine (locked) builds portfolio.v0.manifest.v1. The verdict manifest
- *   shape is portfolio.v0.eval.manifest.v1 (§5.2). Since the engine cannot be
+ *   The engine (locked) builds the restoration envelope. The eval impl assembles
+ *   and signs the verdict manifest itself (§5.2). Since the engine cannot be
  *   modified, the eval impl assembles and signs the verdict manifest itself,
  *   writes it as verdict.json in workingDir, and declares it as an artifact
  *   with role "evaluation_verdict". The engine's outer manifest becomes the
@@ -21,25 +21,29 @@
  */
 
 import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { keccak256, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
 import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { DesiredState } from '../../../types/desired-state.js';
+import type { RestorationJob } from '../../../types/desired-state.js';
 import type { HlFill, HlGridPoint } from '../../../venues/hyperliquid/types.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
 import { bracketGridPoints } from '../../../venues/hyperliquid/grid.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { signCanonical } from '../../engine/signing.js';
+import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
 
 import {
-  RestorationManifestSchema,
   PortfolioV0IntentSchema,
   PortfolioV0EligibilitySchema,
 } from '../../../types/portfolio.js';
-import type { RestorationManifest } from '../../../types/portfolio.js';
+import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import type { SignedEnvelope } from '../../../types/envelope.js';
+import { PortfolioV0RestorationPayloadSchema } from '../../../types/payloads/portfolio-v0.js';
+import type { PortfolioV0RestorationPayload } from '../../../types/payloads/portfolio-v0.js';
 
 import {
   equityCurve,
@@ -71,6 +75,12 @@ import {
 import { checkEquityReturnTarget, checkMaxDrawdownConstraint } from './checks/spec.js';
 
 import type { Check, Verdict, PortfolioV0EvaluatorConfig } from './types.js';
+
+// ── Span helpers ──────────────────────────────────────────────────────────────
+
+function nowNanos(): string {
+  return `${BigInt(Date.now()) * 1_000_000n}`;
+}
 
 // ── Verdict derivation per §7.3 ───────────────────────────────────────────────
 
@@ -116,11 +126,12 @@ function _assembleUnsignedManifest(params: {
   onchainCreationTx: string;
   onchainCreationBlock: number;
   restorationRequestId: string;
-  intent: DesiredState;
+  intent: RestorationJob;
   checks: Check[];
   verdict: Verdict;
   score: string;
-  targetManifest: RestorationManifest | null;
+  targetPayload: PortfolioV0RestorationPayload | null;
+  targetEnvelope: SignedEnvelope | null;
   rederivPrePayload: { capturedAt: number; payload: unknown } | null;
   rederivFills: HlFill[] | null;
   rederived: { equityReturn: number; maxDrawdown: number; closedTrades: number; notional: number } | null;
@@ -130,11 +141,11 @@ function _assembleUnsignedManifest(params: {
   const {
     intentCid, onchainCreationTx, onchainCreationBlock, restorationRequestId,
     intent, checks, verdict, score,
-    targetManifest, rederivPrePayload, rederivFills, rederived,
+    targetPayload, targetEnvelope, rederivPrePayload, rederivFills, rederived,
     evaluatorSafeAddress, evaluatorAgentEoa,
   } = params;
 
-  const claimedGating = targetManifest?.gating ?? {
+  const claimedGating = targetPayload?.gating ?? {
     equityReturnPct: '0',
     maxDrawdownPct: '0',
     closedTradesCount: 0,
@@ -149,13 +160,13 @@ function _assembleUnsignedManifest(params: {
   };
 
   const rederivPreSnap = rederivPrePayload ?? {
-    capturedAt: targetManifest?.preSnapshot.capturedAt ?? 0,
+    capturedAt: targetPayload?.preSnapshot.capturedAt ?? 0,
     payload: null,
   };
 
   const rederivPostSnap = {
-    capturedAt: targetManifest?.postSnapshot.capturedAt ?? 0,
-    payload: targetManifest?.postSnapshot.payload ?? null,
+    capturedAt: targetPayload?.postSnapshot.capturedAt ?? 0,
+    payload: targetPayload?.postSnapshot.payload ?? null,
   };
 
   const fillsHash = (() => {
@@ -164,13 +175,12 @@ function _assembleUnsignedManifest(params: {
   })();
 
   return {
-    schemaVersion: 'portfolio.v0.eval.manifest.v1',
     intent: intentProvenance,
     evaluator: {
       safeAddress: evaluatorSafeAddress,
       agentEoa: evaluatorAgentEoa,
     },
-    window: targetManifest?.window ?? intent.window ?? { startTs: 0, endTs: 0 },
+    window: targetEnvelope?.window ?? intent.window ?? { startTs: 0, endTs: 0 },
     verdict,
     score,
     scoreBasis: 'calmar.v1',
@@ -188,15 +198,15 @@ function _assembleUnsignedManifest(params: {
     },
     claimed: {
       preSnapshot: {
-        capturedAt: targetManifest?.preSnapshot.capturedAt ?? 0,
-        payload: targetManifest?.preSnapshot.payload ?? null,
+        capturedAt: targetPayload?.preSnapshot.capturedAt ?? 0,
+        payload: targetPayload?.preSnapshot.payload ?? null,
       },
       postSnapshot: {
-        capturedAt: targetManifest?.postSnapshot.capturedAt ?? 0,
-        payload: targetManifest?.postSnapshot.payload ?? null,
+        capturedAt: targetPayload?.postSnapshot.capturedAt ?? 0,
+        payload: targetPayload?.postSnapshot.payload ?? null,
       },
       fillsHash,
-      fillsCount: targetManifest?.fills.length ?? 0,
+      fillsCount: targetPayload?.fills.length ?? 0,
       gating: claimedGating,
     },
     checks,
@@ -264,13 +274,13 @@ export class PortfolioV0Evaluator implements RestorerImpl {
   }
 
   async canAttempt(
-    intent: DesiredState,
+    intent: RestorationJob,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (intent.spec?.kind !== 'portfolio.v0') {
       return { ok: false, reason: 'spec.kind is not portfolio.v0' };
     }
     if (intent.type !== 'evaluation') {
-      return { ok: false, reason: 'DesiredState.type is not evaluation' };
+      return { ok: false, reason: 'RestorationJob.type is not evaluation' };
     }
     if (!intent.restorationRequestId) {
       return { ok: false, reason: 'restorationRequestId is required' };
@@ -288,10 +298,11 @@ export class PortfolioV0Evaluator implements RestorerImpl {
     }
     const { intent, log } = ctx;
 
-    // ── Step 1: Parse restorer's manifest from inlined context ────────────────
-    // The manifest JSON is inlined by MechAdapter.tryCreateEvaluationJob at context.restorationResult.
+    // ── Step 1: Parse restorer's SignedEnvelope from inlined context ─────────
+    // The envelope JSON is inlined by MechAdapter.tryCreateEvaluationJob at context.restorationResult.
     // Falls back to an error — crash recovery path not yet implemented.
-    let targetManifest: RestorationManifest;
+    let targetEnvelope: SignedEnvelope;
+    let targetPayload: PortfolioV0RestorationPayload;
     let targetIntent: ReturnType<typeof PortfolioV0IntentSchema.parse>;
     let hlPortfolioPeriodFn: (user: string) => Promise<{ accountValueHistory: HlGridPoint[] } | null>;
     let hlUserFillsByTimeFn: (user: string, startTime: number, endTime?: number) => Promise<{ fills: HlFill[]; startTimeClamped: boolean }>;
@@ -306,7 +317,13 @@ export class PortfolioV0Evaluator implements RestorerImpl {
     }
 
     try {
-      targetManifest = RestorationManifestSchema.parse(JSON.parse(inlined));
+      targetEnvelope = SignedEnvelopeSchema.parse(JSON.parse(inlined));
+      if (targetEnvelope.kind !== 'portfolio.v0' || targetEnvelope.role !== 'restoration') {
+        throw new Error(
+          `Unexpected envelope kind/role: ${targetEnvelope.kind}/${targetEnvelope.role}; expected portfolio.v0/restoration`,
+        );
+      }
+      targetPayload = PortfolioV0RestorationPayloadSchema.parse(targetEnvelope.payload);
       // The original portfolio.v0 intent is directly at intent.spec — no IPFS fetch needed.
       targetIntent = PortfolioV0IntentSchema.parse(intent);
 
@@ -323,27 +340,27 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log({ level: 'error', msg: 'portfolio-v0-evaluator: failed to parse manifest/intent', data: { err: msg } });
+      log({ level: 'error', msg: 'portfolio-v0-evaluator: failed to parse envelope/intent', data: { err: msg } });
       // We cannot proceed — return a minimal INDETERMINATE output.
       checks.push({
         name: 'availability.manifest_parseable',
         status: 'FAIL',
-        detail: `Failed to parse manifest or intent: ${msg}`,
+        detail: `Failed to parse envelope or intent: ${msg}`,
       });
-      return this._buildOutput(ctx, checks, null, null, null, null, null, null, null, null);
+      return this._buildOutput(ctx, checks, null, null, null, null, null, null, null, null, null);
     }
 
-    // Extract provenance fields from the parsed manifest + intent
-    const intentCid = targetManifest.intent.cid;
-    const onchainCreationTx = targetManifest.intent.onchainCreationTx;
-    const onchainCreationBlock = targetManifest.intent.onchainCreationBlock;
+    // Extract provenance fields from the parsed envelope + intent
+    const intentCid = targetEnvelope.intent.cid;
+    const onchainCreationTx = targetEnvelope.intent.onchainCreationTx;
+    const onchainCreationBlock = targetEnvelope.intent.onchainCreationBlock;
     const restorationRequestId = intent.restorationRequestId!;
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: starting evaluation', data: { intentCid, restorationRequestId } });
 
 
     const masterAddress = targetIntent.spec.account.masterAddress;
-    const { startTs, endTs } = targetManifest.window;
+    const { startTs, endTs } = targetEnvelope.window;
 
     // ── Step 2: Re-fetch HL data ──────────────────────────────────────────────
 
@@ -353,30 +370,73 @@ export class PortfolioV0Evaluator implements RestorerImpl {
     let startTimeClamped = false;
     let hlReachable = false;
 
-    try {
-      const [portfolioResp, fillsResult] = await Promise.all([
-        hlPortfolioPeriodFn(masterAddress),
-        hlUserFillsByTimeFn(masterAddress, startTs, endTs),
-      ]);
+    {
+      const hlFetchStart = nowNanos();
+      try {
+        const [portfolioResp, fillsResult] = await Promise.all([
+          hlPortfolioPeriodFn(masterAddress),
+          hlUserFillsByTimeFn(masterAddress, startTs, endTs),
+        ]);
 
-      grid = portfolioResp?.accountValueHistory ?? [];
-      rederivFills = fillsResult.fills;
-      startTimeClamped = fillsResult.startTimeClamped;
-      hlReachable = true;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log({ level: 'error', msg: 'portfolio-v0-evaluator: HL API call failed', data: { err: msg } });
+        grid = portfolioResp?.accountValueHistory ?? [];
+        rederivFills = fillsResult.fills;
+        startTimeClamped = fillsResult.startTimeClamped;
+        hlReachable = true;
+        ctx.trajectory.addSpan({
+          name: 'GET api.hyperliquid.xyz',
+          kind: 'CLIENT',
+          startTimeUnixNano: hlFetchStart,
+          endTimeUnixNano: nowNanos(),
+          attributes: {
+            'jinn.span.kind': 'jinn.venue_io',
+            'net.peer.name': 'api.hyperliquid.xyz',
+            'http.request.method': 'POST',
+            'http.response.status_code': 200,
+            'url.full': 'https://api.hyperliquid.xyz/info',
+            'venue.id': 'hyperliquid',
+            'venue.fetch.kind': 'portfolio_period+fills',
+          },
+          events: [],
+          status: { code: 'OK' },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        ctx.trajectory.addSpan({
+          name: 'GET api.hyperliquid.xyz',
+          kind: 'CLIENT',
+          startTimeUnixNano: hlFetchStart,
+          endTimeUnixNano: nowNanos(),
+          attributes: {
+            'jinn.span.kind': 'jinn.venue_io',
+            'net.peer.name': 'api.hyperliquid.xyz',
+            'http.request.method': 'POST',
+            'http.response.status_code': 0,
+            'url.full': 'https://api.hyperliquid.xyz/info',
+            'venue.id': 'hyperliquid',
+            'venue.fetch.kind': 'portfolio_period+fills',
+          },
+          events: [
+            {
+              timeUnixNano: nowNanos(),
+              name: 'exception',
+              attributes: { 'exception.message': msg },
+            },
+          ],
+          status: { code: 'ERROR', message: msg },
+        });
+        log({ level: 'error', msg: 'portfolio-v0-evaluator: HL API call failed', data: { err: msg } });
+      }
     }
 
     // ── Availability checks ───────────────────────────────────────────────────
 
     checks.push(checkHlReachable(hlReachable));
     if (!hlReachable) {
-      return this._buildOutput(ctx, checks, null, null, null, null, intentCid, onchainCreationTx, onchainCreationBlock, restorationRequestId);
+      return this._buildOutput(ctx, checks, null, null, null, null, null, intentCid, onchainCreationTx, onchainCreationBlock, restorationRequestId);
     }
 
-    const preCapturedAt = targetManifest.preSnapshot.capturedAt;
-    const postCapturedAt = targetManifest.postSnapshot.capturedAt;
+    const preCapturedAt = targetPayload.preSnapshot.capturedAt;
+    const postCapturedAt = targetPayload.postSnapshot.capturedAt;
 
     checks.push(checkPreSnapshotRederivable(grid, preCapturedAt));
     checks.push(checkFillsRederivable(startTimeClamped));
@@ -419,14 +479,14 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       ? null
       : {
           capturedAt: postCapturedAt,
-          payload: targetManifest.postSnapshot.payload,
+          payload: targetPayload.postSnapshot.payload,
         };
 
     // ── Compute canonical metrics ─────────────────────────────────────────────
 
     // Extract accountValues for metric computation
-    const claimedPrePayload = targetManifest.preSnapshot.payload;
-    const claimedPostPayload = targetManifest.postSnapshot.payload;
+    const claimedPrePayload = targetPayload.preSnapshot.payload;
+    const claimedPostPayload = targetPayload.postSnapshot.payload;
 
     // Use the shared extractor so unified-shape and legacy payloads both work
     // (see `extractAccountValue` in checks/consistency.ts).
@@ -457,11 +517,11 @@ export class PortfolioV0Evaluator implements RestorerImpl {
 
     // ── Consistency checks ────────────────────────────────────────────────────
 
-    const claimedGating = targetManifest.gating;
+    const claimedGating = targetPayload.gating;
 
     checks.push(checkPreSnapshot(claimedPrePayload, rederivPrePayload));
     checks.push(checkPostSnapshot(claimedPostPayload, rederivPostPayload));
-    checks.push(checkFills(targetManifest.fills, rederivFills));
+    checks.push(checkFills(targetPayload.fills, rederivFills));
     checks.push(checkGatingEquityReturn(claimedGating.equityReturnPct, rederivEquityReturn));
     checks.push(checkGatingMaxDrawdown(claimedGating.maxDrawdownPct, rederivMaxDrawdown));
     checks.push(checkGatingClosedTrades(claimedGating.closedTradesCount, rederivClosedTrades));
@@ -481,13 +541,14 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       notional: rederivNotional,
     };
 
-    return this._buildOutput(ctx, checks, targetManifest, rederivPrePayload, rederivFills, rederived, intentCid, onchainCreationTx, onchainCreationBlock, restorationRequestId);
+    return this._buildOutput(ctx, checks, targetPayload, targetEnvelope, rederivPrePayload, rederivFills, rederived, intentCid, onchainCreationTx, onchainCreationBlock, restorationRequestId);
   }
 
   private async _buildOutput(
     ctx: RestorationContext,
     checks: Check[],
-    targetManifest: RestorationManifest | null,
+    targetPayload: PortfolioV0RestorationPayload | null,
+    targetEnvelope: SignedEnvelope | null,
     rederivPrePayload: { capturedAt: number; payload: unknown } | null,
     rederivFills: HlFill[] | null,
     rederived: {
@@ -509,11 +570,29 @@ export class PortfolioV0Evaluator implements RestorerImpl {
     const postRederivableSkipped = checks.some(
       (c) => c.name === 'availability.hl_post_snapshot_rederivable' && c.status === 'SKIP',
     );
+    const scoreStart = nowNanos();
     const verdict: Verdict = postRederivableSkipped ? 'INDETERMINATE' : deriveVerdict(checks);
 
     const equityReturn = rederived?.equityReturn ?? 0;
     const maxDrawdown = rederived?.maxDrawdown ?? 0;
     const score = scoreCalmarV1(equityReturn, maxDrawdown, verdict);
+    const scoreEnd = nowNanos();
+
+    ctx.trajectory.addSpan({
+      name: 'score.calmar.v1',
+      kind: 'INTERNAL',
+      startTimeUnixNano: scoreStart,
+      endTimeUnixNano: scoreEnd,
+      attributes: {
+        'jinn.span.kind': 'jinn.state_transition',
+        'jinn.state.from': 'FETCHED',
+        'jinn.state.to': 'SCORED',
+        'verdict': verdict,
+        'score.basis': 'calmar.v1',
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: verdict derived', data: { verdict, score, checkCount: checks.length } });
 
@@ -534,7 +613,8 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       checks,
       verdict,
       score,
-      targetManifest,
+      targetPayload,
+      targetEnvelope,
       rederivPrePayload,
       rederivFills,
       rederived,
@@ -564,11 +644,75 @@ export class PortfolioV0Evaluator implements RestorerImpl {
 
     // ── Write verdict.json ────────────────────────────────────────────────────
 
+    const verdictJson = JSON.stringify(verdictManifest, null, 2);
+    const verdictSha256 = createHash('sha256').update(verdictJson).digest('hex');
     _writeVerdictArtifact(workingDir, verdictManifest);
+
+    const artifactEmitNs = nowNanos();
+    ctx.trajectory.addSpan({
+      name: 'artifact.emit verdict.json',
+      kind: 'INTERNAL',
+      startTimeUnixNano: artifactEmitNs,
+      endTimeUnixNano: artifactEmitNs,
+      attributes: {
+        'jinn.span.kind': 'jinn.artifact.emit',
+        'jinn.artifact.cid': 'pending',
+        'jinn.artifact.artifactType': 'evaluation_verdict',
+        'jinn.artifact.sha256': verdictSha256,
+        'artifact.path': 'verdict.json',
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: verdict.json written', data: { path: join(workingDir, 'verdict.json') } });
 
     // ── Build RestorationOutput ───────────────────────────────────────────────
+
+    // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
+    // Assembles the PortfolioV0VerdictPayload from the already-computed fields.
+    //
+    // restorationEnvelope: CID threaded from the daemon via context, sha256
+    // computed as sha256(JCS(restorationEnvelope)) — matching the upload pipeline
+    // and the conformance harness (8l6 fix A).
+    //
+    // verificationOfRestoration: stub — Plan D will connect the real SDK that
+    // fetches + validates the restoration envelope against its claimed tier.
+    // For V1 the stub always reports 'valid' (self-signed tier), which means
+    // the REJECTED-if-invalid path in engine.pack() never fires in practice
+    // until Plan D replaces this stub.
+    const restorationEnvelopeCid = (intent.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+      ?? restorationRequestId
+      ?? 'bafy-unknown';
+    const restorationResultJson = intent.context?.['restorationResult'];
+    // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
+    const restorationEnvelopeSha256 = typeof restorationResultJson === 'string'
+      ? createHash('sha256').update(canonicalJson(JSON.parse(restorationResultJson) as unknown)).digest('hex')
+      : '0'.repeat(64);
+    const restorationEnvelope = {
+      cid: restorationEnvelopeCid,
+      sha256: restorationEnvelopeSha256,
+    };
+
+    const verificationOfRestoration = {
+      claimedTier: 'self-signed' as const,  // TODO(plan-d): read from restoration envelope
+      sdkVersion: '0.0.0-stub',              // TODO(plan-d): real SDK version
+      timestamp: Date.now(),
+      checks: [{ name: 'stub', passed: true }],
+      overall: 'valid' as const,             // TODO(plan-d): real SDK outcome
+    };
+
+    const verdictPayload: Record<string, unknown> = {
+      restorationEnvelope,
+      verificationOfRestoration,
+      verdict,
+      score,
+      scoreBasis: 'calmar.v1',
+      scoreVersion: 'v1',
+      rederived: unsigned['rederived'],
+      claimed: unsigned['claimed'],
+      checks: unsigned['checks'],
+    };
 
     const output: RestorationOutput = {
       venueRef: { name: 'hyperliquid' },
@@ -589,11 +733,12 @@ export class PortfolioV0Evaluator implements RestorerImpl {
         closedTradesCount: rederived?.closedTrades ?? 0,
         tradedNotionalMultiple: String(rederived?.notional ?? 0),
       },
+      verdictPayload,
       artifacts: [
         {
           path: 'verdict.json',
-          role: 'evaluation_verdict',
-          metadata: { verdict, score, schemaVersion: 'portfolio.v0.eval.manifest.v1' },
+          artifactType: 'evaluation_verdict',
+          metadata: { verdict, score },
           tags: ['verdict', 'evaluation'],
           access: { kind: 'open' },
         },

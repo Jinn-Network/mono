@@ -8,11 +8,15 @@ export type StakingMode = z.infer<typeof StakingModeSchema>;
 // ── Service step progression ─────────────────────────────────────────────────
 //
 // Standard (stOLAS) mode:
-//   awaiting_stake -> staked -> mech_deployed -> complete
+//   awaiting_stake -> staked -> mech_deployed -> agent_registered -> complete
 //
 // Self-bond mode (legacy):
 //   awaiting_stake -> service_created -> service_activated -> agents_registered ->
-//   service_deployed -> service_staked -> mech_deployed -> complete
+//   service_deployed -> service_staked -> mech_deployed -> agent_registered -> complete
+//
+// `agent_registered` is the ERC-8004 IdentityRegistry mint
+// (one agent NFT per operator Safe; see
+// docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md §4.1).
 
 export const ServiceStepSchema = z.enum([
   'awaiting_stake',
@@ -23,6 +27,7 @@ export const ServiceStepSchema = z.enum([
   'service_staked',
   'staked',
   'mech_deployed',
+  'agent_registered',
   'complete',
 ]);
 
@@ -39,6 +44,25 @@ export const ServiceStateSchema = z.object({
   staking_address: z.string().nullable(),
   step: ServiceStepSchema,
   error: z.string().nullable(),
+
+  // ERC-8004 IdentityRegistry mint state.
+  //
+  // Populated by the operator-NFT mint step at bootstrap (jinn-mono-j07,
+  // see bootstrap.ts `stepRegisterAgent`). Read in main.ts (jinn-mono-3zk)
+  // to construct an `IdentityPublisher` for the engine when bootstrap has
+  // produced an agentId.
+  //
+  // All optional — missing on legacy state files written before the mint
+  // step landed; the daemon defensively skips publishing when `agent_id`
+  // is null. Decimal string because the on-chain `agentId` is `uint256`.
+  agent_id: z.string().nullable().optional().default(null),
+  agent_uri: z.string().nullable().optional().default(null),
+  identity_registry_address: z.string().nullable().optional().default(null),
+  agent_registered_tx: z.string().nullable().optional().default(null),
+  // True once `IdentityRegistry.setAgentWallet` succeeds for this Safe.
+  // Currently always `false` — wallet binding is deferred to jinn-mono-aev
+  // (Safe ERC-1271 wrapping).
+  safe_bound_to_agent: z.boolean().nullable().optional().default(false),
 });
 
 export type ServiceState = z.infer<typeof ServiceStateSchema>;
@@ -77,6 +101,11 @@ export function createDefaultServiceState(index: number, agentAddress: string): 
     staking_address: null,
     step: 'awaiting_stake',
     error: null,
+    agent_id: null,
+    agent_uri: null,
+    identity_registry_address: null,
+    agent_registered_tx: null,
+    safe_bound_to_agent: false,
   };
 }
 
