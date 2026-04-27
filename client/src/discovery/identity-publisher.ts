@@ -28,8 +28,16 @@ import { encodeAbiParameters, type Hex, type PublicClient, type WalletClient } f
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-/** Evidence tier on the canonical ladder. See payload-schema §5. */
-export type ExecutionTier = 0 | 1 | 2 | 3 | 4;
+/**
+ * Evidence tier on the canonical ladder.
+ *
+ * V1 admits only `{0=self-signed, 1=committed, 3=attested}` — aligned with
+ * `EvidenceTierSchema` in `client/src/types/envelope.ts` (PR #37 commit
+ * 44cc949b stripped V2+ tiers `consensus`=2 and `proved`=4 from V1). The
+ * gap at 2 and the absent 4 are intentional: future schema-version bumps
+ * re-admit them. See payload-schema §5.
+ */
+export type ExecutionTier = 0 | 1 | 3;
 
 /** Metadata key prefix. See payload-schema §6.1. */
 export type ContentKind = 'envelope' | 'evaluation';
@@ -123,18 +131,20 @@ function isZeroBytes32(value: Hex): boolean {
  * Throws `PayloadValidationError` on mismatch; otherwise returns the payload.
  *
  * Rules:
- *   - tier ∈ {0,1,2}: attestationQuoteCid MUST be empty, sourceMeasurement MUST be zero.
- *   - tier ∈ {3,4}:   attestationQuoteCid MUST be non-empty, sourceMeasurement MUST be non-zero.
+ *   - V1 admits only tiers {0=self-signed, 1=committed, 3=attested}. Tiers 2
+ *     (consensus) and 4 (proved) are V2+ and rejected here.
+ *   - tier ∈ {0,1}: attestationQuoteCid MUST be empty, sourceMeasurement MUST be zero.
+ *   - tier === 3:  attestationQuoteCid MUST be non-empty, sourceMeasurement MUST be non-zero.
  *   - version MUST equal 1 (this module only emits v1).
  */
 export function validatePayload(payload: ExecutionPayload): ExecutionPayload {
   if (payload.version !== 1) {
     throw new PayloadValidationError(payload.tier, `version must be 1, got ${payload.version}`);
   }
-  if (payload.tier < 0 || payload.tier > 4 || !Number.isInteger(payload.tier)) {
+  if (payload.tier !== 0 && payload.tier !== 1 && payload.tier !== 3) {
     throw new PayloadValidationError(
       payload.tier,
-      `tier must be integer in [0,4], got ${payload.tier}`,
+      `V1 admits only tiers {0,1,3}; got ${payload.tier}. Tiers 2 (consensus) and 4 (proved) are V2+.`,
     );
   }
   // manifestHash must be a 32-byte hex (66 chars including 0x).

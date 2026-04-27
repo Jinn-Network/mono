@@ -104,26 +104,28 @@ describe('validatePayload — strict-mode tier rules', () => {
     expect(() => validatePayload(VECTOR_B_INPUT)).not.toThrow();
   });
 
-  it('accepts tier 2 with empty quote and zero measurement', () => {
+  it('rejects tier 2 (consensus) — V2+ only in V1 schema', () => {
     expect(() =>
       validatePayload({
         ...VECTOR_A_INPUT,
+        // @ts-expect-error — tier 2 is intentionally excluded from ExecutionTier
         tier: 2,
       }),
-    ).not.toThrow();
+    ).toThrow(PayloadValidationError);
   });
 
   it('accepts tier 3 with non-empty quote and non-zero measurement', () => {
     expect(() => validatePayload(VECTOR_C_INPUT)).not.toThrow();
   });
 
-  it('accepts tier 4 with non-empty quote and non-zero measurement', () => {
+  it('rejects tier 4 (proved) — V2+ only in V1 schema', () => {
     expect(() =>
       validatePayload({
         ...VECTOR_C_INPUT,
+        // @ts-expect-error — tier 4 is intentionally excluded from ExecutionTier
         tier: 4,
       }),
-    ).not.toThrow();
+    ).toThrow(PayloadValidationError);
   });
 
   it('rejects tier 0 with non-empty attestationQuoteCid (PayloadValidationError)', () => {
@@ -154,17 +156,6 @@ describe('validatePayload — strict-mode tier rules', () => {
     ).toThrow(PayloadValidationError);
   });
 
-  it('rejects tier 2 with non-zero sourceMeasurement', () => {
-    expect(() =>
-      validatePayload({
-        ...VECTOR_A_INPUT,
-        tier: 2,
-        sourceMeasurement:
-          '0x4444444444444444444444444444444444444444444444444444444444444444',
-      }),
-    ).toThrow(PayloadValidationError);
-  });
-
   it('rejects tier 3 with empty attestationQuoteCid', () => {
     expect(() =>
       validatePayload({
@@ -180,16 +171,6 @@ describe('validatePayload — strict-mode tier rules', () => {
         ...VECTOR_C_INPUT,
         sourceMeasurement:
           '0x0000000000000000000000000000000000000000000000000000000000000000',
-      }),
-    ).toThrow(PayloadValidationError);
-  });
-
-  it('rejects tier 4 with empty attestationQuoteCid', () => {
-    expect(() =>
-      validatePayload({
-        ...VECTOR_C_INPUT,
-        tier: 4,
-        attestationQuoteCid: '0x',
       }),
     ).toThrow(PayloadValidationError);
   });

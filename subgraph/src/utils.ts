@@ -166,15 +166,21 @@ export function decodeExecutionPayload(payload: Bytes): DecodedPayload {
     ]);
     return result;
   }
-  if (tier < 0 || tier > 4) {
-    log.warning("decodeExecutionPayload: tier out of range {}", [tier.toString()]);
+  // V1 admits only {0=self-signed, 1=committed, 3=attested}. Tiers 2 (consensus)
+  // and 4 (proved) are V2+ — aligned with EvidenceTierSchema in
+  // client/src/types/envelope.ts (PR #37 fix 44cc949b).
+  if (tier != 0 && tier != 1 && tier != 3) {
+    log.warning(
+      "decodeExecutionPayload: V1 rejects tier {} (admits only 0,1,3)",
+      [tier.toString()],
+    );
     return result;
   }
 
   // Per-tier validity (g7h §5, strict mode):
-  //   tier ∈ {0,1,2}: attestationQuoteCid MUST be empty AND sourceMeasurement MUST be zero.
-  //   tier ∈ {3,4}:   attestationQuoteCid MUST be non-empty AND sourceMeasurement MUST be non-zero.
-  let requiresAttestation = tier >= 3;
+  //   tier ∈ {0,1}: attestationQuoteCid MUST be empty AND sourceMeasurement MUST be zero.
+  //   tier === 3:  attestationQuoteCid MUST be non-empty AND sourceMeasurement MUST be non-zero.
+  let requiresAttestation = tier == 3;
   let hasQuote = attestationQuoteBytes.length > 0;
   let measurementIsZero = sourceMeasurement.length == 0 || isAllZeroBytes(sourceMeasurement);
   let hasMeasurement = !measurementIsZero;
