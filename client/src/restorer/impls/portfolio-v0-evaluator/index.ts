@@ -685,8 +685,9 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       ?? restorationRequestId
       ?? 'bafy-unknown';
     const restorationResultJson = intent.context?.['restorationResult'];
+    // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
     const restorationEnvelopeSha256 = typeof restorationResultJson === 'string'
-      ? createHash('sha256').update(restorationResultJson).digest('hex')
+      ? createHash('sha256').update(canonicalJson(JSON.parse(restorationResultJson) as unknown)).digest('hex')
       : '0'.repeat(64);
     const restorationEnvelope = {
       cid: restorationEnvelopeCid,

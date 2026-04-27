@@ -18,6 +18,7 @@ import {
   recomputeTopLevelSignatureHash,
 } from '../prediction-v0-evaluator/checks/integrity.js';
 import { resolveExpectedRestorationIntentCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
+import { canonicalJson } from '../../engine/canonical-json.js';
 import { deriveGroundTruthBps } from './canonical-metrics.js';
 import { parsePredictionApySubmissionEnvelope } from './parse-submission.js';
 import { computeScore } from './score.js';
@@ -308,7 +309,8 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     const envelopeCid = (ctx.intent.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
       ?? ctx.intent.restorationRequestId
       ?? 'bafy-unknown';
-    const envelopeSha256 = createHash('sha256').update(manifestJson).digest('hex');
+    // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
+    const envelopeSha256 = createHash('sha256').update(canonicalJson(rawPayload)).digest('hex');
     const restorationEnvelope = {
       cid: envelopeCid,
       sha256: envelopeSha256,

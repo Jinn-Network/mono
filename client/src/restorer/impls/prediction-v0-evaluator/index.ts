@@ -42,6 +42,7 @@ import {
   recomputeTopLevelSignatureHash,
 } from './checks/integrity.js';
 import { resolveExpectedRestorationIntentCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
+import { canonicalJson } from '../../engine/canonical-json.js';
 import { checkQuestionKindSupported } from './checks/spec.js';
 
 function nowNanos(): string {
@@ -312,7 +313,8 @@ export class PredictionV0Evaluator implements RestorerImpl {
     const envelopeCid = (intent.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
       ?? intent.restorationRequestId
       ?? 'bafy-unknown';
-    const envelopeSha256 = createHash('sha256').update(manifestJson).digest('hex');
+    // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
+    const envelopeSha256 = createHash('sha256').update(canonicalJson(rawPayload)).digest('hex');
     const restorationEnvelope = {
       cid: envelopeCid,
       sha256: envelopeSha256,

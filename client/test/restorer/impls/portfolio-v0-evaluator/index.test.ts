@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { canonicalJson } from '../../../../src/restorer/engine/canonical-json.js';
 import { tmpdir } from 'node:os';
 import { PortfolioV0Evaluator } from '../../../../src/restorer/impls/portfolio-v0-evaluator/index.js';
 import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
@@ -909,9 +910,8 @@ describe('PortfolioV0Evaluator', () => {
       const out = await evaluator.run(ctx);
       const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
       expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
-      // sha256 must be the sha256 of the restoration envelope JSON
-      const manifestJson = JSON.stringify(MOCK_MANIFEST);
-      const expectedSha256 = createHash('sha256').update(manifestJson).digest('hex');
+      // sha256 must be the sha256 of the JCS canonical bytes (aligns with JCS upload pipeline)
+      const expectedSha256 = createHash('sha256').update(canonicalJson(MOCK_MANIFEST)).digest('hex');
       expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
     });
 
