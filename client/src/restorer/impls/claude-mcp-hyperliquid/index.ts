@@ -34,7 +34,7 @@ import type {
   IntentEnableMetadata,
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { DesiredState } from '../../../types/desired-state.js';
+import type { RestorationJob } from '../../../types/desired-state.js';
 import type { RationaleEntry } from '../../../types/portfolio.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
 import { getUnifiedAccountValue } from '../../../venues/hyperliquid/account-value.js';
@@ -120,7 +120,7 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
     return ctx.kind === 'portfolio.v0' && ctx.type !== 'evaluation';
   }
 
-  async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async canAttempt(intent: RestorationJob): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (!intent.spec || intent.spec['kind'] !== 'portfolio.v0') {
       return { ok: false, reason: 'spec.kind is not portfolio.v0' };
     }
@@ -639,7 +639,7 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
 
     const artifacts = allSessions.map((session) => ({
       path: `sessions/${session.sessionId}/transcript.txt`,
-      role: 'session_transcript',
+      artifactType: 'session_transcript',
       metadata: {
         sessionId: session.sessionId,
         startedAt: session.startedAt,
@@ -776,7 +776,7 @@ Begin with \`hl_account_unified\` now. No preamble.`;
 
 async function _runTestSessions(
   runSession: NonNullable<TestDeps['runSession']>,
-  intent: DesiredState,
+  intent: RestorationJob,
   portfolioIntent: ReturnType<typeof PortfolioV0IntentSchema.parse>,
   workingDir: string,
   abort: AbortSignal,

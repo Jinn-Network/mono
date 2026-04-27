@@ -3,9 +3,10 @@ import { existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import type { DesiredState, RestorationResult } from '../types/index.js';
+import type { RestorationJob, RestorationResult } from '../types/index.js';
 import type { Runner, RunnerContext } from './runner.js';
 import { Store } from '../store/store.js';
+import { tracedSpawn } from '../trajectory/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -43,8 +44,8 @@ export class ClaudeRunner implements Runner {
     this.mcpLauncher = resolveJinnMcpLauncher(config.mcpServerPath);
   }
 
-  async run(desiredState: DesiredState, context: RunnerContext): Promise<RestorationResult> {
-    const prompt = buildPrompt(desiredState);
+  async run(restorationJob: RestorationJob, context: RunnerContext): Promise<RestorationResult> {
+    const prompt = buildPrompt(restorationJob);
 
     // Write MCP config to temp dir
     const tmpDir = mkdtempSync(join(tmpdir(), 'jinn-runner-'));
@@ -56,14 +57,14 @@ export class ClaudeRunner implements Runner {
           command: this.mcpLauncher.command,
           args: this.mcpLauncher.args,
           env: {
-            DESIRED_STATE_ID: desiredState.id,
-            DESIRED_STATE_DESCRIPTION: desiredState.description,
-            DESIRED_STATE_CONTEXT: desiredState.context ? JSON.stringify(desiredState.context) : '',
-            DESIRED_STATE_TYPE: desiredState.type ?? '',
-            RESTORATION_REQUEST_ID: desiredState.restorationRequestId ?? '',
+            DESIRED_STATE_ID: restorationJob.id,
+            DESIRED_STATE_DESCRIPTION: restorationJob.description,
+            DESIRED_STATE_CONTEXT: restorationJob.context ? JSON.stringify(restorationJob.context) : '',
+            DESIRED_STATE_TYPE: restorationJob.type ?? '',
+            RESTORATION_REQUEST_ID: restorationJob.restorationRequestId ?? '',
             REQUEST_ID: context.requestId,
-            RESTORATION_DELIVERY_DATA: desiredState.type === 'evaluation' && desiredState.context?.restorationResult
-              ? JSON.stringify(desiredState.context.restorationResult)
+            RESTORATION_DELIVERY_DATA: restorationJob.type === 'evaluation' && restorationJob.context?.restorationResult
+              ? JSON.stringify(restorationJob.context.restorationResult)
               : '',
             STORE_PATH: context.storePath ?? '',
             DAEMON_API_URL: context.daemonApiUrl ?? '',
@@ -73,13 +74,33 @@ export class ClaudeRunner implements Runner {
     }));
 
     try {
-      await spawnAgent(this.claudePath, prompt, mcpConfigPath, this.model, context.timeoutMs);
+      if (context.trajectory) {
+        // Traced path — wrap spawn with tracedSpawn so the subprocess lifetime
+        // surfaces as a jinn.state_transition span in the run's trajectory.
+        const agentEnv = buildAgentEnv();
+        const args = buildAgentArgs(prompt, mcpConfigPath, this.model);
+        console.log(`[runner] Spawning agent (traced): ${this.claudePath} ${args.slice(0, 3).join(' ')} ... (timeout: ${context.timeoutMs}ms)`);
+        const result = await tracedSpawn({
+          collector: context.trajectory,
+          cmd: this.claudePath,
+          args,
+          env: agentEnv,
+          stateFrom: 'PREPARED',
+          stateTo: 'RAN_CLAUDE',
+        });
+        console.log(`[runner] Agent process exited (exitCode: ${result.exitCode})`);
+        if (result.exitCode !== 0) {
+          throw new Error(`Agent exited with code ${result.exitCode}: ${result.stderr.slice(0, 500)}`);
+        }
+      } else {
+        await spawnAgent(this.claudePath, prompt, mcpConfigPath, this.model, context.timeoutMs);
+      }
 
       // Read result from store — the MCP tool published it as an artifact
       if (context.storePath) {
         const store = new Store(context.storePath);
         try {
-          const isEvaluation = desiredState.type === 'evaluation';
+          const isEvaluation = restorationJob.type === 'evaluation';
           const tag = isEvaluation ? 'evaluation-verdict' : 'restoration-result';
           const artifact = store.getArtifactByRequestId(context.requestId, tag);
           if (artifact) {
@@ -97,13 +118,13 @@ export class ClaudeRunner implements Runner {
   }
 }
 
-export function buildPrompt(desiredState: DesiredState): string {
+export function buildPrompt(restorationJob: RestorationJob): string {
   let contextSection = '';
-  if (desiredState.context && Object.keys(desiredState.context).length > 0) {
-    contextSection = `\n## Context\n${JSON.stringify(desiredState.context, null, 2)}\n`;
+  if (restorationJob.context && Object.keys(restorationJob.context).length > 0) {
+    contextSection = `\n## Context\n${JSON.stringify(restorationJob.context, null, 2)}\n`;
   }
 
-  const isEvaluation = desiredState.type === 'evaluation';
+  const isEvaluation = restorationJob.type === 'evaluation';
 
   const instructions = isEvaluation
     ? `## Instructions
@@ -123,8 +144,8 @@ export function buildPrompt(desiredState: DesiredState): string {
   return `You are ${isEvaluation ? 'evaluating a restoration' : 'restoring a desired state'}.
 
 ## Desired State
-ID: ${desiredState.id}
-Description: ${desiredState.description}
+ID: ${restorationJob.id}
+Description: ${restorationJob.description}
 ${contextSection}
 ${instructions}
 
@@ -184,11 +205,16 @@ function buildAgentEnv(): Record<string, string> {
   return env;
 }
 
+function buildAgentArgs(prompt: string, mcpConfigPath: string, model?: string): string[] {
+  const args = ['-p', prompt, '--mcp-config', mcpConfigPath, '--strict-mcp-config'];
+  if (model) args.push('--model', model);
+  args.push('--allowedTools', 'mcp__jinn-client__*');
+  return args;
+}
+
 function spawnAgent(claudePath: string, prompt: string, mcpConfigPath: string, model?: string, timeoutMs?: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = ['-p', prompt, '--mcp-config', mcpConfigPath, '--strict-mcp-config'];
-    if (model) args.push('--model', model);
-    args.push('--allowedTools', 'mcp__jinn-client__*');
+    const args = buildAgentArgs(prompt, mcpConfigPath, model);
 
     console.log(`[runner] Spawning agent: ${claudePath} ${args.slice(0, 3).join(' ')} ... (timeout: ${timeoutMs}ms)`);
 

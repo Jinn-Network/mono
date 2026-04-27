@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 
 import { ClaudeMcpPredictionApyImpl } from '../../../../src/restorer/impls/claude-mcp-prediction-apy/index.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 
 const enabled = process.env['JINN_TEST_CLAUDE_PREDICTION_APY'] === '1';
 
@@ -52,7 +52,7 @@ describe.skipIf(!enabled)('claude-mcp-prediction-apy (isolation)', () => {
     const windowEndTs = windowStartTs + 3_600_000;
     const resolveTs = windowEndTs + 900_000;
 
-    const intent: DesiredState = {
+    const intent: RestorationJob = {
       id: 'iso-apy-1',
       description: 'USDC supply APY (isolation test)',
       window: { startTs: windowStartTs, endTs: windowEndTs },
@@ -73,7 +73,7 @@ describe.skipIf(!enabled)('claude-mcp-prediction-apy (isolation)', () => {
         question: { resolveTs },
       },
       eligibility: { maxSubmissionDelayMs: 60_000 },
-    } as unknown as DesiredState;
+    } as unknown as RestorationJob;
 
     const impl = new ClaudeMcpPredictionApyImpl({
       rpcUrl: process.env['BASE_SEPOLIA_RPC_URL'] ?? 'https://sepolia.base.org',

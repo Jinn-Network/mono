@@ -7,21 +7,22 @@
  * Score: brier.v1 scaled to 1e18 fixed-point.
  */
 import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { createPublicClient, http, keccak256, stringToHex } from 'viem';
+import { createPublicClient, http } from 'viem';
 import { baseSepolia, base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
+import { signCanonical } from '../../engine/signing.js';
 
 import type { PublicClient } from 'viem';
 import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { DesiredState } from '../../../types/desired-state.js';
+import type { RestorationJob } from '../../../types/desired-state.js';
 import {
   PredictionV0IntentSchema,
-  PredictionSubmissionManifestSchema,
-  type PredictionSubmissionManifest,
-  type PredictionVerdictManifest,
 } from '../../../types/prediction.js';
+import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { PredictionV0RestorationPayloadSchema, type PredictionV0RestorationPayload } from '../../../types/payloads/prediction-v0.js';
 import {
   oraclePriceAtResolveTs,
   scaleToDecimal,
@@ -40,8 +41,13 @@ import {
   checkIntentRefMissingExpected,
   recomputeTopLevelSignatureHash,
 } from './checks/integrity.js';
-import { resolveExpectedRestorationIntentCid } from '../evaluation-context.js';
+import { resolveExpectedRestorationIntentCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
+import { canonicalJson } from '../../engine/canonical-json.js';
 import { checkQuestionKindSupported } from './checks/spec.js';
+
+function nowNanos(): string {
+  return `${BigInt(Date.now()) * 1_000_000n}`;
+}
 
 export interface PredictionV0EvaluatorConfig {
   /** Set by {@link buildRestorerImpls} for CLI registries (no real signer). */
@@ -58,37 +64,6 @@ export interface PredictionV0EvaluatorConfig {
   };
 }
 
-function parseRestorationSubmissionManifest(manifestJson: string): PredictionSubmissionManifest {
-  const raw = JSON.parse(manifestJson) as Record<string, unknown>;
-  const direct = PredictionSubmissionManifestSchema.safeParse(raw);
-  if (direct.success) return direct.data;
-
-  if (raw['schemaVersion'] !== 'portfolio.v0.manifest.v1') {
-    return PredictionSubmissionManifestSchema.parse(raw);
-  }
-
-  const gating = raw['gating'] as Record<string, unknown> | undefined;
-  const informational = raw['informational'] as Record<string, unknown> | undefined;
-  const oracleSnapshot = informational?.['oracleSnapshot'];
-  const normalized = {
-    schemaVersion: 'prediction.v0.submission.v1',
-    generatedAt: raw['generatedAt'],
-    intent: raw['intent'],
-    restorer: raw['restorer'],
-    window: raw['window'],
-    prediction: {
-      probability: String(gating?.['probability'] ?? ''),
-      submittedAt: Number(gating?.['submittedAt']),
-      modelId: String(gating?.['modelId'] ?? ''),
-    },
-    ...(oracleSnapshot && typeof oracleSnapshot === 'object'
-      ? { oracleSnapshot }
-      : {}),
-    signature: raw['signature'],
-  };
-
-  return PredictionSubmissionManifestSchema.parse(normalized);
-}
 
 export class PredictionV0Evaluator implements RestorerImpl {
   readonly name = 'prediction-v0-evaluator';
@@ -105,7 +80,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
     return { ready: true };
   }
 
-  async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async canAttempt(intent: RestorationJob): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (intent.spec?.kind !== 'prediction.v0') return { ok: false, reason: 'spec.kind is not prediction.v0' };
     if (intent.type !== 'evaluation') return { ok: false, reason: 'type is not evaluation' };
     if (!intent.restorationRequestId) return { ok: false, reason: 'restorationRequestId is required' };
@@ -131,33 +106,88 @@ export class PredictionV0Evaluator implements RestorerImpl {
     const predictionIntent = PredictionV0IntentSchema.parse(intent);
     const { feed, venue } = predictionIntent.spec.oracle;
 
-    // 2. Parse restorer's manifest from inlined context
+    // 2. Parse restorer's SignedEnvelope from inlined context
     const manifestJson = intent.context!['restorationResult'] as string;
     const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
-    const manifest = parseRestorationSubmissionManifest(manifestJson);
+    const envelope = SignedEnvelopeSchema.parse(rawPayload);
+    if (envelope.kind !== 'prediction.v0' || envelope.role !== 'restoration') {
+      throw new Error(
+        `Unexpected envelope kind/role: ${envelope.kind}/${envelope.role}; expected prediction.v0/restoration`,
+      );
+    }
+    const payload: PredictionV0RestorationPayload = PredictionV0RestorationPayloadSchema.parse(envelope.payload);
 
     // 3. Fetch Chainlink spanning round
     let spanning: SpanningResult;
-    if (testDeps?.oraclePriceAtResolveTs) {
-      spanning = await testDeps.oraclePriceAtResolveTs(feed as `0x${string}`, predictionIntent.spec.question.resolveTs);
-    } else {
-      const expectedChainId = venue === 'chainlink-base' ? 8453 : 84532;
-      const chain = venue === 'chainlink-base' ? base : baseSepolia;
-      const publicClient = createPublicClient({
-        chain,
-        transport: http(this.config.rpcUrl),
-      }) as unknown as PublicClient;
-      const actualChainId = await publicClient.getChainId();
-      if (actualChainId !== expectedChainId) {
-        throw new Error(
-          `oracle venue mismatch: spec says ${venue} (chainId ${expectedChainId}) but RPC chainId is ${actualChainId}`,
+    const oracleFetchStart = nowNanos();
+    const oraclePeerName = venue === 'chainlink-base' ? 'base-rpc' : 'base-sepolia-rpc';
+    try {
+      if (testDeps?.oraclePriceAtResolveTs) {
+        spanning = await testDeps.oraclePriceAtResolveTs(feed as `0x${string}`, predictionIntent.spec.question.resolveTs);
+      } else {
+        const expectedChainId = venue === 'chainlink-base' ? 8453 : 84532;
+        const chain = venue === 'chainlink-base' ? base : baseSepolia;
+        const publicClient = createPublicClient({
+          chain,
+          transport: http(this.config.rpcUrl),
+        }) as unknown as PublicClient;
+        const actualChainId = await publicClient.getChainId();
+        if (actualChainId !== expectedChainId) {
+          throw new Error(
+            `oracle venue mismatch: spec says ${venue} (chainId ${expectedChainId}) but RPC chainId is ${actualChainId}`,
+          );
+        }
+        spanning = await oraclePriceAtResolveTs(
+          feed as `0x${string}`,
+          predictionIntent.spec.question.resolveTs,
+          publicClient,
         );
       }
-      spanning = await oraclePriceAtResolveTs(
-        feed as `0x${string}`,
-        predictionIntent.spec.question.resolveTs,
-        publicClient,
-      );
+      ctx.trajectory.addSpan({
+        name: `chainlink.oraclePriceAtResolveTs ${oraclePeerName}`,
+        kind: 'CLIENT',
+        startTimeUnixNano: oracleFetchStart,
+        endTimeUnixNano: nowNanos(),
+        attributes: {
+          'jinn.span.kind': 'jinn.venue_io',
+          'net.peer.name': oraclePeerName,
+          'http.request.method': 'POST',
+          'http.response.status_code': 200,
+          'url.full': this.config.rpcUrl ?? 'rpc',
+          'venue.id': 'chainlink',
+          'chainlink.feed': feed,
+          'chainlink.resolveTs': predictionIntent.spec.question.resolveTs,
+        },
+        events: [],
+        status: { code: 'OK' },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.trajectory.addSpan({
+        name: `chainlink.oraclePriceAtResolveTs ${oraclePeerName}`,
+        kind: 'CLIENT',
+        startTimeUnixNano: oracleFetchStart,
+        endTimeUnixNano: nowNanos(),
+        attributes: {
+          'jinn.span.kind': 'jinn.venue_io',
+          'net.peer.name': oraclePeerName,
+          'http.request.method': 'POST',
+          'http.response.status_code': 0,
+          'url.full': this.config.rpcUrl ?? 'rpc',
+          'venue.id': 'chainlink',
+          'chainlink.feed': feed,
+          'chainlink.resolveTs': predictionIntent.spec.question.resolveTs,
+        },
+        events: [
+          {
+            timeUnixNano: nowNanos(),
+            name: 'exception',
+            attributes: { 'exception.message': msg },
+          },
+        ],
+        status: { code: 'ERROR', message: msg },
+      });
+      throw err;
     }
 
     // 4. Run checks (order matters: availability → eligibility → integrity → spec)
@@ -168,38 +198,54 @@ export class PredictionV0Evaluator implements RestorerImpl {
     checks.push(checkOracleRoundCoversResolveTs(spanning));
 
     // eligibility
-    checks.push(checkSubmissionWithinWindow(manifest.prediction.submittedAt, predictionIntent.window));
+    checks.push(checkSubmissionWithinWindow(payload.prediction.submittedAt, predictionIntent.window));
 
     // integrity
     checks.push(checkWindowBounds(predictionIntent));
-    checks.push(checkManifestFieldsPresent(manifest.prediction));
+    checks.push(checkManifestFieldsPresent(payload.prediction));
     {
       const recomputed = recomputeTopLevelSignatureHash(rawPayload);
-      checks.push(await checkManifestSignature(recomputed, manifest.signature));
+      checks.push(await checkManifestSignature(recomputed, envelope.signature));
     }
     if (expectedRef.kind === 'missing') {
       checks.push(checkIntentRefMissingExpected());
     } else {
-      checks.push(checkIntentRef(manifest.intent.cid, expectedRef.cid));
+      checks.push(checkIntentRef(envelope.intent.cid, expectedRef.cid));
     }
 
     // spec
     checks.push(checkQuestionKindSupported(predictionIntent.spec.question));
 
     // 5. Derive verdict
+    const scoreStart = nowNanos();
     const verdict = deriveVerdict(checks);
 
     // 6. Derive ground truth + score
     const priceAtResolve = scaleToDecimal(spanning.round.answer, spanning.round.decimals);
     const groundTruth = resolveGroundTruth(predictionIntent.spec.question, priceAtResolve);
-    const { score, scoreBasis, scoreVersion } = computeScore(verdict, manifest.prediction.probability, groundTruth);
+    const { score, scoreBasis, scoreVersion } = computeScore(verdict, payload.prediction.probability, groundTruth);
+    const scoreEnd = nowNanos();
+    ctx.trajectory.addSpan({
+      name: 'score.brier.v1',
+      kind: 'INTERNAL',
+      startTimeUnixNano: scoreStart,
+      endTimeUnixNano: scoreEnd,
+      attributes: {
+        'jinn.span.kind': 'jinn.state_transition',
+        'jinn.state.from': 'FETCHED',
+        'jinn.state.to': 'SCORED',
+        'verdict': verdict,
+        'score.basis': scoreBasis,
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     // 7. Assemble + sign verdict manifest
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
-    const verdictManifestBase: Omit<PredictionVerdictManifest, 'signature'> = {
-      schemaVersion: 'prediction.v0.verdict.v1',
+    const verdictManifestBase: Record<string, unknown> = {
       generatedAt: Date.now(),
-      intent: manifest.intent,
+      intent: envelope.intent,
       evaluator: { safeAddress: this.config.evaluatorSafeAddress, agentEoa: evaluatorAccount.address },
       window: predictionIntent.window,
       verdict,
@@ -214,25 +260,92 @@ export class PredictionV0Evaluator implements RestorerImpl {
         ...(spanning.nextRound ? { nextRoundUpdatedAt: spanning.nextRound.updatedAt } : {}),
       },
       claimed: {
-        probability: manifest.prediction.probability,
-        submittedAt: manifest.prediction.submittedAt,
-        modelId: manifest.prediction.modelId,
+        probability: payload.prediction.probability,
+        submittedAt: payload.prediction.submittedAt,
+        modelId: payload.prediction.modelId,
         // Omitted when no IPFS submission CID is available (inline / dev).
       },
       groundTruth,
       checks,
     };
-    const canonical = JSON.stringify(verdictManifestBase);
-    const hash = keccak256(stringToHex(canonical));
-    // Raw ECDSA — no EIP-191 prefix. recoverAddress (not recoverMessageAddress) on verify.
-    const sig = await evaluatorAccount.sign({ hash });
-    const verdictManifest: PredictionVerdictManifest = {
+    // Sign with JCS canonical form (RFC 8785) via signCanonical — matching
+    // envelope-assembly and portfolio-v0-evaluator.
+    const signed = await signCanonical(verdictManifestBase, this.config.evaluatorPk! as `0x${string}`, evaluatorAccount.address as `0x${string}`);
+    const verdictManifest: Record<string, unknown> = {
       ...verdictManifestBase,
-      signature: { algo: 'secp256k1', signer: evaluatorAccount.address, hash, sig },
+      signature: { algo: 'secp256k1', signer: evaluatorAccount.address, hash: signed.hash, sig: signed.sig },
     };
-    writeFileSync(join(workingDir, 'verdict.json'), JSON.stringify(verdictManifest, null, 2));
+    const verdictJson = JSON.stringify(verdictManifest, null, 2);
+    const verdictSha256 = createHash('sha256').update(verdictJson).digest('hex');
+    writeFileSync(join(workingDir, 'verdict.json'), verdictJson);
+
+    const artifactEmitNs = nowNanos();
+    ctx.trajectory.addSpan({
+      name: 'artifact.emit verdict.json',
+      kind: 'INTERNAL',
+      startTimeUnixNano: artifactEmitNs,
+      endTimeUnixNano: artifactEmitNs,
+      attributes: {
+        'jinn.span.kind': 'jinn.artifact.emit',
+        'jinn.artifact.cid': 'pending',
+        'jinn.artifact.artifactType': 'evaluation_verdict',
+        'jinn.artifact.sha256': verdictSha256,
+        'artifact.path': 'verdict.json',
+      },
+      events: [],
+      status: { code: 'OK' },
+    });
 
     log({ level: 'info', msg: 'prediction-v0-evaluator: verdict', data: { verdict, score, groundTruth } });
+
+    // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
+    // Assembles the PredictionV0VerdictPayload from the already-computed fields.
+    //
+    // restorationEnvelope: CID threaded from the daemon via context, sha256
+    // computed from the JSON bytes of the restoration envelope (matching the
+    // conformance harness which also computes sha256(JSON.stringify(fetchedEnvelope))).
+    //
+    // verificationOfRestoration: stub — Plan D will connect the real SDK that
+    // fetches + validates the restoration envelope against its claimed tier.
+    // For V1 the stub always reports 'valid' (self-signed tier), which means
+    // the REJECTED-if-invalid path in engine.pack() never fires in practice
+    // until Plan D replaces this stub.
+    const envelopeCid = (intent.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+      ?? intent.restorationRequestId
+      ?? 'bafy-unknown';
+    // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
+    const envelopeSha256 = createHash('sha256').update(canonicalJson(rawPayload)).digest('hex');
+    const restorationEnvelope = {
+      cid: envelopeCid,
+      sha256: envelopeSha256,
+    };
+
+    const verificationOfRestoration = {
+      claimedTier: 'self-signed' as const,   // TODO(plan-d): read from restoration envelope
+      sdkVersion: '0.0.0-stub',              // TODO(plan-d): real SDK version
+      timestamp: Date.now(),
+      checks: [{ name: 'stub', passed: true }],
+      overall: 'valid' as const,             // TODO(plan-d): real SDK outcome
+    };
+
+    const verdictPayload: Record<string, unknown> = {
+      restorationEnvelope,
+      verificationOfRestoration,
+      verdict,
+      score,
+      scoreBasis,
+      scoreVersion,
+      oracleReading: verdictManifestBase['oracleReading'],
+      claimed: {
+        probability: payload.prediction.probability,
+        submittedAt: payload.prediction.submittedAt,
+        modelId: payload.prediction.modelId,
+        // submissionManifestCid omitted — not available from inline manifest context
+        // TODO(plan-d): populate once IPFS submission CID is resolved
+      },
+      groundTruth,
+      checks,
+    };
 
     return {
       venueRef: { name: 'chainlink' },
@@ -247,14 +360,15 @@ export class PredictionV0Evaluator implements RestorerImpl {
         skipCount: checks.filter(c => c.status === 'SKIP').length,
       },
       informational: {
-        claimedProbability: manifest.prediction.probability,
-        oracleReading: verdictManifestBase.oracleReading,
+        claimedProbability: payload.prediction.probability,
+        oracleReading: verdictManifestBase['oracleReading'],
       },
+      verdictPayload,
       artifacts: [
         {
           path: 'verdict.json',
-          role: 'evaluation_verdict',
-          metadata: { verdict, score, schemaVersion: 'prediction.v0.verdict.v1' },
+          artifactType: 'evaluation_verdict',
+          metadata: { verdict, score },
           access: { kind: 'open' },
         },
       ],

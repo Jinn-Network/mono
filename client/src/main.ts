@@ -432,13 +432,15 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
-  // Packaging deps: IPFS upload + optional artifact registration (wired in daemon via registerArtifact)
+  // Packaging deps: IPFS upload (ERC-8004 per-artifact registration is rebuilt
+  // under jinn-mono-3zk; see DR
+  // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
   const packagingDeps = {
     ipfsRegistryUrl: config.ipfsRegistryUrl,
   };
 
-  // Manifest assembly deps: sign manifests with agent EOA private key
-  const manifestDeps = {
+  // Envelope assembly deps: sign envelopes with agent EOA private key
+  const envelopeDeps = {
     ipfsRegistryUrl: config.ipfsRegistryUrl,
     agentEoaPrivateKey: agentPrivateKey,
     safeAddress,
@@ -562,11 +564,16 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
   const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
+  const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
+  const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
   const { generators: autoIntentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
     network: config.network,
     rpcUrl: config.rpcUrl,
     autoIntentsDisabled,
     env: process.env,
+    agentEoa: agentEoaAddress,
+    safeAddress,
+    agentPrivateKey,
   });
   for (const line of autoIntentLogLines) {
     console.log(line);
@@ -626,7 +633,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       },
       claimDeps,
       packagingDeps,
-      manifestDeps,
+      envelopeDeps,
       deliveryDeps,
       implRegistry,
       identityPublisher,

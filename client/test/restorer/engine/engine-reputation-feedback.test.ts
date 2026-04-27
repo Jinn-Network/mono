@@ -140,7 +140,7 @@ async function seedDelivering(
   opts: SeedOptions,
 ): Promise<void> {
   const now = Date.now() - 1000;
-  const desiredState: PersistedIntentInput['desiredState'] = {
+  const restorationJob: PersistedIntentInput['restorationJob'] = {
     id: requestId,
     description: 'eval test',
     type: opts.intentType,
@@ -161,7 +161,7 @@ async function seedDelivering(
     intentType: opts.intentType,
     windowStartTs: now,
     windowEndTs: now + 86_400_000,
-    desiredState,
+    restorationJob,
   };
   await engine.observe(input);
 

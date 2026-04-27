@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { SessionResult } from './types.js';
+import type { TrajectoryCollector } from '../../../trajectory/index.js';
 
 export interface OrchestratorDeps {
   claudePath: string;
@@ -23,6 +24,12 @@ export interface OrchestratorDeps {
   pollIntervalMs?: number;
   submissionGraceMs?: number;
   _spawnFn?: typeof spawn;
+  /**
+   * Trajectory collector — when present, each session spawn emits a
+   * jinn.state_transition span covering the subprocess lifetime.
+   * Scope §3.2 traced-I/O boundary.
+   */
+  trajectory?: TrajectoryCollector;
 }
 
 const DEFAULT_SESSION_MAX_MS = 180_000;
@@ -39,6 +46,7 @@ export async function spawnSession(sessionId: string, prompt: string, deps: Orch
 
   const transcriptPath = join(sessionDir, 'transcript.txt');
   const startedAt = Date.now();
+  const startNs = `${BigInt(startedAt) * 1_000_000n}`;
   writeFileSync(
     transcriptPath,
     `=== Session ${sessionId} started at ${new Date(startedAt).toISOString()} ===\n\n`,
@@ -122,6 +130,7 @@ export async function spawnSession(sessionId: string, prompt: string, deps: Orch
     child.on('exit', (code, signal) => {
       cleanup();
       const endedAt = Date.now();
+      const endNs = `${BigInt(endedAt) * 1_000_000n}`;
       appendFileSync(
         transcriptPath,
         `\n\n=== Session ended at ${new Date(endedAt).toISOString()} (code=${code} signal=${signal} submitted=${deps.isSubmitted()} terminatedEarly=${terminatedEarly} aborted=${aborted}) ===\n`,
@@ -130,6 +139,25 @@ export async function spawnSession(sessionId: string, prompt: string, deps: Orch
         level: 'info',
         msg: `apy-prediction-session: ${sessionId} exited`,
         data: { code, signal, durationMs: endedAt - startedAt, submitted: deps.isSubmitted(), aborted },
+      });
+      const exitCode = code ?? -1;
+      deps.trajectory?.addSpan({
+        name: `subprocess.${deps.claudePath}`,
+        kind: 'INTERNAL',
+        startTimeUnixNano: startNs,
+        endTimeUnixNano: endNs,
+        attributes: {
+          'jinn.span.kind': 'jinn.state_transition',
+          'jinn.state.from': 'PREPARED',
+          'jinn.state.to': 'RAN_CLAUDE',
+          'subprocess.cmd': deps.claudePath,
+          'subprocess.args': args,
+          'subprocess.exit_code': exitCode,
+          'session.id': sessionId,
+          'prediction.submitted': deps.isSubmitted(),
+        },
+        events: [],
+        status: exitCode === 0 || signal ? { code: 'OK' } : { code: 'ERROR', message: `exit ${exitCode}` },
       });
       resolve({
         sessionId,
@@ -145,8 +173,27 @@ export async function spawnSession(sessionId: string, prompt: string, deps: Orch
     child.on('error', (err) => {
       cleanup();
       const endedAt = Date.now();
+      const endNs = `${BigInt(endedAt) * 1_000_000n}`;
       appendFileSync(transcriptPath, `\n\n=== Session spawn error: ${err.message} ===\n`);
       deps.log({ level: 'error', msg: `apy-prediction-session: ${sessionId} spawn error`, data: { err: err.message } });
+      deps.trajectory?.addSpan({
+        name: `subprocess.${deps.claudePath}`,
+        kind: 'INTERNAL',
+        startTimeUnixNano: startNs,
+        endTimeUnixNano: endNs,
+        attributes: {
+          'jinn.span.kind': 'jinn.state_transition',
+          'jinn.state.from': 'PREPARED',
+          'jinn.state.to': 'RAN_CLAUDE',
+          'subprocess.cmd': deps.claudePath,
+          'subprocess.args': args,
+          'subprocess.exit_code': -1,
+          'session.id': sessionId,
+          'prediction.submitted': deps.isSubmitted(),
+        },
+        events: [{ timeUnixNano: endNs, name: 'exception', attributes: { 'exception.message': err.message } }],
+        status: { code: 'ERROR', message: err.message },
+      });
       resolve({
         sessionId,
         startedAt,

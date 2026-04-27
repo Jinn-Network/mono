@@ -37,6 +37,12 @@ export function collectTestnetAutoIntentGenerators(opts: {
   rpcUrl: string;
   autoIntentsDisabled: boolean;
   env: NodeJS.ProcessEnv;
+  /** Agent EOA address — passed to generator configs that produce SignedIntentV1. */
+  agentEoa?: `0x${string}`;
+  /** Safe address — passed to generator configs that populate intent.creator. */
+  safeAddress?: `0x${string}`;
+  /** Agent EOA private key — passed to generator configs that sign intents. */
+  agentPrivateKey?: `0x${string}`;
 }): { generators: Array<{ kind: string; generator: IntentGenerator }>; logLines: string[] } {
   const generators: Array<{ kind: string; generator: IntentGenerator }> = [];
   const logLines: string[] = [];
@@ -47,6 +53,9 @@ export function collectTestnetAutoIntentGenerators(opts: {
     network: opts.network,
     rpcUrl: opts.rpcUrl,
     env: opts.env,
+    agentEoa: opts.agentEoa,
+    safeAddress: opts.safeAddress,
+    agentPrivateKey: opts.agentPrivateKey,
   };
   for (const kind of knownKinds()) {
     const entry = SPEC_KINDS[kind] as SpecKind;

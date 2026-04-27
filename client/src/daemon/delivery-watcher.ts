@@ -2,6 +2,8 @@ import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
+import { SignedEnvelopeSchema } from '../types/envelope.js';
+import { validatePayload } from '../types/payloads/index.js';
 
 export class DeliveryWatcherLoop {
   private stopped = false;
@@ -22,9 +24,42 @@ export class DeliveryWatcherLoop {
       try {
         for await (const delivery of this.adapter.watchForDeliveries()) {
           if (this.stopped) break;
+
+          // Attempt to parse the delivery result as a jinn.execution.v1 envelope.
+          // result.data is either a JSON-stringified SignedEnvelope (new path) or
+          // a legacy plain-text result (old path). Invalid envelopes are logged and
+          // skipped so a bad delivery cannot crash the daemon loop.
+          let parsedRaw: unknown;
+          try {
+            parsedRaw = JSON.parse(delivery.result.data);
+          } catch {
+            // Not JSON — treat as legacy plain-text, skip envelope validation.
+            parsedRaw = null;
+          }
+
+          if (parsedRaw !== null && typeof parsedRaw === 'object') {
+            const maybeEnvelope = parsedRaw as Record<string, unknown>;
+            if (maybeEnvelope['schemaVersion'] === 'jinn.execution.v1') {
+              try {
+                const envelope = SignedEnvelopeSchema.parse(maybeEnvelope);
+                validatePayload(envelope.kind, envelope.role, envelope.payload);
+                console.error(
+                  `[delivery-watcher] envelope ok kind=${envelope.kind} role=${envelope.role} ` +
+                  `tier=${envelope.evidenceTier} requestId=${delivery.requestId.slice(0, 10)}...`,
+                );
+              } catch (err) {
+                console.error(
+                  `[delivery-watcher] envelope parse/validate failed for ${delivery.requestId.slice(0, 10)}...: ${err}`,
+                );
+                continue;
+              }
+            }
+            // If schemaVersion is absent the payload is legacy — fall through to normal handling.
+          }
+
           // The adapter handles claim + evaluation creation internally.
           // We just drive the iteration and log for observability.
-          const type = delivery.desiredState.type ?? 'unknown';
+          const type = delivery.restorationJob.type ?? 'unknown';
           console.error(`[delivery-watcher] Processed ${type} delivery: ${delivery.requestId.slice(0, 10)}...`);
           if (this.store) {
             emitEvent(this.store, {

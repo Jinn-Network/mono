@@ -8,6 +8,7 @@
  */
 
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { IntentPersistence, type PersistedIntent, type PersistedIntentInput } from './persistence.js';
 import { IntentState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
@@ -22,21 +23,19 @@ import {
   provisionImplStateDir,
   walkArtifacts,
   uploadArtifacts,
-  registerArtifacts,
   type PackagingDeps,
 } from './packaging.js';
 import {
-  assembleAndSignManifest,
-  type ManifestAssemblyDeps,
-  type ManifestAssemblyOptions,
-} from './manifest-assembly.js';
+  assembleAndSignEnvelope,
+  type EnvelopeAssemblyDeps,
+  type EnvelopeInputs,
+} from './envelope-assembly.js';
 import {
   deliverAndClaim,
   type DeliveryDeps,
 } from './delivery.js';
 import type { RestorerImpl, RestorationOutput } from '../types.js';
 import { SkippableError } from '../types.js';
-import type { Registry8004 } from '../../discovery/registry.js';
 import type {
   ExecutionPayload,
   ExecutionTier,
@@ -49,6 +48,8 @@ import type {
 } from '../../reputation/feedback-hook.js';
 import { submitEvaluatorFeedback } from '../../reputation/feedback-hook.js';
 import type { ResolvedAgent } from '../../discovery/agent-resolver.js';
+import type { Role } from '../../types/envelope.js';
+import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -93,10 +94,14 @@ export interface RestorationEngineOptions {
    */
   packagingDeps?: PackagingDeps;
   /**
-   * Manifest assembly dependencies. When provided, pack() can assemble + sign.
+   * Envelope assembly dependencies. When provided, pack() can assemble + sign.
    * When absent, pack() falls back to NotImplementedError.
+   *
+   * Replaces the old `manifestDeps` (ManifestAssemblyDeps). The safeAddress
+   * field that was on ManifestAssemblyDeps is now sourced from deliveryDeps
+   * or passed directly in EnvelopeInputs.participant.
    */
-  manifestDeps?: ManifestAssemblyDeps;
+  envelopeDeps?: EnvelopeAssemblyDeps & { safeAddress?: `0x${string}` };
   /**
    * Delivery dependencies. When provided, deliver() is functional.
    * When absent, deliver() falls back to NotImplementedError.
@@ -109,14 +114,6 @@ export interface RestorationEngineOptions {
   implRegistry?: {
     findFor(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): RestorerImpl | undefined;
   };
-  /**
-   * ERC-8004 Identity Registry client. When provided, the engine registers
-   * the envelope (adw:ExecutionEnvelope) and each artifact (adw:Artifact with
-   * parentEnvelopeCid) after successful pack().
-   *
-   * Optional — tests and development modes may skip registration.
-   */
-  erc8004Registry?: Registry8004;
   /**
    * ERC-8004 Identity Registry per-execution publisher (jinn-mono-3zk).
    * When provided, the engine calls
@@ -174,16 +171,26 @@ export class RestorationEngine {
   protected readonly paths: RestorationEngineOptions['paths'];
   protected readonly claimDeps: RestorationEngineOptions['claimDeps'];
   protected readonly packagingDeps: RestorationEngineOptions['packagingDeps'];
-  protected readonly manifestDeps: RestorationEngineOptions['manifestDeps'];
+  protected readonly envelopeDeps: RestorationEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: RestorationEngineOptions['deliveryDeps'];
   protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
-  protected readonly erc8004Registry: RestorationEngineOptions['erc8004Registry'];
   protected readonly identityPublisher: RestorationEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: RestorationEngineOptions['reputationFeedback'];
 
   // Transient storage for impl output between runImpl and pack transitions.
   // Keyed by requestId; cleared after successful pack.
   private readonly implOutputs = new Map<string, RestorationOutput>();
+
+  // Transient storage for trajectory collectors produced in runImpl.
+  // emitTrajectory is deferred to pack() so that artifact spans can be added
+  // before the trajectory is finalised and uploaded (Task 16 bidirectional linkage).
+  // Keyed by requestId; cleared after successful pack.
+  // Protected (not private) to allow test subclasses to inject collectors.
+  protected readonly trajectoryCollectors = new Map<string, TrajectoryCollector>();
+
+  // Transient storage for trajectory CID+sha256 refs produced by runImpl.
+  // Keyed by requestId; cleared after successful pack.
+  private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string } | null>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
   private stopped = false;
@@ -194,10 +201,9 @@ export class RestorationEngine {
     this.paths = opts.paths;
     this.claimDeps = opts.claimDeps;
     this.packagingDeps = opts.packagingDeps;
-    this.manifestDeps = opts.manifestDeps;
+    this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
-    this.erc8004Registry = opts.erc8004Registry;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
   }
@@ -535,16 +541,16 @@ export class RestorationEngine {
     const implStateName = intent.implName ?? resolvedImpl?.name ?? intent.specKind ?? 'default';
     const implStateDir = join(this.paths.implStateDirRoot, implStateName);
 
-    // Prefer the persisted full DesiredState; fall back to a stub for legacy
+    // Prefer the persisted full RestorationJob; fall back to a stub for legacy
     // (pre-migration) rows so the engine still works for health-check intents.
-    const desiredState = intent.desiredState ?? {
+    const restorationJob = intent.restorationJob ?? {
       id: intent.requestId,
       description: '',
       ...(intent.specKind ? { spec: { kind: intent.specKind } } : {}),
       window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
     };
 
-    provisionWorkingDir(workingDir, desiredState as import('../../types/desired-state.js').DesiredState);
+    provisionWorkingDir(workingDir, restorationJob as import('../../types/desired-state.js').RestorationJob);
     provisionImplStateDir(implStateDir);
 
     // takePreSnapshot transitions directly to RUNNING with the snapshot payload
@@ -587,14 +593,20 @@ export class RestorationEngine {
     const msUntilEndTs = () => Math.max(0, windowEndTs - Date.now());
     const endTimer = setTimeout(() => abort.abort(), msUntilEndTs());
 
+    // Create a trajectory collector for this run.
+    const trajectory = new TrajectoryCollector({
+      intentCid: intent.intentCid ?? '',
+      runId: randomUUID(),
+    });
+
     try {
       const ctx = {
-        intent: (intent.desiredState ?? {
+        intent: (intent.restorationJob ?? {
           id: intent.requestId,
           description: '',
           ...(intent.specKind ? { spec: { kind: intent.specKind } } : {}),
           window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
-        }) as import('../../types/desired-state.js').DesiredState,
+        }) as import('../../types/desired-state.js').RestorationJob,
         intentCid: intent.intentCid,
         implStateDir,
         workingDir,
@@ -603,6 +615,7 @@ export class RestorationEngine {
         },
         abort: abort.signal,
         msUntilEndTs,
+        trajectory,
       };
 
       let output: RestorationOutput;
@@ -634,6 +647,13 @@ export class RestorationEngine {
       }
       this.implOutputs.set(intent.requestId, output);
 
+      // Store the trajectory collector so pack() can:
+      //   1. pass it to uploadArtifacts (artifact.emit spans + producedBy metadata)
+      //   2. call emitTrajectory AFTER artifact upload so spans are included
+      //   3. backfill trajectoryCid on artifacts before envelope assembly
+      // emitTrajectory is intentionally deferred to pack() (Task 16).
+      this.trajectoryCollectors.set(intent.requestId, trajectory);
+
       // Persist impl output BEFORE the state transition so that a crash after
       // the transition (RUNNING → POST_SNAPSHOT) but before pack() runs will
       // find the serialised output in the DB on restart. pack() will hydrate the
@@ -659,9 +679,9 @@ export class RestorationEngine {
 
   /**
    * PACKAGING transition: walk workingDir, upload artifacts, assemble + sign
-   * manifest, upload manifest, persist manifest CID + artifact CIDs.
+   * envelope, upload envelope, persist envelope CID + artifact CIDs.
    *
-   * Requires packagingDeps + manifestDeps. When absent, falls back to
+   * Requires packagingDeps + envelopeDeps. When absent, falls back to
    * NotImplementedError.
    */
   protected async pack(intent: PersistedIntent): Promise<void> {
@@ -679,7 +699,7 @@ export class RestorationEngine {
       }
     }
 
-    if (!this.packagingDeps || !this.manifestDeps) {
+    if (!this.packagingDeps || !this.envelopeDeps) {
       throw new NotImplementedError('pack');
     }
 
@@ -688,61 +708,155 @@ export class RestorationEngine {
     const implOutput = this.implOutputs.get(intent.requestId);
     const implArtifacts = implOutput?.artifacts ?? [];
 
-    // 1. Walk + upload artifacts (NO registration yet — manifest CID not known)
+    // 1. Walk + upload artifacts (NO registration yet — manifest CID not known).
+    // Pass the trajectory collector (if present) so uploadArtifacts can emit
+    // jinn.artifact.emit spans and attach producedBy back-refs (Task 16 forward
+    // linkage). emitTrajectory is called AFTER upload so artifact spans are included.
+    const collector = this.trajectoryCollectors.get(intent.requestId);
+    const packagingDepsWithCollector = collector
+      ? { ...this.packagingDeps, collector }
+      : this.packagingDeps;
     const rawArtifacts = await walkArtifacts(workingDir, implArtifacts);
-    const uploadedArtifacts = await uploadArtifacts(rawArtifacts, this.packagingDeps);
+    const uploadedArtifacts = await uploadArtifacts(rawArtifacts, packagingDepsWithCollector);
+
+    // 1b. Emit trajectory to IPFS now that all artifact spans have been added.
+    // Non-fatal — envelope assembly continues with envelope.trajectory = null if upload fails.
+    let trajectoryRef: { cid: string; sha256: string } | null =
+      this.trajectoryRefs.get(intent.requestId) ?? null;
+    if (!trajectoryRef && collector && this.envelopeDeps) {
+      try {
+        const { privateKeyToAccount } = await import('viem/accounts');
+        const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
+        const { cid, sha256 } = await emitTrajectory({
+          collector,
+          runId: collector.runId,
+          signerPrivateKey: this.envelopeDeps.agentEoaPrivateKey,
+          signerAddress: account.address as `0x${string}`,
+          ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
+        });
+        trajectoryRef = { cid, sha256 };
+        console.log(`[restorer-engine] ${intent.requestId}: trajectory emitted cid=${cid}`);
+      } catch (err) {
+        console.warn(
+          `[restorer-engine] ${intent.requestId}: trajectory emit failed (non-fatal):`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+    this.trajectoryRefs.set(intent.requestId, trajectoryRef);
+
+    // 1c. Backward linkage: backfill trajectoryCid on all artifacts that have a
+    // producedBy back-ref. This must happen BEFORE assembleAndSignEnvelope so the
+    // signed envelope carries the complete reference (Task 16).
+    if (trajectoryRef) {
+      const trajectoryCid = trajectoryRef.cid;
+      for (const art of uploadedArtifacts) {
+        const pb = (art.metadata as Record<string, unknown> | undefined)?.['producedBy'];
+        if (pb != null && typeof pb === 'object' && 'spanId' in pb) {
+          (pb as Record<string, unknown>)['trajectoryCid'] = trajectoryCid;
+        }
+      }
+    }
 
     // Map to Artifact shape (strip localPath)
     const artifacts = uploadedArtifacts.map(({ localPath: _localPath, ...art }) => art);
 
     // 2. Derive agentEoa from private key
     const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(this.manifestDeps.agentEoaPrivateKey);
+    const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
     const agentEoa = account.address;
 
-    // Safe multisig address — sourced from manifestDeps (preferred) or deliveryDeps.
+    // Safe multisig address — sourced from envelopeDeps (preferred) or deliveryDeps.
     // Hard throw if absent: falling back to agentEoa would produce a
-    // protocol-invalid manifest (safeAddress MUST differ from agentEoa, §5.1).
-    const safeAddress = this.manifestDeps.safeAddress ?? this.deliveryDeps?.safeAddress;
+    // protocol-invalid envelope (safeAddress MUST differ from agentEoa, §5.1).
+    const safeAddress = this.envelopeDeps.safeAddress ?? this.deliveryDeps?.safeAddress;
     if (!safeAddress) {
-      throw new Error('pack: safeAddress not configured in manifestDeps or deliveryDeps');
+      throw new Error('pack: safeAddress not configured in envelopeDeps or deliveryDeps');
     }
 
-    // 3. Assemble + sign manifest
-    const provenance = {
-      intentCid: intent.intentCid,
-      onchainCreationTx: intent.onchainCreationTx,
-      onchainCreationBlock: intent.onchainCreationBlock,
-      requestId: intent.requestId,
-      safeAddress,
-      agentEoa,
-      windowStartTs: intent.windowStartTs,
-      windowEndTs: intent.windowEndTs,
-    };
-
+    // 3. Build envelope payload from impl output (kind-typed, wrapped into payload field)
     const preSnapshotPayload = intent.preSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
     const postSnapshotPayload = intent.postSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
 
-    const manifestImplOutput = {
-      preSnapshot: {
-        capturedAt: intent.preSnapshotCapturedAt ?? Date.now(),
-        hlTime: preSnapshotPayload?.hlTime ?? 0,
-        // Double-fallback: first tries the structured .payload field (normal shape),
-        // then falls back to the whole payload object (handles takePreSnapshot's
-        // synthetic shape where the snapshot IS the top-level object, not nested).
-        payload: preSnapshotPayload?.payload ?? preSnapshotPayload ?? {},
-      },
-      postSnapshot: {
-        capturedAt: intent.postSnapshotCapturedAt ?? Date.now(),
-        hlTime: postSnapshotPayload?.hlTime ?? 0,
-        // Same double-fallback as above.
-        payload: postSnapshotPayload?.payload ?? postSnapshotPayload ?? {},
-      },
-      fills: (intent.fillsPayload as unknown[]) ?? [],
-      gating: (intent.gatingClaim as Record<string, unknown>) ?? {},
-      informational: (intent.informationalClaim as Record<string, unknown>) ?? undefined,
-      rationale: implOutput?.rationale ?? undefined,
-    };
+    // The specKind drives payload schema selection. Fall back to 'legacy.v0'
+    // for intents without a spec.kind (legacy health-check / daemon-loop-test
+    // intents that use the legacy-claude impl). The legacy.v0 kind accepts any
+    // Record payload so validatePayload does not reject the output.
+    const specKind = intent.specKind ?? 'legacy.v0';
+
+    // Derive role from intent type. Evaluator intents produce 'verdict' envelopes;
+    // all other intents produce 'restoration' envelopes.
+    const isEvaluation = intent.intentType === 'evaluation';
+    const role: Role = isEvaluation ? 'verdict' : 'restoration';
+
+    let envelopePayload: Record<string, unknown>;
+
+    if (isEvaluation) {
+      // ── Verdict envelope payload ──────────────────────────────────────────────
+      // The evaluator impl populates verdictPayload on RestorationOutput with a
+      // PortfolioV0VerdictPayload-shaped object. Engine passes it through to the
+      // envelope assembler, which runs validatePayload('portfolio.v0', 'verdict', ...).
+      //
+      // If verdictPayload is absent (impl bug / crash recovery), fall back to a
+      // minimal INDETERMINATE stub so the envelope assembly does not silently succeed
+      // with a wrong shape — validatePayload will catch schema mismatches.
+      //
+      // verificationOfRestoration: stubbed — Plan D will connect the real SDK.
+      // restorationEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
+      const verdictPayload = implOutput?.verdictPayload;
+      if (!verdictPayload) {
+        throw new Error(
+          `pack: evaluator impl for ${intent.requestId} did not produce verdictPayload on RestorationOutput; ` +
+          `ensure the impl populates output.verdictPayload`,
+        );
+      }
+
+      // If the (stub) verificationOfRestoration reports 'invalid', downgrade verdict
+      // to REJECTED per scope §3.3.  For V1 the stub always returns 'valid', so this
+      // path does not fire in practice — Plan D makes it real.
+      const verif = verdictPayload['verificationOfRestoration'] as
+        | { overall?: string }
+        | undefined;
+      if (verif?.overall === 'invalid') {
+        // Override verdict to REJECTED; preserve the rest of the payload.
+        envelopePayload = {
+          ...verdictPayload,
+          verdict: 'REJECTED',
+        };
+      } else {
+        envelopePayload = verdictPayload;
+      }
+    } else if (implOutput?.restorationPayload) {
+      // ── Non-portfolio restoration envelope payload ────────────────────────────
+      // Impls for kinds with a non-portfolio payload schema (e.g. prediction.v0)
+      // declare their own fully-formed payload. Engine passes it through directly
+      // so validatePayload() can check it against the per-kind schema.
+      envelopePayload = implOutput.restorationPayload;
+    } else {
+      // ── Portfolio restoration envelope payload (legacy / portfolio.v0) ─────────
+      envelopePayload = {
+        preSnapshot: {
+          capturedAt: intent.preSnapshotCapturedAt ?? Date.now(),
+          hlTime: preSnapshotPayload?.hlTime ?? 0,
+          // Double-fallback: first tries the structured .payload field (normal shape),
+          // then falls back to the whole payload object (handles takePreSnapshot's
+          // synthetic shape where the snapshot IS the top-level object, not nested).
+          payload: preSnapshotPayload?.payload ?? preSnapshotPayload ?? {},
+        },
+        postSnapshot: {
+          capturedAt: intent.postSnapshotCapturedAt ?? Date.now(),
+          hlTime: postSnapshotPayload?.hlTime ?? 0,
+          // Same double-fallback as above.
+          payload: postSnapshotPayload?.payload ?? postSnapshotPayload ?? {},
+        },
+        fills: (intent.fillsPayload as unknown[]) ?? [],
+        gating: (intent.gatingClaim as Record<string, unknown>) ?? {},
+        ...(intent.informationalClaim != null
+          ? { informational: intent.informationalClaim as Record<string, unknown> }
+          : {}),
+        ...(implOutput?.rationale != null ? { rationale: implOutput.rationale } : {}),
+      };
+    }
 
     // 4. Persist generatedAt once (first pack); reuse on retry for CID determinism.
     const generatedAt: number = intent.manifestGeneratedAt ?? Date.now();
@@ -752,69 +866,54 @@ export class RestorationEngine {
       this.persistence.setManifestGeneratedAt(intent.requestId, generatedAt);
     }
 
-    const manifestOpts: ManifestAssemblyOptions = { generatedAt };
+    // 5. Assemble + sign envelope → envelope CID now known
+    // TODO(build-info): replace 'dev' and the zero digest with real build-time
+    // constants from a future build-info.ts module generated at CI time.
+    // trajectoryRef was computed in step 1b above (emitted after artifact upload).
+    const envelopeTrajectory = trajectoryRef
+      ? { cid: trajectoryRef.cid, sha256: trajectoryRef.sha256 }
+      : null;
 
-    // 5. Sign + upload manifest → manifest CID now known
-    const { manifest: _manifest, manifestCid, signatureHash } = await assembleAndSignManifest(
-      provenance,
-      manifestImplOutput,
+    const envelopeInputs: EnvelopeInputs = {
+      kind: specKind,
+      role,
+      intent: {
+        cid: intent.intentCid,
+        onchainCreationTx: intent.onchainCreationTx,
+        onchainCreationBlock: intent.onchainCreationBlock,
+        requestId: intent.requestId,
+      },
+      participant: { safeAddress, agentEoa },
+      window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
+      executor: {
+        implName: intent.implName ?? specKind,
+        implVersion: '1.0.0',
+        // TODO(build-info): populate from a build-time constants module.
+        clientGitSha: 'dev',
+        codeDigest: 'sha256:' + '0'.repeat(64),
+        signingKey: { kind: 'agent-eoa', pubkey: agentEoa },
+      },
+      trajectory: envelopeTrajectory,
       artifacts,
-      this.manifestDeps,
-      manifestOpts,
+      payload: envelopePayload,
+      generatedAt,
+    };
+
+    const { envelopeCid, envelopeHash } = await assembleAndSignEnvelope(
+      envelopeInputs,
+      this.envelopeDeps,
     );
+    const manifestCid = envelopeCid;
+    const signatureHash = envelopeHash;
 
-    // 6. Register artifacts with back-pointer to parent manifest CID (spec §6.1)
-    registerArtifacts(uploadedArtifacts, manifestCid, this.packagingDeps);
+    // 6. ERC-8004 per-execution registration (envelope + artifacts) is rebuilt
+    //    under beads jinn-mono-3zk and downstream against the operator-rooted
+    //    entity model — see DR
+    //    docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md.
+    //    The previous per-CID registerEnvelope / registerArtifactWithParent
+    //    path was deleted with PR #37 cleanup.
 
-    // 6b. ERC-8004 Identity Registry registration (Plan E Task 11). Best-effort:
-    // failures emit a warning but do not fail the pack() transition — the envelope
-    // + on-chain claimDelivery evidenceHash remain the canonical substrate.
-    if (this.erc8004Registry) {
-      const intentType = (intent.intentType ?? 'restoration') as 'restoration' | 'verdict';
-      const envelopeRegistrationPromise = this.erc8004Registry
-        .registerEnvelope({
-          envelopeCid: manifestCid,
-          kind: intent.specKind ?? 'unknown',
-          role: intentType,
-          evidenceTier: 'self-signed',
-          intentCid: intent.intentCid ?? '',
-          parentEnvelopeCid: intent.intentType === 'evaluation'
-            ? ((intent as unknown as Record<string, unknown>)['parentEnvelopeCid'] as string | undefined)
-            : undefined,
-          participant: safeAddress,
-          generatedAt,
-        })
-        .catch((err: unknown) => {
-          console.warn(
-            `[restorer-engine] registerEnvelope failed for ${intent.requestId}: ${err instanceof Error ? err.message : err}`,
-          );
-          return null;
-        });
-
-      const artifactRegistrationPromises = uploadedArtifacts.map((art) =>
-        this.erc8004Registry!
-          .registerArtifactWithParent({
-            id: art.cid,
-            title: art.role ?? 'unknown',
-            tags: [intent.specKind ?? 'unknown'],
-            outcome: 'restored',
-            endpoint: `ipfs://${art.cid}`,
-            parentEnvelopeCid: manifestCid,
-          })
-          .catch((err: unknown) => {
-            console.warn(
-              `[restorer-engine] registerArtifactWithParent failed for ${art.cid}: ${err instanceof Error ? err.message : err}`,
-            );
-            return null;
-          }),
-      );
-
-      // Await all registrations so uncaught-promise warnings don't fire.
-      // We do NOT block the state transition on these — they are fire-and-resolve.
-      await Promise.all([envelopeRegistrationPromise, ...artifactRegistrationPromises]);
-    }
-
-    // 6c. ERC-8004 IdentityRegistry per-execution `setMetadata` (jinn-mono-3zk).
+    // 6b. ERC-8004 IdentityRegistry per-execution `setMetadata` (jinn-mono-3zk).
     //
     // Anchors the envelope under the operator's agent NFT with a v1 ABI-encoded
     // payload (tier + manifestHash + optional TEE pointers); see
@@ -875,8 +974,10 @@ export class RestorationEngine {
     });
     console.log(`[restorer-engine] ${intent.requestId} PACKAGING → DELIVERING manifestCid=${manifestCid}`);
 
-    // Clean up impl output (no longer needed)
+    // Clean up transient state (no longer needed after DELIVERING)
     this.implOutputs.delete(intent.requestId);
+    this.trajectoryCollectors.delete(intent.requestId);
+    this.trajectoryRefs.delete(intent.requestId);
   }
 
   /**
@@ -1072,7 +1173,7 @@ export class RestorationEngine {
     evidenceHash: `0x${string}`;
     manifestCid: string | null;
   } | null {
-    const ds = intent.desiredState;
+    const ds = intent.restorationJob;
     const inlined = ds?.context?.['restorationResult'];
     if (typeof inlined !== 'string' || inlined.length === 0) {
       return null;

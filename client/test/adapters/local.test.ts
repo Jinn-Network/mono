@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
-import type { DesiredState, RestorationRequest } from '../../src/types/index.js';
+import type { RestorationJob, RestorationRequest } from '../../src/types/index.js';
 
 describe('LocalAdapter', () => {
   let adapter: LocalAdapter;
@@ -11,8 +11,8 @@ describe('LocalAdapter', () => {
   });
 
   it('posts a desired state and makes restoration request available immediately', async () => {
-    const state: DesiredState = { id: 'ds-1', description: 'Test state' };
-    const requestId = await adapter.postDesiredState(state);
+    const state: RestorationJob = { id: 'ds-1', description: 'Test state' };
+    const requestId = await adapter.postRestorationJob(state);
     expect(requestId).toBeDefined();
 
     const requests: RestorationRequest[] = [];
@@ -21,18 +21,18 @@ describe('LocalAdapter', () => {
       break; // take one — should be the restoration request
     }
     expect(requests).toHaveLength(1);
-    expect(requests[0].desiredState.type).toBe('restoration');
+    expect(requests[0].restorationJob.type).toBe('restoration');
   });
 
   it('claim always succeeds', async () => {
-    const state: DesiredState = { id: 'ds-1', description: 'Test state' };
-    const requestId = await adapter.postDesiredState(state);
+    const state: RestorationJob = { id: 'ds-1', description: 'Test state' };
+    const requestId = await adapter.postRestorationJob(state);
     await expect(adapter.claimRequest(requestId)).resolves.toBeUndefined();
   });
 
   it('submit makes result available as delivery', async () => {
-    const state: DesiredState = { id: 'ds-1', description: 'Test state' };
-    const requestId = await adapter.postDesiredState(state);
+    const state: RestorationJob = { id: 'ds-1', description: 'Test state' };
+    const requestId = await adapter.postRestorationJob(state);
     await adapter.claimRequest(requestId);
     await adapter.submitResult(requestId, { data: 'restored' });
 
@@ -45,13 +45,13 @@ describe('LocalAdapter', () => {
   });
 
   it('creates both restoration and evaluation requests when posting', async () => {
-    const state: DesiredState = { id: 'ds-1', description: 'Test state' };
-    const restorationRequestId = await adapter.postDesiredState(state);
+    const state: RestorationJob = { id: 'ds-1', description: 'Test state' };
+    const restorationRequestId = await adapter.postRestorationJob(state);
 
     // First request yielded should be the restoration request
     const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
     const { value: restorationReq } = await iter.next();
-    expect(restorationReq.desiredState.type).toBe('restoration');
+    expect(restorationReq.restorationJob.type).toBe('restoration');
     expect(restorationReq.requestId).toBe(restorationRequestId);
 
     // Deliver the restoration so the evaluation request becomes available
@@ -59,21 +59,21 @@ describe('LocalAdapter', () => {
 
     // Now the evaluation request should be yielded
     const { value: evalReq } = await iter.next();
-    expect(evalReq.desiredState.type).toBe('evaluation');
-    expect(evalReq.desiredState.restorationRequestId).toBe(restorationRequestId);
+    expect(evalReq.restorationJob.type).toBe('evaluation');
+    expect(evalReq.restorationJob.restorationRequestId).toBe(restorationRequestId);
 
     await adapter.stop();
   });
 
   it('evaluation request is only yielded after restoration is delivered', async () => {
-    const state: DesiredState = { id: 'ds-1', description: 'Test state' };
-    const restorationRequestId = await adapter.postDesiredState(state);
+    const state: RestorationJob = { id: 'ds-1', description: 'Test state' };
+    const restorationRequestId = await adapter.postRestorationJob(state);
 
     const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
 
     // Get the restoration request
     const { value: restorationReq } = await iter.next();
-    expect(restorationReq.desiredState.type).toBe('restoration');
+    expect(restorationReq.restorationJob.type).toBe('restoration');
 
     // Before delivery, evaluation request should not be available
     // We check by racing with a short timeout

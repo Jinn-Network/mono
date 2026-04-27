@@ -15,6 +15,7 @@ import {
   spawnSession,
   runSessionLoop,
 } from '../../../../src/restorer/impls/claude-mcp-hyperliquid/session-orchestrator.js';
+import { TrajectoryCollector } from '../../../../src/trajectory/collector.js';
 
 // ── Fake child-process factory ─────────────────────────────────────────────────
 
@@ -354,5 +355,90 @@ describe('checkMarketMoveTrigger', () => {
     expect(result.triggered).toBe(true);
     // BTC is checked first
     expect(result.coin).toBe('BTC');
+  });
+});
+
+// ── Trajectory span emission ───────────────────────────────────────────────────
+
+describe('spawnSession — trajectory spans', () => {
+  let tmpDir: string;
+
+  afterEach(() => {
+    try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+  });
+
+  it('emits a jinn.state_transition span when trajectory collector is provided and session exits', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'orch-traj-'));
+    const { child, emitStdout, emitExit } = makeFakeChild();
+    const spawnFn: SpawnFn = vi.fn().mockReturnValue(child);
+
+    const collector = new TrajectoryCollector({ intentCid: 'bafy-test', runId: 'run-traj-1' });
+
+    setImmediate(() => {
+      emitStdout('some output\n');
+      setImmediate(() => emitExit(0));
+    });
+
+    const deps = makeDeps(tmpDir, { _spawnFn: spawnFn, trajectory: collector });
+    await spawnSession('traj-session-1', 'test prompt', deps);
+
+    const { spans } = collector.snapshot();
+    expect(spans).toHaveLength(1);
+    const span = spans[0];
+    expect(span.attributes['jinn.span.kind']).toBe('jinn.state_transition');
+    expect(span.attributes['jinn.state.from']).toBe('PREPARED');
+    expect(span.attributes['jinn.state.to']).toBe('RAN_CLAUDE');
+    expect(span.attributes['subprocess.cmd']).toBe('claude');
+    expect(span.attributes['subprocess.exit_code']).toBe(0);
+    expect(span.attributes['session.id']).toBe('traj-session-1');
+    expect(span.status.code).toBe('OK');
+  });
+
+  it('emits an ERROR span when session exits non-zero', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'orch-traj-'));
+    const { child, emitExit } = makeFakeChild();
+    const spawnFn: SpawnFn = vi.fn().mockReturnValue(child);
+
+    const collector = new TrajectoryCollector({ intentCid: 'bafy-test', runId: 'run-traj-2' });
+
+    setImmediate(() => emitExit(1));
+
+    const deps = makeDeps(tmpDir, { _spawnFn: spawnFn, trajectory: collector });
+    await spawnSession('traj-session-2', 'test prompt', deps);
+
+    const { spans } = collector.snapshot();
+    expect(spans[0].status.code).toBe('ERROR');
+    expect(spans[0].attributes['subprocess.exit_code']).toBe(1);
+  });
+
+  it('emits an ERROR span with exception event on spawn error', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'orch-traj-'));
+    const { child, emitError } = makeFakeChild();
+    const spawnFn: SpawnFn = vi.fn().mockReturnValue(child);
+
+    const collector = new TrajectoryCollector({ intentCid: 'bafy-test', runId: 'run-traj-3' });
+
+    setImmediate(() => emitError(new Error('ENOENT: claude not found')));
+
+    const deps = makeDeps(tmpDir, { _spawnFn: spawnFn, trajectory: collector });
+    await spawnSession('traj-session-err', 'test prompt', deps);
+
+    const { spans } = collector.snapshot();
+    expect(spans).toHaveLength(1);
+    expect(spans[0].status.code).toBe('ERROR');
+    expect(spans[0].events[0].name).toBe('exception');
+    expect(spans[0].events[0].attributes?.['exception.message']).toContain('ENOENT');
+  });
+
+  it('does not emit a span when no trajectory collector is provided', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'orch-traj-'));
+    const { child, emitExit } = makeFakeChild();
+    const spawnFn: SpawnFn = vi.fn().mockReturnValue(child);
+
+    setImmediate(() => emitExit(0));
+
+    // No trajectory field — should not throw
+    const deps = makeDeps(tmpDir, { _spawnFn: spawnFn });
+    await expect(spawnSession('no-traj-session', 'test prompt', deps)).resolves.toBeDefined();
   });
 });

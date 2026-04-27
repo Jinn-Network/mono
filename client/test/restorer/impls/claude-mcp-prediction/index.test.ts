@@ -24,7 +24,7 @@ function makeIntent() {
       },
     },
     eligibility: { maxSubmissionDelayMs: 60_000 },
-  } as unknown as import('../../../../src/types/desired-state.js').DesiredState;
+  } as unknown as import('../../../../src/types/desired-state.js').RestorationJob;
 }
 
 function makeCtx() {
@@ -81,8 +81,8 @@ describe('ClaudeMcpPredictionImpl (mocked session)', () => {
     expect(out.informational?.rationale).toBe('Current price suggests upside');
     expect(out.artifacts).toHaveLength(2);
     expect(out.artifacts![0]!.path).toBe('prediction.json');
-    expect(out.artifacts![0]!.role).toBe('prediction_submission');
-    expect(out.artifacts![1]!.role).toBe('session_transcript');
+    expect(out.artifacts![0]!.artifactType).toBe('prediction_submission');
+    expect(out.artifacts![1]!.artifactType).toBe('session_transcript');
 
     // prediction.json was written to workingDir.
     const predictionPath = join(ctx.workingDir, 'prediction.json');
@@ -91,6 +91,19 @@ describe('ClaudeMcpPredictionImpl (mocked session)', () => {
     expect(payload.probability).toBe('0.6200');
     expect(payload.rationale).toBe('Current price suggests upside');
     expect(payload.modelId).toContain('claude-mcp-prediction');
+
+    // restorationPayload must match PredictionV0RestorationPayloadSchema
+    const { PredictionV0RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-v0.js');
+    expect(out.restorationPayload).toBeDefined();
+    const parsed = PredictionV0RestorationPayloadSchema.safeParse(out.restorationPayload);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.prediction.probability).toBe('0.6200');
+      expect(typeof parsed.data.prediction.submittedAt).toBe('number');
+      expect(parsed.data.prediction.modelId).toContain('claude-mcp-prediction');
+      // rationale is in informational only (free-form string, not the schema's { ts, note }[] shape)
+      expect(out.restorationPayload!['rationale']).toBeUndefined();
+    }
   });
 
   it('throws descriptively when session ends without submit_prediction', async () => {

@@ -10,35 +10,34 @@
 import { config as dotenvConfig } from 'dotenv';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.env') });
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
-import { spawnAnvilFork, jsonRpc as anvilJsonRpc, type AnvilHarness } from '../_support/chain/anvil.js';
-import { fundAddressWithOLAS } from '../_support/chain/olas-funding.js';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { createPublicClient, decodeEventLog, getAddress, http, parseAbi, type Address, type Hex, type PublicClient } from 'viem';
+import { createPublicClient, decodeEventLog, encodeAbiParameters, getAddress, http, keccak256, numberToHex, pad, parseAbi, toHex, type Address, type Hex, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
-import { MechAdapter } from '../../src/adapters/mech/adapter.js';
-import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
-import { getChainConfig } from '../../src/earning/contracts.js';
-import { decodeMarketplaceRequestLogs, getMechDeliveryRate, getTimeoutBounds, submitRestorationJob } from '../../src/adapters/mech/contracts.js';
-import { buildDesiredStatePayload, uploadToIpfs, cidToDigestHex } from '../../src/adapters/mech/ipfs.js';
-import { createClients } from '../../src/adapters/mech/safe.js';
-import { PredictionApyV0BaselineImpl } from '../../src/restorer/impls/prediction-apy-v0-baseline/index.js';
-import { PredictionApyV0Evaluator } from '../../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
-import { signCanonical } from '../../src/restorer/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../src/restorer/impls/evaluation-context.js';
-import type { DesiredState } from '../../src/types/desired-state.js';
-import type { RestorationContext } from '../../src/restorer/types.js';
-import type { PredictionApySubmissionManifest } from '../../src/types/prediction-apy.js';
-import { JINN_ROUTER_ABI, MECH_ABI, MECH_MARKETPLACE_ABI, NATIVE_PAYMENT_TYPE } from '../../src/adapters/mech/types.js';
+import { MechAdapter } from '../src/adapters/mech/adapter.js';
+import { FleetBootstrapper } from '../src/earning/bootstrap.js';
+import { getChainConfig } from '../src/earning/contracts.js';
+import { decodeMarketplaceRequestLogs, getMechDeliveryRate, getTimeoutBounds, submitRestorationJob } from '../src/adapters/mech/contracts.js';
+import { buildRestorationJobPayload, uploadToIpfs, cidToDigestHex } from '../src/adapters/mech/ipfs.js';
+import { createClients } from '../src/adapters/mech/safe.js';
+import { PredictionApyV0BaselineImpl } from '../src/restorer/impls/prediction-apy-v0-baseline/index.js';
+import { PredictionApyV0Evaluator } from '../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
+import { signCanonical } from '../src/restorer/engine/signing.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../src/restorer/impls/evaluation-context.js';
+import type { RestorationJob } from '../src/types/desired-state.js';
+import type { RestorationContext } from '../src/restorer/types.js';
+import type { PredictionApySubmissionManifest } from '../src/types/prediction-apy.js';
+import { JINN_ROUTER_ABI, MECH_ABI, MECH_MARKETPLACE_ABI, NATIVE_PAYMENT_TYPE } from '../src/adapters/mech/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
-let ANVIL_PORT = 0;
-let ANVIL_RPC = '';
+const ANVIL_PORT = 8549;
+const ANVIL_RPC = `http://127.0.0.1:${ANVIL_PORT}`;
 const PASSWORD = 'test-password-pred-apy';
 
 const CHAIN_CONFIG = getChainConfig('base');
@@ -49,6 +48,26 @@ const ROUTER_ADDRESS: Address = '0xfFa7118A3D820cd4E820010837D65FAfF463181B';
 interface PhaseResult { name: string; ok: boolean; ms: number; error?: string }
 
 function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
+
+async function waitFor(description: string, check: () => Promise<boolean>, timeoutMs = 30_000, intervalMs = 500): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await check()) return;
+    await sleep(intervalMs);
+  }
+  throw new Error(`Timeout waiting for: ${description}`);
+}
+
+async function jsonRpc(url: string, method: string, params: unknown[] = []): Promise<unknown> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
+  });
+  const body = (await res.json()) as { result?: unknown; error?: { message: string } };
+  if (body.error) throw new Error(`RPC error (${method}): ${body.error.message}`);
+  return body.result;
+}
 
 async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseResult> {
   const start = Date.now();
@@ -63,6 +82,10 @@ async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseRes
     console.error(`  ✗ ${name} (${ms}ms): ${error}`);
     return { name, ok: false, ms, error };
   }
+}
+
+function erc20BalanceSlot(holder: string, mappingSlot: bigint = 0n): Hex {
+  return keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [getAddress(holder) as Address, mappingSlot]));
 }
 
 function makeAdapter(agentPk: `0x${string}`, safe: Address, mech: Address): MechAdapter {
@@ -84,7 +107,7 @@ function makeAdapter(agentPk: `0x${string}`, safe: Address, mech: Address): Mech
 async function main(): Promise<void> {
   console.log('\n=== Prediction.apy.v0 Full E2E (production-shaped) ===\n');
 
-  let chain: AnvilHarness | null = null;
+  let anvil: ChildProcess | null = null;
   let tmpDir: string | null = null;
   const results: PhaseResult[] = [];
 
@@ -95,16 +118,20 @@ async function main(): Promise<void> {
   let adapter!: MechAdapter;
   let restorationRequestId!: string;
   let evalRequestId!: string;
-  let intent!: DesiredState;
+  let intent!: RestorationJob;
   let intentCid!: string;
   let window!: { startTs: number; endTs: number };
 
   try {
     results.push(await runPhase('Phase 1: Spawn Anvil fork + temp dir', async () => {
       tmpDir = await mkdtemp(join(tmpdir(), 'jinn-e2e-apy-'));
-      chain = await spawnAnvilFork({ forkUrl: BASE_RPC_URL, silent: true });
-      ANVIL_PORT = chain.port;
-      ANVIL_RPC = chain.rpcUrl;
+      const forkBlock = process.env['ANVIL_FORK_BLOCK'] ?? '';
+      const args = ['--fork-url', BASE_RPC_URL, '--port', String(ANVIL_PORT), '--silent', ...(forkBlock ? ['--fork-block-number', forkBlock] : [])];
+      anvil = spawn(process.env['ANVIL_PATH'] ?? 'anvil', args, { stdio: 'ignore' });
+      await waitFor('anvil ready', async () => {
+        try { const b = await jsonRpc(ANVIL_RPC, 'eth_blockNumber'); return typeof b === 'string' && b.startsWith('0x'); }
+        catch { return false; }
+      });
       publicClient = createPublicClient({ chain: base, transport: http(ANVIL_RPC) }) as unknown as PublicClient;
       console.log(`    Temp dir: ${tmpDir}`);
       console.log(`    Fork block: ${await publicClient.getBlockNumber()}`);
@@ -117,12 +144,13 @@ async function main(): Promise<void> {
       if (!r1.funding) throw new Error('expected funding requirement');
       const master = r1.funding.master_address;
 
-      await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [master, '0x56BC75E2D63100000']);
+      await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [master, '0x56BC75E2D63100000']);
+      const slot = erc20BalanceSlot(master);
       const olasAmount = 100000n * 10n ** 18n;
-      await fundAddressWithOLAS(chain!, getAddress(master) as Address, olasAmount);
       const { encodeFunctionData } = await import('viem');
-      await anvilJsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [master]);
-      await anvilJsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{
+      await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [OLAS_TOKEN, slot, pad(toHex(olasAmount), { size: 32 })]);
+      await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [master]);
+      await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{
         from: master,
         to: OLAS_TOKEN,
         data: encodeFunctionData({
@@ -131,7 +159,7 @@ async function main(): Promise<void> {
           args: [CHAIN_CONFIG.stakingContract as Address, olasAmount],
         }),
       }]);
-      await anvilJsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{
+      await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{
         from: master,
         to: CHAIN_CONFIG.stakingContract,
         data: encodeFunctionData({
@@ -140,8 +168,8 @@ async function main(): Promise<void> {
           args: [olasAmount],
         }),
       }]);
-      await anvilJsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [master]);
-      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [master]);
+      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
       bootstrapper = new FleetBootstrapper({ earningDir: tmpDir, chain: 'base', rpcUrl: ANVIL_RPC, targetServices: 1 });
       const r2 = await bootstrapper.bootstrap(PASSWORD);
@@ -149,8 +177,8 @@ async function main(): Promise<void> {
       const svc = r2.fleet_state.services.find(s => s.step === 'complete' && s.safe_address && s.mech_address);
       if (!svc) throw new Error('no completed service');
 
-      const { FleetStateStore } = await import('../../src/earning/store.js');
-      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
+      const { FleetStateStore } = await import('../src/earning/store.js');
+      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
       const store = new FleetStateStore(tmpDir);
       const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), PASSWORD);
       agentPk = walletPrivateKeyAtIndex(mnemonic, svc.index) as `0x${string}`;
@@ -159,7 +187,7 @@ async function main(): Promise<void> {
 
       console.log(`    Safe: ${safeAddress}`);
       console.log(`    Mech: ${mechAddress}`);
-      await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [safeAddress, '0x56BC75E2D63100000']);
+      await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [safeAddress, '0x56BC75E2D63100000']);
     }));
 
     results.push(await runPhase('Phase 3: Initialize adapter', async () => {
@@ -192,10 +220,10 @@ async function main(): Promise<void> {
           question: { resolveTs: window.endTs + 900_000 },
         },
         eligibility: { maxSubmissionDelayMs: 3_600_000 },
-      } as unknown as DesiredState;
+      } as unknown as RestorationJob;
 
       // Use the same path production uses for createRestorationJob payload.
-      const payload = buildDesiredStatePayload(intent);
+      const payload = buildRestorationJobPayload(intent);
       const cid = await uploadToIpfs('https://registry.autonolas.tech', payload);
       intentCid = `f01551220${cidToDigestHex(cid).slice(2)}`;
       const intentDataHex = cidToDigestHex(cid) as Hex;
@@ -216,9 +244,9 @@ async function main(): Promise<void> {
       );
       if (reqIds.length === 0) throw new Error('no request id');
       restorationRequestId = reqIds[0]!;
-      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-      // Ensure adapter tracks this restoration for eval creation path, just like postDesiredState.
+      // Ensure adapter tracks this restoration for eval creation path, just like postRestorationJob.
       (adapter as any).pendingEvaluations.set(restorationRequestId, {
         ...intent,
         context: { ...(intent.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: intentCid },
@@ -293,7 +321,7 @@ async function main(): Promise<void> {
         },
       };
       await adapter.submitResult(req.value.requestId, { data: JSON.stringify(submission) });
-      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
       console.log('    restoration delivered');
     }));
 
@@ -320,15 +348,15 @@ async function main(): Promise<void> {
 
     results.push(await runPhase('Phase 7: Watch eval request, run APY evaluator, deliver verdict', async () => {
       const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
-      let evalReq: { requestId: string; desiredState: DesiredState; intentCid?: string } | undefined;
+      let evalReq: { requestId: string; restorationJob: RestorationJob; intentCid?: string } | undefined;
       const deadline = Date.now() + 60_000;
       while (!evalReq && Date.now() < deadline) {
         const next = await Promise.race([
           iter.next(),
           sleep(3_000).then(() => ({ done: true, value: undefined })),
         ]);
-        if (!next.done && next.value?.desiredState?.type === 'evaluation') {
-          evalReq = next.value as { requestId: string; desiredState: DesiredState; intentCid?: string };
+        if (!next.done && next.value?.restorationJob?.type === 'evaluation') {
+          evalReq = next.value as { requestId: string; restorationJob: RestorationJob; intentCid?: string };
         }
       }
       if (!evalReq) throw new Error('no evaluation request');
@@ -347,7 +375,7 @@ async function main(): Promise<void> {
         },
       });
       const out = await evaluator.run({
-        intent: evalReq.desiredState,
+        intent: evalReq.restorationJob,
         intentCid: evalReq.intentCid ?? '',
         implStateDir,
         workingDir,
@@ -368,7 +396,7 @@ async function main(): Promise<void> {
           gating: out.gating,
         }),
       });
-      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
       console.log(`    evaluator delivered verdict: ${verdict}`);
     }));
 
@@ -392,7 +420,7 @@ async function main(): Promise<void> {
     }));
   } finally {
     if (adapter) { try { await adapter.stop(); } catch { /**/ } }
-    if (chain) await chain.teardown();
+    if (anvil) anvil.kill('SIGTERM');
     if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
   }
 

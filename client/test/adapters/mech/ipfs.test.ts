@@ -3,15 +3,10 @@ import {
   buildIpfsFetchCidPathCandidates,
   buildIpfsHexCidCandidatesFromPartialHex,
   normalizeIpfsGatewayBase,
-  normalizeIpfsRegistryAddUrl,
-  uploadToIpfs,
+  fetchSignedIntentFromIpfs,
 } from '../../../src/adapters/mech/ipfs.js';
 
 describe('ipfs gateway + CID helpers (jinn-node parity)', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it('normalizeIpfsGatewayBase handles origin-only, /ipfs suffix, and trailing slashes', () => {
     expect(normalizeIpfsGatewayBase('https://gateway.autonolas.tech')).toBe(
       'https://gateway.autonolas.tech/ipfs/',
@@ -43,44 +38,104 @@ describe('ipfs gateway + CID helpers (jinn-node parity)', () => {
       'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi';
     expect(buildIpfsFetchCidPathCandidates(bafy)).toEqual([bafy]);
   });
+});
 
-  it('normalizeIpfsRegistryAddUrl handles origin-only and full add endpoint URLs', () => {
-    expect(normalizeIpfsRegistryAddUrl('https://registry.autonolas.tech')).toBe(
-      'https://registry.autonolas.tech/api/v0/add',
-    );
-    expect(normalizeIpfsRegistryAddUrl('https://registry.autonolas.tech/api/v0/add')).toBe(
-      'https://registry.autonolas.tech/api/v0/add',
-    );
+// ── fetchSignedIntentFromIpfs ─────────────────────────────────────────────────
+
+/** Minimal valid SignedIntentV1 fixture. */
+const VALID_SIGNED_INTENT = {
+  schemaVersion: 'intent.v1',
+  id: 'test-intent-id',
+  kind: 'portfolio.v0',
+  description: 'Test intent description',
+  window: { startTs: 1_000_000, endTs: 1_086_400_000 },
+  spec: { kind: 'portfolio.v0' },
+  eligibility: {},
+  creator: {
+    safeAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    agentEoa: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  },
+  createdAt: 1_000_000,
+  signature: {
+    algo: 'secp256k1',
+    signer: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    hash: '0x' + 'ab'.repeat(32),
+    sig: '0x' + 'cd'.repeat(65),
+  },
+};
+
+function makeFetchStub(body: unknown, ok = true) {
+  return vi.fn().mockResolvedValue({
+    ok,
+    status: ok ? 200 : 500,
+    statusText: ok ? 'OK' : 'Internal Server Error',
+    headers: { get: () => 'application/json' },
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
+  });
+}
+
+describe('fetchSignedIntentFromIpfs', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it('uploadToIpfs posts JSON to the configured registry and returns the last Hash', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        [
-          JSON.stringify({ Name: 'content.json', Hash: 'bafyfirst' }),
-          JSON.stringify({ Name: '', Hash: 'bafylast' }),
-        ].join('\n'),
-        { status: 200 },
+  it('parses a valid SignedIntentV1 fetched from IPFS', async () => {
+    vi.stubGlobal('fetch', makeFetchStub(VALID_SIGNED_INTENT));
+
+    const result = await fetchSignedIntentFromIpfs(
+      'https://gateway.autonolas.tech',
+      'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+    );
+
+    expect(result.schemaVersion).toBe('intent.v1');
+    expect(result.id).toBe('test-intent-id');
+    expect(result.kind).toBe('portfolio.v0');
+    expect(result.signature.algo).toBe('secp256k1');
+  });
+
+  it('throws ZodError when the fetched document lacks a signature field', async () => {
+    const noSig = { ...VALID_SIGNED_INTENT };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (noSig as any).signature;
+
+    vi.stubGlobal('fetch', makeFetchStub(noSig));
+
+    await expect(
+      fetchSignedIntentFromIpfs(
+        'https://gateway.autonolas.tech',
+        'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
       ),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(uploadToIpfs('https://registry.example', { ok: true })).resolves.toBe('bafylast');
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    expect(url.toString()).toBe(
-      'https://registry.example/api/v0/add?pin=true&cid-version=1&wrap-with-directory=false',
-    );
-    expect(init.method).toBe('POST');
-    expect(init.body).toBeInstanceOf(FormData);
+    ).rejects.toThrow();
   });
 
-  it('uploadToIpfs rejects registry responses without a CID', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+  it('throws ZodError when schemaVersion is not intent.v1', async () => {
+    const wrongVersion = { ...VALID_SIGNED_INTENT, schemaVersion: 'intent.v0' };
 
-    await expect(uploadToIpfs('https://registry.example', { ok: true })).rejects.toThrow(
-      'IPFS registry upload did not return a CID',
-    );
+    vi.stubGlobal('fetch', makeFetchStub(wrongVersion));
+
+    await expect(
+      fetchSignedIntentFromIpfs(
+        'https://gateway.autonolas.tech',
+        'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('throws when kind and spec.kind do not match', async () => {
+    const mismatch = {
+      ...VALID_SIGNED_INTENT,
+      kind: 'portfolio.v0',
+      spec: { kind: 'something-else' },
+    };
+
+    vi.stubGlobal('fetch', makeFetchStub(mismatch));
+
+    await expect(
+      fetchSignedIntentFromIpfs(
+        'https://gateway.autonolas.tech',
+        'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+      ),
+    ).rejects.toThrow();
   });
 });

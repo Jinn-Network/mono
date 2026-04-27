@@ -174,7 +174,7 @@ describe('loadConfig RPC override handling', () => {
     });
   });
 
-  it('preserves portfolio.v0 DesiredState fields (window, spec, eligibility) through config parsing', async () => {
+  it('preserves portfolio.v0 RestorationJob fields (window, spec, eligibility) through config parsing', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       desiredStates: [
@@ -229,5 +229,66 @@ describe('loadConfig RPC override handling', () => {
     expect(config.testnetL2DeploymentPath).toBe('/tmp/from-env-l2.json');
     expect(config.testnetL2TokenDeploymentPath).toBe('/tmp/from-env-token.json');
     expect(config.testnetClaimRegistryDeploymentPath).toBe('/tmp/from-env-claim-registry.json');
+  });
+
+  it('identityRegistryAddress is undefined by default', () => {
+    const config = loadConfig();
+    expect(config.identityRegistryAddress).toBeUndefined();
+  });
+
+  it('validationRegistryAddress is undefined by default', () => {
+    const config = loadConfig();
+    expect(config.validationRegistryAddress).toBeUndefined();
+  });
+
+  it('accepts identityRegistryAddress from config file', async () => {
+    const configPath = await writeConfigFile({
+      identityRegistryAddress: '0x1234567890abcdef1234567890abcdef12345678',
+    });
+    const config = loadConfig(configPath);
+    expect(config.identityRegistryAddress).toBe('0x1234567890abcdef1234567890abcdef12345678');
+  });
+
+  it('accepts validationRegistryAddress from config file', async () => {
+    const configPath = await writeConfigFile({
+      validationRegistryAddress: '0xabcdef1234567890abcdef1234567890abcdef12',
+    });
+    const config = loadConfig(configPath);
+    expect(config.validationRegistryAddress).toBe('0xabcdef1234567890abcdef1234567890abcdef12');
+  });
+
+  it('reads identityRegistryAddress from env var', () => {
+    process.env['JINN_IDENTITY_REGISTRY_ADDRESS'] = '0xaabbccdd00000000000000000000000000000001';
+    try {
+      const config = loadConfig();
+      expect(config.identityRegistryAddress).toBe('0xaabbccdd00000000000000000000000000000001');
+    } finally {
+      delete process.env['JINN_IDENTITY_REGISTRY_ADDRESS'];
+    }
+  });
+
+  it('reads validationRegistryAddress from env var', () => {
+    process.env['JINN_VALIDATION_REGISTRY_ADDRESS'] = '0xaabbccdd00000000000000000000000000000002';
+    try {
+      const config = loadConfig();
+      expect(config.validationRegistryAddress).toBe('0xaabbccdd00000000000000000000000000000002');
+    } finally {
+      delete process.env['JINN_VALIDATION_REGISTRY_ADDRESS'];
+    }
+  });
+
+  it('reputationEnabled defaults to false', () => {
+    const config = loadConfig();
+    expect(config.reputationEnabled).toBe(false);
+  });
+
+  it('accepts reputationEnabled=true from env var', () => {
+    process.env['JINN_REPUTATION_ENABLED'] = '1';
+    try {
+      const config = loadConfig();
+      expect(config.reputationEnabled).toBe(true);
+    } finally {
+      delete process.env['JINN_REPUTATION_ENABLED'];
+    }
   });
 });
