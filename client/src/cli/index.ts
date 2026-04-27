@@ -37,6 +37,7 @@ import pluginCommand from './commands/plugin-install.js';
 import updateCommand from './commands/update.js';
 import intentsCommand from './commands/intents.js';
 import mcpCommand from './commands/mcp.js';
+import migrateAgentIdCommand from './commands/migrate-agent-id.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -63,6 +64,7 @@ const COMMANDS: CommandModule[] = [
   updateCommand,
   intentsCommand,
   mcpCommand,
+  migrateAgentIdCommand,
 ];
 
 function publicCommandNames(commands: CommandModule[]): string[] {

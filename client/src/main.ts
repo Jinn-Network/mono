@@ -27,6 +27,7 @@ import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-
 import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
+import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
 import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from './earning/wallet.js';
@@ -178,8 +179,47 @@ async function bootstrap(): Promise<{
     });
   }
 
+  // Legacy migration (jinn-mono-jgp): backfill `agent_id` on `complete`
+  // services that pre-date j07. Idempotent + per-service failure-isolated;
+  // a failure here does not abort daemon startup, but we surface counts so
+  // operators notice. Disabled via `runLegacyMigrations: false` /
+  // JINN_RUN_LEGACY_MIGRATIONS=0 — operators can run `jinn migrate-agent-id`
+  // explicitly instead.
+  let state = result.fleet_state;
+  if (config.runLegacyMigrations) {
+    try {
+      const migration = await runLegacyAgentIdMigration({
+        earningDir: config.earningDir,
+        network: NETWORK_CHAIN,
+        rpcUrl: config.rpcUrl,
+        password: PASSWORD,
+        testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+        testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+        testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+        testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
+      });
+      if (migration.migrated.length > 0 || migration.failed.length > 0) {
+        console.log(
+          `[main] Legacy agent_id migration: migrated=${migration.migrated.length} ` +
+          `skipped=${migration.skipped.length} failed=${migration.failed.length}`,
+        );
+        for (const f of migration.failed) {
+          console.log(
+            `[main]   service ${f.service.index} (agent ${f.service.agent_address}): ${f.error}`,
+          );
+        }
+        // Reload state so downstream wiring (agent_id, identityRegistry)
+        // sees the migrated rows.
+        state = await new FleetStateStore(config.earningDir).load(NETWORK_CHAIN);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[main] Legacy agent_id migration failed (non-fatal): ${message}`);
+    }
+  }
+
   // Use the first complete service for the daemon
-  const state = result.fleet_state;
   const firstComplete = state.services.find(s => s.step === 'complete');
   if (!firstComplete || !firstComplete.safe_address) {
     emitEnvelope({

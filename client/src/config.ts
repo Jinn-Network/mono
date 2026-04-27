@@ -169,6 +169,19 @@ export const JinnConfigSchema = z.object({
       implStateDirRoot: z.string().optional(),
     })
     .optional(),
+
+  /**
+   * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
+   * backfill `agent_id` on `complete` services that pre-date j07).
+   *
+   * Defaults to true — the migrations are no-ops on already-migrated
+   * fleets and cheap on Base. Operators on a flaky RPC or with locked
+   * funds can set this to false and run `jinn migrate-agent-id`
+   * explicitly.
+   *
+   * Env: JINN_RUN_LEGACY_MIGRATIONS=0|1.
+   */
+  runLegacyMigrations: z.boolean().default(true),
 });
 
 const DEFAULT_ENGINE = {
@@ -274,6 +287,12 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_DEBUG'] !== undefined) {
     const v = env['JINN_DEBUG'].trim().toLowerCase();
     merged.debug = v === '1' || v === 'true' || v === 'yes';
+  }
+
+  if (env['JINN_RUN_LEGACY_MIGRATIONS'] !== undefined) {
+    const v = env['JINN_RUN_LEGACY_MIGRATIONS'].trim().toLowerCase();
+    merged.runLegacyMigrations =
+      !(v === '0' || v === 'false' || v === 'no' || v === '');
   }
 
   if (env['JINN_MASTER_ETH_DAILY_WEI']) {

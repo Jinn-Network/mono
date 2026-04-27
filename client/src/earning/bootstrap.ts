@@ -836,9 +836,12 @@ export class FleetBootstrapper {
     console.error(`[fleet-bootstrap] Service ${index}: reStake confirmed (tx: ${reStakeHash})`);
 
     // Service is now Staked again with the same service_id, safe_address, and mech_address.
-    // Mark the step as complete so the bootstrap doesn't try to re-stake or re-deploy mech.
+    // Step back to `mech_deployed` so the resume loop advances through
+    // `stepRegisterAgent` (idempotent — short-circuits if `agent_id` is
+    // already set; mints if a pre-j07 operator was just re-staked and
+    // never had the operator agent NFT). See jinn-mono-jgp.
     return this.store.updateService(index, {
-      step: 'complete',
+      step: 'mech_deployed',
     });
   }
 
