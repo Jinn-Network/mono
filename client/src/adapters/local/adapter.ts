@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ExecutionAdapter } from '../adapter.js';
 import type {
-  DesiredState,
+  RestorationJob,
   RequestId,
   RestorationRequest,
   RestorationResult,
@@ -24,17 +24,17 @@ export class LocalAdapter implements ExecutionAdapter {
     // No-op for local
   }
 
-  async postDesiredState(state: DesiredState): Promise<RequestId> {
+  async postRestorationJob(state: RestorationJob): Promise<RequestId> {
     const requestId = randomUUID();
 
     // Create restoration request
-    const restorationState: DesiredState = {
+    const restorationState: RestorationJob = {
       ...state,
       type: state.type ?? 'restoration',
     };
     const request: RestorationRequest = {
       requestId,
-      desiredState: restorationState,
+      restorationJob: restorationState,
     };
     this.requests.set(requestId, request);
 
@@ -46,14 +46,14 @@ export class LocalAdapter implements ExecutionAdapter {
 
     // Create linked evaluation request
     const evalRequestId = randomUUID();
-    const evaluationState: DesiredState = {
+    const evaluationState: RestorationJob = {
       ...state,
       type: 'evaluation',
       restorationRequestId: requestId,
     };
     const evalRequest: RestorationRequest = {
       requestId: evalRequestId,
-      desiredState: evaluationState,
+      restorationJob: evaluationState,
     };
     this.requests.set(evalRequestId, evalRequest);
     // Evaluation requests are deferred — only yielded after restoration is delivered
@@ -67,7 +67,7 @@ export class LocalAdapter implements ExecutionAdapter {
       // Check if any deferred evaluation requests are now ready
       const stillDeferred: RestorationRequest[] = [];
       for (const evalReq of this.deferredEvalRequests) {
-        const restorationId = evalReq.desiredState.restorationRequestId;
+        const restorationId = evalReq.restorationJob.restorationRequestId;
         if (restorationId && this.deliveredRequestIds.has(restorationId)) {
           // Restoration delivered — yield evaluation request
           if (this.requestWaiters.length > 0) {
@@ -104,7 +104,7 @@ export class LocalAdapter implements ExecutionAdapter {
 
     const delivery: DeliveredResult = {
       requestId,
-      desiredState: request.desiredState,
+      restorationJob: request.restorationJob,
       result,
       deliveryMechAddress: 'local',
     };
@@ -118,7 +118,7 @@ export class LocalAdapter implements ExecutionAdapter {
     // Check if any deferred evaluation requests are now ready
     const stillDeferred: RestorationRequest[] = [];
     for (const evalReq of this.deferredEvalRequests) {
-      const restorationId = evalReq.desiredState.restorationRequestId;
+      const restorationId = evalReq.restorationJob.restorationRequestId;
       if (restorationId && this.deliveredRequestIds.has(restorationId)) {
         if (this.requestWaiters.length > 0) {
           this.requestWaiters.shift()!(evalReq);
@@ -149,10 +149,10 @@ export class LocalAdapter implements ExecutionAdapter {
     this.stopped = true;
     // Resolve any pending waiters so loops can exit
     for (const waiter of this.requestWaiters) {
-      waiter({ requestId: '', desiredState: { id: '', description: '' } });
+      waiter({ requestId: '', restorationJob: { id: '', description: '' } });
     }
     for (const waiter of this.deliveryWaiters) {
-      waiter({ requestId: '', desiredState: { id: '', description: '' }, result: { data: '' }, deliveryMechAddress: '' });
+      waiter({ requestId: '', restorationJob: { id: '', description: '' }, result: { data: '' }, deliveryMechAddress: '' });
     }
     this.requestWaiters = [];
     this.deliveryWaiters = [];

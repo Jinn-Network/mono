@@ -1,24 +1,30 @@
+import { ZodError } from 'zod';
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
+import { keccak256 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import type { ExecutionAdapter } from '../adapter.js';
 import type {
-  DesiredState,
+  RestorationJob,
   RequestId,
   RestorationRequest,
   RestorationResult,
   DeliveredResult,
 } from '../../types/index.js';
-import { TransientError, PermanentError } from '../../types/index.js';
+import { TransientError, PermanentError, parseRestorationJob } from '../../types/index.js';
 import { createClients } from './safe.js';
 import {
-  buildDesiredStatePayload,
+  buildRestorationJobPayload,
   buildResultPayload,
   uploadToIpfs,
   cidToDigestHex,
   fetchFromIpfs,
+  fetchSignedIntentFromIpfs,
+  fetchSignedEnvelopeFromIpfs,
   digestHexToGatewayUrl,
-  parseDesiredStateFromPayload,
+  parseRestorationJobFromPayload,
 } from './ipfs.js';
+import { canonicalJson } from '../../restorer/engine/canonical-json.js';
+import { SignedEnvelopeSchema } from '../../types/envelope.js';
 import {
   submitRestorationJob,
   submitEvaluationJob,
@@ -39,8 +45,7 @@ import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
-import { computeEvidenceSimHash, type EvidenceCheckpointV1 } from '../../earning/evidence-simhash.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -51,7 +56,7 @@ export class MechAdapter implements ExecutionAdapter {
   private stopped = false;
   private requestBlockCursor = 0n;
   private deliveryBlockCursor = 0n;
-  private pendingEvaluations = new Map<string, import('../../types/index.js').DesiredState>();
+  private pendingEvaluations = new Map<string, import('../../types/index.js').RestorationJob>();
   private pendingEvaluationClaims = new Set<string>();
   // Restoration requests where claimDelivery succeeded but evaluation creation failed.
   // Swept on each poll cycle so they don't require a new Deliver event.
@@ -59,14 +64,14 @@ export class MechAdapter implements ExecutionAdapter {
   // Restoration result content cached across evaluation-job retries so a transient
   // Safe/router failure does not silently strip evaluator context on the next poll.
   private pendingEvaluationResults = new Map<string, string>();
+  // IPFS CID of the restoration envelope — threaded into evaluation context so
+  // evaluators can populate restorationEnvelope.cid without a synchronous IPFS fetch.
+  private pendingEvaluationResultCids = new Map<string, string>();
   // RIDs with no delivery found in backfill window; avoids repeated 500k-block rescans.
   private backfillMissRids = new Set<string>();
   // Original desired states keyed by request ID (restoration and evaluation)
-  // so we can yield accurate desiredState in DeliveredResult
-  private originalStates = new Map<string, DesiredState>();
-  // Most recently posted intent CID (IPFS); surfaced via getLastPostedIntentCid()
-  // for ERC-8004 registration in the posting service.
-  private _lastPostedIntentCid: string | undefined;
+  // so we can yield accurate restorationJob in DeliveredResult
+  private originalStates = new Map<string, RestorationJob>();
   private store?: Store;
   private claimPolicy: ClaimPolicy;
 
@@ -218,14 +223,16 @@ export class MechAdapter implements ExecutionAdapter {
         try {
           const d = String(deliveryDataHex);
           const dig = d.startsWith('0x') ? d.slice(2) : d;
+          const envelopeCid = `f01551220${dig}`;
           const payload = (await fetchFromIpfs(
             this.config.ipfsGatewayUrl,
-            `f01551220${dig}`,
+            envelopeCid,
           )) as Record<string, unknown>;
           this.pendingEvaluationResults.set(
             requestId,
             (payload.data as string) ?? JSON.stringify(payload),
           );
+          this.pendingEvaluationResultCids.set(requestId, envelopeCid);
           this.backfillMissRids.delete(requestId);
         } catch (err) {
           console.error(`[mech] recovery: could not load restoration result IPFS for ${requestId}:`, err);
@@ -239,24 +246,21 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  getLastPostedIntentCid(): string | undefined {
-    return this._lastPostedIntentCid;
-  }
-
-  async postDesiredState(state: DesiredState): Promise<RequestId> {
-    const restorationState: DesiredState = {
+  async postRestorationJob(state: RestorationJob): Promise<RequestId> {
+    const restorationState: RestorationJob = {
       ...state,
       type: state.type ?? 'restoration',
       attemptId: state.attemptId,
       attemptNumber: state.attemptNumber,
     };
-    const restorationPayload = buildDesiredStatePayload(restorationState);
-    const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, restorationPayload);
+    // When a pre-built SignedIntentV1 is attached, upload it directly so the
+    // on-chain CID points to the canonical signed intent document rather than
+    // the legacy RestorationJobPayload shape.
+    const ipfsDoc: unknown = state.intent ?? buildRestorationJobPayload(restorationState);
+    const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, ipfsDoc);
     const restorationDataHex = cidToDigestHex(restorationCid);
     const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
     const restorationIntentCid = `f01551220${digestNo0x}`;
-    // Expose for ERC-8004 registration (posting service reads this right after postDesiredState).
-    this._lastPostedIntentCid = restorationIntentCid;
 
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
@@ -286,7 +290,7 @@ export class MechAdapter implements ExecutionAdapter {
     // Store for evaluation creation after delivery is claimed. The evaluation
     // job’s IPFS CID is different from the restoration intended-state CID; evaluators
     // need the latter to verify submission.intent.cid (see context.restorationIntentCid).
-    const stateForEval: DesiredState = {
+    const stateForEval: RestorationJob = {
       ...state,
       context: { ...(state.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: restorationIntentCid },
     };
@@ -321,12 +325,25 @@ export class MechAdapter implements ExecutionAdapter {
               // IPFS_GATEWAY_PREFIX constant (f01551220) which has worked in production.
               // If the gateway ever switches to dag-pb (0x70) the prefix would be f01701220.
               const intentCid = `f01551220${digest}`;
-              const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid) as Record<string, unknown>;
-              const desiredState = parseDesiredStateFromPayload(payload);
+              // Try to parse as a typed SignedIntentV1 first (Plan B envelope).
+              // Fall back to the legacy loose payload shape for older on-chain data.
+              let restorationJob: RestorationJob;
+              try {
+                const signed = await fetchSignedIntentFromIpfs(this.config.ipfsGatewayUrl, intentCid);
+                restorationJob = parseRestorationJob({ intent: signed });
+              } catch (err) {
+                if (!(err instanceof ZodError)) throw err;
+                // Fallback: pre-envelope legacy payload. Will be removed in Plan C (one-shot cutover).
+                console.debug(
+                  `[adapters/mech] intent.v1 parse failed for CID ${intentCid}; falling back to legacy payload parser`,
+                );
+                const payload = (await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid)) as Record<string, unknown>;
+                restorationJob = parseRestorationJobFromPayload(payload);
+              }
 
               yield {
                 requestId,
-                desiredState,
+                restorationJob,
                 intentCid,
                 onchainCreationTx: transactionHash,
                 onchainCreationBlock: blockNumber,
@@ -405,23 +422,52 @@ export class MechAdapter implements ExecutionAdapter {
             //   delivered (iDelivered is false) → the creator Safe must still call claimDelivery
             //   so the router flips `restorationDeliveryClaimed` for this requestId. Otherwise
             //   tryCreateEvaluationJob never unblocks. See JinnRouter.claimDelivery in contracts.
-            const shouldClaimDelivery = iDelivered || (iCreatedRestoration && !iDelivered);
+            const isCrossOperator = iCreatedRestoration && !iDelivered;
+            const shouldClaimDelivery = iDelivered || isCrossOperator;
             if (shouldClaimDelivery) {
               try {
                 const variant = this.config.routerClaimDeliveryVariant;
                 let evidenceHash: `0x${string}` | undefined;
                 if (variant === 'v2') {
-                  try {
-                    const checkpoint: EvidenceCheckpointV1 = {
-                      version: 1,
-                      desiredStateHash: requestId,
-                      toolCalls: [],
-                      externalInteractions: [],
-                      outcome: 'success',
-                    };
-                    evidenceHash = computeEvidenceSimHash(checkpoint);
-                  } catch (err) {
-                    console.error(`[mech] Failed to compute evidence SimHash for ${requestId}:`, err);
+                  if (iDelivered) {
+                    // Same-operator path: we signed the envelope, hash is in store.
+                    const stored = this.store?.getIntentEvidenceHash(requestId);
+                    if (stored) {
+                      evidenceHash = stored as `0x${string}`;
+                    }
+                  } else {
+                    // Cross-operator path: we did NOT deliver, so no local store entry.
+                    // Derive evidenceHash by fetching the delivered envelope from IPFS
+                    // and recomputing keccak256(JCS(envelope - signature)).
+                    // If derivation fails, skip claim and let the next watch loop retry.
+                    try {
+                      const deliveryDigest = deliveryDataHex.startsWith('0x')
+                        ? deliveryDataHex.slice(2)
+                        : deliveryDataHex;
+                      const envelopeCid = `f01551220${deliveryDigest}`;
+                      const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
+                        this.config.ipfsGatewayUrl,
+                        envelopeCid,
+                      );
+                      const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
+                      // Strip signature to recompute the hash over the unsigned body.
+                      const { signature, ...unsignedBody } = parsed;
+                      const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
+                      const recomputed = keccak256(jcsBytes);
+                      if (recomputed !== signature.hash) {
+                        console.error(
+                          `[mech] cross-operator claimDelivery skipped for ${requestId}: recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
+                        );
+                        continue;
+                      }
+                      evidenceHash = recomputed as `0x${string}`;
+                    } catch (deriveErr) {
+                      console.error(
+                        `[mech] cross-operator evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
+                        deriveErr,
+                      );
+                      continue;
+                    }
                   }
                 }
                 await claimDelivery(
@@ -452,15 +498,17 @@ export class MechAdapter implements ExecutionAdapter {
             //     tryCreateEvaluationJob calls verifyRestorationClaimed() which polls for the claim.
             if (iCreatedRestoration) {
               let restorationResultData: string | undefined;
+              let restorationEnvelopeCid: string | undefined;
               try {
                 const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
-                const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${digest}`) as Record<string, unknown>;
+                restorationEnvelopeCid = `f01551220${digest}`;
+                const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, restorationEnvelopeCid) as Record<string, unknown>;
                 restorationResultData = (payload.data as string) ?? JSON.stringify(payload);
                 this.backfillMissRids.delete(requestId);
               } catch (err) {
                 console.error(`[mech] Failed to fetch restoration result for evaluation: ${requestId}`, err);
               }
-              await this.tryCreateEvaluationJob(requestId, restorationResultData);
+              await this.tryCreateEvaluationJob(requestId, restorationResultData, restorationEnvelopeCid);
             }
 
             // (c) If I created the evaluation, clean up tracking once delivered.
@@ -479,14 +527,14 @@ export class MechAdapter implements ExecutionAdapter {
               };
 
               // Use the original desired state — not the result payload
-              const desiredState = this.originalStates.get(requestId) ?? {
+              const restorationJob = this.originalStates.get(requestId) ?? {
                 id: requestId,
                 description: '',
               };
 
               yield {
                 requestId,
-                desiredState,
+                restorationJob,
                 result: restorationResult,
                 deliveryMechAddress: mechAddress,
               };
@@ -550,12 +598,14 @@ export class MechAdapter implements ExecutionAdapter {
     try {
       const d = String(dhex);
       const dig = d.startsWith('0x') ? d.slice(2) : d;
+      const envelopeCid = `f01551220${dig}`;
       const payload = (await fetchFromIpfs(
         this.config.ipfsGatewayUrl,
-        `f01551220${dig}`,
+        envelopeCid,
       )) as Record<string, unknown>;
       const data = (payload.data as string) ?? JSON.stringify(payload);
       this.pendingEvaluationResults.set(requestId, data);
+      this.pendingEvaluationResultCids.set(requestId, envelopeCid);
       this.backfillMissRids.delete(requestId);
       return data;
     } catch (err) {
@@ -564,12 +614,15 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  private async tryCreateEvaluationJob(requestId: string, restorationResultData?: string): Promise<void> {
+  private async tryCreateEvaluationJob(requestId: string, restorationResultData?: string, restorationEnvelopeCid?: string): Promise<void> {
     if (!this.pendingEvaluations.has(requestId)) return;
     const originalState = this.pendingEvaluations.get(requestId)!;
     if (restorationResultData) {
       this.pendingEvaluationResults.set(requestId, restorationResultData);
       this.backfillMissRids.delete(requestId);
+    }
+    if (restorationEnvelopeCid) {
+      this.pendingEvaluationResultCids.set(requestId, restorationEnvelopeCid);
     }
     let cachedRestorationResultData = restorationResultData ?? this.pendingEvaluationResults.get(requestId);
     if (cachedRestorationResultData == null) {
@@ -582,17 +635,19 @@ export class MechAdapter implements ExecutionAdapter {
       );
       return;
     }
+    const cachedEnvelopeCid = restorationEnvelopeCid ?? this.pendingEvaluationResultCids.get(requestId);
     try {
-      const evaluationState: DesiredState = {
+      const evaluationState: RestorationJob = {
         ...originalState,
         type: 'evaluation',
         restorationRequestId: requestId,
         context: {
           ...originalState.context,
           restorationResult: cachedRestorationResultData,
+          ...(cachedEnvelopeCid ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: cachedEnvelopeCid } : {}),
         },
       };
-      const evaluationPayload = buildDesiredStatePayload(evaluationState);
+      const evaluationPayload = buildRestorationJobPayload(evaluationState);
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
       const evaluationDataHex = cidToDigestHex(evaluationCid);
 
@@ -635,6 +690,7 @@ export class MechAdapter implements ExecutionAdapter {
       this.pendingEvaluations.delete(requestId);
       this.claimedButNotEvaluated.delete(requestId);
       this.pendingEvaluationResults.delete(requestId);
+      this.pendingEvaluationResultCids.delete(requestId);
     } catch (err) {
       console.error(`[mech] Failed to create evaluation job for ${requestId}:`, err);
       // Track for retry on next poll cycle (doesn't require a new Deliver event)

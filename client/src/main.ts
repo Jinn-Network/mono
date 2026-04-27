@@ -27,6 +27,7 @@ import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-
 import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { getChainConfig } from './earning/contracts.js';
+import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
 import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from './earning/wallet.js';
@@ -128,6 +129,10 @@ async function bootstrap(): Promise<{
   agentPrivateKey: `0x${string}`;
   safeAddress: `0x${string}`;
   mechAddress?: `0x${string}`;
+  /** ERC-8004 agent NFT id (decimal string). null if bootstrap mint not yet complete. */
+  agentId: string | null;
+  /** ERC-8004 IdentityRegistry contract used for the mint. null if unknown. */
+  identityRegistryAddress: `0x${string}` | null;
 }> {
   console.log('[main] Running fleet bootstrap...');
 
@@ -174,8 +179,47 @@ async function bootstrap(): Promise<{
     });
   }
 
+  // Legacy migration (jinn-mono-jgp): backfill `agent_id` on `complete`
+  // services that pre-date j07. Idempotent + per-service failure-isolated;
+  // a failure here does not abort daemon startup, but we surface counts so
+  // operators notice. Disabled via `runLegacyMigrations: false` /
+  // JINN_RUN_LEGACY_MIGRATIONS=0 — operators can run `jinn migrate-agent-id`
+  // explicitly instead.
+  let state = result.fleet_state;
+  if (config.runLegacyMigrations) {
+    try {
+      const migration = await runLegacyAgentIdMigration({
+        earningDir: config.earningDir,
+        network: NETWORK_CHAIN,
+        rpcUrl: config.rpcUrl,
+        password: PASSWORD,
+        testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+        testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+        testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+        testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
+      });
+      if (migration.migrated.length > 0 || migration.failed.length > 0) {
+        console.log(
+          `[main] Legacy agent_id migration: migrated=${migration.migrated.length} ` +
+          `skipped=${migration.skipped.length} failed=${migration.failed.length}`,
+        );
+        for (const f of migration.failed) {
+          console.log(
+            `[main]   service ${f.service.index} (agent ${f.service.agent_address}): ${f.error}`,
+          );
+        }
+        // Reload state so downstream wiring (agent_id, identityRegistry)
+        // sees the migrated rows.
+        state = await new FleetStateStore(config.earningDir).load(NETWORK_CHAIN);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[main] Legacy agent_id migration failed (non-fatal): ${message}`);
+    }
+  }
+
   // Use the first complete service for the daemon
-  const state = result.fleet_state;
   const firstComplete = state.services.find(s => s.step === 'complete');
   if (!firstComplete || !firstComplete.safe_address) {
     emitEnvelope({
@@ -210,6 +254,10 @@ async function bootstrap(): Promise<{
     agentPrivateKey: agentPrivateKey as `0x${string}`,
     safeAddress: firstComplete.safe_address as `0x${string}`,
     mechAddress: firstComplete.mech_address ? (firstComplete.mech_address as `0x${string}`) : undefined,
+    agentId: firstComplete.agent_id ?? null,
+    identityRegistryAddress: firstComplete.identity_registry_address
+      ? (firstComplete.identity_registry_address as `0x${string}`)
+      : null,
   };
 }
 
@@ -268,8 +316,16 @@ export async function main(): Promise<DaemonStartupInfo> {
     });
   }
 
-  const { agentPrivateKey, masterAddress, safeAddress, mechAddress, serviceIndex, serviceId } =
-    await bootstrap();
+  const {
+    agentPrivateKey,
+    masterAddress,
+    safeAddress,
+    mechAddress,
+    serviceIndex,
+    serviceId,
+    agentId,
+    identityRegistryAddress,
+  } = await bootstrap();
 
   if (!mechAddress) {
     emitEnvelope({
@@ -376,13 +432,15 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
-  // Packaging deps: IPFS upload + optional artifact registration (wired in daemon via registerArtifact)
+  // Packaging deps: IPFS upload (ERC-8004 per-artifact registration is rebuilt
+  // under jinn-mono-3zk; see DR
+  // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
   const packagingDeps = {
     ipfsRegistryUrl: config.ipfsRegistryUrl,
   };
 
-  // Manifest assembly deps: sign manifests with agent EOA private key
-  const manifestDeps = {
+  // Envelope assembly deps: sign envelopes with agent EOA private key
+  const envelopeDeps = {
     ipfsRegistryUrl: config.ipfsRegistryUrl,
     agentEoaPrivateKey: agentPrivateKey,
     safeAddress,
@@ -423,13 +481,99 @@ export async function main(): Promise<DaemonStartupInfo> {
     console.log('[main] ClaimRegistry: not configured (claim step will use NotImplementedError fallback)');
   }
 
+  // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
+  //
+  // When the bootstrap has minted an ERC-8004 IdentityRegistry NFT for the
+  // active service (agent_id non-null) AND we know the registry address, wire
+  // an IdentityPublisher so the engine anchors each envelope under the
+  // operator's agent NFT via setMetadata. Otherwise log a warning — publishing
+  // is disabled until bootstrap completes that step (jinn-mono-j07).
+  let identityPublisher: import('./discovery/identity-publisher.js').IdentityPublisher | undefined;
+  if (agentId && identityRegistryAddress) {
+    const { IdentityPublisher } = await import('./discovery/identity-publisher.js');
+    identityPublisher = new IdentityPublisher({
+      identityRegistryAddress,
+      agentId: BigInt(agentId),
+      walletClient: agentClients.walletClient,
+      publicClient: agentClients.publicClient,
+    });
+    console.log(
+      `[main] IdentityPublisher: agentId=${agentId} registry=${identityRegistryAddress}`,
+    );
+  } else {
+    console.log(
+      '[main] IdentityPublisher: disabled (no agent_id on active service — re-run bootstrap to mint the operator agent NFT)',
+    );
+  }
+
+  // ── Reputation feedback hook (jinn-mono-yg4) ──────────────────────────────
+  //
+  // After the evaluator's claimDelivery succeeds, the engine fires
+  // `ReputationRegistry.giveFeedback(restorerAgentId, …)` so the restorer's
+  // agent NFT accrues a rating (DR §4.3). This requires:
+  //
+  //   1. A `ReputationRegistryClient` for the active chain. We use the
+  //      canonical 0x8004… deployment; writes route through the operator's
+  //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
+  //      identity.
+  //   2. An agentId resolver — looks up the restorer's agentId from the
+  //      parent manifest's evidenceHash via the subgraph. When `subgraphUrl`
+  //      is unconfigured the resolver returns null cleanly and the hook
+  //      becomes a no-op (defensive: feedback is non-fatal).
+  //
+  // Skipped when the operator hasn't minted an agent NFT yet (matches the
+  // IdentityPublisher gating above).
+  let reputationFeedback:
+    | NonNullable<import('./restorer/engine/engine.js').RestorationEngineOptions['reputationFeedback']>
+    | undefined;
+  if (agentId) {
+    const { getReputationRegistryAddress, ReputationRegistryClient } = await import(
+      './reputation/registry.js'
+    );
+    const chainId = config.network === 'testnet' ? 84532 : 8453;
+    const reputationRegistryAddress = getReputationRegistryAddress(chainId);
+    if (reputationRegistryAddress) {
+      const reputationClient = new ReputationRegistryClient({
+        reputationRegistryAddress,
+        publicClient: agentClients.publicClient,
+        walletClient: agentClients.walletClient,
+        safeAddress,
+      });
+      const { resolveAgentIdForManifest } = await import(
+        './discovery/agent-resolver.js'
+      );
+      const subgraphUrl = config.subgraphUrl;
+      reputationFeedback = {
+        client: reputationClient,
+        resolveAgentId: (manifestHash) =>
+          resolveAgentIdForManifest({ manifestHash, subgraphUrl }),
+      };
+      console.log(
+        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${subgraphUrl ? ` subgraph=${subgraphUrl}` : ' (no subgraph configured — resolver always null)'}`,
+      );
+    } else {
+      console.log(
+        `[main] ReputationFeedback: disabled (no canonical ReputationRegistry deployed on chainId=${chainId})`,
+      );
+    }
+  } else {
+    console.log(
+      '[main] ReputationFeedback: disabled (no agent_id on active service — same gating as IdentityPublisher)',
+    );
+  }
+
   // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
   const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
+  const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
+  const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
   const { generators: autoIntentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
     network: config.network,
     rpcUrl: config.rpcUrl,
     autoIntentsDisabled,
     env: process.env,
+    agentEoa: agentEoaAddress,
+    safeAddress,
+    agentPrivateKey,
   });
   for (const line of autoIntentLogLines) {
     console.log(line);
@@ -489,9 +633,11 @@ export async function main(): Promise<DaemonStartupInfo> {
       },
       claimDeps,
       packagingDeps,
-      manifestDeps,
+      envelopeDeps,
       deliveryDeps,
       implRegistry,
+      identityPublisher,
+      reputationFeedback,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

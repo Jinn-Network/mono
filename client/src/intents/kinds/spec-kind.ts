@@ -5,7 +5,7 @@
 
 import type { IntentGenerator } from '../sources.js';
 
-/** Overlay fields merged into DesiredState when posting from --spec-file. */
+/** Overlay fields merged into RestorationJob when posting from --spec-file. */
 export type ParsedSpecOverlay = {
   window: unknown;
   spec: unknown;
@@ -25,6 +25,12 @@ export interface TestnetAutoContext {
   network: 'mainnet' | 'testnet';
   rpcUrl: string;
   env: NodeJS.ProcessEnv;
+  /** Agent EOA address — threaded into auto-gen configs so generators can populate creator. */
+  agentEoa?: `0x${string}`;
+  /** Safe address — threaded into auto-gen configs so generators can populate creator. */
+  safeAddress?: `0x${string}`;
+  /** Agent EOA private key — threaded into auto-gen configs so generators can sign SignedIntentV1. */
+  agentPrivateKey?: `0x${string}`;
 }
 
 export interface SpecKind<GenConfig = unknown> {

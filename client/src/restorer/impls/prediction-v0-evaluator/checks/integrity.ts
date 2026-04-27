@@ -1,7 +1,9 @@
 import { keccak256, recoverAddress } from 'viem';
 import { canonicalJson } from '../../../engine/canonical-json.js';
 import type { Check } from '../types.js';
-import type { PredictionV0Intent, PredictionSubmissionManifest } from '../../../../types/prediction.js';
+import type { PredictionV0Intent } from '../../../../types/prediction.js';
+import type { PredictionV0RestorationPayload } from '../../../../types/payloads/prediction-v0.js';
+import type { SignedEnvelope } from '../../../../types/envelope.js';
 
 /**
  * Window-bounds integrity. We no longer pin an exact duration — the schema
@@ -44,7 +46,7 @@ export function checkWindowBounds(intent: PredictionV0Intent): Check {
 }
 
 export function checkManifestFieldsPresent(
-  prediction: PredictionSubmissionManifest['prediction'],
+  prediction: PredictionV0RestorationPayload['prediction'],
 ): Check {
   const p = Number(prediction.probability);
   if (!Number.isFinite(p) || p < 0 || p > 1) {
@@ -82,7 +84,7 @@ export function recomputeTopLevelSignatureHash(manifest: Record<string, unknown>
 
 export async function checkManifestSignature(
   canonicalHash: `0x${string}`,
-  signature: PredictionSubmissionManifest['signature'],
+  signature: SignedEnvelope['signature'],
 ): Promise<Check> {
   if (signature.algo !== 'secp256k1') {
     return { name: 'integrity.manifest_signature', status: 'FAIL', detail: 'non-secp256k1 signature' };

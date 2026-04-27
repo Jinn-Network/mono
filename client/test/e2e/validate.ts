@@ -40,6 +40,7 @@ import {
   numberToHex,
   pad,
   parseAbi,
+  parseAbiItem,
   type Address,
   type Hex,
   type PublicClient,
@@ -534,6 +535,23 @@ async function main(): Promise<void> {
   /** Baseline multisig nonces after Phase 3 (for Phase 15 isRatioPass). */
   let baselineMultisigNonces: bigint[] | undefined;
 
+  // ERC-8004 Phase 1b state (jinn-mono-al7).
+  /** ERC-8004 agentId minted in Phase 2 (bootstrap stepRegisterAgent). */
+  let agentId: bigint | undefined;
+  /** Whether the Safe→agentId binding (setAgentWallet) succeeded in bootstrap. */
+  let safeBoundToAgent: boolean | undefined;
+  /** IdentityRegistry address persisted on the EarningState. */
+  let identityRegistryAddress: Address | undefined;
+  /** Block range for scanning ERC-8004 events emitted during bootstrap. */
+  let bootstrapEventFromBlock: bigint | undefined;
+  /**
+   * Per-execution envelope publish state for the ERC-8004 Phase 1b assertions.
+   * Populated by the new "envelope publish" phase and reused by the validation
+   * + reputation phases.
+   */
+  let publishedEnvelopeManifestCid: string | undefined;
+  let publishedEnvelopeManifestHash: Hex | undefined;
+
   // Phase 12 cross-operator state
   let tmpDir2: string | null = null;
   let safeAddressB: Address | undefined;
@@ -579,6 +597,10 @@ async function main(): Promise<void> {
     results.push(
       await runPhase('Phase 2: Bootstrap operator — create service + mech', async () => {
         if (!tmpDir) throw new Error('No temp dir from Phase 1');
+
+        // Capture the chain head before bootstrap so the ERC-8004 assertions
+        // (jinn-mono-al7) can scope `getLogs` to the bootstrap window.
+        bootstrapEventFromBlock = await publicClient.getBlockNumber();
 
         // Step 1: Run bootstrap to get awaiting_funding (creates wallet + predicts safe)
         let bootstrapper = new FleetBootstrapper({
@@ -660,6 +682,19 @@ async function main(): Promise<void> {
           throw new Error('Bootstrap completed but no mech_address in state');
         }
 
+        // ── ERC-8004 Phase 1b state (jinn-mono-al7) ─────────────────────────
+        // The bootstrap state machine now includes an `agent_registered` step
+        // (jinn-mono-j07) that mints an ERC-8004 IdentityRegistry NFT and
+        // calls `setAgentWallet` to bind the Safe (jinn-mono-aev). Capture
+        // those fields here so downstream phases can assert against them.
+        if (firstComplete?.agent_id) {
+          agentId = BigInt(firstComplete.agent_id);
+        }
+        safeBoundToAgent = firstComplete?.safe_bound_to_agent ?? false;
+        if (firstComplete?.identity_registry_address) {
+          identityRegistryAddress = getAddress(firstComplete.identity_registry_address) as Address;
+        }
+
         // Step 4: Decrypt mnemonic keystore to derive agent EOA private key
         const { FleetStateStore } = await import('../../src/earning/store.js');
         const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
@@ -675,6 +710,9 @@ async function main(): Promise<void> {
         console.log(`    Service ID: ${serviceId}`);
         console.log(`    Safe: ${safeAddress}`);
         console.log(`    Mech: ${mechAddress}`);
+        console.log(`    ERC-8004 agentId: ${agentId ?? '(not minted)'}`);
+        console.log(`    ERC-8004 safe_bound_to_agent: ${safeBoundToAgent}`);
+        console.log(`    ERC-8004 identity_registry_address: ${identityRegistryAddress ?? '(none)'}`);
       }),
     );
 
@@ -1117,6 +1155,796 @@ async function main(): Promise<void> {
         }
         console.log(`    Search after=2020: ${afterPast.length} result(s) ✓`);
       }),
+    );
+
+    // ── Phase 8c–8g: ERC-8004 Phase 1b assertions (jinn-mono-al7) ────────────
+    //
+    // These phases verify the operator-rooted ERC-8004 entity model end-to-end
+    // on the Anvil-fork against the canonical 0x8004… deployments on Base
+    // mainnet. See:
+    //   - docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md
+    //   - docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md
+    //
+    // Subgraph-deployment phases are intentionally skipped — assertions read
+    // raw chain logs (which is what the subgraph would index anyway). Wiring
+    // a full Graph node + Postgres + IPFS into the e2e harness is heavy and
+    // not required for this beadline.
+
+    results.push(
+      await runPhase(
+        'Phase 8c: ERC-8004 bootstrap — assert agent NFT mint + Safe binding (jinn-mono-al7, subsumes jinn-mono-2m7)',
+        async () => {
+          if (!agentAddressA) {
+            throw new Error('Missing agentAddressA from Phase 2');
+          }
+          if (bootstrapEventFromBlock === undefined) {
+            throw new Error('Missing bootstrapEventFromBlock from Phase 2');
+          }
+
+          // 1. agent_id MUST be populated on the persisted state.
+          if (agentId === undefined) {
+            throw new Error(
+              'Phase 2 bootstrap completed but EarningState.agent_id is null — ' +
+                'stepRegisterAgent did not mint the ERC-8004 agent NFT.',
+            );
+          }
+          console.log(`    EarningState.agent_id = ${agentId}`);
+
+          // 2. The Registered event MUST exist in the bootstrap window for the
+          //    agent EOA owner. This is the assertion subsumed from
+          //    jinn-mono-2m7 ("assert Registered event in e2e").
+          if (!identityRegistryAddress) {
+            throw new Error(
+              'Phase 2 bootstrap completed but EarningState.identity_registry_address is null',
+            );
+          }
+          // Canonical Base-mainnet IdentityRegistry — cross-check schema
+          // address against the canonical entry in earning/contracts.ts.
+          const { IDENTITY_REGISTRY_ADDRESSES } = await import('../../src/earning/contracts.js');
+          const expectedRegistry = getAddress(IDENTITY_REGISTRY_ADDRESSES[base.id]!) as Address;
+          if (identityRegistryAddress !== expectedRegistry) {
+            throw new Error(
+              `EarningState.identity_registry_address (${identityRegistryAddress}) does not ` +
+                `match canonical Base address (${expectedRegistry})`,
+            );
+          }
+          console.log(`    identity_registry_address = ${identityRegistryAddress} (canonical Base)`);
+
+          const tip = await publicClient.getBlockNumber();
+          const registeredEvent = parseAbiItem(
+            'event Registered(uint256 indexed agentId, string agentURI, address indexed owner)',
+          );
+          const registeredLogs = await publicClient.getLogs({
+            address: identityRegistryAddress,
+            event: registeredEvent,
+            args: { owner: agentAddressA },
+            fromBlock: bootstrapEventFromBlock,
+            toBlock: tip,
+          });
+          if (registeredLogs.length === 0) {
+            throw new Error(
+              `No IdentityRegistry.Registered event found for owner=${agentAddressA} ` +
+                `in blocks [${bootstrapEventFromBlock}, ${tip}]`,
+            );
+          }
+          // Multiple events would indicate a bootstrap-side bug (duplicate mint).
+          // Assert at-most-one for the agent EOA.
+          if (registeredLogs.length > 1) {
+            throw new Error(
+              `Found ${registeredLogs.length} Registered events for owner=${agentAddressA} — ` +
+                `bootstrap minted duplicate NFTs (jinn-mono-jgp duplicate-mint guard regression).`,
+            );
+          }
+          const eventArgs = registeredLogs[0]!.args as {
+            agentId?: bigint;
+            agentURI?: string;
+            owner?: Address;
+          };
+          if (eventArgs.agentId === undefined) {
+            throw new Error('Registered event missing agentId arg');
+          }
+          if (eventArgs.agentId !== agentId) {
+            throw new Error(
+              `Registered event agentId=${eventArgs.agentId} does not match ` +
+                `EarningState.agent_id=${agentId}`,
+            );
+          }
+          console.log(
+            `    Registered event verified: agentId=${eventArgs.agentId} ` +
+              `agentURI="${eventArgs.agentURI ?? ''}" owner=${eventArgs.owner}`,
+          );
+
+          // 3. getAgentWallet(agentId) MUST return the Safe address when
+          //    safe_bound_to_agent is true. When the bind step left it false
+          //    (e.g. no Safe topology), this assertion is SKIP per the brief.
+          if (!safeBoundToAgent) {
+            console.log(
+              `    safe_bound_to_agent=false — SKIPPING getAgentWallet assertion ` +
+                `(stub case: bind deferred or no Safe topology)`,
+            );
+          } else if (!safeAddress) {
+            throw new Error('safe_bound_to_agent=true but safe_address is missing');
+          } else {
+            const { IDENTITY_REGISTRY_ABI: ABI } = await import('../../src/earning/contracts.js');
+            const onChainWallet = await publicClient.readContract({
+              address: identityRegistryAddress,
+              abi: ABI,
+              functionName: 'getAgentWallet',
+              args: [agentId],
+            });
+            if (!sameAddress(onChainWallet, safeAddress)) {
+              throw new Error(
+                `IdentityRegistry.getAgentWallet(${agentId}) = ${onChainWallet}, ` +
+                  `expected Safe ${safeAddress}`,
+              );
+            }
+            console.log(
+              `    getAgentWallet(${agentId}) = ${onChainWallet} (== Safe address)`,
+            );
+          }
+        },
+      ),
+    );
+
+    results.push(
+      await runPhase(
+        'Phase 8d: ERC-8004 envelope publish — IdentityPublisher.setMetadata + payload decode',
+        async () => {
+          if (agentId === undefined || !identityRegistryAddress) {
+            throw new Error(
+              'Missing ERC-8004 state from Phase 2/8c (agentId or identity_registry_address)',
+            );
+          }
+          if (!agentEoaPrivateKey || !agentAddressA) {
+            throw new Error('Missing agentEoaPrivateKey/agentAddressA from Phase 2');
+          }
+
+          // Phases 5-8 routed restoration + evaluation deliveries through the
+          // agent EOA, draining its bootstrap top-up. Refill before our
+          // ERC-8004 writes so they don't fail with "insufficient funds".
+          await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [
+            agentAddressA,
+            '0x56BC75E2D63100000', // 100 ETH
+          ]);
+
+          const { IdentityPublisher, PAYLOAD_TUPLE } = await import(
+            '../../src/discovery/identity-publisher.js'
+          );
+          const { createWalletClient, decodeAbiParameters, http: httpTransport, keccak256, stringToBytes } =
+            await import('viem');
+          const { privateKeyToAccount } = await import('viem/accounts');
+
+          // Build a publisher backed by the agent EOA — same signer the
+          // production daemon wires (see client/src/main.ts §IdentityPublisher).
+          const account = privateKeyToAccount(agentEoaPrivateKey);
+          const walletClient = createWalletClient({
+            account,
+            chain: base,
+            transport: httpTransport(ANVIL_RPC),
+          });
+
+          const publisher = new IdentityPublisher({
+            identityRegistryAddress,
+            agentId,
+            walletClient,
+            publicClient,
+          });
+
+          // Synthesize a v0-style envelope (tier=1 committed, with a
+          // JinnRouter-shaped manifestHash). In production the engine.pack()
+          // path passes the real signatureHash; here we use a deterministic
+          // surrogate so the on-chain assertion is independent of the
+          // legacy-restorer's signature derivation.
+          const manifestCid = `bafkreial7e2eenvelope${Date.now().toString(16)}`;
+          const manifestHash = keccak256(stringToBytes(`al7-test-${manifestCid}`));
+          const tier = 1; // committed — matches engine.ts payload selection
+                         // when an evidenceHash is present (see engine.ts §831).
+
+          const beforeBlock = await publicClient.getBlockNumber();
+
+          const txHash = await publisher.publishContent({
+            kind: 'envelope',
+            cid: manifestCid,
+            payload: {
+              version: 1,
+              tier,
+              manifestHash,
+              attestationQuoteCid: '0x',
+              sourceMeasurement:
+                '0x0000000000000000000000000000000000000000000000000000000000000000',
+            },
+          });
+          await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+          console.log(`    setMetadata tx=${txHash}`);
+
+          // Pull the MetadataSet event for this publish — narrowed by the
+          // indexed agentId topic so we don't pick up unrelated events.
+          const metadataSetEvent = parseAbiItem(
+            'event MetadataSet(uint256 indexed agentId, string indexed indexedMetadataKey, string metadataKey, bytes metadataValue)',
+          );
+          const tipBlock = await publicClient.getBlockNumber();
+          const logs = await publicClient.getLogs({
+            address: identityRegistryAddress,
+            event: metadataSetEvent,
+            args: { agentId },
+            fromBlock: beforeBlock,
+            toBlock: tipBlock,
+          });
+
+          // Filter to envelope:* keys; multiple unrelated MetadataSets could
+          // theoretically race the same agentId on a real chain, but this is
+          // a fresh fork so we expect exactly the one we just emitted.
+          const envelopeLogs = logs.filter(l => {
+            const a = l.args as { metadataKey?: string };
+            return typeof a.metadataKey === 'string' && a.metadataKey.startsWith('envelope:');
+          });
+          if (envelopeLogs.length === 0) {
+            throw new Error(
+              `No MetadataSet event with metadataKey starting with "envelope:" found ` +
+                `(agentId=${agentId}, blocks [${beforeBlock}, ${tipBlock}])`,
+            );
+          }
+          const eventArgs = envelopeLogs[envelopeLogs.length - 1]!.args as {
+            agentId?: bigint;
+            metadataKey?: string;
+            metadataValue?: Hex;
+          };
+          if (eventArgs.metadataKey !== `envelope:${manifestCid}`) {
+            throw new Error(
+              `MetadataSet metadataKey="${eventArgs.metadataKey}", expected "envelope:${manifestCid}"`,
+            );
+          }
+          console.log(`    MetadataSet event verified: key=${eventArgs.metadataKey}`);
+
+          // Decode the v1 payload tuple and validate per payload-schema §5.
+          const decoded = decodeAbiParameters(
+            PAYLOAD_TUPLE as unknown as ReadonlyArray<{ name: string; type: string }>,
+            eventArgs.metadataValue!,
+          );
+          const [decodedVersion, decodedTier, decodedManifestHash, decodedQuoteCid, decodedMeasurement] =
+            decoded as [bigint | number, bigint | number, Hex, Hex, Hex];
+          const versionNum = typeof decodedVersion === 'bigint' ? Number(decodedVersion) : decodedVersion;
+          const tierNum = typeof decodedTier === 'bigint' ? Number(decodedTier) : decodedTier;
+
+          if (versionNum !== 1) {
+            throw new Error(`payload.version=${versionNum}, expected 1`);
+          }
+          if (tierNum !== 0 && tierNum !== 1) {
+            throw new Error(
+              `payload.tier=${tierNum}, expected 0 (self-signed) or 1 (committed) — ` +
+                `TEE attestation tiers (>=3) are not yet live in this client`,
+            );
+          }
+          if (decodedManifestHash.toLowerCase() !== manifestHash.toLowerCase()) {
+            throw new Error(
+              `payload.manifestHash=${decodedManifestHash} does not match expected ${manifestHash}`,
+            );
+          }
+          if (decodedQuoteCid !== '0x') {
+            throw new Error(
+              `payload.attestationQuoteCid="${decodedQuoteCid}", expected "0x" for tier<3`,
+            );
+          }
+          const ZERO_BYTES32 =
+            '0x0000000000000000000000000000000000000000000000000000000000000000';
+          if (decodedMeasurement.toLowerCase() !== ZERO_BYTES32) {
+            throw new Error(
+              `payload.sourceMeasurement=${decodedMeasurement}, expected zero for tier<3`,
+            );
+          }
+          console.log(
+            `    payload decoded OK: version=${versionNum} tier=${tierNum} ` +
+              `manifestHash=${decodedManifestHash}`,
+          );
+
+          publishedEnvelopeManifestCid = manifestCid;
+          publishedEnvelopeManifestHash = manifestHash;
+        },
+      ),
+    );
+
+    results.push(
+      await runPhase(
+        'Phase 8e: ERC-8004 evaluator feedback — ReputationRegistry.giveFeedback',
+        async () => {
+          if (agentId === undefined) {
+            throw new Error('Missing agentId from Phase 2/8c');
+          }
+          if (!publishedEnvelopeManifestCid || !publishedEnvelopeManifestHash) {
+            throw new Error('Missing published envelope state from Phase 8d');
+          }
+
+          const { ReputationRegistryClient, REPUTATION_REGISTRY_ADDRESSES } = await import(
+            '../../src/reputation/registry.js'
+          );
+          const { submitEvaluatorFeedback, mapVerdictToScore } = await import(
+            '../../src/reputation/feedback-hook.js'
+          );
+          const { createWalletClient, http: httpTransport } = await import('viem');
+          const { privateKeyToAccount, generatePrivateKey } = await import('viem/accounts');
+
+          const reputationRegistryAddress = REPUTATION_REGISTRY_ADDRESSES[base.id]!;
+          console.log(`    ReputationRegistry: ${reputationRegistryAddress}`);
+
+          // The contract enforces no-self-feedback (caller cannot be agent
+          // owner / approved / operator-for-all). In production the evaluator
+          // is a different operator from the restorer; here we synthesise an
+          // independent EOA so the e2e exercises the real path. Documented as
+          // an e2e-specific shortcut: production resolves the restorer
+          // agentId via the subgraph and uses a separate evaluator wallet.
+          const evaluatorPk = generatePrivateKey();
+          const evaluatorAccount = privateKeyToAccount(evaluatorPk);
+          await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [
+            evaluatorAccount.address,
+            '0x56BC75E2D63100000', // 100 ETH
+          ]);
+          const evaluatorWalletClient = createWalletClient({
+            account: evaluatorAccount,
+            chain: base,
+            transport: httpTransport(ANVIL_RPC),
+          });
+
+          const reputationClient = new ReputationRegistryClient({
+            reputationRegistryAddress,
+            publicClient,
+            walletClient: evaluatorWalletClient,
+            // Direct EOA path (no Safe wrapping) — the evaluator EOA is the
+            // independent reviewer. Production wires a Safe via
+            // ReputationRegistryConfig.safeAddress.
+          });
+
+          // Sanity-check the score-mapping policy hasn't drifted (the e2e
+          // depends on PASS=100/2 for the on-chain assertion below).
+          const passMapping = mapVerdictToScore('PASS');
+          if (!passMapping || passMapping.score !== 100 || passMapping.scoreDecimals !== 2) {
+            throw new Error(
+              `mapVerdictToScore('PASS') drifted: ${JSON.stringify(passMapping)} ` +
+                `(expected score=100, scoreDecimals=2)`,
+            );
+          }
+
+          const beforeBlock = await publicClient.getBlockNumber();
+
+          // E2E shortcut: pass restorerAgentId directly. Production resolves
+          // it via subgraph (jinn-mono-yg4 / agent-resolver.ts), but the
+          // subgraph isn't running in this harness. The hook itself is what
+          // we want to exercise — its agentId-resolution dependency is a
+          // composition concern, not the hook's logic.
+          const outcome = await submitEvaluatorFeedback({
+            registry: reputationClient,
+            ref: {
+              restorerAgentId: agentId,
+              restorerManifestCid: publishedEnvelopeManifestCid,
+              restorerEvidenceHash: publishedEnvelopeManifestHash,
+            },
+            verdict: { verdict: 'PASS', kind: 'al7-test' },
+          });
+          await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+
+          if (outcome.kind !== 'submitted') {
+            throw new Error(
+              `submitEvaluatorFeedback outcome=${JSON.stringify(outcome)} (expected submitted)`,
+            );
+          }
+          console.log(`    giveFeedback tx=${outcome.txHash}`);
+
+          // Pull the NewFeedback event scoped to our agentId + the
+          // independent evaluator wallet.
+          const newFeedbackEvent = parseAbiItem(
+            'event NewFeedback(uint256 indexed agentId, address indexed clientAddress, ' +
+              'uint64 feedbackIndex, int128 value, uint8 valueDecimals, ' +
+              'string indexed indexedTag1, string tag1, string tag2, string endpoint, ' +
+              'string feedbackURI, bytes32 feedbackHash)',
+          );
+          const tipBlock = await publicClient.getBlockNumber();
+          const logs = await publicClient.getLogs({
+            address: reputationRegistryAddress,
+            event: newFeedbackEvent,
+            args: { agentId, clientAddress: evaluatorAccount.address },
+            fromBlock: beforeBlock,
+            toBlock: tipBlock,
+          });
+          if (logs.length === 0) {
+            throw new Error(
+              `No NewFeedback event found for agentId=${agentId} ` +
+                `clientAddress=${evaluatorAccount.address} blocks [${beforeBlock}, ${tipBlock}]`,
+            );
+          }
+          const fbArgs = logs[logs.length - 1]!.args as {
+            agentId?: bigint;
+            clientAddress?: Address;
+            value?: bigint;
+            valueDecimals?: number;
+            feedbackURI?: string;
+            feedbackHash?: Hex;
+          };
+          if (fbArgs.agentId !== agentId) {
+            throw new Error(
+              `NewFeedback.agentId=${fbArgs.agentId} expected ${agentId}`,
+            );
+          }
+          // The hook builds feedbackURI as `manifest:<cid>`; assert that.
+          const expectedFeedbackURI = `manifest:${publishedEnvelopeManifestCid}`;
+          if (fbArgs.feedbackURI !== expectedFeedbackURI) {
+            throw new Error(
+              `feedbackURI="${fbArgs.feedbackURI}", expected "${expectedFeedbackURI}"`,
+            );
+          }
+          if ((fbArgs.feedbackHash ?? '').toLowerCase() !== publishedEnvelopeManifestHash.toLowerCase()) {
+            throw new Error(
+              `feedbackHash=${fbArgs.feedbackHash} does not match restorer evidenceHash ${publishedEnvelopeManifestHash}`,
+            );
+          }
+          // PASS verdict: int128 value=100, uint8 valueDecimals=2 → score 1.00
+          if (fbArgs.value !== 100n) {
+            throw new Error(`NewFeedback.value=${fbArgs.value}, expected 100 (PASS)`);
+          }
+          if (fbArgs.valueDecimals !== 2) {
+            throw new Error(
+              `NewFeedback.valueDecimals=${fbArgs.valueDecimals}, expected 2 (PASS)`,
+            );
+          }
+          console.log(
+            `    NewFeedback verified: agentId=${fbArgs.agentId} value=${fbArgs.value}/` +
+              `${fbArgs.valueDecimals} feedbackURI="${fbArgs.feedbackURI}"`,
+          );
+        },
+      ),
+    );
+
+    results.push(
+      await runPhase(
+        'Phase 8f: ERC-8004 operator-initiated validation — ValidationRegistry request + response (DR §4.4)',
+        async () => {
+          if (agentId === undefined) {
+            throw new Error('Missing agentId from Phase 2/8c');
+          }
+          if (!agentEoaPrivateKey || !agentAddressA) {
+            throw new Error('Missing agentEoaPrivateKey/agentAddressA from Phase 2');
+          }
+          if (!publishedEnvelopeManifestHash) {
+            throw new Error('Missing published envelope manifestHash from Phase 8d');
+          }
+
+          // Refill agent EOA in case earlier writes drained it (we already
+          // emit one setMetadata in Phase 8d; submitResponse below is a
+          // second write from the same EOA).
+          await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [
+            agentAddressA,
+            '0x56BC75E2D63100000', // 100 ETH
+          ]);
+
+          // Per jinn-mono-b18 and DR §4.4 (amended), validationRequest is
+          // OPERATOR-INITIATED in Phase 1b. Adversarial third-party
+          // challenges are deferred to Phase 2 via the DisputeProxy spec
+          // (docs/superpowers/specs/2026-04-27-erc8004-dispute-proxy-design.md).
+          // The deployed ValidationRegistry rejects callers that aren't the
+          // agent NFT owner / approved / operator-for-all, so we use the
+          // agent EOA (owner of the NFT minted in Phase 2).
+          //
+          // For e2e, the same wallet plays both operator AND validator roles
+          // — production decouples them via independent validator selection.
+
+          const { ValidationRegistryClient, VALIDATION_REGISTRY_ADDRESSES } = await import(
+            '../../src/validation/registry.js'
+          );
+          const { createWalletClient, http: httpTransport, keccak256, stringToBytes } = await import('viem');
+          const { privateKeyToAccount } = await import('viem/accounts');
+
+          const validationRegistryAddress = VALIDATION_REGISTRY_ADDRESSES[base.id]!;
+          console.log(`    ValidationRegistry: ${validationRegistryAddress}`);
+
+          const account = privateKeyToAccount(agentEoaPrivateKey);
+          const walletClient = createWalletClient({
+            account,
+            chain: base,
+            transport: httpTransport(ANVIL_RPC),
+          });
+
+          const validationClient = new ValidationRegistryClient({
+            validationRegistryAddress,
+            publicClient,
+            walletClient,
+          });
+
+          // requestHash = manifest evidenceHash (DR §4.4 normative).
+          const requestHash = publishedEnvelopeManifestHash;
+          const requestURI = `ipfs://manifest:${publishedEnvelopeManifestCid ?? 'unknown'}`;
+
+          const beforeReqBlock = await publicClient.getBlockNumber();
+          const reqTx = await validationClient.requestValidation({
+            validatorAddress: account.address, // self-validation in e2e
+            agentId,
+            requestURI,
+            requestHash,
+          });
+          await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+          const reqReceipt = await publicClient.waitForTransactionReceipt({ hash: reqTx });
+          if (reqReceipt.status !== 'success') {
+            throw new Error(
+              `validationRequest reverted (tx=${reqTx}): receipt.status=${reqReceipt.status}`,
+            );
+          }
+          console.log(`    validationRequest tx=${reqTx}`);
+
+          const validationRequestEvent = parseAbiItem(
+            'event ValidationRequest(address indexed validatorAddress, uint256 indexed agentId, string requestURI, bytes32 indexed requestHash)',
+          );
+          const tipBlock = await publicClient.getBlockNumber();
+          const reqLogs = await publicClient.getLogs({
+            address: validationRegistryAddress,
+            event: validationRequestEvent,
+            args: { validatorAddress: account.address, agentId, requestHash },
+            fromBlock: beforeReqBlock,
+            toBlock: tipBlock,
+          });
+          if (reqLogs.length === 0) {
+            throw new Error(
+              `No ValidationRequest event found (validator=${account.address}, ` +
+                `agentId=${agentId}, requestHash=${requestHash})`,
+            );
+          }
+          const reqArgs = reqLogs[reqLogs.length - 1]!.args as {
+            validatorAddress?: Address;
+            agentId?: bigint;
+            requestURI?: string;
+            requestHash?: Hex;
+          };
+          if (reqArgs.requestURI !== requestURI) {
+            throw new Error(
+              `ValidationRequest.requestURI="${reqArgs.requestURI}", expected "${requestURI}"`,
+            );
+          }
+          console.log(
+            `    ValidationRequest verified: validator=${reqArgs.validatorAddress} ` +
+              `agentId=${reqArgs.agentId} requestHash=${reqArgs.requestHash}`,
+          );
+
+          // Sanity-read getValidationStatus before submitResponse to confirm
+          // the request is persisted and visible at the same key our response
+          // will look up.
+          const preStatus = await validationClient.getStatus(requestHash);
+          if (!preStatus) {
+            throw new Error(
+              `validationRequest emitted event but getValidationStatus(${requestHash}) ` +
+                `returned null — storage was not written under the expected key`,
+            );
+          }
+          if (preStatus.status !== 'REQUESTED') {
+            throw new Error(
+              `pre-response getStatus.status="${preStatus.status}", expected "REQUESTED"`,
+            );
+          }
+          if (preStatus.validatorAddress !== account.address) {
+            throw new Error(
+              `pre-response getStatus.validatorAddress=${preStatus.validatorAddress}, ` +
+                `expected ${account.address}`,
+            );
+          }
+          console.log(
+            `    pre-response getStatus: status=${preStatus.status} ` +
+              `validator=${preStatus.validatorAddress} agentId=${preStatus.agentId}`,
+          );
+
+          // Validator (same wallet, e2e shortcut) submits the response.
+          const responseHash = keccak256(stringToBytes(`al7-validator-response-${requestHash}`));
+          const responseURI = 'ipfs://stub';
+          const beforeRespBlock = await publicClient.getBlockNumber();
+          const respTx = await validationClient.submitResponse({
+            requestHash,
+            response: 80,
+            responseURI,
+            responseHash,
+            tag: 'test',
+          });
+          await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+          const respReceipt = await publicClient.waitForTransactionReceipt({ hash: respTx });
+          if (respReceipt.status !== 'success') {
+            throw new Error(
+              `validationResponse reverted (tx=${respTx}): receipt.status=${respReceipt.status}`,
+            );
+          }
+          console.log(`    validationResponse tx=${respTx}`);
+
+          // Pull from the receipt directly — args-filtered getLogs has been
+          // unreliable on the Anvil fork (filter encoding for the
+          // 3-indexed-bytes32 event sometimes drops matches). The receipt is
+          // authoritative for "what did this tx emit".
+          const validationResponseEvent = parseAbiItem(
+            'event ValidationResponse(address indexed validatorAddress, uint256 indexed agentId, ' +
+              'bytes32 indexed requestHash, uint8 response, string responseURI, ' +
+              'bytes32 responseHash, string tag)',
+          );
+          const VALIDATION_RESPONSE_TOPIC = keccak256(
+            stringToBytes(
+              'ValidationResponse(address,uint256,bytes32,uint8,string,bytes32,string)',
+            ),
+          );
+          // Use receipt logs as the authoritative source.
+          const txLogs = respReceipt.logs.filter(
+            l =>
+              l.address.toLowerCase() === validationRegistryAddress.toLowerCase() &&
+              l.topics[0] === VALIDATION_RESPONSE_TOPIC,
+          );
+          if (txLogs.length === 0) {
+            throw new Error(
+              `No ValidationResponse event found in receipt for tx=${respTx} ` +
+                `(receipt has ${respReceipt.logs.length} logs total)`,
+            );
+          }
+          const decodedRespEvent = decodeEventLog({
+            abi: [validationResponseEvent],
+            data: txLogs[0]!.data,
+            topics: txLogs[0]!.topics,
+          });
+          const respArgs = decodedRespEvent.args as unknown as {
+            validatorAddress?: Address;
+            agentId?: bigint;
+            requestHash?: Hex;
+            response?: number;
+            responseURI?: string;
+            responseHash?: Hex;
+            tag?: string;
+          };
+          if ((respArgs.requestHash ?? '').toLowerCase() !== requestHash.toLowerCase()) {
+            throw new Error(
+              `ValidationResponse.requestHash=${respArgs.requestHash} ` +
+                `expected ${requestHash}`,
+            );
+          }
+          // Suppress unused-var warning while still providing context for
+          // the second filter window we previously computed.
+          void beforeRespBlock;
+          if (respArgs.response !== 80) {
+            throw new Error(`ValidationResponse.response=${respArgs.response}, expected 80`);
+          }
+          if (respArgs.tag !== 'test') {
+            throw new Error(`ValidationResponse.tag="${respArgs.tag}", expected "test"`);
+          }
+          console.log(
+            `    ValidationResponse verified: response=${respArgs.response} ` +
+              `tag="${respArgs.tag}" responseHash=${respArgs.responseHash}`,
+          );
+
+          // getValidationStatus(requestHash) returns the response we just stored.
+          const status = await validationClient.getStatus(requestHash);
+          if (!status) {
+            throw new Error(
+              `ValidationRegistry.getStatus(${requestHash}) returned null after submitResponse`,
+            );
+          }
+          if (status.status !== 'RESPONDED') {
+            throw new Error(`status.status="${status.status}", expected "RESPONDED"`);
+          }
+          if (status.response !== 80) {
+            throw new Error(`status.response=${status.response}, expected 80`);
+          }
+          if (status.tag !== 'test') {
+            throw new Error(`status.tag="${status.tag}", expected "test"`);
+          }
+          console.log(
+            `    getStatus verified: status=${status.status} response=${status.response} ` +
+              `tag="${status.tag}"`,
+          );
+        },
+      ),
+    );
+
+    results.push(
+      await runPhase(
+        'Phase 8g: ERC-8004 legacy migration — runLegacyAgentIdMigration recovers existing agentId, no double-mint',
+        async () => {
+          if (!tmpDir || !agentEoaPrivateKey || !identityRegistryAddress) {
+            throw new Error('Missing state from Phase 2');
+          }
+          if (agentId === undefined) {
+            throw new Error('Missing agentId from Phase 2/8c');
+          }
+
+          const { migrateAgentIds } = await import('../../src/earning/migrate-agent-id.js');
+          const { FleetStateStore } = await import('../../src/earning/store.js');
+          const { decryptMnemonic } = await import('../../src/earning/wallet.js');
+
+          // Test path A: a service that already has a Registered event on
+          // chain (the one from Phase 2) should recover its existing agentId
+          // — the duplicate-mint guard in migrate-agent-id.ts MUST NOT mint
+          // a fresh NFT.
+          //
+          // We mutate the persisted state in-place: clear agent_id on the
+          // existing complete service to simulate the legacy-pre-j07 shape.
+          // After migration, agent_id must be repopulated AND match the
+          // chain-side Registered event we already verified in Phase 8c
+          // (which proves no second mint happened).
+          const stateStore = new FleetStateStore(tmpDir);
+          const beforeState = await stateStore.load('base');
+          const completeSvcs = beforeState.services.filter(s => s.step === 'complete');
+          if (completeSvcs.length === 0) {
+            throw new Error('No complete services in EarningState — Phase 2 should have populated one');
+          }
+          const targetIdx = completeSvcs[0]!.index;
+
+          // Snapshot the existing fields, clear agent_id, persist.
+          await stateStore.updateService(targetIdx, {
+            agent_id: null,
+            agent_uri: null,
+            agent_registered_tx: null,
+          });
+          // Sanity: re-load and confirm.
+          const cleared = (await stateStore.load('base')).services.find(s => s.index === targetIdx);
+          if (!cleared || cleared.agent_id !== null) {
+            throw new Error(
+              `Failed to clear agent_id on service ${targetIdx}: got ${cleared?.agent_id}`,
+            );
+          }
+
+          // Capture the IdentityRegistry block range BEFORE migration so
+          // we can detect a fresh mint (which there should NOT be).
+          const beforeMigrateBlock = await publicClient.getBlockNumber();
+
+          // Use the lower-level migrateAgentIds entry point so we can pass
+          // `scanFromBlock`. Scanning from block 0 against a Base-mainnet
+          // fork is prohibitively slow (chunks of 10k blocks across all of
+          // Base history); the bootstrap window is the only place a
+          // Registered event for our agent EOA exists.
+          const mnemonic = await decryptMnemonic(
+            await stateStore.loadMnemonicKeystore(),
+            PASSWORD,
+          );
+          const config = getChainConfig('base');
+          config.rpcUrl = ANVIL_RPC;
+          const result = await migrateAgentIds({
+            stateStore,
+            config,
+            network: 'base',
+            mnemonic,
+            scanFromBlock: bootstrapEventFromBlock,
+          });
+
+          if (result.migrated.length !== 1) {
+            throw new Error(
+              `expected 1 migrated service, got ${result.migrated.length} ` +
+                `(failed=${result.failed.length}, skipped=${result.skipped.length})`,
+            );
+          }
+          const migrated = result.migrated[0]!;
+          if (!migrated.agent_id) {
+            throw new Error('migrated service has null agent_id');
+          }
+          if (BigInt(migrated.agent_id) !== agentId) {
+            throw new Error(
+              `migrated.agent_id=${migrated.agent_id} does not match Phase 2 agentId=${agentId} — ` +
+                `duplicate-mint guard regressed (jinn-mono-jgp).`,
+            );
+          }
+          console.log(
+            `    Recovered existing agentId=${migrated.agent_id} for service ${targetIdx} (no mint)`,
+          );
+
+          // Verify NO new Registered event was emitted (i.e. duplicate-mint
+          // guard fired correctly: chain-side scan found the existing token
+          // and the migration short-circuited).
+          const registeredEvent = parseAbiItem(
+            'event Registered(uint256 indexed agentId, string agentURI, address indexed owner)',
+          );
+          const tipBlock = await publicClient.getBlockNumber();
+          const newLogs = await publicClient.getLogs({
+            address: identityRegistryAddress,
+            event: registeredEvent,
+            args: { owner: agentAddressA },
+            fromBlock: beforeMigrateBlock + 1n,
+            toBlock: tipBlock,
+          });
+          if (newLogs.length > 0) {
+            throw new Error(
+              `Found ${newLogs.length} Registered events post-migration — duplicate mint! ` +
+                `(blocks [${beforeMigrateBlock + 1n}, ${tipBlock}])`,
+            );
+          }
+          console.log(
+            `    No new Registered events post-migration — duplicate-mint guard works`,
+          );
+        },
+      ),
     );
 
     // ── Phase 9: Checkpoint + verify rewards ─────────────────────────────────

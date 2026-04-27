@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { makePredictionV0Generator } from '../../src/intents/prediction-v0-auto.js';
 import type { PublicClient } from 'viem';
 
@@ -25,7 +26,7 @@ describe('makePredictionV0Generator', () => {
     vi.useRealTimers();
   });
 
-  it('produces a valid prediction.v0 DesiredState with sentinel-resolved threshold', async () => {
+  it('produces a valid prediction.v0 RestorationJob with sentinel-resolved threshold', async () => {
     vi.setSystemTime(new Date('2026-04-21T18:23:45Z')); // mid-hour
     const gen = makePredictionV0Generator({
       feed: '0x000000000000000000000000000000000000feed',
@@ -120,5 +121,47 @@ describe('makePredictionV0Generator', () => {
     expect(q.operator).toBe('LT');
     // 2000 × 0.99 = 1980
     expect(q.threshold).toBe('1980');
+  });
+
+  it('produces a SignedIntentV1 document when signing credentials are provided', async () => {
+    vi.setSystemTime(new Date('2026-04-21T18:23:45Z'));
+    const pk = generatePrivateKey();
+    const account = privateKeyToAccount(pk);
+    const safeAddress = '0x1111111111111111111111111111111111111111' as `0x${string}`;
+
+    const gen = makePredictionV0Generator({
+      feed: '0x000000000000000000000000000000000000feed',
+      feedDescription: 'ETH / USD',
+      venue: 'chainlink-base-sepolia',
+      _publicClient: makePublicClient('2300'),
+      agentEoa: account.address as `0x${string}`,
+      safeAddress,
+      agentPrivateKey: pk,
+    });
+    const state = await gen();
+    expect(state).not.toBeNull();
+    expect(state!.intent).toBeDefined();
+    const signed = state!.intent!;
+    expect(signed.schemaVersion).toBe('intent.v1');
+    expect(signed.kind).toBe('prediction.v0');
+    expect(signed.creator).toBeDefined();
+    expect(signed.creator.safeAddress).toBe(safeAddress);
+    expect(signed.creator.agentEoa.toLowerCase()).toBe(account.address.toLowerCase());
+    expect(signed.signature).toBeDefined();
+    expect(signed.signature.algo).toBe('secp256k1');
+    expect(signed.signature.sig).toMatch(/^0x[0-9a-f]{130}$/);
+  });
+
+  it('does not produce a SignedIntentV1 when signing credentials are absent', async () => {
+    vi.setSystemTime(new Date('2026-04-21T18:23:45Z'));
+    const gen = makePredictionV0Generator({
+      feed: '0x000000000000000000000000000000000000feed',
+      feedDescription: 'ETH / USD',
+      venue: 'chainlink-base-sepolia',
+      _publicClient: makePublicClient('2300'),
+    });
+    const state = await gen();
+    expect(state).not.toBeNull();
+    expect(state!.intent).toBeUndefined();
   });
 });

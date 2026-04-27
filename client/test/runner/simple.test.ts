@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SimpleRunner } from '../../src/runner/simple.js';
-import type { DesiredState } from '../../src/types/index.js';
+import type { RestorationJob } from '../../src/types/index.js';
 
 describe('SimpleRunner', () => {
   it('produces a result from a desired state', async () => {
@@ -8,12 +8,12 @@ describe('SimpleRunner', () => {
       return `Restored: ${description}`;
     });
 
-    const desiredState: DesiredState = {
+    const restorationJob: RestorationJob = {
       id: 'ds-1',
       description: 'The API should return 200 on /health',
     };
 
-    const result = await runner.run(desiredState, {
+    const result = await runner.run(restorationJob, {
       requestId: 'req-1',
       workingDirectory: '/tmp',
       timeoutMs: 30000,

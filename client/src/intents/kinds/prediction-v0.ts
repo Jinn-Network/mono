@@ -28,6 +28,9 @@ export const predictionV0: SpecKind<PredictionV0AutoConfig> = {
       feedDescription: 'ETH / USD',
       venue: 'chainlink-base-sepolia',
       rpcUrl: ctx.rpcUrl,
+      agentEoa: ctx.agentEoa,
+      safeAddress: ctx.safeAddress,
+      agentPrivateKey: ctx.agentPrivateKey,
     };
   },
   ui: {

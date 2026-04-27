@@ -135,9 +135,9 @@ describe('artifact cycle summaries', () => {
     ], ['one', 'two']);
 
     expect(summary.completedCycles).toBe(1);
-    expect(summary.byDesiredState.one.successfulRestorations).toBe(1);
-    expect(summary.byDesiredState.one.successfulEvaluations).toBe(1);
-    expect(summary.byDesiredState.two.successfulRestorations).toBe(1);
-    expect(summary.byDesiredState.two.successfulEvaluations).toBe(0);
+    expect(summary.byRestorationJob.one.successfulRestorations).toBe(1);
+    expect(summary.byRestorationJob.one.successfulEvaluations).toBe(1);
+    expect(summary.byRestorationJob.two.successfulRestorations).toBe(1);
+    expect(summary.byRestorationJob.two.successfulEvaluations).toBe(0);
   });
 });

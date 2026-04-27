@@ -168,12 +168,18 @@ export async function claimDelivery(
     return '0x' as Hex;
   }
 
+  if (options.variant === 'v2' && !options.evidenceHash) {
+    throw new Error(
+      `claimDelivery(v2): evidenceHash is required for V2 claim — refusing to write ZERO_EVIDENCE for requestId ${requestId}`,
+    );
+  }
+
   const calldata =
     options.variant === 'v2'
       ? encodeFunctionData({
           abi: JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
           functionName: 'claimDelivery',
-          args: [requestId, options.evidenceHash ?? ZERO_EVIDENCE],
+          args: [requestId, options.evidenceHash!],
         })
       : encodeFunctionData({
           abi: JINN_ROUTER_CLAIM_DELIVERY_V1_ABI,

@@ -1,7 +1,7 @@
-import type { DesiredState } from '../types/desired-state.js';
+import type { RestorationJob } from '../types/desired-state.js';
 
-/** Returns a freshly-built DesiredState for this tick, or null to skip. */
-export type IntentGenerator = () => Promise<DesiredState | null>;
+/** Returns a freshly-built RestorationJob for this tick, or null to skip. */
+export type IntentGenerator = () => Promise<RestorationJob | null>;
 
 export type IntentPostingPolicy =
   | { kind: 'once_per_safe' }
@@ -9,9 +9,16 @@ export type IntentPostingPolicy =
   | { kind: 'interval'; intervalMs: number; scopeKey?: string };
 
 export interface IntentCandidate {
-  desiredState: DesiredState;
+  restorationJob: RestorationJob;
   sourceKey: string;
   postingPolicy: IntentPostingPolicy;
+  /**
+   * IPFS CID of the signed intent document, if already uploaded by the caller
+   * (e.g. `jinn submit-intent --spec-file`). When present, the posting service
+   * uses it to register the intent on the ERC-8004 Identity Registry after a
+   * successful on-chain post (best-effort, Plan E).
+   */
+  intentCid?: string;
   sourceMeta?: {
     kind?: string;
     bucketKey?: string;
@@ -27,14 +34,14 @@ export interface IntentSource {
 export class StaticConfiguredIntentSource implements IntentSource {
   readonly sourceKey = 'configured';
 
-  constructor(private readonly desiredStates: DesiredState[]) {}
+  constructor(private readonly desiredStates: RestorationJob[]) {}
 
   async collect(_now: Date): Promise<IntentCandidate[]> {
-    return this.desiredStates.map((desiredState) => ({
-      desiredState,
-      sourceKey: `${this.sourceKey}:${desiredState.id}`,
+    return this.desiredStates.map((restorationJob) => ({
+      restorationJob,
+      sourceKey: `${this.sourceKey}:${restorationJob.id}`,
       postingPolicy: { kind: 'once_per_safe' },
-      sourceMeta: { kind: desiredState.spec?.kind, note: 'configured' },
+      sourceMeta: { kind: restorationJob.spec?.kind, note: 'configured' },
     }));
   }
 }
@@ -46,17 +53,17 @@ export class GeneratedIntentSource implements IntentSource {
   ) {}
 
   async collect(_now: Date): Promise<IntentCandidate[]> {
-    const desiredState = await this.generator();
-    if (!desiredState) return [];
-    const bucketKey = desiredState.window
-      ? `${desiredState.window.startTs}:${desiredState.window.endTs}`
-      : desiredState.id;
+    const restorationJob = await this.generator();
+    if (!restorationJob) return [];
+    const bucketKey = restorationJob.window
+      ? `${restorationJob.window.startTs}:${restorationJob.window.endTs}`
+      : restorationJob.id;
     return [{
-      desiredState,
+      restorationJob,
       sourceKey: this.sourceKey,
       postingPolicy: { kind: 'once_per_bucket', bucketKey },
       sourceMeta: {
-        kind: desiredState.spec?.kind,
+        kind: restorationJob.spec?.kind,
         bucketKey,
         note: 'generated',
       },

@@ -7,7 +7,7 @@ import type {
   ReadyStatus,
   EnableResult,
 } from '../../types.js';
-import type { DesiredState } from '../../../types/desired-state.js';
+import type { RestorationJob } from '../../../types/desired-state.js';
 import type { ClaudeCodeLearnerImpl } from './restorer.js';
 import { harvestOutput } from './harvest.js';
 
@@ -58,7 +58,7 @@ export class ClaudeCodeLearnerWrapper implements RestorerImpl {
     return { ready: true };
   }
 
-  async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async canAttempt(intent: RestorationJob): Promise<{ ok: true } | { ok: false; reason: string }> {
     const spec = {
       kind: intent.spec?.kind ?? '',
       type: intent.type ?? ('restoration' as const),

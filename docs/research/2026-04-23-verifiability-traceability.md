@@ -246,6 +246,21 @@ Concrete, ordered, grounded in the existing code:
    attribution works. This is the codification of what
    `2026-04-23-outcome-vs-intent-execution-model.md` already proposes.
 
+> **Entity model note (2026-04-27).** "ERC-8004-style knowledge discovery
+> and reputation" above lands as: one agent NFT per operator Safe (minted
+> at bootstrap), with each published envelope/evaluation anchored on chain
+> via `IdentityRegistry.setMetadata(operatorAgentId, "<kind>:<cid>", payload)`
+> where `payload` carries `(tier, manifestHash, attestationQuoteCid,
+> sourceMeasurement)`. Per-execution trust is intrinsic to that payload + the
+> IPFS attestation it points to — it is **not** inherited from the operator's
+> reputation, which is a separate, slow-moving signal accruing on the agent
+> NFT. Reputation: `ReputationRegistry.giveFeedback(agentId, …)` with body
+> referencing the manifest. Challenges: `ValidationRegistry.validationRequest(
+> validator, agentId, evidenceHash)` — Phase 1b's challenge mechanism on
+> existing 8004 primitives. Discovery: a Jinn-owned subgraph synthesizes an
+> `Execution` entity from the events. See
+> `docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md`.
+
 ### V2 — trajectory attestation via TEE-backed execution
 
 This is the primary V2 work and the place where Jinn's substrate thesis

@@ -16,7 +16,11 @@ export const predictionApyV0: SpecKind<PredictionApyV0AutoConfig | undefined> = 
     if (ctx.network !== 'testnet' || ctx.env['JINN_ENABLE_APY_AUTO_INTENTS'] !== '1') {
       return undefined;
     }
-    return {};
+    return {
+      agentEoa: ctx.agentEoa,
+      safeAddress: ctx.safeAddress,
+      agentPrivateKey: ctx.agentPrivateKey,
+    };
   },
   ui: {
     description: 'Supply APY prediction (Aave v3 TWA)',
