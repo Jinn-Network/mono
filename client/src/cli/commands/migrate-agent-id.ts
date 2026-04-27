@@ -12,7 +12,7 @@
  * See `client/src/earning/migrate-agent-id.ts` and jinn-mono-jgp.
  */
 
-import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
+import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
@@ -51,7 +51,9 @@ function humanResult(payload: {
   return lines.join('\n');
 }
 
-export interface MigrateAgentIdDeps extends BaseCommandDeps {
+export interface MigrateAgentIdDeps {
+  loadConfig: typeof defaultLoadConfig;
+  getConfigPathFromArgs: typeof defaultGetConfigPathFromArgs;
   resolveCliPassword: typeof defaultResolveCliPassword;
   runMigration: typeof defaultRunMigration;
 }

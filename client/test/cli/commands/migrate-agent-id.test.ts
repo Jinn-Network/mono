@@ -3,7 +3,24 @@ import {
   createMigrateAgentIdCommand,
   type MigrateAgentIdDeps,
 } from '../../../src/cli/commands/migrate-agent-id.js';
-import { makeCommandCtx } from '@test/cli.js';
+import type { CommandContext } from '../../../src/cli/command.js';
+
+function makeCommandCtx(opts: { argv?: string[]; env?: NodeJS.ProcessEnv } = {}): {
+  ctx: CommandContext;
+  writes: string[];
+  exits: number[];
+} {
+  const writes: string[] = [];
+  const exits: number[] = [];
+  const ctx: CommandContext = {
+    argv: opts.argv ?? [],
+    stdoutIsTty: false,
+    writer: { write: (s: string) => { writes.push(s); return true; } },
+    exit: (code: number) => { exits.push(code); },
+    env: opts.env ?? {},
+  };
+  return { ctx, writes, exits };
+}
 
 const defaultConfig = {
   earningDir: '/tmp/earning',
