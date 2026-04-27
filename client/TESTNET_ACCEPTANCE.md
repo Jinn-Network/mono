@@ -64,7 +64,9 @@ Do not edit `client/.acceptance/docker-compose.env` by hand. It is regenerated
 from `client/.env`, `client/.env.acceptance`, and the current shell environment
 on every setup or release run. Durable secrets for acceptance, including
 `CLAUDE_CODE_OAUTH_TOKEN`, belong in `client/.env.acceptance` or in the shell
-environment for a single run.
+environment for a single run. Do not paste OAuth tokens into chat, issue
+trackers, or release reports; use the ignored `.env.acceptance` file or an
+operator secret manager.
 
 The dedicated Docker acceptance environment persists state in these named volumes:
 
@@ -97,6 +99,8 @@ These are intentionally distinct from the normal operator compose volumes.
    ```bash
    echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
    ```
+   Do not share this token in chat. Treat it as operator-local release
+   infrastructure.
    Do not put this only in `.acceptance/docker-compose.env`; the next run will
    overwrite that file.
 5. Run the steady-state release gate:
@@ -140,6 +144,9 @@ Add the resulting token to `client/.env.acceptance`:
 ```bash
 echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
 ```
+
+Do not paste the token into chat or issue trackers. If the token rotates, update
+the ignored local `.env.acceptance` file or the operator secret manager.
 
 The release gate checks this before `jinn doctor`. If the generated compose env
 has no token and the dedicated Claude auth volume is not already logged in, the
