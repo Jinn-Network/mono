@@ -42,6 +42,13 @@ import type {
   ExecutionTier,
   IdentityPublisher,
 } from '../../discovery/identity-publisher.js';
+import type { ReputationRegistryClient } from '../../reputation/registry.js';
+import type {
+  EvaluatorVerdict,
+  FeedbackHookOutcome,
+} from '../../reputation/feedback-hook.js';
+import { submitEvaluatorFeedback } from '../../reputation/feedback-hook.js';
+import type { ResolvedAgent } from '../../discovery/agent-resolver.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -124,6 +131,30 @@ export interface RestorationEngineOptions {
    * Optional — when absent, the engine simply skips publishing.
    */
   identityPublisher?: IdentityPublisher;
+  /**
+   * ERC-8004 ReputationRegistry feedback hook (jinn-mono-yg4).
+   *
+   * When provided, the engine fires `submitEvaluatorFeedback` after a
+   * successful evaluator-side `claimDelivery`, so the restorer's agent NFT
+   * accrues a rating per DR §4.3. Requires:
+   *
+   *   - `client`: a `ReputationRegistryClient` (writes are routed through the
+   *     evaluator's Safe so `msg.sender` matches the operator identity).
+   *   - `resolveAgentId`: looks up the restorer's `agentId` from the parent
+   *     manifest's `evidenceHash`. Returns `null` when no match is found
+   *     (subgraph not yet indexed; envelope not published) — the engine
+   *     skips feedback gracefully without failing delivery.
+   *
+   * Failures inside the hook are logged but NEVER fatal: JinnRouter's
+   * `claimDelivery` is the authoritative settlement. Restoration-only
+   * intents skip this branch entirely.
+   *
+   * Optional — when absent, the engine simply skips feedback.
+   */
+  reputationFeedback?: {
+    client: ReputationRegistryClient;
+    resolveAgentId: (manifestHash: `0x${string}`) => Promise<ResolvedAgent | null>;
+  };
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -148,6 +179,7 @@ export class RestorationEngine {
   protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
   protected readonly erc8004Registry: RestorationEngineOptions['erc8004Registry'];
   protected readonly identityPublisher: RestorationEngineOptions['identityPublisher'];
+  protected readonly reputationFeedback: RestorationEngineOptions['reputationFeedback'];
 
   // Transient storage for impl output between runImpl and pack transitions.
   // Keyed by requestId; cleared after successful pack.
@@ -167,6 +199,7 @@ export class RestorationEngine {
     this.implRegistry = opts.implRegistry;
     this.erc8004Registry = opts.erc8004Registry;
     this.identityPublisher = opts.identityPublisher;
+    this.reputationFeedback = opts.reputationFeedback;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -893,6 +926,178 @@ export class RestorationEngine {
       deliveryTxHash,
     });
     console.log(`[restorer-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
+
+    // ── Reputation feedback hook (jinn-mono-yg4) ─────────────────────────────
+    //
+    // Evaluator-only path: after `claimDelivery` settles the verdict, fire
+    // `ReputationRegistry.giveFeedback(restorerAgentId, ...)` so the
+    // restorer's agent NFT accrues a rating (DR §4.3).
+    //
+    // Best-effort: any failure inside the hook is logged but does not
+    // change the COMPLETE state. claimDelivery is already authoritative.
+    if (intent.intentType === 'evaluation' && this.reputationFeedback) {
+      await this._maybePostEvaluatorFeedback(intent).catch((err) => {
+        console.warn(
+          `[restorer-engine] ${requestId}: reputation feedback hook errored unexpectedly (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      });
+    }
+  }
+
+  /**
+   * Post evaluator feedback on the restorer's agent NFT.
+   *
+   * Pulls the verdict from the persisted gating claim (the evaluator impl
+   * writes `{ verdict, score, scoreBasis, ... }` into `output.gating`),
+   * resolves the restorer's `agentId` via the configured subgraph
+   * resolver, and submits a single `ReputationRegistry.giveFeedback` tx.
+   *
+   * Skipped silently when:
+   *   - No `reputationFeedback` deps wired.
+   *   - `gatingClaim` doesn't carry a verdict (impl shape mismatch — log and
+   *     return).
+   *   - The parent restorer's manifest hash isn't reachable from the
+   *     persisted state (legacy intents that pre-date evidenceHash
+   *     threading — log and return).
+   *   - `resolveAgentId` returns null (subgraph not indexed yet, or no
+   *     subgraph URL configured at all — log and return).
+   *
+   * The mapping policy (PASS / FAIL / REJECTED / INDETERMINATE → score) lives
+   * inside `submitEvaluatorFeedback` / `mapVerdictToScore` in the
+   * feedback-hook module; we just hand it the verdict.
+   */
+  private async _maybePostEvaluatorFeedback(intent: PersistedIntent): Promise<void> {
+    if (!this.reputationFeedback) return;
+
+    const gating = intent.gatingClaim as
+      | { verdict?: unknown; scoreBasis?: unknown }
+      | null;
+    const verdictRaw = gating?.['verdict'];
+    if (
+      verdictRaw !== 'PASS' &&
+      verdictRaw !== 'FAIL' &&
+      verdictRaw !== 'REJECTED' &&
+      verdictRaw !== 'INDETERMINATE'
+    ) {
+      console.warn(
+        `[restorer-engine] ${intent.requestId}: reputation feedback skipped — gatingClaim has no recognised verdict (got=${String(verdictRaw)})`,
+      );
+      return;
+    }
+    const verdict = verdictRaw as EvaluatorVerdict['verdict'];
+
+    // Pull the parent restorer's manifest evidence from the inlined eval
+    // payload. The evaluator impl receives the restorer's signed manifest
+    // JSON via `intent.context.restorationResult` (see
+    // `MechAdapter.tryCreateEvaluationJob`). Its `signature.hash` is
+    // exactly what the restorer committed via `claimDelivery(evidenceHash)`.
+    const parent = this._extractRestorerManifestRef(intent);
+    if (!parent) {
+      console.warn(
+        `[restorer-engine] ${intent.requestId}: reputation feedback skipped — could not extract restorer manifest hash from inlined evaluation payload`,
+      );
+      return;
+    }
+
+    let resolved: ResolvedAgent | null;
+    try {
+      resolved = await this.reputationFeedback.resolveAgentId(parent.evidenceHash);
+    } catch (err) {
+      console.warn(
+        `[restorer-engine] ${intent.requestId}: reputation feedback resolver threw (non-fatal): ${err instanceof Error ? err.message : err}`,
+      );
+      return;
+    }
+    if (!resolved) {
+      console.log(
+        `[restorer-engine] ${intent.requestId}: reputation feedback skipped — no agentId resolved for restorer manifestHash=${parent.evidenceHash} (subgraph not indexed yet, or no envelope published)`,
+      );
+      return;
+    }
+
+    // CID resolution priority: subgraph row's `manifestCid` (cheapest, the
+    // operator already published an envelope under it), else the inlined
+    // CID hint when present, else fall back to the bare hash. The subgraph
+    // parses `manifest:<cid>` to a `manifestRef` regardless.
+    const manifestCid = resolved.manifestCid ?? parent.manifestCid ?? '';
+
+    // The intent kind is the same `spec.kind` used by the restoration —
+    // `intent.specKind` is "portfolio.v0" both for the restoration and its
+    // evaluation. Tag1 is indexed on the on-chain event, so cheap to filter.
+    const kind = intent.specKind ?? undefined;
+
+    const verdictArg: EvaluatorVerdict = kind ? { verdict, kind } : { verdict };
+
+    let outcome: FeedbackHookOutcome;
+    try {
+      outcome = await submitEvaluatorFeedback({
+        registry: this.reputationFeedback.client,
+        ref: {
+          restorerAgentId: resolved.agentId,
+          restorerManifestCid: manifestCid,
+          restorerEvidenceHash: parent.evidenceHash,
+        },
+        verdict: verdictArg,
+      });
+    } catch (err) {
+      // submitEvaluatorFeedback already swallows known reverts, but a
+      // truly unexpected throw still must not propagate past delivery.
+      console.warn(
+        `[restorer-engine] ${intent.requestId}: reputation feedback unexpected throw (non-fatal): ${err instanceof Error ? err.message : err}`,
+      );
+      return;
+    }
+
+    console.log(
+      `[restorer-engine] ${intent.requestId}: reputation feedback ${outcome.kind} verdict=${verdict} restorerAgentId=${resolved.agentId.toString()}`,
+    );
+  }
+
+  /**
+   * Extract the restorer's `evidenceHash` (and best-effort `manifestCid`)
+   * from the persisted evaluation intent.
+   *
+   * The evaluator's `intent.context.restorationResult` holds the restorer's
+   * full signed manifest JSON inlined as a string (per
+   * `MechAdapter.tryCreateEvaluationJob`). We parse it and pull the
+   * `signature.hash`, which is exactly the on-chain `evidenceHash`.
+   *
+   * The CID is not always inlined — the manifest carries its own
+   * `intent.cid` field (the *original intent* CID), not its self-CID. We
+   * therefore return `manifestCid: null` here and rely on the subgraph
+   * resolver to surface the published manifest CID. Returns `null` when
+   * the inlined payload is missing or malformed.
+   */
+  private _extractRestorerManifestRef(intent: PersistedIntent): {
+    evidenceHash: `0x${string}`;
+    manifestCid: string | null;
+  } | null {
+    const ds = intent.desiredState;
+    const inlined = ds?.context?.['restorationResult'];
+    if (typeof inlined !== 'string' || inlined.length === 0) {
+      return null;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(inlined);
+    } catch {
+      return null;
+    }
+    if (typeof parsed !== 'object' || parsed === null) {
+      return null;
+    }
+    const sig = (parsed as Record<string, unknown>)['signature'];
+    if (typeof sig !== 'object' || sig === null) {
+      return null;
+    }
+    const hashRaw = (sig as Record<string, unknown>)['hash'];
+    if (typeof hashRaw !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hashRaw)) {
+      return null;
+    }
+    return {
+      evidenceHash: hashRaw as `0x${string}`,
+      manifestCid: null,
+    };
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────────

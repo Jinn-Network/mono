@@ -464,6 +464,62 @@ export async function main(): Promise<DaemonStartupInfo> {
     );
   }
 
+  // ── Reputation feedback hook (jinn-mono-yg4) ──────────────────────────────
+  //
+  // After the evaluator's claimDelivery succeeds, the engine fires
+  // `ReputationRegistry.giveFeedback(restorerAgentId, …)` so the restorer's
+  // agent NFT accrues a rating (DR §4.3). This requires:
+  //
+  //   1. A `ReputationRegistryClient` for the active chain. We use the
+  //      canonical 0x8004… deployment; writes route through the operator's
+  //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
+  //      identity.
+  //   2. An agentId resolver — looks up the restorer's agentId from the
+  //      parent manifest's evidenceHash via the subgraph. When `subgraphUrl`
+  //      is unconfigured the resolver returns null cleanly and the hook
+  //      becomes a no-op (defensive: feedback is non-fatal).
+  //
+  // Skipped when the operator hasn't minted an agent NFT yet (matches the
+  // IdentityPublisher gating above).
+  let reputationFeedback:
+    | NonNullable<import('./restorer/engine/engine.js').RestorationEngineOptions['reputationFeedback']>
+    | undefined;
+  if (agentId) {
+    const { getReputationRegistryAddress, ReputationRegistryClient } = await import(
+      './reputation/registry.js'
+    );
+    const chainId = config.network === 'testnet' ? 84532 : 8453;
+    const reputationRegistryAddress = getReputationRegistryAddress(chainId);
+    if (reputationRegistryAddress) {
+      const reputationClient = new ReputationRegistryClient({
+        reputationRegistryAddress,
+        publicClient: agentClients.publicClient,
+        walletClient: agentClients.walletClient,
+        safeAddress,
+      });
+      const { resolveAgentIdForManifest } = await import(
+        './discovery/agent-resolver.js'
+      );
+      const subgraphUrl = config.subgraphUrl;
+      reputationFeedback = {
+        client: reputationClient,
+        resolveAgentId: (manifestHash) =>
+          resolveAgentIdForManifest({ manifestHash, subgraphUrl }),
+      };
+      console.log(
+        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${subgraphUrl ? ` subgraph=${subgraphUrl}` : ' (no subgraph configured — resolver always null)'}`,
+      );
+    } else {
+      console.log(
+        `[main] ReputationFeedback: disabled (no canonical ReputationRegistry deployed on chainId=${chainId})`,
+      );
+    }
+  } else {
+    console.log(
+      '[main] ReputationFeedback: disabled (no agent_id on active service — same gating as IdentityPublisher)',
+    );
+  }
+
   // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
   const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
   const { generators: autoIntentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
@@ -534,6 +590,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       deliveryDeps,
       implRegistry,
       identityPublisher,
+      reputationFeedback,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
