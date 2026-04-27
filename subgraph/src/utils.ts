@@ -53,13 +53,16 @@ export function loadOrCreateOperator(
 // Metadata-key parsing
 //
 // Recognised execution kinds map to ExecutionKind enum values in the schema.
-// We accept the list referenced in the DR (§4.2 + §9): envelope, evaluation,
-// intent, license. Anything else falls through to MetadataEntry.
+// Per the payload schema spec (jinn-mono-g7h §6), ONLY `envelope` and
+// `evaluation` produce Execution rows in v1. `intent:` and `license:` are
+// RESERVED prefixes — operators publishing under those keys today fall through
+// to the MetadataEntry catch-all (so the rows stay visible) but do NOT get an
+// Execution row until their own specs land.
 // ────────────────────────────────────────────────────────────────────────────
 export class ParsedKey {
-  kind: string;     // "ENVELOPE" | "EVALUATION" | ...
+  kind: string;     // "ENVELOPE" | "EVALUATION" | "OTHER"
   cid: string;      // suffix after the first ":"
-  recognised: bool; // true if prefix is one of our known set
+  recognised: bool; // true only for active execution-kind prefixes
 
   constructor() {
     this.kind = "OTHER";
@@ -85,13 +88,10 @@ export function parseMetadataKey(metadataKey: string): ParsedKey {
   } else if (prefix == "evaluation") {
     result.kind = "EVALUATION";
     result.recognised = true;
-  } else if (prefix == "intent") {
-    result.kind = "INTENT";
-    result.recognised = true;
-  } else if (prefix == "license") {
-    result.kind = "LICENSE";
-    result.recognised = true;
   } else {
+    // intent: and license: are reserved-but-unimplemented (g7h §6).
+    // All other prefixes fall through here; the MetadataEntry catch-all
+    // surfaces them without producing an Execution row.
     result.kind = "OTHER";
     result.recognised = false;
   }
@@ -117,7 +117,7 @@ export class DecodedPayload {
   tierRaw: i32;
   tierString: string;
   manifestHash: Bytes;
-  attestationQuoteCid: string;
+  attestationQuoteCid: Bytes; // raw multibase-decoded CID bytes (g7h §4)
   sourceMeasurement: Bytes;
 
   constructor() {
@@ -126,7 +126,7 @@ export class DecodedPayload {
     this.tierRaw = -1;
     this.tierString = TIER_UNKNOWN;
     this.manifestHash = Bytes.empty();
-    this.attestationQuoteCid = "";
+    this.attestationQuoteCid = Bytes.empty();
     this.sourceMeasurement = Bytes.empty();
   }
 }
@@ -171,17 +171,38 @@ export function decodeExecutionPayload(payload: Bytes): DecodedPayload {
     return result;
   }
 
+  // Per-tier validity (g7h §5, strict mode):
+  //   tier ∈ {0,1,2}: attestationQuoteCid MUST be empty AND sourceMeasurement MUST be zero.
+  //   tier ∈ {3,4}:   attestationQuoteCid MUST be non-empty AND sourceMeasurement MUST be non-zero.
+  let requiresAttestation = tier >= 3;
+  let hasQuote = attestationQuoteBytes.length > 0;
+  let measurementIsZero = sourceMeasurement.length == 0 || isAllZeroBytes(sourceMeasurement);
+  let hasMeasurement = !measurementIsZero;
+  if (requiresAttestation != hasQuote || requiresAttestation != hasMeasurement) {
+    log.warning(
+      "decodeExecutionPayload: tier-field mismatch (tier={}, hasQuote={}, hasMeasurement={})",
+      [tier.toString(), hasQuote ? "true" : "false", hasMeasurement ? "true" : "false"],
+    );
+    return result;
+  }
+
   result.ok = true;
   result.version = version;
   result.tierRaw = tier;
   result.tierString = TIER_STRINGS[tier];
   result.manifestHash = manifestHash;
-  // attestationQuoteCid bytes hold the IPFS CID as ASCII bytes (per DR §4.2
-  // the field name is `attestationQuoteCid` typed `bytes`). We surface as
-  // utf-8 string for ergonomic queries.
-  result.attestationQuoteCid = attestationQuoteBytes.toString();
+  // attestationQuoteCid is raw multibase-decoded CID bytes (g7h §4). Stored
+  // verbatim; consumers reconstruct the textual CID at read time.
+  result.attestationQuoteCid = attestationQuoteBytes;
   result.sourceMeasurement = sourceMeasurement;
   return result;
+}
+
+function isAllZeroBytes(b: Bytes): bool {
+  for (let i = 0; i < b.length; i++) {
+    if (b[i] != 0) return false;
+  }
+  return true;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

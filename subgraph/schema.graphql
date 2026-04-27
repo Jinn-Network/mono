@@ -67,8 +67,6 @@ enum ExecutionTier {
 enum ExecutionKind {
   ENVELOPE
   EVALUATION
-  INTENT
-  LICENSE
   OTHER
 }
 
@@ -100,8 +98,8 @@ type Execution @entity(immutable: false) {
   "uint8 raw tier value (0..4) or null if undecoded"
   tierRaw: Int
 
-  "IPFS CID of TEE attestation quote (empty for tier < attested)"
-  attestationQuoteCid: String
+  "Raw multibase-decoded IPFS CID bytes of TEE attestation quote (empty for tier < attested). See payload schema spec §4 — binary form, not text."
+  attestationQuoteCid: Bytes
 
   "Expected enclave measurement (zero for tier < attested)"
   sourceMeasurement: Bytes
