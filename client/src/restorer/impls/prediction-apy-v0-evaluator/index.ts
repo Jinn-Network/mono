@@ -1,9 +1,10 @@
 import { writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { createPublicClient, http, keccak256, stringToHex } from 'viem';
+import { createPublicClient, http } from 'viem';
 import { base, baseSepolia, mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
+import { signCanonical } from '../../engine/signing.js';
 import type { PublicClient } from 'viem';
 import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
@@ -16,7 +17,7 @@ import {
   checkManifestSignature,
   recomputeTopLevelSignatureHash,
 } from '../prediction-v0-evaluator/checks/integrity.js';
-import { resolveExpectedRestorationIntentCid } from '../evaluation-context.js';
+import { resolveExpectedRestorationIntentCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
 import { deriveGroundTruthBps } from './canonical-metrics.js';
 import { parsePredictionApySubmissionEnvelope } from './parse-submission.js';
 import { computeScore } from './score.js';
@@ -265,11 +266,12 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
       },
       checks,
     };
-    const hash = keccak256(stringToHex(JSON.stringify(baseManifest)));
-    const sig = await evaluatorAccount.sign({ hash });
+    // Sign with JCS canonical form (RFC 8785) via signCanonical — matching
+    // envelope-assembly and portfolio-v0-evaluator.
+    const signed = await signCanonical(baseManifest, this.config.evaluatorPk! as `0x${string}`, evaluatorAccount.address as `0x${string}`);
     const verdictManifest: Record<string, unknown> = {
       ...baseManifest,
-      signature: { algo: 'secp256k1', signer: evaluatorAccount.address, hash, sig },
+      signature: { algo: 'secp256k1', signer: evaluatorAccount.address, hash: signed.hash, sig: signed.sig },
     };
     const verdictJson = JSON.stringify(verdictManifest, null, 2);
     const verdictSha256 = createHash('sha256').update(verdictJson).digest('hex');
@@ -294,19 +296,22 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
     // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
     // Assembles the PredictionApyV0VerdictPayload from the already-computed fields.
     //
-    // restorationEnvelope: placeholder — the real CID/sha256 of the restoration
-    // envelope being evaluated. TODO(plan-d): resolve from adapter using
-    // intent.restorationRequestId once restoration envelope lookup is wired.
+    // restorationEnvelope: CID threaded from the daemon via context, sha256
+    // computed from the JSON bytes of the restoration envelope (matching the
+    // conformance harness which also computes sha256(JSON.stringify(fetchedEnvelope))).
     //
     // verificationOfRestoration: stub — Plan D will connect the real SDK that
     // fetches + validates the restoration envelope against its claimed tier.
     // For V1 the stub always reports 'valid' (self-signed tier), which means
     // the REJECTED-if-invalid path in engine.pack() never fires in practice
     // until Plan D replaces this stub.
+    const envelopeCid = (ctx.intent.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+      ?? ctx.intent.restorationRequestId
+      ?? 'bafy-unknown';
+    const envelopeSha256 = createHash('sha256').update(manifestJson).digest('hex');
     const restorationEnvelope = {
-      // TODO(plan-d): resolve real CID from adapter via intent.restorationRequestId
-      cid: ctx.intent.restorationRequestId ?? 'bafy-unknown',
-      sha256: '0'.repeat(64),  // TODO(plan-d): derive from fetched envelope bytes
+      cid: envelopeCid,
+      sha256: envelopeSha256,
     };
 
     const verificationOfRestoration = {

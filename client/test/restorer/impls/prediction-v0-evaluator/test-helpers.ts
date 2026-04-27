@@ -3,7 +3,7 @@ import type { PredictionV0Intent } from '../../../../src/types/prediction.js';
 import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { SignedEnvelope } from '../../../../src/types/envelope.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
 
 export function makeValidIntent(overrides: Partial<PredictionV0Intent> = {}): PredictionV0Intent {
   return {
@@ -79,7 +79,7 @@ export async function makeSignedManifest(overrides: {
 export function makeEvalRestorationJob(
   envelope: SignedEnvelope | Record<string, unknown>,
   intent: PredictionV0Intent,
-  options?: { omitRestorationIntentCid?: boolean },
+  options?: { omitRestorationIntentCid?: boolean; restorationEnvelopeCid?: string },
 ): RestorationJob {
   const e = envelope as { intent: { cid: string } };
   return {
@@ -95,6 +95,9 @@ export function makeEvalRestorationJob(
       ...(options?.omitRestorationIntentCid
         ? {}
         : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: e.intent.cid }),
+      ...(options?.restorationEnvelopeCid
+        ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: options.restorationEnvelopeCid }
+        : {}),
     },
   } as unknown as RestorationJob;
 }

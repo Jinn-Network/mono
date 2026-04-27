@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -5,7 +6,7 @@ import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionApyV0Evaluator } from '../../../../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
 import { PredictionApyV0VerdictPayloadSchema } from '../../../../src/types/payloads/prediction-apy-v0.js';
 import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
@@ -65,7 +66,7 @@ async function makeSignedApyManifestJson(overrides: { submittedAt?: number; inte
 
 function makeEvalIntent(
   manifestJson: string,
-  options?: { omitRestorationIntentCid?: boolean; restorationIntentCid?: string },
+  options?: { omitRestorationIntentCid?: boolean; restorationIntentCid?: string; restorationEnvelopeCid?: string },
 ): RestorationJob {
   return {
     id: 'eval-apy',
@@ -89,6 +90,9 @@ function makeEvalIntent(
       ...(options?.omitRestorationIntentCid
         ? {}
         : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: options?.restorationIntentCid ?? 'expected-cid' }),
+      ...(options?.restorationEnvelopeCid
+        ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: options.restorationEnvelopeCid }
+        : {}),
     },
   } as unknown as RestorationJob;
 }
@@ -250,11 +254,31 @@ describe('PredictionApyV0Evaluator', () => {
       expect(parsed.data.verdict).toBe('PASS');
       expect(parsed.data.scoreBasis).toBe('absolute-error-linear.v1');
       expect(parsed.data.restorationEnvelope.cid).toBe('bafy-unknown');
-      expect(parsed.data.restorationEnvelope.sha256).toMatch(/^0{64}$/);
+      // sha256 is now computed from the restoration envelope JSON (not a placeholder)
+      expect(parsed.data.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(parsed.data.verificationOfRestoration.claimedTier).toBe('self-signed');
       expect(parsed.data.verificationOfRestoration.overall).toBe('valid');
       expect(parsed.data.claimed.predictedBps).toBe('100');
       expect(parsed.data.claimed.modelId).toBe('apy-persistence.v1');
     }
+  });
+
+  it('restorationEnvelope.cid uses threaded context key + sha256 matches manifest JSON', async () => {
+    const manifest = await makeSignedApyManifestJson();
+    const envelopeCid = 'f01551220deadbeef1234567890abcdef';
+    const evalIntent = makeEvalIntent(manifest, { restorationEnvelopeCid: envelopeCid });
+    const ev = new PredictionApyV0Evaluator({
+      evaluatorPk: PK,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const out = await ev.run(
+      makeCtx(evalIntent, 'expected-cid', {
+        twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
+      }),
+    );
+    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+    expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
+    const expectedSha256 = createHash('sha256').update(manifest).digest('hex');
+    expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
   });
 });

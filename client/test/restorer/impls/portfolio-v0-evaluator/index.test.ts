@@ -14,11 +14,13 @@
  *   - _testDeps injected via PortfolioV0Evaluator constructor config, not spec
  */
 
+import { createHash } from 'node:crypto';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PortfolioV0Evaluator } from '../../../../src/restorer/impls/portfolio-v0-evaluator/index.js';
+import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
 import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { HlFill, HlGridPoint } from '../../../../src/venues/hyperliquid/types.js';
@@ -191,6 +193,8 @@ interface CtxOverrides {
   fills?: HlFill[];
   grid?: HlGridPoint[];
   startTimeClamped?: boolean;
+  /** Thread a restoration envelope CID through context (tests CID back-ref). */
+  restorationEnvelopeCid?: string;
   /** Simulate HL API failure. */
   hlError?: boolean;
 }
@@ -212,6 +216,7 @@ function makeCtx(
     intentSpecOverrides = {},
     eligibilityOverrides,
     manifest = MOCK_MANIFEST,
+    restorationEnvelopeCid,
   } = overrides;
 
   const ds: RestorationJob = {
@@ -241,6 +246,7 @@ function makeCtx(
     },
     context: {
       restorationResult: JSON.stringify(manifest),
+      ...(restorationEnvelopeCid ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: restorationEnvelopeCid } : {}),
     },
   };
 
@@ -888,6 +894,38 @@ describe('PortfolioV0Evaluator', () => {
       // the signed content is everything except `signature` and `generatedAt`.
       expect(typeof verdict1.generatedAt).toBe('number');
       expect(typeof verdict2.generatedAt).toBe('number');
+    });
+  });
+
+  // ── restorationEnvelope back-ref ──────────────────────────────────────────
+
+  describe('restorationEnvelope back-ref', () => {
+    it('uses restorationEnvelopeCid from context when threaded by daemon', async () => {
+      const workingDir = makeTmpDir();
+      dirs.push(workingDir);
+      const evaluator = makeEvaluator();
+      const envelopeCid = 'f01551220deadbeefcafe';
+      const ctx = makeCtx(workingDir, evaluator, { restorationEnvelopeCid: envelopeCid });
+      const out = await evaluator.run(ctx);
+      const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+      expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
+      // sha256 must be the sha256 of the restoration envelope JSON
+      const manifestJson = JSON.stringify(MOCK_MANIFEST);
+      const expectedSha256 = createHash('sha256').update(manifestJson).digest('hex');
+      expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+    });
+
+    it('falls back to restorationRequestId when no context key present', async () => {
+      const workingDir = makeTmpDir();
+      dirs.push(workingDir);
+      const evaluator = makeEvaluator();
+      const ctx = makeCtx(workingDir, evaluator);
+      const out = await evaluator.run(ctx);
+      const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+      // restorationRequestId is '0xrequest' in makeCtx
+      expect(vp.restorationEnvelope.cid).toBe('0xrequest');
+      // sha256 must be a valid hex string (not placeholder zeros)
+      expect(vp.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
     });
   });
 });

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -122,6 +123,40 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const artifactSpan = spans.find((s: any) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
     expect(artifactSpan!.attributes['jinn.artifact.artifactType']).toBe('evaluation_verdict');
     expect(typeof artifactSpan!.attributes['jinn.artifact.sha256']).toBe('string');
+  });
+
+  it('restorationEnvelope.cid uses context restorationEnvelopeCid when present', async () => {
+    const intent = makeValidIntent();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
+    const manifestJson = JSON.stringify(manifest);
+    const evalIntent = makeEvalRestorationJob(manifest, intent, {
+      restorationEnvelopeCid: 'f01551220abcdef1234',
+    });
+    const evaluator = new PredictionV0Evaluator({
+      evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+    expect(vp.restorationEnvelope.cid).toBe('f01551220abcdef1234');
+    const expectedSha256 = createHash('sha256').update(manifestJson).digest('hex');
+    expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+  });
+
+  it('restorationEnvelope.cid falls back to bafy-unknown when no context key or requestId', async () => {
+    const intent = makeValidIntent();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
+    // makeEvalRestorationJob sets restorationRequestId to 0x00...00 (not empty)
+    const evaluator = new PredictionV0Evaluator({
+      evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+    // falls back to restorationRequestId (0x00...00) since no RESTORATION_ENVELOPE_CID_CONTEXT_KEY
+    expect(vp.restorationEnvelope.cid).not.toBe('bafy-unknown');
+    expect(vp.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('INDETERMINATE when oracle has no spanning round', async () => {

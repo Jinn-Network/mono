@@ -34,6 +34,7 @@ import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../
 import { bracketGridPoints } from '../../../venues/hyperliquid/grid.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { signCanonical } from '../../engine/signing.js';
+import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
 
 import {
   PortfolioV0IntentSchema,
@@ -671,19 +672,25 @@ export class PortfolioV0Evaluator implements RestorerImpl {
     // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
     // Assembles the PortfolioV0VerdictPayload from the already-computed fields.
     //
-    // restorationEnvelope: placeholder — the real CID/sha256 of the restoration
-    // envelope being evaluated. TODO(plan-d): resolve from adapter using
-    // intent.restorationRequestId once restoration envelope lookup is wired.
+    // restorationEnvelope: CID threaded from the daemon via context, sha256
+    // computed from the JSON bytes of the restoration envelope (matching the
+    // conformance harness which also computes sha256(JSON.stringify(fetchedEnvelope))).
     //
     // verificationOfRestoration: stub — Plan D will connect the real SDK that
     // fetches + validates the restoration envelope against its claimed tier.
     // For V1 the stub always reports 'valid' (self-signed tier), which means
     // the REJECTED-if-invalid path in engine.pack() never fires in practice
     // until Plan D replaces this stub.
+    const restorationEnvelopeCid = (intent.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+      ?? restorationRequestId
+      ?? 'bafy-unknown';
+    const restorationResultJson = intent.context?.['restorationResult'];
+    const restorationEnvelopeSha256 = typeof restorationResultJson === 'string'
+      ? createHash('sha256').update(restorationResultJson).digest('hex')
+      : '0'.repeat(64);
     const restorationEnvelope = {
-      // TODO(plan-d): resolve real CID from adapter via intent.restorationRequestId
-      cid: restorationRequestId ?? 'bafy-unknown',
-      sha256: '0'.repeat(64),  // TODO(plan-d): derive from fetched envelope bytes
+      cid: restorationEnvelopeCid,
+      sha256: restorationEnvelopeSha256,
     };
 
     const verificationOfRestoration = {

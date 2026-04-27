@@ -41,7 +41,7 @@ import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -60,6 +60,9 @@ export class MechAdapter implements ExecutionAdapter {
   // Restoration result content cached across evaluation-job retries so a transient
   // Safe/router failure does not silently strip evaluator context on the next poll.
   private pendingEvaluationResults = new Map<string, string>();
+  // IPFS CID of the restoration envelope — threaded into evaluation context so
+  // evaluators can populate restorationEnvelope.cid without a synchronous IPFS fetch.
+  private pendingEvaluationResultCids = new Map<string, string>();
   // RIDs with no delivery found in backfill window; avoids repeated 500k-block rescans.
   private backfillMissRids = new Set<string>();
   // Original desired states keyed by request ID (restoration and evaluation)
@@ -216,14 +219,16 @@ export class MechAdapter implements ExecutionAdapter {
         try {
           const d = String(deliveryDataHex);
           const dig = d.startsWith('0x') ? d.slice(2) : d;
+          const envelopeCid = `f01551220${dig}`;
           const payload = (await fetchFromIpfs(
             this.config.ipfsGatewayUrl,
-            `f01551220${dig}`,
+            envelopeCid,
           )) as Record<string, unknown>;
           this.pendingEvaluationResults.set(
             requestId,
             (payload.data as string) ?? JSON.stringify(payload),
           );
+          this.pendingEvaluationResultCids.set(requestId, envelopeCid);
           this.backfillMissRids.delete(requestId);
         } catch (err) {
           console.error(`[mech] recovery: could not load restoration result IPFS for ${requestId}:`, err);
@@ -452,15 +457,17 @@ export class MechAdapter implements ExecutionAdapter {
             //     tryCreateEvaluationJob calls verifyRestorationClaimed() which polls for the claim.
             if (iCreatedRestoration) {
               let restorationResultData: string | undefined;
+              let restorationEnvelopeCid: string | undefined;
               try {
                 const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
-                const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${digest}`) as Record<string, unknown>;
+                restorationEnvelopeCid = `f01551220${digest}`;
+                const payload = await fetchFromIpfs(this.config.ipfsGatewayUrl, restorationEnvelopeCid) as Record<string, unknown>;
                 restorationResultData = (payload.data as string) ?? JSON.stringify(payload);
                 this.backfillMissRids.delete(requestId);
               } catch (err) {
                 console.error(`[mech] Failed to fetch restoration result for evaluation: ${requestId}`, err);
               }
-              await this.tryCreateEvaluationJob(requestId, restorationResultData);
+              await this.tryCreateEvaluationJob(requestId, restorationResultData, restorationEnvelopeCid);
             }
 
             // (c) If I created the evaluation, clean up tracking once delivered.
@@ -550,12 +557,14 @@ export class MechAdapter implements ExecutionAdapter {
     try {
       const d = String(dhex);
       const dig = d.startsWith('0x') ? d.slice(2) : d;
+      const envelopeCid = `f01551220${dig}`;
       const payload = (await fetchFromIpfs(
         this.config.ipfsGatewayUrl,
-        `f01551220${dig}`,
+        envelopeCid,
       )) as Record<string, unknown>;
       const data = (payload.data as string) ?? JSON.stringify(payload);
       this.pendingEvaluationResults.set(requestId, data);
+      this.pendingEvaluationResultCids.set(requestId, envelopeCid);
       this.backfillMissRids.delete(requestId);
       return data;
     } catch (err) {
@@ -564,12 +573,15 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  private async tryCreateEvaluationJob(requestId: string, restorationResultData?: string): Promise<void> {
+  private async tryCreateEvaluationJob(requestId: string, restorationResultData?: string, restorationEnvelopeCid?: string): Promise<void> {
     if (!this.pendingEvaluations.has(requestId)) return;
     const originalState = this.pendingEvaluations.get(requestId)!;
     if (restorationResultData) {
       this.pendingEvaluationResults.set(requestId, restorationResultData);
       this.backfillMissRids.delete(requestId);
+    }
+    if (restorationEnvelopeCid) {
+      this.pendingEvaluationResultCids.set(requestId, restorationEnvelopeCid);
     }
     let cachedRestorationResultData = restorationResultData ?? this.pendingEvaluationResults.get(requestId);
     if (cachedRestorationResultData == null) {
@@ -582,6 +594,7 @@ export class MechAdapter implements ExecutionAdapter {
       );
       return;
     }
+    const cachedEnvelopeCid = restorationEnvelopeCid ?? this.pendingEvaluationResultCids.get(requestId);
     try {
       const evaluationState: RestorationJob = {
         ...originalState,
@@ -590,6 +603,7 @@ export class MechAdapter implements ExecutionAdapter {
         context: {
           ...originalState.context,
           restorationResult: cachedRestorationResultData,
+          ...(cachedEnvelopeCid ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: cachedEnvelopeCid } : {}),
         },
       };
       const evaluationPayload = buildRestorationJobPayload(evaluationState);
@@ -635,6 +649,7 @@ export class MechAdapter implements ExecutionAdapter {
       this.pendingEvaluations.delete(requestId);
       this.claimedButNotEvaluated.delete(requestId);
       this.pendingEvaluationResults.delete(requestId);
+      this.pendingEvaluationResultCids.delete(requestId);
     } catch (err) {
       console.error(`[mech] Failed to create evaluation job for ${requestId}:`, err);
       // Track for retry on next poll cycle (doesn't require a new Deliver event)
