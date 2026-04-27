@@ -1,0 +1,115 @@
+specVersion: 1.0.0
+schema:
+  file: ./schema.graphql
+description: |
+  Jinn-specific subgraph: indexes ERC-8004 IdentityRegistry / ValidationRegistry /
+  ReputationRegistry plus JinnRouter and synthesises Operator + Execution entities.
+  See docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md.
+repository: https://github.com/Jinn-Network/mono
+features:
+  - nonFatalErrors
+dataSources:
+  - kind: ethereum/contract
+    name: IdentityRegistry
+    network: base-sepolia
+    source:
+      address: "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+      abi: IdentityRegistry
+      startBlock: 22000000
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/handlers/identity.ts
+      entities:
+        - Operator
+        - Execution
+        - MetadataEntry
+        - URIUpdate
+      abis:
+        - name: IdentityRegistry
+          file: ./abis/IdentityRegistry.json
+      eventHandlers:
+        - event: Registered(indexed uint256,string,indexed address)
+          handler: handleRegistered
+        - event: MetadataSet(indexed uint256,indexed string,string,bytes)
+          handler: handleMetadataSet
+        - event: URIUpdated(indexed uint256,string,indexed address)
+          handler: handleURIUpdated
+  - kind: ethereum/contract
+    name: ValidationRegistry
+    network: base-sepolia
+    source:
+      address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+      abi: ValidationRegistry
+      startBlock: 22000000
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/handlers/validation.ts
+      entities:
+        - Validation
+        - Operator
+        - Execution
+      abis:
+        - name: ValidationRegistry
+          file: ./abis/ValidationRegistry.json
+      eventHandlers:
+        - event: ValidationRequest(indexed address,indexed uint256,string,indexed bytes32)
+          handler: handleValidationRequest
+        - event: ValidationResponse(indexed address,indexed uint256,indexed bytes32,uint8,string,bytes32,string)
+          handler: handleValidationResponse
+  - kind: ethereum/contract
+    name: ReputationRegistry
+    network: base-sepolia
+    source:
+      address: "0x8004B663056A597Dffe9eCcC1965A193B7388713"
+      abi: ReputationRegistry
+      startBlock: 22000000
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/handlers/reputation.ts
+      entities:
+        - Feedback
+        - FeedbackResponse
+        - Operator
+        - Execution
+      abis:
+        - name: ReputationRegistry
+          file: ./abis/ReputationRegistry.json
+      eventHandlers:
+        - event: NewFeedback(indexed uint256,indexed address,uint64,int128,uint8,indexed string,string,string,string,string,bytes32)
+          handler: handleNewFeedback
+        - event: FeedbackRevoked(indexed uint256,indexed address,indexed uint64)
+          handler: handleFeedbackRevoked
+        - event: ResponseAppended(indexed uint256,indexed address,uint64,indexed address,string,bytes32)
+          handler: handleResponseAppended
+  - kind: ethereum/contract
+    name: JinnRouter
+    network: base-sepolia
+    source:
+      address: "0x7c502a4288C4f4279edbb363d692f530200e22dC"
+      abi: JinnRouter
+      startBlock: 22000000
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/handlers/router.ts
+      entities:
+        - RouterJob
+        - Execution
+        - Operator
+      abis:
+        - name: JinnRouter
+          file: ./abis/JinnRouter.json
+      eventHandlers:
+        - event: RestorationJobCreated(indexed address,indexed bytes32)
+          handler: handleRestorationJobCreated
+        - event: EvaluationJobCreated(indexed address,indexed bytes32,indexed bytes32)
+          handler: handleEvaluationJobCreated
+        - event: DeliveryClaimed(indexed address,indexed bytes32,uint8)
+          handler: handleDeliveryClaimed

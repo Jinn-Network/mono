@@ -1,0 +1,74 @@
+{
+  "base-sepolia": {
+    "IdentityRegistry": {
+      "address": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "startBlock": 22000000
+    },
+    "ValidationRegistry": {
+      "address": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
+      "startBlock": 22000000
+    },
+    "ReputationRegistry": {
+      "address": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "startBlock": 22000000
+    },
+    "JinnRouter": {
+      "address": "0x7c502a4288C4f4279edbb363d692f530200e22dC",
+      "startBlock": 22000000
+    }
+  },
+  "base": {
+    "IdentityRegistry": {
+      "address": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "startBlock": 25000000
+    },
+    "ValidationRegistry": {
+      "address": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58",
+      "startBlock": 25000000
+    },
+    "ReputationRegistry": {
+      "address": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "startBlock": 25000000
+    },
+    "JinnRouter": {
+      "address": "0xfFa7118A3D820cd4E820010837D65FAfF463181B",
+      "startBlock": 25000000
+    }
+  },
+  "sepolia": {
+    "IdentityRegistry": {
+      "address": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "startBlock": 8000000
+    },
+    "ValidationRegistry": {
+      "address": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
+      "startBlock": 8000000
+    },
+    "ReputationRegistry": {
+      "address": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "startBlock": 8000000
+    },
+    "JinnRouter": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 8000000
+    }
+  },
+  "mainnet": {
+    "IdentityRegistry": {
+      "address": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "startBlock": 22500000
+    },
+    "ValidationRegistry": {
+      "address": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58",
+      "startBlock": 22500000
+    },
+    "ReputationRegistry": {
+      "address": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "startBlock": 22500000
+    },
+    "JinnRouter": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 22500000
+    }
+  }
+}
