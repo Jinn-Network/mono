@@ -2750,140 +2750,17 @@ async function main(): Promise<void> {
     );
 
     // ── Phase 13d: 8004 Registry + Subgraph Backfill ───────────────────────
-
-    const { Registry8004 } = await import('../src/discovery/registry.js');
-    const { queryArtifacts: querySubgraphArtifacts, getMetadataValue: getMeta } = await import('../src/discovery/subgraph.js');
+    //
+    // The PR #37 "ERC-8004 three-registry client" path was deleted (DR
+    // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
+    // The rebuilt operator-rooted client + Jinn subgraph land via beads
+    // jinn-mono-j07 / 3zk / 9jg / 2ff / fud. This phase will be replaced by
+    // an operator-rooted register + setMetadata + subgraph round-trip once
+    // those land. Skipped for now to keep the rest of the e2e green.
 
     results.push(
-      await runPhase('Phase 13d: 8004 Registry + Subgraph — register artifact, mock subgraph, backfill', async () => {
-        if (!tmpDir) throw new Error('Missing tmpDir from Phase 1');
-
-        // --- Part 1: Deploy mock 8004 registry on Anvil ---
-        const { createWalletClient: createWC2 } = await import('viem');
-        const { privateKeyToAccount: pk2acc } = await import('viem/accounts');
-
-        const deployerKey2 = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
-        const deployerAccount2 = pk2acc(deployerKey2);
-        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [deployerAccount2.address, '0x56BC75E2D63100000']);
-
-        // Deploy a minimal 8004 registry mock — just needs register() that emits an event
-        // For simplicity, use the Registry8004 class to register against a real contract
-        // We'll test the registration data encoding + subgraph mock separately
-
-        // --- Part 2: Mock subgraph endpoint ---
-        // Returns V1 schema: artifacts (not legacy agents) for artifact queries,
-        // agents (AgentCard) for node-discovery queries.
-        const { createServer: createHttpServer } = await import('node:http');
-
-        // V1 artifact entity shape (matches queryArtifacts GraphQL selection set)
-        const mockV1Artifacts = [
-          {
-            id: 'subgraph-test-artifact',
-            artifactType: 'restoration-knowledge',
-            parentEnvelope: { id: 'test-parent-envelope' },
-            tags: ['subgraph', 'discovery'],
-            agent: {
-              id: 'agent-1',
-              agentURI: 'http://remote-node:7331',
-              owner: '0xSubgraphOwner',
-            },
-          },
-        ];
-
-        const mockSubgraph = createHttpServer((req, res) => {
-          let body = '';
-          req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-          req.on('end', () => {
-            const parsed = JSON.parse(body) as { query: string };
-            // queryArtifacts uses 'artifacts(' in the query body.
-            // queryNodes uses 'agents(' with AgentCard filter.
-            const isArtifactQuery = parsed.query.includes('artifacts(');
-            const isNodeQuery = parsed.query.includes('AgentCard');
-
-            let responseData: Record<string, unknown>;
-            if (isArtifactQuery) {
-              // V1 queryArtifacts expects { data: { artifacts: [...] } }
-              responseData = { artifacts: mockV1Artifacts };
-            } else if (isNodeQuery) {
-              // queryNodes expects { data: { agents: [...] } } (unchanged)
-              responseData = { agents: [{
-                id: '2',
-                agentURI: 'http://discovered-peer:7331',
-                owner: '0xPeerOwner',
-                metadata: [
-                  { metadataKey: 'documentType', metadataValueString: 'adw:AgentCard' },
-                  { metadataKey: 'endpoint', metadataValueString: 'http://discovered-peer:7331' },
-                  { metadataKey: 'ownerAddress', metadataValueString: '0xPeerOwner' },
-                ],
-              }] };
-            } else {
-              responseData = {};
-            }
-
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ data: responseData }));
-          });
-        });
-
-        await new Promise<void>(resolve => mockSubgraph.listen(7350, resolve));
-        console.log('    Mock subgraph listening on port 7350');
-
-        try {
-          // --- Part 3: Query mock subgraph for artifacts ---
-          // queryArtifacts projects V1 Artifact entities to SubgraphResult via
-          // artifactToSubgraphResult — metadata keys: documentType, artifactId,
-          // artifactType, parentEnvelopeCid, tags. The agentURI carries the endpoint.
-          const artifacts = await querySubgraphArtifacts({ url: 'http://localhost:7350' });
-          if (artifacts.length === 0) throw new Error('Subgraph query returned no artifacts');
-
-          const firstArtifact = artifacts[0];
-          const artifactId = getMeta(firstArtifact, 'artifactId');
-          const artifactType = getMeta(firstArtifact, 'artifactType');
-          const tagsRaw = getMeta(firstArtifact, 'tags');
-          // In V1 the endpoint comes from the agent's agentURI (used for node endpoint)
-          const endpoint = firstArtifact.agentURI.startsWith('artifact:')
-            ? ''
-            : firstArtifact.agentURI;
-
-          if (artifactId !== 'subgraph-test-artifact') throw new Error(`Wrong artifactId: ${artifactId}`);
-          if (artifactType !== 'restoration-knowledge') throw new Error(`Wrong artifactType: ${artifactType}`);
-          console.log(`    Subgraph artifact: id=${artifactId}, artifactType="${artifactType}", endpoint=${endpoint}`);
-
-          // --- Part 4: Backfill into store ---
-          const backfillStore = new Store(join(tmpDir, 'backfill-test.db'));
-          const tags = tagsRaw ? JSON.parse(tagsRaw) as string[] : [];
-
-          backfillStore.insertRemoteArtifact({
-            id: artifactId!,
-            desiredStateId: '',
-            requestId: '',
-            title: artifactType ?? '',
-            tags,
-            outcome: 'UNKNOWN',
-            ownerAddress: firstArtifact.owner,
-            endpoint,
-          });
-
-          // Verify it's searchable
-          const results = backfillStore.searchArtifacts({ tags: ['subgraph'] });
-          if (results.length === 0) throw new Error('Backfilled artifact not found in search');
-          console.log(`    Backfilled artifact searchable: ${results.length} result(s)`);
-
-          // Verify it's marked as remote
-          const remoteInfo = backfillStore.getRemoteArtifactInfo(artifactId!);
-          if (!remoteInfo) throw new Error('Remote info not found');
-          if (remoteInfo.endpoint !== endpoint) throw new Error(`Wrong endpoint: ${remoteInfo.endpoint}`);
-          console.log(`    Remote info: endpoint=${remoteInfo.endpoint}, owner=${remoteInfo.ownerAddress}`);
-
-          // Content should be null (metadata only, not acquired yet)
-          const content = backfillStore.getArtifactContent(artifactId!);
-          if (content !== null) throw new Error('Content should be null before acquisition');
-          console.log('    Content is null (not yet acquired) — correct');
-
-          backfillStore.close();
-        } finally {
-          await new Promise<void>(resolve => mockSubgraph.close(() => resolve()));
-        }
+      await runPhase('Phase 13d: 8004 Registry + Subgraph — skipped (rebuild pending)', async () => {
+        console.log('    SKIP: per-CID ERC-8004 wiring deleted; operator-rooted rebuild tracked in jinn-mono-j07/3zk/9jg/2ff/fud');
       }),
     );
 

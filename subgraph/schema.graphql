@@ -1,114 +1,16 @@
-# Agent — the Identity Registry row. One per on-chain register() call. documentType distinguishes subtype.
-type Agent @entity(immutable: false) {
-  id: ID!                        # agent ID from Identity Registry (uint256 as string)
-  agentURI: String!
-  owner: Bytes!
-  documentType: String!          # 'adw:AgentCard' | 'adw:Intent' | 'adw:ExecutionEnvelope' | 'adw:SourceBundle' | 'adw:Artifact'
-  metadata: [Metadata!]! @derivedFrom(field: "agent")
-  createdAt: BigInt!
-  createdAtBlock: BigInt!
-  createdAtTx: Bytes!
-}
-
-# Metadata — thin tuple keyed to an Agent. Plan E may register 5–15 tuples per agent.
-type Metadata @entity(immutable: true) {
-  id: ID!                        # `${agentId}-${metadataKey}`
-  agent: Agent!
-  metadataKey: String!
-  metadataValue: Bytes!
-  metadataValueString: String!   # utf-8 decoded convenience (subgraph mapping does the decode)
-}
-
-# Intent — derived from an Agent with documentType='adw:Intent'. One-to-one with Agent entity.
-type Intent @entity(immutable: false) {
-  id: ID!                        # intent CID
-  kind: String!
-  creator: Bytes!
-  createdAt: BigInt!
-  requestId: Bytes!
-  agent: Agent!                  # backing Identity Registry row
-  restorationEnvelopes: [ExecutionEnvelope!]! @derivedFrom(field: "intent")
-  knowledgeTree: KnowledgeTree   # nullable until first envelope registers
-}
-
-# ExecutionEnvelope — restoration or verdict. Plan E writes documentType='adw:ExecutionEnvelope'.
-type ExecutionEnvelope @entity(immutable: false) {
-  id: ID!                        # envelope CID
-  kind: String!
-  role: String!                  # 'restoration' | 'verdict'
-  evidenceTier: String!          # 'self-signed' | 'committed' | 'attested' | 'consensus' | 'proved'
-  intent: Intent!
-  parentEnvelope: ExecutionEnvelope  # nullable; for verdicts, references the restoration
-  childVerdicts: [ExecutionEnvelope!]! @derivedFrom(field: "parentEnvelope")
-  measurement: Bytes             # nullable; only populated at attested tier
-  participant: Bytes!            # Safe address
-  generatedAt: BigInt!
-  createdAtBlock: BigInt!
-  createdAtTx: Bytes!
-  artifacts: [Artifact!]! @derivedFrom(field: "parentEnvelope")
-  sourceBundle: SourceBundle     # nullable; resolved by bundleCid lookup if a bundle has already registered
-  agent: Agent!
-  # Validation records (if challengers have re-verified this envelope)
-  validationRequests: [ValidationRequest!]! @derivedFrom(field: "envelope")
-  validationResponses: [ValidationResponse!]! @derivedFrom(field: "envelope")
-}
-
-# Artifact — Plan E registers documentType='adw:Artifact' with parentEnvelopeCid metadata.
-type Artifact @entity(immutable: false) {
-  id: ID!                        # artifact CID
-  artifactType: String!
-  parentEnvelope: ExecutionEnvelope!
-  tags: [String!]                # parsed from metadata JSON if present
-  agent: Agent!
-  createdAtBlock: BigInt!
-  createdAtTx: Bytes!
-}
-
-# SourceBundle — registered once per release, referenced by executor.source.bundleCid.
-type SourceBundle @entity(immutable: false) {
-  id: ID!                        # bundle CID
-  measurement: Bytes!
-  buildRecipeKind: String!       # 'dockerfile' | 'nix' | 'bazel'
-  humanUrl: String
-  publishedBy: Bytes!            # Safe or EOA that registered
-  envelopesUsing: [ExecutionEnvelope!]! @derivedFrom(field: "sourceBundle")
-  agent: Agent!
-  createdAtBlock: BigInt!
-  createdAtTx: Bytes!
-}
-
-# KnowledgeTree — synthetic aggregate. Written by the envelope handler.
-type KnowledgeTree @entity(immutable: false) {
-  id: ID!                        # intent CID
-  intent: Intent!
-  totalRestorations: Int!
-  totalVerdicts: Int!
-  attestedRestorations: Int!
-  attestedVerdicts: Int!
-  attestedFraction: BigDecimal!  # (attestedRestorations + attestedVerdicts) / (totalRestorations + totalVerdicts)
-  lastUpdatedBlock: BigInt!
-}
-
-# Validation Registry entities — mirror the on-chain challenger flow.
-type ValidationRequest @entity(immutable: true) {
-  id: ID!                        # request ID (bytes32 hex)
-  envelope: ExecutionEnvelope!   # nullable in GraphQL sense — but we resolve at write time; if lookup fails the event is discarded with a log
-  challenger: Bytes!
-  scope: String!                 # e.g. 'attestation' | 'reproducible-build'
-  requestedAt: BigInt!
-  response: ValidationResponse   # nullable until the response fires
-  createdAtBlock: BigInt!
-  createdAtTx: Bytes!
-}
-
-type ValidationResponse @entity(immutable: true) {
-  id: ID!                        # response ID (bytes32 hex)
-  request: ValidationRequest!
-  envelope: ExecutionEnvelope!
-  validator: Bytes!
-  overall: String!               # 'valid' | 'invalid'
-  detail: String                 # optional free-form detail
-  respondedAt: BigInt!
-  createdAtBlock: BigInt!
-  createdAtTx: Bytes!
+# Jinn subgraph — schema placeholder.
+#
+# PR #37's per-CID entity model (Intent, ExecutionEnvelope, SourceBundle,
+# Artifact, KnowledgeTree, Validation) was deleted as a category error against
+# the deployed ERC-8004 contracts (DR
+# docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md §2).
+#
+# The real Jinn-specific schema (Operator, Execution, Validation, Feedback
+# synthesized from IdentityRegistry / ValidationRegistry / ReputationRegistry
+# events) lands under bead jinn-mono-fud.
+#
+# `_Placeholder` exists solely so `graph build` accepts the schema while the
+# rebuilt entities are pending.
+type _Placeholder @entity(immutable: true) {
+  id: ID!
 }

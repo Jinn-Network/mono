@@ -83,7 +83,6 @@ function makeOpts(store: Store, tmp: string): RestorationEngineOptions {
     },
     packagingDeps: {
       ipfsRegistryUrl: 'http://ipfs.test',
-      registerArtifact: vi.fn(),
     },
     envelopeDeps: {
       ipfsRegistryUrl: 'http://ipfs.test',

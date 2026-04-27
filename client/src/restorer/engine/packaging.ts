@@ -69,18 +69,6 @@ export interface UploadedArtifact extends Artifact {
 export interface PackagingDeps {
   ipfsRegistryUrl: string;
   /**
-   * Called after artifact registration is ready (after manifest CID is known).
-   * The optional `parentManifestCid` is the IPFS CID of the enclosing manifest,
-   * enabling back-pointer links per spec §6.1. Fire-and-forget is fine.
-   */
-  registerArtifact?: (artifact: {
-    id: string;
-    title: string;
-    tags: string[];
-    outcome: string;
-    parentManifestCid?: string;
-  }) => void;
-  /**
    * Optional trajectory collector. When provided, a `jinn.artifact.emit` span
    * is added to the trajectory for each successfully uploaded artifact, and
    * `artifact.metadata.producedBy` is set to `{ spanId, trajectoryCid: '' }`.
@@ -396,11 +384,9 @@ export async function walkArtifacts(
 // ── Upload pipeline ───────────────────────────────────────────────────────────
 
 /**
- * Upload all collected artifacts to IPFS — NO registration.
+ * Upload all collected artifacts to IPFS.
  *
  * Returns an array of `UploadedArtifact` (= Artifact + localPath).
- * Registration is deferred until the manifest CID is known; call
- * `registerArtifacts(uploaded, parentManifestCid, deps)` afterwards.
  */
 export async function uploadArtifacts(
   artifacts: Array<{
@@ -475,25 +461,3 @@ export async function uploadArtifacts(
   return results;
 }
 
-/**
- * Register already-uploaded artifacts with a back-pointer to the parent manifest CID.
- *
- * Call this AFTER the manifest has been assembled, signed, and uploaded so that
- * `parentManifestCid` is known (spec §6.1 requirement). Fire-and-forget.
- */
-export function registerArtifacts(
-  uploaded: UploadedArtifact[],
-  parentManifestCid: string,
-  deps: PackagingDeps,
-): void {
-  if (!deps.registerArtifact) return;
-  for (const art of uploaded) {
-    deps.registerArtifact({
-      id: art.cid,
-      title: art.localPath.split('/').pop() ?? art.cid,
-      tags: art.tags ?? [art.artifactType],
-      outcome: 'uploaded',
-      parentManifestCid,
-    });
-  }
-}

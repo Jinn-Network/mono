@@ -37,7 +37,6 @@ import pluginCommand from './commands/plugin-install.js';
 import updateCommand from './commands/update.js';
 import intentsCommand from './commands/intents.js';
 import mcpCommand from './commands/mcp.js';
-import registerSourceBundleCommand from './commands/register-source-bundle.js';
 import conformanceCommand from './commands/conformance.js';
 
 const COMMANDS: CommandModule[] = [
@@ -65,7 +64,6 @@ const COMMANDS: CommandModule[] = [
   updateCommand,
   intentsCommand,
   mcpCommand,
-  registerSourceBundleCommand,
   conformanceCommand,
 ];
 

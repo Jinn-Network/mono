@@ -1,54 +1,11 @@
+# Jinn subgraph manifest — placeholder.
+#
+# PR #37 wired this against guessed IdentityRegistry / ValidationRegistry ABIs
+# and an NFT-per-CID model. Per DR
+# docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md, the
+# rebuilt operator-rooted indexer (real `0x8004…` ABIs, Operator + Execution +
+# Validation + Feedback entities) lands under bead jinn-mono-fud.
 specVersion: 1.0.0
 schema:
   file: ./schema.graphql
-dataSources:
-  - kind: ethereum/contract
-    name: IdentityRegistry
-    network: base-sepolia
-    source:
-      address: "0x0000000000000000000000000000000000000000"
-      abi: IdentityRegistry
-      startBlock: 40700000
-    mapping:
-      kind: ethereum/events
-      apiVersion: 0.0.9
-      language: wasm/assemblyscript
-      file: ./src/mapping.ts
-      entities:
-        - Agent
-        - Metadata
-        - Intent
-        - ExecutionEnvelope
-        - Artifact
-        - SourceBundle
-        - KnowledgeTree
-      abis:
-        - name: IdentityRegistry
-          file: ./abis/IdentityRegistry.json
-      eventHandlers:
-        - event: Register(indexed uint256,indexed address,string,(string,bytes)[])
-          handler: handleRegister
-  - kind: ethereum/contract
-    name: ValidationRegistry
-    network: base-sepolia
-    source:
-      address: "0x0000000000000000000000000000000000000000"
-      abi: ValidationRegistry
-      startBlock: 40700000
-    mapping:
-      kind: ethereum/events
-      apiVersion: 0.0.9
-      language: wasm/assemblyscript
-      file: ./src/mapping.ts
-      entities:
-        - ValidationRequest
-        - ValidationResponse
-        - ExecutionEnvelope
-      abis:
-        - name: ValidationRegistry
-          file: ./abis/ValidationRegistry.json
-      eventHandlers:
-        - event: ValidationRequested(indexed bytes32,indexed address,indexed bytes32,string)
-          handler: handleValidationRequested
-        - event: ValidationResponded(indexed bytes32,indexed bytes32,indexed address,string,string)
-          handler: handleValidationResponded
+dataSources: []

@@ -1,4 +1,18 @@
-# Jinn V1 Subgraph
+# Jinn Subgraph (placeholder)
+
+> **Status:** PR #37's per-CID entity model (`Intent`, `ExecutionEnvelope`,
+> `Artifact`, `SourceBundle`, `KnowledgeTree`) was deleted as a category error
+> against the deployed ERC-8004 contracts — see
+> [`docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md`](../docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
+> The rebuilt operator-rooted Jinn subgraph (synthesized `Operator`,
+> `Execution`, `Validation`, `Feedback` entities from
+> `IdentityRegistry` / `ValidationRegistry` / `ReputationRegistry` events)
+> lands under bead `jinn-mono-fud`.
+>
+> The package is kept compilable in the meantime; the manifest declares no
+> data sources and the schema contains a single `_Placeholder` entity. The
+> instructions below describe the legacy V1 stack and will be updated when
+> the new subgraph ships.
 
 The Jinn V1 subgraph indexes Plan E's ERC-8004 Identity Registry and Validation Registry events on Base Sepolia into a queryable GraphQL graph. It exposes `Intent`, `ExecutionEnvelope`, `Artifact`, `SourceBundle`, and a synthetic `KnowledgeTree` aggregate that joins restorations, verdicts, and attested-fraction counts for each intent CID.
 
