@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
-import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { describe, expect, it } from 'vitest';
+import { createWithdrawCommand } from '@/cli/commands/withdraw.js';
+import { parseWithdrawArgv } from '@/withdraw/args.js';
+import { validateWithdrawArgs } from '@/withdraw/args.js';
+import { runCommand } from '@test/cli.js';
+import type { GatheredStatusRaw } from '@/api/status-build.js';
 
 const mockRaw: GatheredStatusRaw = {
   shutdownState: null,
@@ -33,59 +36,73 @@ const mockRaw: GatheredStatusRaw = {
   masterDailyEstimateWei: '0',
 };
 
-vi.mock('../../../src/cli/introspection-context.js', () => ({
-  gatherIntrospectionRaw: vi.fn(async () => mockRaw),
-}));
-
-function makeCtx(argv: string[], tty = false): { ctx: CommandContext; writes: string[]; exits: number[] } {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv,
-    stdoutIsTty: tty,
-    writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: (c: number) => { exits.push(c); },
-    env: { JINN_PASSWORD: 'test' },
-  };
-  return { ctx, writes, exits };
-}
+/** Minimal deps covering all paths exercised by the tests below (dry-run + validation paths). */
+const fakeDeps = {
+  loadConfig: () => ({ network: 'testnet', rpcUrl: 'https://fake', earningDir: '/tmp/e' }) as any,
+  getConfigPathFromArgs: () => undefined,
+  gatherIntrospectionRaw: async () => mockRaw as GatheredStatusRaw,
+  resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+  parseWithdrawArgv,
+  validateWithdrawArgs,
+  computeSweepWouldSend: async () => false,
+  runWithdrawPlan: async () => {},
+  withdrawNeedsInteractiveConfirm: () => false,
+  decryptMnemonic: async () => 'mnemonic',
+  fleetStateStoreFactory: () => ({
+    loadMnemonicKeystore: async () => '{}',
+    tryLoadExisting: async () => null,
+  }) as any,
+  createJinnPublicClient: () => ({}) as any,
+};
 
 describe('withdraw command', () => {
   it('--dry-run emits a sweep plan', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/withdraw.js');
-    const { ctx, writes } = makeCtx([
-      '--to',
-      '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-      '--eth-amount',
-      '0.01',
-      '--dry-run',
-    ]);
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createWithdrawCommand(fakeDeps);
+    const { envelopes } = await runCommand(cmd, {
+      argv: [
+        '--to',
+        '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+        '--eth-amount',
+        '0.01',
+        '--dry-run',
+      ],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    const parsed = envelopes[envelopes.length - 1] as {
+      dryRun: boolean;
+      plan: Array<{ from: string }>;
+    };
     expect(parsed.dryRun).toBe(true);
-    expect(parsed.plan.some((p: { from: string }) => p.from === '0xM')).toBe(true);
+    expect(parsed.plan.some((p) => p.from === '0xM')).toBe(true);
   });
 
   it('missing --to emits invalid_invocation', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/withdraw.js');
-    const { ctx, writes, exits } = makeCtx(['--drain-eth', '--yes']);
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createWithdrawCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd, {
+      argv: ['--drain-eth', '--yes'],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    const parsed = envelopes[envelopes.length - 1] as {
+      code: string;
+      details?: { field?: string };
+    };
     expect(parsed.code).toBe('invalid_invocation');
     expect(parsed.details?.field).toBe('--to');
     expect(exits).toEqual([11]);
   });
 
   it('non-TTY without --yes or --dry-run refuses', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/withdraw.js');
-    const { ctx, writes, exits } = makeCtx([
-      '--to',
-      '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-      '--eth-amount',
-      '0.01',
-    ]);
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createWithdrawCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd, {
+      argv: [
+        '--to',
+        '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+        '--eth-amount',
+        '0.01',
+      ],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    const parsed = envelopes[envelopes.length - 1] as { code: string };
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
   });

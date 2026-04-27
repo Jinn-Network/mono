@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
+import { describe, expect, it } from 'vitest';
 import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { createRewardsCommand } from '@/cli/commands/rewards.js';
+import { assembleRewardsV1 } from '@/api/rewards-build.js';
+import { runCommand } from '@test/cli.js';
 
 const mockRaw: GatheredStatusRaw = {
   shutdownState: null,
@@ -34,40 +36,26 @@ const mockRaw: GatheredStatusRaw = {
   pendingStakingRewardsWei: '1000',
 };
 
-vi.mock('../../../src/cli/introspection-context.js', () => ({
-  gatherIntrospectionRaw: vi.fn(async () => mockRaw),
-}));
+const fakeDeps = {
+  gatherIntrospectionRaw: async () => mockRaw as GatheredStatusRaw,
+  assembleRewardsV1,
+};
 
 describe('rewards command', () => {
   it('emits a rewards response with lastClaimAt and service entries', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/rewards.js');
-    const writes: string[] = [];
-    const ctx: CommandContext = {
-      argv: [],
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: () => {},
-      env: {},
-    };
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createRewardsCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd);
+    expect(exits).toEqual([]);
+    expect(envelopes).toHaveLength(1);
+    const parsed = envelopes[0] as { lastClaimAt: string; services: Array<{ pending: string }> };
     expect(parsed.lastClaimAt).toBe('2026-04-14T11:00:00.000Z');
     expect(parsed.services[0].pending).toBe('1000');
   });
 
   it('emits invalid_invocation for bad flags', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/rewards.js');
-    const writes: string[] = [];
-    const exits: number[] = [];
-    const ctx: CommandContext = {
-      argv: ['--configt', '/tmp/x'],
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: (code: number) => { exits.push(code); },
-      env: {},
-    };
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createRewardsCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd, { argv: ['--configt', '/tmp/x'] });
+    const parsed = envelopes[0] as { code: string };
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
   });

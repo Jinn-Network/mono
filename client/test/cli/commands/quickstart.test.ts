@@ -1,76 +1,33 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
+import { createQuickstartCommand } from '../../../src/cli/commands/quickstart.js';
+import type { QuickstartDeps } from '../../../src/cli/commands/quickstart.js';
+import { makeCommandCtx } from '@test/cli.js';
 
-const runInitMock = vi.fn();
-const runBootstrapMock = vi.fn();
-const runDoctorMock = vi.fn();
-const loadConfigMock = vi.fn();
-const mainMock = vi.fn();
-const checkRpcNetworkMock = vi.fn();
-const checkApiPortAvailableMock = vi.fn();
-
-vi.mock('../../../src/cli/commands/init.js', () => ({
-  default: {
-    name: 'init',
-    summary: '',
-    helpText: '',
-    run: runInitMock,
-  },
-}));
-
-vi.mock('../../../src/cli/commands/bootstrap.js', () => ({
-  default: {
-    name: 'bootstrap',
-    summary: '',
-    helpText: '',
-    run: runBootstrapMock,
-  },
-}));
-
-vi.mock('../../../src/cli/commands/doctor.js', () => ({
-  default: {
-    name: 'doctor',
-    summary: '',
-    helpText: '',
-    run: runDoctorMock,
-  },
-}));
-
-vi.mock('../../../src/config.js', () => ({
-  loadConfig: loadConfigMock,
-}));
-
-vi.mock('../../../src/preflight/rpc-network.js', () => ({
-  checkRpcNetwork: checkRpcNetworkMock,
-  rpcNetworkFailureHint: () => 'fix rpc',
-}));
-
-vi.mock('../../../src/preflight/api-port.js', () => ({
-  checkApiPortAvailable: checkApiPortAvailableMock,
-  apiPortFailureMessage: (r: { port: number }) => `Port ${r.port} is already in use.`,
-}));
-
-vi.mock('../../../src/main.js', () => ({
-  main: mainMock,
-}));
-
-function makeCtx(argv: string[] = [], env: Record<string, string> = { JINN_PASSWORD: 'test-password' }): {
-  ctx: CommandContext;
-  writes: string[];
-  exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
+function makeFakeDeps(overrides: Partial<QuickstartDeps> = {}): QuickstartDeps {
   return {
-    ctx: {
-      argv,
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: (code: number) => { exits.push(code); },
-      env,
+    loadConfig: vi.fn(() => ({
+      network: 'testnet',
+      rpcUrl: 'https://sepolia.base.org',
+      apiPort: 7331,
+    })) as unknown as QuickstartDeps['loadConfig'],
+    getConfigPathFromArgs: vi.fn(() => undefined) as unknown as QuickstartDeps['getConfigPathFromArgs'],
+    checkRpcNetwork: vi.fn(async () => ({ ok: true as const })) as unknown as QuickstartDeps['checkRpcNetwork'],
+    rpcNetworkFailureHint: vi.fn(() => 'fix rpc') as unknown as QuickstartDeps['rpcNetworkFailureHint'],
+    checkApiPortAvailable: vi.fn(async () => ({ ok: true as const, port: 7331 })) as unknown as QuickstartDeps['checkApiPortAvailable'],
+    apiPortFailureMessage: vi.fn((r: { port: number }) => `Port ${r.port} is already in use.`) as unknown as QuickstartDeps['apiPortFailureMessage'],
+    mainFn: vi.fn(async () => ({})),
+    initRun: vi.fn(),
+    bootstrapRun: vi.fn(),
+    doctorRun: vi.fn(),
+    passwordFileIO: {
+      exists: vi.fn(() => false),
+      read: vi.fn(() => ''),
+      write: vi.fn(),
+      ensureDir: vi.fn(),
     },
-    writes,
-    exits,
+    randomBytesFn: vi.fn(() => Buffer.from('deadbeef'.repeat(8), 'hex')),
+    ...overrides,
   };
 }
 
@@ -83,47 +40,45 @@ describe('quickstart command', () => {
   it('passes --config through to bootstrap and disables faucet retries while polling', async () => {
     vi.useFakeTimers();
 
-    runDoctorMock.mockImplementation(async (ctx: CommandContext) => {
-      ctx.writer.write(JSON.stringify({ ok: true, blockingCount: 0, checks: [] }));
-    });
-
-    runInitMock.mockImplementation(async (ctx: CommandContext) => {
-      ctx.writer.write(JSON.stringify({ master: '0xmaster' }));
-      ctx.exit(0);
-    });
-
-    runBootstrapMock
-      .mockImplementationOnce(async (ctx: CommandContext) => {
-        ctx.writer.write(JSON.stringify({
-          code: 'funding_required',
-          details: { address: '0xmaster' },
-          hint: 'Fund the wallet.',
-        }));
-        ctx.exit(10);
-      })
-      .mockImplementationOnce(async (ctx: CommandContext) => {
-        ctx.writer.write(JSON.stringify({ ok: true }));
+    const fakeDeps = makeFakeDeps({
+      loadConfig: vi.fn(() => ({ apiPort: 9555, network: 'testnet', rpcUrl: 'https://sepolia.base.org' })) as unknown as QuickstartDeps['loadConfig'],
+      checkApiPortAvailable: vi.fn(async () => ({ ok: true as const, port: 9555 })) as unknown as QuickstartDeps['checkApiPortAvailable'],
+      doctorRun: vi.fn(async (ctx: CommandContext) => {
+        ctx.writer.write(JSON.stringify({ ok: true, blockingCount: 0, checks: [] }));
+      }),
+      initRun: vi.fn(async (ctx: CommandContext) => {
+        ctx.writer.write(JSON.stringify({ master: '0xmaster' }));
         ctx.exit(0);
-      });
+      }),
+      bootstrapRun: vi.fn()
+        .mockImplementationOnce(async (ctx: CommandContext) => {
+          ctx.writer.write(JSON.stringify({
+            code: 'funding_required',
+            details: { address: '0xmaster' },
+            hint: 'Fund the wallet.',
+          }));
+          ctx.exit(10);
+        })
+        .mockImplementationOnce(async (ctx: CommandContext) => {
+          ctx.writer.write(JSON.stringify({ ok: true }));
+          ctx.exit(0);
+        }) as unknown as QuickstartDeps['bootstrapRun'],
+    });
 
-    loadConfigMock.mockReturnValue({ apiPort: 9555, network: 'testnet', rpcUrl: 'https://sepolia.base.org' });
-    checkRpcNetworkMock.mockResolvedValue({ ok: true });
-    checkApiPortAvailableMock.mockResolvedValue({ ok: true, port: 9555 });
-
-    const { default: quickstart } = await import('../../../src/cli/commands/quickstart.js');
-    const { ctx, writes, exits } = makeCtx(['--config', '/tmp/custom.json', '--no-daemon']);
+    const quickstart = createQuickstartCommand(fakeDeps);
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--config', '/tmp/custom.json', '--no-daemon'], env: { JINN_PASSWORD: 'test-password' } });
 
     const runPromise = quickstart.run(ctx);
     await vi.advanceTimersByTimeAsync(15_000);
     await runPromise;
 
-    expect(runBootstrapMock).toHaveBeenCalledTimes(2);
-    expect(checkApiPortAvailableMock).not.toHaveBeenCalled();
-    expect(runBootstrapMock.mock.calls[0]?.[0]).toMatchObject({
+    expect(fakeDeps.bootstrapRun).toHaveBeenCalledTimes(2);
+    expect(fakeDeps.checkApiPortAvailable).not.toHaveBeenCalled();
+    expect((fakeDeps.bootstrapRun as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toMatchObject({
       argv: ['--json', '--config', '/tmp/custom.json'],
       env: expect.objectContaining({ JINN_PASSWORD: 'test-password' }),
     });
-    expect(runBootstrapMock.mock.calls[1]?.[0]).toMatchObject({
+    expect((fakeDeps.bootstrapRun as ReturnType<typeof vi.fn>).mock.calls[1]?.[0]).toMatchObject({
       argv: ['--json', '--config', '/tmp/custom.json'],
       env: expect.objectContaining({
         JINN_PASSWORD: 'test-password',
@@ -138,18 +93,19 @@ describe('quickstart command', () => {
   });
 
   it('fails before bootstrap when daemon mode needs an occupied api port', async () => {
-    loadConfigMock.mockReturnValue({ apiPort: 7331, network: 'testnet', rpcUrl: 'https://sepolia.base.org' });
-    checkRpcNetworkMock.mockResolvedValue({ ok: true });
-    checkApiPortAvailableMock.mockResolvedValue({ ok: false, port: 7331, code: 'EADDRINUSE', message: 'in use' });
+    const fakeDeps = makeFakeDeps({
+      loadConfig: vi.fn(() => ({ apiPort: 7331, network: 'testnet', rpcUrl: 'https://sepolia.base.org' })) as unknown as QuickstartDeps['loadConfig'],
+      checkApiPortAvailable: vi.fn(async () => ({ ok: false as const, port: 7331, code: 'EADDRINUSE', message: 'in use' })) as unknown as QuickstartDeps['checkApiPortAvailable'],
+    });
 
-    const { default: quickstart } = await import('../../../src/cli/commands/quickstart.js');
-    const { ctx, writes, exits } = makeCtx([]);
+    const quickstart = createQuickstartCommand(fakeDeps);
+    const { ctx, writes, exits } = makeCommandCtx({ argv: [], env: { JINN_PASSWORD: 'test-password' } });
     await quickstart.run(ctx);
 
     const parsed = JSON.parse(writes[writes.length - 1] ?? '{}');
     expect(parsed.code).toBe('invalid_invocation');
     expect(parsed.details).toMatchObject({ field: 'apiPort', port: 7331 });
-    expect(runBootstrapMock).not.toHaveBeenCalled();
+    expect(fakeDeps.bootstrapRun).not.toHaveBeenCalled();
     expect(exits).toEqual([11]);
   });
 });

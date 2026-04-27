@@ -52,12 +52,12 @@
     "release:testnet-acceptance:docker": "node scripts/testnet-acceptance-docker.mjs",
     "release:testnet-acceptance:host": "node scripts/testnet-acceptance.mjs",
     "status": "tsx scripts/status.ts",
-    "e2e": "tsx scripts/e2e-validate.ts",
-    "e2e-portfolio-v0": "tsx scripts/e2e-portfolio-v0.ts",
-    "e2e-prediction-apy-v0": "tsx scripts/e2e-prediction-apy-v0.ts",
-    "e2e:prediction": "cd ../contracts && yarn compile && cd ../client && tsx scripts/e2e-prediction-v0.ts",
-    "staking": "tsx scripts/staking-validate.ts",
-    "stolas": "tsx scripts/stolas-validate.ts",
+    "e2e": "tsx test/e2e/validate.ts",
+    "e2e-portfolio-v0": "tsx test/e2e/portfolio-v0.ts",
+    "e2e-prediction-apy-v0": "tsx test/e2e/prediction-apy-v0.ts",
+    "e2e:prediction": "cd ../contracts && yarn compile && cd ../client && tsx test/e2e/prediction-v0.ts",
+    "staking": "tsx test/e2e/staking.ts",
+    "stolas": "tsx test/e2e/stolas.ts",
     "withdraw": "tsx scripts/withdraw.ts"
   },
   "dependencies": {

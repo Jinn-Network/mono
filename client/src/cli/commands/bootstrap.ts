@@ -1,11 +1,15 @@
-import type { CommandContext, CommandModule } from '../command.js';
+import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
-import { loadConfig } from '../../config.js';
+import { loadConfig as defaultLoadConfig, getConfigPathFromArgs as defaultGetConfigPathFromArgs } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
-import { resolveCliPassword } from '../password.js';
-import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
+import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
+import {
+  checkRpcNetwork as defaultCheckRpcNetwork,
+  logRpcLocalDevToStderr as defaultLogRpcLocalDevToStderr,
+  rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
+} from '../../preflight/rpc-network.js';
 
 /** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
 function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
@@ -29,78 +33,25 @@ function humanBootstrapSuccess(payload: {
   return lines.join('\n');
 }
 
-async function run(ctx: CommandContext): Promise<void> {
-  let json = false;
-  let human = false;
-  let configPath: string | undefined;
-  try {
-    const parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS });
-    json = Boolean(parsed.values.json);
-    human = Boolean(parsed.values.human);
-    configPath =
-      typeof parsed.values.config === 'string' && parsed.values.config.length > 0
-        ? parsed.values.config
-        : undefined;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: 'Invalid command-line arguments.',
-        hint: 'Run `jinn bootstrap --help` for supported flags.',
-        exampleCli: 'jinn bootstrap --json',
-        details: { field: 'argv', expected: message },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
+export interface BootstrapDeps extends BaseCommandDeps {
+  checkRpcNetwork: typeof defaultCheckRpcNetwork;
+  rpcNetworkFailureHint: typeof defaultRpcNetworkFailureHint;
+  logRpcLocalDevToStderr: typeof defaultLogRpcLocalDevToStderr;
+  bootstrapperFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => FleetBootstrapper;
+  resolveCliPassword: typeof defaultResolveCliPassword;
+}
 
-  const password = resolveCliPassword(ctx.argv, ctx.env);
-  if (!password.ok) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: password.message,
-        hint: 'Set JINN_PASSWORD or pass --password-fd N, then re-run.',
-        exampleCli: 'jinn bootstrap --json',
-        details: { field: 'keystore password', expected: 'non-empty string via environment or fd' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-
-  const config = loadConfig(configPath);
-  const rpcPreflight = await checkRpcNetwork(config);
-  if (!rpcPreflight.ok) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: rpcPreflight.message,
-        hint: rpcNetworkFailureHint(rpcPreflight),
-        exampleCli: 'jinn doctor --human',
-        details: {
-          field: 'rpcUrl',
-          network: rpcPreflight.network,
-          expectedChainId: rpcPreflight.expectedChainId,
-          actualChainId: rpcPreflight.actualChainId ?? null,
-          rpcHost: rpcPreflight.rpcHost,
-          reason: rpcPreflight.reason,
-        },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-  // Log to real stderr; `ctx.writer` is stdout and must stay a single JSON (or
-  // human) line for `emitResult` / `emitEnvelope` contracts.
-  logRpcLocalDevToStderr(rpcPreflight);
-  const bootstrapper = new FleetBootstrapper({
+const PRODUCTION_DEPS: BootstrapDeps = {
+  loadConfig: defaultLoadConfig,
+  getConfigPathFromArgs: defaultGetConfigPathFromArgs,
+  checkRpcNetwork: defaultCheckRpcNetwork,
+  rpcNetworkFailureHint: defaultRpcNetworkFailureHint,
+  logRpcLocalDevToStderr: defaultLogRpcLocalDevToStderr,
+  bootstrapperFactory: (config) => new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: config.network === 'testnet' ? 'base-sepolia' : 'base',
     rpcUrl: config.rpcUrl,
-    env: ctx.env,
+    env: (config as any).env,
     stakingMode: config.stakingMode,
     targetServices: config.targetServices,
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
@@ -110,91 +61,166 @@ async function run(ctx: CommandContext): Promise<void> {
     testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
     pollIntervalMs: config.pollIntervalMs,
-  });
+  }),
+  resolveCliPassword: defaultResolveCliPassword,
+};
 
-  let result: Awaited<ReturnType<FleetBootstrapper['bootstrap']>>;
-  try {
-    result = await bootstrapper.bootstrap(password.password);
-  } catch (err) {
-    const cause = err instanceof Error ? err.message : String(err);
-    const message =
-      err instanceof Error && err.message.trim().length > 0
-        ? err.message
-        : 'Bootstrap failed with an unexpected error.';
-    const details: Record<string, unknown> = { cause };
-    if (envelopeDebug(ctx.env) && err instanceof Error && err.stack) {
-      details.stack = err.stack;
-    }
-    emitEnvelope(
-      {
-        code: 'fatal',
-        message,
-        details,
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-
-  if (result.funding) {
-    emitEnvelope(
-      {
-        code: 'funding_required',
-        message: result.message,
-        hint: 'Fund the listed address and re-run jinn bootstrap.',
-        exampleCli: 'jinn fund-requirements --json',
-        details: {
-          role: 'master',
-          address: result.funding.master_address,
-          asset: 'native',
-          needWei: result.funding.eth_required,
-          haveWei: result.funding.eth_balance,
+export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): CommandModule {
+  async function run(ctx: CommandContext): Promise<void> {
+    let json = false;
+    let human = false;
+    let configPath: string | undefined;
+    try {
+      const parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS });
+      json = Boolean(parsed.values.json);
+      human = Boolean(parsed.values.human);
+      configPath =
+        typeof parsed.values.config === 'string' && parsed.values.config.length > 0
+          ? parsed.values.config
+          : undefined;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: 'Invalid command-line arguments.',
+          hint: 'Run `jinn bootstrap --help` for supported flags.',
+          exampleCli: 'jinn bootstrap --json',
+          details: { field: 'argv', expected: message },
         },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const password = deps.resolveCliPassword(ctx.argv, ctx.env);
+    if (!password.ok) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: password.message,
+          hint: 'Set JINN_PASSWORD or pass --password-fd N, then re-run.',
+          exampleCli: 'jinn bootstrap --json',
+          details: { field: 'keystore password', expected: 'non-empty string via environment or fd' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const config = deps.loadConfig(configPath);
+    const rpcPreflight = await deps.checkRpcNetwork(config);
+    if (!rpcPreflight.ok) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: rpcPreflight.message,
+          hint: deps.rpcNetworkFailureHint(rpcPreflight),
+          exampleCli: 'jinn doctor --human',
+          details: {
+            field: 'rpcUrl',
+            network: rpcPreflight.network,
+            expectedChainId: rpcPreflight.expectedChainId,
+            actualChainId: rpcPreflight.actualChainId ?? null,
+            rpcHost: rpcPreflight.rpcHost,
+            reason: rpcPreflight.reason,
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    // Log to real stderr; `ctx.writer` is stdout and must stay a single JSON (or
+    // human) line for `emitResult` / `emitEnvelope` contracts.
+    deps.logRpcLocalDevToStderr(rpcPreflight);
+
+    // Pass env into config so bootstrapperFactory can forward it to FleetBootstrapper.
+    const configWithEnv = { ...config, env: ctx.env };
+    const bootstrapper = deps.bootstrapperFactory(configWithEnv as any);
+
+    let result: Awaited<ReturnType<FleetBootstrapper['bootstrap']>>;
+    try {
+      result = await bootstrapper.bootstrap(password.password);
+    } catch (err) {
+      const cause = err instanceof Error ? err.message : String(err);
+      const message =
+        err instanceof Error && err.message.trim().length > 0
+          ? err.message
+          : 'Bootstrap failed with an unexpected error.';
+      const details: Record<string, unknown> = { cause };
+      if (envelopeDebug(ctx.env) && err instanceof Error && err.stack) {
+        details.stack = err.stack;
+      }
+      emitEnvelope(
+        {
+          code: 'fatal',
+          message,
+          details,
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    if (result.funding) {
+      emitEnvelope(
+        {
+          code: 'funding_required',
+          message: result.message,
+          hint: 'Fund the listed address and re-run jinn bootstrap.',
+          exampleCli: 'jinn fund-requirements --json',
+          details: {
+            role: 'master',
+            address: result.funding.master_address,
+            asset: 'native',
+            needWei: result.funding.eth_required,
+            haveWei: result.funding.eth_balance,
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    if (!result.ok) {
+      emitEnvelope(
+        {
+          code: 'fatal',
+          message: result.message,
+          hint: 'Bootstrap failed before the fleet reached a runnable state.',
+          details: { cause: result.message },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const state = result.fleet_state;
+    const payload = {
+      schemaVersion: 1 as const,
+      generatedAt: new Date().toISOString(),
+      master: state.master_address ?? '',
+      services: state.services.map((s) => ({
+        index: s.index,
+        step: s.step,
+        serviceId: s.service_id ?? null,
+      })),
+    };
+
+    emitResult(payload, (v) => humanBootstrapSuccess(v as typeof payload), {
+      json,
+      human,
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env['NO_COLOR']),
+    });
+    ctx.exit(0);
   }
 
-  if (!result.ok) {
-    emitEnvelope(
-      {
-        code: 'fatal',
-        message: result.message,
-        hint: 'Bootstrap failed before the fleet reached a runnable state.',
-        details: { cause: result.message },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-
-  const state = result.fleet_state;
-  const payload = {
-    schemaVersion: 1 as const,
-    generatedAt: new Date().toISOString(),
-    master: state.master_address ?? '',
-    services: state.services.map((s) => ({
-      index: s.index,
-      step: s.step,
-      serviceId: s.service_id ?? null,
-    })),
-  };
-
-  emitResult(payload, (v) => humanBootstrapSuccess(v as typeof payload), {
-    json,
-    human,
-    writer: ctx.writer,
-    stdoutIsTty: ctx.stdoutIsTty,
-    noColor: Boolean(ctx.env['NO_COLOR']),
-  });
-  ctx.exit(0);
-}
-
-const command: CommandModule = {
-  name: 'bootstrap',
-  summary: 'Advance the fleet state machine toward a running daemon',
-  helpText: `Usage: jinn bootstrap [--human] [--config <path>] [--password-fd <fd>]
+  return {
+    name: 'bootstrap',
+    summary: 'Advance the fleet state machine toward a running daemon',
+    helpText: `Usage: jinn bootstrap [--human] [--config <path>] [--password-fd <fd>]
 
 Idempotent. Walks the fleet state machine from wherever it is toward
 a complete, running state. Re-run as many times as needed; the
@@ -214,7 +240,9 @@ Failure example (funding gate):
   $ echo $?
   10
 `,
-  run,
-};
+    run,
+  };
+}
 
+const command: CommandModule = createBootstrapCommand();
 export default command;

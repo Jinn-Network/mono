@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mock the mech adapter helpers ─────────────────────────────────────────────
 
+// MOCK_JUSTIFICATION: src/adapters/mech/ipfs.js is the I/O leaf for IPFS gateway HTTP calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   cidToDigestHex: vi.fn().mockReturnValue('0xdeadbeef00000000000000000000000000000000000000000000000000000000' as `0x${string}`),
   uploadToIpfs: vi.fn(),
@@ -10,6 +11,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   digestHexToGatewayUrl: vi.fn(),
 }));
 
+// MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   callDeliverToMarketplace: vi.fn().mockResolvedValue('0xdeliverytx' as `0x${string}`),
   claimDelivery: vi.fn().mockResolvedValue('0xclaimtx' as `0x${string}`),

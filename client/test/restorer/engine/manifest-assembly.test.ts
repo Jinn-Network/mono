@@ -5,6 +5,7 @@ import { canonicalJson } from '../../../src/restorer/engine/canonical-json.js';
 
 // ── Mock IPFS upload ──────────────────────────────────────────────────────────
 
+// MOCK_JUSTIFICATION: src/adapters/mech/ipfs.js is the I/O leaf for IPFS gateway HTTP calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn().mockResolvedValue('bafymanifest123'),
   cidToDigestHex: vi.fn().mockReturnValue('0xdeadbeef00000000000000000000000000000000000000000000000000000000'),

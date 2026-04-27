@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { ClaudeMcpPredictionApyImpl } from '../../../../src/restorer/impls/claude-mcp-prediction-apy/index.js';
-import type { RestorationContext } from '../../../../src/restorer/types.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 
 function makeIntent() {
   const now = Date.now();
@@ -34,20 +33,13 @@ function makeIntent() {
   } as unknown as import('../../../../src/types/desired-state.js').DesiredState;
 }
 
-function makeCtx(): RestorationContext {
-  const tmp = mkdtempSync(join(tmpdir(), 'apy-claude-test-'));
-  const workingDir = join(tmp, 'work');
-  const implStateDir = join(tmp, 'state');
-  mkdirSync(workingDir);
-  mkdirSync(implStateDir);
-  return {
+function makeCtx() {
+  return makeRestorationCtx({
     intent: makeIntent(),
-    workingDir,
-    implStateDir,
-    log: () => {},
-    abort: new AbortController().signal,
+    prefix: 'apy-claude-test-',
+    separateDirs: true,
     msUntilEndTs: () => 3_600_000,
-  };
+  });
 }
 
 describe('ClaudeMcpPredictionApyImpl (mocked session)', () => {

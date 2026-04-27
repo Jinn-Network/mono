@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { ClaudeMcpPredictionImpl } from '../../../../src/restorer/impls/claude-mcp-prediction/index.js';
-import type { RestorationContext } from '../../../../src/restorer/types.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 
 function makeIntent() {
   return {
@@ -28,24 +27,15 @@ function makeIntent() {
   } as unknown as import('../../../../src/types/desired-state.js').DesiredState;
 }
 
-function makeCtx(): RestorationContext {
-  const tmp = mkdtempSync(join(tmpdir(), 'pred-claude-test-'));
-  const workingDir = join(tmp, 'work');
-  const implStateDir = join(tmp, 'state');
-  mkdirSync(workingDir);
-  mkdirSync(implStateDir);
-  // The impl writes prediction.json at dirname(transcriptPath)/../../ —
-  // for test mode, transcriptPath is typically workingDir/sessions/<id>/transcript.txt
-  // so ../../.. resolves back to workingDir. Create the sessions subdir for tests
-  // that craft their own transcriptPath.
-  return {
+function makeCtx() {
+  // separateDirs=true allocates separate workingDir + implStateDir under one temp root,
+  // matching the original helper's layout.
+  return makeRestorationCtx({
     intent: makeIntent(),
-    workingDir,
-    implStateDir,
-    log: () => {},
-    abort: new AbortController().signal,
+    prefix: 'pred-claude-test-',
+    separateDirs: true,
     msUntilEndTs: () => 3_600_000,
-  };
+  });
 }
 
 describe('ClaudeMcpPredictionImpl (mocked session)', () => {

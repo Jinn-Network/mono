@@ -1,40 +1,34 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
-import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { describe, expect, it } from 'vitest';
+import { createHistoryCommand } from '@/cli/commands/history.js';
+import { assembleHistoryV1 } from '@/api/history-build.js';
+import { runCommand } from '@test/cli.js';
+import type { GatheredStatusRaw } from '@/api/status-build.js';
+import type { ActivityEventRow } from '@/store/store.js';
 
-const mockStoreRows = [
+const mockStoreRows: ActivityEventRow[] = [
   {
     id: 1,
     ts: '2026-04-14T12:00:00.000Z',
-    kind: 'delivered' as const,
-    requestId: 'req_2' as const,
-    serviceIndex: null as const,
-    txHash: null as const,
-    specKind: null as const,
-    outcome: 'ok' as const,
+    kind: 'delivered',
+    requestId: 'req_2',
+    serviceIndex: null,
+    txHash: null,
+    specKind: null,
+    outcome: 'ok',
+    detail: null,
   },
   {
     id: 2,
     ts: '2026-04-14T11:00:00.000Z',
-    kind: 'created' as const,
-    requestId: 'req_1' as const,
-    serviceIndex: null as const,
-    txHash: null as const,
-    specKind: null as const,
-    outcome: 'ok' as const,
+    kind: 'created',
+    requestId: 'req_1',
+    serviceIndex: null,
+    txHash: null,
+    specKind: null,
+    outcome: 'ok',
+    detail: null,
   },
 ];
-
-vi.mock('../../../src/store/store.js', () => ({
-  Store: class {
-    getRecentActivityEvents(
-      limit: number,
-      _opts: { since?: string; cursor?: string } = {},
-    ) {
-      return mockStoreRows.slice(0, limit);
-    }
-  },
-}));
 
 const mockRaw: GatheredStatusRaw = {
   shutdownState: null,
@@ -50,45 +44,35 @@ const mockRaw: GatheredStatusRaw = {
   masterDailyEstimateWei: '0',
 };
 
-vi.mock('../../../src/cli/introspection-context.js', () => ({
-  gatherIntrospectionRaw: vi.fn(async () => mockRaw),
-}));
+function makeFakeStore(rows: ActivityEventRow[]) {
+  return {
+    getRecentActivityEvents: (
+      limit: number,
+      _opts: { since?: string; cursor?: string } = {},
+    ) => rows.slice(0, limit),
+  } as any;
+}
 
-vi.mock('../../../src/config.js', () => ({
-  loadConfig: () => ({
-    dbPath: '/tmp/history-mock.db',
-  }),
+const fakeDeps = {
+  loadConfig: () => ({ dbPath: '/tmp/history-mock.db' }) as any,
   getConfigPathFromArgs: () => undefined,
-}));
+  storeFactory: (_path: string) => makeFakeStore(mockStoreRows),
+  gatherIntrospectionRaw: async () => mockRaw as GatheredStatusRaw,
+  assembleHistoryV1,
+};
 
 describe('history command', () => {
   it('emits events from local activity store', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/history.js');
-    const writes: string[] = [];
-    const ctx: CommandContext = {
-      argv: [],
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: () => {},
-      env: {},
-    };
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createHistoryCommand(fakeDeps);
+    const { envelopes } = await runCommand(cmd);
+    const parsed = envelopes[envelopes.length - 1] as { events: unknown[] };
     expect(parsed.events.length).toBe(2);
   });
 
   it('respects --limit', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/history.js');
-    const writes: string[] = [];
-    const ctx: CommandContext = {
-      argv: ['--limit', '1'],
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: () => {},
-      env: {},
-    };
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createHistoryCommand(fakeDeps);
+    const { envelopes } = await runCommand(cmd, { argv: ['--limit', '1'] });
+    const parsed = envelopes[envelopes.length - 1] as { events: unknown[] };
     expect(parsed.events).toHaveLength(1);
   });
 });

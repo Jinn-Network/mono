@@ -5,18 +5,53 @@ import { fileURLToPath } from 'node:url';
 import type { Address } from 'viem';
 import { createPublicClient, http } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import type { CommandContext, CommandModule } from '../command.js';
+import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
-import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../../preflight/claude-binary.js';
-import { detectAuthContext, probeClaudeAuth } from '../../preflight/claude-auth.js';
-import { getConfigPathFromArgs, loadConfig, type JinnConfig } from '../../config.js';
+import { checkClaudeBinary as defaultCheckClaudeBinary, type ClaudeBinaryCheckResult } from '../../preflight/claude-binary.js';
+import {
+  detectAuthContext as defaultDetectAuthContext,
+  probeClaudeAuth as defaultProbeClaudeAuth,
+} from '../../preflight/claude-auth.js';
+import {
+  getConfigPathFromArgs as defaultGetConfigPathFromArgs,
+  loadConfig as defaultLoadConfig,
+  type JinnConfig,
+} from '../../config.js';
 import { getChainConfig, ERC20_ABI } from '../../earning/contracts.js';
-import { runPortfolioV0DoctorChecks } from '../../api/portfolio-v0-doctor.js';
+import { runPortfolioV0DoctorChecks as defaultRunPortfolioV0DoctorChecks } from '../../api/portfolio-v0-doctor.js';
 import { mnemonicKeystorePath } from '../../earning/store.js';
-import { checkRpcNetwork, rpcNetworkFailureHint } from '../../preflight/rpc-network.js';
+import {
+  checkRpcNetwork as defaultCheckRpcNetwork,
+  rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
+} from '../../preflight/rpc-network.js';
 import { SPEC_KINDS } from '../../intents/kinds/index.js';
+
+export interface DoctorDeps extends BaseCommandDeps {
+  checkClaudeBinary: typeof defaultCheckClaudeBinary;
+  checkRpcNetwork: typeof defaultCheckRpcNetwork;
+  rpcNetworkFailureHint: typeof defaultRpcNetworkFailureHint;
+  runPortfolioV0DoctorChecks: typeof defaultRunPortfolioV0DoctorChecks;
+  /** Probes the distributor's OLAS balance via real RPC; tests inject a fake to avoid network hangs. */
+  checkDistributorReachable: (config: JinnConfig) => Promise<CheckResult | null>;
+  /** Detects whether claude runs in a container/compose/bare context. */
+  detectAuthContext: typeof defaultDetectAuthContext;
+  /** Probes claude auth status via subprocess; tests inject a fake to avoid spawning claude. */
+  probeClaudeAuth: typeof defaultProbeClaudeAuth;
+}
+
+const PRODUCTION_DEPS: DoctorDeps = {
+  loadConfig: defaultLoadConfig,
+  getConfigPathFromArgs: defaultGetConfigPathFromArgs,
+  checkClaudeBinary: defaultCheckClaudeBinary,
+  checkRpcNetwork: defaultCheckRpcNetwork,
+  rpcNetworkFailureHint: defaultRpcNetworkFailureHint,
+  runPortfolioV0DoctorChecks: defaultRunPortfolioV0DoctorChecks,
+  checkDistributorReachable,
+  detectAuthContext: defaultDetectAuthContext,
+  probeClaudeAuth: defaultProbeClaudeAuth,
+};
 
 interface CheckResult {
   name: string;
@@ -211,118 +246,144 @@ async function checkDistributorReachable(config: JinnConfig): Promise<CheckResul
   }
 }
 
-async function checkRpcNetworkForDoctor(config: JinnConfig): Promise<CheckResult> {
-  const result = await checkRpcNetwork(config);
-  if (result.ok) {
-    const detail = result.localDev
-      ? `${result.rpcHost} reports chainId ${result.actualChainId} for config network ${result.network} (local loopback; Anvil/Hardhat id, not Base ${result.expectedChainId} — expected for local forks).`
-      : `${result.rpcHost} reports chain ${result.actualChainId} for ${result.network}`;
+export function createDoctorCommand(deps: DoctorDeps = PRODUCTION_DEPS): CommandModule {
+  async function checkRpcNetworkForDoctor(config: JinnConfig): Promise<CheckResult> {
+    const result = await deps.checkRpcNetwork(config);
+    if (result.ok) {
+      const detail = result.localDev
+        ? `${result.rpcHost} reports chainId ${result.actualChainId} for config network ${result.network} (local loopback; Anvil/Hardhat id, not Base ${result.expectedChainId} — expected for local forks).`
+        : `${result.rpcHost} reports chain ${result.actualChainId} for ${result.network}`;
+      return {
+        name: 'rpc_network',
+        ok: true,
+        detail,
+        rpcStatus: result.localDev ? 'local_dev_override' : 'matched',
+        rpc: {
+          host: result.rpcHost,
+          network: result.network,
+          expectedChainId: result.expectedChainId,
+          actualChainId: result.actualChainId,
+        },
+      };
+    }
     return {
       name: 'rpc_network',
-      ok: true,
-      detail,
-      rpcStatus: result.localDev ? 'local_dev_override' : 'matched',
-      rpc: {
-        host: result.rpcHost,
-        network: result.network,
-        expectedChainId: result.expectedChainId,
-        actualChainId: result.actualChainId,
-      },
+      ok: false,
+      detail: result.message,
+      remedy: deps.rpcNetworkFailureHint(result),
     };
   }
-  return {
-    name: 'rpc_network',
-    ok: false,
-    detail: result.message,
-    remedy: rpcNetworkFailureHint(result),
-  };
-}
 
-async function checkClaudeAuth(config: JinnConfig): Promise<CheckResult> {
-  const cwd = process.cwd();
-  const context = detectAuthContext({ cwd, configuredMode: config.runtimeMode });
-  const probe = probeClaudeAuth({ context, cwd });
-  return {
-    name: 'claude_auth',
-    ok: probe.authenticated,
-    detail: probe.authenticated
-      ? `${probe.detail} (${context})`
-      : `Not authenticated (${context})`,
-    ...(probe.authenticated
-      ? {}
-      : { remedy: 'Run `jinn auth` to authenticate Claude.' }),
-  };
-}
-
-async function run(ctx: CommandContext): Promise<void> {
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: ctx.argv,
-      options: { ...COMMON_FLAGS },
-      allowPositionals: false,
-    });
-  } catch (err) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: err instanceof Error ? err.message : String(err),
-        exampleCli: 'jinn doctor',
-        details: { field: 'flags' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-  const configPath =
-    getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
-  const config = loadConfig(configPath);
-  const checks: CheckResult[] = [];
-
-  checks.push(await checkNodeVersion());
-
-  const claudeResult = await checkClaudeBinary(config.claudePath);
-  checks.push(claudeBinaryCheckForDoctor(config.claudePath, claudeResult));
-  checks.push(await checkClaudeAuth(config));
-
-  checks.push(checkKeystorePresent(config.earningDir));
-  checks.push(await checkRpcNetworkForDoctor(config));
-  checks.push(await checkDeploymentLoaded(config));
-  checks.push(checkDaemonRuntimeReady());
-
-  const distributorCheck = await checkDistributorReachable(config);
-  if (distributorCheck) checks.push(distributorCheck);
-
-  // portfolio.v0 checks — only run if the operator has configured a
-  // portfolio.v0 desired state. Otherwise, reporting `hl_api_wallet: fail`
-  // on a fresh operator who hasn't submitted an HL intent is false-alarm
-  // noise. Operators who want the HL-specific preflight in isolation can
-  // run those checks under a dedicated verb once one exists.
-  const portfolioKind = SPEC_KINDS['portfolio.v0']!.kind;
-  const hasPortfolioV0 = config.desiredStates.some((d) => d.spec?.kind === portfolioKind);
-  if (hasPortfolioV0) {
-    const implStateDirRoot = config.engine.implStateDirRoot;
-    const hlImplStateDir = join(implStateDirRoot, 'claude-mcp-hyperliquid');
-    const portfolioChecks = runPortfolioV0DoctorChecks(hlImplStateDir);
-    checks.push(...portfolioChecks);
+  async function checkClaudeAuth(config: JinnConfig): Promise<CheckResult> {
+    const cwd = process.cwd();
+    const context = deps.detectAuthContext({ cwd, configuredMode: config.runtimeMode });
+    const probe = deps.probeClaudeAuth({ context, cwd });
+    return {
+      name: 'claude_auth',
+      ok: probe.authenticated,
+      detail: probe.authenticated
+        ? `${probe.detail} (${context})`
+        : `Not authenticated (${context})`,
+      ...(probe.authenticated
+        ? {}
+        : { remedy: 'Run `jinn auth` to authenticate Claude.' }),
+    };
   }
 
-  const blockingCount = checks.filter((c) => !c.ok).length;
-  const payload = {
-    schemaVersion: 1 as const,
-    generatedAt: new Date().toISOString(),
-    checks,
-    ok: blockingCount === 0,
-    blockingCount,
-  };
+  return {
+    name: 'doctor',
+    summary: 'Preflight checks: answers "would jinn run work?" without running it',
+    helpText: `Usage: jinn doctor [--human] [--config <path>]
 
-  emitResult(payload, (v) => humanDoctor(v as typeof payload), {
-    json: Boolean(parsed.values.json),
-    human: Boolean(parsed.values.human),
-    writer: ctx.writer,
-    stdoutIsTty: ctx.stdoutIsTty,
-    noColor: Boolean(ctx.env['NO_COLOR']),
-  });
+Runs a set of non-mutating checks against the local environment and
+configuration:
+  - node_version                Node.js >= 20
+  - claude_binary               claude CLI resolvable on PATH
+  - claude_auth                 Claude CLI authenticated
+  - keystore_present            mnemonic keystore in configured earning directory (optional)
+  - deployment_loaded           testnet/mainnet contract addresses resolved
+  - portfolio_impl_state_dir    HL impl state directory present and readable
+  - hl_api_wallet               HL API wallet generated and approved by operator
+
+By default, emits a machine-readable JSON object with a checks array,
+an overall ok flag, and a blockingCount. Exit code is 0 even when
+checks fail — callers read the result to decide whether to proceed.
+
+Examples:
+  jinn doctor
+  jinn doctor --human
+`,
+    async run(ctx: CommandContext): Promise<void> {
+      let parsed;
+      try {
+        parsed = parseArgs({
+          args: ctx.argv,
+          options: { ...COMMON_FLAGS },
+          allowPositionals: false,
+        });
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            exampleCli: 'jinn doctor',
+            details: { field: 'flags' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      const configPath =
+        deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
+      const config = deps.loadConfig(configPath);
+      const checks: CheckResult[] = [];
+
+      checks.push(await checkNodeVersion());
+
+      const claudeResult = await deps.checkClaudeBinary(config.claudePath);
+      checks.push(claudeBinaryCheckForDoctor(config.claudePath, claudeResult));
+      checks.push(await checkClaudeAuth(config));
+
+      checks.push(checkKeystorePresent(config.earningDir));
+      checks.push(await checkRpcNetworkForDoctor(config));
+      checks.push(await checkDeploymentLoaded(config));
+      checks.push(checkDaemonRuntimeReady());
+
+      const distributorCheck = await deps.checkDistributorReachable(config);
+      if (distributorCheck) checks.push(distributorCheck);
+
+      // portfolio.v0 checks — only run if the operator has configured a
+      // portfolio.v0 desired state. Otherwise, reporting `hl_api_wallet: fail`
+      // on a fresh operator who hasn't submitted an HL intent is false-alarm
+      // noise. Operators who want the HL-specific preflight in isolation can
+      // run those checks under a dedicated verb once one exists.
+      const portfolioKind = SPEC_KINDS['portfolio.v0']!.kind;
+      const hasPortfolioV0 = config.desiredStates.some((d) => d.spec?.kind === portfolioKind);
+      if (hasPortfolioV0) {
+        const implStateDirRoot = config.engine.implStateDirRoot;
+        const hlImplStateDir = join(implStateDirRoot, 'claude-mcp-hyperliquid');
+        const portfolioChecks = deps.runPortfolioV0DoctorChecks(hlImplStateDir);
+        checks.push(...portfolioChecks);
+      }
+
+      const blockingCount = checks.filter((c) => !c.ok).length;
+      const payload = {
+        schemaVersion: 1 as const,
+        generatedAt: new Date().toISOString(),
+        checks,
+        ok: blockingCount === 0,
+        blockingCount,
+      };
+
+      emitResult(payload, (v) => humanDoctor(v as typeof payload), {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      });
+    },
+  };
 }
 
 function humanDoctor(payload: {
@@ -344,30 +405,5 @@ function humanDoctor(payload: {
   return lines.join('\n');
 }
 
-const command: CommandModule = {
-  name: 'doctor',
-  summary: 'Preflight checks: answers "would jinn run work?" without running it',
-  helpText: `Usage: jinn doctor [--human] [--config <path>]
-
-Runs a set of non-mutating checks against the local environment and
-configuration:
-  - node_version                Node.js >= 20
-  - claude_binary               claude CLI resolvable on PATH
-  - claude_auth                 Claude CLI authenticated
-  - keystore_present            mnemonic keystore in configured earning directory (optional)
-  - deployment_loaded           testnet/mainnet contract addresses resolved
-  - portfolio_impl_state_dir    HL impl state directory present and readable
-  - hl_api_wallet               HL API wallet generated and approved by operator
-
-By default, emits a machine-readable JSON object with a checks array,
-an overall ok flag, and a blockingCount. Exit code is 0 even when
-checks fail — callers read the result to decide whether to proceed.
-
-Examples:
-  jinn doctor
-  jinn doctor --human
-`,
-  run,
-};
-
+const command: CommandModule = createDoctorCommand();
 export default command;

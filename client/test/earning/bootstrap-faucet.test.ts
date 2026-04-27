@@ -8,10 +8,6 @@ const requestTestnetFundingMock = vi.fn(async () => ({
   txHash: '0x' + '12'.repeat(32),
 }));
 
-vi.mock('../../src/earning/faucet.js', () => ({
-  requestTestnetFunding: requestTestnetFundingMock,
-}));
-
 describe('Fleet bootstrap faucet cap', () => {
   const dirs: string[] = [];
 
@@ -32,6 +28,7 @@ describe('Fleet bootstrap faucet cap', () => {
       rpcUrl: 'https://sepolia.base.org',
       env: {},
       stakingMode: 'standard',
+      requestFunding: requestTestnetFundingMock,
     });
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);

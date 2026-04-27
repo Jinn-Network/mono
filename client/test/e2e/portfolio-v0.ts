@@ -23,10 +23,11 @@
 import { config as dotenvConfig } from 'dotenv';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.env') });
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp } from 'node:fs/promises';
+import { spawnAnvilFork, jsonRpc as anvilJsonRpc, type AnvilHarness } from '../_support/chain/anvil.js';
+import { fundAddressWithOLAS } from '../_support/chain/olas-funding.js';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
@@ -48,31 +49,31 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 
-import { decodeMarketplaceRequestLogs } from '../src/adapters/mech/contracts.js';
+import { decodeMarketplaceRequestLogs } from '../../src/adapters/mech/contracts.js';
 import {
   MECH_ABI,
   MECH_MARKETPLACE_ABI,
   JINN_ROUTER_ABI,
   NATIVE_PAYMENT_TYPE,
-} from '../src/adapters/mech/types.js';
-import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
-import { getChainConfig } from '../src/earning/contracts.js';
-import { assembleAndSignManifest } from '../src/restorer/engine/manifest-assembly.js';
-import { ClaudeMcpHyperliquidImpl } from '../src/restorer/impls/claude-mcp-hyperliquid/index.js';
-import { PortfolioV0Evaluator } from '../src/restorer/impls/portfolio-v0-evaluator/index.js';
-import type { RestorationContext } from '../src/restorer/types.js';
-import type { HlClearinghouseState, HlFill, HlGridPoint } from '../src/venues/hyperliquid/types.js';
-import type { DesiredState } from '../src/types/desired-state.js';
-import type { RestorationManifest } from '../src/types/portfolio.js';
+} from '../../src/adapters/mech/types.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { getChainConfig } from '../../src/earning/contracts.js';
+import { assembleAndSignManifest } from '../../src/restorer/engine/manifest-assembly.js';
+import { ClaudeMcpHyperliquidImpl } from '../../src/restorer/impls/claude-mcp-hyperliquid/index.js';
+import { PortfolioV0Evaluator } from '../../src/restorer/impls/portfolio-v0-evaluator/index.js';
+import type { RestorationContext } from '../../src/restorer/types.js';
+import type { HlClearinghouseState, HlFill, HlGridPoint } from '../../src/venues/hyperliquid/types.js';
+import type { DesiredState } from '../../src/types/desired-state.js';
+import type { RestorationManifest } from '../../src/types/portfolio.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
-const ANVIL_PORT = 8547; // Separate port from e2e-validate.ts (8546) to avoid conflicts
-const ANVIL_RPC = `http://127.0.0.1:${ANVIL_PORT}`;
+let ANVIL_PORT = 0;
+let ANVIL_RPC = '';
 const PASSWORD = 'test-password-pf';
 
 const CHAIN_CONFIG = getChainConfig('base');
@@ -97,26 +98,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function waitFor(description: string, check: () => Promise<boolean>, timeoutMs = 30000, intervalMs = 500): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await check()) return;
-    await sleep(intervalMs);
-  }
-  throw new Error(`Timeout waiting for: ${description}`);
-}
-
-async function jsonRpc(url: string, method: string, params: unknown[] = []): Promise<unknown> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
-  });
-  const body = (await res.json()) as { result?: unknown; error?: { message: string } };
-  if (body.error) throw new Error(`RPC error (${method}): ${body.error.message}`);
-  return body.result;
-}
-
 interface PhaseResult { name: string; ok: boolean; ms: number; error?: string; }
 
 async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseResult> {
@@ -134,10 +115,6 @@ async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseRes
   }
 }
 
-function erc20BalanceSlot(holder: string, mappingSlot: bigint = 0n): Hex {
-  return keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [getAddress(holder) as Address, mappingSlot]));
-}
-
 function addressMappingSlot(holder: Address, mappingSlot: bigint): Hex {
   return keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [holder, mappingSlot]));
 }
@@ -151,11 +128,11 @@ function sameAddress(a: string, b: string): boolean {
 }
 
 async function getStorageWord(contractAddress: Address, slot: Hex): Promise<Hex> {
-  return await jsonRpc(ANVIL_RPC, 'eth_getStorageAt', [contractAddress, slot, 'latest']) as Hex;
+  return await anvilJsonRpc(ANVIL_RPC, 'eth_getStorageAt', [contractAddress, slot, 'latest']) as Hex;
 }
 
 async function setStorageWord(contractAddress: Address, slot: Hex, value: Hex): Promise<void> {
-  await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [contractAddress, slot, value]);
+  await anvilJsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [contractAddress, slot, value]);
 }
 
 async function readAgentFactory(publicClient: PublicClient, mechAddress: Address): Promise<Address> {
@@ -198,7 +175,7 @@ async function pinAgentFactoryMapping(publicClient: PublicClient, mechAddress: A
 
 async function warmCreateRestorationJobPath(safeAddress: Address, mechAddress: Address, deliveryRate: bigint, responseTimeout: bigint): Promise<void> {
   const data = encodeFunctionData({ abi: JINN_ROUTER_ABI, functionName: 'createRestorationJob', args: ['0x1234', mechAddress, deliveryRate, responseTimeout, NATIVE_PAYMENT_TYPE, '0x'] });
-  await jsonRpc(ANVIL_RPC, 'eth_call', [{ from: safeAddress, to: ROUTER_ADDRESS, value: numberToHex(deliveryRate), data }, 'latest']);
+  await anvilJsonRpc(ANVIL_RPC, 'eth_call', [{ from: safeAddress, to: ROUTER_ADDRESS, value: numberToHex(deliveryRate), data }, 'latest']);
 }
 
 async function stabilizeForkedMarketplaceState(publicClient: PublicClient, safeAddress: Address, mechAddress: Address): Promise<void> {
@@ -236,12 +213,12 @@ async function normalizeForkTimestamp(publicClient: PublicClient, forkBlock?: st
   }
   let targetTimestamp: bigint;
   try {
-    const upstreamBlock = await jsonRpc(BASE_RPC_URL, 'eth_getBlockByNumber', [forkBlock ? numberToHex(BigInt(forkBlock)) : 'latest', false]) as { timestamp?: string } | null;
+    const upstreamBlock = await anvilJsonRpc(BASE_RPC_URL, 'eth_getBlockByNumber', [forkBlock ? numberToHex(BigInt(forkBlock)) : 'latest', false]) as { timestamp?: string } | null;
     targetTimestamp = upstreamBlock?.timestamp ? BigInt(upstreamBlock.timestamp) : BigInt(Math.floor(Date.now() / 1000));
   } catch { targetTimestamp = BigInt(Math.floor(Date.now() / 1000)); }
   const capped = targetTimestamp <= UINT32_MAX - RESPONSE_TIMEOUT_HEADROOM ? targetTimestamp : UINT32_MAX - RESPONSE_TIMEOUT_HEADROOM;
-  await jsonRpc(ANVIL_RPC, 'evm_setTime', [Number(capped)]);
-  await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+  await anvilJsonRpc(ANVIL_RPC, 'evm_setTime', [Number(capped)]);
+  await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
   const normalizedBlock = await publicClient.getBlock();
   if (normalizedBlock.timestamp > UINT32_MAX - RESPONSE_TIMEOUT_HEADROOM) throw new Error(`Fork timestamp still too high after normalization`);
   console.log(`    Normalized fork timestamp to ${normalizedBlock.timestamp}`);
@@ -295,7 +272,7 @@ process.on('beforeExit', (code) => { if (!exitExpected) console.error(`[e2e-pf] 
 async function main(): Promise<void> {
   console.log('\n=== Portfolio.v0 E2E (Anvil fork + mocked Claude + mocked HL) ===\n');
 
-  let anvil: ChildProcess | null = null;
+  let chain: AnvilHarness | null = null;
   let tmpDir: string | null = null;
   const results: PhaseResult[] = [];
 
@@ -318,17 +295,10 @@ async function main(): Promise<void> {
       tmpDir = await mkdtemp(join(tmpdir(), 'jinn-e2e-pf-'));
       console.log(`    Temp dir: ${tmpDir}`);
 
-      const anvilPath = process.env['ANVIL_PATH'] ?? 'anvil';
       const forkBlock = process.env['ANVIL_FORK_BLOCK'] ?? '';
-      const anvilArgs = ['--fork-url', BASE_RPC_URL, '--port', String(ANVIL_PORT), '--silent', ...(forkBlock ? ['--fork-block-number', forkBlock] : [])];
-
-      anvil = spawn(anvilPath, anvilArgs, { stdio: 'ignore', detached: false });
-      anvil.on('error', (err) => { throw new Error(`Failed to spawn Anvil: ${err.message}`); });
-
-      await waitFor('Anvil RPC ready', async () => {
-        try { const b = await jsonRpc(ANVIL_RPC, 'eth_blockNumber'); return typeof b === 'string' && b.startsWith('0x'); }
-        catch { return false; }
-      });
+      chain = await spawnAnvilFork({ forkUrl: BASE_RPC_URL, silent: true, ...(forkBlock ? { forkBlock: Number(forkBlock) } : {}) });
+      ANVIL_PORT = chain.port;
+      ANVIL_RPC = chain.rpcUrl;
 
       publicClient = createPublicClient({ chain: base, transport: http(ANVIL_RPC) }) as unknown as PublicClient;
       const blockNumber = await publicClient.getBlockNumber();
@@ -348,18 +318,19 @@ async function main(): Promise<void> {
       const masterAddress = initialResult.funding.master_address;
       console.log(`    Master: ${masterAddress}`);
 
-      // Fund master with ETH + OLAS for staking deposit
-      await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [masterAddress, '0x56BC75E2D63100000']);
-      const eoaOlasSlot = erc20BalanceSlot(masterAddress);
+      // Fund master with ETH + OLAS for staking deposit — independent writes.
       const eoaOlasAmount = 100000n * 10n ** 18n;
-      await jsonRpc(ANVIL_RPC, 'anvil_setStorageAt', [OLAS_TOKEN, eoaOlasSlot, pad(toHex(eoaOlasAmount), { size: 32 })]);
+      await Promise.all([
+        anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [masterAddress, '0x56BC75E2D63100000']),
+        fundAddressWithOLAS(chain!, getAddress(masterAddress) as Address, eoaOlasAmount),
+      ]);
 
-      await jsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddress]);
-      await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: masterAddress, to: OLAS_TOKEN, data: encodeFunctionData({ abi: parseAbi(['function approve(address,uint256) returns (bool)']), functionName: 'approve', args: [CHAIN_CONFIG.stakingContract as Address, eoaOlasAmount] }) }]);
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
-      await jsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: masterAddress, to: CHAIN_CONFIG.stakingContract, data: encodeFunctionData({ abi: parseAbi(['function deposit(uint256)']), functionName: 'deposit', args: [eoaOlasAmount] }) }]);
-      await jsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [masterAddress]);
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddress]);
+      await anvilJsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: masterAddress, to: OLAS_TOKEN, data: encodeFunctionData({ abi: parseAbi(['function approve(address,uint256) returns (bool)']), functionName: 'approve', args: [CHAIN_CONFIG.stakingContract as Address, eoaOlasAmount] }) }]);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: masterAddress, to: CHAIN_CONFIG.stakingContract, data: encodeFunctionData({ abi: parseAbi(['function deposit(uint256)']), functionName: 'deposit', args: [eoaOlasAmount] }) }]);
+      await anvilJsonRpc(ANVIL_RPC, 'anvil_stopImpersonatingAccount', [masterAddress]);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
 
       bootstrapper = new FleetBootstrapper({ earningDir: tmpDir, chain: 'base', rpcUrl: ANVIL_RPC });
       const finalResult = await bootstrapper.bootstrap(PASSWORD);
@@ -370,8 +341,8 @@ async function main(): Promise<void> {
       mechAddress = firstComplete?.mech_address as Address | undefined;
       if (!safeAddress || !mechAddress) throw new Error('Bootstrap completed but missing safe/mech address');
 
-      const { FleetStateStore } = await import('../src/earning/store.js');
-      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
+      const { FleetStateStore } = await import('../../src/earning/store.js');
+      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
       const store = new FleetStateStore(tmpDir);
       const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), PASSWORD);
       agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, firstComplete!.index);
@@ -399,8 +370,8 @@ async function main(): Promise<void> {
       });
       await adapter.initialize();
 
-      await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [safeAddress, '0x56BC75E2D63100000']);
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [safeAddress, '0x56BC75E2D63100000']);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
 
       await stabilizeForkedMarketplaceState(publicClient, safeAddress, mechAddress);
       console.log('    MechAdapter initialized + marketplace stabilized');
@@ -435,11 +406,11 @@ async function main(): Promise<void> {
         eligibility: { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 },
       };
 
-      // Mine fresh blocks to avoid stale nonce
-      for (let i = 0; i < 3; i++) { await jsonRpc(ANVIL_RPC, 'evm_mine', []); await sleep(100); }
+      // Mine 3 blocks to flush stale nonce state from bootstrap.
+      await chain!.mineBlocks(3);
 
       restorationRequestId = await adapter.postDesiredState(portfolioIntent);
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
       console.log(`    portfolio.v0 intent posted, requestId: ${restorationRequestId}`);
 
       // Verify MarketplaceRequest event on-chain
@@ -458,7 +429,7 @@ async function main(): Promise<void> {
       }
 
       // Mine blocks while waiting for request
-      const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
+      const miningInterval = setInterval(async () => { try { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
 
       let reqValue: Awaited<ReturnType<typeof adapter['watchForRequests'][typeof Symbol.asyncIterator]>> | undefined;
       try {
@@ -480,10 +451,10 @@ async function main(): Promise<void> {
 
       // Claim on-chain
       await adapter.claimRequest(req.requestId);
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
 
       // Build impl with mocked HL + noop runSession
-      const mockHlClient = new MockHlClient() as unknown as import('../src/venues/hyperliquid/client.js').HyperliquidClient;
+      const mockHlClient = new MockHlClient() as unknown as import('../../src/venues/hyperliquid/client.js').HyperliquidClient;
       const impl = new ClaudeMcpHyperliquidImpl({
         _testDeps: {
           runSession: async (_sessionId: string, _prompt: string) => ({ stdout: '' }),
@@ -559,14 +530,14 @@ async function main(): Promise<void> {
         gating: output.gating,
       });
 
-      const miningInterval2 = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
+      const miningInterval2 = setInterval(async () => { try { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       try {
         await adapter.submitResult(req.requestId, { data: resultData });
       } finally {
         clearInterval(miningInterval2);
       }
 
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
       console.log('    Result submitted on-chain');
     }));
 
@@ -577,7 +548,7 @@ async function main(): Promise<void> {
     results.push(await runPhase('Phase 6: Creator claims restoration delivery + creates evaluation job', async () => {
       if (!adapter || !restorationRequestId) throw new Error('Missing state');
 
-      const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
+      const miningInterval = setInterval(async () => { try { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       let delivery: Awaited<ReturnType<typeof deliveryIter.next>>;
       try {
         delivery = await Promise.race([
@@ -594,7 +565,7 @@ async function main(): Promise<void> {
       console.log(`    Restoration delivery claimed. requestId: ${del.requestId}`);
 
       // Wait for evaluation creation tx to confirm
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
       const currentBlock = await publicClient.getBlockNumber();
       const routerLogs = await publicClient.getLogs({ address: ROUTER_ADDRESS, fromBlock: currentBlock - 10n, toBlock: currentBlock });
       let foundEvalJob = false;
@@ -617,7 +588,7 @@ async function main(): Promise<void> {
       }
 
       // Mine + wait for evaluation request
-      const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
+      const miningInterval = setInterval(async () => { try { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       let evalReqValue: Awaited<ReturnType<typeof adapter['watchForRequests'][typeof Symbol.asyncIterator]>> | undefined;
       try {
         const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
@@ -637,7 +608,7 @@ async function main(): Promise<void> {
 
       // Claim on-chain
       await adapter.claimRequest(req.requestId);
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
 
       // Build evaluator context using the unified-payload model (Task 10 migration).
       // The restorer's manifest is inlined at context.restorationResult; the original
@@ -709,14 +680,14 @@ async function main(): Promise<void> {
         gating: evalOutput.gating,
       });
 
-      const miningInterval2 = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
+      const miningInterval2 = setInterval(async () => { try { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       try {
         await adapter.submitResult(req.requestId, { data: evalResultData });
       } finally {
         clearInterval(miningInterval2);
       }
 
-      await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+      await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
       console.log('    Evaluator verdict submitted on-chain');
     }));
 
@@ -725,7 +696,7 @@ async function main(): Promise<void> {
     results.push(await runPhase('Phase 8: Creator claims eval delivery + assert verdict === REJECTED', async () => {
       if (!adapter) throw new Error('Missing adapter');
 
-      const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
+      const miningInterval = setInterval(async () => { try { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       let delivery: Awaited<ReturnType<typeof deliveryIter.next>>;
       try {
         delivery = await Promise.race([
@@ -763,7 +734,8 @@ async function main(): Promise<void> {
 
   } finally {
     if (adapter) { try { adapter.stop(); } catch { /**/ } }
-    if (anvil) { anvil.kill('SIGTERM'); console.log('\n  Anvil stopped'); }
+    if (chain) { await chain.teardown(); console.log('\n  Anvil stopped'); }
+    if (tmpDir) { try { await rm(tmpDir, { recursive: true, force: true }); } catch { /**/ } }
   }
 
   // ── Summary ──────────────────────────────────────────────────────────────────

@@ -3,32 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import auth from '../../../src/cli/commands/auth.js';
-import type { CommandContext } from '../../../src/cli/command.js';
-
-function makeCtx(overrides: Partial<CommandContext> = {}): {
-  ctx: CommandContext;
-  writes: string[];
-  exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv: [],
-    stdoutIsTty: false,
-    writer: {
-      write: (s: string) => {
-        writes.push(s);
-        return true;
-      },
-    },
-    exit: (code: number) => {
-      exits.push(code);
-    },
-    env: {},
-    ...overrides,
-  };
-  return { ctx, writes, exits };
-}
+import { makeCommandCtx } from '@test/cli.js';
 
 describe('auth command', () => {
   it('has name "auth" and a summary', () => {
@@ -38,7 +13,7 @@ describe('auth command', () => {
   });
 
   it('emits invalid_invocation with exit 11 for bad flags', async () => {
-    const { ctx, writes, exits } = makeCtx({ argv: ['--bogus'] });
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--bogus'] });
     await auth.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
@@ -46,7 +21,7 @@ describe('auth command', () => {
   });
 
   it('emits either a success result or invalid_invocation on non-TTY (no flags)', async () => {
-    const { ctx, writes, exits } = makeCtx({ stdoutIsTty: false });
+    const { ctx, writes, exits } = makeCommandCtx({ tty: false });
     await auth.run(ctx);
     expect(writes.length).toBeGreaterThanOrEqual(1);
     const parsed = JSON.parse(writes[writes.length - 1]!);
@@ -70,9 +45,9 @@ describe('auth command', () => {
     const prev = process.env.JINN_NETWORK;
     process.env.JINN_NETWORK = 'testnet';
     try {
-      const { ctx } = makeCtx({
+      const { ctx } = makeCommandCtx({
         argv: ['--mode', 'bare', '--config', configPath],
-        stdoutIsTty: false,
+        tty: false,
       });
       await auth.run(ctx);
       const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));

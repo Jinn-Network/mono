@@ -61,7 +61,7 @@ client/          TypeScript daemon — the main runnable component
   fixtures/
     config.example.json  Example config file
     local-config.json    Local adapter test config
-  test/                  Vitest tests (14 files, 33 tests)
+  test/                  Vitest tests (see docs/runbooks/testing.md)
 
 contracts/       Solidity smart contracts (Hardhat)
   src/

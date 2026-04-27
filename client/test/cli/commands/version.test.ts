@@ -1,25 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import version from '../../../src/cli/commands/version.js';
-import type { CommandContext } from '../../../src/cli/command.js';
 import { loadConfig } from '../../../src/config.js';
 import { getChainConfig } from '../../../src/earning/contracts.js';
-
-function makeCtx(argv: string[] = []): { ctx: CommandContext; writes: string[]; exits: number[] } {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv,
-    stdoutIsTty: false,
-    writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: (code: number) => { exits.push(code); },
-    env: {},
-  };
-  return { ctx, writes, exits };
-}
+import { makeCommandCtx } from '@test/cli.js';
 
 describe('version command', () => {
   it('emits a JSON object with schemaVersion, client, protocol, network, tokens', async () => {
-    const { ctx, writes } = makeCtx();
+    const { ctx, writes } = makeCommandCtx();
     await version.run(ctx);
     expect(writes).toHaveLength(1);
     const parsed = JSON.parse(writes[0]);
@@ -50,14 +37,14 @@ describe('version command', () => {
   });
 
   it('exits 0 and writes nothing else on success', async () => {
-    const { ctx, writes, exits } = makeCtx();
+    const { ctx, writes, exits } = makeCommandCtx();
     await version.run(ctx);
     expect(writes).toHaveLength(1);
     expect(exits).toEqual([]);
   });
 
   it('emits invalid_invocation for bad flags', async () => {
-    const { ctx, writes, exits } = makeCtx(['--bogus']);
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--bogus'] });
     await version.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.code).toBe('invalid_invocation');
@@ -73,7 +60,7 @@ describe('version command', () => {
     process.env.HOME = tmp;
     process.env.JINN_NETWORK = 'testnet';
     try {
-      const { ctx, writes } = makeCtx();
+      const { ctx, writes } = makeCommandCtx();
       await version.run(ctx);
       const parsed = JSON.parse(writes[0]);
       expect(parsed.network).toBe('testnet');
@@ -87,7 +74,7 @@ describe('version command', () => {
   });
 
   it('--human output starts with "Jinn client" and includes the commit line', async () => {
-    const { ctx, writes } = makeCtx(['--human']);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--human'] });
     await version.run(ctx);
     const out = writes.join('');
     expect(out.startsWith('Jinn client ')).toBe(true);

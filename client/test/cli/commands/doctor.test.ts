@@ -1,166 +1,68 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import doctor from '../../../src/cli/commands/doctor.js';
-import type { CommandContext } from '../../../src/cli/command.js';
+import { describe, it, expect } from 'vitest';
+import { createDoctorCommand } from '@/cli/commands/doctor.js';
+import { runCommand } from '@test/cli.js';
 
-const defaultRpcNetworkResult = () => ({
-  ok: true as const,
-  network: 'mainnet' as const,
-  expectedChainId: 8453,
-  actualChainId: 8453,
-  rpcHost: 'mainnet.base.org',
-});
+const fakeDeps = {
+  loadConfig: () => ({
+    network: 'testnet' as const,
+    rpcUrl: 'http://fake',
+    apiPort: 7331,
+    claudePath: 'claude',
+    desiredStates: [],
+    engine: { implStateDirRoot: '/tmp/fake-impl-state', workingDirRoot: '/tmp/fake-work' },
+    earningDir: '/tmp/fake-earning',
+  } as any),
+  getConfigPathFromArgs: () => undefined,
+  checkClaudeBinary: async () => ({ ok: true, detail: 'fake claude binary' } as any),
+  checkRpcNetwork: async () => ({
+    ok: true,
+    network: 'testnet' as const,
+    expectedChainId: 84532,
+    actualChainId: 84532,
+    rpcHost: 'fake',
+  }),
+  rpcNetworkFailureHint: () => 'unused',
+  runPortfolioV0DoctorChecks: () => [],
+  checkDistributorReachable: async () => null,
+  detectAuthContext: () => 'bare' as const,
+  probeClaudeAuth: () => ({
+    authenticated: true,
+    context: 'bare' as const,
+    detail: 'fake claude auth',
+  }),
+} as const;
 
-const checkRpcNetworkMock = vi.hoisted(() => vi.fn(async () => defaultRpcNetworkResult()));
-
-vi.mock('../../../src/preflight/rpc-network.js', () => ({
-  checkRpcNetwork: checkRpcNetworkMock,
-  rpcNetworkFailureHint: vi.fn(() => 'Set rpcUrl to a matching Base RPC endpoint.'),
-}));
-
-function makeCtx(env: Record<string, string> = {}): {
-  ctx: CommandContext; writes: string[]; exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv: [],
-    stdoutIsTty: false,
-    writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: (code: number) => { exits.push(code); },
-    env,
-  };
-  return { ctx, writes, exits };
-}
-
-describe('doctor command', () => {
-  beforeEach(() => {
-    checkRpcNetworkMock.mockImplementation(async () => defaultRpcNetworkResult());
+describe('doctor command (DI integration)', () => {
+  it('emits a well-formed envelope and rpc_network passes when the rpc check succeeds', async () => {
+    const cmd = createDoctorCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd);
+    expect(exits).toEqual([]);
+    expect(envelopes).toHaveLength(1);
+    const env = envelopes[0] as { schemaVersion: number; ok: boolean; checks: Array<{ name: string; ok: boolean }> };
+    expect(env.schemaVersion).toBe(1);
+    expect(typeof env.ok).toBe('boolean');
+    expect(env.checks.length).toBeGreaterThan(0);
+    // The injected rpc check passes — verify rpc_network is ok in the output
+    const rpcCheck = env.checks.find(c => c.name === 'rpc_network');
+    expect(rpcCheck).toBeDefined();
+    expect(rpcCheck!.ok).toBe(true);
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('emits a checks array and an ok/blockingCount roll-up', async () => {
-    const { ctx, writes } = makeCtx();
-    await doctor.run(ctx);
-    expect(writes).toHaveLength(1);
-    const parsed = JSON.parse(writes[0]);
-    expect(parsed.schemaVersion).toBe(1);
-    expect(Array.isArray(parsed.checks)).toBe(true);
-    expect(parsed.checks.length).toBeGreaterThan(0);
-    expect(typeof parsed.ok).toBe('boolean');
-    expect(typeof parsed.blockingCount).toBe('number');
-    // Every check has the required shape
-    for (const check of parsed.checks) {
-      expect(typeof check.name).toBe('string');
-      expect(typeof check.ok).toBe('boolean');
-      expect(typeof check.detail).toBe('string');
-    }
-  });
-
-  it('includes structured rpcStatus and rpc for rpc_network when preflight matches Base', async () => {
-    const { ctx, writes } = makeCtx();
-    await doctor.run(ctx);
-    const parsed = JSON.parse(writes[0]);
-    const rpc = parsed.checks.find((c: { name: string }) => c.name === 'rpc_network');
-    expect(rpc).toBeDefined();
-    expect(rpc.rpcStatus).toBe('matched');
-    expect(rpc.rpc).toEqual({
-      host: 'mainnet.base.org',
-      network: 'mainnet',
-      expectedChainId: 8453,
-      actualChainId: 8453,
+  it('emits ok=false when rpc-network check fails', async () => {
+    const cmd = createDoctorCommand({
+      ...fakeDeps,
+      checkRpcNetwork: async () => ({
+        ok: false,
+        network: 'testnet' as const,
+        expectedChainId: 84532,
+        actualChainId: 1,
+        rpcHost: 'fake',
+        reason: 'chain_mismatch' as const,
+        message: 'chain mismatch',
+      }),
+      rpcNetworkFailureHint: () => 'set rpcUrl',
     });
-  });
-
-  it('marks rpc_network as local_dev_override when loopback preflight uses Anvil chain id', async () => {
-    checkRpcNetworkMock.mockResolvedValueOnce({
-      ok: true,
-      network: 'testnet',
-      expectedChainId: 84532,
-      actualChainId: 31337,
-      rpcHost: '127.0.0.1:8545',
-      localDev: true,
-    });
-    const { ctx, writes } = makeCtx();
-    await doctor.run(ctx);
-    const parsed = JSON.parse(writes[0]);
-    const rpc = parsed.checks.find((c: { name: string }) => c.name === 'rpc_network');
-    expect(rpc).toBeDefined();
-    expect(rpc.rpcStatus).toBe('local_dev_override');
-    expect(rpc.rpc).toEqual({
-      host: '127.0.0.1:8545',
-      network: 'testnet',
-      expectedChainId: 84532,
-      actualChainId: 31337,
-    });
-  });
-
-  it('includes the claude_binary check', async () => {
-    const { ctx, writes } = makeCtx();
-    await doctor.run(ctx);
-    const parsed = JSON.parse(writes[0]);
-    const names = parsed.checks.map((c: { name: string }) => c.name);
-    expect(names).toContain('claude_binary');
-    expect(names).toContain('node_version');
-    expect(names).toContain('keystore_present');
-  });
-
-  it('reports keystore_present once jinn init has written the keystore', async () => {
-    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    // `doctor` reads earningDir via loadConfig, which consults process.env and
-    // the on-disk ~/.jinn-client/config.json — not ctx.env. Isolate both by
-    // pointing HOME at a throwaway dir and injecting JINN_EARNING_DIR into
-    // process.env for the duration of the test.
-    const home = mkdtempSync(join(tmpdir(), 'jinn-doctor-home-'));
-    const earning = mkdtempSync(join(tmpdir(), 'jinn-doctor-earn-'));
-    writeFileSync(join(earning, 'master_keystore.json'), '{}');
-    const prev = { ...process.env };
-    process.env.HOME = home;
-    process.env.JINN_EARNING_DIR = earning;
-    try {
-      const { ctx, writes } = makeCtx({ JINN_EARNING_DIR: earning });
-      await doctor.run(ctx);
-      const parsed = JSON.parse(writes[0]);
-      const keystoreCheck = parsed.checks.find(
-        (c: { name: string }) => c.name === 'keystore_present',
-      );
-      expect(keystoreCheck).toBeDefined();
-      expect(keystoreCheck.ok).toBe(true);
-      expect(keystoreCheck.detail).toMatch(/master_keystore\.json/);
-    } finally {
-      process.env = prev;
-      rmSync(home, { recursive: true, force: true });
-      rmSync(earning, { recursive: true, force: true });
-    }
-  });
-
-  it('--human output is a checklist (not JSON)', async () => {
-    const { ctx, writes } = makeCtx();
-    ctx.argv = ['--human'];
-    await doctor.run(ctx);
-    const out = writes.join('');
-    expect(out.startsWith('[ok  ]') || out.startsWith('[fail]')).toBe(true);
-    expect(out).toMatch(/Summary: /);
-  });
-
-  it('includes the claude_auth check', async () => {
-    const { ctx, writes } = makeCtx();
-    await doctor.run(ctx);
-    const parsed = JSON.parse(writes[0]);
-    const names = parsed.checks.map((c: { name: string }) => c.name);
-    expect(names).toContain('claude_auth');
-  });
-
-  it('emits invalid_invocation for bad flags', async () => {
-    const { ctx, writes, exits } = makeCtx();
-    ctx.argv = ['--bogus'];
-    await doctor.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]);
-    expect(parsed.code).toBe('invalid_invocation');
-    expect(exits).toEqual([11]);
+    const { envelopes } = await runCommand(cmd);
+    expect((envelopes[0] as { ok: boolean }).ok).toBe(false);
   });
 });

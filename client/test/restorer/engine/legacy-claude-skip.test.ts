@@ -2,7 +2,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { Store } from '../../../src/store/store.js';
+import type { Store } from '@/store/store.js';
+import { withTempStore } from '@test/store.js';
 import { RestorationEngine, type RestorationEngineOptions } from '../../../src/restorer/engine/engine.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
 import type { RestorerImpl } from '../../../src/restorer/types.js';
@@ -15,9 +16,8 @@ class ExposedEngine extends RestorationEngine {
   }
 }
 
-async function buildEngineWith(run: RestorerImpl['run'], implName = 'legacy-claude') {
+async function buildEngineWith(store: Store, run: RestorerImpl['run'], implName = 'legacy-claude') {
   const root = mkdtempSync(join(tmpdir(), 'jinn-eng-skip-'));
-  const store = new Store(':memory:');
   const impl: RestorerImpl = {
     name: implName,
     version: '1.0.0',
@@ -52,14 +52,13 @@ async function buildEngineWith(run: RestorerImpl['run'], implName = 'legacy-clau
     preSnapshotPayload: { provisioned: true },
   });
   persistence.transition('req-1', IntentState.RUNNING);
-  return { engine, persistence, store };
+  return { engine, persistence };
 }
 
 describe('legacy-claude skip handling', () => {
   it('treats SkippableError from an impl as a skipped output instead of hard failure', async () => {
-    const store = new Store(':memory:');
-    const root = mkdtempSync(join(tmpdir(), 'jinn-skip-'));
-    try {
+    await withTempStore(async (store) => {
+      const root = mkdtempSync(join(tmpdir(), 'jinn-skip-'));
       const legacyClaude: RestorerImpl = {
         name: 'legacy-claude',
         version: '1.0.0',
@@ -116,55 +115,49 @@ describe('legacy-claude skip handling', () => {
       expect(intent.informationalClaim).toMatchObject({
         status: 'skipped',
       });
-    } finally {
-      store.close();
-    }
+    });
   });
 
   it('does NOT skip when the error is a generic rate-limit surfaced through legacy-claude', async () => {
-    const { engine, persistence, store } = await buildEngineWith(async () => {
-      throw new Error('upstream RPC rate limit exceeded: 429 from base.org');
-    });
-    try {
+    await withTempStore(async (store) => {
+      const { engine, persistence } = await buildEngineWith(store, async () => {
+        throw new Error('upstream RPC rate limit exceeded: 429 from base.org');
+      });
       await expect(engine.invokeRunImpl('req-1')).rejects.toThrow(/rate limit exceeded/);
       const intent = persistence.getOrThrow('req-1');
       // Stayed in RUNNING — no silent skip, no POST_SNAPSHOT transition.
       expect(intent.state).toBe(IntentState.RUNNING);
-    } finally {
-      store.close();
-    }
+    });
   });
 
   it('does NOT skip when a non-legacy impl throws a normal Error (not SkippableError)', async () => {
-    const { engine, persistence, store } = await buildEngineWith(
-      async () => {
-        throw new Error('Claude quota exhausted (but we are not legacy-claude).');
-      },
-      'prediction-v0-baseline',
-    );
-    try {
+    await withTempStore(async (store) => {
+      const { engine, persistence } = await buildEngineWith(
+        store,
+        async () => {
+          throw new Error('Claude quota exhausted (but we are not legacy-claude).');
+        },
+        'prediction-v0-baseline',
+      );
       await expect(engine.invokeRunImpl('req-1')).rejects.toThrow(/Claude quota exhausted/);
       const intent = persistence.getOrThrow('req-1');
       expect(intent.state).toBe(IntentState.RUNNING);
-    } finally {
-      store.close();
-    }
+    });
   });
 
   it('skips for SkippableError from any impl name (engine does not name-check)', async () => {
-    const { engine, persistence, store } = await buildEngineWith(
-      async () => {
-        throw new SkippableError('claude_unavailable', 'auth failed');
-      },
-      'some-other-impl',
-    );
-    try {
+    await withTempStore(async (store) => {
+      const { engine, persistence } = await buildEngineWith(
+        store,
+        async () => {
+          throw new SkippableError('claude_unavailable', 'auth failed');
+        },
+        'some-other-impl',
+      );
       await engine.invokeRunImpl('req-1');
       const intent = persistence.getOrThrow('req-1');
       expect(intent.state).toBe(IntentState.POST_SNAPSHOT);
       expect(intent.gatingClaim).toMatchObject({ skipped: true, reason: 'claude_unavailable' });
-    } finally {
-      store.close();
-    }
+    });
   });
 });
