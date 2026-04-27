@@ -90,4 +90,32 @@ describe('default-learner path-scope guard', () => {
       }
     }
   });
+
+  it('cross-kind isolation: different implStateDirs produce independent outputs', async () => {
+    // Simulate what the engine provides: kind-partitioned implStateDirs.
+    // Two runs with different kind dirs must produce independent gating output
+    // with no cross-contamination between each other's state roots.
+    const implStateDirKindA = mkdtempSync(join(tmpdir(), 'jinn-pathscope-kind-a-'));
+    const implStateDirKindB = mkdtempSync(join(tmpdir(), 'jinn-pathscope-kind-b-'));
+    try {
+      const adapter = new NoOpHarnessAdapter();
+      const implA = new DefaultLearningRestorerImpl({ adapter });
+      const implB = new DefaultLearningRestorerImpl({ adapter });
+
+      const ctxA = makeCtx(workingDir, implStateDirKindA);
+      const ctxB = makeCtx(mkdtempSync(join(tmpdir(), 'jinn-pathscope-work-b-')), implStateDirKindB);
+
+      const outA = await implA.run(ctxA);
+      const outB = await implB.run(ctxB);
+
+      // Neither output may reference the other's implStateDir root.
+      const jsonA = JSON.stringify(outA);
+      const jsonB = JSON.stringify(outB);
+      expect(jsonA).not.toContain(implStateDirKindB);
+      expect(jsonB).not.toContain(implStateDirKindA);
+    } finally {
+      rmSync(implStateDirKindA, { recursive: true, force: true });
+      rmSync(implStateDirKindB, { recursive: true, force: true });
+    }
+  });
 });

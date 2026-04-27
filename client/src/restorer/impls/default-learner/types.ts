@@ -1,6 +1,12 @@
 import type { RestorationContext } from '../../types.js';
 
 /**
+ * Typed allowlist of env keys the wrapper may inject into the harness child
+ * process. Adding a new key requires an explicit update here.
+ */
+export type KnownAdapterEnvKey = 'JINN_DEFAULT_LEARNER_PHASE_RANGE';
+
+/**
  * Inputs the shim derives from RestorationContext and hands to the
  * harness adapter. The adapter then constructs a session prompt + env
  * for the underlying CLI / runtime.
@@ -43,9 +49,10 @@ export interface IntentSessionInputs {
    * thread phase-range hints (e.g. JINN_DEFAULT_LEARNER_PHASE_RANGE) to
    * the coordinator skill running inside the spawned harness.
    *
-   * Pass-through only. Adapters must not silently drop these.
+   * Restricted to the {@link KnownAdapterEnvKey} allowlist. Pass-through only;
+   * adapters must not silently drop these.
    */
-  adapterEnv?: Record<string, string>;
+  adapterEnv?: Partial<Record<KnownAdapterEnvKey, string>>;
 }
 
 /**

@@ -221,10 +221,10 @@ describe('jinn-mono-u59: takePreSnapshot uses impl.name for implStateDir', () =>
       await engine.process('u59-1');
 
       expect(received.ctx).not.toBeNull();
-      // Must end in 'claude-mcp-hyperliquid', not 'portfolio.v0' — operators
-      // pre-place credentials at <root>/<impl.name>, matching runImpl's fallback.
-      expect(received.ctx!.implStateDir.endsWith('/claude-mcp-hyperliquid')).toBe(true);
-      expect(received.ctx!.implStateDir.endsWith('/portfolio.v0')).toBe(false);
+      // Path is <root>/<impl.name>/<kind-sanitized>. impl.name segment must
+      // appear, and the kind segment (. → _) must be the leaf.
+      expect(received.ctx!.implStateDir).toContain('/claude-mcp-hyperliquid/');
+      expect(received.ctx!.implStateDir.endsWith('/portfolio_v0')).toBe(true);
     });
   });
 });

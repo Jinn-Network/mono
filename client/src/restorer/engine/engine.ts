@@ -473,13 +473,16 @@ export class RestorationEngine {
   protected async takePreSnapshot(intent: PersistedIntent): Promise<void> {
     const workingDir = join(this.paths.workingDirRoot, intent.requestId);
     // Resolve the impl via registry so implStateDir matches the path runImpl uses
-    // (join(implStateDirRoot, impl.name)). Falls back to specKind then 'default'
+    // (join(implStateDirRoot, impl.name, kind)). Falls back to specKind then 'default'
     // when no impl is registered — legacy path preserved for health-check intents.
     const resolvedImpl = intent.specKind
       ? this.implRegistry?.findFor({ kind: intent.specKind, type: intent.intentType ?? 'restoration' }) ?? null
       : null;
     const implStateName = intent.implName ?? resolvedImpl?.name ?? intent.specKind ?? 'default';
-    const implStateDir = join(this.paths.implStateDirRoot, implStateName);
+    const kindSeg = (intent.specKind ?? '').replace(/[.:]/g, '_');
+    const implStateDir = kindSeg
+      ? join(this.paths.implStateDirRoot, implStateName, kindSeg)
+      : join(this.paths.implStateDirRoot, implStateName);
 
     // Prefer the persisted full DesiredState; fall back to a stub for legacy
     // (pre-migration) rows so the engine still works for health-check intents.
@@ -526,7 +529,12 @@ export class RestorationEngine {
     }
 
     const workingDir = intent.workingDir ?? join(this.paths.workingDirRoot, intent.requestId);
-    const implStateDir = intent.implStateDir ?? join(this.paths.implStateDirRoot, impl.name);
+    const kindSeg = specKind.replace(/[.:]/g, '_');
+    const implStateDir = intent.implStateDir ?? (
+      kindSeg
+        ? join(this.paths.implStateDirRoot, impl.name, kindSeg)
+        : join(this.paths.implStateDirRoot, impl.name)
+    );
     const windowEndTs = intent.windowEndTs;
 
     const abort = new AbortController();
