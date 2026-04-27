@@ -12,23 +12,22 @@ import {
   fakeImproveSummary,
   fakeMemoryConsolidationRecord,
 } from '../../../../src/restorer/impls/default-learner/test-utils/fake-plugin-outputs.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
 
 function makeCtx(workingDir: string, implStateDir: string): RestorationContext {
   const endTs = Date.now() + 60_000;
-  return {
+  return makeRestorationCtx({
     intent: {
       id: 'replan-test-1',
       description: 'replan test',
       window: { startTs: Date.now() - 1000, endTs },
-      spec: { kind: 'unknown.kind' } as RestorationContext['intent']['spec'],
+      spec: { kind: 'unknown.kind' },
     } as RestorationContext['intent'],
-    implStateDir,
     workingDir,
-    log: () => undefined,
-    abort: new AbortController().signal,
+    implStateDir,
     msUntilEndTs: () => Math.max(0, endTs - Date.now()),
-  };
+  });
 }
 
 describe('default-learner replan path', () => {

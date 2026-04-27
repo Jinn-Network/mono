@@ -29,7 +29,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_ROOT = resolve(HERE, '..');
+const PACKAGE_ROOT = resolve(HERE, '..', '..');
 const PLUGIN_PATH = join(PACKAGE_ROOT, 'plugins', 'default-learner');
 
 const PHASES = [

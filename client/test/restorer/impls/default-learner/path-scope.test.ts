@@ -5,22 +5,20 @@ import { join, resolve } from 'node:path';
 import { DefaultLearningRestorerImpl } from '../../../../src/restorer/impls/default-learner/index.js';
 import { NoOpHarnessAdapter } from '../../../../src/restorer/impls/default-learner/test-utils/noop-adapter.js';
 import { fakeFullPipelineRun } from '../../../../src/restorer/impls/default-learner/test-utils/fake-plugin-outputs.js';
-import type { RestorationContext } from '../../../../src/restorer/types.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 
-function makeCtx(workingDir: string, implStateDir: string): RestorationContext {
+function makeCtx(workingDir: string, implStateDir: string) {
   const endTs = Date.now() + 60_000;
-  return {
+  return makeRestorationCtx({
     intent: {
       id: 'path-scope-1',
       description: 'path scope test',
       window: { startTs: Date.now() - 1000, endTs },
-    } as RestorationContext['intent'],
-    implStateDir,
+    },
     workingDir,
-    log: () => undefined,
-    abort: new AbortController().signal,
+    implStateDir,
     msUntilEndTs: () => Math.max(0, endTs - Date.now()),
-  };
+  });
 }
 
 describe('default-learner path-scope guard', () => {

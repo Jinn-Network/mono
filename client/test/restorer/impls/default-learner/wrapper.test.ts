@@ -14,6 +14,7 @@ import {
   fakeImproveSummary,
   fakeMemoryConsolidationRecord,
 } from '../../../../src/restorer/impls/default-learner/test-utils/fake-plugin-outputs.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../../../src/restorer/types.js';
 
 function makeFakeSpecialist(kinds: string[]): RestorerImpl & { runCalled: boolean } {
@@ -48,20 +49,18 @@ function makeFakeSpecialist(kinds: string[]): RestorerImpl & { runCalled: boolea
 
 function makeCtx(workingDir: string, implStateDir: string, kind: string): RestorationContext {
   const endTs = Date.now() + 60_000;
-  return {
+  return makeRestorationCtx({
     intent: {
       id: 'wrapper-test-1',
       description: 'wrapper test',
       window: { startTs: Date.now() - 1000, endTs },
-      spec: { kind } as RestorationContext['intent']['spec'],
+      spec: { kind },
     } as RestorationContext['intent'],
     intentCid: 'bafywrapper',
-    implStateDir,
     workingDir,
-    log: () => undefined,
-    abort: new AbortController().signal,
+    implStateDir,
     msUntilEndTs: () => Math.max(0, endTs - Date.now()),
-  };
+  });
 }
 
 describe('DefaultLearningWrapper', () => {

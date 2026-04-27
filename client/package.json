@@ -35,7 +35,7 @@
     "access": "public"
   },
   "scripts": {
-    "e2e:full-cycle": "tsx scripts/e2e-default-learner-full-cycle.ts",
+    "e2e:full-cycle": "tsx test/e2e/default-learner-full-cycle.ts",
     "jinn": "tsx src/bin/jinn.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build": "tsc && chmod +x dist/bin/jinn.js dist/bin/jinn-mcp.js && mkdir -p dist/dashboard && cp src/dashboard/index.html dist/dashboard/index.html && node scripts/write-dist-build-meta.mjs",
