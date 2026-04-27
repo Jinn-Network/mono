@@ -45,7 +45,7 @@ delivered to the marketplace). The tool fetches it from your configured IPFS gat
 ```
 Conformance report for bafybeiabc123...
   Tier   : self-signed
-  Summary: 10/10 passed, 0 failed, 3 skipped
+  Summary: 6/11 passed, 0 failed, 5 skipped
   Layer 1: PASS
   Layer 2: N/A (not attested tier)
   Overall: PASS
@@ -54,14 +54,13 @@ Conformance report for bafybeiabc123...
   [ok  ] [L1] envelope.payload
   [ok  ] [L1] envelope.hash-signature
   [-   ] [L1] trajectory.schema: envelope.trajectory is null
-  [-   ] [L1] trajectory.hash-chain
-  [-   ] [L1] trajectory.span-profile
+  [-   ] [L1] trajectory.hash-chain: envelope.trajectory is null
+  [-   ] [L1] trajectory.span-profile: envelope.trajectory is null
   [ok  ] [L1] artifacts.vocabulary
   [ok  ] [L1] artifacts.linkage
-  [-   ] [L1] verdict.back-ref
-  [-   ] [L1] verdict.verification-record
+  [-   ] [L1] verdict.back-ref: restoration role — not applicable
+  [-   ] [L1] verdict.verification-record: restoration role — not applicable
   [ok  ] [L1] secret-scrub.compliance
-  [ok  ] [L1] envelope.hash-signature
 ```
 
 `[-]` = skipped (legitimately not applicable). `[ok]` = passed. `[FAIL]` = failed.

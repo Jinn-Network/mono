@@ -36,30 +36,38 @@ dataSources:
           handler: handleMetadataSet
         - event: URIUpdated(indexed uint256,string,indexed address)
           handler: handleURIUpdated
-  - kind: ethereum/contract
-    name: ValidationRegistry
-    network: base-sepolia
-    source:
-      address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
-      abi: ValidationRegistry
-      startBlock: 22000000
-    mapping:
-      kind: ethereum/events
-      apiVersion: 0.0.9
-      language: wasm/assemblyscript
-      file: ./src/handlers/validation.ts
-      entities:
-        - Validation
-        - Operator
-        - Execution
-      abis:
-        - name: ValidationRegistry
-          file: ./abis/ValidationRegistry.json
-      eventHandlers:
-        - event: ValidationRequest(indexed address,indexed uint256,string,indexed bytes32)
-          handler: handleValidationRequest
-        - event: ValidationResponse(indexed address,indexed uint256,indexed bytes32,uint8,string,bytes32,string)
-          handler: handleValidationResponse
+  # ValidationRegistry data source is GATED — not included in default deployment.
+  # The canonical ERC-8004 upstream deployment list (github.com/erc-8004/erc-8004-contracts)
+  # confirms Identity and Reputation Registry deployments but does NOT list Validation Registry
+  # addresses (Validation is marked "under active update" upstream). Do not uncomment until
+  # deployment is confirmed via eth_getCode + upstream artifact on each target chain.
+  # The ValidationRegistry client TS code (client/src/discovery/registry.ts) and handlers
+  # (src/handlers/validation.ts) are kept for when addresses are confirmed.
+  #
+  # - kind: ethereum/contract
+  #   name: ValidationRegistry
+  #   network: base-sepolia
+  #   source:
+  #     address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+  #     abi: ValidationRegistry
+  #     startBlock: 22000000
+  #   mapping:
+  #     kind: ethereum/events
+  #     apiVersion: 0.0.9
+  #     language: wasm/assemblyscript
+  #     file: ./src/handlers/validation.ts
+  #     entities:
+  #       - Validation
+  #       - Operator
+  #       - Execution
+  #     abis:
+  #       - name: ValidationRegistry
+  #         file: ./abis/ValidationRegistry.json
+  #     eventHandlers:
+  #       - event: ValidationRequest(indexed address,indexed uint256,string,indexed bytes32)
+  #         handler: handleValidationRequest
+  #       - event: ValidationResponse(indexed address,indexed uint256,indexed bytes32,uint8,string,bytes32,string)
+  #         handler: handleValidationResponse
   - kind: ethereum/contract
     name: ReputationRegistry
     network: base-sepolia

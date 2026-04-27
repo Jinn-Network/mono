@@ -302,8 +302,8 @@ export class PredictionV0Evaluator implements RestorerImpl {
     // Assembles the PredictionV0VerdictPayload from the already-computed fields.
     //
     // restorationEnvelope: CID threaded from the daemon via context, sha256
-    // computed from the JSON bytes of the restoration envelope (matching the
-    // conformance harness which also computes sha256(JSON.stringify(fetchedEnvelope))).
+    // computed as sha256(JCS(restorationEnvelope)) — matching the upload pipeline
+    // and the conformance harness (8l6 fix A).
     //
     // verificationOfRestoration: stub — Plan D will connect the real SDK that
     // fetches + validates the restoration envelope against its claimed tier.
