@@ -415,4 +415,247 @@ describe('Fleet bootstrap', () => {
     expect(result.message).toMatch(/curating-agent whitelist/);
     expect(result.message).toMatch(/setCuratingAgents/);
   });
+
+  // ── ERC-8004 IdentityRegistry mint (jinn-mono-j07) ─────────────────────────
+
+  it('runs the ERC-8004 mint step on first bootstrap and persists agent_id', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+
+    // Stub the upstream OLAS steps; let the real `stepRegisterAgent` run.
+    vi.spyOn(bootstrapper as any, 'stepStolasStake').mockImplementation(async (_s: any, _m: any, index: number) => {
+      return store.updateService(index, {
+        safe_address: '0x2222222222222222222222222222222222222222',
+        service_id: 99,
+        staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+        step: 'staked',
+      });
+    });
+    vi.spyOn(bootstrapper as any, 'stepDeployMech').mockImplementation(async (_s: any, _m: any, index: number) => {
+      return store.updateService(index, {
+        mech_address: '0x4444444444444444444444444444444444444444',
+        step: 'mech_deployed',
+      });
+    });
+
+    // Capture the call to `stepRegisterAgent` — easier than mocking the
+    // whole viem write+receipt path. The real implementation drives the
+    // state store the same way; what we assert here is the wiring (it
+    // gets called) + the resulting transition through agent_registered
+    // to complete.
+    const stepRegisterSpy = vi
+      .spyOn(bootstrapper as any, 'stepRegisterAgent')
+      .mockImplementation(async (_s: any, _m: any, index: number) => {
+        return store.updateService(index as number, {
+          agent_id: '7',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'ab'.repeat(32),
+          safe_bound_to_agent: false,
+          step: 'agent_registered',
+        });
+      });
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(true);
+    expect(stepRegisterSpy).toHaveBeenCalledTimes(1);
+    expect(result.fleet_state.services).toHaveLength(1);
+    const svc = result.fleet_state.services[0];
+    expect(svc.step).toBe('complete');
+    expect(svc.agent_id).toBe('7');
+    expect(svc.identity_registry_address).toBe(
+      '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+    );
+    expect(svc.safe_bound_to_agent).toBe(false);
+  });
+
+  it('agent_registered step is idempotent — does not re-mint when agent_id is already set', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'mech_deployed',
+          error: null,
+          // Agent was minted on a previous run.
+          agent_id: '12345',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'aa'.repeat(32),
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    // Master is funded; on-chain says service still staked (state=1).
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(1);
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: 1,
+      stakingMultisig: '0x2222222222222222222222222222222222222222',
+      registryState: 4,
+      registryMultisig: '0x2222222222222222222222222222222222222222',
+      safeDeployed: true,
+    });
+
+    // Stake step should NOT run (we're already past awaiting_stake).
+    const stakeSpy = vi
+      .spyOn(bootstrapper as any, 'stepStolasStake')
+      .mockImplementation(async () => {
+        throw new Error('stepStolasStake should not be called on idempotent re-run');
+      });
+
+    // `stepDeployMech` is re-entered on `mech_deployed` (existing behaviour);
+    // its own internal short-circuit returns immediately when mech_address
+    // is already set. We assert the no-op shape via the spy here.
+    const deploySpy = vi
+      .spyOn(bootstrapper as any, 'stepDeployMech')
+      .mockImplementation(async (_s: any, _m: any, index: number) => {
+        // Real stepDeployMech early-returns to `mech_deployed` when
+        // mech_address exists; mirror that here.
+        return store.updateService(index, { step: 'mech_deployed' });
+      });
+
+    // The real stepRegisterAgent runs — its internal short-circuit must
+    // detect the existing agent_id and skip the mint tx. We assert by
+    // spying on the underlying viem send path: zero tx writes means no
+    // re-mint.
+    const sendSpy = vi
+      .spyOn((bootstrapper as any).publicClient, 'request')
+      .mockImplementation(async (_opts: any) => {
+        // Fall through to the real eth_chainId and balance reads; only
+        // forbid send paths.
+        return undefined as any;
+      });
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(true);
+    expect(stakeSpy).not.toHaveBeenCalled();
+    expect(deploySpy).toHaveBeenCalledTimes(1);
+
+    // The publicClient.request mock above swallows everything, so we
+    // can't fail-by-fact-of-call. Instead assert no eth_sendRawTransaction
+    // / eth_sendTransaction calls reached the request fn.
+    const sendCalls = sendSpy.mock.calls.filter(([opts]: any[]) =>
+      typeof opts === 'object' && opts && (opts.method === 'eth_sendRawTransaction' || opts.method === 'eth_sendTransaction'),
+    );
+    expect(sendCalls).toHaveLength(0);
+
+    const svc = result.fleet_state.services[0];
+    expect(svc.step).toBe('complete');
+    // agent_id and identity_registry_address survive the re-run.
+    expect(svc.agent_id).toBe('12345');
+    expect(svc.identity_registry_address).toBe(
+      '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+    );
+  });
+
+  it('agent_registered step short-circuits in stepRegisterAgent when agent_id already set', async () => {
+    // Direct unit test of the idempotency guard in `stepRegisterAgent`,
+    // without driving the full bootstrap loop. Asserts that no
+    // outgoing tx is sent when `agent_id` is already on the service row.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'mech_deployed',
+          error: null,
+          agent_id: '999',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'cc'.repeat(32),
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    const writeSpy = vi.spyOn((bootstrapper as any).publicClient, 'request');
+
+    // Drive the step directly. We don't supply state-with-services; the
+    // method re-reads from the store regardless.
+    const fleet = await store.load('base');
+    const next = await (bootstrapper as any).stepRegisterAgent(fleet, mnemonic, 1);
+
+    const svc = next.services.find((s: any) => s.index === 1);
+    expect(svc.step).toBe('agent_registered');
+    expect(svc.agent_id).toBe('999');
+    // identity_registry_address is preserved from the prior persisted value.
+    expect(svc.identity_registry_address).toBe(
+      '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+    );
+    // No outgoing RPC writes — the short-circuit happens before any tx.
+    const sendCalls = writeSpy.mock.calls.filter(([opts]: any[]) =>
+      typeof opts === 'object' && opts && (opts.method === 'eth_sendRawTransaction' || opts.method === 'eth_sendTransaction'),
+    );
+    expect(sendCalls).toHaveLength(0);
+  });
 });

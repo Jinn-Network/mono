@@ -20,6 +20,8 @@ import {
   type ChainConfig,
   ERC20_ABI,
   EVENT_TOPICS,
+  IDENTITY_REGISTRY_ABI,
+  IDENTITY_REGISTRY_ADDRESSES,
   SERVICE_MANAGER_ABI,
   SERVICE_REGISTRY_APPROVE_ABI,
   SERVICE_REGISTRY_L2_ABI,
@@ -616,11 +618,21 @@ export class FleetBootstrapper {
     }
 
     // Reload service state after stake
-    const updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index);
+    let updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index);
     if (!updatedSvc) throw new Error(`Service ${index} disappeared from state`);
 
     if (updatedSvc.step === 'staked' || updatedSvc.step === 'mech_deployed') {
       state = await this.stepDeployMech(state, mnemonic, index);
+      updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (updatedSvc.step === 'mech_deployed' || updatedSvc.step === 'agent_registered') {
+      state = await this.stepRegisterAgent(state, mnemonic, index);
+      updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (updatedSvc.step === 'agent_registered') {
+      state = await this.store.updateService(index, { step: 'complete' });
     }
 
     return this.store.load(this.chain);
@@ -665,6 +677,16 @@ export class FleetBootstrapper {
 
     if (svc.step === 'staked' || svc.step === 'mech_deployed') {
       state = await this.stepDeployMech(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'mech_deployed' || svc.step === 'agent_registered') {
+      state = await this.stepRegisterAgent(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'agent_registered') {
+      state = await this.store.updateService(index, { step: 'complete' });
     }
 
     return this.store.load(this.chain);
@@ -828,7 +850,7 @@ export class FleetBootstrapper {
 
     if (svc.mech_address) {
       console.error(`[fleet-bootstrap] Service ${index}: mech already deployed at ${svc.mech_address}`);
-      return this.store.updateService(index, { step: 'complete' });
+      return this.store.updateService(index, { step: 'mech_deployed' });
     }
 
     const serviceId = svc.service_id!;
@@ -903,8 +925,129 @@ export class FleetBootstrapper {
 
     return this.store.updateService(index, {
       mech_address: mechAddress,
-      step: 'complete',
+      step: 'mech_deployed',
     });
+  }
+
+  /**
+   * ERC-8004 IdentityRegistry mint (jinn-mono-j07).
+   *
+   * Mints one operator agent NFT per service Safe; the agent EOA owns
+   * the token. Persists `agent_id` (and metadata) to state immediately
+   * after the receipt parses, so a crash between register and the
+   * subsequent `setAgentWallet` does not lose the token.
+   *
+   * v0 uses an empty `agentURI` — operators are expected to populate
+   * it later via `setAgentURI` once an off-chain agent card is in
+   * scope. Bootstrap is not blocked on producing an agent card.
+   *
+   * Idempotent: a re-run with `svc.agent_id` already set short-circuits
+   * to `step: 'agent_registered'` (or further) without re-mint.
+   *
+   * `setAgentWallet` is **stubbed** in this revision — the Safe
+   * ERC-1271 / EIP-712 wrapping flow (typed data digest → Safe
+   * `SafeMessage` wrap → owner ECDSA → contract-signature blob) is
+   * tracked separately. `safe_bound_to_agent` is therefore left
+   * `false`. See entity-model spec §4.1 + §6.
+   */
+  private async stepRegisterAgent(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    void state;
+    const svc = (await this.store.load(this.chain)).services.find(s => s.index === index);
+    if (!svc) throw new Error(`Service ${index} not found in state`);
+
+    const identityRegistry = this.config.identityRegistry
+      ?? IDENTITY_REGISTRY_ADDRESSES[this.config.chainId];
+    if (!identityRegistry) {
+      throw new Error(
+        `IdentityRegistry address not configured for chainId=${this.config.chainId}; ` +
+        `update IDENTITY_REGISTRY_ADDRESSES in earning/contracts.ts.`,
+      );
+    }
+
+    // Idempotency: if we have an agentId already, skip the mint.
+    if (svc.agent_id) {
+      console.error(
+        `[fleet-bootstrap] Service ${index}: ERC-8004 agent already registered ` +
+        `(agentId=${svc.agent_id}); skipping mint.`,
+      );
+      return this.store.updateService(index, {
+        identity_registry_address: svc.identity_registry_address ?? getAddress(identityRegistry),
+        step: 'agent_registered',
+      });
+    }
+
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+
+    // v0: empty agentURI. The richer agent card (per §6 of the spec) is
+    // future work — operators may later call `setAgentURI`.
+    const agentURI = '';
+    const registerData = encodeFunctionData({
+      abi: IDENTITY_REGISTRY_ABI,
+      functionName: 'register',
+      args: [agentURI],
+    }) as Hex;
+
+    console.error(
+      `[fleet-bootstrap] Service ${index}: minting ERC-8004 agent NFT ` +
+      `(IdentityRegistry=${identityRegistry}, agentEOA=${agentSigner.address})`,
+    );
+
+    const txHash = await viemSendTransactionWithRetry(
+      agentWallet,
+      this.publicClient,
+      {
+        account: agentSigner as Account,
+        to: addr(identityRegistry),
+        data: registerData,
+      },
+    );
+
+    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, txHash);
+    if (receipt.status !== 'success') {
+      throw new Error(`IdentityRegistry.register() tx failed for service ${index}: ${txHash}`);
+    }
+
+    const agentId = this.parseAgentIdFromReceipt(receipt, identityRegistry);
+    if (agentId === null) {
+      throw new Error(
+        `IdentityRegistry.register() succeeded but Registered event was not found ` +
+        `(service ${index}, tx: ${txHash})`,
+      );
+    }
+
+    console.error(
+      `[fleet-bootstrap] Service ${index}: ERC-8004 agent registered ` +
+      `(agentId=${agentId}, tx=${txHash})`,
+    );
+
+    // Persist agentId IMMEDIATELY so a crash between this write and the
+    // (currently stubbed) setAgentWallet call does not lose the token.
+    let next = await this.store.updateService(index, {
+      agent_id: agentId,
+      agent_uri: agentURI,
+      identity_registry_address: getAddress(identityRegistry),
+      agent_registered_tx: txHash,
+    });
+
+    // setAgentWallet stubbed — see header comment + jinn-mono-j07 follow-up.
+    if (svc.safe_address) {
+      console.error(
+        `[fleet-bootstrap] Service ${index}: setAgentWallet binding deferred ` +
+        `(Safe=${svc.safe_address}, agentId=${agentId}). ` +
+        `Tracked as a follow-up bd task.`,
+      );
+    }
+    next = await this.store.updateService(index, {
+      safe_bound_to_agent: false,
+      step: 'agent_registered',
+    });
+
+    return next;
   }
 
   // ── Self-bond step handlers ──────────────────────────────────────────
@@ -1434,6 +1577,40 @@ export class FleetBootstrapper {
       const t0 = log.topics[0];
       if (t0 === topic && log.topics.length >= 3) {
         return getAddress(('0x' + log.topics[2]!.slice(26)) as Hex);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Extract `agentId` from an `IdentityRegistry.Registered` log emitted in
+   * the receipt. Filters by `(address, topic[0])` first to avoid colliding
+   * with any other contract that happens to share the event signature.
+   *
+   * Returns the agentId as a decimal string (uint256) so it round-trips
+   * cleanly through JSON-persisted EarningState.
+   */
+  private parseAgentIdFromReceipt(
+    receipt: TransactionReceipt,
+    identityRegistry: string,
+  ): string | null {
+    const topic = EVENT_TOPICS.Registered;
+    const target = identityRegistry.toLowerCase();
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== target) continue;
+      if (log.topics[0] !== topic) continue;
+      try {
+        const decoded = decodeEventLog({
+          abi: IDENTITY_REGISTRY_ABI,
+          data: log.data,
+          topics: log.topics as [Hex, ...Hex[]],
+          strict: false,
+        });
+        if (decoded.eventName === 'Registered' && 'agentId' in decoded.args) {
+          return (decoded.args.agentId as bigint).toString();
+        }
+      } catch {
+        // Not a matching event
       }
     }
     return null;
