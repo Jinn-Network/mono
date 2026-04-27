@@ -1,12 +1,15 @@
 /**
- * Tests for IdentityPublisher integration in engine.pack() (jinn-mono-3zk).
+ * Tests for IdentityPublisher wiring in engine.deliver() (PR#37 review2 must-fix #2).
  *
  * Covers:
- *   - publishContent is called once per pack() with kind=envelope and the
- *     manifest CID + evidenceHash mapped into the v1 payload tuple.
- *   - publishContent failure is logged but does NOT abort pack() (state still
- *     advances to DELIVERING).
- *   - When no publisher is configured, pack() does not attempt to publish.
+ *   - pack() does NOT call identityPublisher.publishContent (it moved to deliver()).
+ *   - deliver() calls publishContent ONLY AFTER successful claimDelivery, using
+ *     the evidenceHash persisted from pack().
+ *   - publishContent failure is non-fatal: deliver() still transitions to COMPLETE.
+ *   - When no identityPublisher is configured, deliver() does not attempt to publish.
+ *   - setMetadata is idempotent: calling deliver() twice with the same evidenceHash
+ *     calls publishContent each time (idempotent write; caller is responsible for
+ *     dedup if needed — the test documents the idempotent intent).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -26,6 +29,7 @@ import type { IdentityPublisher } from '../../../src/discovery/identity-publishe
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
+// MOCK_JUSTIFICATION: src/adapters/mech/ipfs.js is the I/O leaf for IPFS gateway HTTP calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn().mockResolvedValue('bafymock123'),
   cidToDigestHex: vi.fn().mockReturnValue('0xdeadbeef00000000000000000000000000000000000000000000000000000000' as `0x${string}`),
@@ -34,6 +38,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   digestHexToGatewayUrl: vi.fn(),
 }));
 
+// MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   callDeliverToMarketplace: vi.fn().mockResolvedValue('0xdeliverytx' as `0x${string}`),
   claimDelivery: vi.fn().mockResolvedValue('0xclaimtx' as `0x${string}`),
@@ -50,9 +55,11 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   scanEvaluationJobs: vi.fn(),
 }));
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const TEST_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as `0x${string}`;
+const PACK_EVIDENCE_HASH = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee1' as Hex;
+const PACK_MANIFEST_CID = 'bafymock123';
 
 const noopRegistry: RestorerImplRegistry = {
   resolveImplName: () => null,
@@ -62,20 +69,6 @@ function mkTmp(): string {
   const dir = join(tmpdir(), `eng-pub-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   return dir;
-}
-
-function makeInput(requestId: string): PersistedIntentInput {
-  const now = Date.now() - 1000;
-  return {
-    requestId,
-    intentCid: 'bafyintent123',
-    onchainCreationTx: '0xdeadbeef',
-    onchainCreationBlock: 100,
-    specKind: 'portfolio.v0',
-    windowStartTs: now,
-    windowEndTs: now + 86_400_000,
-    restorationJob: { id: requestId, description: 'test' },
-  };
 }
 
 function makeOpts(
@@ -125,35 +118,93 @@ class TestEngine extends RestorationEngine {
   }
 }
 
+function makeIntentInput(requestId: string): PersistedIntentInput {
+  const now = Date.now() - 1000;
+  return {
+    requestId,
+    intentCid: 'bafyintent123',
+    onchainCreationTx: '0xdeadbeef',
+    onchainCreationBlock: 100,
+    specKind: 'portfolio.v0',
+    windowStartTs: now,
+    windowEndTs: now + 86_400_000,
+    restorationJob: { id: requestId, description: 'test' },
+  };
+}
+
 async function drivePackTransition(engine: TestEngine, requestId: string, workingDir: string): Promise<void> {
-  await engine.observe(makeInput(requestId));
+  await engine.observe(makeIntentInput(requestId));
   const p = engine.testPersistence;
+  const now = Date.now();
   p.transition(requestId, IntentState.CLAIMED);
   p.transition(requestId, IntentState.WAITING);
   p.transition(requestId, IntentState.PRE_SNAPSHOT, {
     workingDir,
     implStateDir: join(workingDir, '..', '..', 'impls', 'test'),
-    preSnapshotCapturedAt: Date.now(),
-    preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    preSnapshotCapturedAt: now,
+    preSnapshotPayload: { equity: '1000', capturedAt: now, hlTime: 0 },
   });
   p.transition(requestId, IntentState.RUNNING);
   p.transition(requestId, IntentState.POST_SNAPSHOT, {
-    postSnapshotCapturedAt: Date.now(),
-    postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    postSnapshotCapturedAt: now,
+    postSnapshotPayload: { equity: '1100', capturedAt: now, hlTime: 0 },
     fillsPayload: [],
-    gatingClaim: {},
+    // Valid portfolio.v0 gating claim shape (required by payload validation)
+    gatingClaim: {
+      equityReturnPct: '10',
+      maxDrawdownPct: '5',
+      closedTradesCount: 25,
+      tradedNotionalMultiple: '8',
+    },
   });
   p.transition(requestId, IntentState.PACKAGING);
   await engine.process(requestId);
 }
 
+/**
+ * Seed an intent directly into DELIVERING state (bypassing pack()) with
+ * a fixed evidenceHash and manifestCid, for testing deliver() in isolation.
+ */
+async function seedDelivering(
+  engine: TestEngine,
+  requestId: string,
+  evidenceHash: Hex,
+  manifestCid: string,
+): Promise<void> {
+  const now = Date.now() - 1000;
+  await engine.observe(makeIntentInput(requestId));
+  const p = engine.testPersistence;
+  p.transition(requestId, IntentState.CLAIMED);
+  p.transition(requestId, IntentState.WAITING);
+  p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+    workingDir: '/tmp/wd',
+    implStateDir: '/tmp/impl',
+    preSnapshotCapturedAt: now,
+    preSnapshotPayload: { capturedAt: now, hlTime: 0 },
+  });
+  p.transition(requestId, IntentState.RUNNING);
+  p.transition(requestId, IntentState.POST_SNAPSHOT, {
+    postSnapshotCapturedAt: now,
+    postSnapshotPayload: { capturedAt: now, hlTime: 0 },
+    fillsPayload: [],
+    gatingClaim: {},
+  });
+  p.transition(requestId, IntentState.PACKAGING, {
+    manifestCid,
+    artifactCids: {},
+    evidenceHash,
+  });
+  p.transition(requestId, IntentState.DELIVERING);
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('Engine IdentityPublisher wiring (jinn-mono-3zk)', () => {
+describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
   let store: Store;
   let tmp: string;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     store = new Store(':memory:');
     tmp = mkTmp();
   });
@@ -163,77 +214,123 @@ describe('Engine IdentityPublisher wiring (jinn-mono-3zk)', () => {
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  // SKIP: PR #37's engine refactor (manifestDeps→envelopeDeps, new envelope schema
-  // validation) broke this integration test's setup. The IdentityPublisher unit
-  // tests in test/discovery/identity-publisher.test.ts (23 tests) still cover the
-  // encoder + tier validity. The integration is also exercised by Phase 8d in
-  // client/test/e2e/validate.ts (al7 e2e). Tracked as a follow-up bead to update
-  // these tests against the post-#37 engine internals.
-  it.skip('calls publishContent with kind=envelope and v1 committed payload after pack()', async () => {
+  // ── pack() must NOT call publishContent ──────────────────────────────────────
+
+  it('pack() does NOT call publishContent', async () => {
     const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
     const mockPublisher = { publishContent: publishContentMock } as unknown as IdentityPublisher;
 
     const engine = new TestEngine(makeOpts(store, tmp, mockPublisher));
-    const requestId = 'req-pub-01';
+    const requestId = 'req-pack-no-pub';
     const workingDir = provisionWorkDir(tmp, requestId);
 
     await drivePackTransition(engine, requestId, workingDir);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
     expect(intent.state).toBe(IntentState.DELIVERING);
+    // publishContent must NOT have been called during pack()
+    expect(publishContentMock).not.toHaveBeenCalled();
+  });
 
+  it('pack() without identityPublisher still advances to DELIVERING', async () => {
+    const engine = new TestEngine(makeOpts(store, tmp));
+    const requestId = 'req-pack-no-pub-no-publisher';
+    const workingDir = provisionWorkDir(tmp, requestId);
+
+    await drivePackTransition(engine, requestId, workingDir);
+
+    const intent = engine.testPersistence.getByRequestId(requestId)!;
+    expect(intent.state).toBe(IntentState.DELIVERING);
+  });
+
+  // ── deliver() calls publishContent AFTER claimDelivery succeeds ─────────────
+
+  it('deliver() calls publishContent after claimDelivery succeeds, using evidenceHash from pack', async () => {
+    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
+    const mockPublisher = { publishContent: publishContentMock } as unknown as IdentityPublisher;
+
+    const engine = new TestEngine(makeOpts(store, tmp, mockPublisher));
+    const requestId = 'req-deliver-pub';
+
+    await seedDelivering(engine, requestId, PACK_EVIDENCE_HASH, PACK_MANIFEST_CID);
+
+    await engine.process(requestId);
+
+    const intent = engine.testPersistence.getByRequestId(requestId)!;
+    expect(intent.state).toBe(IntentState.COMPLETE);
+
+    // publishContent called exactly once after claimDelivery
     expect(publishContentMock).toHaveBeenCalledTimes(1);
     const arg = publishContentMock.mock.calls[0]![0] as {
       kind: string;
       cid: string;
-      payload: {
-        version: number;
-        tier: number;
-        manifestHash: Hex;
-        attestationQuoteCid: Hex;
-        sourceMeasurement: Hex;
-      };
+      payload: { version: number; tier: number; manifestHash: Hex };
     };
     expect(arg.kind).toBe('envelope');
-    expect(arg.cid).toBe('bafymock123');
+    expect(arg.cid).toBe(PACK_MANIFEST_CID);
     expect(arg.payload.version).toBe(1);
-    // evidenceHash is non-zero (assembleAndSignManifest produces a real keccak256),
-    // so the engine declares tier=1 (committed) per v0 rule.
+    // evidenceHash is non-zero → tier=1 (committed)
     expect(arg.payload.tier).toBe(1);
-    expect(arg.payload.manifestHash).toBe(intent.evidenceHash);
-    expect(arg.payload.attestationQuoteCid).toBe('0x');
-    expect(arg.payload.sourceMeasurement).toBe(
-      '0x0000000000000000000000000000000000000000000000000000000000000000',
-    );
+    // Same evidenceHash persisted from pack()
+    expect(arg.payload.manifestHash).toBe(PACK_EVIDENCE_HASH);
   });
 
-  it.skip('pack() still advances to DELIVERING when publishContent throws', async () => {
-    const publishContentMock = vi
-      .fn()
-      .mockRejectedValue(new Error('rpc unreachable'));
+  it('deliver() publishContent failure is non-fatal — COMPLETE state still set', async () => {
+    const publishContentMock = vi.fn().mockRejectedValue(new Error('rpc unreachable'));
     const mockPublisher = { publishContent: publishContentMock } as unknown as IdentityPublisher;
 
     const engine = new TestEngine(makeOpts(store, tmp, mockPublisher));
-    const requestId = 'req-pub-02';
-    const workingDir = provisionWorkDir(tmp, requestId);
+    const requestId = 'req-deliver-pub-fail';
 
-    await drivePackTransition(engine, requestId, workingDir);
+    await seedDelivering(engine, requestId, PACK_EVIDENCE_HASH, PACK_MANIFEST_CID);
+
+    await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.DELIVERING);
-    expect(intent.manifestCid).toBe('bafymock123');
+    expect(intent.state).toBe(IntentState.COMPLETE);
     expect(publishContentMock).toHaveBeenCalledTimes(1);
   });
 
-  it.skip('does NOT call publishContent when identityPublisher is absent', async () => {
+  it('deliver() without identityPublisher does not throw and transitions to COMPLETE', async () => {
     const engine = new TestEngine(makeOpts(store, tmp));
-    const requestId = 'req-pub-03';
-    const workingDir = provisionWorkDir(tmp, requestId);
+    const requestId = 'req-deliver-no-publisher';
 
-    await drivePackTransition(engine, requestId, workingDir);
+    await seedDelivering(engine, requestId, PACK_EVIDENCE_HASH, PACK_MANIFEST_CID);
+
+    await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.DELIVERING);
-    // Nothing further to assert — absence is the contract.
+    expect(intent.state).toBe(IntentState.COMPLETE);
+  });
+
+  it('setMetadata is idempotent on retry — publishContent called with same evidenceHash on repeated deliver()', async () => {
+    // setMetadata (publishContent on IdentityRegistry) is a pure key-value write;
+    // calling it a second time with the same payload is safe. This test seeds two
+    // separate DELIVERING intents with the same evidenceHash (simulating retry
+    // from a separate engine instance) to verify both calls use the persisted hash.
+    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
+    const mockPublisher = { publishContent: publishContentMock } as unknown as IdentityPublisher;
+
+    const engine = new TestEngine(makeOpts(store, tmp, mockPublisher));
+
+    // First deliver: intent A
+    const requestIdA = 'req-deliver-idempotent-a';
+    await seedDelivering(engine, requestIdA, PACK_EVIDENCE_HASH, PACK_MANIFEST_CID);
+    await engine.process(requestIdA);
+
+    // Second deliver: a new intent B seeded with the same evidenceHash (simulates
+    // a retry cycle where the same hash is passed again — idempotent write).
+    const requestIdB = 'req-deliver-idempotent-b';
+    const store2 = new Store(':memory:');
+    const engine2 = new TestEngine(makeOpts(store2, tmp, mockPublisher));
+    await seedDelivering(engine2, requestIdB, PACK_EVIDENCE_HASH, PACK_MANIFEST_CID);
+    await engine2.process(requestIdB);
+    store2.close();
+
+    // publishContent called twice, both times with the same evidenceHash
+    expect(publishContentMock).toHaveBeenCalledTimes(2);
+    for (const call of publishContentMock.mock.calls) {
+      expect((call[0] as any).payload.manifestHash).toBe(PACK_EVIDENCE_HASH);
+    }
   });
 });

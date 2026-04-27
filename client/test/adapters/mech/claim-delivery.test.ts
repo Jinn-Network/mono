@@ -56,6 +56,7 @@ describe('claimDelivery', () => {
   it('treats Safe GS013 as idempotent when the router now reports claimed', async () => {
     const publicClient = makePublicClient([false, true]);
     vi.mocked(executeSafeTransaction).mockRejectedValueOnce(new Error('execution reverted: GS013'));
+    const evidenceHash = `0x${'ef'.repeat(32)}` as Hex;
 
     const txHash = await claimDelivery(
       publicClient,
@@ -63,11 +64,28 @@ describe('claimDelivery', () => {
       SAFE_ADDRESS,
       ROUTER_ADDRESS,
       REQUEST_ID,
-      { variant: 'v2' },
+      { variant: 'v2', evidenceHash },
     );
 
     expect(txHash).toBe('0x');
     expect(executeSafeTransaction).toHaveBeenCalledOnce();
     expect(publicClient.readContract).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws when variant is v2 and evidenceHash is missing', async () => {
+    const publicClient = makePublicClient([false]);
+
+    await expect(
+      claimDelivery(
+        publicClient,
+        makeWalletClient(),
+        SAFE_ADDRESS,
+        ROUTER_ADDRESS,
+        REQUEST_ID,
+        { variant: 'v2' },
+      ),
+    ).rejects.toThrow('evidenceHash is required for V2 claim');
+
+    expect(executeSafeTransaction).not.toHaveBeenCalled();
   });
 });

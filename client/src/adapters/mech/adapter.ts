@@ -1,5 +1,6 @@
 import { ZodError } from 'zod';
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
+import { keccak256 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import type { ExecutionAdapter } from '../adapter.js';
 import type {
@@ -18,9 +19,12 @@ import {
   cidToDigestHex,
   fetchFromIpfs,
   fetchSignedIntentFromIpfs,
+  fetchSignedEnvelopeFromIpfs,
   digestHexToGatewayUrl,
   parseRestorationJobFromPayload,
 } from './ipfs.js';
+import { canonicalJson } from '../../restorer/engine/canonical-json.js';
+import { SignedEnvelopeSchema } from '../../types/envelope.js';
 import {
   submitRestorationJob,
   submitEvaluationJob,
@@ -418,15 +422,52 @@ export class MechAdapter implements ExecutionAdapter {
             //   delivered (iDelivered is false) → the creator Safe must still call claimDelivery
             //   so the router flips `restorationDeliveryClaimed` for this requestId. Otherwise
             //   tryCreateEvaluationJob never unblocks. See JinnRouter.claimDelivery in contracts.
-            const shouldClaimDelivery = iDelivered || (iCreatedRestoration && !iDelivered);
+            const isCrossOperator = iCreatedRestoration && !iDelivered;
+            const shouldClaimDelivery = iDelivered || isCrossOperator;
             if (shouldClaimDelivery) {
               try {
                 const variant = this.config.routerClaimDeliveryVariant;
                 let evidenceHash: `0x${string}` | undefined;
                 if (variant === 'v2') {
-                  const stored = this.store?.getIntentEvidenceHash(requestId);
-                  if (stored) {
-                    evidenceHash = stored as `0x${string}`;
+                  if (iDelivered) {
+                    // Same-operator path: we signed the envelope, hash is in store.
+                    const stored = this.store?.getIntentEvidenceHash(requestId);
+                    if (stored) {
+                      evidenceHash = stored as `0x${string}`;
+                    }
+                  } else {
+                    // Cross-operator path: we did NOT deliver, so no local store entry.
+                    // Derive evidenceHash by fetching the delivered envelope from IPFS
+                    // and recomputing keccak256(JCS(envelope - signature)).
+                    // If derivation fails, skip claim and let the next watch loop retry.
+                    try {
+                      const deliveryDigest = deliveryDataHex.startsWith('0x')
+                        ? deliveryDataHex.slice(2)
+                        : deliveryDataHex;
+                      const envelopeCid = `f01551220${deliveryDigest}`;
+                      const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
+                        this.config.ipfsGatewayUrl,
+                        envelopeCid,
+                      );
+                      const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
+                      // Strip signature to recompute the hash over the unsigned body.
+                      const { signature, ...unsignedBody } = parsed;
+                      const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
+                      const recomputed = keccak256(jcsBytes);
+                      if (recomputed !== signature.hash) {
+                        console.error(
+                          `[mech] cross-operator claimDelivery skipped for ${requestId}: recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
+                        );
+                        continue;
+                      }
+                      evidenceHash = recomputed as `0x${string}`;
+                    } catch (deriveErr) {
+                      console.error(
+                        `[mech] cross-operator evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
+                        deriveErr,
+                      );
+                      continue;
+                    }
                   }
                 }
                 await claimDelivery(

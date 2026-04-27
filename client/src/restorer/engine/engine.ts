@@ -874,6 +874,13 @@ export class RestorationEngine {
       ? { cid: trajectoryRef.cid, sha256: trajectoryRef.sha256 }
       : null;
 
+    // evidenceTier reflects the on-chain commitment state at the time of signing.
+    // For the V2 claim flow, claimDelivery will write an evidenceHash on-chain,
+    // so the envelope should be declared 'committed'. For V1 or unknown flows,
+    // 'self-signed' is accurate (no on-chain hash commitment).
+    const evidenceTier: import('../../types/envelope.js').EvidenceTier =
+      this.deliveryDeps?.claimDeliveryVariant === 'v2' ? 'committed' : 'self-signed';
+
     const envelopeInputs: EnvelopeInputs = {
       kind: specKind,
       role,
@@ -893,6 +900,7 @@ export class RestorationEngine {
         codeDigest: 'sha256:' + '0'.repeat(64),
         signingKey: { kind: 'agent-eoa', pubkey: agentEoa },
       },
+      evidenceTier,
       trajectory: envelopeTrajectory,
       artifacts,
       payload: envelopePayload,
@@ -913,51 +921,12 @@ export class RestorationEngine {
     //    The previous per-CID registerEnvelope / registerArtifactWithParent
     //    path was deleted with PR #37 cleanup.
 
-    // 6b. ERC-8004 IdentityRegistry per-execution `setMetadata` (jinn-mono-3zk).
-    //
-    // Anchors the envelope under the operator's agent NFT with a v1 ABI-encoded
-    // payload (tier + manifestHash + optional TEE pointers); see
-    // `docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md` §3.1 and
-    // `2026-04-27-erc-8004-entity-model-design.md` §4.2.
-    //
-    // Best-effort. Failures are logged but never fatal: the JinnRouter
-    // claimDelivery(evidenceHash) call below is the authoritative on-chain
-    // commitment; this `setMetadata` is the discovery anchor.
-    //
-    // Restoration-only for now. Evaluator publishing of `evaluation:<cid>`
-    // lands with jinn-mono-2ff so we don't disturb the evaluator delivery
-    // path here.
-    if (this.identityPublisher) {
-      const intentTypeRaw = intent.intentType ?? 'restoration';
-      if (intentTypeRaw === 'restoration') {
-        // v0 tier rule: with an evidenceHash on chain we declare `committed`;
-        // higher tiers (`attested`, `proved`) come later when TEE work lands
-        // (see DR §4.2 + payload-schema §5).
-        const tier: ExecutionTier = signatureHash ? 1 : 0;
-        const payload: ExecutionPayload = {
-          version: 1,
-          tier,
-          manifestHash: signatureHash,
-          attestationQuoteCid: '0x',
-          sourceMeasurement:
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
-        };
-        try {
-          const txHash = await this.identityPublisher.publishContent({
-            kind: 'envelope',
-            cid: manifestCid,
-            payload,
-          });
-          console.log(
-            `[restorer-engine] ${intent.requestId}: setMetadata envelope:${manifestCid} tx=${txHash}`,
-          );
-        } catch (err) {
-          console.warn(
-            `[restorer-engine] ${intent.requestId}: setMetadata envelope publish failed (non-fatal): ${err instanceof Error ? err.message : err}`,
-          );
-        }
-      }
-    }
+    // 6b. ERC-8004 IdentityRegistry per-execution `setMetadata` fires in
+    //    deliver() AFTER claimDelivery succeeds (jinn-mono-3zk, PR#37 review2
+    //    must-fix #2). 'committed' must mean "observable on-chain evidenceHash
+    //    exists" — publishing before claim would lie during failures.
+    //    The evidenceHash (signatureHash) is persisted to DELIVERING state below
+    //    and reused by deliver().
 
     // 7. Build artifact CID map for persistence
     const artifactCids: Record<string, string> = {};
@@ -1027,6 +996,47 @@ export class RestorationEngine {
       deliveryTxHash,
     });
     console.log(`[restorer-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
+
+    // ── ERC-8004 setMetadata — fires AFTER claimDelivery succeeds ────────────
+    //
+    // Moved here from pack() per PR#37 review2 must-fix #2. 'committed' means
+    // "observable on-chain evidenceHash exists" — publishing before claim would
+    // lie during failures. evidenceHash comes from intent (persisted in
+    // DELIVERING state by pack()); idempotent on retry (setMetadata is a pure
+    // key-value write; re-running with the same payload is safe).
+    //
+    // Restoration-only for now. Evaluator setMetadata lands with jinn-mono-2ff.
+    if (this.identityPublisher) {
+      const intentTypeRaw = intent.intentType ?? 'restoration';
+      if (intentTypeRaw === 'restoration') {
+        const signatureHash = evidenceHash as `0x${string}` | null | undefined;
+        // v0 tier rule: with an evidenceHash on chain we declare `committed` (tier=1);
+        // higher tiers (`attested`, `proved`) come later when TEE work lands.
+        const tier: ExecutionTier = signatureHash ? 1 : 0;
+        const setMetadataPayload: ExecutionPayload = {
+          version: 1,
+          tier,
+          manifestHash: signatureHash ?? ('0x' as `0x${string}`),
+          attestationQuoteCid: '0x',
+          sourceMeasurement:
+            '0x0000000000000000000000000000000000000000000000000000000000000000',
+        };
+        try {
+          const pubTxHash = await this.identityPublisher.publishContent({
+            kind: 'envelope',
+            cid: manifestCid,
+            payload: setMetadataPayload,
+          });
+          console.log(
+            `[restorer-engine] ${requestId}: setMetadata envelope:${manifestCid} tx=${pubTxHash}`,
+          );
+        } catch (err) {
+          console.warn(
+            `[restorer-engine] ${requestId}: setMetadata envelope publish failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
+    }
 
     // ── Reputation feedback hook (jinn-mono-yg4) ─────────────────────────────
     //

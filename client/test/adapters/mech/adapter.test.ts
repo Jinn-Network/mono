@@ -39,8 +39,25 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   fetchSignedIntentFromIpfs: vi.fn().mockImplementation(() => {
     throw new ZodError([]);
   }),
+  fetchSignedEnvelopeFromIpfs: vi.fn().mockResolvedValue(null),
   parseRestorationJobFromPayload: vi.fn().mockReturnValue({ id: 'ds-1', description: 'test' }),
   digestHexToGatewayUrl: vi.fn(),
+}));
+
+// Mock canonical-json so hash derivation is deterministic in tests.
+// MOCK_JUSTIFICATION: canonical-json is a pure transform; mocking it fixes the
+// output so keccak256(JCS(...)) produces a predictable test hash.
+vi.mock('../../../src/restorer/engine/canonical-json.js', () => ({
+  canonicalJson: vi.fn().mockReturnValue('{"mocked":"jcs"}'),
+}));
+
+// Mock envelope types schema so SignedEnvelopeSchema.parse is controllable.
+// MOCK_JUSTIFICATION: zod schema validation of the envelope shape is tested in
+// envelope-assembly tests; here we only need to exercise the adapter routing logic.
+vi.mock('../../../src/types/envelope.js', () => ({
+  SignedEnvelopeSchema: {
+    parse: vi.fn(),
+  },
 }));
 
 // Mock Safe
@@ -400,5 +417,123 @@ describe('MechAdapter with JinnRouter', () => {
     expect(submitEvaluationJob).toHaveBeenCalled();
 
     await adapter.stop();
+  });
+
+  it('V2 cross-operator claimDelivery derives evidenceHash from fetched envelope', async () => {
+    // Cross-operator: another mech delivered, we (creator) must claim.
+    // No local store entry → adapter fetches envelope from IPFS, recomputes
+    // keccak256(JCS(envelope - signature)), verifies against signature.hash,
+    // then passes that hash to claimDelivery.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+    const { canonicalJson } = await import('../../../src/restorer/engine/canonical-json.js');
+
+    const requestId = '0x' + 'aa'.repeat(32);
+    const deliveryDigest = 'dd'.repeat(32);
+    // mechAddress is DIFFERENT from safeAddress → cross-operator
+    const otherMechAddress = '0x' + '99'.repeat(20);
+
+    // The mocked canonicalJson returns '{"mocked":"jcs"}'; keccak256 of those
+    // UTF-8 bytes produces a deterministic real hash. We set signature.hash to
+    // that same value so the recomputed hash matches.
+    const { keccak256 } = await import('viem');
+    const jcsBytes = new TextEncoder().encode('{"mocked":"jcs"}');
+    const expectedHash = keccak256(jcsBytes);
+
+    const fakeEnvelope = {
+      schemaVersion: 'jinn.execution.v1',
+      kind: 'portfolio.v0',
+      role: 'restoration',
+      signature: { algo: 'secp256k1', signer: '0xabc', hash: expectedHash, sig: '0xsig' },
+    };
+    vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
+    // fetchFromIpfs mock for the eval job fetch (iCreatedRestoration path)
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'restored' });
+
+    vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+      requestId,
+      deliveryDataHex: '0x' + deliveryDigest,
+      mechAddress: otherMechAddress,
+    }]);
+
+    const v2Config: MechAdapterConfig = { ...TEST_CONFIG, routerClaimDeliveryVariant: 'v2' };
+    const adapter = new MechAdapter(v2Config);
+    await adapter.initialize();
+
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(200n);
+    (adapter as any).deliveryBlockCursor = 100n;
+    // Mark as iCreatedRestoration (we created this request)
+    (adapter as any).pendingEvaluations.set(requestId, { id: 'ds-1', description: 'test' });
+
+    const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+    await gen.next();
+
+    // claimDelivery must be called with the derived hash, NOT zero
+    expect(claimDelivery).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      v2Config.safeAddress,
+      v2Config.routerAddress,
+      requestId,
+      { variant: 'v2', evidenceHash: expectedHash },
+    );
+    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(
+      v2Config.ipfsGatewayUrl,
+      `f01551220${deliveryDigest}`,
+    );
+
+    await adapter.stop();
+  });
+
+  it('V2 cross-operator claimDelivery skips claim when envelope fetch fails', async () => {
+    // If IPFS is unavailable, derivation fails → skip claim, retry next loop.
+    // Run the generator briefly; the skipped-claim path does not yield so we
+    // stop the adapter after the first poll pass and assert claimDelivery was
+    // not called.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedEnvelopeFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const requestId = '0x' + 'aa'.repeat(32);
+    const otherMechAddress = '0x' + '99'.repeat(20);
+
+    vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+      requestId,
+      deliveryDataHex: '0x' + 'dd'.repeat(32),
+      mechAddress: otherMechAddress,
+    }]);
+    vi.mocked(fetchSignedEnvelopeFromIpfs).mockRejectedValueOnce(
+      new Error('IPFS fetch failed after all candidates'),
+    );
+
+    // Use a very short pollInterval so the loop finishes quickly
+    const v2Config: MechAdapterConfig = {
+      ...TEST_CONFIG,
+      routerClaimDeliveryVariant: 'v2',
+      pollIntervalMs: 0,
+    };
+    const adapter = new MechAdapter(v2Config);
+    await adapter.initialize();
+
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(200n);
+    (adapter as any).deliveryBlockCursor = 100n;
+    (adapter as any).pendingEvaluations.set(requestId, { id: 'ds-1', description: 'test' });
+
+    // Run the generator; stop after the first poll pass completes (the derivation
+    // failure causes `continue` so no yield — we stop and check side effects).
+    const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+    // Stop the adapter immediately so the generator terminates after the first pass
+    const firstPass = gen.next();
+    // Give the event loop a tick for the first poll pass to execute
+    await new Promise(r => setTimeout(r, 50));
+    await adapter.stop();
+    // The generator returns (done: true) after stop
+    await firstPass;
+
+    // claimDelivery must NOT be called when derivation fails
+    expect(claimDelivery).not.toHaveBeenCalled();
   });
 });
