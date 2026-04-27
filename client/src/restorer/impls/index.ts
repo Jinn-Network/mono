@@ -14,6 +14,11 @@ import { ClaudeMcpPredictionImpl } from './claude-mcp-prediction/index.js';
 import { PredictionApyV0BaselineImpl } from './prediction-apy-v0-baseline/index.js';
 import { ClaudeMcpPredictionApyImpl } from './claude-mcp-prediction-apy/index.js';
 import { PredictionApyV0Evaluator } from './prediction-apy-v0-evaluator/index.js';
+import {
+  ClaudeCodeLearnerImpl,
+  ClaudeCodeLearnerWrapper,
+} from './claude-code-learner/index.js';
+import { ClaudeCodeHarnessAdapter } from './claude-code-learner/index.js';
 
 /**
  * Environment passed to {@link buildRestorerImpls} — same shape for daemon
@@ -143,5 +148,17 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
         }),
   );
 
-  return out;
+  // Build the claude-code-learner wrapper LAST (so it sees all other impls
+  // as its specialists pool) but register it FIRST so it wins
+  // first-match for every kind.
+  const learnerAdapter = new ClaudeCodeHarnessAdapter({
+    claudePath: env.claudePath,
+    claudeModel: env.claudeModel,
+  });
+  const learnerShim = new ClaudeCodeLearnerImpl({ adapter: learnerAdapter });
+  const learnerWrapper = new ClaudeCodeLearnerWrapper({
+    shim: learnerShim,
+    specialists: [...out], // snapshot of specialists; wrapper does not delegate to itself
+  });
+  return [learnerWrapper, ...out];
 }
