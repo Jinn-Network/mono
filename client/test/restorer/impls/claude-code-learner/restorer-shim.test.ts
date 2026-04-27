@@ -83,17 +83,14 @@ describe('ClaudeCodeLearnerImpl — shim lifecycle (NoOp adapter)', () => {
     });
   });
 
-  it('run(ctx) returns a RestorationOutput even when adapter writes no artifacts (degraded path)', async () => {
+  it('run(ctx) throws when adapter writes no artifacts (hard-fail on missing required artifacts)', async () => {
     const adapter = new NoOpHarnessAdapter().on(async () => {
       // Simulate harness exiting without writing anything.
     });
     const impl = new ClaudeCodeLearnerImpl({ adapter });
     const ctx = makeCtx(workingDir, implStateDir);
 
-    const out = await impl.run(ctx);
-
-    expect(out.venueRef.name).toEqual('claude-code-learner');
-    expect(out.gating).toMatchObject({ phasesCompleted: [] });
+    await expect(impl.run(ctx)).rejects.toThrow('Required artifact missing');
   });
 
   it('honors a custom pluginRoot override', async () => {

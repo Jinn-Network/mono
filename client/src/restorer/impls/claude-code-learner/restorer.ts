@@ -69,6 +69,10 @@ export class ClaudeCodeLearnerImpl implements RestorerImpl {
 
     await this.adapter.runIntent(inputs, this.pluginRoot);
 
-    return harvestOutput(ctx.workingDir);
+    // Pass the phase-range hint (if any) through to harvestOutput so that
+    // a pre-execute or post-execute pass only validates the artifacts that
+    // the coordinator was asked to produce for that pass.
+    const phaseRange = adapterEnv['JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE'];
+    return harvestOutput(ctx.workingDir, phaseRange);
   }
 }
