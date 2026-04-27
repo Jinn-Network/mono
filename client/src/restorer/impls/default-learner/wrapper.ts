@@ -4,7 +4,10 @@ import type {
   RestorerImpl,
   RestorationContext,
   RestorationOutput,
+  ReadyStatus,
+  EnableResult,
 } from '../../types.js';
+import type { DesiredState } from '../../../types/desired-state.js';
 import type { DefaultLearningRestorerImpl } from './restorer.js';
 import { harvestOutput } from './harvest.js';
 
@@ -43,6 +46,32 @@ export class DefaultLearningWrapper implements RestorerImpl {
 
   supports(_spec: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
     return true;
+  }
+
+  async isReady(): Promise<ReadyStatus> {
+    for (const specialist of this.specialists) {
+      if (specialist.isReady) {
+        const status = await specialist.isReady();
+        if (!status.ready) return status;
+      }
+    }
+    return { ready: true };
+  }
+
+  async canAttempt(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const spec = {
+      kind: intent.spec?.kind ?? '',
+      type: intent.type ?? ('restoration' as const),
+    };
+    return (await this.findSpecialist(spec)?.canAttempt?.(intent)) ?? { ok: true };
+  }
+
+  async onEnable(_args: Record<string, string | undefined>): Promise<EnableResult> {
+    return { status: 'ready' };
+  }
+
+  async onDisable(): Promise<void> {
+    // no-op: wrapper itself has no disable flow
   }
 
   /**

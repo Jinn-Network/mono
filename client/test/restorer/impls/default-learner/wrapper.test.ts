@@ -15,7 +15,8 @@ import {
   fakeMemoryConsolidationRecord,
 } from '../../../../src/restorer/impls/default-learner/test-utils/fake-plugin-outputs.js';
 import { makeRestorationCtx } from '@test/restoration-ctx.js';
-import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../../../src/restorer/types.js';
+import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../../../src/restorer/types.js';
+import type { DesiredState } from '../../../../src/types/desired-state.js';
 
 function makeFakeSpecialist(kinds: string[]): RestorerImpl & { runCalled: boolean } {
   const stub = {
@@ -61,6 +62,21 @@ function makeCtx(workingDir: string, implStateDir: string, kind: string): Restor
     implStateDir,
     msUntilEndTs: () => Math.max(0, endTs - Date.now()),
   });
+}
+
+function makeSpecialistWithGates(
+  kinds: string[],
+  gates: Partial<Pick<RestorerImpl, 'isReady' | 'canAttempt' | 'enableMetadata' | 'onEnable' | 'onDisable'>>,
+): RestorerImpl {
+  return {
+    name: `specialist-${kinds.join(',')}`,
+    version: '0.0.1',
+    supports: (spec: { kind: string }) => kinds.includes(spec.kind),
+    async run(_ctx: RestorationContext): Promise<RestorationOutput> {
+      return { venueRef: { name: 'specialist' }, gating: {} };
+    },
+    ...gates,
+  };
 }
 
 describe('DefaultLearningWrapper', () => {
@@ -177,5 +193,113 @@ describe('DefaultLearningWrapper', () => {
     await wrapper.run(ctx);
 
     expect(wrongSpecialist.runCalled).toBe(false);
+  });
+
+  describe('gate method delegation', () => {
+    it('isReady() delegates to specialist and propagates not-ready status', async () => {
+      const specialist = makeSpecialistWithGates(['portfolio.v0'], {
+        async isReady(): Promise<ReadyStatus> {
+          return { ready: false, reason: 'no api-wallet' };
+        },
+      });
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [specialist] });
+
+      const status = await wrapper.isReady!();
+      expect(status.ready).toBe(false);
+      expect(status.reason).toBe('no api-wallet');
+    });
+
+    it('isReady() returns ready when no specialist defines isReady', async () => {
+      const specialist = makeFakeSpecialist(['portfolio.v0']);
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [specialist] });
+
+      const status = await wrapper.isReady!();
+      expect(status.ready).toBe(true);
+    });
+
+    it('isReady() returns ready when all specialists report ready', async () => {
+      const specialist = makeSpecialistWithGates(['portfolio.v0'], {
+        async isReady(): Promise<ReadyStatus> {
+          return { ready: true };
+        },
+      });
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [specialist] });
+
+      const status = await wrapper.isReady!();
+      expect(status.ready).toBe(true);
+    });
+
+    it('canAttempt() delegates to specialist for matching kind and propagates rejection', async () => {
+      const specialist = makeSpecialistWithGates(['portfolio.v0'], {
+        async canAttempt(_intent: DesiredState) {
+          return { ok: false as const, reason: 'window closed' };
+        },
+      });
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [specialist] });
+
+      const intent: DesiredState = { id: 'test', description: 'test', spec: { kind: 'portfolio.v0' } };
+      const result = await wrapper.canAttempt!(intent);
+      expect(result.ok).toBe(false);
+      expect((result as { ok: false; reason: string }).reason).toBe('window closed');
+    });
+
+    it('canAttempt() returns ok:true when no specialist matches kind', async () => {
+      const specialist = makeSpecialistWithGates(['prediction.v0'], {
+        async canAttempt(_intent: DesiredState) {
+          return { ok: false as const, reason: 'wrong kind' };
+        },
+      });
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [specialist] });
+
+      const intent: DesiredState = { id: 'test', description: 'test', spec: { kind: 'portfolio.v0' } };
+      const result = await wrapper.canAttempt!(intent);
+      expect(result.ok).toBe(true);
+    });
+
+    it('canAttempt() returns ok:true when matching specialist has no canAttempt', async () => {
+      const specialist = makeFakeSpecialist(['portfolio.v0']);
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [specialist] });
+
+      const intent: DesiredState = { id: 'test', description: 'test', spec: { kind: 'portfolio.v0' } };
+      const result = await wrapper.canAttempt!(intent);
+      expect(result.ok).toBe(true);
+    });
+
+    it('enableMetadata() returns undefined (no kind context for delegation)', () => {
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [] });
+
+      expect(wrapper.enableMetadata?.()).toBeUndefined();
+    });
+
+    it('onEnable() returns ready status', async () => {
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [] });
+
+      const result = await wrapper.onEnable!({});
+      expect(result.status).toBe('ready');
+    });
+
+    it('onDisable() resolves without error', async () => {
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new DefaultLearningRestorerImpl({ adapter });
+      const wrapper = new DefaultLearningWrapper({ shim, specialists: [] });
+
+      await expect(wrapper.onDisable!()).resolves.toBeUndefined();
+    });
   });
 });
