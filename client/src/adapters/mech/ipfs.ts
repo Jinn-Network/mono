@@ -1,8 +1,10 @@
 import type { Hex } from 'viem';
-import type { DesiredState, RestorationResult } from '../../types/index.js';
+import type { RestorationJob, RestorationResult } from '../../types/index.js';
+import { parseSignedIntentV1, type SignedIntentV1 } from '../../types/intent.js';
 import { IPFS_GATEWAY_PREFIX } from './types.js';
+import { canonicalJson } from '../../restorer/engine/canonical-json.js';
 
-export interface DesiredStatePayload {
+export interface RestorationJobPayload {
   desiredStateId: string;
   description: string;
   context?: Record<string, unknown>;
@@ -22,7 +24,7 @@ export interface RestorationResultPayload {
   artifacts?: string[];
 }
 
-export function buildDesiredStatePayload(state: DesiredState): DesiredStatePayload {
+export function buildRestorationJobPayload(state: RestorationJob): RestorationJobPayload {
   return {
     desiredStateId: state.id,
     description: state.description,
@@ -37,8 +39,8 @@ export function buildDesiredStatePayload(state: DesiredState): DesiredStatePaylo
   };
 }
 
-export function parseDesiredStateFromPayload(payload: Record<string, unknown>): DesiredState {
-  const spec = payload.spec as DesiredState['spec'] | undefined;
+export function parseRestorationJobFromPayload(payload: Record<string, unknown>): RestorationJob {
+  const spec = payload.spec as RestorationJob['spec'] | undefined;
   const rawWindow = payload.window as { startTs?: unknown; endTs?: unknown } | undefined;
   const window =
     rawWindow && typeof rawWindow.startTs === 'number' && typeof rawWindow.endTs === 'number'
@@ -83,6 +85,23 @@ export function normalizeIpfsRegistryAddUrl(registryUrl: string): string {
   t = t.replace(/\/+$/, '');
   if (t.endsWith('/api/v0/add')) return t;
   return `${t}/api/v0/add`;
+}
+
+function parseRegistryUploadCid(responseText: string): string {
+  let lastHash: string | undefined;
+  for (const line of responseText.trim().split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { Hash?: unknown };
+      if (typeof entry.Hash === 'string' && entry.Hash.length > 0) {
+        lastHash = entry.Hash;
+      }
+    } catch {
+      // Ignore non-JSON lines — the registry returns newline-delimited JSON.
+    }
+  }
+  if (!lastHash) throw new Error('IPFS registry upload did not return a CID');
+  return lastHash;
 }
 
 /**
@@ -153,32 +172,14 @@ async function fetchJsonFromUrl(url: string, signal: AbortSignal): Promise<unkno
   }
 }
 
-function parseRegistryUploadCid(responseText: string): string {
-  let lastHash: string | undefined;
-  for (const line of responseText.trim().split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line) as { Hash?: unknown };
-      if (typeof entry.Hash === 'string' && entry.Hash.length > 0) {
-        lastHash = entry.Hash;
-      }
-    } catch {
-      // The registry returns newline-delimited JSON. Ignore non-JSON lines so
-      // callers get the same "no CID" failure as the old mech-client helper.
-    }
-  }
-  if (!lastHash) throw new Error('IPFS registry upload did not return a CID');
-  return lastHash;
-}
-
 /**
  * Fetch JSON from IPFS gateways, mirroring jinn-node:
  * 1) Normalize base URL (avoid `/ipfs//ipfs/` when env already includes `/ipfs/`).
  * 2) Try raw then dag-pb hex CIDs for the same digest.
  * 3) Retry on primary gateway then public ipfs.io fallback.
  *
- * Upload JSON to an IPFS registry compatible with Autonolas `/api/v0/add`.
- * The registry returns newline-delimited JSON and the last `Hash` is the file CID.
+ * Upload: serialise to JCS canonical bytes (RFC 8785) so the CID and sha256
+ * fields are reproducible by any third party with a standard JCS library.
  */
 export async function uploadToIpfs(registryUrl: string, data: unknown): Promise<string> {
   const url = new URL(normalizeIpfsRegistryAddUrl(registryUrl));
@@ -186,9 +187,9 @@ export async function uploadToIpfs(registryUrl: string, data: unknown): Promise<
   url.searchParams.set('cid-version', '1');
   url.searchParams.set('wrap-with-directory', 'false');
 
+  const jcsBytes = new TextEncoder().encode(canonicalJson(data));
   const formData = new FormData();
-  const body = JSON.stringify(data, null, 2);
-  formData.append('file', new Blob([body], { type: 'application/json' }), 'content.json');
+  formData.append('file', new Blob([jcsBytes], { type: 'application/json' }), 'content.json');
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), IPFS_UPLOAD_TIMEOUT_MS);
@@ -231,6 +232,21 @@ export async function fetchFromIpfs(gatewayUrl: string, cid: string): Promise<un
     }
   }
   throw new Error(`IPFS JSON fetch failed after all candidates: ${errors.join(' | ')}`);
+}
+
+/**
+ * Fetch an intent CID from IPFS and parse it through `parseSignedIntentV1`.
+ *
+ * Use this whenever you have an intent CID and want a typed `SignedIntentV1`
+ * document. Throws `ZodError` if the fetched bytes don't conform to the
+ * `intent.v1` schema.
+ */
+export async function fetchSignedIntentFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<SignedIntentV1> {
+  const raw = await fetchFromIpfs(gatewayUrl, cid);
+  return parseSignedIntentV1(raw);
 }
 
 /**
@@ -284,6 +300,153 @@ export function digestHexToGatewayUrl(digestHex: string): string {
 export async function fetchFromDigest(digestHex: string): Promise<unknown> {
   const hex = (digestHex.startsWith('0x') ? digestHex.slice(2) : digestHex).toLowerCase();
   return fetchFromIpfs('https://gateway.autonolas.tech', `f01551220${hex}`);
+}
+
+// ── Conformance harness IPFS fetch helpers ───────────────────────────────────
+
+async function fetchRawBytesFromUrl(url: string, signal: AbortSignal): Promise<Uint8Array> {
+  const response = await fetch(url, { method: 'GET', signal });
+  if (!response.ok) {
+    throw new Error(`IPFS fetch failed: ${response.status} ${response.statusText} (${url.slice(0, 80)}…)`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+/**
+ * Fetch a SignedEnvelope from IPFS by CID as raw bytes.
+ * Returns the exact bytes stored at the CID — no JSON parse/re-encode roundtrip.
+ * Use this whenever the bytes will be hashed (conformance hash-signature check).
+ */
+export async function fetchSignedEnvelopeBytesRaw(
+  gatewayUrl: string,
+  cid: string,
+): Promise<Uint8Array> {
+  const base = normalizeIpfsGatewayBase(gatewayUrl);
+  const candidates = buildIpfsFetchCidPathCandidates(cid);
+  const errors: string[] = [];
+  for (const cidPath of candidates) {
+    for (const [name, baseUrl] of [
+      ['primary', base] as const,
+      ['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const,
+    ]) {
+      const url = `${baseUrl}${cidPath}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
+      try {
+        return await fetchRawBytesFromUrl(url, controller.signal);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push(`${name}:${url.slice(0, 100)}: ${message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  throw new Error(`IPFS raw bytes fetch failed after all candidates: ${errors.join(' | ')}`);
+}
+
+/**
+ * Fetch a SignedEnvelope from IPFS by CID.
+ * Returns the raw parsed JSON object (caller must validate schema).
+ */
+export async function fetchSignedEnvelopeFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<unknown> {
+  return fetchFromIpfs(gatewayUrl, cid);
+}
+
+/**
+ * Fetch a JinnTrajectoryV1 from IPFS by CID.
+ * Returns the raw parsed JSON object (caller must validate schema).
+ */
+export async function fetchTrajectoryFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<unknown> {
+  return fetchFromIpfs(gatewayUrl, cid);
+}
+
+/**
+ * Fetch raw bytes from IPFS by CID.
+ *
+ * Unlike `fetchFromIpfs`, this does not attempt JSON parsing — it returns
+ * the raw `Uint8Array` from the gateway response. Use for source files
+ * (`.ts`, `.js`, `text/plain`, etc.) that are not JSON documents.
+ */
+export async function fetchRawBytesFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<Uint8Array> {
+  const base = normalizeIpfsGatewayBase(gatewayUrl);
+  const candidates = buildIpfsFetchCidPathCandidates(cid);
+  const errors: string[] = [];
+  for (const cidPath of candidates) {
+    for (const [name, baseUrl] of [
+      ['primary', base] as const,
+      ['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const,
+    ]) {
+      const url = `${baseUrl}${cidPath}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
+      try {
+        return await fetchRawBytesFromUrl(url, controller.signal);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push(`${name}:${url.slice(0, 100)}: ${message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  throw new Error(`IPFS raw bytes fetch failed after all candidates: ${errors.join(' | ')}`);
+}
+
+/**
+ * Fetch a text file from IPFS by CID.
+ *
+ * Fetches raw bytes via `fetchRawBytesFromIpfs` and decodes them as UTF-8.
+ * Use for source files (`.ts`, `.js`, `text/plain`, etc.) that are not JSON.
+ */
+export async function fetchTextFromIpfs(
+  gatewayUrl: string,
+  cid: string,
+): Promise<string> {
+  const bytes = await fetchRawBytesFromIpfs(gatewayUrl, cid);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+/**
+ * Fetch a source bundle from IPFS by CID.
+ *
+ * V1 acceptable impl: the bundle root is a JSON manifest listing files by
+ * relative path and CID. We fetch the manifest as JSON, then fetch each
+ * listed source file as raw bytes (decoded to UTF-8 via TextDecoder).
+ * Source files are typically `.ts` / `.js` / `text/plain` — not JSON —
+ * so they must NOT be fetched through the JSON-only `fetchFromIpfs` path.
+ *
+ * Format: `{ files: Array<{ path: string; cid: string }> }`
+ */
+export async function fetchSourceBundleFromIpfs(
+  gatewayUrl: string,
+  bundleCid: string,
+): Promise<{ files: Map<string, string>; manifest?: Record<string, unknown> }> {
+  // Manifest is a JSON document — JSON fetch is correct here.
+  const manifest = await fetchFromIpfs(gatewayUrl, bundleCid) as Record<string, unknown>;
+  const fileEntries = manifest['files'] as Array<{ path: string; cid: string }> | undefined;
+
+  const files = new Map<string, string>();
+  if (Array.isArray(fileEntries)) {
+    await Promise.all(
+      fileEntries.map(async ({ path, cid }) => {
+        // Source files are raw text, not JSON — use fetchTextFromIpfs.
+        const content = await fetchTextFromIpfs(gatewayUrl, cid);
+        files.set(path, content);
+      }),
+    );
+  }
+
+  return { files, manifest };
 }
 
 // ── Base encoding helpers ────────────────────────────────────────────────────

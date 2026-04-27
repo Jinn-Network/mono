@@ -9,7 +9,12 @@ import {
 
 describe('SPEC_KINDS manifest', () => {
   it('knownKinds returns stable insertion order', () => {
-    expect(knownKinds()).toEqual(['portfolio.v0', 'prediction.v0', 'prediction.apy.v0']);
+    expect(knownKinds()).toEqual([
+      'portfolio.v0',
+      'prediction.v0',
+      'prediction.apy.v0',
+      'learner-loop-test',
+    ]);
   });
 
   it('unknownKindMessage lists known kinds', () => {

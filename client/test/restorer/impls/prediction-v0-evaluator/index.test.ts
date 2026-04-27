@@ -1,11 +1,12 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
+import { canonicalJson } from '../../../../src/restorer/engine/canonical-json.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionV0Evaluator } from '../../../../src/restorer/impls/prediction-v0-evaluator/index.js';
-import { signCanonical } from '../../../../src/restorer/engine/signing.js';
-import { makeValidIntent, makeSignedManifest, makeEvalDesiredState } from './test-helpers.js';
+import { makeValidIntent, makeSignedManifest, makeEvalRestorationJob } from './test-helpers.js';
+import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
 function makeCtx(intent: any, deps: any) {
   const tmp = mkdtempSync(join(tmpdir(), 'pred-eval-'));
@@ -17,6 +18,7 @@ function makeCtx(intent: any, deps: any) {
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 0,
+    trajectory: new TrajectoryCollector({ intentCid: 'test-intent-cid', runId: 'test-run-id' }),
     _testDeps: deps,
   } as any;
 }
@@ -38,7 +40,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('PASS with correct prediction (p=0.55, oracle > threshold)', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
@@ -49,29 +51,10 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     expect(out.gating.groundTruth).toBe('YES');
   });
 
-  it('accepts the engine outer manifest produced by prediction restorations', async () => {
+  it('verdict artifact has correct schemaVersion metadata', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
-    const pk = ('0x' + '1'.repeat(64)) as `0x${string}`;
-    const account = privateKeyToAccount(pk);
-    const unsignedOuter: Record<string, unknown> = {
-      schemaVersion: 'portfolio.v0.manifest.v1',
-      generatedAt: manifest.generatedAt,
-      intent: manifest.intent,
-      restorer: manifest.restorer,
-      window: manifest.window,
-      preSnapshot: { schemaVersion: 1, capturedAt: 0, venue: { name: 'chainlink' }, account: {}, positions: [], openOrders: [] },
-      postSnapshot: { schemaVersion: 1, capturedAt: 0, venue: { name: 'chainlink' }, account: {}, positions: [], openOrders: [] },
-      fills: [],
-      gating: manifest.prediction,
-      artifacts: [],
-    };
-    const s = await signCanonical(unsignedOuter, pk, account.address);
-    const outerManifest = {
-      ...unsignedOuter,
-      signature: { algo: 'secp256k1' as const, signer: account.address, hash: s.hash, sig: s.sig },
-    };
-    const evalIntent = makeEvalDesiredState(outerManifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
@@ -80,13 +63,13 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
 
     expect(out.gating.verdict).toBe('PASS');
-    expect(out.artifacts[0]?.metadata).toMatchObject({ schemaVersion: 'prediction.v0.verdict.v1' });
+    expect(out.artifacts[0]?.metadata).toMatchObject({ verdict: 'PASS' });
   });
 
   it('REJECTED when submittedAt > window.endTs', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ submittedAt: intent.window.endTs + 1, intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('REJECTED');
@@ -96,7 +79,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('FAIL on bad signature', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ corruptSignature: true, intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('FAIL');
@@ -106,16 +89,81 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   it('INDETERMINATE when context.restorationIntentCid is missing (legacy eval payload)', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent, { omitRestorationIntentCid: true });
+    const evalIntent = makeEvalRestorationJob(manifest, intent, { omitRestorationIntentCid: true });
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('INDETERMINATE');
   });
 
+  it('emits venue_io + state_transition + artifact.emit spans on success', async () => {
+    const intent = makeValidIntent();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
+    const evaluator = new PredictionV0Evaluator({
+      evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const ctx = makeCtx(evalIntent, spanningDeps('3501'));
+    await evaluator.run(ctx);
+
+    const { spans } = ctx.trajectory.snapshot();
+    const kinds = spans.map((s: any) => s.attributes['jinn.span.kind']);
+
+    expect(kinds).toContain('jinn.venue_io');
+    expect(kinds).toContain('jinn.state_transition');
+    expect(kinds).toContain('jinn.artifact.emit');
+
+    const venueSpan = spans.find((s: any) => s.attributes['jinn.span.kind'] === 'jinn.venue_io');
+    expect(venueSpan!.attributes['http.response.status_code']).toBe(200);
+    expect(venueSpan!.attributes['venue.id']).toBe('chainlink');
+
+    const stateSpan = spans.find((s: any) => s.attributes['jinn.span.kind'] === 'jinn.state_transition');
+    expect(stateSpan!.attributes['jinn.state.from']).toBe('FETCHED');
+    expect(stateSpan!.attributes['jinn.state.to']).toBe('SCORED');
+
+    const artifactSpan = spans.find((s: any) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
+    expect(artifactSpan!.attributes['jinn.artifact.artifactType']).toBe('evaluation_verdict');
+    expect(typeof artifactSpan!.attributes['jinn.artifact.sha256']).toBe('string');
+  });
+
+  it('restorationEnvelope.cid uses context restorationEnvelopeCid when present', async () => {
+    const intent = makeValidIntent();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
+    const evalIntent = makeEvalRestorationJob(manifest, intent, {
+      restorationEnvelopeCid: 'f01551220abcdef1234',
+    });
+    const evaluator = new PredictionV0Evaluator({
+      evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+    expect(vp.restorationEnvelope.cid).toBe('f01551220abcdef1234');
+    // Evaluator uses JCS canonical bytes (canonicalJson) to match the upload pipeline.
+    const expectedSha256 = createHash('sha256').update(canonicalJson(manifest)).digest('hex');
+    expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+  });
+
+  it('restorationEnvelope.cid falls back to bafy-unknown when no context key or requestId', async () => {
+    const intent = makeValidIntent();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, intentCid: 'intent-cid' });
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
+    // makeEvalRestorationJob sets restorationRequestId to 0x00...00 (not empty)
+    const evaluator = new PredictionV0Evaluator({
+      evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+    // falls back to restorationRequestId (0x00...00) since no RESTORATION_ENVELOPE_CID_CONTEXT_KEY
+    expect(vp.restorationEnvelope.cid).not.toBe('bafy-unknown');
+    expect(vp.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   it('INDETERMINATE when oracle has no spanning round', async () => {
     const intent = makeValidIntent();
     const manifest = await makeSignedManifest({ intentCid: 'intent-cid' });
-    const evalIntent = makeEvalDesiredState(manifest, intent);
+    const evalIntent = makeEvalRestorationJob(manifest, intent);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalIntent, {
       oraclePriceAtResolveTs: async () => ({

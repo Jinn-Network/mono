@@ -13,7 +13,7 @@ function makeInput(overrides: Partial<PersistedIntentInput> = {}): PersistedInte
     specKind: 'portfolio.v0',
     windowStartTs: Date.now() + 60_000,
     windowEndTs: Date.now() + 60_000 + 86_400_000,
-    desiredState: { id: 'req-001', description: 'test' },
+    restorationJob: { id: 'req-001', description: 'test' },
     ...overrides,
   };
 }
@@ -348,7 +348,7 @@ describe('concurrent transition', () => {
       onchainCreationBlock: 1,
       windowStartTs: Date.now() + 60_000,
       windowEndTs: Date.now() + 86_400_000,
-      desiredState: { id: 'concurrent-1', description: 'test' },
+      restorationJob: { id: 'concurrent-1', description: 'test' },
     });
 
     // First call succeeds (DISCOVERED → CLAIMED)
@@ -382,7 +382,7 @@ describe('concurrent transition', () => {
       onchainCreationBlock: 1,
       windowStartTs: Date.now() + 60_000,
       windowEndTs: Date.now() + 86_400_000,
-      desiredState: { id: 'concurrent-2', description: 'test' },
+      restorationJob: { id: 'concurrent-2', description: 'test' },
     });
 
     // First call: DISCOVERED → CLAIMED (success)
@@ -425,7 +425,7 @@ describe('concurrent transition', () => {
       onchainCreationBlock: 1,
       windowStartTs: Date.now() + 60_000,
       windowEndTs: Date.now() + 86_400_000,
-      desiredState: { id: 'concurrent-3', description: 'test' },
+      restorationJob: { id: 'concurrent-3', description: 'test' },
     });
 
     // Advance to CLAIMED
@@ -475,7 +475,7 @@ describe('concurrent transition', () => {
       onchainCreationBlock: 1,
       windowStartTs: Date.now() + 60_000,
       windowEndTs: Date.now() + 86_400_000,
-      desiredState: { id: 'normal-flow', description: 'test' },
+      restorationJob: { id: 'normal-flow', description: 'test' },
     });
 
     // Full happy-path chain must still work after the optimistic-concurrency fix
@@ -503,7 +503,7 @@ describe('concurrent transition', () => {
       onchainCreationBlock: 1,
       windowStartTs: Date.now() + 60_000,
       windowEndTs: Date.now() + 86_400_000,
-      desiredState: { id: 'conc-err-type', description: 'test' },
+      restorationJob: { id: 'conc-err-type', description: 'test' },
     });
 
     p.transition('conc-err-type', IntentState.CLAIMED);
@@ -555,7 +555,7 @@ describe('IntentPersistence — intent_type', () => {
       intentType: 'evaluation',
       windowStartTs: 0,
       windowEndTs: 3_600_000,
-      desiredState: { id: 'i', description: 'd' },
+      restorationJob: { id: 'i', description: 'd' },
     });
     const got = p.getByRequestId('0xabc');
     expect(got?.intentType).toBe('evaluation');
@@ -572,7 +572,7 @@ describe('IntentPersistence — intent_type', () => {
       onchainCreationBlock: 1,
       windowStartTs: 0,
       windowEndTs: 3_600_000,
-      desiredState: { id: 'i', description: 'd' },
+      restorationJob: { id: 'i', description: 'd' },
     });
     const got = p.getByRequestId('0xdef');
     expect(got?.intentType).toBeNull();

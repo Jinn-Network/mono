@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { ClaudeMcpPredictionApyImpl } from '../../../../src/restorer/impls/claude-mcp-prediction-apy/index.js';
-import type { RestorationContext } from '../../../../src/restorer/types.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 
 function makeIntent() {
   const now = Date.now();
@@ -31,23 +30,16 @@ function makeIntent() {
       question: { resolveTs },
     },
     eligibility: { maxSubmissionDelayMs: 60_000 },
-  } as unknown as import('../../../../src/types/desired-state.js').DesiredState;
+  } as unknown as import('../../../../src/types/desired-state.js').RestorationJob;
 }
 
-function makeCtx(): RestorationContext {
-  const tmp = mkdtempSync(join(tmpdir(), 'apy-claude-test-'));
-  const workingDir = join(tmp, 'work');
-  const implStateDir = join(tmp, 'state');
-  mkdirSync(workingDir);
-  mkdirSync(implStateDir);
-  return {
+function makeCtx() {
+  return makeRestorationCtx({
     intent: makeIntent(),
-    workingDir,
-    implStateDir,
-    log: () => {},
-    abort: new AbortController().signal,
+    prefix: 'apy-claude-test-',
+    separateDirs: true,
     msUntilEndTs: () => 3_600_000,
-  };
+  });
 }
 
 describe('ClaudeMcpPredictionApyImpl (mocked session)', () => {
@@ -90,8 +82,8 @@ describe('ClaudeMcpPredictionApyImpl (mocked session)', () => {
     expect(out.informational?.rationale).toBe('observed rate');
     expect(out.artifacts).toHaveLength(2);
     expect(out.artifacts![0]!.path).toBe('prediction-apy.json');
-    expect(out.artifacts![0]!.role).toBe('prediction_submission');
-    expect(out.artifacts![1]!.role).toBe('session_transcript');
+    expect(out.artifacts![0]!.artifactType).toBe('prediction_submission');
+    expect(out.artifacts![1]!.artifactType).toBe('session_transcript');
 
     const predictionPath = join(ctx.workingDir, 'prediction-apy.json');
     expect(existsSync(predictionPath)).toBe(true);
@@ -99,6 +91,17 @@ describe('ClaudeMcpPredictionApyImpl (mocked session)', () => {
     expect(payload.predictedBps).toBe('350');
     expect(payload.rationale).toBe('observed rate');
     expect(payload.modelId).toContain('claude-mcp-prediction-apy');
+
+    // restorationPayload must match PredictionApyV0RestorationPayloadSchema
+    const { PredictionApyV0RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-apy-v0.js');
+    expect(out.restorationPayload).toBeDefined();
+    const parsed = PredictionApyV0RestorationPayloadSchema.safeParse(out.restorationPayload);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.prediction.predictedBps).toBe('350');
+      expect(typeof parsed.data.prediction.submittedAt).toBe('number');
+      expect(parsed.data.prediction.modelId).toContain('claude-mcp-prediction-apy');
+    }
   });
 
   it('throws when session ends without submit_apy_prediction', async () => {

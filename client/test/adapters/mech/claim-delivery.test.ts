@@ -3,10 +3,12 @@ import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { claimDelivery } from '../../../src/adapters/mech/contracts.js';
 import { executeSafeTransaction } from '../../../src/adapters/mech/safe.js';
 
+// MOCK_JUSTIFICATION: src/adapters/mech/safe.js is the I/O leaf for Safe wallet RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/safe.js', () => ({
   executeSafeTransaction: vi.fn(),
 }));
 
+// MOCK_JUSTIFICATION: src/tx-retry.js wraps chain-RPC retry logic at the I/O boundary; mocking it is mocking the boundary.
 vi.mock('../../../src/tx-retry.js', () => ({
   waitForTransactionReceiptWithRetry: vi.fn(),
   isRecoverableTransactionError: vi.fn().mockReturnValue(true),
@@ -54,6 +56,7 @@ describe('claimDelivery', () => {
   it('treats Safe GS013 as idempotent when the router now reports claimed', async () => {
     const publicClient = makePublicClient([false, true]);
     vi.mocked(executeSafeTransaction).mockRejectedValueOnce(new Error('execution reverted: GS013'));
+    const evidenceHash = `0x${'ef'.repeat(32)}` as Hex;
 
     const txHash = await claimDelivery(
       publicClient,
@@ -61,11 +64,28 @@ describe('claimDelivery', () => {
       SAFE_ADDRESS,
       ROUTER_ADDRESS,
       REQUEST_ID,
-      { variant: 'v2' },
+      { variant: 'v2', evidenceHash },
     );
 
     expect(txHash).toBe('0x');
     expect(executeSafeTransaction).toHaveBeenCalledOnce();
     expect(publicClient.readContract).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws when variant is v2 and evidenceHash is missing', async () => {
+    const publicClient = makePublicClient([false]);
+
+    await expect(
+      claimDelivery(
+        publicClient,
+        makeWalletClient(),
+        SAFE_ADDRESS,
+        ROUTER_ADDRESS,
+        REQUEST_ID,
+        { variant: 'v2' },
+      ),
+    ).rejects.toThrow('evidenceHash is required for V2 claim');
+
+    expect(executeSafeTransaction).not.toHaveBeenCalled();
   });
 });

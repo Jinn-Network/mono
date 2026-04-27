@@ -11,8 +11,17 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ClaudeMcpHyperliquidImpl, _writeHlMcpServerScript } from '../../../../src/restorer/impls/claude-mcp-hyperliquid/index.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { HlClearinghouseState, HlFill, HlSpotClearinghouseState } from '../../../../src/venues/hyperliquid/types.js';
+
+// Mock uploadToIpfs for envelope-assembly integration tests (no real network)
+vi.mock('../../../../src/adapters/mech/ipfs.js', () => ({
+  uploadToIpfs: vi.fn().mockResolvedValue('bafy-mock-envelope-cid'),
+  cidToDigestHex: vi.fn().mockReturnValue('0xdeadbeef00000000000000000000000000000000000000000000000000000000'),
+  fetchFromIpfs: vi.fn(),
+  fetchFromDigest: vi.fn(),
+  digestHexToGatewayUrl: vi.fn(),
+}));
 
 // ── Shared test data ───────────────────────────────────────────────────────────
 
@@ -62,7 +71,7 @@ function mockFills(preValue = 10_000): HlFill[] {
   }));
 }
 
-function makePortfolioV0Intent(): DesiredState {
+function makePortfolioV0Intent(): RestorationJob {
   return {
     id: 'test-portfolio-v0-intent',
     description: 'Grow HL portfolio by 5% over 24h with max 10% drawdown.',
@@ -363,7 +372,7 @@ describe('ClaudeMcpHyperliquidImpl', () => {
       const output = await impl.run(ctx);
 
       // Should have at least one artifact with role session_transcript
-      const transcriptArtifacts = output.artifacts?.filter((a) => a.role === 'session_transcript') ?? [];
+      const transcriptArtifacts = output.artifacts?.filter((a) => a.artifactType === 'session_transcript') ?? [];
       expect(transcriptArtifacts.length).toBeGreaterThan(0);
 
       // transcript file should exist
@@ -428,6 +437,164 @@ describe('ClaudeMcpHyperliquidImpl', () => {
       const output = await impl.run(ctx);
       expect(output.postSnapshot).toBeDefined();
     });
+  });
+});
+
+// ── Envelope-compatibility: run() output passes through engine pack() pipeline ─
+
+describe('envelope compatibility (portfolio.v0 restoration payload)', () => {
+  let workingDir: string;
+  let implStateDir: string;
+
+  afterEach(() => {
+    if (workingDir) rmSync(workingDir, { recursive: true, force: true });
+    if (implStateDir) rmSync(implStateDir, { recursive: true, force: true });
+  });
+
+  function setup() {
+    workingDir = mkdtempSync(join(tmpdir(), 'jinn-hl-envelope-test-working-'));
+    implStateDir = mkdtempSync(join(tmpdir(), 'jinn-hl-envelope-test-state-'));
+    return { workingDir, implStateDir };
+  }
+
+  it('run() output gating matches PortfolioV0RestorationPayloadSchema.gating', async () => {
+    const { PortfolioV0RestorationPayloadSchema } = await import('../../../../src/types/payloads/portfolio-v0.js');
+    const { workingDir, implStateDir } = setup();
+
+    const fills = mockFills();
+    const hlClientMock = {
+      clearinghouseState: vi.fn()
+        .mockResolvedValueOnce(mockClearinghouseState('10000'))
+        .mockResolvedValue(mockClearinghouseState('10600')),
+      spotClearinghouseState: vi.fn().mockResolvedValue(mockSpotClearinghouseState()),
+      userFills: vi.fn().mockResolvedValue(fills),
+      userFillsByTime: vi.fn().mockResolvedValue({ fills, startTimeClamped: false }),
+      meta: vi.fn().mockResolvedValue({ universe: [] }),
+      allMids: vi.fn().mockResolvedValue({ BTC: '50000' }),
+      portfolio: vi.fn().mockResolvedValue([]),
+    };
+
+    const impl = new ClaudeMcpHyperliquidImpl({
+      _testDeps: {
+        runSession: async (sessionId) => ({ stdout: `[test] session ${sessionId} complete` }),
+        hlClient: hlClientMock as any,
+      },
+    });
+
+    const ctx = makeContext(workingDir, implStateDir);
+    const output = await impl.run(ctx);
+
+    // Construct the envelope payload exactly as engine.ts pack() does
+    const envelopePayload: Record<string, unknown> = {
+      preSnapshot: {
+        capturedAt: output.preSnapshot!.capturedAt,
+        hlTime: (output.preSnapshot as any).hlTime ?? 0,
+        payload: (output.preSnapshot as any).payload ?? {},
+      },
+      postSnapshot: {
+        capturedAt: output.postSnapshot!.capturedAt,
+        hlTime: (output.postSnapshot as any).hlTime ?? 0,
+        payload: (output.postSnapshot as any).payload ?? {},
+      },
+      fills: output.fills ?? [],
+      gating: output.gating,
+      ...(output.informational != null ? { informational: output.informational } : {}),
+      ...(output.rationale != null ? { rationale: output.rationale } : {}),
+    };
+
+    // Validate the envelope payload against the portfolio.v0 restoration schema
+    expect(() => PortfolioV0RestorationPayloadSchema.parse(envelopePayload)).not.toThrow();
+  });
+
+  it('run() output passes assembleAndSignEnvelope with role=restoration, kind=portfolio.v0', async () => {
+    const { assembleAndSignEnvelope } = await import('../../../../src/restorer/engine/envelope-assembly.js');
+    const { SignedEnvelopeSchema } = await import('../../../../src/types/envelope.js');
+    const { workingDir, implStateDir } = setup();
+
+    const fills = mockFills();
+    const hlClientMock = {
+      clearinghouseState: vi.fn()
+        .mockResolvedValueOnce(mockClearinghouseState('10000'))
+        .mockResolvedValue(mockClearinghouseState('10600')),
+      spotClearinghouseState: vi.fn().mockResolvedValue(mockSpotClearinghouseState()),
+      userFills: vi.fn().mockResolvedValue(fills),
+      userFillsByTime: vi.fn().mockResolvedValue({ fills, startTimeClamped: false }),
+      meta: vi.fn().mockResolvedValue({ universe: [] }),
+      allMids: vi.fn().mockResolvedValue({ BTC: '50000' }),
+      portfolio: vi.fn().mockResolvedValue([]),
+    };
+
+    const impl = new ClaudeMcpHyperliquidImpl({
+      _testDeps: {
+        runSession: async (sessionId) => ({ stdout: `[test] session ${sessionId} complete` }),
+        hlClient: hlClientMock as any,
+      },
+    });
+
+    const ctx = makeContext(workingDir, implStateDir);
+    const output = await impl.run(ctx);
+
+    // Mirror engine.ts pack() envelope payload construction
+    const envelopePayload: Record<string, unknown> = {
+      preSnapshot: {
+        capturedAt: output.preSnapshot!.capturedAt,
+        hlTime: (output.preSnapshot as any).hlTime ?? 0,
+        payload: (output.preSnapshot as any).payload ?? {},
+      },
+      postSnapshot: {
+        capturedAt: output.postSnapshot!.capturedAt,
+        hlTime: (output.postSnapshot as any).hlTime ?? 0,
+        payload: (output.postSnapshot as any).payload ?? {},
+      },
+      fills: output.fills ?? [],
+      gating: output.gating,
+      ...(output.informational != null ? { informational: output.informational } : {}),
+      ...(output.rationale != null ? { rationale: output.rationale } : {}),
+    };
+
+    const TEST_PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as `0x${string}`;
+    const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as `0x${string}`;
+
+    const result = await assembleAndSignEnvelope(
+      {
+        kind: 'portfolio.v0',
+        role: 'restoration',
+        intent: {
+          cid: 'bafy-test-intent',
+          onchainCreationTx: '0x' + 'ab'.repeat(32),
+          onchainCreationBlock: 100,
+          requestId: '0x' + 'cd'.repeat(32),
+        },
+        participant: { safeAddress: TEST_ADDRESS, agentEoa: TEST_ADDRESS },
+        window: { startTs: START_TS, endTs: END_TS },
+        executor: {
+          implName: 'claude-mcp-hyperliquid',
+          implVersion: '1.0.0',
+          clientGitSha: 'dev',
+          codeDigest: 'sha256:' + '0'.repeat(64),
+          signingKey: { kind: 'agent-eoa', pubkey: TEST_ADDRESS },
+        },
+        artifacts: [],
+        payload: envelopePayload,
+        generatedAt: NOW,
+      },
+      {
+        ipfsRegistryUrl: 'http://mock',
+        agentEoaPrivateKey: TEST_PK,
+      },
+    );
+
+    // Envelope role + kind must be correct
+    expect(result.envelope.role).toBe('restoration');
+    expect(result.envelope.kind).toBe('portfolio.v0');
+    expect(result.envelope.schemaVersion).toBe('jinn.execution.v1');
+
+    // Envelope must validate against SignedEnvelopeSchema
+    expect(() => SignedEnvelopeSchema.parse(result.envelope)).not.toThrow();
+
+    // Signature hash must be present and 32-byte hex
+    expect(result.envelopeHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(result.envelope.signature.hash).toBe(result.envelopeHash);
   });
 });
 

@@ -14,14 +14,18 @@
  *   - _testDeps injected via PortfolioV0Evaluator constructor config, not spec
  */
 
+import { createHash } from 'node:crypto';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { canonicalJson } from '../../../../src/restorer/engine/canonical-json.js';
 import { tmpdir } from 'node:os';
 import { PortfolioV0Evaluator } from '../../../../src/restorer/impls/portfolio-v0-evaluator/index.js';
+import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { HlFill, HlGridPoint } from '../../../../src/venues/hyperliquid/types.js';
+import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
 // ── Shared test data ──────────────────────────────────────────────────────────
 
@@ -67,7 +71,9 @@ const POST_SNAPSHOT = {
 };
 
 const MOCK_MANIFEST = {
-  schemaVersion: 'portfolio.v0.manifest.v1',
+  schemaVersion: 'jinn.execution.v1',
+  kind: 'portfolio.v0',
+  role: 'restoration',
   generatedAt: NOW,
   intent: {
     cid: 'QmINTENT',
@@ -75,21 +81,33 @@ const MOCK_MANIFEST = {
     onchainCreationBlock: 100,
     requestId: '0x0000000000000000000000000000000000000000000000000000000000000001',
   },
-  restorer: {
+  participant: {
     safeAddress: '0x1111111111111111111111111111111111111111',
     agentEoa: '0x2222222222222222222222222222222222222222',
   },
   window: { startTs: START_TS, endTs: END_TS },
-  preSnapshot: PRE_SNAPSHOT,
-  postSnapshot: POST_SNAPSHOT,
-  fills: MOCK_FILLS,
-  gating: {
-    equityReturnPct: '6.0',
-    maxDrawdownPct: '0.0',
-    closedTradesCount: 25,
-    tradedNotionalMultiple: '5.0',
+  executor: {
+    implName: 'portfolio-v0',
+    implVersion: '1.0.0',
+    clientGitSha: 'dev',
+    codeDigest: 'sha256:' + '0'.repeat(64),
+    signingKey: { kind: 'agent-eoa', pubkey: '0x2222222222222222222222222222222222222222' },
   },
+  evidenceTier: 'self-signed',
+  attestation: null,
+  trajectory: null,
   artifacts: [],
+  payload: {
+    preSnapshot: PRE_SNAPSHOT,
+    postSnapshot: POST_SNAPSHOT,
+    fills: MOCK_FILLS,
+    gating: {
+      equityReturnPct: '6.0',
+      maxDrawdownPct: '0.0',
+      closedTradesCount: 25,
+      tradedNotionalMultiple: '5.0',
+    },
+  },
   signature: {
     algo: 'secp256k1',
     signer: '0x2222222222222222222222222222222222222222',
@@ -176,6 +194,8 @@ interface CtxOverrides {
   fills?: HlFill[];
   grid?: HlGridPoint[];
   startTimeClamped?: boolean;
+  /** Thread a restoration envelope CID through context (tests CID back-ref). */
+  restorationEnvelopeCid?: string;
   /** Simulate HL API failure. */
   hlError?: boolean;
 }
@@ -197,9 +217,10 @@ function makeCtx(
     intentSpecOverrides = {},
     eligibilityOverrides,
     manifest = MOCK_MANIFEST,
+    restorationEnvelopeCid,
   } = overrides;
 
-  const ds: DesiredState = {
+  const ds: RestorationJob = {
     id: 'eval-intent-1',
     description: 'Evaluate portfolio.v0 restoration result',
     type: 'evaluation',
@@ -226,6 +247,7 @@ function makeCtx(
     },
     context: {
       restorationResult: JSON.stringify(manifest),
+      ...(restorationEnvelopeCid ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: restorationEnvelopeCid } : {}),
     },
   };
 
@@ -236,6 +258,7 @@ function makeCtx(
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 60_000,
+    trajectory: new TrajectoryCollector({ intentCid: 'test-intent-cid', runId: 'test-run-id' }),
   };
 }
 
@@ -315,7 +338,7 @@ describe('PortfolioV0Evaluator', () => {
 
     it('returns ok=false when spec.kind is wrong', async () => {
       const impl = makeEvaluator();
-      const intent: DesiredState = {
+      const intent: RestorationJob = {
         id: 'x',
         description: 'x',
         type: 'evaluation',
@@ -329,7 +352,7 @@ describe('PortfolioV0Evaluator', () => {
 
     it('returns ok=false when type is not evaluation', async () => {
       const impl = makeEvaluator();
-      const intent: DesiredState = {
+      const intent: RestorationJob = {
         id: 'x',
         description: 'x',
         type: 'restoration',
@@ -343,7 +366,7 @@ describe('PortfolioV0Evaluator', () => {
 
     it('returns ok=false when context.restorationResult is missing', async () => {
       const impl = makeEvaluator();
-      const intent: DesiredState = {
+      const intent: RestorationJob = {
         id: 'x',
         description: 'x',
         type: 'evaluation',
@@ -357,7 +380,7 @@ describe('PortfolioV0Evaluator', () => {
 
     it('returns ok=false when restorationRequestId is missing', async () => {
       const impl = makeEvaluator();
-      const intent: DesiredState = {
+      const intent: RestorationJob = {
         id: 'x',
         description: 'x',
         type: 'evaluation',
@@ -437,8 +460,11 @@ describe('PortfolioV0Evaluator', () => {
       };
       const unifiedManifest = {
         ...MOCK_MANIFEST,
-        preSnapshot: unifiedPreSnapshot,
-        postSnapshot: unifiedPostSnapshot,
+        payload: {
+          ...MOCK_MANIFEST.payload,
+          preSnapshot: unifiedPreSnapshot,
+          postSnapshot: unifiedPostSnapshot,
+        },
       };
 
       const ctx = makeCtx(wd, impl, { manifest: unifiedManifest });
@@ -458,7 +484,6 @@ describe('PortfolioV0Evaluator', () => {
       expect(existsSync(verdictPath)).toBe(true);
 
       const verdict = JSON.parse(readFileSync(verdictPath, 'utf-8'));
-      expect(verdict.schemaVersion).toBe('portfolio.v0.eval.manifest.v1');
       expect(verdict.verdict).toBe('PASS');
       expect(verdict.checks).toBeDefined();
       expect(Array.isArray(verdict.checks)).toBe(true);
@@ -506,7 +531,7 @@ describe('PortfolioV0Evaluator', () => {
       const output = await impl.run(ctx);
 
       expect(output.artifacts).toBeDefined();
-      const verdictArtifact = output.artifacts!.find((a) => a.role === 'evaluation_verdict');
+      const verdictArtifact = output.artifacts!.find((a) => a.artifactType === 'evaluation_verdict');
       expect(verdictArtifact).toBeDefined();
       expect(verdictArtifact!.path).toBe('verdict.json');
     });
@@ -557,9 +582,12 @@ describe('PortfolioV0Evaluator', () => {
       // Net result: FAIL driven by consistency.gating.max_drawdown.
       const manifestWithDrawdown = {
         ...MOCK_MANIFEST,
-        gating: {
-          ...MOCK_MANIFEST.gating,
-          maxDrawdownPct: '15.0',  // 15% drawdown claimed — inconsistent with rederived ~0%
+        payload: {
+          ...MOCK_MANIFEST.payload,
+          gating: {
+            ...MOCK_MANIFEST.payload.gating,
+            maxDrawdownPct: '15.0',  // 15% drawdown claimed — inconsistent with rederived ~0%
+          },
         },
       };
 
@@ -621,6 +649,20 @@ describe('PortfolioV0Evaluator', () => {
   // ── run() — INDETERMINATE scenario ───────────────────────────────────────────
 
   describe('run() — INDETERMINATE scenario', () => {
+    it('emits venue_io span with ERROR status when HL API fails', async () => {
+      const wd = makeTmpDir(); dirs.push(wd);
+      const impl = makeEvaluator({ hlError: true });
+      const ctx = makeCtx(wd, impl);
+
+      await impl.run(ctx);
+
+      const { spans } = ctx.trajectory.snapshot();
+      const venueSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.venue_io');
+      expect(venueSpan).toBeDefined();
+      expect(venueSpan!.status.code).toBe('ERROR');
+      expect(venueSpan!.attributes['http.response.status_code']).toBe(0);
+    });
+
     it('produces INDETERMINATE verdict when HL API fails', async () => {
       const wd = makeTmpDir(); dirs.push(wd);
 
@@ -679,7 +721,10 @@ describe('PortfolioV0Evaluator', () => {
 
       const manifestWithLatePost = {
         ...MOCK_MANIFEST,
-        postSnapshot: latePostSnapshot,
+        payload: {
+          ...MOCK_MANIFEST.payload,
+          postSnapshot: latePostSnapshot,
+        },
       };
 
       const impl = makeEvaluator();
@@ -755,7 +800,7 @@ describe('PortfolioV0Evaluator', () => {
       expect(verdict.scoreVersion).toBe('v1');
     });
 
-    it('verdict.json has correct schemaVersion', async () => {
+    it('verdict.json has no legacy schemaVersion field', async () => {
       const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
       const ctx = makeCtx(wd, impl);
@@ -763,7 +808,8 @@ describe('PortfolioV0Evaluator', () => {
       await impl.run(ctx);
 
       const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
-      expect(verdict.schemaVersion).toBe('portfolio.v0.eval.manifest.v1');
+      expect(verdict.schemaVersion).toBeUndefined();
+      expect(verdict.verdict).toBeDefined();
     });
 
     it('verdict.json carries onchainCreationBlock from manifest intent provenance', async () => {
@@ -782,6 +828,36 @@ describe('PortfolioV0Evaluator', () => {
     // ── Finding #12: generatedAt determinism ────────────────────────────────
     // Two evaluations of identical inputs at different wall-clock times must
     // produce the same signed hash but different generatedAt values.
+
+    it('trajectory collector receives venue_io + state_transition + artifact.emit spans', async () => {
+      const impl = makeEvaluator();
+      const wd = makeTmpDir(); dirs.push(wd);
+      const ctx = makeCtx(wd, impl);
+
+      await impl.run(ctx);
+
+      const { spans } = ctx.trajectory.snapshot();
+      const kinds = spans.map((s) => s.attributes['jinn.span.kind']);
+
+      expect(kinds).toContain('jinn.venue_io');
+      expect(kinds).toContain('jinn.state_transition');
+      expect(kinds).toContain('jinn.artifact.emit');
+
+      const venueSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.venue_io');
+      expect(venueSpan).toBeDefined();
+      expect(venueSpan!.attributes['net.peer.name']).toBe('api.hyperliquid.xyz');
+      expect(venueSpan!.attributes['http.response.status_code']).toBe(200);
+
+      const stateSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.state_transition');
+      expect(stateSpan).toBeDefined();
+      expect(stateSpan!.attributes['jinn.state.from']).toBe('FETCHED');
+      expect(stateSpan!.attributes['jinn.state.to']).toBe('SCORED');
+
+      const artifactSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
+      expect(artifactSpan).toBeDefined();
+      expect(artifactSpan!.attributes['jinn.artifact.artifactType']).toBe('evaluation_verdict');
+      expect(typeof artifactSpan!.attributes['jinn.artifact.sha256']).toBe('string');
+    });
 
     it('two evaluations at different times produce the same signed hash (finding #12)', async () => {
       const T1 = 1_750_000_000_000;
@@ -819,6 +895,37 @@ describe('PortfolioV0Evaluator', () => {
       // the signed content is everything except `signature` and `generatedAt`.
       expect(typeof verdict1.generatedAt).toBe('number');
       expect(typeof verdict2.generatedAt).toBe('number');
+    });
+  });
+
+  // ── restorationEnvelope back-ref ──────────────────────────────────────────
+
+  describe('restorationEnvelope back-ref', () => {
+    it('uses restorationEnvelopeCid from context when threaded by daemon', async () => {
+      const workingDir = makeTmpDir();
+      dirs.push(workingDir);
+      const evaluator = makeEvaluator();
+      const envelopeCid = 'f01551220deadbeefcafe';
+      const ctx = makeCtx(workingDir, evaluator, { restorationEnvelopeCid: envelopeCid });
+      const out = await evaluator.run(ctx);
+      const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+      expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
+      // sha256 must be the sha256 of the JCS canonical bytes (aligns with JCS upload pipeline)
+      const expectedSha256 = createHash('sha256').update(canonicalJson(MOCK_MANIFEST)).digest('hex');
+      expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+    });
+
+    it('falls back to restorationRequestId when no context key present', async () => {
+      const workingDir = makeTmpDir();
+      dirs.push(workingDir);
+      const evaluator = makeEvaluator();
+      const ctx = makeCtx(workingDir, evaluator);
+      const out = await evaluator.run(ctx);
+      const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+      // restorationRequestId is '0xrequest' in makeCtx
+      expect(vp.restorationEnvelope.cid).toBe('0xrequest');
+      // sha256 must be a valid hex string (not placeholder zeros)
+      expect(vp.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
     });
   });
 });

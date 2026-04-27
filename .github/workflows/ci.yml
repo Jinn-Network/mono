@@ -22,6 +22,11 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: yarn install --immutable
+      # Foundry provides `anvil`, required by the test/_support/chain/*.test.ts
+      # helper unit tests (added in this refactor) — they spawn a real local
+      # fork to verify the helpers work. The test/e2e/* scripts that also need
+      # anvil are excluded by vitest config and don't run under `yarn test`.
+      - uses: foundry-rs/foundry-toolchain@v1
       - run: yarn typecheck
       - run: yarn test
       - run: yarn build

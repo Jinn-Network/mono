@@ -2,7 +2,7 @@
  * Integration tests for engine.ts packaging + delivery integration.
  *
  * Tests that pack() and deliver() stubs are replaced with real behaviour when
- * packagingDeps + manifestDeps + deliveryDeps are injected.
+ * packagingDeps + envelopeDeps + deliveryDeps are injected.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -69,7 +69,7 @@ function makeInput(requestId: string, tmp: string): PersistedIntentInput {
     specKind: 'portfolio.v0',
     windowStartTs: now,
     windowEndTs: now + 86_400_000,
-    desiredState: { id: requestId, description: 'test' },
+    restorationJob: { id: requestId, description: 'test' },
   };
 }
 
@@ -83,9 +83,8 @@ function makeOpts(store: Store, tmp: string): RestorationEngineOptions {
     },
     packagingDeps: {
       ipfsRegistryUrl: 'http://ipfs.test',
-      registerArtifact: vi.fn(),
     },
-    manifestDeps: {
+    envelopeDeps: {
       ipfsRegistryUrl: 'http://ipfs.test',
       agentEoaPrivateKey: TEST_PRIVATE_KEY,
       safeAddress: '0xsafe' as `0x${string}`,
@@ -178,7 +177,7 @@ describe('Engine packaging integration', () => {
     await expect(eng.process('req-002')).rejects.toThrow(NotImplementedError);
   });
 
-  it('pack() succeeds with packagingDeps + manifestDeps and advances to DELIVERING', async () => {
+  it('pack() succeeds with packagingDeps + envelopeDeps and advances to DELIVERING', async () => {
     // Provision working dir manually so pack() has something to walk
     const requestId = 'req-003';
     const workingDir = join(tmp, 'restorations', requestId);
@@ -213,19 +212,19 @@ describe('Engine packaging integration', () => {
     expect(intent!.state).toBe(IntentState.DELIVERING);
     expect(intent!.manifestCid).toBe('bafymock123');
 
-    // Assert restorer provenance: safeAddress must be the Safe multisig,
+    // Assert participant provenance: safeAddress must be the Safe multisig,
     // agentEoa must be derived from the private key — they MUST differ.
     const uploadCalls = (uploadToIpfs as ReturnType<typeof vi.fn>).mock.calls;
-    const manifestCall = uploadCalls.find(
+    const envelopeCall = uploadCalls.find(
       ([, payload]: [string, Record<string, unknown>]) =>
-        typeof payload === 'object' && payload !== null && 'restorer' in payload,
+        typeof payload === 'object' && payload !== null && 'participant' in payload,
     );
-    expect(manifestCall).toBeDefined();
-    const manifest = manifestCall![1] as Record<string, unknown>;
-    const restorer = manifest.restorer as Record<string, unknown>;
-    expect(restorer.safeAddress).toBe('0xsafe');
-    expect(restorer.agentEoa).not.toBe('0xsafe');
-    expect(restorer.safeAddress).not.toBe(restorer.agentEoa);
+    expect(envelopeCall).toBeDefined();
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+    const participant = envelope.participant as Record<string, unknown>;
+    expect(participant.safeAddress).toBe('0xsafe');
+    expect(participant.agentEoa).not.toBe('0xsafe');
+    expect(participant.safeAddress).not.toBe(participant.agentEoa);
   });
 
   it('deliver() throws NotImplementedError when deliveryDeps absent', async () => {
@@ -270,7 +269,7 @@ describe('Engine packaging integration', () => {
   });
 
   it('pack() throws when safeAddress is not configured', async () => {
-    // Engine with manifestDeps missing safeAddress and no deliveryDeps
+    // Engine with envelopeDeps missing safeAddress and no deliveryDeps
     const optsNoSafe: RestorationEngineOptions = {
       store,
       registry: noopRegistry,
@@ -281,7 +280,7 @@ describe('Engine packaging integration', () => {
       packagingDeps: {
         ipfsRegistryUrl: 'http://ipfs.test',
       },
-      manifestDeps: {
+      envelopeDeps: {
         ipfsRegistryUrl: 'http://ipfs.test',
         agentEoaPrivateKey: TEST_PRIVATE_KEY,
         // safeAddress intentionally absent
@@ -315,7 +314,7 @@ describe('Engine packaging integration', () => {
     p.transition(requestId, IntentState.PACKAGING);
 
     await expect(eng.process(requestId)).rejects.toThrow(
-      'pack: safeAddress not configured in manifestDeps or deliveryDeps',
+      'pack: safeAddress not configured in envelopeDeps or deliveryDeps',
     );
   });
 
@@ -341,7 +340,7 @@ describe('Engine packaging integration', () => {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
-      gatingClaim: {},
+      gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
     });
     p.transition(requestId, IntentState.PACKAGING);
 
@@ -383,7 +382,7 @@ describe('Engine packaging integration', () => {
         postSnapshotCapturedAt: 2000,
         postSnapshotPayload: { capturedAt: 2000, hlTime: 0 },
         fillsPayload: [],
-        gatingClaim: { equityReturnPct: '5' },
+        gatingClaim: { equityReturnPct: '5', maxDrawdownPct: '2', closedTradesCount: 10, tradedNotionalMultiple: '3' },
       });
       p.transition(requestId, IntentState.PACKAGING);
     };
@@ -436,5 +435,354 @@ describe('Engine packaging integration', () => {
     const gen1 = (manifestUploads[0]![1] as Record<string, unknown>)['generatedAt'];
     const gen2 = (manifestUploads[1]![1] as Record<string, unknown>)['generatedAt'];
     expect(gen1).toBe(gen2);
+  });
+
+  // ── Verdict envelope (evaluation intent) ─────────────────────────────────────
+
+  it('pack() emits role=verdict envelope for intentType=evaluation with verdictPayload', async () => {
+    // An evaluation intent must produce a 'verdict' envelope, not 'restoration'.
+    // The verdictPayload on implOutputsJson is passed through as the envelope payload
+    // and validated against PortfolioV0VerdictPayloadSchema.
+    const requestId = 'req-eval-001';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+    // verdict.json must exist so walkArtifacts picks it up (evaluator impl writes it)
+    writeFileSync(join(workingDir, 'verdict.json'), JSON.stringify({ verdict: 'PASS' }));
+
+    // Build a minimal valid PortfolioV0VerdictPayload
+    const verdictPayload = {
+      restorationEnvelope: { cid: 'bafy-rest', sha256: '0'.repeat(64) },
+      verificationOfRestoration: {
+        claimedTier: 'self-signed',
+        sdkVersion: '0.0.0-stub',
+        timestamp: Date.now(),
+        checks: [{ name: 'stub', passed: true }],
+        overall: 'valid',
+      },
+      verdict: 'PASS',
+      score: '0.5',
+      scoreBasis: 'calmar.v1',
+      scoreVersion: 'v1',
+      rederived: {
+        preSnapshot: { capturedAt: 1000, payload: {} },
+        postSnapshot: { capturedAt: 2000, payload: {} },
+        fills: [],
+        gating: {},
+      },
+      claimed: {
+        preSnapshot: { capturedAt: 1000, payload: {} },
+        postSnapshot: { capturedAt: 2000, payload: {} },
+        fillsHash: '0xff',
+        fillsCount: 0,
+        gating: {},
+      },
+      checks: [{ name: 'availability.x', status: 'PASS' }],
+    };
+
+    const implOutput = {
+      venueRef: { name: 'hyperliquid' },
+      gating: { verdict: 'PASS', score: '0.5' },
+      verdictPayload,
+      artifacts: [{ path: 'verdict.json', artifactType: 'evaluation_verdict', tags: ['verdict'], access: { kind: 'open' } }],
+    };
+
+    await engine.observe({
+      requestId,
+      intentCid: 'bafyintent123',
+      onchainCreationTx: '0xdeadbeef',
+      onchainCreationBlock: 100,
+      specKind: 'portfolio.v0',
+      intentType: 'evaluation',
+      windowStartTs: Date.now() - 1000,
+      windowEndTs: Date.now() + 86_400_000,
+      restorationJob: { id: requestId, description: 'test', type: 'evaluation' },
+    });
+    const p = engine.testPersistence;
+    p.transition(requestId, IntentState.CLAIMED);
+    p.transition(requestId, IntentState.WAITING);
+    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'portfolio-v0-evaluator'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, IntentState.RUNNING);
+    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { verdict: 'PASS', score: '0.5' },
+      implOutputsJson: JSON.stringify(implOutput),
+    });
+    p.transition(requestId, IntentState.PACKAGING);
+
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    // Reset mock to default implementation (the idempotency test may have patched it)
+    uploadMock.mockResolvedValue('bafymock123');
+    uploadMock.mockClear();
+
+    await engine.process(requestId);
+
+    const intent = engine.testPersistence.getByRequestId(requestId)!;
+    expect(intent.state).toBe(IntentState.DELIVERING);
+    expect(intent.manifestCid).toBe('bafymock123');
+
+    // Find the uploaded envelope (has schemaVersion='jinn.execution.v1')
+    const envelopeCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>)['schemaVersion'] === 'jinn.execution.v1',
+    );
+    expect(envelopeCall).toBeDefined();
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+
+    // role MUST be 'verdict'
+    expect(envelope['role']).toBe('verdict');
+
+    // payload must contain the verdict fields (not restoration snapshot fields)
+    const payload = envelope['payload'] as Record<string, unknown>;
+    expect(payload['verdict']).toBe('PASS');
+    expect(payload['restorationEnvelope']).toBeDefined();
+    expect(payload['verificationOfRestoration']).toBeDefined();
+    expect(payload['rederived']).toBeDefined();
+    expect(payload['claimed']).toBeDefined();
+    expect(payload['checks']).toBeDefined();
+    // Must NOT have restoration-specific fields
+    expect(payload['preSnapshot']).toBeUndefined();
+    expect(payload['postSnapshot']).toBeUndefined();
+    expect(payload['fills']).toBeUndefined();
+  });
+
+  it('pack() throws when evaluation intent has no verdictPayload on implOutput', async () => {
+    // Guard: if an evaluator impl forgot to set verdictPayload, pack() should throw
+    // rather than silently assembling a malformed restoration-role envelope.
+    const requestId = 'req-eval-no-vp';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+
+    // implOutput with no verdictPayload field
+    const implOutput = {
+      venueRef: { name: 'hyperliquid' },
+      gating: { verdict: 'PASS', score: '0.5' },
+      // verdictPayload intentionally absent
+      artifacts: [],
+    };
+
+    await engine.observe({
+      requestId,
+      intentCid: 'bafyintent123',
+      onchainCreationTx: '0xdeadbeef',
+      onchainCreationBlock: 100,
+      specKind: 'portfolio.v0',
+      intentType: 'evaluation',
+      windowStartTs: Date.now() - 1000,
+      windowEndTs: Date.now() + 86_400_000,
+      restorationJob: { id: requestId, description: 'test', type: 'evaluation' },
+    });
+    const p = engine.testPersistence;
+    p.transition(requestId, IntentState.CLAIMED);
+    p.transition(requestId, IntentState.WAITING);
+    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'portfolio-v0-evaluator'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, IntentState.RUNNING);
+    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { verdict: 'PASS' },
+      implOutputsJson: JSON.stringify(implOutput),
+    });
+    p.transition(requestId, IntentState.PACKAGING);
+
+    await expect(engine.process(requestId)).rejects.toThrow(
+      /evaluator impl.*did not produce verdictPayload/,
+    );
+  });
+});
+
+// ── Task 16: trajectory↔artifact bidirectional linkage ────────────────────────
+
+import { TrajectoryCollector } from '../../../src/trajectory/collector.js';
+
+class TrajectoryTestEngine extends RestorationEngine {
+  get testPersistence(): IntentPersistence {
+    return this.persistence;
+  }
+
+  /** Inject a pre-built TrajectoryCollector for a given requestId (test helper). */
+  injectCollector(requestId: string, collector: TrajectoryCollector): void {
+    this.trajectoryCollectors.set(requestId, collector);
+  }
+}
+
+describe('Engine pack() — trajectory↔artifact bidirectional linkage', () => {
+  let store: Store;
+  let tmp: string;
+  let engine: TrajectoryTestEngine;
+
+  beforeEach(() => {
+    store = new Store(':memory:');
+    tmp = mkTmp();
+    engine = new TrajectoryTestEngine(makeOpts(store, tmp));
+  });
+
+  afterEach(() => {
+    store.close();
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('backfills trajectoryCid on artifact producedBy after emitTrajectory', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockClear();
+
+    // Return a distinct CID for the trajectory upload vs artifact uploads
+    let callIndex = 0;
+    uploadMock.mockImplementation(async (_url: string, payload: unknown) => {
+      callIndex++;
+      // The trajectory upload sends an object with a 'trajectory' field (signed blob)
+      // but more reliably: it has a 'signature' field (from signCanonical in emit.ts).
+      // Artifact uploads send { artifactType, sha256, data }.
+      // Envelope uploads send { schemaVersion: 'jinn.execution.v1', ... }.
+      if (typeof payload === 'object' && payload !== null && 'signature' in (payload as Record<string, unknown>)) {
+        return 'bafy-trajectory-cid';
+      }
+      return `bafy-artifact-${callIndex}`;
+    });
+
+    const requestId = 'req-traj-link';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+    writeFileSync(join(workingDir, 'sessions', 'session.jsonl'), '{"msg":"hi"}');
+
+    await engine.observe(makeInput(requestId, tmp));
+    const p = engine.testPersistence;
+    p.transition(requestId, IntentState.CLAIMED);
+    p.transition(requestId, IntentState.WAITING);
+    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'test'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, IntentState.RUNNING);
+    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
+    });
+    p.transition(requestId, IntentState.PACKAGING);
+
+    // Inject a trajectory collector (simulates what runImpl would have set up)
+    const collector = new TrajectoryCollector({ intentCid: 'bafyintent123', runId: 'run-test-1' });
+    // Add a pre-existing span (simulates impl activity)
+    collector.addSpan({
+      name: 'phase.run',
+      kind: 'INTERNAL',
+      startTimeUnixNano: '1000000000',
+      endTimeUnixNano: '2000000000',
+      attributes: { 'jinn.span.kind': 'jinn.phase', 'jinn.phase.name': 'run' },
+      events: [],
+      status: { code: 'OK' },
+    });
+    engine.injectCollector(requestId, collector);
+
+    // Run pack()
+    await engine.process(requestId);
+
+    // Verify state advanced to DELIVERING
+    const intent = engine.testPersistence.getByRequestId(requestId);
+    expect(intent!.state).toBe(IntentState.DELIVERING);
+
+    // Verify the envelope's artifacts have producedBy.trajectoryCid populated
+    const envelopeCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>)['schemaVersion'] === 'jinn.execution.v1',
+    );
+    expect(envelopeCall).toBeDefined();
+
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+    const envelopeArtifacts = envelope['artifacts'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(envelopeArtifacts)).toBe(true);
+
+    // At least some artifacts should have producedBy set with a non-empty trajectoryCid
+    const artifactsWithProducedBy = envelopeArtifacts.filter((a) => {
+      const meta = a['metadata'] as Record<string, unknown> | undefined;
+      return meta?.['producedBy'] != null;
+    });
+    expect(artifactsWithProducedBy.length).toBeGreaterThan(0);
+
+    // Every producedBy.trajectoryCid must be the trajectory CID (non-empty)
+    for (const art of artifactsWithProducedBy) {
+      const meta = art['metadata'] as Record<string, unknown>;
+      const pb = meta['producedBy'] as Record<string, unknown>;
+      expect(typeof pb['trajectoryCid']).toBe('string');
+      expect(pb['trajectoryCid']).not.toBe('');
+      // The trajectoryCid must be the value returned by the trajectory upload
+      expect(pb['trajectoryCid']).toBe('bafy-trajectory-cid');
+    }
+  });
+
+  it('pack() works without a collector — no producedBy on artifacts', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockResolvedValue('bafymock123');
+    uploadMock.mockClear();
+
+    const requestId = 'req-no-collector';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+
+    await engine.observe(makeInput(requestId, tmp));
+    const p = engine.testPersistence;
+    p.transition(requestId, IntentState.CLAIMED);
+    p.transition(requestId, IntentState.WAITING);
+    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'test'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, IntentState.RUNNING);
+    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { equityReturnPct: '5', maxDrawdownPct: '2', closedTradesCount: 10, tradedNotionalMultiple: '3' },
+    });
+    p.transition(requestId, IntentState.PACKAGING);
+
+    // No collector injected — emitTrajectory should not be called
+    await engine.process(requestId);
+    const intent = engine.testPersistence.getByRequestId(requestId);
+    expect(intent!.state).toBe(IntentState.DELIVERING);
+
+    // Envelope's trajectory field should be null (no collector → no trajectory)
+    const envelopeCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>)['schemaVersion'] === 'jinn.execution.v1',
+    );
+    expect(envelopeCall).toBeDefined();
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+    expect(envelope['trajectory']).toBeNull();
   });
 });

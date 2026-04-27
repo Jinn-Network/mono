@@ -24,7 +24,7 @@ const server = new McpServer({
 });
 
 // Read desired state from env vars (passed by ClaudeRunner)
-const desiredState = {
+const restorationJob = {
   id: process.env['DESIRED_STATE_ID'] ?? '',
   description: process.env['DESIRED_STATE_DESCRIPTION'] ?? '',
   context: process.env['DESIRED_STATE_CONTEXT']
@@ -43,17 +43,22 @@ const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
 
 server.tool(
   'get_desired_state',
-  'Get the current desired state that needs to be restored',
+  // NOTE: Returns the RUNTIME shape (RestorationJob fields + attempt/request metadata),
+  // NOT the signed wire format (SignedIntentV1). The signed intent, if present, was
+  // uploaded to IPFS at job creation time and is referenced by the on-chain CID.
+  // Claude receives this runtime shape to understand what objective to pursue —
+  // it does not need to verify or re-sign the intent envelope.
+  'Get the current desired state that needs to be restored. Returns runtime job context: id, description, type (restoration|evaluation), restorationRequestId, requestId, and optional context bag. This is the RUNTIME shape — not the signed intent.v1 wire format.',
   {},
   async () => ({
     content: [{
       type: 'text' as const,
       text: JSON.stringify({
-        id: desiredState.id,
-        description: desiredState.description,
-        context: desiredState.context,
-        type: desiredState.type || undefined,
-        restorationRequestId: desiredState.restorationRequestId || undefined,
+        id: restorationJob.id,
+        description: restorationJob.description,
+        context: restorationJob.context,
+        type: restorationJob.type || undefined,
+        restorationRequestId: restorationJob.restorationRequestId || undefined,
         requestId,
       }),
     }],
@@ -81,13 +86,13 @@ server.tool(
     data: z.string().optional().describe('Result data or artifact content'),
   },
   async ({ success, description, data }) => {
-    const isEvaluation = desiredState.type === 'evaluation';
+    const isEvaluation = restorationJob.type === 'evaluation';
     const resultTag = isEvaluation ? 'evaluation-verdict' : 'restoration-result';
     const id = randomUUID();
 
     const artifact = {
       id,
-      desiredStateId: desiredState.id,
+      desiredStateId: restorationJob.id,
       requestId,
       title: `${resultTag}: ${description.slice(0, 80)}`,
       content: data ?? description,
@@ -144,7 +149,7 @@ server.tool(
       content: [{
         type: 'text' as const,
         text: JSON.stringify({
-          restorationRequestId: desiredState.restorationRequestId,
+          restorationRequestId: restorationJob.restorationRequestId,
           deliveryData: JSON.parse(raw),
         }),
       }],
@@ -166,7 +171,7 @@ server.tool(
     if (store) {
       store.insertArtifact({
         id,
-        desiredStateId: desiredState.id,
+        desiredStateId: restorationJob.id,
         requestId,
         title,
         content,

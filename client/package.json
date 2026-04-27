@@ -23,6 +23,7 @@
   "files": [
     "dist/",
     "deployments/",
+    "plugins/",
     "skills/",
     "docker-compose.yml",
     "CONTRIBUTING.md",
@@ -34,6 +35,7 @@
     "access": "public"
   },
   "scripts": {
+    "e2e:full-cycle": "tsx test/e2e/claude-code-learner-full-cycle.ts",
     "jinn": "tsx src/bin/jinn.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build": "tsc && chmod +x dist/bin/jinn.js dist/bin/jinn-mcp.js && mkdir -p dist/dashboard && cp src/dashboard/index.html dist/dashboard/index.html && node scripts/write-dist-build-meta.mjs",
@@ -53,12 +55,13 @@
     "release:testnet-acceptance:docker": "node scripts/testnet-acceptance-docker.mjs",
     "release:testnet-acceptance:host": "node scripts/testnet-acceptance.mjs",
     "status": "tsx scripts/status.ts",
-    "e2e": "tsx scripts/e2e-validate.ts",
-    "e2e-portfolio-v0": "tsx scripts/e2e-portfolio-v0.ts",
-    "e2e-prediction-apy-v0": "tsx scripts/e2e-prediction-apy-v0.ts",
-    "e2e:prediction": "cd ../contracts && yarn compile && cd ../client && tsx scripts/e2e-prediction-v0.ts",
-    "staking": "tsx scripts/staking-validate.ts",
-    "stolas": "tsx scripts/stolas-validate.ts",
+    "e2e": "tsx test/e2e/validate.ts",
+    "e2e:claude-code-learner": "tsx test/e2e/claude-code-learner-portfolio-v0.ts",
+    "e2e-portfolio-v0": "tsx test/e2e/portfolio-v0.ts",
+    "e2e-prediction-apy-v0": "tsx test/e2e/prediction-apy-v0.ts",
+    "e2e:prediction": "cd ../contracts && yarn compile && cd ../client && tsx test/e2e/prediction-v0.ts",
+    "staking": "tsx test/e2e/staking.ts",
+    "stolas": "tsx test/e2e/stolas.ts",
     "withdraw": "tsx scripts/withdraw.ts"
   },
   "dependencies": {
@@ -76,6 +79,7 @@
     "@x402/fetch": "^2.9.0",
     "@x402/hono": "^2.9.0",
     "better-sqlite3": "^11.0.0",
+    "canonicalize": "^2.0.0",
     "dotenv": "^17.4.1",
     "hono": "^4.12.10",
     "viem": "^2.0.0",

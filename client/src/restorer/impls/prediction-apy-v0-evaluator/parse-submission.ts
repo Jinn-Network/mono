@@ -1,32 +1,29 @@
-import {
-  PredictionApySubmissionManifestSchema,
-  type PredictionApySubmissionManifest,
-} from '../../../types/prediction-apy.js';
+import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import type { SignedEnvelope } from '../../../types/envelope.js';
+import { PredictionApyV0RestorationPayloadSchema } from '../../../types/payloads/prediction-apy-v0.js';
+import type { PredictionApyV0RestorationPayload } from '../../../types/payloads/prediction-apy-v0.js';
 
 /**
- * Parse a restoration submission for prediction.apy.v0. Engine-wrapped jobs store
- * the prediction under `gating` (see manifest assembly); direct IPFS manifests
- * use `prediction` per schema.
+ * Parse a restoration submission envelope for prediction.apy.v0.
+ *
+ * Restorations are published as jinn.execution.v1 SignedEnvelopes with
+ * kind='prediction.apy.v0' and role='restoration'. The prediction payload
+ * lives at envelope.payload per PredictionApyV0RestorationPayloadSchema.
+ *
+ * Returns both the envelope (for signature / intent provenance) and the
+ * typed payload (for prediction fields).
  */
-export function parsePredictionApySubmissionManifest(manifestJson: string): PredictionApySubmissionManifest {
+export function parsePredictionApySubmissionEnvelope(manifestJson: string): {
+  envelope: SignedEnvelope;
+  payload: PredictionApyV0RestorationPayload;
+} {
   const raw = JSON.parse(manifestJson) as Record<string, unknown>;
-  const gating = raw['gating'] as Record<string, unknown> | undefined;
-  const gatingBps = gating?.['predictedBps'];
-  if (gating && (typeof gatingBps === 'string' || typeof gatingBps === 'number')) {
-    const normalized = {
-      schemaVersion: 'prediction.apy.v0.submission.v1',
-      generatedAt: raw['generatedAt'] ?? Date.now(),
-      intent: raw['intent'],
-      restorer: raw['restorer'],
-      window: raw['window'],
-      prediction: {
-        predictedBps: String(gatingBps),
-        submittedAt: Number(gating['submittedAt'] ?? 0),
-        modelId: String(gating['modelId'] ?? ''),
-      },
-      signature: raw['signature'],
-    };
-    return PredictionApySubmissionManifestSchema.parse(normalized);
+  const envelope = SignedEnvelopeSchema.parse(raw);
+  if (envelope.kind !== 'prediction.apy.v0' || envelope.role !== 'restoration') {
+    throw new Error(
+      `Unexpected envelope kind/role: ${envelope.kind}/${envelope.role}; expected prediction.apy.v0/restoration`,
+    );
   }
-  return PredictionApySubmissionManifestSchema.parse(raw);
+  const payload = PredictionApyV0RestorationPayloadSchema.parse(envelope.payload);
+  return { envelope, payload };
 }

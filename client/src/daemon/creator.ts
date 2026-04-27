@@ -1,5 +1,5 @@
 import type { ExecutionAdapter } from '../adapters/adapter.js';
-import type { DesiredState, RequestId } from '../types/index.js';
+import type { RestorationJob, RequestId } from '../types/index.js';
 import type { Store } from '../store/store.js';
 import { PermanentError, TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
@@ -8,7 +8,7 @@ import { IntentPostingService } from '../intents/posting-service.js';
 import type { IntentSource } from '../intents/sources.js';
 
 export interface ActiveAttempt {
-  desiredState: DesiredState;
+  restorationJob: RestorationJob;
   attemptNumber: number;
   restorationRequestId: string;
   status: 'pending' | 'resolved';
@@ -23,7 +23,7 @@ export class CreatorLoop {
 
   private static readonly PERMANENT_FAILURE_BACKOFF_MS = 30 * 60 * 1000;
 
-  private static failureCacheKey(state: DesiredState, safeAddress?: string): string {
+  private static failureCacheKey(state: RestorationJob, safeAddress?: string): string {
     const prefix = safeAddress ? `create_failed:${safeAddress}` : 'create_failed';
     return `${prefix}:${state.id}`;
   }
@@ -53,7 +53,7 @@ export class CreatorLoop {
     }
 
     for (const candidate of candidates) {
-      const state = candidate.desiredState;
+      const state = candidate.restorationJob;
       const failureKey = CreatorLoop.failureCacheKey(state, this.safeAddress);
       const failedAt = this.store.getConfigValue(failureKey);
       if (failedAt) {
@@ -74,7 +74,7 @@ export class CreatorLoop {
 
         const requestId = postResult.requestId;
         this.attempts.set(state.id, {
-          desiredState: state,
+          restorationJob: state,
           attemptNumber: postResult.attemptNumber,
           restorationRequestId: requestId,
           status: 'pending',

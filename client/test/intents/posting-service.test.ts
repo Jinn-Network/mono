@@ -3,17 +3,10 @@ import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { IntentPostingService } from '../../src/intents/posting-service.js';
 import { Store } from '../../src/store/store.js';
 import { TransientError } from '../../src/types/index.js';
-import type { Registry8004 } from '../../src/discovery/registry.js';
+import type { SignedIntentV1 } from '../../src/types/intent.js';
 
 const SAFE_A = '0x00112233445566778899aabbccddeeff00112233';
 const SAFE_B = '0x1111222233334444555566667777888899990000';
-
-/** Adapter stub that exposes getLastPostedIntentCid() for registry tests. */
-function makeAdapterWithIntentCid(intentCid: string): LocalAdapter & { getLastPostedIntentCid(): string } {
-  const adapter = new LocalAdapter();
-  (adapter as LocalAdapter & { getLastPostedIntentCid(): string }).getLastPostedIntentCid = () => intentCid;
-  return adapter as LocalAdapter & { getLastPostedIntentCid(): string };
-}
 
 describe('IntentPostingService', () => {
   it('returns the same request id for repeated manual submissions from the same Safe', async () => {
@@ -22,9 +15,9 @@ describe('IntentPostingService', () => {
     const store = new Store(':memory:');
     const service = new IntentPostingService(adapter, store);
 
-    const postSpy = vi.spyOn(adapter, 'postDesiredState');
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
     const candidate = {
-      desiredState: { id: 'manual-1', description: 'test manual submission' },
+      restorationJob: { id: 'manual-1', description: 'test manual submission' },
       sourceKey: 'manual:manual-1',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
@@ -49,10 +42,10 @@ describe('IntentPostingService', () => {
 
     store.setConfigValue(`cli_intent:${SAFE_A}:manual-legacy`, 'legacy-request-id');
 
-    const postSpy = vi.spyOn(adapter, 'postDesiredState');
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
     const result = await service.postCandidate(
       {
-        desiredState: { id: 'manual-legacy', description: 'legacy' },
+        restorationJob: { id: 'manual-legacy', description: 'legacy' },
         sourceKey: 'manual:manual-legacy',
         postingPolicy: { kind: 'once_per_safe' },
       },
@@ -82,9 +75,9 @@ describe('IntentPostingService', () => {
     const store = new Store(':memory:');
     const service = new IntentPostingService(adapter, store);
 
-    const postSpy = vi.spyOn(adapter, 'postDesiredState');
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
     const candidate = {
-      desiredState: { id: 'shared-id', description: 'same logical id' },
+      restorationJob: { id: 'shared-id', description: 'same logical id' },
       sourceKey: 'manual:shared-id',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
@@ -110,13 +103,13 @@ describe('IntentPostingService', () => {
       releasePost = resolve;
     });
 
-    const postSpy = vi.spyOn(adapter, 'postDesiredState').mockImplementation(async (state) => {
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob').mockImplementation(async (state) => {
       await postingGate;
       return `req-${state.id}`;
     });
 
     const candidate = {
-      desiredState: { id: 'race-1', description: 'race test' },
+      restorationJob: { id: 'race-1', description: 'race test' },
       sourceKey: 'manual:race-1',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
@@ -138,102 +131,60 @@ describe('IntentPostingService', () => {
     await adapter.stop();
   });
 
-  // ── ERC-8004 Intent Registration (Plan E Task 10) ────────────────────────────
-
-  it('calls registerIntent after a successful post when registry is injected', async () => {
-    const adapter = makeAdapterWithIntentCid('bafy-intent-test-cid');
-    await adapter.initialize();
-    const store = new Store(':memory:');
-
-    const registerIntentMock = vi.fn().mockResolvedValue(1n);
-    const mockRegistry = { registerIntent: registerIntentMock } as unknown as Registry8004;
-
-    const service = new IntentPostingService(adapter, store, mockRegistry);
-
-    const candidate = {
-      desiredState: {
-        id: 'reg-1',
-        description: 'test registration',
-        spec: { kind: 'portfolio.v0' },
-      },
-      sourceKey: 'manual:reg-1',
-      postingPolicy: { kind: 'once_per_safe' } as const,
-    };
-
-    const result = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
-    expect(result.idempotent).toBe(false);
-
-    expect(registerIntentMock).toHaveBeenCalledTimes(1);
-    expect(registerIntentMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intentCid: 'bafy-intent-test-cid',
-        kind: 'portfolio.v0',
-        requestId: result.requestId,
-      }),
-    );
-
-    store.close();
-    await adapter.stop();
-  });
-
-  it('does NOT call registerIntent when adapter does not expose getLastPostedIntentCid', async () => {
-    // LocalAdapter without the method — intentCid is undefined → registration skipped
+  it('propagates SignedIntentV1 on RestorationJob through to the adapter unchanged', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
+    const service = new IntentPostingService(adapter, store);
 
-    const registerIntentMock = vi.fn().mockResolvedValue(1n);
-    const mockRegistry = { registerIntent: registerIntentMock } as unknown as Registry8004;
-
-    const service = new IntentPostingService(adapter, store, mockRegistry);
-
-    const candidate = {
-      desiredState: {
-        id: 'no-cid-1',
-        description: 'no cid adapter',
-        spec: { kind: 'portfolio.v0' },
+    const stubIntent: SignedIntentV1 = {
+      schemaVersion: 'intent.v1',
+      id: 'intent-propagation-test',
+      kind: 'health_check',
+      description: 'propagation test',
+      window: { startTs: '2026-01-01T00:00:00.000Z', endTs: '2026-12-31T23:59:59.999Z' },
+      spec: { kind: 'health_check' },
+      eligibility: {},
+      creator: {
+        safeAddress: '0x0000000000000000000000000000000000000001',
+        agentEoa: '0x0000000000000000000000000000000000000002',
       },
-      sourceKey: 'manual:no-cid-1',
+      createdAt: 1_700_000_000_000,
+      signature: {
+        algo: 'secp256k1',
+        signer: '0x0000000000000000000000000000000000000002',
+        hash: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        sig: '0xcafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe01',
+      },
+    };
+
+    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const candidate = {
+      restorationJob: {
+        id: 'intent-propagation-test',
+        description: 'propagation test',
+        intent: stubIntent,
+      },
+      sourceKey: 'manual:intent-propagation-test',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
 
-    await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
-    // registerIntent must NOT be called when no intentCid is available
-    expect(registerIntentMock).not.toHaveBeenCalled();
-
-    store.close();
-    await adapter.stop();
-  });
-
-  it('post succeeds even when registerIntent throws (best-effort)', async () => {
-    const adapter = makeAdapterWithIntentCid('bafy-failing-cid');
-    await adapter.initialize();
-    const store = new Store(':memory:');
-
-    const registerIntentMock = vi.fn().mockRejectedValue(new Error('registry down'));
-    const mockRegistry = { registerIntent: registerIntentMock } as unknown as Registry8004;
-
-    const service = new IntentPostingService(adapter, store, mockRegistry);
-
-    const candidate = {
-      desiredState: {
-        id: 'fail-reg-1',
-        description: 'registry will fail',
-        spec: { kind: 'portfolio.v0' },
-      },
-      sourceKey: 'manual:fail-reg-1',
-      postingPolicy: { kind: 'once_per_safe' } as const,
-    };
-
-    // Should NOT throw despite registry failure
     const result = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
-    expect(result.idempotent).toBe(false);
-    expect(result.requestId).toBeTruthy();
 
-    // registerIntent was attempted
-    expect(registerIntentMock).toHaveBeenCalledTimes(1);
+    expect(result.idempotent).toBe(false);
+    expect(result.restorationJob.intent).toBe(stubIntent);
+    expect(postSpy).toHaveBeenCalledOnce();
+    const posted = postSpy.mock.calls[0][0];
+    expect(posted.intent).toBe(stubIntent);
 
     store.close();
     await adapter.stop();
   });
+
+  // ERC-8004 per-execution registration is rebuilt under bead jinn-mono-3zk
+  // against the operator-rooted entity model — see DR
+  // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md. The
+  // previous per-CID registerIntent test block was removed with PR #37 cleanup
+  // (jinn-mono-2k6); new posting-service tests covering setMetadata land with
+  // jinn-mono-3zk.
 });

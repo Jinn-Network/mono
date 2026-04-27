@@ -3,7 +3,6 @@ import type { Store } from '../store/store.js';
 export type LifecycleKind =
   | 'intent_posted'
   | 'intent_registry_failed'
-  | 'envelope_registry_failed'
   | 'request_claimed'
   | 'delivery_submitted'
   | 'evaluation_submitted'

@@ -4,16 +4,15 @@ import type { ExecutionAdapter } from '../adapters/adapter.js';
 import { emitEvent } from '../observability/emit-event.js';
 import type { Store } from '../store/store.js';
 import type { IntentPostRecord, IntentPostingPolicyType } from '../store/store.js';
-import { TransientError, type DesiredState, type RequestId } from '../types/index.js';
+import { TransientError, type RestorationJob, type RequestId } from '../types/index.js';
 import type { IntentCandidate, IntentPostingPolicy } from './sources.js';
-import type { Registry8004 } from '../discovery/registry.js';
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
 const POST_LOCK_STALE_AFTER_MS = 60_000;
 
 export interface IntentPostResult {
   requestId: RequestId;
-  desiredState: DesiredState;
+  restorationJob: RestorationJob;
   attemptNumber: number;
   attemptId: string;
   idempotent: boolean;
@@ -54,7 +53,6 @@ export class IntentPostingService {
   constructor(
     private readonly adapter: ExecutionAdapter,
     private readonly store: Store,
-    private readonly registry?: Registry8004,
   ) {}
 
   async postCandidate(
@@ -101,7 +99,7 @@ export class IntentPostingService {
     });
     if (!lockAcquired) {
       throw new TransientError(
-        `Intent post already in progress for ${candidate.sourceKey} (${candidate.desiredState.id})`,
+        `Intent post already in progress for ${candidate.sourceKey} (${candidate.restorationJob.id})`,
       );
     }
 
@@ -129,63 +127,34 @@ export class IntentPostingService {
 
       const previousPostCount = lockedExisting?.postCount ?? 0;
       const attemptNumber = previousPostCount + 1;
-      const attemptId = `${candidate.desiredState.id}/${attemptNumber}`;
-      const desiredState: DesiredState = {
-        ...candidate.desiredState,
+      const attemptId = `${candidate.restorationJob.id}/${attemptNumber}`;
+      const restorationJob: RestorationJob = {
+        ...candidate.restorationJob,
         type: 'restoration',
         attemptId,
         attemptNumber,
       };
-      const requestId = await this.adapter.postDesiredState(desiredState);
-
-      // ERC-8004 Intent registration (Plan E Task 10). Best-effort: a failure here
-      // does NOT roll back the post. Registration fires only when a registry is
-      // injected and the adapter surfaces the intent CID (IPFS-backed adapters only).
-      if (this.registry && candidate.desiredState.spec?.kind) {
-        const intentCid = this.adapter.getLastPostedIntentCid?.();
-        if (intentCid) {
-          const creator = opts.creatorSafeAddress
-            ? getAddress(opts.creatorSafeAddress)
-            : creatorSafeAddress === GLOBAL_CREATOR_SCOPE
-              ? ''
-              : creatorSafeAddress;
-          try {
-            await this.registry.registerIntent({
-              intentCid,
-              kind: candidate.desiredState.spec.kind,
-              creator,
-              createdAt: nowMs,
-              requestId: requestId as `0x${string}`,
-            });
-          } catch (err) {
-            // Registration is best-effort; a failure here should not prevent the
-            // intent from being posted. Log + emit but don't throw.
-            console.warn(`[posting-service] registerIntent failed: ${err instanceof Error ? err.message : err}`);
-            emitEvent(this.store, {
-              kind: 'intent_registry_failed',
-              requestId,
-              specKind: candidate.desiredState.spec?.kind,
-              outcome: 'failed',
-              detail: err instanceof Error ? err.message : String(err),
-            }, 'creator');
-          }
-        }
-      }
+      const requestId = await this.adapter.postRestorationJob(restorationJob);
 
       this.store.recordOwnActivity(requestId, 'created');
       emitEvent(this.store, {
         kind: 'intent_posted',
         requestId,
-        specKind: candidate.desiredState.spec?.kind,
+        specKind: candidate.restorationJob.spec?.kind,
         outcome: 'ok',
-        detail: `Posted intent for desired state ${candidate.desiredState.id} via ${candidate.sourceKey}`,
+        detail: `Posted intent for desired state ${candidate.restorationJob.id} via ${candidate.sourceKey}`,
       }, 'creator');
+
+      // ERC-8004 per-execution registration is rebuilt under bead jinn-mono-3zk
+      // against the operator-rooted entity model (DR
+      // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
+      // The previous per-CID registerIntent path was deleted with PR #37 cleanup.
       this.store.upsertIntentPostRecord({
         creatorSafeAddress,
         sourceKey: candidate.sourceKey,
         policyType,
         scopeKey,
-        desiredStateId: candidate.desiredState.id,
+        desiredStateId: candidate.restorationJob.id,
         requestId,
         firstPostedAt: lockedExisting?.firstPostedAt ?? nowIso,
         lastPostedAt: nowIso,
@@ -193,7 +162,7 @@ export class IntentPostingService {
       });
       return {
         requestId,
-        desiredState,
+        restorationJob,
         attemptNumber,
         attemptId,
         idempotent: false,
@@ -228,7 +197,7 @@ export class IntentPostingService {
         sourceKey: candidate.sourceKey,
         policyType: args.policyType,
         scopeKey: args.scopeKey,
-        desiredStateId: candidate.desiredState.id,
+        desiredStateId: candidate.restorationJob.id,
         requestId,
         firstPostedAt: args.nowIso,
         lastPostedAt: args.nowIso,
@@ -246,11 +215,11 @@ export class IntentPostingService {
     source: 'store' | 'legacy_config',
   ): IntentPostResult {
     const attemptNumber = Math.max(1, record.postCount);
-    const attemptId = `${candidate.desiredState.id}/${attemptNumber}`;
+    const attemptId = `${candidate.restorationJob.id}/${attemptNumber}`;
     return {
       requestId: record.requestId,
-      desiredState: {
-        ...candidate.desiredState,
+      restorationJob: {
+        ...candidate.restorationJob,
         type: 'restoration',
         attemptId,
         attemptNumber,

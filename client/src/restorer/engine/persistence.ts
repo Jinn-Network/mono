@@ -11,7 +11,7 @@
 
 import type Database from 'better-sqlite3';
 import { assertValidTransition, TERMINAL_STATES, type IntentState } from './state.js';
-import type { DesiredState } from '../../types/desired-state.js';
+import type { RestorationJob } from '../../types/desired-state.js';
 
 // ── Concurrency error ─────────────────────────────────────────────────────────
 
@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS restoration_intents (
   manifest_generated_at   INTEGER,
   evidence_hash           TEXT,
 
-  -- Additive column (schema migration 2026-04-17, full DesiredState threading):
-  -- desired_state_payload: full DesiredState JSON, captured at observe() time.
+  -- Additive column (schema migration 2026-04-17, full RestorationJob threading):
+  -- desired_state_payload: full RestorationJob JSON, captured at observe() time.
   -- NULL for pre-migration rows (legacy fallback in engine consumers).
   desired_state_payload   TEXT,
 
@@ -110,18 +110,18 @@ export interface PersistedIntentInput {
   onchainCreationTx: string;
   onchainCreationBlock: number;
   specKind?: string;
-  /** 'restoration' (default) or 'evaluation'. Captured from DesiredState.type at observe() time. */
+  /** 'restoration' (default) or 'evaluation'. Captured from RestorationJob.type at observe() time. */
   intentType?: 'restoration' | 'evaluation';
   windowStartTs: number;
   windowEndTs: number;
   /**
-   * Full DesiredState payload, captured at observe() time.
+   * Full RestorationJob payload, captured at observe() time.
    * Required: production callers always thread it (daemon.ts); making this
    * required provides a type-level guarantee against silent regression to the
    * stub path. Tests that need to exercise the pre-migration NULL row path
    * must use a direct raw SQL INSERT.
    */
-  desiredState: DesiredState;
+  restorationJob: RestorationJob;
 }
 
 /** Full persisted intent row (all columns). */
@@ -160,8 +160,8 @@ export interface PersistedIntent {
   /** keccak256 of signed manifest canonical JSON; used by deliver() as evidenceHash. */
   evidenceHash: string | null;
 
-  /** Full DesiredState payload as recorded at observe() time; null for pre-migration rows. */
-  desiredState: DesiredState | null;
+  /** Full RestorationJob payload as recorded at observe() time; null for pre-migration rows. */
+  restorationJob: RestorationJob | null;
 
   /**
    * Serialised RestorationOutput from runImpl, persisted before the
@@ -315,7 +315,7 @@ function rowToIntent(row: RawRow): PersistedIntent {
     deliveryTxHash: row.delivery_tx_hash,
     manifestGeneratedAt: row.manifest_generated_at,
     evidenceHash: row.evidence_hash,
-    desiredState: parseJson<DesiredState>(row.desired_state_payload),
+    restorationJob: parseJson<RestorationJob>(row.desired_state_payload),
     implOutputsJson: row.impl_outputs_json,
     failureReason: row.failure_reason,
     failureAt: row.failure_at,
@@ -361,7 +361,7 @@ export class IntentPersistence {
       now: Date.now(),
       windowStartTs: input.windowStartTs,
       windowEndTs: input.windowEndTs,
-      desiredStatePayload: input.desiredState ? JSON.stringify(input.desiredState) : null,
+      desiredStatePayload: input.restorationJob ? JSON.stringify(input.restorationJob) : null,
     });
   }
 

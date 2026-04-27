@@ -3,12 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../src/cli/command.js';
+import type { CommandContext, CommandModule } from '@/cli/command.js';
 
 const spawnMock = vi.fn();
 const stopRunMock = vi.fn();
 const initRunMock = vi.fn();
 
+// MOCK_JUSTIFICATION: node:child_process is a leaf Node built-in; spawn is a syscall and cannot be DI'd without a shim module we don't own.
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
@@ -17,23 +18,19 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
-vi.mock('../../src/cli/commands/stop.js', () => ({
-  default: {
-    name: 'stop',
-    summary: '',
-    helpText: '',
-    run: stopRunMock,
-  },
-}));
+const fakeStopCommand: CommandModule = {
+  name: 'stop',
+  summary: '',
+  helpText: '',
+  run: stopRunMock,
+};
 
-vi.mock('../../src/cli/commands/init.js', () => ({
-  default: {
-    name: 'init',
-    summary: '',
-    helpText: '',
-    run: initRunMock,
-  },
-}));
+const fakeInitCommand: CommandModule = {
+  name: 'init',
+  summary: '',
+  helpText: '',
+  run: initRunMock,
+};
 
 class FakeChildProcess extends EventEmitter {
   pid = 4242;
@@ -51,7 +48,7 @@ describe('operator MCP helpers', () => {
     vi.useFakeTimers();
     spawnMock.mockReturnValue(new FakeChildProcess());
 
-    const { startDetachedDaemon } = await import('../../src/mcp/operator-server.js');
+    const { startDetachedDaemon } = await import('@/mcp/operator-server.js');
     const home = mkdtempSync(join(tmpdir(), 'jinn-mcp-start-'));
 
     const promise = startDetachedDaemon({ HOME: home });
@@ -73,8 +70,8 @@ describe('operator MCP helpers', () => {
       ctx.exit(11);
     });
 
-    const { stopDetachedDaemon } = await import('../../src/mcp/operator-server.js');
-    const result = await stopDetachedDaemon({});
+    const { stopDetachedDaemon } = await import('@/mcp/operator-server.js');
+    const result = await stopDetachedDaemon({}, { stopCommand: fakeStopCommand });
 
     expect(result).toEqual({
       ok: true,
@@ -91,8 +88,8 @@ describe('operator MCP helpers', () => {
       ctx.exit(2);
     });
 
-    const { createOperatorServer } = await import('../../src/mcp/operator-server.js');
-    const server = createOperatorServer();
+    const { createOperatorServer } = await import('@/mcp/operator-server.js');
+    const server = createOperatorServer({ initCommand: fakeInitCommand });
     const result = await server._registeredTools.jinn_init.handler({}, {});
 
     expect(result).toEqual({

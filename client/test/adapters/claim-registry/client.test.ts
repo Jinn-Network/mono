@@ -38,11 +38,13 @@ function makeWalletClient(): WalletClient {
 }
 
 // Mock executeSafeTransaction so claimJob/releaseClaim don't need a real Safe
+// MOCK_JUSTIFICATION: src/adapters/mech/safe.js is the I/O leaf for Safe wallet RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/safe.js', () => ({
   executeSafeTransaction: vi.fn().mockResolvedValue('0xsafetxhash' as Hex),
 }));
 
 // Mock waitForTransactionReceiptWithRetry so tests don't need a real chain
+// MOCK_JUSTIFICATION: src/tx-retry.js wraps chain-RPC retry logic at the I/O boundary; mocking it is mocking the boundary.
 vi.mock('../../../src/tx-retry.js', () => ({
   waitForTransactionReceiptWithRetry: vi.fn().mockResolvedValue({ status: 'success' }),
   withRecoverableRetry: vi.fn().mockImplementation((fn: () => Promise<unknown>) => fn()),

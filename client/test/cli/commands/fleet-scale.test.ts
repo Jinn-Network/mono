@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
+import { describe, expect, it } from 'vitest';
 import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { makeCommandCtx } from '@test/cli.js';
+import { createFleetScaleCommand, type FleetScaleDeps } from '../../../src/cli/commands/fleet-scale.js';
+import { findServiceByDisplayIndex } from '../../../src/earning/fleet-display-index.js';
 
 const mockRawOne: GatheredStatusRaw = {
   shutdownState: null,
@@ -33,27 +35,24 @@ const mockRawOne: GatheredStatusRaw = {
   masterDailyEstimateWei: '0',
 };
 
-vi.mock('../../../src/cli/introspection-context.js', () => ({
-  gatherIntrospectionRaw: vi.fn(async () => mockRawOne),
-}));
-
-function makeCtx(argv: string[]): { ctx: CommandContext; writes: string[]; exits: number[] } {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv,
-    stdoutIsTty: false,
-    writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: (c: number) => { exits.push(c); },
-    env: { JINN_PASSWORD: 'test' },
+function makeFakeDeps(raw: GatheredStatusRaw = mockRawOne): FleetScaleDeps {
+  return {
+    loadConfig: () => ({} as any),
+    getConfigPathFromArgs: () => undefined,
+    gatherIntrospectionRaw: async () => raw,
+    resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+    signerContextFactory: async () => ({ ok: false, envelope: { code: 'fatal', message: 'not used in dry-run tests' } } as any),
+    bootstrapperFactory: () => ({ bootstrap: async () => ({ ok: true, message: 'ok', fleet_state: { master_address: '0xM', services: [] } }) } as any),
+    retireFleetServiceOnChain: async () => ({ ok: true, message: 'retired', txHash: '0xabc' } as any),
+    findServiceByDisplayIndex,
+    isRecoverableTransactionError: () => false,
   };
-  return { ctx, writes, exits };
 }
 
 describe('fleet compound command', () => {
   it('scale --dry-run accepts --config and --password-fd', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
-    const { ctx, writes } = makeCtx([
+    const fleet = createFleetScaleCommand(makeFakeDeps());
+    const { ctx, writes } = makeCommandCtx({ argv: [
       'scale',
       '--to',
       '3',
@@ -62,15 +61,15 @@ describe('fleet compound command', () => {
       '/tmp/fleet-scale-config.json',
       '--password-fd',
       '5',
-    ]);
+    ], env: { JINN_PASSWORD: 'test' } });
     await fleet.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
   });
 
   it('scale --to 3 --dry-run emits a growth plan', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
-    const { ctx, writes } = makeCtx(['scale', '--to', '3', '--dry-run']);
+    const fleet = createFleetScaleCommand(makeFakeDeps());
+    const { ctx, writes } = makeCommandCtx({ argv: ['scale', '--to', '3', '--dry-run'], env: { JINN_PASSWORD: 'test' } });
     await fleet.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
@@ -78,8 +77,8 @@ describe('fleet compound command', () => {
   });
 
   it('scale --to 1 --dry-run when already at 1 is a no-op', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
-    const { ctx, writes } = makeCtx(['scale', '--to', '1', '--dry-run']);
+    const fleet = createFleetScaleCommand(makeFakeDeps());
+    const { ctx, writes } = makeCommandCtx({ argv: ['scale', '--to', '1', '--dry-run'], env: { JINN_PASSWORD: 'test' } });
     await fleet.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.plan).toEqual([]);
@@ -87,8 +86,8 @@ describe('fleet compound command', () => {
   });
 
   it('missing subverb emits invalid_invocation', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
-    const { ctx, writes, exits } = makeCtx([]);
+    const fleet = createFleetScaleCommand(makeFakeDeps());
+    const { ctx, writes, exits } = makeCommandCtx({ argv: [], env: { JINN_PASSWORD: 'test' } });
     await fleet.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
@@ -97,8 +96,8 @@ describe('fleet compound command', () => {
   });
 
   it('unknown subverb emits invalid_invocation', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
-    const { ctx, writes, exits } = makeCtx(['nope']);
+    const fleet = createFleetScaleCommand(makeFakeDeps());
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['nope'], env: { JINN_PASSWORD: 'test' } });
     await fleet.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');

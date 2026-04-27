@@ -1,13 +1,17 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
+import { canonicalJson } from '../../../../src/restorer/engine/canonical-json.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionApyV0Evaluator } from '../../../../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
-import type { DesiredState } from '../../../../src/types/desired-state.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
+import { PredictionApyV0VerdictPayloadSchema } from '../../../../src/types/payloads/prediction-apy-v0.js';
+import type { RestorationJob } from '../../../../src/types/desired-state.js';
 import type { RestorationContext } from '../../../../src/restorer/types.js';
+import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
 const PK = ('0x' + 'e'.repeat(64)) as `0x${string}`;
 const AGENT_PK = ('0x' + '1'.repeat(64)) as `0x${string}`;
@@ -22,15 +26,30 @@ const intentProv = (cid: string) => ({
 async function makeSignedApyManifestJson(overrides: { submittedAt?: number; intentCid?: string; corruptSignature?: boolean } = {}) {
   const account = privateKeyToAccount(AGENT_PK);
   const unsigned: Record<string, unknown> = {
-    schemaVersion: 'prediction.apy.v0.submission.v1',
+    schemaVersion: 'jinn.execution.v1',
+    kind: 'prediction.apy.v0',
+    role: 'restoration',
     generatedAt: 1_000,
     intent: intentProv(overrides.intentCid ?? 'expected-cid'),
-    restorer: { safeAddress: '0x' + '44'.repeat(20), agentEoa: account.address },
+    participant: { safeAddress: '0x' + '44'.repeat(20), agentEoa: account.address },
     window: { startTs: 0, endTs: 600_000 },
-    prediction: {
-      predictedBps: '100',
-      submittedAt: overrides.submittedAt ?? 100_000,
-      modelId: 'apy-persistence.v1',
+    executor: {
+      implName: 'claude-mcp-prediction-apy',
+      implVersion: '1.0.0',
+      clientGitSha: 'dev',
+      codeDigest: 'sha256:' + '0'.repeat(64),
+      signingKey: { kind: 'agent-eoa', pubkey: account.address },
+    },
+    evidenceTier: 'self-signed',
+    attestation: null,
+    trajectory: null,
+    artifacts: [],
+    payload: {
+      prediction: {
+        predictedBps: '100',
+        submittedAt: overrides.submittedAt ?? 100_000,
+        modelId: 'apy-persistence.v1',
+      },
     },
   };
   const s = await signCanonical(unsigned, AGENT_PK, account.address);
@@ -48,8 +67,8 @@ async function makeSignedApyManifestJson(overrides: { submittedAt?: number; inte
 
 function makeEvalIntent(
   manifestJson: string,
-  options?: { omitRestorationIntentCid?: boolean; restorationIntentCid?: string },
-): DesiredState {
+  options?: { omitRestorationIntentCid?: boolean; restorationIntentCid?: string; restorationEnvelopeCid?: string },
+): RestorationJob {
   return {
     id: 'eval-apy',
     description: 'e',
@@ -72,11 +91,14 @@ function makeEvalIntent(
       ...(options?.omitRestorationIntentCid
         ? {}
         : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: options?.restorationIntentCid ?? 'expected-cid' }),
+      ...(options?.restorationEnvelopeCid
+        ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: options.restorationEnvelopeCid }
+        : {}),
     },
-  } as unknown as DesiredState;
+  } as unknown as RestorationJob;
 }
 
-function makeCtx(intent: DesiredState, intentCid: string, testDeps: Record<string, unknown> = {}): RestorationContext {
+function makeCtx(intent: RestorationJob, intentCid: string, testDeps: Record<string, unknown> = {}): RestorationContext & { trajectory: TrajectoryCollector } {
   const d = mkdtempSync(join(tmpdir(), 'apy-eval-'));
   return {
     intent,
@@ -86,8 +108,9 @@ function makeCtx(intent: DesiredState, intentCid: string, testDeps: Record<strin
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 0,
+    trajectory: new TrajectoryCollector({ intentCid: 'test-intent-cid', runId: 'test-run-id' }),
     _testDeps: testDeps,
-  } as unknown as RestorationContext;
+  } as unknown as RestorationContext & { trajectory: TrajectoryCollector };
 }
 
 describe('PredictionApyV0Evaluator', () => {
@@ -179,5 +202,85 @@ describe('PredictionApyV0Evaluator', () => {
       }),
     );
     expect(out.gating.verdict).toBe('FAIL');
+  });
+
+  it('emits venue_io + state_transition + artifact.emit spans on successful run', async () => {
+    const manifest = await makeSignedApyManifestJson();
+    const evalIntent = makeEvalIntent(manifest);
+    const ev = new PredictionApyV0Evaluator({
+      evaluatorPk: PK,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const ctx = makeCtx(evalIntent, 'expected-cid', {
+      twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
+    });
+    await ev.run(ctx);
+
+    const { spans } = ctx.trajectory.snapshot();
+    const kinds = spans.map((s) => s.attributes['jinn.span.kind']);
+
+    expect(kinds).toContain('jinn.venue_io');
+    expect(kinds).toContain('jinn.state_transition');
+    expect(kinds).toContain('jinn.artifact.emit');
+
+    const venueSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.venue_io');
+    expect(venueSpan!.attributes['http.response.status_code']).toBe(200);
+    expect(venueSpan!.attributes['venue.id']).toBe('aave-v3');
+
+    const stateSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.state_transition');
+    expect(stateSpan!.attributes['jinn.state.from']).toBe('FETCHED');
+    expect(stateSpan!.attributes['jinn.state.to']).toBe('SCORED');
+
+    const artifactSpan = spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
+    expect(artifactSpan!.attributes['jinn.artifact.artifactType']).toBe('evaluation_verdict');
+    expect(typeof artifactSpan!.attributes['jinn.artifact.sha256']).toBe('string');
+  });
+
+  it('verdictPayload conforms to PredictionApyV0VerdictPayloadSchema on PASS', async () => {
+    const manifest = await makeSignedApyManifestJson();
+    const evalIntent = makeEvalIntent(manifest);
+    const ev = new PredictionApyV0Evaluator({
+      evaluatorPk: PK,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const out = await ev.run(
+      makeCtx(evalIntent, 'expected-cid', {
+        twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
+      }),
+    );
+    expect(out.verdictPayload).toBeDefined();
+    const parsed = PredictionApyV0VerdictPayloadSchema.safeParse(out.verdictPayload);
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.verdict).toBe('PASS');
+      expect(parsed.data.scoreBasis).toBe('absolute-error-linear.v1');
+      expect(parsed.data.restorationEnvelope.cid).toBe('bafy-unknown');
+      // sha256 is now computed from the restoration envelope JSON (not a placeholder)
+      expect(parsed.data.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(parsed.data.verificationOfRestoration.claimedTier).toBe('self-signed');
+      expect(parsed.data.verificationOfRestoration.overall).toBe('valid');
+      expect(parsed.data.claimed.predictedBps).toBe('100');
+      expect(parsed.data.claimed.modelId).toBe('apy-persistence.v1');
+    }
+  });
+
+  it('restorationEnvelope.cid uses threaded context key + sha256 matches manifest JSON', async () => {
+    const manifest = await makeSignedApyManifestJson();
+    const envelopeCid = 'f01551220deadbeef1234567890abcdef';
+    const evalIntent = makeEvalIntent(manifest, { restorationEnvelopeCid: envelopeCid });
+    const ev = new PredictionApyV0Evaluator({
+      evaluatorPk: PK,
+      evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
+    });
+    const out = await ev.run(
+      makeCtx(evalIntent, 'expected-cid', {
+        twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
+      }),
+    );
+    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+    expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
+    // Evaluator uses JCS canonical bytes (canonicalJson) to match the upload pipeline.
+    const expectedSha256 = createHash('sha256').update(canonicalJson(JSON.parse(manifest))).digest('hex');
+    expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
   });
 });

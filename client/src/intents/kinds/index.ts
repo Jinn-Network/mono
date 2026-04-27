@@ -6,6 +6,7 @@ import type { IntentGenerator } from '../sources.js';
 import { portfolioV0 } from './portfolio-v0.js';
 import { predictionV0 } from './prediction-v0.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
+import { learnerLoopTest } from './learner-loop-test.js';
 import type { SpecKind, TestnetAutoContext } from './spec-kind.js';
 
 export type { ParsedSpecOverlay, ParseDeps, SpecKind, TestnetAutoContext } from './spec-kind.js';
@@ -16,6 +17,7 @@ export const SPEC_KINDS: Record<string, SpecKind<any>> = {
   'portfolio.v0': portfolioV0,
   'prediction.v0': predictionV0,
   'prediction.apy.v0': predictionApyV0,
+  'learner-loop-test': learnerLoopTest,
 };
 
 export function knownKinds(): string[] {
@@ -37,6 +39,12 @@ export function collectTestnetAutoIntentGenerators(opts: {
   rpcUrl: string;
   autoIntentsDisabled: boolean;
   env: NodeJS.ProcessEnv;
+  /** Agent EOA address — passed to generator configs that produce SignedIntentV1. */
+  agentEoa?: `0x${string}`;
+  /** Safe address — passed to generator configs that populate intent.creator. */
+  safeAddress?: `0x${string}`;
+  /** Agent EOA private key — passed to generator configs that sign intents. */
+  agentPrivateKey?: `0x${string}`;
 }): { generators: Array<{ kind: string; generator: IntentGenerator }>; logLines: string[] } {
   const generators: Array<{ kind: string; generator: IntentGenerator }> = [];
   const logLines: string[] = [];
@@ -47,6 +55,9 @@ export function collectTestnetAutoIntentGenerators(opts: {
     network: opts.network,
     rpcUrl: opts.rpcUrl,
     env: opts.env,
+    agentEoa: opts.agentEoa,
+    safeAddress: opts.safeAddress,
+    agentPrivateKey: opts.agentPrivateKey,
   };
   for (const kind of knownKinds()) {
     const entry = SPEC_KINDS[kind] as SpecKind;

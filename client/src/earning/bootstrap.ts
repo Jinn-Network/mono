@@ -20,6 +20,8 @@ import {
   type ChainConfig,
   ERC20_ABI,
   EVENT_TOPICS,
+  IDENTITY_REGISTRY_ABI,
+  IDENTITY_REGISTRY_ADDRESSES,
   SERVICE_MANAGER_ABI,
   SERVICE_REGISTRY_APPROVE_ABI,
   SERVICE_REGISTRY_L2_ABI,
@@ -36,6 +38,7 @@ import {
   initDeployedSafe,
   initPredictedSafe,
 } from './safe-adapter.js';
+import { bindAgentWalletToSafe } from './agent-wallet-binding.js';
 import { FleetStateStore } from './store.js';
 import {
   generateMnemonic,
@@ -112,6 +115,11 @@ export interface FleetBootstrapperOptions {
    * from poll frequency (config.pollIntervalMs).
    */
   pollIntervalMs?: number;
+  /**
+   * Injectable faucet function — defaults to {@link requestTestnetFunding}.
+   * Provided in tests to avoid hitting the real CDP endpoint.
+   */
+  requestFunding?: typeof requestTestnetFunding;
 }
 
 export class FleetBootstrapper {
@@ -124,6 +132,7 @@ export class FleetBootstrapper {
   private readonly debug: boolean;
   private readonly masterEthDailyEstimateWei: bigint;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly requestFunding: typeof requestTestnetFunding;
 
   constructor(options: FleetBootstrapperOptions = {}) {
     this.store = new FleetStateStore(options.earningDir);
@@ -132,6 +141,7 @@ export class FleetBootstrapper {
     this.stakingMode = options.stakingMode ?? 'standard';
     this.targetServices = options.targetServices ?? 1;
     this.debug = options.debug ?? isJinnDebug();
+    this.requestFunding = options.requestFunding ?? requestTestnetFunding;
     const dailyOpt = options.masterEthDailyEstimateWei;
     this.masterEthDailyEstimateWei =
       dailyOpt !== undefined
@@ -246,7 +256,7 @@ export class FleetBootstrapper {
           `(each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-60 s on first run).`,
         );
         for (let i = 0; i < MAX_FAUCET_ITERS; i++) {
-          const faucetResult = await requestTestnetFunding(masterAddress, 'base-sepolia');
+          const faucetResult = await this.requestFunding(masterAddress, 'base-sepolia');
           if (!faucetResult.ok) {
             if (faucetResult.rateLimited) {
               console.error(`[fleet-bootstrap] CDP faucet rate-limited after ${i} drips: ${faucetResult.reason}`);
@@ -596,7 +606,22 @@ export class FleetBootstrapper {
       }
     }
 
-    if (svc.step === 'complete') return state;
+    if (svc.step === 'complete') {
+      // Legacy operator recovery: agent NFT was minted (agent_id set) but the
+      // Safe was never bound via IdentityRegistry.setAgentWallet. This happens
+      // for operators who ran bootstrap after the mint step landed (jinn-mono-j07)
+      // but before the Safe-binding feature shipped (jinn-mono-aev). Without this
+      // check they would remain permanently unbound.
+      if (svc.agent_id && svc.safe_address && svc.safe_bound_to_agent !== true) {
+        console.error(
+          `[fleet-bootstrap] Service ${index}: legacy agent_id=${svc.agent_id} with unbound Safe; running binding step.`,
+        );
+        state = await this.stepRegisterAgent(state, mnemonic, index);
+        // Restore step to complete after the binding sub-step finishes.
+        state = await this.store.updateService(index, { step: 'complete' });
+      }
+      return state;
+    }
 
     if (this.stakingMode === 'standard') {
       return this.resumeServiceStandard(state, mnemonic, index);
@@ -616,11 +641,21 @@ export class FleetBootstrapper {
     }
 
     // Reload service state after stake
-    const updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index);
+    let updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index);
     if (!updatedSvc) throw new Error(`Service ${index} disappeared from state`);
 
     if (updatedSvc.step === 'staked' || updatedSvc.step === 'mech_deployed') {
       state = await this.stepDeployMech(state, mnemonic, index);
+      updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (updatedSvc.step === 'mech_deployed' || updatedSvc.step === 'agent_registered') {
+      state = await this.stepRegisterAgent(state, mnemonic, index);
+      updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (updatedSvc.step === 'agent_registered') {
+      state = await this.store.updateService(index, { step: 'complete' });
     }
 
     return this.store.load(this.chain);
@@ -665,6 +700,16 @@ export class FleetBootstrapper {
 
     if (svc.step === 'staked' || svc.step === 'mech_deployed') {
       state = await this.stepDeployMech(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'mech_deployed' || svc.step === 'agent_registered') {
+      state = await this.stepRegisterAgent(state, mnemonic, index);
+      svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
+    }
+
+    if (svc.step === 'agent_registered') {
+      state = await this.store.updateService(index, { step: 'complete' });
     }
 
     return this.store.load(this.chain);
@@ -813,9 +858,12 @@ export class FleetBootstrapper {
     console.error(`[fleet-bootstrap] Service ${index}: reStake confirmed (tx: ${reStakeHash})`);
 
     // Service is now Staked again with the same service_id, safe_address, and mech_address.
-    // Mark the step as complete so the bootstrap doesn't try to re-stake or re-deploy mech.
+    // Step back to `mech_deployed` so the resume loop advances through
+    // `stepRegisterAgent` (idempotent — short-circuits if `agent_id` is
+    // already set; mints if a pre-j07 operator was just re-staked and
+    // never had the operator agent NFT). See jinn-mono-jgp.
     return this.store.updateService(index, {
-      step: 'complete',
+      step: 'mech_deployed',
     });
   }
 
@@ -828,7 +876,7 @@ export class FleetBootstrapper {
 
     if (svc.mech_address) {
       console.error(`[fleet-bootstrap] Service ${index}: mech already deployed at ${svc.mech_address}`);
-      return this.store.updateService(index, { step: 'complete' });
+      return this.store.updateService(index, { step: 'mech_deployed' });
     }
 
     const serviceId = svc.service_id!;
@@ -903,8 +951,182 @@ export class FleetBootstrapper {
 
     return this.store.updateService(index, {
       mech_address: mechAddress,
-      step: 'complete',
+      step: 'mech_deployed',
     });
+  }
+
+  /**
+   * ERC-8004 IdentityRegistry mint + Safe wallet bind (jinn-mono-j07,
+   * jinn-mono-aev).
+   *
+   * Two on-chain effects, gated independently for idempotency:
+   *
+   * 1. **Mint** (jinn-mono-j07): one operator agent NFT per service Safe;
+   *    the agent EOA owns the token. Persists `agent_id` (and metadata)
+   *    to state immediately after the receipt parses, so a crash between
+   *    register and the subsequent `setAgentWallet` does not lose the
+   *    token. v0 uses an empty `agentURI` — operators are expected to
+   *    populate it later via `setAgentURI`. Re-run with `svc.agent_id`
+   *    already set short-circuits the mint.
+   *
+   * 2. **Bind** (jinn-mono-aev): `IdentityRegistry.setAgentWallet(agentId,
+   *    safe, deadline, sig)` from the agent EOA. The contract recovers
+   *    `sig` against the Safe via ERC-1271; we wrap the EIP-712
+   *    AgentWalletSet digest in Safe's SafeMessage typed-data and
+   *    raw-ECDSA-sign with the sole owner (= agent EOA). On success,
+   *    `safe_bound_to_agent` flips to true. Re-run with
+   *    `svc.safe_bound_to_agent` already true short-circuits the bind.
+   *    See `agent-wallet-binding.ts` + spec §4.1.
+   *
+   * Folded into a single step (rather than a discrete state) because the
+   * existing `safe_bound_to_agent` flag already provides per-effect
+   * idempotency, and the order is fixed (mint → bind → complete). Both
+   * sub-steps re-enter cleanly on the existing `mech_deployed |
+   * agent_registered` step guard.
+   */
+  private async stepRegisterAgent(
+    state: FleetState,
+    mnemonic: string,
+    index: number,
+  ): Promise<FleetState> {
+    void state;
+    let svc = (await this.store.load(this.chain)).services.find(s => s.index === index);
+    if (!svc) throw new Error(`Service ${index} not found in state`);
+
+    const identityRegistry = this.config.identityRegistry
+      ?? IDENTITY_REGISTRY_ADDRESSES[this.config.chainId];
+    if (!identityRegistry) {
+      throw new Error(
+        `IdentityRegistry address not configured for chainId=${this.config.chainId}; ` +
+        `update IDENTITY_REGISTRY_ADDRESSES in earning/contracts.ts.`,
+      );
+    }
+
+    const agentSigner = deriveAgentSigner(mnemonic, index);
+    const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+
+    // ── Sub-step A: mint NFT (skip if agent_id is already set). ─────────
+    let agentId: string;
+    if (svc.agent_id) {
+      console.error(
+        `[fleet-bootstrap] Service ${index}: ERC-8004 agent already registered ` +
+        `(agentId=${svc.agent_id}); skipping mint.`,
+      );
+      agentId = svc.agent_id;
+      svc = await this.firstServiceUpdate(index, {
+        identity_registry_address: svc.identity_registry_address ?? getAddress(identityRegistry),
+        step: 'agent_registered',
+      });
+    } else {
+      // v0: empty agentURI. The richer agent card (per §6 of the spec) is
+      // future work — operators may later call `setAgentURI`.
+      const agentURI = '';
+      const registerData = encodeFunctionData({
+        abi: IDENTITY_REGISTRY_ABI,
+        functionName: 'register',
+        args: [agentURI],
+      }) as Hex;
+
+      console.error(
+        `[fleet-bootstrap] Service ${index}: minting ERC-8004 agent NFT ` +
+        `(IdentityRegistry=${identityRegistry}, agentEOA=${agentSigner.address})`,
+      );
+
+      const mintTxHash = await viemSendTransactionWithRetry(
+        agentWallet,
+        this.publicClient,
+        {
+          account: agentSigner as Account,
+          to: addr(identityRegistry),
+          data: registerData,
+        },
+      );
+
+      const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, mintTxHash);
+      if (receipt.status !== 'success') {
+        throw new Error(`IdentityRegistry.register() tx failed for service ${index}: ${mintTxHash}`);
+      }
+
+      const parsed = this.parseAgentIdFromReceipt(receipt, identityRegistry);
+      if (parsed === null) {
+        throw new Error(
+          `IdentityRegistry.register() succeeded but Registered event was not found ` +
+          `(service ${index}, tx: ${mintTxHash})`,
+        );
+      }
+      agentId = parsed;
+
+      console.error(
+        `[fleet-bootstrap] Service ${index}: ERC-8004 agent registered ` +
+        `(agentId=${agentId}, tx=${mintTxHash})`,
+      );
+
+      // Persist agentId IMMEDIATELY so a crash between this write and the
+      // setAgentWallet call below does not lose the token.
+      svc = await this.firstServiceUpdate(index, {
+        agent_id: agentId,
+        agent_uri: agentURI,
+        identity_registry_address: getAddress(identityRegistry),
+        agent_registered_tx: mintTxHash,
+        step: 'agent_registered',
+      });
+    }
+
+    // ── Sub-step B: bind Safe wallet via ERC-1271 (jinn-mono-aev). ──────
+    // Idempotent: skip when already bound. Requires safe_address — if the
+    // operator is in a topology without a Safe (future), the bind step is
+    // simply not applicable and `safe_bound_to_agent` stays false.
+    if (svc.safe_bound_to_agent) {
+      console.error(
+        `[fleet-bootstrap] Service ${index}: Safe already bound to agentId=${agentId} ` +
+        `(safe=${svc.safe_address}); skipping setAgentWallet.`,
+      );
+    } else if (!svc.safe_address) {
+      console.error(
+        `[fleet-bootstrap] Service ${index}: no safe_address — cannot bind agent NFT ` +
+        `(agentId=${agentId}). Bootstrap will leave safe_bound_to_agent=false; this is ` +
+        `unexpected for the standard staking topology.`,
+      );
+    } else {
+      console.error(
+        `[fleet-bootstrap] Service ${index}: binding Safe ${svc.safe_address} to ` +
+        `agentId=${agentId} via setAgentWallet (ERC-1271).`,
+      );
+      const result = await bindAgentWalletToSafe({
+        identityRegistryAddress: addr(identityRegistry),
+        agentId: BigInt(agentId),
+        safeAddress: addr(svc.safe_address),
+        agentEoaAccount: agentSigner,
+        agentEoaWalletClient: agentWallet,
+        publicClient: this.publicClient,
+        chainId: this.config.chainId,
+      });
+      console.error(
+        `[fleet-bootstrap] Service ${index}: setAgentWallet succeeded ` +
+        `(tx=${result.txHash}, safe=${svc.safe_address}).`,
+      );
+      svc = await this.firstServiceUpdate(index, {
+        safe_bound_to_agent: true,
+      });
+    }
+
+    return this.store.load(this.chain);
+  }
+
+  /**
+   * Tiny store wrapper: re-loads the service row after `updateService` so
+   * the next sub-step sees the latest persisted shape (including any
+   * fields written by sibling code paths since this fn started).
+   */
+  private async firstServiceUpdate(
+    index: number,
+    patch: Parameters<FleetStateStore['updateService']>[1],
+  ): Promise<ServiceState> {
+    await this.store.updateService(index, patch);
+    const fleet = await this.store.load(this.chain);
+    const svc = fleet.services.find(s => s.index === index);
+    if (!svc) throw new Error(`Service ${index} not found after update`);
+    return svc;
   }
 
   // ── Self-bond step handlers ──────────────────────────────────────────
@@ -1434,6 +1656,40 @@ export class FleetBootstrapper {
       const t0 = log.topics[0];
       if (t0 === topic && log.topics.length >= 3) {
         return getAddress(('0x' + log.topics[2]!.slice(26)) as Hex);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Extract `agentId` from an `IdentityRegistry.Registered` log emitted in
+   * the receipt. Filters by `(address, topic[0])` first to avoid colliding
+   * with any other contract that happens to share the event signature.
+   *
+   * Returns the agentId as a decimal string (uint256) so it round-trips
+   * cleanly through JSON-persisted EarningState.
+   */
+  private parseAgentIdFromReceipt(
+    receipt: TransactionReceipt,
+    identityRegistry: string,
+  ): string | null {
+    const topic = EVENT_TOPICS.Registered;
+    const target = identityRegistry.toLowerCase();
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== target) continue;
+      if (log.topics[0] !== topic) continue;
+      try {
+        const decoded = decodeEventLog({
+          abi: IDENTITY_REGISTRY_ABI,
+          data: log.data,
+          topics: log.topics as [Hex, ...Hex[]],
+          strict: false,
+        });
+        if (decoded.eventName === 'Registered' && 'agentId' in decoded.args) {
+          return (decoded.args.agentId as bigint).toString();
+        }
+      } catch {
+        // Not a matching event
       }
     }
     return null;

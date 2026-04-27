@@ -1,0 +1,59 @@
+{
+  "_comment": "ValidationRegistry addresses are NOT included as default data sources. The canonical ERC-8004 upstream deployment list (github.com/erc-8004/erc-8004-contracts) confirms Identity and Reputation Registry deployments for all chains below, but does NOT list Validation Registry deployments (marked 'under active update' upstream). Do not add ValidationRegistry here until deployment is confirmed via eth_getCode + upstream artifact. Identity and Reputation Registry addresses are confirmed from upstream deployment artifacts.",
+  "base-sepolia": {
+    "IdentityRegistry": {
+      "address": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "startBlock": 22000000
+    },
+    "ReputationRegistry": {
+      "address": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "startBlock": 22000000
+    },
+    "JinnRouter": {
+      "address": "0x7c502a4288C4f4279edbb363d692f530200e22dC",
+      "startBlock": 22000000
+    }
+  },
+  "base": {
+    "IdentityRegistry": {
+      "address": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "startBlock": 25000000
+    },
+    "ReputationRegistry": {
+      "address": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "startBlock": 25000000
+    },
+    "JinnRouter": {
+      "address": "0xfFa7118A3D820cd4E820010837D65FAfF463181B",
+      "startBlock": 25000000
+    }
+  },
+  "sepolia": {
+    "IdentityRegistry": {
+      "address": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "startBlock": 8000000
+    },
+    "ReputationRegistry": {
+      "address": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "startBlock": 8000000
+    },
+    "JinnRouter": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 8000000
+    }
+  },
+  "mainnet": {
+    "IdentityRegistry": {
+      "address": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "startBlock": 22500000
+    },
+    "ReputationRegistry": {
+      "address": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "startBlock": 22500000
+    },
+    "JinnRouter": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 22500000
+    }
+  }
+}

@@ -1,45 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
+import { createUpdateCommand } from '@/cli/commands/update.js';
+import { runCommand } from '@test/cli.js';
+import type { CommandContext } from '@/cli/command.js';
 
-const execSyncMock = vi.fn();
-const pluginRunMock = vi.fn();
-
+// MOCK_JUSTIFICATION: node:child_process is a leaf Node built-in; execSync is a syscall and cannot be DI'd without a shim module we don't own.
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
-    execSync: execSyncMock,
+    execSync: vi.fn(),
   };
 });
-
-vi.mock('../../../src/cli/commands/plugin-install.js', () => ({
-  default: {
-    name: 'plugin',
-    summary: '',
-    helpText: '',
-    run: pluginRunMock,
-  },
-}));
-
-function makeCtx(argv: string[] = ['--json'], env: Record<string, string> = {}): {
-  ctx: CommandContext;
-  writes: string[];
-  exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  return {
-    ctx: {
-      argv,
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: (code: number) => { exits.push(code); },
-      env,
-    },
-    writes,
-    exits,
-  };
-}
 
 describe('update command', () => {
   afterEach(() => {
@@ -47,7 +18,7 @@ describe('update command', () => {
   });
 
   it('reports plugin refresh errors even when plugin install does not set an exit code', async () => {
-    pluginRunMock.mockImplementation(async (ctx: CommandContext) => {
+    const pluginRunMock = vi.fn(async (ctx: CommandContext) => {
       ctx.writer.write(JSON.stringify({
         results: [
           {
@@ -59,12 +30,13 @@ describe('update command', () => {
       }));
     });
 
-    const { default: updateCommand } = await import('../../../src/cli/commands/update.js');
-    const { ctx, writes, exits } = makeCtx(['--json', '--skip-npm']);
+    const cmd = createUpdateCommand({ pluginRun: pluginRunMock });
+    const { envelopes, exits } = await runCommand(cmd, { argv: ['--json', '--skip-npm'] });
 
-    await updateCommand.run(ctx);
-
-    const payload = JSON.parse(writes[writes.length - 1] ?? '{}');
+    const payload = envelopes[envelopes.length - 1] as {
+      ok: boolean;
+      steps: Array<{ step: string; status: string; detail: string }>;
+    };
     expect(payload.ok).toBe(false);
     expect(payload.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -72,7 +44,7 @@ describe('update command', () => {
         status: 'error',
       }),
     ]));
-    expect(payload.steps.find((step: { step: string }) => step.step === 'plugin-install')?.detail)
+    expect(payload.steps.find((step) => step.step === 'plugin-install')?.detail)
       .toContain('claude-code');
     expect(exits).toEqual([]);
   });

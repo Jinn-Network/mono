@@ -1,0 +1,302 @@
+"""
+Jinn-specific subgraph schema.
+
+Synthesizes a queryable `Execution` entity by stitching together:
+- `IdentityRegistry.MetadataSet` — per-execution content commitments published as
+  `setMetadata(agentId, "<kind>:<cid>", payload)` on the operator's NFT.
+- `ValidationRegistry.ValidationRequest` / `.ValidationResponse` — per-execution
+  challenges keyed by `(validator, agentId, requestHash)` where
+  `requestHash = manifest.evidenceHash`.
+- `ReputationRegistry.NewFeedback` / `.FeedbackRevoked` / `.ResponseAppended` —
+  feedback on the operator NFT, body naming the specific manifest CID.
+- `JinnRouter` request creation + delivery — to bind on-chain `requestId` to the
+  off-chain manifest hash and surface delivery timing.
+
+Operator-rooted ERC-8004 entity model. See decision record
+`docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md`.
+"""
+
+# ── Operator (one agentId per operator Safe) ───────────────────────────────────
+
+type Operator @entity(immutable: false) {
+  "agentId as decimal string"
+  id: ID!
+
+  "ERC-721 token id from IdentityRegistry"
+  agentId: BigInt!
+
+  "Current owner of the agent NFT (the agent EOA)"
+  owner: Bytes!
+
+  "agentURI set at register / via setAgentURI"
+  agentURI: String
+
+  "Latest verified Safe wallet (from `agentWallet` reserved metadata)"
+  agentWallet: Bytes
+
+  registeredAt: BigInt!
+  registeredBlock: BigInt!
+  registeredTx: Bytes!
+
+  lastUpdatedAt: BigInt!
+
+  executions: [Execution!]! @derivedFrom(field: "operator")
+  metadataEntries: [MetadataEntry!]! @derivedFrom(field: "operator")
+  validationsAsAgent: [Validation!]! @derivedFrom(field: "agent")
+  feedbackReceived: [Feedback!]! @derivedFrom(field: "agent")
+  uriUpdates: [URIUpdate!]! @derivedFrom(field: "operator")
+  routerJobs: [RouterJob!]! @derivedFrom(field: "operator")
+}
+
+# ── Execution (synthesized from MetadataSet + JinnRouter + Validation + Feedback) ──
+
+"""
+Tier of the execution's commitment payload.
+0 = self-signed, 1 = committed, 2 = consensus, 3 = attested, 4 = proved.
+See `docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md`.
+"""
+enum ExecutionTier {
+  SELF_SIGNED
+  COMMITTED
+  CONSENSUS
+  ATTESTED
+  PROVED
+  UNKNOWN
+}
+
+enum ExecutionKind {
+  ENVELOPE
+  EVALUATION
+  OTHER
+}
+
+type Execution @entity(immutable: false) {
+  """
+  Composite id: `<agentId>-<manifestHash hex>`. Stable across re-publishes
+  (the same metadata key is overwritten by `setMetadata`).
+  """
+  id: ID!
+
+  operator: Operator!
+  kind: ExecutionKind!
+
+  "Raw metadata key, e.g. `envelope:bafy…` or `evaluation:bafy…`"
+  metadataKey: String!
+
+  "CID parsed from the metadata key suffix (after `<kind>:`)"
+  manifestCid: String!
+
+  """
+  keccak256 of the canonical manifest bytes. Decoded from the `MetadataSet`
+  payload. Equals JinnRouter `evidenceHash` when present.
+  """
+  manifestHash: Bytes
+
+  "Decoded tier from payload (when payload conforms to the v1 schema)"
+  tier: ExecutionTier!
+
+  "uint8 raw tier value (0..4) or null if undecoded"
+  tierRaw: Int
+
+  "Raw multibase-decoded IPFS CID bytes of TEE attestation quote (empty for tier < attested). See payload schema spec §4 — binary form, not text."
+  attestationQuoteCid: Bytes
+
+  "Expected enclave measurement (zero for tier < attested)"
+  sourceMeasurement: Bytes
+
+  "Payload schema version (always 1 for now, null if not decoded)"
+  payloadVersion: Int
+
+  "True iff payload bytes parsed cleanly into the v1 envelope/evaluation tuple"
+  payloadDecoded: Boolean!
+
+  "Raw bytes payload from MetadataSet (for forward-compat / debugging)"
+  payloadBytes: Bytes!
+
+  "Block + tx of the most recent setMetadata for this row"
+  publishedAt: BigInt!
+  publishedBlock: BigInt!
+  publishedTx: Bytes!
+
+  "How many times this exact (agentId, metadataKey) has been (re)published"
+  publishCount: Int!
+
+  """
+  JinnRouter request id this execution was filed in response to (if any).
+
+  NOT YET POPULATED: Execution.routerJob and Execution.deliveredAt are null
+  for all executions until JinnRouter emits an event that includes evidenceHash,
+  or until ERC-8004 metadata payload v2 includes requestId so the subgraph can
+  build the join deterministically. The previous join (manifestHash vs requestId)
+  compared values from different domains and has been removed. See subgraph
+  handler identity.ts for full explanation.
+  """
+  jinnRouterRequestId: Bytes
+  routerJob: RouterJob
+
+  "Block timestamp of the on-chain delivery claim, if matched. See jinnRouterRequestId note — currently always null."
+  deliveredAt: BigInt
+
+  validations: [Validation!]! @derivedFrom(field: "execution")
+  feedback: [Feedback!]! @derivedFrom(field: "execution")
+}
+
+"""
+Generic catch-all for `MetadataSet` rows that do not match a recognised
+prefix (`envelope:`, `evaluation:`, etc.). Lets us see new keys without
+shipping a new subgraph.
+"""
+type MetadataEntry @entity(immutable: false) {
+  "Composite id: `<agentId>-<keccak256(metadataKey hex)>`"
+  id: ID!
+
+  operator: Operator!
+  metadataKey: String!
+  metadataValue: Bytes!
+
+  updatedAt: BigInt!
+  updatedBlock: BigInt!
+  updatedTx: Bytes!
+  updateCount: Int!
+}
+
+# ── Validation (per-execution challenges) ─────────────────────────────────────
+
+enum ValidationStatusKind {
+  REQUESTED
+  RESPONDED
+}
+
+type Validation @entity(immutable: false) {
+  "requestHash as 0x-prefixed hex"
+  id: ID!
+
+  "Operator agentId that the dispute is filed against"
+  agent: Operator!
+
+  validator: Bytes!
+  requestHash: Bytes!
+  requestURI: String
+
+  "If we matched it to a known Execution by requestHash == manifestHash"
+  execution: Execution
+
+  status: ValidationStatusKind!
+
+  "0..100 (set on response)"
+  response: Int
+  responseURI: String
+  responseHash: Bytes
+  tag: String
+
+  requestedAt: BigInt!
+  requestedBlock: BigInt!
+  requestedTx: Bytes!
+
+  respondedAt: BigInt
+  respondedBlock: BigInt
+  respondedTx: Bytes
+}
+
+# ── Feedback (operator-level reputation, body names manifest) ─────────────────
+
+type Feedback @entity(immutable: false) {
+  "Composite id: `<agentId>-<clientAddress hex>-<feedbackIndex>`"
+  id: ID!
+
+  agent: Operator!
+  client: Bytes!
+
+  "1-indexed feedbackIndex from the registry (per-(agent, client) sequence)"
+  feedbackIndex: BigInt!
+
+  value: BigInt!
+  valueDecimals: Int!
+
+  tag1: String
+  tag2: String
+  endpoint: String
+  feedbackURI: String
+  feedbackHash: Bytes
+
+  "Manifest CID parsed from the feedback body (URI / tag2 heuristic)"
+  manifestRef: String
+
+  "Joined Execution if `manifestRef` matches an indexed envelope/evaluation"
+  execution: Execution
+
+  revoked: Boolean!
+  revokedAt: BigInt
+  revokedTx: Bytes
+
+  createdAt: BigInt!
+  createdBlock: BigInt!
+  createdTx: Bytes!
+
+  responses: [FeedbackResponse!]! @derivedFrom(field: "feedback")
+}
+
+type FeedbackResponse @entity(immutable: true) {
+  "Composite id: `<feedback.id>-<responder hex>-<txHash>-<logIndex>`"
+  id: ID!
+
+  feedback: Feedback!
+  responder: Bytes!
+  responseURI: String!
+  responseHash: Bytes!
+
+  appendedAt: BigInt!
+  appendedBlock: BigInt!
+  appendedTx: Bytes!
+}
+
+# ── URI updates (audit log on the operator's identity) ────────────────────────
+
+type URIUpdate @entity(immutable: true) {
+  "Composite id: `<txHash>-<logIndex>`"
+  id: ID!
+
+  operator: Operator!
+  newURI: String!
+  updatedBy: Bytes!
+  updatedAt: BigInt!
+  updatedBlock: BigInt!
+  updatedTx: Bytes!
+}
+
+# ── JinnRouter (request creation + delivery) ──────────────────────────────────
+
+enum RouterJobKind {
+  RESTORATION
+  EVALUATION
+}
+
+type RouterJob @entity(immutable: false) {
+  "requestId as 0x-prefixed hex"
+  id: ID!
+
+  kind: RouterJobKind!
+  creator: Bytes!
+
+  "For evaluation jobs, the parent restoration requestId"
+  restorationRequestId: Bytes
+
+  parentJob: RouterJob
+
+  createdAt: BigInt!
+  createdBlock: BigInt!
+  createdTx: Bytes!
+
+  "uint8 jobType from DeliveryClaimed (0=unknown,1=restoration,2=evaluation)"
+  deliveryJobType: Int
+
+  "Address that called claimDelivery"
+  claimer: Bytes
+
+  claimedAt: BigInt
+  claimedBlock: BigInt
+  claimedTx: Bytes
+
+  "If we matched the request to an operator by creator address (best-effort)"
+  operator: Operator
+}

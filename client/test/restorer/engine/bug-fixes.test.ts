@@ -1,7 +1,7 @@
 /**
  * Regression tests for restorer-engine + claude-mcp-hyperliquid bug fixes:
  *   - jinn-mono-sae: recovery chain re-dispatches after takePreSnapshot
- *   - jinn-mono-egi: full DesiredState threading through persistence
+ *   - jinn-mono-egi: full RestorationJob threading through persistence
  *   - jinn-mono-eci: periodic engine tick
  *   - jinn-mono-u59: takePreSnapshot resolves impl.name via registry for implStateDir
  *   - jinn-mono-cmb: session-orchestrator ignores undefined config overrides
@@ -18,7 +18,7 @@ import {
 } from '../../../src/restorer/engine/engine.js';
 import { IntentPersistence } from '../../../src/restorer/engine/persistence.js';
 import { IntentState, MissingEvidenceHashError } from '../../../src/restorer/engine/state.js';
-import type { DesiredState } from '../../../src/types/desired-state.js';
+import type { RestorationJob } from '../../../src/types/desired-state.js';
 import type { RestorerImpl, RestorationContext, RestorationOutput } from '../../../src/restorer/types.js';
 import {
   resolveOrchestratorConfig,
@@ -66,7 +66,7 @@ function makeRecordingImpl(opts: { name?: string; specKind: string; output?: Par
   return { impl, received };
 }
 
-function fullDesiredState(id: string, windowStartTs: number, windowEndTs: number): DesiredState {
+function fullRestorationJob(id: string, windowStartTs: number, windowEndTs: number): RestorationJob {
   return {
     id,
     description: 'Recover BTC-PERP exposure to 50% of equity within window',
@@ -98,7 +98,7 @@ describe('jinn-mono-sae: recovery re-dispatches runImpl after takePreSnapshot', 
     const engine = new RestorationEngine(opts);
     const persistence = new IntentPersistence(store.db);
 
-    const ds = fullDesiredState('rec-1', now - 1000, now + 86_400_000);
+    const ds = fullRestorationJob('rec-1', now - 1000, now + 86_400_000);
     persistence.insertDiscovered({
       requestId: 'rec-1',
       intentCid: 'cid-rec-1',
@@ -107,7 +107,7 @@ describe('jinn-mono-sae: recovery re-dispatches runImpl after takePreSnapshot', 
       specKind: 'portfolio.v0',
       windowStartTs: ds.window!.startTs,
       windowEndTs: ds.window!.endTs,
-      desiredState: ds,
+      restorationJob: ds,
     });
     persistence.transition('rec-1', IntentState.CLAIMED);
 
@@ -122,14 +122,14 @@ describe('jinn-mono-sae: recovery re-dispatches runImpl after takePreSnapshot', 
 
 // ── Bug 2: jinn-mono-egi ──────────────────────────────────────────────────────
 
-describe('jinn-mono-egi: full DesiredState round-trip', () => {
+describe('jinn-mono-egi: full RestorationJob round-trip', () => {
   let store: Store;
   beforeEach(() => { store = new Store(':memory:'); });
   afterEach(() => { store.close(); });
 
-  it('persists and re-emits a complete portfolio.v0 DesiredState into ctx.intent', async () => {
+  it('persists and re-emits a complete portfolio.v0 RestorationJob into ctx.intent', async () => {
     const now = Date.now();
-    const ds = fullDesiredState('egi-1', now - 1000, now + 86_400_000);
+    const ds = fullRestorationJob('egi-1', now - 1000, now + 86_400_000);
     const { impl, received } = makeRecordingImpl({ specKind: 'portfolio.v0' });
     const opts: RestorationEngineOptions = {
       ...makeOpts(store),
@@ -146,7 +146,7 @@ describe('jinn-mono-egi: full DesiredState round-trip', () => {
       specKind: 'portfolio.v0',
       windowStartTs: ds.window!.startTs,
       windowEndTs: ds.window!.endTs,
-      desiredState: ds,
+      restorationJob: ds,
     });
 
     // Drive to RUNNING via process() (DISCOVERED → CLAIMED requires claimDeps;
@@ -175,7 +175,7 @@ describe('jinn-mono-egi: full DesiredState round-trip', () => {
     );
 
     // Engine with no impl registered — recovery should still process the row
-    // without throwing on the missing payload. The legacy stub DesiredState is
+    // without throwing on the missing payload. The legacy stub RestorationJob is
     // synthesised from intent.specKind/window for both takePreSnapshot and
     // runImpl. Recovery advances CLAIMED → WAITING → PRE_SNAPSHOT → RUNNING.
     const engine = new RestorationEngine(makeOpts(store));
@@ -183,12 +183,12 @@ describe('jinn-mono-egi: full DesiredState round-trip', () => {
     const after = persistence.getByRequestId('legacy-1')!;
     // The intent advanced past CLAIMED (recovery did not throw on NULL payload).
     // Recovery walks CLAIMED → WAITING → PRE_SNAPSHOT → RUNNING via takePreSnapshot
-    // (using the synthesised stub DesiredState), then runImpl throws
+    // (using the synthesised stub RestorationJob), then runImpl throws
     // NotImplementedError. That throw propagates out of _recoverOne without
     // marking FAILED because current.state (RUNNING) no longer matches the
     // original intent.state (CLAIMED) — so the row is left in RUNNING.
     expect(after.state).toBe(IntentState.RUNNING);
-    expect(after.desiredState).toBeNull();
+    expect(after.restorationJob).toBeNull();
   });
 });
 
@@ -201,7 +201,7 @@ describe('jinn-mono-u59: takePreSnapshot uses impl.name for implStateDir', () =>
 
   it('resolves implStateDir to <root>/<impl.name>, not <root>/<specKind>', async () => {
     const now = Date.now();
-    const ds = fullDesiredState('u59-1', now - 1000, now + 86_400_000);
+    const ds = fullRestorationJob('u59-1', now - 1000, now + 86_400_000);
     const { impl, received } = makeRecordingImpl({ name: 'claude-mcp-hyperliquid', specKind: 'portfolio.v0' });
     const opts: RestorationEngineOptions = {
       ...makeOpts(store),
@@ -218,17 +218,19 @@ describe('jinn-mono-u59: takePreSnapshot uses impl.name for implStateDir', () =>
       specKind: 'portfolio.v0',
       windowStartTs: ds.window!.startTs,
       windowEndTs: ds.window!.endTs,
-      desiredState: ds,
+      restorationJob: ds,
     });
     persistence.transition('u59-1', IntentState.CLAIMED);
     persistence.transition('u59-1', IntentState.WAITING);
     await engine.process('u59-1');
 
     expect(received.ctx).not.toBeNull();
-    // Must end in 'claude-mcp-hyperliquid', not 'portfolio.v0' — operators
-    // pre-place credentials at <root>/<impl.name>, matching runImpl's fallback.
-    expect(received.ctx!.implStateDir.endsWith('/claude-mcp-hyperliquid')).toBe(true);
-    expect(received.ctx!.implStateDir.endsWith('/portfolio.v0')).toBe(false);
+    // Path is <root>/<impl.name>/<kind-sanitized>. impl.name segment must
+    // appear (operators pre-place credentials at <root>/<impl.name>),
+    // and the per-kind partition (. → _) must be the leaf so cross-kind
+    // state cannot contaminate.
+    expect(received.ctx!.implStateDir).toContain('/claude-mcp-hyperliquid/');
+    expect(received.ctx!.implStateDir.endsWith('/portfolio_v0')).toBe(true);
   });
 });
 
@@ -287,7 +289,7 @@ describe('finding-3: deliver() throws MissingEvidenceHashError when evidenceHash
       onchainCreationBlock: 1,
       windowStartTs: now - 1000,
       windowEndTs: now + 86_400_000,
-      desiredState: { id: 'mis-1', description: 'test' },
+      restorationJob: { id: 'mis-1', description: 'test' },
     });
 
     // Advance to DELIVERING with no evidenceHash (null)
@@ -325,7 +327,7 @@ describe('finding-3: deliver() throws MissingEvidenceHashError when evidenceHash
       onchainCreationBlock: 1,
       windowStartTs: now - 1000,
       windowEndTs: now + 86_400_000,
-      desiredState: { id: 'v1-1', description: 'test' },
+      restorationJob: { id: 'v1-1', description: 'test' },
     });
     persistence.transition('v1-1', IntentState.CLAIMED);
     persistence.transition('v1-1', IntentState.WAITING);
@@ -377,7 +379,7 @@ describe('jinn-mono-eci: tick advances WAITING intents past windowStartTs', () =
       onchainCreationBlock: 9,
       windowStartTs: baseNow + 1_000,        // 1s in the future
       windowEndTs: baseNow + 86_400_000,
-      desiredState: { id: 'eci-1', description: 'test' },
+      restorationJob: { id: 'eci-1', description: 'test' },
     });
     persistence.transition('eci-1', IntentState.CLAIMED);
     persistence.transition('eci-1', IntentState.WAITING);

@@ -4,13 +4,14 @@
  * Pure type definitions; no runtime side effects.
  */
 
-import type { DesiredState } from '../types/desired-state.js';
+import type { RestorationJob } from '../types/desired-state.js';
 import type { OutputArtifact, RationaleEntry, Snapshot } from '../types/portfolio.js';
+import type { TrajectoryCollector } from '../trajectory/index.js';
 
 // ── RestorationContext ────────────────────────────────────────────────────────
 
 export interface RestorationContext {
-  intent: DesiredState;
+  intent: RestorationJob;
   /**
    * IPFS CID of this job's desired state (from Marketplace / observe).
    * Restorers' submission manifests should reference the same CID; evaluators
@@ -26,6 +27,13 @@ export interface RestorationContext {
   /** Fires at window.endTs. */
   abort: AbortSignal;
   msUntilEndTs: () => number;
+  /**
+   * In-run trajectory collector. Impls call ctx.trajectory.addSpan(...)
+   * (or use the traced wrappers) to emit spans. The engine emits the
+   * collected trajectory to IPFS before envelope assembly and populates
+   * envelope.trajectory with the resulting { cid, sha256 }.
+   */
+  trajectory: TrajectoryCollector;
 }
 
 // ── RestorationOutput ─────────────────────────────────────────────────────────
@@ -41,6 +49,26 @@ export interface RestorationOutput {
   /** Shape is per spec.kind convention. */
   gating: Record<string, unknown>;
   informational?: Record<string, unknown>;
+
+  /**
+   * Full restoration payload for impls whose kind has a non-portfolio payload
+   * schema (e.g. prediction.v0, prediction.apy.v0).
+   *
+   * When set, engine.pack() uses this directly as the envelope payload
+   * (validated against the kind's restoration schema) instead of building the
+   * portfolio-shaped { preSnapshot, postSnapshot, fills, gating } wrapper.
+   * Portfolio impls MUST leave this undefined (engine falls back to legacy shape).
+   */
+  restorationPayload?: Record<string, unknown>;
+
+  /**
+   * Full verdict payload for evaluator impls (intentType === 'evaluation').
+   *
+   * When set, engine.pack() uses role='verdict' and passes this as the
+   * envelope payload directly (validated against the kind's verdict schema).
+   * Restoration impls MUST leave this undefined.
+   */
+  verdictPayload?: Record<string, unknown>;
 
   artifacts?: OutputArtifact[];
   rationale?: RationaleEntry[];
@@ -152,7 +180,7 @@ export interface RestorerImpl {
   /**
    * Return true if this impl should handle the given (kind, type) pair.
    *
-   * `type` reflects DesiredState.type:
+   * `type` reflects RestorationJob.type:
    *   - 'restoration' (or undefined — legacy default): the impl runs a restoration attempt
    *   - 'evaluation': the impl runs as an evaluator producing a verdict
    *
@@ -160,7 +188,7 @@ export interface RestorerImpl {
    * An evaluator impl for kind=X should return true for type === 'evaluation'.
    */
   supports(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): boolean;
-  canAttempt?(intent: DesiredState): Promise<{ ok: true } | { ok: false; reason: string }>;
+  canAttempt?(intent: RestorationJob): Promise<{ ok: true } | { ok: false; reason: string }>;
   run(ctx: RestorationContext): Promise<RestorationOutput>;
 
   /**

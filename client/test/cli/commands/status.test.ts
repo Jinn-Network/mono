@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
+import { describe, expect, it } from 'vitest';
 import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { createStatusCommand } from '@/cli/commands/status.js';
+import { assembleStatusRollupV1 } from '@/api/status-rollup-build.js';
+import { runCommand } from '@test/cli.js';
 
 const mockRaw: GatheredStatusRaw = {
   shutdownState: 'running',
@@ -46,23 +48,26 @@ const mockRaw: GatheredStatusRaw = {
   earningDir: '/tmp/earning',
 };
 
-vi.mock('../../../src/cli/introspection-context.js', () => ({
-  gatherIntrospectionRaw: vi.fn(async () => mockRaw),
-}));
+const fakeDeps = {
+  gatherIntrospectionRaw: async () => mockRaw as GatheredStatusRaw,
+  assembleStatusRollupV1,
+};
 
 describe('status command', () => {
   it('emits the §4.1 roll-up shape with daemon/rpc/fleet/earnings/exit', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/status.js');
-    const writes: string[] = [];
-    const ctx: CommandContext = {
-      argv: [],
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: () => {},
-      env: {},
+    const cmd = createStatusCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd);
+    expect(exits).toEqual([]);
+    expect(envelopes).toHaveLength(1);
+    const parsed = envelopes[0] as {
+      schemaVersion: number;
+      daemon: { state: string; startedAt: string; network: string };
+      rpc: { ok: boolean; chainId: number };
+      fleet: { size: number; complete: number; needsAttention: number };
+      earnings: { pendingTotal: string; asset: string };
+      exit: { blocking: boolean; hint: string };
+      paths: { earningDir: string; dbPath: string };
     };
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.daemon.state).toBe('running');
     expect(parsed.daemon.startedAt).toBe('2026-04-14T12:00:00.000Z');
@@ -83,33 +88,17 @@ describe('status command', () => {
   });
 
   it('rejects unknown flags with invalid_invocation', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/status.js');
-    const writes: string[] = [];
-    const exits: number[] = [];
-    const ctx: CommandContext = {
-      argv: ['--configt', 'bad.json'],
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: (code: number) => { exits.push(code); },
-      env: {},
-    };
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createStatusCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd, { argv: ['--configt', 'bad.json'] });
+    const parsed = envelopes[0] as { code: string };
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
   });
 
-  it('renders human output through the CLI dispatcher', async () => {
-    const { runCli } = await import('../../../src/cli/index.js');
-    const writes: string[] = [];
-    const exits: number[] = [];
-    await runCli(['status', '--human'], {
-      stdoutIsTty: true,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: (code: number) => { exits.push(code); },
-    });
-
-    const out = writes.join('');
+  it('renders human output (--human flag emits plain text, not JSON)', async () => {
+    const cmd = createStatusCommand(fakeDeps);
+    const { raw, exits } = await runCommand(cmd, { argv: ['--human'], tty: true });
+    const out = raw.join('');
     expect(out).toContain('daemon=running');
     expect(out).not.toMatch(/^\{/);
     expect(exits).toEqual([]);

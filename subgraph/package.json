@@ -1,0 +1,23 @@
+{
+  "name": "@jinn-network/subgraph",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Jinn-specific subgraph: ERC-8004 Identity/Validation/Reputation + JinnRouter, synthesises Operator + Execution entities. See docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md.",
+  "packageManager": "yarn@4.13.0",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build",
+    "build:base-sepolia": "graph build --network base-sepolia --network-file networks.json",
+    "build:base": "graph build --network base --network-file networks.json",
+    "build:sepolia": "graph build --network sepolia --network-file networks.json",
+    "build:mainnet": "graph build --network mainnet --network-file networks.json",
+    "test": "graph test",
+    "deploy:base-sepolia": "graph deploy --node https://api.studio.thegraph.com/deploy/ --ipfs https://api.thegraph.com/ipfs/ --network base-sepolia --network-file networks.json",
+    "deploy:base": "graph deploy --node https://api.studio.thegraph.com/deploy/ --ipfs https://api.thegraph.com/ipfs/ --network base --network-file networks.json"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "0.98.1",
+    "@graphprotocol/graph-ts": "0.38.2"
+  }
+}

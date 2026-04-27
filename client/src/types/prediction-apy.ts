@@ -1,28 +1,16 @@
+/**
+ * prediction.apy.v0 — typed intent spec.
+ *
+ * Legacy manifest schemas (prediction.apy.v0.submission.v1,
+ * prediction.apy.v0.verdict.v1) have been removed per scope §3.4.
+ * Use jinn.execution.v1 SignedEnvelope with
+ * PredictionApyV0RestorationPayloadSchema / PredictionApyV0VerdictPayloadSchema
+ * instead.
+ */
 import { z } from 'zod';
 import { WindowSchema } from './desired-state.js';
 
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, 'must be a 0x-prefixed hex string');
-
-const SignatureSchema = z.object({
-  algo: z.literal('secp256k1'),
-  signer: HexStringSchema,
-  hash: HexStringSchema,
-  sig: HexStringSchema,
-});
-
-const IntentProvenanceSchema = z.object({
-  cid: z.string().min(1),
-  onchainCreationTx: HexStringSchema,
-  onchainCreationBlock: z.number().int(),
-  requestId: HexStringSchema,
-});
-
-const ParticipantSchema = z.object({
-  safeAddress: HexStringSchema,
-  agentEoa: HexStringSchema,
-});
-
-const IntegerStringSchema = z.string().regex(/^-?\d+$/, 'must be an integer string');
 
 export const PredictionApyV0SpecSchema = z.object({
   kind: z.literal('prediction.apy.v0'),
@@ -98,59 +86,3 @@ export const PredictionApyV0IntentSchema = z
   );
 
 export type PredictionApyV0Intent = z.infer<typeof PredictionApyV0IntentSchema>;
-
-export const PredictionApySubmissionManifestSchema = z.object({
-  schemaVersion: z.literal('prediction.apy.v0.submission.v1'),
-  generatedAt: z.number().int(),
-  intent: IntentProvenanceSchema,
-  restorer: ParticipantSchema,
-  window: WindowSchema,
-  prediction: z.object({
-    predictedBps: IntegerStringSchema,
-    submittedAt: z.number().int(),
-    modelId: z.string().min(1),
-  }),
-  signature: SignatureSchema,
-});
-
-export type PredictionApySubmissionManifest = z.infer<typeof PredictionApySubmissionManifestSchema>;
-
-export const PredictionApyVerdictManifestSchema = z.object({
-  schemaVersion: z.literal('prediction.apy.v0.verdict.v1'),
-  generatedAt: z.number().int(),
-  intent: IntentProvenanceSchema,
-  evaluator: ParticipantSchema,
-  window: WindowSchema,
-  verdict: z.enum(['PASS', 'FAIL', 'REJECTED', 'INDETERMINATE']),
-  score: z.string(),
-  scoreBasis: z.literal('absolute-error-linear.v1'),
-  scoreVersion: z.string(),
-  oracleReading: z.object({
-    pool: HexStringSchema,
-    reserve: HexStringSchema,
-    sampleCount: z.number().int().positive(),
-    twaWindowSeconds: z.number().int().positive(),
-    resolveTs: z.number().int(),
-  }),
-  claimed: z.object({
-    predictedBps: IntegerStringSchema,
-    submittedAt: z.number().int(),
-    modelId: z.string(),
-    /** Present when the submission was registered on IPFS; omitted for inline/dev. */
-    submissionManifestCid: z.string().min(1).optional(),
-  }),
-  groundTruth: z.object({
-    twApyBps: IntegerStringSchema,
-    errorBps: z.string().regex(/^\d+$/),
-  }),
-  checks: z.array(
-    z.object({
-      name: z.string(),
-      status: z.enum(['PASS', 'FAIL', 'SKIP', 'INDETERMINATE']),
-      detail: z.union([z.string(), z.record(z.unknown())]).optional(),
-    }),
-  ),
-  signature: SignatureSchema,
-});
-
-export type PredictionApyVerdictManifest = z.infer<typeof PredictionApyVerdictManifestSchema>;
