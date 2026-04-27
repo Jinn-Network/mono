@@ -19,9 +19,9 @@ import { mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PortfolioV0Evaluator } from '../../../../src/restorer/impls/portfolio-v0-evaluator/index.js';
-import type { RestorationContext } from '../../../../src/restorer/types.js';
 import type { DesiredState } from '../../../../src/types/desired-state.js';
 import type { HlFill, HlGridPoint } from '../../../../src/venues/hyperliquid/types.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 
 // ── Shared test data ──────────────────────────────────────────────────────────
 
@@ -181,25 +181,21 @@ interface CtxOverrides {
 }
 
 /**
- * Build a RestorationContext for an evaluation intent using the unified-payload model.
+ * Build the evaluation DesiredState for the unified-payload model.
  *
  * - spec.kind = 'portfolio.v0' (same as restoration)
  * - intent.type = 'evaluation'
  * - manifest is inlined at context.restorationResult as a JSON string
  * - HL test deps are passed via evaluator constructor config (_testDeps)
  */
-function makeCtx(
-  workingDir: string,
-  evaluator: PortfolioV0Evaluator,
-  overrides: CtxOverrides = {},
-): RestorationContext {
+function makeEvalIntent(overrides: CtxOverrides = {}): DesiredState {
   const {
     intentSpecOverrides = {},
     eligibilityOverrides,
     manifest = MOCK_MANIFEST,
   } = overrides;
 
-  const ds: DesiredState = {
+  return {
     id: 'eval-intent-1',
     description: 'Evaluate portfolio.v0 restoration result',
     type: 'evaluation',
@@ -228,15 +224,19 @@ function makeCtx(
       restorationResult: JSON.stringify(manifest),
     },
   };
+}
 
-  return {
-    intent: ds,
-    implStateDir: workingDir,
+function makeCtx(
+  workingDir: string,
+  _evaluator: PortfolioV0Evaluator,
+  overrides: CtxOverrides = {},
+) {
+  // Pass the pre-allocated workingDir so the test's dirs[] cleanup array works correctly.
+  return makeRestorationCtx({
+    intent: makeEvalIntent(overrides),
     workingDir,
-    log: () => {},
-    abort: new AbortController().signal,
     msUntilEndTs: () => 60_000,
-  };
+  });
 }
 
 /**

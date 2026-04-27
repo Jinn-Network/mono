@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
 import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { createFleetScaleCommand, type FleetScaleDeps } from '../../../src/cli/commands/fleet-scale.js';
+import { findServiceByDisplayIndex } from '../../../src/earning/fleet-display-index.js';
 
 const mockRawTwo: GatheredStatusRaw = {
   shutdownState: null,
@@ -43,13 +45,23 @@ const mockRawTwo: GatheredStatusRaw = {
   masterDailyEstimateWei: '0',
 };
 
-vi.mock('../../../src/cli/introspection-context.js', () => ({
-  gatherIntrospectionRaw: vi.fn(async () => mockRawTwo),
-}));
+function makeFakeDeps(raw: GatheredStatusRaw = mockRawTwo): FleetScaleDeps {
+  return {
+    loadConfig: () => ({} as any),
+    getConfigPathFromArgs: () => undefined,
+    gatherIntrospectionRaw: async () => raw,
+    resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+    signerContextFactory: async () => ({ ok: false, envelope: { code: 'fatal', message: 'not used in dry-run tests' } } as any),
+    bootstrapperFactory: () => ({ bootstrap: async () => ({ ok: true, message: 'ok', fleet_state: { master_address: '0xM', services: [] } }) } as any),
+    retireFleetServiceOnChain: async () => ({ ok: true, message: 'retired', txHash: '0xabc' } as any),
+    findServiceByDisplayIndex,
+    isRecoverableTransactionError: () => false,
+  };
+}
 
 describe('fleet retire subverb', () => {
   it('retire 1 --dry-run emits a retire plan for display index 1 (HD slot 2)', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
+    const fleet = createFleetScaleCommand(makeFakeDeps());
     const writes: string[] = [];
     const ctx: CommandContext = {
       argv: ['retire', '1', '--dry-run'],
@@ -65,7 +77,7 @@ describe('fleet retire subverb', () => {
   });
 
   it('retire 0 --dry-run targets display index 0 (HD slot 1)', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
+    const fleet = createFleetScaleCommand(makeFakeDeps());
     const writes: string[] = [];
     const ctx: CommandContext = {
       argv: ['retire', '0', '--dry-run'],
@@ -80,7 +92,7 @@ describe('fleet retire subverb', () => {
   });
 
   it('retire 99 --dry-run on non-existent index is a no-op', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
+    const fleet = createFleetScaleCommand(makeFakeDeps());
     const writes: string[] = [];
     const ctx: CommandContext = {
       argv: ['retire', '99', '--dry-run'],
@@ -96,7 +108,7 @@ describe('fleet retire subverb', () => {
   });
 
   it('retire with no index emits invalid_invocation', async () => {
-    const { default: fleet } = await import('../../../src/cli/commands/fleet-scale.js');
+    const fleet = createFleetScaleCommand(makeFakeDeps());
     const writes: string[] = [];
     const exits: number[] = [];
     const ctx: CommandContext = {

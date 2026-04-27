@@ -66,6 +66,15 @@ export interface StolasClaimTickResult {
 }
 
 /**
+ * Injectable retry-function dependencies for {@link tickStolasDistributorClaims}.
+ * Defaults to the production implementations from `tx-retry.ts`.
+ */
+export interface StolasClaimRetryDeps {
+  sendTx: typeof viemSendTransactionWithRetry;
+  waitForReceipt: typeof waitForTransactionReceiptWithRetry;
+}
+
+/**
  * For each fleet service with pending staking rewards, submit distributor.claim([proxy],[id]).
  * Errors on individual services are logged and swallowed so the daemon loop stays healthy.
  */
@@ -81,8 +90,13 @@ export async function tickStolasDistributorClaims(
      * any permanent/receipt failure surfaces a normal Error. Daemon callers omit this.
      */
     strict?: boolean;
+    /** Injectable retry deps — defaults to production implementations. */
+    retryDeps?: StolasClaimRetryDeps;
   },
 ): Promise<StolasClaimTickResult> {
+  const { sendTx = viemSendTransactionWithRetry, waitForReceipt = waitForTransactionReceiptWithRetry } =
+    options.retryDeps ?? {};
+
   const result: StolasClaimTickResult = {
     attempted: 0,
     submitted: 0,
@@ -126,13 +140,13 @@ export async function tickStolasDistributorClaims(
         functionName: 'claim',
         args: [[getAddress(stakingProxy) as Address], [BigInt(serviceId)]],
       }) as Hex;
-      const txHash = await viemSendTransactionWithRetry(masterWallet, publicClient, {
+      const txHash = await sendTx(masterWallet, publicClient, {
         account: masterWallet.account!,
         to: getAddress(distributor) as Address,
         data,
         gas: 1_200_000n,
       });
-      const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash as Hex);
+      const receipt = await waitForReceipt(publicClient, txHash as Hex);
       if (receipt.status !== 'success') {
         result.failedPermanent += 1;
         console.error(

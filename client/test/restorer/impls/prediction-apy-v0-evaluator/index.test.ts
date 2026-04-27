@@ -1,13 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionApyV0Evaluator } from '../../../../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../../src/restorer/impls/evaluation-context.js';
 import type { DesiredState } from '../../../../src/types/desired-state.js';
-import type { RestorationContext } from '../../../../src/restorer/types.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 
 const PK = ('0x' + 'e'.repeat(64)) as `0x${string}`;
 const AGENT_PK = ('0x' + '1'.repeat(64)) as `0x${string}`;
@@ -76,18 +73,13 @@ function makeEvalIntent(
   } as unknown as DesiredState;
 }
 
-function makeCtx(intent: DesiredState, intentCid: string, testDeps: Record<string, unknown> = {}): RestorationContext {
-  const d = mkdtempSync(join(tmpdir(), 'apy-eval-'));
-  return {
+function makeCtx(intent: DesiredState, intentCid: string, testDeps: Record<string, unknown> = {}) {
+  return makeRestorationCtx({
     intent,
     intentCid,
-    implStateDir: d,
-    workingDir: d,
-    log: () => {},
-    abort: new AbortController().signal,
-    msUntilEndTs: () => 0,
-    _testDeps: testDeps,
-  } as unknown as RestorationContext;
+    prefix: 'apy-eval-',
+    extra: { _testDeps: testDeps },
+  }) as any;
 }
 
 describe('PredictionApyV0Evaluator', () => {

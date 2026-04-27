@@ -5,13 +5,13 @@
  *
  * @internal — do not import from `src/`.
  */
-import type { ExecutionAdapter } from '../src/adapters/adapter.js';
-import type { Runner } from '../src/runner/runner.js';
-import type { Store } from '../src/store/store.js';
-import type { RestorationRequest } from '../src/types/index.js';
-import { PermanentError, TransientError } from '../src/types/index.js';
-import { isRecoverableTransactionError } from '../src/tx-retry.js';
-import { emitEvent } from '../src/observability/emit-event.js';
+import type { ExecutionAdapter } from '../../src/adapters/adapter.js';
+import type { Runner } from '../../src/runner/runner.js';
+import type { Store } from '../../src/store/store.js';
+import type { RestorationRequest } from '../../src/types/index.js';
+import { PermanentError, TransientError } from '../../src/types/index.js';
+import { isRecoverableTransactionError } from '../../src/tx-retry.js';
+import { emitEvent } from '../../src/observability/emit-event.js';
 
 /**
  * @deprecated Production uses {@link RestorationEngine}; this class exists for

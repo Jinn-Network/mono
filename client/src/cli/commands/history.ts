@@ -1,11 +1,18 @@
 import { parseArgs } from 'node:util';
-import type { CommandContext, CommandModule } from '../command.js';
+import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
-import { gatherIntrospectionRaw } from '../introspection-context.js';
-import { assembleHistoryV1 } from '../../api/history-build.js';
+import {
+  gatherIntrospectionRaw as defaultGatherIntrospectionRaw,
+} from '../introspection-context.js';
+import {
+  assembleHistoryV1 as defaultAssembleHistoryV1,
+} from '../../api/history-build.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import type { HistoryV1Response } from '../../api/history-build.js';
-import { loadConfig, getConfigPathFromArgs } from '../../config.js';
+import {
+  loadConfig as defaultLoadConfig,
+  getConfigPathFromArgs as defaultGetConfigPathFromArgs,
+} from '../../config.js';
 import { Store } from '../../store/store.js';
 
 function humanHistory(payload: HistoryV1Response): string {
@@ -19,66 +26,25 @@ function humanHistory(payload: HistoryV1Response): string {
   return lines.join('\n');
 }
 
-async function run(ctx: CommandContext): Promise<void> {
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: ctx.argv,
-      options: {
-        limit: { type: 'string', default: '50' },
-        since: { type: 'string' },
-        cursor: { type: 'string' },
-        json: { type: 'boolean', default: false },
-        human: { type: 'boolean', default: false },
-        config: { type: 'string' },
-      },
-      allowPositionals: false,
-    });
-  } catch (err) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: err instanceof Error ? err.message : String(err),
-        exampleCli: 'jinn history --limit 50',
-        details: { field: 'flags' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-  const n = parseInt(parsed.values.limit as string, 10);
-  const effLimit = Math.min(Math.max(Number.isFinite(n) ? n : 50, 1), 500);
-  const fromVerbFlags = getConfigPathFromArgs(ctx.argv);
-  const fromProcess =
-    typeof process !== 'undefined' ? getConfigPathFromArgs(process.argv.slice(2)) : undefined;
-  const config = loadConfig(fromVerbFlags ?? fromProcess);
-  const store = new Store(config.dbPath);
-  const since = parsed.values.since as string | undefined;
-  const cursor = parsed.values.cursor as string | undefined;
-  const fromStore = store.getRecentActivityEvents(effLimit, { since, cursor });
-  const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-  const payload = assembleHistoryV1(
-    raw,
-    {
-      limit: effLimit,
-      since,
-      cursor,
-    },
-    fromStore,
-  );
-  emitResult(payload, (v) => humanHistory(v as HistoryV1Response), {
-    json: Boolean(parsed.values.json),
-    human: Boolean(parsed.values.human),
-    writer: ctx.writer,
-    stdoutIsTty: ctx.stdoutIsTty,
-    noColor: Boolean(ctx.env['NO_COLOR']),
-  });
+export interface HistoryDeps extends BaseCommandDeps {
+  storeFactory: (path: string) => Store;
+  gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
+  assembleHistoryV1: typeof defaultAssembleHistoryV1;
 }
 
-const command: CommandModule = {
-  name: 'history',
-  summary: 'Recent protocol activity (intents, claims, deliveries, evaluations, rewards)',
-  helpText: `Usage: jinn history [--since <ISO-8601>] [--limit <N>] [--human]
+const PRODUCTION_DEPS: HistoryDeps = {
+  loadConfig: defaultLoadConfig,
+  getConfigPathFromArgs: defaultGetConfigPathFromArgs,
+  storeFactory: (path) => new Store(path),
+  gatherIntrospectionRaw: defaultGatherIntrospectionRaw,
+  assembleHistoryV1: defaultAssembleHistoryV1,
+};
+
+export function createHistoryCommand(deps: HistoryDeps = PRODUCTION_DEPS): CommandModule {
+  return {
+    name: 'history',
+    summary: 'Recent protocol activity (intents, claims, deliveries, evaluations, rewards)',
+    helpText: `Usage: jinn history [--since <ISO-8601>] [--limit <N>] [--human]
 
 Returns recent protocol events from the local activity log. Each
 event has a stable \`kind\` enum (intent_posted, request_claimed,
@@ -88,7 +54,63 @@ Examples:
   jinn history --limit 20
   jinn history --human
 `,
-  run,
-};
+    async run(ctx: CommandContext): Promise<void> {
+      let parsed;
+      try {
+        parsed = parseArgs({
+          args: ctx.argv,
+          options: {
+            limit: { type: 'string', default: '50' },
+            since: { type: 'string' },
+            cursor: { type: 'string' },
+            json: { type: 'boolean', default: false },
+            human: { type: 'boolean', default: false },
+            config: { type: 'string' },
+          },
+          allowPositionals: false,
+        });
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            exampleCli: 'jinn history --limit 50',
+            details: { field: 'flags' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      const n = parseInt(parsed.values.limit as string, 10);
+      const effLimit = Math.min(Math.max(Number.isFinite(n) ? n : 50, 1), 500);
+      const fromVerbFlags = deps.getConfigPathFromArgs(ctx.argv);
+      const fromProcess =
+        typeof process !== 'undefined' ? deps.getConfigPathFromArgs(process.argv.slice(2)) : undefined;
+      const config = deps.loadConfig(fromVerbFlags ?? fromProcess);
+      const store = deps.storeFactory(config.dbPath);
+      const since = parsed.values.since as string | undefined;
+      const cursor = parsed.values.cursor as string | undefined;
+      const fromStore = store.getRecentActivityEvents(effLimit, { since, cursor });
+      const raw = await deps.gatherIntrospectionRaw({ argv: ctx.argv });
+      const payload = deps.assembleHistoryV1(
+        raw,
+        {
+          limit: effLimit,
+          since,
+          cursor,
+        },
+        fromStore,
+      );
+      emitResult(payload, (v) => humanHistory(v as HistoryV1Response), {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      });
+    },
+  };
+}
 
+const command: CommandModule = createHistoryCommand();
 export default command;

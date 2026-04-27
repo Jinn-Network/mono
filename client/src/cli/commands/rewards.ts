@@ -3,8 +3,18 @@ import { formatUnits } from 'viem';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { emitResult } from '../output.js';
-import { gatherIntrospectionRaw } from '../introspection-context.js';
-import { assembleRewardsV1, type RewardsV1Response } from '../../api/rewards-build.js';
+import { gatherIntrospectionRaw as defaultGatherIntrospectionRaw } from '../introspection-context.js';
+import { assembleRewardsV1 as defaultAssembleRewardsV1, type RewardsV1Response } from '../../api/rewards-build.js';
+
+export interface RewardsDeps {
+  gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
+  assembleRewardsV1: typeof defaultAssembleRewardsV1;
+}
+
+const PRODUCTION_DEPS: RewardsDeps = {
+  gatherIntrospectionRaw: defaultGatherIntrospectionRaw,
+  assembleRewardsV1: defaultAssembleRewardsV1,
+};
 
 function formatRewardAmount(wei: string): string {
   try {
@@ -35,45 +45,11 @@ function humanRewards(payload: RewardsV1Response): string {
   return lines.join('\n');
 }
 
-async function run(ctx: CommandContext): Promise<void> {
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: ctx.argv,
-      options: {
-        json: { type: 'boolean', default: false },
-        human: { type: 'boolean', default: false },
-        config: { type: 'string' },
-      },
-      allowPositionals: false,
-    });
-  } catch (err) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: err instanceof Error ? err.message : String(err),
-        exampleCli: 'jinn rewards',
-        details: { field: 'flags' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-  const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-  const payload = assembleRewardsV1(raw);
-  emitResult(payload, (v) => humanRewards(v as RewardsV1Response), {
-    json: Boolean(parsed.values.json),
-    human: Boolean(parsed.values.human),
-    writer: ctx.writer,
-    stdoutIsTty: ctx.stdoutIsTty,
-    noColor: Boolean(ctx.env['NO_COLOR']),
-  });
-}
-
-const command: CommandModule = {
-  name: 'rewards',
-  summary: 'Earned vs claimed per service, per asset; next checkpoint time',
-  helpText: `Usage: jinn rewards [--human]
+export function createRewardsCommand(deps: RewardsDeps = PRODUCTION_DEPS): CommandModule {
+  return {
+    name: 'rewards',
+    summary: 'Earned vs claimed per service, per asset; next checkpoint time',
+    helpText: `Usage: jinn rewards [--human]
 
 Returns the current pending reward balance per service, per asset
 role. Uses \`reward\` as the asset name; look up the concrete token
@@ -83,7 +59,42 @@ Examples:
   jinn rewards
   jinn rewards --human
 `,
-  run,
-};
+    async run(ctx: CommandContext): Promise<void> {
+      let parsed;
+      try {
+        parsed = parseArgs({
+          args: ctx.argv,
+          options: {
+            json: { type: 'boolean', default: false },
+            human: { type: 'boolean', default: false },
+            config: { type: 'string' },
+          },
+          allowPositionals: false,
+        });
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            exampleCli: 'jinn rewards',
+            details: { field: 'flags' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      const raw = await deps.gatherIntrospectionRaw({ argv: ctx.argv });
+      const payload = deps.assembleRewardsV1(raw);
+      emitResult(payload, (v) => humanRewards(v as RewardsV1Response), {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      });
+    },
+  };
+}
 
+const command: CommandModule = createRewardsCommand();
 export default command;

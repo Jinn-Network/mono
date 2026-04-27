@@ -112,6 +112,11 @@ export interface FleetBootstrapperOptions {
    * from poll frequency (config.pollIntervalMs).
    */
   pollIntervalMs?: number;
+  /**
+   * Injectable faucet function — defaults to {@link requestTestnetFunding}.
+   * Provided in tests to avoid hitting the real CDP endpoint.
+   */
+  requestFunding?: typeof requestTestnetFunding;
 }
 
 export class FleetBootstrapper {
@@ -124,6 +129,7 @@ export class FleetBootstrapper {
   private readonly debug: boolean;
   private readonly masterEthDailyEstimateWei: bigint;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly requestFunding: typeof requestTestnetFunding;
 
   constructor(options: FleetBootstrapperOptions = {}) {
     this.store = new FleetStateStore(options.earningDir);
@@ -132,6 +138,7 @@ export class FleetBootstrapper {
     this.stakingMode = options.stakingMode ?? 'standard';
     this.targetServices = options.targetServices ?? 1;
     this.debug = options.debug ?? isJinnDebug();
+    this.requestFunding = options.requestFunding ?? requestTestnetFunding;
     const dailyOpt = options.masterEthDailyEstimateWei;
     this.masterEthDailyEstimateWei =
       dailyOpt !== undefined
@@ -246,7 +253,7 @@ export class FleetBootstrapper {
           `(each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-60 s on first run).`,
         );
         for (let i = 0; i < MAX_FAUCET_ITERS; i++) {
-          const faucetResult = await requestTestnetFunding(masterAddress, 'base-sepolia');
+          const faucetResult = await this.requestFunding(masterAddress, 'base-sepolia');
           if (!faucetResult.ok) {
             if (faucetResult.rateLimited) {
               console.error(`[fleet-bootstrap] CDP faucet rate-limited after ${i} drips: ${faucetResult.reason}`);

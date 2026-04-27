@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
+import { describe, expect, it } from 'vitest';
 import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { createFleetCommand } from '@/cli/commands/fleet.js';
+import { assembleFleetV1 } from '@/api/fleet-build.js';
+import { runCommand } from '@test/cli.js';
 
 const mockRaw: GatheredStatusRaw = {
   shutdownState: 'running',
@@ -34,41 +36,27 @@ const mockRaw: GatheredStatusRaw = {
   minMasterEthWei: '1',
 };
 
-vi.mock('../../../src/cli/introspection-context.js', () => ({
-  gatherIntrospectionRaw: vi.fn(async () => mockRaw),
-}));
+const fakeDeps = {
+  gatherIntrospectionRaw: async () => mockRaw as GatheredStatusRaw,
+  assembleFleetV1,
+};
 
 describe('fleet command', () => {
   it('writes assembled fleet JSON', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/fleet.js');
-    const writes: string[] = [];
-    const ctx: CommandContext = {
-      argv: [],
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: () => {},
-      env: {},
-    };
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createFleetCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd);
+    expect(exits).toEqual([]);
+    expect(envelopes).toHaveLength(1);
+    const parsed = envelopes[0] as { schemaVersion: number; services: Array<{ index: number }> };
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.services).toHaveLength(1);
     expect(parsed.services[0].index).toBe(0);
   });
 
   it('rejects unknown flags with invalid_invocation', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/fleet.js');
-    const writes: string[] = [];
-    const exits: number[] = [];
-    const ctx: CommandContext = {
-      argv: ['--bogus'],
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: (code: number) => { exits.push(code); },
-      env: {},
-    };
-    await cmd.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
+    const cmd = createFleetCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd, { argv: ['--bogus'] });
+    const parsed = envelopes[0] as { code: string };
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
   });

@@ -52,3 +52,13 @@ export const COMMON_FLAGS = {
   /** Parsed value is the fd number as string; read via resolveCliPassword / readPasswordFromFd. */
   'password-fd': { type: 'string' as const },
 };
+
+/**
+ * Shared base for command factory deps. Most CLI commands need at least these.
+ * Extend with command-specific deps via `<Cmd>Deps extends BaseCommandDeps`.
+ * See docs/runbooks/testing.md and any factory-style command (e.g. doctor.ts) for usage.
+ */
+export interface BaseCommandDeps {
+  loadConfig: typeof import('../config.js').loadConfig;
+  getConfigPathFromArgs: typeof import('../config.js').getConfigPathFromArgs;
+}

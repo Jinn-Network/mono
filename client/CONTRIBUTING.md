@@ -13,9 +13,14 @@ Development happens in the [jinn-mono](https://github.com/Jinn-Network/mono) mon
 ```bash
 cd client
 yarn install
-yarn test              # vitest suite — 267 tests
+yarn test              # vitest suite — see docs/runbooks/testing.md
 yarn typecheck         # tsc --noEmit
 ```
+
+## Tests
+
+See [`docs/runbooks/testing.md`](../docs/runbooks/testing.md) for the SOP.
+Shared helpers live in `test/_support/`.
 
 ## Running from source
 

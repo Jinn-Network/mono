@@ -1,263 +1,294 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createPublicClient, getAddress, http, type PublicClient } from 'viem';
+import { getAddress, type PublicClient } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import { COMMON_FLAGS, type CommandContext, type CommandModule } from '../command.js';
+import { createPublicClient, http } from 'viem';
+import { COMMON_FLAGS, type BaseCommandDeps, type CommandContext, type CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
-import { gatherIntrospectionRaw } from '../introspection-context.js';
-import { createCliExecutionContext } from '../execution-context.js';
-import { isRecoverableTransactionError } from '../../tx-retry.js';
+import { gatherIntrospectionRaw as defaultGatherIntrospectionRaw } from '../introspection-context.js';
+import {
+  createCliExecutionContext as defaultCreateCliExecutionContext,
+  type CliExecutionContext,
+} from '../execution-context.js';
+import { isRecoverableTransactionError as defaultIsRecoverableTransactionError } from '../../tx-retry.js';
 import type { DesiredState } from '../../types/desired-state.js';
 import { SPEC_KINDS, unknownKindMessage } from '../../intents/kinds/index.js';
 import { IntentPostingService } from '../../intents/posting-service.js';
-import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
+import { readChainlinkLatest as defaultReadChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
+import {
+  loadConfig as defaultLoadConfig,
+  getConfigPathFromArgs as defaultGetConfigPathFromArgs,
+} from '../../config.js';
 
-async function run(ctx: CommandContext): Promise<void> {
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: ctx.argv,
-      options: {
-        ...COMMON_FLAGS,
-        id: { type: 'string' },
-        description: { type: 'string' },
-        'spec-file': { type: 'string' },
-        'dry-run': { type: 'boolean', default: false },
-        yes: { type: 'boolean', default: false },
-      },
-      allowPositionals: false,
-    });
-  } catch (err) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: err instanceof Error ? err.message : String(err),
-        exampleCli: 'jinn submit-intent --id test-1 --description "..." --dry-run',
-        details: { field: 'flags' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
+export interface SubmitIntentDeps extends BaseCommandDeps {
+  gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
+  executionContextFactory: typeof defaultCreateCliExecutionContext;
+  postingServiceFactory: (ctx: CliExecutionContext) => IntentPostingService;
+  readChainlinkLatest: typeof defaultReadChainlinkLatest;
+  chainlinkPublicClientFactory: (rpcUrl: string, venue: string) => PublicClient;
+  isRecoverableTransactionError: typeof defaultIsRecoverableTransactionError;
+}
 
-  const id = parsed.values.id as string | undefined;
-  const description = parsed.values.description as string | undefined;
+const PRODUCTION_DEPS: SubmitIntentDeps = {
+  loadConfig: defaultLoadConfig,
+  getConfigPathFromArgs: defaultGetConfigPathFromArgs,
+  gatherIntrospectionRaw: defaultGatherIntrospectionRaw,
+  executionContextFactory: defaultCreateCliExecutionContext,
+  postingServiceFactory: (ctx) => new IntentPostingService(ctx.adapter, ctx.jinnStore),
+  readChainlinkLatest: defaultReadChainlinkLatest,
+  chainlinkPublicClientFactory: (rpcUrl, venue) => {
+    const chain = venue === 'chainlink-base' ? base : baseSepolia;
+    return createPublicClient({ chain, transport: http(rpcUrl) }) as unknown as PublicClient;
+  },
+  isRecoverableTransactionError: defaultIsRecoverableTransactionError,
+};
 
-  if (!id) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: '--id is required',
-        exampleCli: 'jinn submit-intent --id my-intent --description "..." --dry-run',
-        details: { field: '--id', expected: 'non-empty string' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-  if (!description) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: '--description is required',
-        exampleCli: 'jinn submit-intent --id my-intent --description "..." --dry-run',
-        details: { field: '--description', expected: 'non-empty string' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
-
-  const dryRun = parsed.values['dry-run'] as boolean;
-  const yes = parsed.values.yes as boolean;
-
-  // ── spec-file loading ───────────────────────────────────────────────────────
-  const specFilePath = parsed.values['spec-file'] as string | undefined;
-  let specOverlay: { window?: any; spec?: any; eligibility?: any } | undefined;
-  if (specFilePath) {
-    let raw: Record<string, unknown>;
+export function createSubmitIntentCommand(deps: SubmitIntentDeps = PRODUCTION_DEPS): CommandModule {
+  async function run(ctx: CommandContext): Promise<void> {
+    let parsed;
     try {
-      raw = JSON.parse(readFileSync(resolve(specFilePath), 'utf8')) as Record<string, unknown>;
-    } catch (err) {
-      emitEnvelope(
-        {
-          code: 'invalid_invocation',
-          message: `Could not read spec file: ${err instanceof Error ? err.message : String(err)}`,
-          exampleCli: 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
-          details: { field: 'spec-file' },
+      parsed = parseArgs({
+        args: ctx.argv,
+        options: {
+          ...COMMON_FLAGS,
+          id: { type: 'string' },
+          description: { type: 'string' },
+          'spec-file': { type: 'string' },
+          'dry-run': { type: 'boolean', default: false },
+          yes: { type: 'boolean', default: false },
         },
-        { writer: ctx.writer, exit: ctx.exit },
-      );
-      return;
-    }
-    const kind = (raw['spec'] as { kind?: unknown } | undefined)?.kind;
-    const kindStr = typeof kind === 'string' ? kind : undefined;
-    const specKind = kindStr !== undefined ? SPEC_KINDS[kindStr] : undefined;
-    if (!specKind) {
-      emitEnvelope(
-        {
-          code: 'invalid_invocation',
-          message: unknownKindMessage(kindStr),
-          exampleCli:
-            'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
-          details: { field: 'spec-file', expected: 'spec.kind must be a registered intent kind' },
-        },
-        { writer: ctx.writer, exit: ctx.exit },
-      );
-      return;
-    }
-
-    const stub: Record<string, unknown> = { id: id!, description: description!, ...raw };
-    try {
-      const parsedOverlay = await specKind.parseSpec(stub, {
-        readCurrent: async ({ feed, venue }) => {
-          const chain = venue === 'chainlink-base' ? base : baseSepolia;
-          const rpcUrl = ctx.env[venue === 'chainlink-base' ? 'BASE_RPC_URL' : 'BASE_SEPOLIA_RPC_URL']
-            ?? (venue === 'chainlink-base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org');
-          const publicClient = createPublicClient({ chain, transport: http(rpcUrl) }) as unknown as PublicClient;
-          const reading = await readChainlinkLatest(feed, publicClient);
-          return scaleToDecimal(reading.answer, reading.decimals);
-        },
+        allowPositionals: false,
       });
-      specOverlay = {
-        window: parsedOverlay.window,
-        spec: parsedOverlay.spec,
-        eligibility: parsedOverlay.eligibility,
-      };
     } catch (err) {
-      const exampleCli =
-        kindStr === 'prediction.apy.v0'
-          ? 'jinn submit-intent --id my-apy-1 --description "..." --spec-file fixtures/prediction-apy-v0-intent.example.json --dry-run'
-          : kindStr === 'portfolio.v0'
-            ? 'jinn submit-intent --id pf-1 --description "..." --spec-file <portfolio-fixture.json> --dry-run'
-            : 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run';
       emitEnvelope(
         {
           code: 'invalid_invocation',
-          message: `Invalid ${kindStr} intent: ${err instanceof Error ? err.message : String(err)}`,
-          exampleCli,
-          details: { field: 'spec-file' },
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: 'jinn submit-intent --id test-1 --description "..." --dry-run',
+          details: { field: 'flags' },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
       return;
     }
-  }
 
-  if (dryRun) {
-    const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-    const service = raw.fleet?.services.find(s => s.step === 'complete');
-    if (!service?.safe_address) {
+    const id = parsed.values.id as string | undefined;
+    const description = parsed.values.description as string | undefined;
+
+    if (!id) {
       emitEnvelope(
         {
-          code: 'bootstrap_incomplete',
-          message:
-            'No bootstrapped service available to submit intents from. Run `jinn bootstrap` first.',
-          hint: 'Run `jinn fund-requirements` to see outstanding funding, then `jinn bootstrap`.',
-          exampleCli: 'jinn bootstrap --human',
-          details: { field: 'fleet.services', expected: 'at least one service at step=complete' },
+          code: 'invalid_invocation',
+          message: '--id is required',
+          exampleCli: 'jinn submit-intent --id my-intent --description "..." --dry-run',
+          details: { field: '--id', expected: 'non-empty string' },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
       return;
     }
-    const creatorMultisig = getAddress(service.safe_address);
-    emitDryRun(ctx, {
-      verb: 'submit-intent',
-      description: `Would post intent '${id}' from ${creatorMultisig}`,
-      plan: [{ id, description, creatorMultisig, asset: 'native', txCount: 1, ...(specOverlay ? { spec: specOverlay.spec } : {}) }],
-    });
-    return;
-  }
+    if (!description) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: '--description is required',
+          exampleCli: 'jinn submit-intent --id my-intent --description "..." --dry-run',
+          details: { field: '--description', expected: 'non-empty string' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
 
-  if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
+    const dryRun = parsed.values['dry-run'] as boolean;
+    const yes = parsed.values.yes as boolean;
 
-  const built = await createCliExecutionContext({ argv: ctx.argv, env: ctx.env });
-  if (!built.ok) {
-    emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
-    return;
-  }
+    // ── spec-file loading ───────────────────────────────────────────────────────
+    const specFilePath = parsed.values['spec-file'] as string | undefined;
+    let specOverlay: { window?: any; spec?: any; eligibility?: any } | undefined;
+    if (specFilePath) {
+      let raw: Record<string, unknown>;
+      try {
+        raw = JSON.parse(readFileSync(resolve(specFilePath), 'utf8')) as Record<string, unknown>;
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: `Could not read spec file: ${err instanceof Error ? err.message : String(err)}`,
+            exampleCli: 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
+            details: { field: 'spec-file' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      const kind = (raw['spec'] as { kind?: unknown } | undefined)?.kind;
+      const kindStr = typeof kind === 'string' ? kind : undefined;
+      const specKind = kindStr !== undefined ? SPEC_KINDS[kindStr] : undefined;
+      if (!specKind) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: unknownKindMessage(kindStr),
+            exampleCli:
+              'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
+            details: { field: 'spec-file', expected: 'spec.kind must be a registered intent kind' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
 
-  const { adapter, jinnStore, primaryService } = built.ctx;
-  const safe = primaryService.safe_address!;
-  const postingService = new IntentPostingService(adapter, jinnStore);
-  try {
-    const desiredState: DesiredState = {
-      id,
-      description,
-      ...(specOverlay ?? {}),
-    };
-    const postResult = await postingService.postCandidate(
-      {
-        desiredState,
-        sourceKey: `manual:${id}`,
-        postingPolicy: { kind: 'once_per_safe' },
-        sourceMeta: { kind: desiredState.spec?.kind, note: 'manual' },
-      },
-      {
-        creatorSafeAddress: safe,
-        legacyConfigKeys: [`cli_intent:${getAddress(safe)}:${id}`],
-      },
-    );
-    emitResult(
-      {
-        schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
+      const stub: Record<string, unknown> = { id: id!, description: description!, ...raw };
+      try {
+        const parsedOverlay = await specKind.parseSpec(stub, {
+          readCurrent: async ({ feed, venue }) => {
+            const rpcUrl = ctx.env[venue === 'chainlink-base' ? 'BASE_RPC_URL' : 'BASE_SEPOLIA_RPC_URL']
+              ?? (venue === 'chainlink-base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org');
+            const publicClient = deps.chainlinkPublicClientFactory(rpcUrl, venue);
+            const reading = await deps.readChainlinkLatest(feed, publicClient);
+            return scaleToDecimal(reading.answer, reading.decimals);
+          },
+        });
+        specOverlay = {
+          window: parsedOverlay.window,
+          spec: parsedOverlay.spec,
+          eligibility: parsedOverlay.eligibility,
+        };
+      } catch (err) {
+        const exampleCli =
+          kindStr === 'prediction.apy.v0'
+            ? 'jinn submit-intent --id my-apy-1 --description "..." --spec-file fixtures/prediction-apy-v0-intent.example.json --dry-run'
+            : kindStr === 'portfolio.v0'
+              ? 'jinn submit-intent --id pf-1 --description "..." --spec-file <portfolio-fixture.json> --dry-run'
+              : 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run';
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: `Invalid ${kindStr} intent: ${err instanceof Error ? err.message : String(err)}`,
+            exampleCli,
+            details: { field: 'spec-file' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+    }
+
+    if (dryRun) {
+      const raw = await deps.gatherIntrospectionRaw({ argv: ctx.argv });
+      const service = raw.fleet?.services.find(s => s.step === 'complete');
+      if (!service?.safe_address) {
+        emitEnvelope(
+          {
+            code: 'bootstrap_incomplete',
+            message:
+              'No bootstrapped service available to submit intents from. Run `jinn bootstrap` first.',
+            hint: 'Run `jinn fund-requirements` to see outstanding funding, then `jinn bootstrap`.',
+            exampleCli: 'jinn bootstrap --human',
+            details: { field: 'fleet.services', expected: 'at least one service at step=complete' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      const creatorMultisig = getAddress(service.safe_address);
+      emitDryRun(ctx, {
         verb: 'submit-intent',
+        description: `Would post intent '${id}' from ${creatorMultisig}`,
+        plan: [{ id, description, creatorMultisig, asset: 'native', txCount: 1, ...(specOverlay ? { spec: specOverlay.spec } : {}) }],
+      });
+      return;
+    }
+
+    if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
+
+    const built = await deps.executionContextFactory({ argv: ctx.argv, env: ctx.env });
+    if (!built.ok) {
+      emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
+      return;
+    }
+
+    const { adapter, jinnStore, primaryService } = built.ctx;
+    const safe = primaryService.safe_address!;
+    const postingService = deps.postingServiceFactory(built.ctx);
+    try {
+      const desiredState: DesiredState = {
         id,
-        creatorMultisig: getAddress(safe),
-        requestId: postResult.requestId,
-        status: postResult.idempotent ? 'already_submitted' : 'submitted',
-        attemptId: postResult.attemptId,
-        attemptNumber: postResult.attemptNumber,
-        idempotent: postResult.idempotent,
-      },
-      (v) => {
-        const value = v as { id: string; requestId: string; creatorMultisig: string };
-        return postResult.idempotent
-          ? `Intent already submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`
-          : `Intent submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`;
-      },
-      {
-        json: Boolean(parsed.values.json),
-        human: Boolean(parsed.values.human),
-        writer: ctx.writer,
-        stdoutIsTty: ctx.stdoutIsTty,
-        noColor: Boolean(ctx.env['NO_COLOR']),
-      },
-    );
-  } catch (e) {
-    if (isRecoverableTransactionError(e)) {
+        description,
+        ...(specOverlay ?? {}),
+      };
+      const postResult = await postingService.postCandidate(
+        {
+          desiredState,
+          sourceKey: `manual:${id}`,
+          postingPolicy: { kind: 'once_per_safe' },
+          sourceMeta: { kind: desiredState.spec?.kind, note: 'manual' },
+        },
+        {
+          creatorSafeAddress: safe,
+          legacyConfigKeys: [`cli_intent:${getAddress(safe)}:${id}`],
+        },
+      );
+      emitResult(
+        {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          verb: 'submit-intent',
+          id,
+          creatorMultisig: getAddress(safe),
+          requestId: postResult.requestId,
+          status: postResult.idempotent ? 'already_submitted' : 'submitted',
+          attemptId: postResult.attemptId,
+          attemptNumber: postResult.attemptNumber,
+          idempotent: postResult.idempotent,
+        },
+        (v) => {
+          const value = v as { id: string; requestId: string; creatorMultisig: string };
+          return postResult.idempotent
+            ? `Intent already submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`
+            : `Intent submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`;
+        },
+        {
+          json: Boolean(parsed.values.json),
+          human: Boolean(parsed.values.human),
+          writer: ctx.writer,
+          stdoutIsTty: ctx.stdoutIsTty,
+          noColor: Boolean(ctx.env['NO_COLOR']),
+        },
+      );
+    } catch (e) {
+      if (deps.isRecoverableTransactionError(e)) {
+        emitEnvelope(
+          {
+            code: 'transient_error',
+            message: e instanceof Error ? e.message : String(e),
+            hint: 'Retry when the RPC endpoint is healthy or fees clear.',
+            exampleCli: 'jinn submit-intent --id my-intent --description "..." --yes',
+            details: { cause: e instanceof Error ? e.message : String(e) },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
       emitEnvelope(
         {
-          code: 'transient_error',
+          code: 'fatal',
           message: e instanceof Error ? e.message : String(e),
-          hint: 'Retry when the RPC endpoint is healthy or fees clear.',
-          exampleCli: 'jinn submit-intent --id my-intent --description "..." --yes',
           details: { cause: e instanceof Error ? e.message : String(e) },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
-      return;
     }
-    emitEnvelope(
-      {
-        code: 'fatal',
-        message: e instanceof Error ? e.message : String(e),
-        details: { cause: e instanceof Error ? e.message : String(e) },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
   }
-}
 
-const command: CommandModule = {
-  name: 'submit-intent',
-  summary: 'Post a desired state (restoration job) to the protocol',
-  helpText: `Usage: jinn submit-intent --id <id> --description <text> [--spec-file <path>] [--dry-run] [--yes] [--human]
+  return {
+    name: 'submit-intent',
+    summary: 'Post a desired state (restoration job) to the protocol',
+    helpText: `Usage: jinn submit-intent --id <id> --description <text> [--spec-file <path>] [--dry-run] [--yes] [--human]
 
 Idempotent: re-posting the same (--id) from the same creator Safe returns the
 existing request id from the shared intent-posting store without sending a new
@@ -283,7 +314,9 @@ Examples:
   jinn submit-intent --id eth-up --description "ETH direction" --spec-file fixtures/prediction-v0-intent.example.json --yes
   jinn submit-intent --id usdc-apy --description "Aave APY" --spec-file fixtures/prediction-apy-v0-intent.example.json --yes
 `,
-  run,
-};
+    run,
+  };
+}
 
+const command: CommandModule = createSubmitIntentCommand();
 export default command;

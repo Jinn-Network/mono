@@ -3,10 +3,12 @@ import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { claimDelivery } from '../../../src/adapters/mech/contracts.js';
 import { executeSafeTransaction } from '../../../src/adapters/mech/safe.js';
 
+// MOCK_JUSTIFICATION: src/adapters/mech/safe.js is the I/O leaf for Safe wallet RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/safe.js', () => ({
   executeSafeTransaction: vi.fn(),
 }));
 
+// MOCK_JUSTIFICATION: src/tx-retry.js wraps chain-RPC retry logic at the I/O boundary; mocking it is mocking the boundary.
 vi.mock('../../../src/tx-retry.js', () => ({
   waitForTransactionReceiptWithRetry: vi.fn(),
   isRecoverableTransactionError: vi.fn().mockReturnValue(true),

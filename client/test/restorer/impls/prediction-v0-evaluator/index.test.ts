@@ -1,24 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionV0Evaluator } from '../../../../src/restorer/impls/prediction-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/restorer/engine/signing.js';
 import { makeValidIntent, makeSignedManifest, makeEvalDesiredState } from './test-helpers.js';
+import { makeRestorationCtx } from '@test/restoration-ctx.js';
 
 function makeCtx(intent: any, deps: any) {
-  const tmp = mkdtempSync(join(tmpdir(), 'pred-eval-'));
-  return {
+  return makeRestorationCtx({
     intent,
     intentCid: 'intent-cid',
-    implStateDir: tmp,
-    workingDir: tmp,
-    log: () => {},
-    abort: new AbortController().signal,
-    msUntilEndTs: () => 0,
-    _testDeps: deps,
-  } as any;
+    extra: { _testDeps: deps },
+  }) as any;
 }
 
 function spanningDeps(priceAtResolve: string) {

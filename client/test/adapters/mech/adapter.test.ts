@@ -3,6 +3,7 @@ import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
 import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../src/restorer/impls/evaluation-context.js';
 
 // Mock contract helpers
+// MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   submitRestorationJob: vi.fn().mockResolvedValue({
     requestIds: ['0x' + 'aa'.repeat(32)],
@@ -25,6 +26,7 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
 }));
 
 // Mock IPFS
+// MOCK_JUSTIFICATION: src/adapters/mech/ipfs.js is the I/O leaf for IPFS gateway HTTP calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   buildDesiredStatePayload: vi.fn().mockReturnValue({ desiredStateId: 'ds-1', description: 'test' }),
   uploadToIpfs: vi.fn().mockResolvedValue('QmFakeCid'),
@@ -35,6 +37,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
 }));
 
 // Mock Safe
+// MOCK_JUSTIFICATION: src/adapters/mech/safe.js is the I/O leaf for Safe wallet RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/safe.js', () => ({
   createClients: vi.fn().mockReturnValue({
     publicClient: {

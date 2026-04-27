@@ -20,7 +20,7 @@ import { z } from 'zod';
 import type { CommandModule, CommandContext } from '../cli/command.js';
 
 // ── Read-only command imports ───────────────────────────────────────────────
-import initCommand from '../cli/commands/init.js';
+import defaultInitCommand from '../cli/commands/init.js';
 import doctorCommand from '../cli/commands/doctor.js';
 import fundRequirementsCommand from '../cli/commands/fund-requirements.js';
 import statusCommand from '../cli/commands/status.js';
@@ -31,7 +31,7 @@ import historyCommand from '../cli/commands/history.js';
 // ── Write (mutating) command imports ────────────────────────────────────────
 import bootstrapCommand from '../cli/commands/bootstrap.js';
 import submitIntentCommand from '../cli/commands/submit-intent.js';
-import stopCommand from '../cli/commands/stop.js';
+import defaultStopCommand from '../cli/commands/stop.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -178,10 +178,18 @@ export async function startDetachedDaemon(env: NodeJS.ProcessEnv): Promise<
   return { ok: true, payload: { pid: startResult.pid, status: startResult.status } };
 }
 
-export async function stopDetachedDaemon(env: NodeJS.ProcessEnv): Promise<
+export interface StopDetachedDaemonDeps {
+  stopCommand?: CommandModule;
+}
+
+export async function stopDetachedDaemon(
+  env: NodeJS.ProcessEnv,
+  deps: StopDetachedDaemonDeps = {},
+): Promise<
   { ok: true; payload: Record<string, unknown> } | { ok: false; payload: string }
 > {
-  const result = await runCommandResult(stopCommand, ['--json'], env);
+  const stop = deps.stopCommand ?? defaultStopCommand;
+  const result = await runCommandResult(stop, ['--json'], env);
   if (result.exitCode === null || result.exitCode === 0) {
     return { ok: true, payload: JSON.parse(result.text) as Record<string, unknown> };
   }
@@ -193,7 +201,14 @@ export async function stopDetachedDaemon(env: NodeJS.ProcessEnv): Promise<
 
 // ── Server factory ──────────────────────────────────────────────────────────
 
-export function createOperatorServer(): McpServer {
+export interface OperatorServerDeps {
+  initCommand?: CommandModule;
+  stopCommand?: CommandModule;
+}
+
+export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
+  const initCommand = deps.initCommand ?? defaultInitCommand;
+  const stopCommand = deps.stopCommand ?? defaultStopCommand;
   const server = new McpServer({
     name: 'jinn-operator',
     version: '0.1.0',
@@ -315,7 +330,7 @@ export function createOperatorServer(): McpServer {
     'Stop the running jinn daemon. Idempotent: returns success even if already stopped.',
     {},
     async () => {
-      const result = await stopDetachedDaemon(process.env);
+      const result = await stopDetachedDaemon(process.env, { stopCommand });
       if (result.ok) {
         return { content: [{ type: 'text' as const, text: JSON.stringify(result.payload) }] };
       }

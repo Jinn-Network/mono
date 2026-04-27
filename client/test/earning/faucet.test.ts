@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const requestFaucetMock = vi.fn();
 const cdpClientOptions: Array<Record<string, string>> = [];
 
+// MOCK_JUSTIFICATION: Third-party SDK; faucet is the leaf network adapter (HTTP to coinbase). Mocking the SDK is mocking the boundary.
 vi.mock('@coinbase/cdp-sdk', () => ({
   CdpClient: class {
     evm = {

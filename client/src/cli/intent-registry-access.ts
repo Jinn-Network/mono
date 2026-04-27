@@ -41,8 +41,14 @@ export function resolveConfigPath(explicit?: string): string {
  * Uses {@link buildRestorerImpls} with `stub: true` and no runner (no
  * `legacy-claude` — requires the daemon process + Claude runner).
  * Honest readiness for stub is refined in 7ee.2.
+ *
+ * @param buildImpls - Injectable factory (defaults to {@link buildRestorerImpls}).
+ *   Pass a custom function in tests to observe the env arg without mocking the module.
  */
-export function buildIntentsCliRegistry(config: JinnConfig): RestorerImplRegistry {
+export function buildIntentsCliRegistry(
+  config: JinnConfig,
+  buildImpls: typeof buildRestorerImpls = buildRestorerImpls,
+): RestorerImplRegistry {
   const registry = new RestorerImplRegistry({
     byKind: resolveEffectiveByKind(config),
     default: 'legacy-claude',
@@ -51,7 +57,7 @@ export function buildIntentsCliRegistry(config: JinnConfig): RestorerImplRegistr
 
   // `implStateDirRoot` matches daemon/doctor construction; stub `isReady()` is
   // not HL disk-sensitive today, but the path is consistent if that changes.
-  for (const impl of buildRestorerImpls({
+  for (const impl of buildImpls({
     stub: true,
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,

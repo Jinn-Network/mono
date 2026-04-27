@@ -10,60 +10,31 @@
  * Usage: yarn stolas   (or `yarn exec tsx scripts/stolas-validate.ts`)
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawnAnvilFork, jsonRpc as anvilJsonRpc, type AnvilHarness } from '../_support/chain/anvil.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPublicClient, http, parseAbi, type Address } from 'viem';
 import { base } from 'viem/chains';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import {
   SERVICE_REGISTRY_L2_ABI,
   STOLAS_DISTRIBUTOR,
   STOLAS_DISTRIBUTOR_ABI,
   STOLAS_STAKING_SLOTS_ABI,
   getChainConfig,
-} from '../src/earning/contracts.js';
+} from '../../src/earning/contracts.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
-const ANVIL_PORT = 8548;
-const ANVIL_RPC = `http://127.0.0.1:${ANVIL_PORT}`;
+let ANVIL_PORT = 0;
+let ANVIL_RPC = '';
 const PASSWORD = 'test-password';
 
 const CHAIN_CONFIG = getChainConfig('base');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-async function waitFor(
-  description: string,
-  check: () => Promise<boolean>,
-  timeoutMs = 30000,
-  intervalMs = 500,
-): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await check()) return;
-    await sleep(intervalMs);
-  }
-  throw new Error(`Timeout waiting for: ${description}`);
-}
-
-async function jsonRpc(url: string, method: string, params: unknown[] = []): Promise<unknown> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
-  });
-  const body = (await res.json()) as { result?: unknown; error?: { message: string } };
-  if (body.error) throw new Error(`RPC error (${method}): ${body.error.message}`);
-  return body.result;
-}
 
 // ── Phase runner ─────────────────────────────────────────────────────────────
 
@@ -94,7 +65,7 @@ async function runPhase(name: string, fn: () => Promise<void>): Promise<PhaseRes
 async function main(): Promise<void> {
   console.log('\n=== stOLAS Bootstrap Validation (Anvil Fork) ===\n');
 
-  let anvil: ChildProcess | null = null;
+  let chain: AnvilHarness | null = null;
   let tmpDir: string | null = null;
   const results: PhaseResult[] = [];
 
@@ -111,30 +82,11 @@ async function main(): Promise<void> {
         tmpDir = await mkdtemp(join(tmpdir(), 'jinn-stolas-'));
         console.log(`    Temp dir: ${tmpDir}`);
 
-        const anvilPath = process.env['ANVIL_PATH'] ?? 'anvil';
-        anvil = spawn(anvilPath, [
-          '--fork-url', BASE_RPC_URL,
-          '--port', String(ANVIL_PORT),
-          '--silent',
-        ], {
-          stdio: 'ignore',
-          detached: false,
-        });
+        chain = await spawnAnvilFork({ forkUrl: BASE_RPC_URL, silent: true });
+        ANVIL_PORT = chain.port;
+        ANVIL_RPC = chain.rpcUrl;
 
-        anvil.on('error', (err) => {
-          throw new Error(`Failed to spawn Anvil: ${err.message}`);
-        });
-
-        await waitFor('Anvil RPC ready', async () => {
-          try {
-            const blockNum = await jsonRpc(ANVIL_RPC, 'eth_blockNumber');
-            return typeof blockNum === 'string' && blockNum.startsWith('0x');
-          } catch {
-            return false;
-          }
-        });
-
-        const blockNum = await jsonRpc(ANVIL_RPC, 'eth_blockNumber');
+        const blockNum = await anvilJsonRpc(ANVIL_RPC, 'eth_blockNumber');
         console.log(`    Anvil forked at block ${parseInt(blockNum as string, 16)}`);
       }),
     );
@@ -215,7 +167,7 @@ async function main(): Promise<void> {
         if (!eoaAddress) throw new Error('Missing EOA from Phase 3');
 
         // Fund with 1 ETH — way more than needed but ensures no gas issues
-        await jsonRpc(ANVIL_RPC, 'anvil_setBalance', [
+        await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [
           eoaAddress,
           '0xDE0B6B3A7640000', // 1 ETH in hex
         ]);
@@ -236,7 +188,7 @@ async function main(): Promise<void> {
       await runPhase('Phase 5: Bootstrap to completion (stOLAS stake)', async () => {
         if (!tmpDir) throw new Error('No temp dir');
 
-        await jsonRpc(ANVIL_RPC, 'evm_mine', []);
+        await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Re-create bootstrapper with fresh provider
         bootstrapper = new FleetBootstrapper({
@@ -327,12 +279,8 @@ async function main(): Promise<void> {
 
     results.push(
       await runPhase('Cleanup', async () => {
-        if (anvil) {
-          anvil.kill('SIGTERM');
-          await sleep(500);
-          if (!anvil.killed) {
-            anvil.kill('SIGKILL');
-          }
+        if (chain) {
+          await chain.teardown();
           console.log('    Anvil process terminated');
         }
         if (tmpDir) {

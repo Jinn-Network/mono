@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeMcpHyperliquidImpl } from '../../src/restorer/impls/claude-mcp-hyperliquid/index.js';
-import type { RestorerEnv } from '../../src/restorer/impls/index.js';
+import { buildRestorerImpls, type RestorerEnv } from '../../src/restorer/impls/index.js';
 
 import {
   buildIntentsCliRegistry,
@@ -17,19 +17,6 @@ import {
   setImplForKindInConfig,
 } from '../../src/cli/intent-registry-access.js';
 import { loadConfig, type JinnConfig } from '../../src/config.js';
-
-const captured = vi.hoisted(() => ({ lastEnv: null as RestorerEnv | null }));
-
-vi.mock('../../src/restorer/impls/index.js', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../../src/restorer/impls/index.js')>();
-  return {
-    ...mod,
-    buildRestorerImpls: (env: RestorerEnv) => {
-      captured.lastEnv = env;
-      return mod.buildRestorerImpls(env);
-    },
-  };
-});
 
 describe('setImplEnabledInConfig', () => {
   let dir: string;
@@ -162,11 +149,12 @@ describe('byKind config helpers', () => {
 describe('buildIntentsCliRegistry', () => {
   let dir: string;
   let configPath: string;
+  let capturedEnv: RestorerEnv | null;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'jinn-intent-reg-'));
     configPath = join(dir, 'config.json');
-    captured.lastEnv = null;
+    capturedEnv = null;
   });
 
   afterEach(() => {
@@ -194,10 +182,17 @@ describe('buildIntentsCliRegistry', () => {
     );
     const config = loadConfig(configPath);
     expect(config.engine.implStateDirRoot).toBe(customImplRoot);
-    const registry = buildIntentsCliRegistry(config);
-    expect(captured.lastEnv).not.toBeNull();
-    expect(captured.lastEnv?.implStateDirRoot).toBe(customImplRoot);
-    expect(captured.lastEnv?.stub).toBe(true);
+
+    // Inject a spy that captures the env arg and delegates to the real impl.
+    const buildImpls = vi.fn((env: RestorerEnv) => {
+      capturedEnv = env;
+      return buildRestorerImpls(env);
+    });
+
+    const registry = buildIntentsCliRegistry(config, buildImpls);
+    expect(capturedEnv).not.toBeNull();
+    expect(capturedEnv?.implStateDirRoot).toBe(customImplRoot);
+    expect(capturedEnv?.stub).toBe(true);
     const hl = registry.list().find((i) => i.name === 'claude-mcp-hyperliquid');
     expect(hl).toBeInstanceOf(ClaudeMcpHyperliquidImpl);
     expect(hl.resolvedImplStateDir()).toBe(expectedHlStateDir);
