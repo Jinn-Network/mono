@@ -3,7 +3,7 @@
 **Version:** 1.0 (decision)
 **Date:** 2026-04-27
 **Status:** Decided. Binds PR #37 cleanup and shapes Phase 1b challenge mechanism + reputation surface.
-**Beads:** see §10 — `jinn-mono-2k6`, `jinn-mono-j07`, `jinn-mono-3zk`, `jinn-mono-9jg`, `jinn-mono-2ff`, `jinn-mono-fud`, `jinn-mono-al7`, `jinn-mono-3q8`, `jinn-mono-g7h`, `jinn-mono-b18`.
+**Beads:** see §10 — `jinn-mono-2k6`, `jinn-mono-j07`, `jinn-mono-3zk`, `jinn-mono-9jg`, `jinn-mono-2ff`, `jinn-mono-fud`, `jinn-mono-al7`, `jinn-mono-3q8`, `jinn-mono-g7h`, `jinn-mono-b18`, `jinn-mono-0vg`.
 **Related:**
 
 - `spec/2026-04-21-agentic-data-substrate.md` — substrate thesis; ERC-8004 metadata for license/discovery
@@ -114,6 +114,12 @@ require(
 **Third-party-challenge gap.** Adversarial challenges — where any third party can dispute an operator's manifest without prior approval — require an **operator-installed proxy** contract that the operator has approved (via `setApprovalForAll` or `approve` on the IdentityRegistry NFT) and that exposes a public `requestValidation(...)` entry point. See the companion spec `docs/superpowers/specs/2026-04-27-erc8004-dispute-proxy-design.md` (filed under `jinn-mono-b18`) for the trust model, contract shape, and Phase 1b ship/defer recommendation.
 
 **Validator selection** (open vs. whitelisted vs. staked validator pool) remains **deferred** to a follow-up Phase 1b spec (see §11). The deployed contract accepts any address as `validatorAddress`; whether Jinn imposes additional gating is a separate decision orthogonal to the operator-vs-third-party authorisation issue corrected here.
+
+**Honest note on overlap with Jinn's existing evaluator role (2026-04-27, `jinn-mono-0vg`).** The ValidationRegistry validator and Jinn's existing evaluator role substantially overlap in function — both answer *"did this operator do honest work on this manifest?"* The differences are *how the third party gets selected* (marketplace-assigned for evaluator; operator-chosen for validator), *output granularity* (PASS/FAIL via `JinnRouter.claimDelivery` for evaluator; 0–100 score in ValidationRegistry for validator), and *what it gates* (reward distribution for evaluator; nothing for validator — purely a public receipt).
+
+The validator role's distinct value lives in the **data-substrate / trajectory-buyer story** (`spec/2026-04-21-agentic-data-substrate.md`), where operators voluntarily commission additional third-party review to strengthen their per-execution trust signal beyond what marketplace-assigned evaluators provide. For the loop itself the validator is largely redundant.
+
+The `jinn-mono-9jg` client ships, and `jinn-mono-al7` exercises the contract surface end-to-end, but **no production path issues `validationRequest` today.** Whether to wire it up — and whether the two roles should be merged at the storage layer (e.g., evaluator verdicts posting into ValidationRegistry too) — is tracked under `jinn-mono-0vg`.
 
 ### 4.5 Trust signals layered, not inherited
 
