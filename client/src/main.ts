@@ -128,6 +128,10 @@ async function bootstrap(): Promise<{
   agentPrivateKey: `0x${string}`;
   safeAddress: `0x${string}`;
   mechAddress?: `0x${string}`;
+  /** ERC-8004 agent NFT id (decimal string). null if bootstrap mint not yet complete. */
+  agentId: string | null;
+  /** ERC-8004 IdentityRegistry contract used for the mint. null if unknown. */
+  identityRegistryAddress: `0x${string}` | null;
 }> {
   console.log('[main] Running fleet bootstrap...');
 
@@ -210,6 +214,10 @@ async function bootstrap(): Promise<{
     agentPrivateKey: agentPrivateKey as `0x${string}`,
     safeAddress: firstComplete.safe_address as `0x${string}`,
     mechAddress: firstComplete.mech_address ? (firstComplete.mech_address as `0x${string}`) : undefined,
+    agentId: firstComplete.agent_id ?? null,
+    identityRegistryAddress: firstComplete.identity_registry_address
+      ? (firstComplete.identity_registry_address as `0x${string}`)
+      : null,
   };
 }
 
@@ -268,8 +276,16 @@ export async function main(): Promise<DaemonStartupInfo> {
     });
   }
 
-  const { agentPrivateKey, masterAddress, safeAddress, mechAddress, serviceIndex, serviceId } =
-    await bootstrap();
+  const {
+    agentPrivateKey,
+    masterAddress,
+    safeAddress,
+    mechAddress,
+    serviceIndex,
+    serviceId,
+    agentId,
+    identityRegistryAddress,
+  } = await bootstrap();
 
   if (!mechAddress) {
     emitEnvelope({
@@ -423,6 +439,31 @@ export async function main(): Promise<DaemonStartupInfo> {
     console.log('[main] ClaimRegistry: not configured (claim step will use NotImplementedError fallback)');
   }
 
+  // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
+  //
+  // When the bootstrap has minted an ERC-8004 IdentityRegistry NFT for the
+  // active service (agent_id non-null) AND we know the registry address, wire
+  // an IdentityPublisher so the engine anchors each envelope under the
+  // operator's agent NFT via setMetadata. Otherwise log a warning — publishing
+  // is disabled until bootstrap completes that step (jinn-mono-j07).
+  let identityPublisher: import('./discovery/identity-publisher.js').IdentityPublisher | undefined;
+  if (agentId && identityRegistryAddress) {
+    const { IdentityPublisher } = await import('./discovery/identity-publisher.js');
+    identityPublisher = new IdentityPublisher({
+      identityRegistryAddress,
+      agentId: BigInt(agentId),
+      walletClient: agentClients.walletClient,
+      publicClient: agentClients.publicClient,
+    });
+    console.log(
+      `[main] IdentityPublisher: agentId=${agentId} registry=${identityRegistryAddress}`,
+    );
+  } else {
+    console.log(
+      '[main] IdentityPublisher: disabled (no agent_id on active service — re-run bootstrap to mint the operator agent NFT)',
+    );
+  }
+
   // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
   const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
   const { generators: autoIntentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
@@ -492,6 +533,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       manifestDeps,
       deliveryDeps,
       implRegistry,
+      identityPublisher,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

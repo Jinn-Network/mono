@@ -45,17 +45,23 @@ export const ServiceStateSchema = z.object({
   step: ServiceStepSchema,
   error: z.string().nullable(),
 
-  // ERC-8004 IdentityRegistry mint state (jinn-mono-j07).
-  // All optional — missing on legacy state files written before the
-  // `agent_registered` step landed; bootstrap fills them on first run.
-  // Decimal string because the on-chain `agentId` is a `uint256`.
+  // ERC-8004 IdentityRegistry mint state.
+  //
+  // Populated by the operator-NFT mint step at bootstrap (jinn-mono-j07,
+  // see bootstrap.ts `stepRegisterAgent`). Read in main.ts (jinn-mono-3zk)
+  // to construct an `IdentityPublisher` for the engine when bootstrap has
+  // produced an agentId.
+  //
+  // All optional — missing on legacy state files written before the mint
+  // step landed; the daemon defensively skips publishing when `agent_id`
+  // is null. Decimal string because the on-chain `agentId` is `uint256`.
   agent_id: z.string().nullable().optional().default(null),
   agent_uri: z.string().nullable().optional().default(null),
   identity_registry_address: z.string().nullable().optional().default(null),
   agent_registered_tx: z.string().nullable().optional().default(null),
   // True once `IdentityRegistry.setAgentWallet` succeeds for this Safe.
-  // Currently always `false` — wallet binding is deferred to a follow-up
-  // bead (Safe ERC-1271 wrapping); see bootstrap.ts `stepRegisterAgent`.
+  // Currently always `false` — wallet binding is deferred to jinn-mono-aev
+  // (Safe ERC-1271 wrapping).
   safe_bound_to_agent: z.boolean().nullable().optional().default(false),
 });
 

@@ -37,6 +37,11 @@ import {
 import type { RestorerImpl, RestorationOutput } from '../types.js';
 import { SkippableError } from '../types.js';
 import type { Registry8004 } from '../../discovery/registry.js';
+import type {
+  ExecutionPayload,
+  ExecutionTier,
+  IdentityPublisher,
+} from '../../discovery/identity-publisher.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -105,6 +110,20 @@ export interface RestorationEngineOptions {
    * Optional — tests and development modes may skip registration.
    */
   erc8004Registry?: Registry8004;
+  /**
+   * ERC-8004 Identity Registry per-execution publisher (jinn-mono-3zk).
+   * When provided, the engine calls
+   *   `IdentityRegistry.setMetadata(agentId, "envelope:<cid>", v1Payload)`
+   * after `pack()` returns the manifest CID + evidenceHash, anchoring the
+   * execution under the operator's agent NFT (DR §4.2).
+   *
+   * Failures are logged but NEVER fatal — JinnRouter.claimDelivery(evidenceHash)
+   * remains the authoritative on-chain commitment; this publish is the
+   * discovery anchor.
+   *
+   * Optional — when absent, the engine simply skips publishing.
+   */
+  identityPublisher?: IdentityPublisher;
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -128,6 +147,7 @@ export class RestorationEngine {
   protected readonly deliveryDeps: RestorationEngineOptions['deliveryDeps'];
   protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
   protected readonly erc8004Registry: RestorationEngineOptions['erc8004Registry'];
+  protected readonly identityPublisher: RestorationEngineOptions['identityPublisher'];
 
   // Transient storage for impl output between runImpl and pack transitions.
   // Keyed by requestId; cleared after successful pack.
@@ -146,6 +166,7 @@ export class RestorationEngine {
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
     this.erc8004Registry = opts.erc8004Registry;
+    this.identityPublisher = opts.identityPublisher;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -758,6 +779,52 @@ export class RestorationEngine {
       // Await all registrations so uncaught-promise warnings don't fire.
       // We do NOT block the state transition on these — they are fire-and-resolve.
       await Promise.all([envelopeRegistrationPromise, ...artifactRegistrationPromises]);
+    }
+
+    // 6c. ERC-8004 IdentityRegistry per-execution `setMetadata` (jinn-mono-3zk).
+    //
+    // Anchors the envelope under the operator's agent NFT with a v1 ABI-encoded
+    // payload (tier + manifestHash + optional TEE pointers); see
+    // `docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md` §3.1 and
+    // `2026-04-27-erc-8004-entity-model-design.md` §4.2.
+    //
+    // Best-effort. Failures are logged but never fatal: the JinnRouter
+    // claimDelivery(evidenceHash) call below is the authoritative on-chain
+    // commitment; this `setMetadata` is the discovery anchor.
+    //
+    // Restoration-only for now. Evaluator publishing of `evaluation:<cid>`
+    // lands with jinn-mono-2ff so we don't disturb the evaluator delivery
+    // path here.
+    if (this.identityPublisher) {
+      const intentTypeRaw = intent.intentType ?? 'restoration';
+      if (intentTypeRaw === 'restoration') {
+        // v0 tier rule: with an evidenceHash on chain we declare `committed`;
+        // higher tiers (`attested`, `proved`) come later when TEE work lands
+        // (see DR §4.2 + payload-schema §5).
+        const tier: ExecutionTier = signatureHash ? 1 : 0;
+        const payload: ExecutionPayload = {
+          version: 1,
+          tier,
+          manifestHash: signatureHash,
+          attestationQuoteCid: '0x',
+          sourceMeasurement:
+            '0x0000000000000000000000000000000000000000000000000000000000000000',
+        };
+        try {
+          const txHash = await this.identityPublisher.publishContent({
+            kind: 'envelope',
+            cid: manifestCid,
+            payload,
+          });
+          console.log(
+            `[restorer-engine] ${intent.requestId}: setMetadata envelope:${manifestCid} tx=${txHash}`,
+          );
+        } catch (err) {
+          console.warn(
+            `[restorer-engine] ${intent.requestId}: setMetadata envelope publish failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
     }
 
     // 7. Build artifact CID map for persistence
