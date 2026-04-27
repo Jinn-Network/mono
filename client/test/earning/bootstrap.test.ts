@@ -784,16 +784,23 @@ describe('Fleet bootstrap', () => {
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
     // On-chain staking state is 1 (staked), so eviction recovery path is skipped.
     vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(1);
+    // Avoid real RPC: chain-signal gather returns a healthy staked + bound view.
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: 1,
+      stakingMultisig: '0x2222222222222222222222222222222222222222',
+      registryState: 4,
+      registryMultisig: '0x2222222222222222222222222222222222222222',
+      safeDeployed: true,
+    });
 
     // Spy on stepRegisterAgent to assert it is called for the binding step.
     const stepRegisterSpy = vi
       .spyOn(bootstrapper as any, 'stepRegisterAgent')
       .mockImplementation(async (_s: any, _m: any, index: number) => {
         // Simulate the binding completing: safe_bound_to_agent flips to true,
-        // step advances to agent_registered (the real method's exit state).
+        // service stays at 'complete' (binding is a one-shot side-step).
         return store.updateService(index, {
           safe_bound_to_agent: true,
-          step: 'agent_registered',
         });
       });
 
@@ -854,6 +861,13 @@ describe('Fleet bootstrap', () => {
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
     vi.spyOn(bootstrapper as any, 'getStakingState').mockResolvedValue(1);
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: 1,
+      stakingMultisig: '0x2222222222222222222222222222222222222222',
+      registryState: 4,
+      registryMultisig: '0x2222222222222222222222222222222222222222',
+      safeDeployed: true,
+    });
 
     const stepRegisterSpy = vi.spyOn(bootstrapper as any, 'stepRegisterAgent');
 
