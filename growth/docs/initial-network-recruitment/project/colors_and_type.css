@@ -1,0 +1,280 @@
+/* ============================================================
+   JINN DESIGN SYSTEM — colors_and_type.css
+   The primitives. Everything else is built from here.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+/* ------------------------------------------------------------
+   COLOR — sky / moon / lamplight
+   Palette leans on the metaphor: sky-blue ink on moonlit bone,
+   touched by oil-lamp gold. Dark-first: the protocol lives in
+   a deep blue night, not in black.
+   ------------------------------------------------------------ */
+
+:root {
+  /* Raw palette — reach for semantic tokens instead when possible */
+
+  /* BLUE — the primary. From near-black-blue to luminous sky. */
+  --blue-950: #070d18;       /* deepest — void / vessel interior */
+  --blue-900: #0c1628;       /* primary dark surface */
+  --blue-800: #142340;       /* elevated dark surface */
+  --blue-700: #1f3a66;       /* dark border */
+  --blue-600: #2f5598;
+  --blue-500: #4a7bc4;       /* mid blue */
+  --blue-400: #7aa7dc;       /* primary accent — sky */
+  --blue-300: #a8c8ea;       /* hover / bright */
+  --blue-200: #cbdef3;
+  --blue-100: #e4eefa;       /* elevated light */
+  --blue-50:  #f2f7fc;       /* primary light surface */
+
+  /* GOLD — hints only. Lamplight through the window. */
+  --gold-600: #a88438;
+  --gold-500: #c9a048;       /* canonical gold */
+  --gold-400: #dcb866;       /* primary gold accent */
+  --gold-300: #ead08e;
+
+  /* SLATE — muted mid-tones; the smoke that isn't blue */
+  --slate-500: #5c6b82;
+  --slate-400: #7d8ba3;
+  --slate-300: #a4b0c2;
+
+  /* Status — derived from the palette family: cool teal, deep lamplight,
+     cool iron-red, night-watcher violet. Never pure R/Y/G/B lookups. */
+  --vow-green:   #6a9b8f;    /* success / bound — cool teal-green */
+  --wane:        #b8802f;    /* warning / unresolved — deep lamplight */
+  --break-red:   #a85a5a;    /* error / broken — cool iron-red */
+  --seer-violet: #7a6db0;    /* info / reading — night-watcher violet */
+}
+
+/* ------------------------------------------------------------
+   SEMANTIC TOKENS — dark-first default
+   ------------------------------------------------------------ */
+:root,
+[data-theme="dark"] {
+  /* Surfaces */
+  --bg:          var(--blue-900);
+  --bg-elevated: var(--blue-800);
+  --bg-sunken:   var(--blue-950);
+  --bg-inverse:  var(--blue-50);
+
+  /* Foreground */
+  --fg:          var(--blue-50);
+  --fg-muted:    var(--slate-300);
+  --fg-dim:      var(--slate-400);
+  --fg-inverse:  var(--blue-900);
+
+  /* Borders */
+  --border:         var(--blue-700);
+  --border-strong:  var(--blue-400);
+  --border-accent:  var(--gold-500);
+
+  /* Accents */
+  --accent:           var(--blue-400);
+  --accent-hover:     var(--blue-300);
+  --accent-fg:        var(--blue-950);
+  --gold:             var(--gold-400);
+  --gold-hover:       var(--gold-300);
+
+  /* Status */
+  --success: var(--vow-green);
+  --warning: var(--wane);
+  --danger:  var(--break-red);
+  --info:    var(--seer-violet);
+
+  /* Selection */
+  --selection-bg: var(--blue-400);
+  --selection-fg: var(--blue-950);
+}
+
+[data-theme="light"] {
+  --bg:          var(--blue-50);
+  --bg-elevated: #ffffff;
+  --bg-sunken:   var(--blue-100);
+  --bg-inverse:  var(--blue-900);
+
+  --fg:          var(--blue-900);
+  --fg-muted:    var(--slate-500);
+  --fg-dim:      var(--slate-400);
+  --fg-inverse:  var(--blue-50);
+
+  --border:         var(--blue-200);
+  --border-strong:  var(--blue-700);
+  --border-accent:  var(--gold-500);
+
+  --accent:         var(--blue-600);
+  --accent-hover:   var(--blue-500);
+  --accent-fg:      var(--blue-50);
+  --gold:           var(--gold-500);
+  --gold-hover:     var(--gold-400);
+
+  --selection-bg: var(--blue-900);
+  --selection-fg: var(--blue-50);
+}
+
+/* ------------------------------------------------------------
+   TYPOGRAPHY — two voices only
+   Instrument Serif  — display, wishes, vows, section heads
+   JetBrains Mono    — everything else. UI, body, data, code.
+   ------------------------------------------------------------ */
+
+:root {
+  --font-display: 'Instrument Serif', 'Times New Roman', serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* No sans. The restraint IS the brand. */
+
+  /* Scale — fifth step sizes, tuned for mono's wider metrics */
+  --text-2xs:  10px;
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-base: 14px;
+  --text-md:   15px;
+  --text-lg:   17px;
+  --text-xl:   20px;
+  --text-2xl:  26px;
+  --text-3xl:  34px;
+  --text-4xl:  48px;
+  --text-5xl:  64px;
+  --text-6xl:  88px;
+  --text-7xl:  120px;
+
+  /* Line heights */
+  --lh-tight: 1.05;
+  --lh-snug:  1.2;
+  --lh-base:  1.5;
+  --lh-loose: 1.7;
+
+  /* Letterspacing — mono wants tighter; serif display wants slight loosening */
+  --tracking-display: 0;
+  --tracking-mono:    -0.01em;
+  --tracking-wide:    0.08em;
+  --tracking-label:   0.14em;  /* for ALL CAPS LABELS */
+}
+
+/* ------------------------------------------------------------
+   SEMANTIC TYPE CLASSES
+   ------------------------------------------------------------ */
+
+.display, h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-6xl);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg);
+}
+
+.display-xl {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-7xl);
+  line-height: 0.95;
+}
+
+.display-italic {
+  font-style: italic;
+}
+
+h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-4xl);
+  line-height: var(--lh-snug);
+}
+
+h3 {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--text-lg);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-mono);
+}
+
+h4 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-base);
+  line-height: var(--lh-snug);
+}
+
+.label, .eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+p, .body {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: var(--text-base);
+  line-height: var(--lh-loose);
+  letter-spacing: var(--tracking-mono);
+  color: var(--fg);
+}
+
+.body-sm {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--lh-base);
+}
+
+.code, code, pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-mono);
+}
+
+.data, .tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+/* A single decorative flourish — italic serif pull-quote for mystical copy */
+.wish {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--text-2xl);
+  line-height: var(--lh-base);
+  color: var(--fg);
+}
+
+/* ------------------------------------------------------------
+   BASELINE
+   ------------------------------------------------------------ */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: var(--lh-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--selection-fg);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+}
+a:hover { color: var(--accent-hover); }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 2rem 0;
+}
