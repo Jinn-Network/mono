@@ -17,6 +17,7 @@ import {
 import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
   loadConfig as defaultLoadConfig,
+  buildConfigProvenance,
   type JinnConfig,
 } from '../../config.js';
 import { getChainConfig, ERC20_ABI } from '../../earning/contracts.js';
@@ -367,9 +368,11 @@ Examples:
       }
 
       const blockingCount = checks.filter((c) => !c.ok).length;
+      const provenance = buildConfigProvenance(configPath, config, ctx.env);
       const payload = {
         schemaVersion: 1 as const,
         generatedAt: new Date().toISOString(),
+        config: provenance,
         checks,
         ok: blockingCount === 0,
         blockingCount,

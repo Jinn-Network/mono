@@ -39,19 +39,50 @@ If not installed:
 npm install -g @jinn-network/client
 ```
 
-This gives you one binary:
-- `jinn` — the operator CLI (17 verbs); run `jinn mcp` to start the MCP server
+This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `jinn mcp` (see Phase 2).
 
 ### Prerequisites
 
 - **Node.js 22+** — `node --version` to check
 - **Claude Code CLI** — the daemon spawns Claude as a subprocess for restoration work. Must be installed and authenticated separately.
 
+### CLI verb reference
+
+<!-- skill:cli-table:start -->
+| Verb | What it does |
+|------|--------------|
+| `jinn version` | Print client version, protocol phase, and resolved token map |
+| `jinn doctor` | Preflight checks: answers "would jinn run work?" without running it |
+| `jinn init` | Generate the master wallet and write the encrypted keystore |
+| `jinn quickstart` | Zero-to-running in one command: init, fund, bootstrap, run |
+| `jinn auth` | Check Claude authentication and persist how the operator runs the daemon |
+| `jinn bootstrap` | Advance the fleet state machine toward a running daemon |
+| `jinn fund-requirements` | List addresses that need funding before the next bootstrap step |
+| `jinn run` | Start the daemon in the foreground; stops on SIGINT/SIGTERM |
+| `jinn stop` | Signal a running jinn daemon to shut down gracefully |
+| `jinn status` | Daemon liveness + roll-up (poll this for monitoring; pull detail separately) |
+| `jinn fleet` | Per-service fleet detail (wallets, staking, rewards, attention) |
+| `jinn balance` | Flat per-wallet balance map across master and service wallets |
+| `jinn history` | Recent protocol activity (intents, claims, deliveries, evaluations, rewards) |
+| `jinn rewards` | Earned vs claimed per service, per asset; next checkpoint time |
+| `jinn logs` | Structured event log (one JSON object per line) |
+| `jinn submit-intent` | Post a desired state (restoration job) to the protocol |
+| `jinn claim-rewards` | Pull pending protocol rewards to the fleet multisigs |
+| `jinn withdraw` | Sweep master / agents per withdraw flags |
+| `jinn keys` | Keystore management: backup, change-password |
+| `jinn plugin` | Configure AI tools to use Jinn MCP server and operator skill |
+| `jinn update` | Update the client package and refresh plugins in all configured AI tools |
+| `jinn intents` | List, enable, or disable restoration of specific intent kinds. |
+| `jinn mcp` | Run the operator MCP server over stdio |
+| `jinn migrate-agent-id` | Backfill ERC-8004 agent_id on legacy complete services (jinn-mono-jgp) |
+| `jinn conformance` | Run the envelope + trajectory conformance suite against a signed envelope CID |
+<!-- skill:cli-table:end -->
+
 ## Phase 2: MCP Configuration
 
 If the user wants their agent (Claude Code, Cursor, etc.) to operate jinn programmatically, configure the MCP server:
 
-**For Claude Code** — add to project or user MCP settings:
+**For Claude Code** — run `jinn plugin install` (installs automatically) or add to project/user MCP settings manually:
 ```json
 {
   "mcpServers": {
@@ -77,30 +108,47 @@ If the user wants their agent (Claude Code, Cursor, etc.) to operate jinn progra
 
 Once configured, these MCP tools become available:
 
+<!-- skill:mcp-table:start -->
 | Tool | What it does |
-|------|-------------|
-| `jinn_init` | Create master wallet (idempotent) |
-| `jinn_doctor` | Preflight checks |
-| `jinn_status` | Daemon health + fleet roll-up |
-| `jinn_fleet` | Per-service detail |
-| `jinn_balance` | Wallet balances |
-| `jinn_history` | Recent protocol activity |
-| `jinn_rewards` | Earned vs claimed rewards |
-| `jinn_bootstrap` | Advance fleet state machine |
-| `jinn_submit_intent` | Post a desired state on-chain |
-| `jinn_start_daemon` | Start daemon in background |
-| `jinn_stop_daemon` | Stop running daemon |
+|------|--------------|
+| `jinn_auth` | Read-only: check Claude authentication status and the resolved runtime mode (bare/docker-compose/container). Does NOT attempt login — it only probes and reports. Use this as the first call to verify the agent path is ready. Returns authenticated:true + context + email on success; returns an error envelope if not authenticated. Fast (<1s). |
+| `jinn_doctor` | Preflight checks: node version, claude binary, keystore, deployment config. Read-only. Fast (<5s). |
+| `jinn_fund_requirements` | Read-only: list addresses and amounts that need funding before bootstrap can advance. Note: the underlying command may hydrate wallet state as a side effect of checking funding. Returns an array of funding gaps; empty array means all funded. |
+| `jinn_status` | Daemon liveness and fleet health roll-up. Read-only. Poll this to monitor progress. Fast (<2s). |
+| `jinn_fleet` | Per-service fleet detail: wallets, staking status, activity counts. Read-only. Fast (<5s). |
+| `jinn_balance` | Flat per-wallet balance map across master and service wallets. Read-only. Requires RPC. Fast (<5s). |
+| `jinn_history` | Recent protocol activity: intents, claims, deliveries, evaluations, rewards. Read-only from local DB. Fast (<2s). |
+| `jinn_logs` | Recent activity event log from the local SQLite store. Read-only. Fast (<2s). Returns events with ts, level, component, msg fields. Call with limit=100 for monitoring; increase for deeper history. |
+| `jinn_rewards` | Pending and claimed reward balances per staked service. Read-only. Requires RPC access. Fast (<5s). Returns per-service pending/claimed amounts and next checkpoint time. |
+| `jinn_intents_list` | List all registered intent kinds with their enabled/ready state. Read-only. Fast (<2s). |
+| `jinn_intents_status` | Detailed status for one intent kind: impl, enabled, ready, nextStep. Read-only. Fast (<2s). |
+| `jinn_intents_enable` | MUTATING: Opt in to restoring a specific intent kind. Idempotent. Calls impl.onEnable which may write config. Fast unless impl requires external action. Pass extra_args as space-separated "--key=value" pairs for impl-specific options (e.g. "--hl-master=0x..."). |
+| `jinn_intents_disable` | MUTATING: Opt out of restoring a specific intent kind. Writes config. Idempotent. Fast (<1s). |
+| `jinn_init` | MUTATING. Create the master wallet and write the encrypted keystore. Idempotent: re-runs return the existing master address. Requires confirm: true; default is preview (no filesystem write). |
+| `jinn_quickstart` | MUTATING: Zero-to-running in one call: resolve/generate password, init wallet, bootstrap fleet, start daemon. Idempotent — safe to call repeatedly; resumes from last completed step. Long-running: can take up to 30 minutes if funding is required. Returns a progress stream via --json-progress; poll jinn_status to monitor after this returns. Use no_daemon=true to skip starting the daemon (useful for CI or when the daemon is managed separately). |
+| `jinn_bootstrap` | MUTATING. Advance the fleet state machine. Idempotent. May take several minutes; can post on-chain transactions and request testnet faucet funds. Returns funding_required if a wallet needs ETH. Requires confirm: true; default is preview (no chain or filesystem mutation). |
+| `jinn_submit_intent` | MUTATING. Post a desired state (restoration job) to the protocol. Idempotent by id. Sends an on-chain transaction and pays gas when confirmed. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
+| `jinn_claim_rewards` | MUTATING. Pull pending protocol rewards to the fleet multisigs. Idempotent: zero-delta exits 0. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
+| `jinn_update` | MUTATING: Update the client package and refresh installed plugins. Step 1: npm update -g @jinn-network/client Step 2: jinn plugin install (refreshes skills in all configured AI tools). May take 1-2 minutes. Use skip_npm=true to only refresh plugins with the current version. |
+| `jinn_start_daemon` | MUTATING. Start the jinn daemon as a detached background process. Spawns a long-lived child process and writes a pidfile. Requires confirm: true; default is preview (does not spawn a process). |
+| `jinn_stop_daemon` | MUTATING. Stop the running jinn daemon. Idempotent: returns success even if already stopped. Requires confirm: true; default is preview (does not signal any process). |
+<!-- skill:mcp-table:end -->
 
 ## Phase 3: Quickstart (Zero to Running)
 
-The fastest path from nothing to a running agent:
+The canonical first-run path — run these two commands in order:
 
 ```bash
+# Step 1 — one-time: pick runtime mode and authenticate Claude Code (interactive TTY required).
+jinn auth
+
+# Step 2 — zero-to-running: auto-generates a keystore password, then init → fund → bootstrap → run.
 jinn quickstart
 ```
 
-This single command:
-1. Generates a random keystore password (saved to `~/.jinn-client/keystore-password`)
+`jinn auth` persists the runtime-mode choice so all subsequent commands agree on how to spawn Claude.
+`jinn quickstart` then:
+1. Generates a random keystore password (saved to `~/.jinn-client/keystore-password`, mode 0600)
 2. Creates the master wallet
 3. Funds via Coinbase CDP faucet (automatic on testnet)
 4. Bootstraps the fleet (Safe wallet, service registration, staking, mech deployment)
@@ -108,13 +156,15 @@ This single command:
 
 When it finishes: **open `http://localhost:7331`** for the operator dashboard.
 
-### If the user already has JINN_PASSWORD set:
+### Advanced / CI: explicit password
+
+If you want to manage the password yourself (recommended for production or CI pipelines), set `JINN_PASSWORD` before calling `quickstart`. No file will be written to disk:
 
 ```bash
 JINN_PASSWORD=their-password jinn quickstart
 ```
 
-The command respects an existing password and won't generate a new one.
+For CI, prefer reading the password from a file descriptor: `--password-fd N`.
 
 ### If quickstart stops at "funding required":
 
@@ -224,7 +274,7 @@ To post a desired state for the network to work on:
 jinn submit-intent --id my-intent --description "The service publishes a daily summary" --yes
 ```
 
-Or via MCP: call `jinn_submit_intent` with `id` and `description` parameters.
+Or via MCP: call `jinn_submit_intent` with `id` and `description`. Mutating MCP tools default to a preview envelope; pass `confirm: true` to actually post on-chain. Other mutating tools (`jinn_init`, `jinn_bootstrap`, `jinn_start_daemon`, `jinn_stop_daemon`) follow the same `confirm: true` rule.
 
 ### Checking Rewards
 

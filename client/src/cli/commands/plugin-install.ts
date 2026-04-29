@@ -243,12 +243,27 @@ interface TargetResult {
   detail: string;
 }
 
+/** A single file change that would be made during install. */
+export interface PlanEntry {
+  target: string;
+  kind: 'mcp' | 'skill';
+  filePath: string;
+  fileExists: boolean;
+  /** Exact content that would be appended/written (not the full file). */
+  patch: string;
+  alreadyConfigured: boolean;
+}
+
 interface PluginTarget {
   id: string;
   name: string;
   detect(): boolean;
   isMcpConfigured(scope: 'user' | 'project'): boolean;
   isSkillConfigured(scope: 'user' | 'project'): boolean;
+  /** Return the filesystem path that MCP config would be written to, or null if not applicable. */
+  mcpFilePath?(scope: 'user' | 'project'): string | null;
+  /** Return the filesystem path that skill content would be written to, or null if not applicable. */
+  skillFilePath?(scope: 'user' | 'project'): string | null;
   installMcp(scope: 'user' | 'project'): Promise<TargetResult>;
   installSkill(scope: 'user' | 'project', skillContent: string): Promise<TargetResult>;
   removeMcp(scope: 'user' | 'project'): Promise<TargetResult>;
@@ -266,6 +281,8 @@ const TARGETS: PluginTarget[] = [
     id: 'claude-code',
     name: 'Claude Code',
     detect: () => commandExists('claude'),
+    mcpFilePath(_scope) { return null; /* managed via `claude mcp add` CLI, no direct file path */ },
+    skillFilePath(scope) { return join(claudeSkillDir(scope), 'SKILL.md'); },
     isMcpConfigured(scope) {
       // We can't easily check this without parsing claude's internal config.
       // Attempt to list MCP servers and check for jinn.
@@ -314,6 +331,8 @@ const TARGETS: PluginTarget[] = [
     id: 'claude-desktop',
     name: 'Claude Desktop',
     detect: () => existsSync(claudeDesktopConfigDir()),
+    mcpFilePath(_scope) { return join(claudeDesktopConfigDir(), 'claude_desktop_config.json'); },
+    skillFilePath(scope) { return join(claudeSkillDir(scope === 'project' ? 'user' : scope), 'SKILL.md'); },
     isMcpConfigured(_scope) {
       const cfgPath = join(claudeDesktopConfigDir(), 'claude_desktop_config.json');
       return hasJsonMcpServer(cfgPath, 'mcpServers');
@@ -344,6 +363,16 @@ const TARGETS: PluginTarget[] = [
     id: 'cursor',
     name: 'Cursor',
     detect: () => existsSync(join(homedir(), '.cursor')),
+    mcpFilePath(scope) {
+      return scope === 'user'
+        ? join(homedir(), '.cursor', 'mcp.json')
+        : join(process.cwd(), '.cursor', 'mcp.json');
+    },
+    skillFilePath(scope) {
+      return scope === 'user'
+        ? join(homedir(), '.cursor', 'rules', 'jinn.md')
+        : join(process.cwd(), '.cursor', 'rules', 'jinn.md');
+    },
     isMcpConfigured(scope) {
       const cfgPath = scope === 'user'
         ? join(homedir(), '.cursor', 'mcp.json')
@@ -387,6 +416,14 @@ const TARGETS: PluginTarget[] = [
     id: 'vscode',
     name: 'VS Code',
     detect: () => commandExists('code'),
+    mcpFilePath(scope) {
+      if (scope === 'user') return null;
+      return join(process.cwd(), '.vscode', 'mcp.json');
+    },
+    skillFilePath(scope) {
+      if (scope === 'user') return null;
+      return join(process.cwd(), '.github', 'copilot-instructions.md');
+    },
     isMcpConfigured(scope) {
       if (scope === 'user') return false; // VS Code MCP is project-scoped only via .vscode/mcp.json
       const cfgPath = join(process.cwd(), '.vscode', 'mcp.json');
@@ -432,6 +469,16 @@ const TARGETS: PluginTarget[] = [
     id: 'gemini-cli',
     name: 'Gemini CLI',
     detect: () => existsSync(join(homedir(), '.gemini')),
+    mcpFilePath(scope) {
+      return scope === 'user'
+        ? join(homedir(), '.gemini', 'settings.json')
+        : join(process.cwd(), '.gemini', 'settings.json');
+    },
+    skillFilePath(scope) {
+      return scope === 'user'
+        ? join(homedir(), '.gemini', 'GEMINI.md')
+        : join(process.cwd(), 'GEMINI.md');
+    },
     isMcpConfigured(scope) {
       const cfgPath = scope === 'user'
         ? join(homedir(), '.gemini', 'settings.json')
@@ -475,6 +522,8 @@ const TARGETS: PluginTarget[] = [
     id: 'antigravity',
     name: 'Antigravity',
     detect: () => existsSync(join(homedir(), '.gemini', 'antigravity')),
+    mcpFilePath(_scope) { return join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'); },
+    skillFilePath(_scope) { return join(homedir(), '.gemini', 'GEMINI.md'); },
     isMcpConfigured(_scope) {
       const cfgPath = join(homedir(), '.gemini', 'antigravity', 'mcp_config.json');
       return hasJsonMcpServer(cfgPath, 'mcpServers');
@@ -506,6 +555,16 @@ const TARGETS: PluginTarget[] = [
     id: 'codex',
     name: 'Codex',
     detect: () => existsSync(join(homedir(), '.codex')),
+    mcpFilePath(scope) {
+      return scope === 'user'
+        ? join(homedir(), '.codex', 'config.toml')
+        : join(process.cwd(), '.codex', 'config.toml');
+    },
+    skillFilePath(scope) {
+      return scope === 'user'
+        ? join(homedir(), '.codex', 'AGENTS.md')
+        : join(process.cwd(), 'AGENTS.md');
+    },
     isMcpConfigured(scope) {
       const cfgPath = scope === 'user'
         ? join(homedir(), '.codex', 'config.toml')
@@ -546,6 +605,108 @@ const TARGETS: PluginTarget[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Plan helpers — compute what would change without writing
+// ---------------------------------------------------------------------------
+
+/** Compute the content patch that `upsertTomlMcpServer` would append. */
+function tomlMcpPatch(filePath: string): string {
+  if (hasTomlMcpServer(filePath)) return '(already present)';
+  const existing = existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
+  const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n\n' : existing.length > 0 ? '\n' : '';
+  return separator + TOML_BLOCK + '\n';
+}
+
+/** Compute the content patch that `upsertJsonMcpServer` would append. */
+function jsonMcpPatch(filePath: string, rootKey: string): string {
+  if (hasJsonMcpServer(filePath, rootKey)) return '(already present)';
+  return JSON.stringify({ [rootKey]: { jinn: { command: 'jinn', args: ['mcp'] } } }, null, 2);
+}
+
+/** Compute the content patch that `upsertSkillBlock` would append/replace. */
+function skillBlockPatch(filePath: string, content: string): string {
+  if (hasSkillBlock(filePath)) return `(skill block already present — would update to current SKILL.md content)`;
+  return `${BLOCK_START}\n${content}\n${BLOCK_END}\n`;
+}
+
+function buildPlanEntries(
+  targets: PluginTarget[],
+  scope: 'user' | 'project',
+  skillContent: string,
+  includeMcp: boolean,
+  includeSkill: boolean,
+): PlanEntry[] {
+  const entries: PlanEntry[] = [];
+  const strippedSkill = stripFrontmatter(skillContent);
+
+  for (const target of targets) {
+    if (!target.detect()) continue;
+
+    if (includeMcp) {
+      const fp = target.mcpFilePath?.(scope) ?? null;
+      if (fp !== null) {
+        // Determine the root key for JSON targets vs. TOML targets
+        const isToml = fp.endsWith('.toml');
+        let patch: string;
+        if (isToml) {
+          patch = tomlMcpPatch(fp);
+        } else {
+          // Determine the root key from the file path
+          const rootKey = fp.includes('vscode') ? 'servers' : 'mcpServers';
+          patch = jsonMcpPatch(fp, rootKey);
+        }
+        entries.push({
+          target: target.id,
+          kind: 'mcp',
+          filePath: fp,
+          fileExists: existsSync(fp),
+          patch,
+          alreadyConfigured: target.isMcpConfigured(scope),
+        });
+      } else {
+        // claude-code uses CLI — note it in the plan
+        entries.push({
+          target: target.id,
+          kind: 'mcp',
+          filePath: '(managed via `claude mcp add` CLI)',
+          fileExists: false,
+          patch: target.isMcpConfigured(scope) ? '(already present)' : 'run: claude mcp add --scope ' + scope + ' jinn -- jinn mcp',
+          alreadyConfigured: target.isMcpConfigured(scope),
+        });
+      }
+    }
+
+    if (includeSkill) {
+      const fp = target.skillFilePath?.(scope) ?? null;
+      if (fp !== null) {
+        const isMd = fp.endsWith('.md');
+        let patch: string;
+        if (isMd && target.id !== 'cursor') {
+          patch = skillBlockPatch(fp, strippedSkill);
+        } else {
+          // cursor writes full file; claude-code copies SKILL.md
+          if (target.id === 'cursor') {
+            patch = existsSync(fp) ? '(would overwrite with current SKILL.md content)' : strippedSkill;
+          } else {
+            // claude-code: copies SKILL.md into ~/.claude/skills/jinn-operator/SKILL.md
+            patch = existsSync(fp) ? '(would update SKILL.md to current version)' : '(would copy SKILL.md)';
+          }
+        }
+        entries.push({
+          target: target.id,
+          kind: 'skill',
+          filePath: fp,
+          fileExists: existsSync(fp),
+          patch,
+          alreadyConfigured: target.isSkillConfigured(scope),
+        });
+      }
+    }
+  }
+
+  return entries;
+}
+
+// ---------------------------------------------------------------------------
 // Subverb: install
 // ---------------------------------------------------------------------------
 
@@ -555,7 +716,7 @@ interface ResultEntry {
   skill: { status: string; detail: string };
 }
 
-async function runInstall(ctx: CommandContext, rest: string[]): Promise<void> {
+async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = false): Promise<void> {
   let parsed;
   try {
     parsed = parseArgs({
@@ -565,6 +726,10 @@ async function runInstall(ctx: CommandContext, rest: string[]): Promise<void> {
         target: { type: 'string' },
         json: { type: 'boolean', default: false },
         human: { type: 'boolean', default: false },
+        'dry-run': { type: 'boolean', default: false },
+        yes: { type: 'boolean', default: false },
+        'mcp-only': { type: 'boolean', default: false },
+        'skill-only': { type: 'boolean', default: false },
       },
       allowPositionals: false,
     });
@@ -581,8 +746,25 @@ async function runInstall(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
 
+  // Validate mutually exclusive flags
+  if (parsed.values['mcp-only'] && parsed.values['skill-only']) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: '--mcp-only and --skill-only are mutually exclusive',
+        exampleCli: 'jinn plugin install --mcp-only',
+        details: { field: 'flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
   const scope = (parsed.values.scope as string) === 'project' ? 'project' as const : 'user' as const;
   const targetFilter = parsed.values.target as string | undefined;
+  const isDryRun = forceDryRun || Boolean(parsed.values['dry-run']) || (!ctx.stdoutIsTty && !parsed.values.yes);
+  const includeMcp = !Boolean(parsed.values['skill-only']);
+  const includeSkill = !Boolean(parsed.values['mcp-only']);
 
   let skillContent: string;
   try {
@@ -616,6 +798,40 @@ async function runInstall(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
 
+  // Dry-run / plan mode — emit plan and return without writing
+  if (isDryRun) {
+    const plan = buildPlanEntries(targets, scope, skillContent, includeMcp, includeSkill);
+    emitResult(
+      {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        verb: 'plugin plan',
+        dryRun: true,
+        scope,
+        plan,
+      },
+      (v) => {
+        const data = v as { plan: PlanEntry[] };
+        if (data.plan.length === 0) return 'No targets detected — nothing to install.';
+        return data.plan
+          .map((e) => {
+            const exists = e.fileExists ? 'exists' : 'new';
+            const configured = e.alreadyConfigured ? ' [already configured]' : '';
+            return `${e.target} (${e.kind})${configured}\n  file: ${e.filePath} [${exists}]\n  patch: ${e.patch.substring(0, 120).replace(/\n/g, '\\n')}${e.patch.length > 120 ? '...' : ''}`;
+          })
+          .join('\n\n') + '\n\nRe-run with --yes to apply.';
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
+    );
+    return;
+  }
+
   const results: ResultEntry[] = [];
 
   for (const target of targets) {
@@ -631,18 +847,25 @@ async function runInstall(ctx: CommandContext, rest: string[]): Promise<void> {
     }
 
     let mcpResult: { status: string; detail: string };
-    if (target.isMcpConfigured(scope)) {
+    if (!includeMcp) {
+      mcpResult = { status: 'skipped', detail: 'Skipped (--skill-only)' };
+    } else if (target.isMcpConfigured(scope)) {
       mcpResult = { status: 'skipped', detail: 'Already configured' };
     } else {
       const r = await target.installMcp(scope);
       mcpResult = { status: r.ok ? 'configured' : 'error', detail: r.detail };
     }
 
-    // Always run installSkill — the helpers handle both fresh installs and
-    // updates (replacing existing content), so skill changes propagate when
-    // the package is upgraded and `jinn plugin install` is re-run.
-    const sr = await target.installSkill(scope, skillContent);
-    const skillResult = { status: sr.ok ? 'configured' : 'error', detail: sr.detail };
+    let skillResult: { status: string; detail: string };
+    if (!includeSkill) {
+      skillResult = { status: 'skipped', detail: 'Skipped (--mcp-only)' };
+    } else {
+      // Always run installSkill — the helpers handle both fresh installs and
+      // updates (replacing existing content), so skill changes propagate when
+      // the package is upgraded and `jinn plugin install` is re-run.
+      const sr = await target.installSkill(scope, skillContent);
+      skillResult = { status: sr.ok ? 'configured' : 'error', detail: sr.detail };
+    }
 
     results.push({ target: target.id, mcp: mcpResult, skill: skillResult });
   }
@@ -867,9 +1090,9 @@ async function run(ctx: CommandContext): Promise<void> {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'jinn plugin requires a subverb: install, remove, list',
+        message: 'jinn plugin requires a subverb: install, plan, remove, list',
         exampleCli: 'jinn plugin install',
-        details: { field: 'subverb', expected: 'install|remove|list' },
+        details: { field: 'subverb', expected: 'install|plan|remove|list' },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -879,6 +1102,9 @@ async function run(ctx: CommandContext): Promise<void> {
   switch (subverb) {
     case 'install':
       return runInstall(ctx, rest);
+    case 'plan':
+      // 'plan' is an alias for 'install --dry-run'
+      return runInstall(ctx, rest, true);
     case 'remove':
       return runRemove(ctx, rest);
     case 'list':
@@ -889,7 +1115,7 @@ async function run(ctx: CommandContext): Promise<void> {
           code: 'invalid_invocation',
           message: `Unknown plugin subverb: ${subverb}`,
           exampleCli: 'jinn plugin install',
-          details: { field: 'subverb', expected: 'install|remove|list' },
+          details: { field: 'subverb', expected: 'install|plan|remove|list' },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
@@ -899,18 +1125,26 @@ async function run(ctx: CommandContext): Promise<void> {
 const command: CommandModule = {
   name: 'plugin',
   summary: 'Configure AI tools to use Jinn MCP server and operator skill',
-  helpText: `Usage: jinn plugin <install|remove|list> [options]
+  helpText: `Usage: jinn plugin <install|plan|remove|list> [options]
 
 Subcommands:
   install   Configure detected AI tools with Jinn MCP server and operator skill
+  plan      Show what 'install' would change without writing (alias for install --dry-run)
   remove    Remove Jinn configuration from AI tools
   list      Show detected AI tools and their configuration status
 
 Options:
   --scope <user|project>   Install scope (default: user)
   --target <id>            Configure only this target
+  --dry-run                Show plan without writing files
+  --yes                    Apply writes in non-interactive (non-TTY) mode
+  --mcp-only               Only configure MCP server (skip skill/instruction files)
+  --skill-only             Only configure skill/instruction files (skip MCP server)
   --json                   JSON output (default)
   --human                  Human-readable output
+
+Safety: in non-TTY (agent/script) contexts, 'install' defaults to --dry-run.
+Pass --yes to apply writes. Interactive TTY sessions prompt before writing.
 
 Supported targets:
   claude-code      Claude Code CLI
@@ -923,9 +1157,13 @@ Supported targets:
 
 Examples:
   jinn plugin list --human
-  jinn plugin install --human
-  jinn plugin install --target claude-code --human
-  jinn plugin install --scope project --target cursor
+  jinn plugin plan --human
+  jinn plugin install --dry-run --human
+  jinn plugin install --yes --human
+  jinn plugin install --yes --target claude-code --human
+  jinn plugin install --yes --scope project --target cursor
+  jinn plugin install --yes --mcp-only
+  jinn plugin install --yes --skill-only --target codex
   jinn plugin remove --target claude-code
 `,
   run,

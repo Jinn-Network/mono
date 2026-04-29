@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, buildConfigProvenance } from '../src/config.js';
 
 describe('loadConfig RPC override handling', () => {
   const dirs: string[] = [];
@@ -290,5 +290,76 @@ describe('loadConfig RPC override handling', () => {
     } finally {
       delete process.env['JINN_REPUTATION_ENABLED'];
     }
+  });
+});
+
+describe('buildConfigProvenance', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-provenance-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('returns configLoaded=true and configPath set when a config file is present', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    const config = loadConfig(configPath);
+    const prov = buildConfigProvenance(configPath, config, {});
+    expect(prov.configLoaded).toBe(true);
+    expect(prov.configPath).toBe(configPath);
+  });
+
+  it('returns configLoaded=false and configPath=null when no config file exists', () => {
+    const config = loadConfig();
+    const nonExistentPath = path.join(os.tmpdir(), 'jinn-no-such-config-' + Date.now() + '.json');
+    const prov = buildConfigProvenance(nonExistentPath, config, {});
+    expect(prov.configLoaded).toBe(false);
+    expect(prov.configPath).toBeNull();
+  });
+
+  it('surfaces env overrides by name with value "set"', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    const config = loadConfig(configPath);
+    const prov = buildConfigProvenance(configPath, config, {
+      JINN_RPC_URL: 'http://fake',
+      JINN_EARNING_DIR: '/tmp/earning',
+    });
+    expect(prov.envOverrides['JINN_RPC_URL']).toBe('set');
+    expect(prov.envOverrides['JINN_EARNING_DIR']).toBe('set');
+  });
+
+  it('does NOT include JINN_PASSWORD in envOverrides even when set', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    const config = loadConfig(configPath);
+    const prov = buildConfigProvenance(configPath, config, {
+      JINN_PASSWORD: 'super-secret',
+      JINN_RPC_URL: 'http://fake',
+    });
+    expect('JINN_PASSWORD' in prov.envOverrides).toBe(false);
+    expect(prov.envOverrides['JINN_RPC_URL']).toBe('set');
+  });
+
+  it('does not include unset env vars in envOverrides', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    const config = loadConfig(configPath);
+    const prov = buildConfigProvenance(configPath, config, {});
+    expect(Object.keys(prov.envOverrides)).toHaveLength(0);
+  });
+
+  it('reflects resolved network, earningDir, dbPath, runtimeMode', async () => {
+    const configPath = await writeConfigFile({ network: 'mainnet' });
+    const config = loadConfig(configPath);
+    const prov = buildConfigProvenance(configPath, config, {});
+    expect(prov.network).toBe('mainnet');
+    expect(typeof prov.earningDir).toBe('string');
+    expect(typeof prov.dbPath).toBe('string');
+    expect(prov.runtimeMode).toBeNull(); // not set in config or env
   });
 });

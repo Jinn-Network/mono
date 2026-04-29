@@ -11,6 +11,8 @@ const fakeDeps = {
     desiredStates: [],
     engine: { implStateDirRoot: '/tmp/fake-impl-state', workingDirRoot: '/tmp/fake-work' },
     earningDir: '/tmp/fake-earning',
+    dbPath: '/tmp/fake.db',
+    runtimeMode: undefined,
   } as any),
   getConfigPathFromArgs: () => undefined,
   checkClaudeBinary: async () => ({ ok: true, detail: 'fake claude binary' } as any),
@@ -64,5 +66,41 @@ describe('doctor command (DI integration)', () => {
     });
     const { envelopes } = await runCommand(cmd);
     expect((envelopes[0] as { ok: boolean }).ok).toBe(false);
+  });
+
+  it('includes a config provenance block in the success payload', async () => {
+    const cmd = createDoctorCommand(fakeDeps);
+    const { envelopes } = await runCommand(cmd);
+    const env = envelopes[0] as {
+      config?: {
+        configLoaded: boolean;
+        configPath: string | null;
+        network: string;
+        earningDir: string;
+        dbPath: string;
+        runtimeMode: string | null;
+        envOverrides: Record<string, string>;
+      };
+    };
+    expect(env.config).toBeDefined();
+    expect(typeof env.config!.configLoaded).toBe('boolean');
+    expect(env.config!.network).toMatch(/^(testnet|mainnet)$/);
+    expect(typeof env.config!.earningDir).toBe('string');
+    expect(typeof env.config!.dbPath).toBe('string');
+    expect(env.config!.envOverrides).toBeDefined();
+  });
+
+  it('does not include JINN_PASSWORD in config.envOverrides even when set in ctx.env', async () => {
+    const cmd = createDoctorCommand(fakeDeps);
+    const { envelopes } = await runCommand(cmd, {
+      env: { JINN_PASSWORD: 'secret', JINN_RPC_URL: 'http://fake' },
+    });
+    const env = envelopes[0] as {
+      config?: { envOverrides: Record<string, string> };
+    };
+    expect(env.config).toBeDefined();
+    expect('JINN_PASSWORD' in env.config!.envOverrides).toBe(false);
+    // JINN_RPC_URL was set so it should appear
+    expect(env.config!.envOverrides['JINN_RPC_URL']).toBe('set');
   });
 });

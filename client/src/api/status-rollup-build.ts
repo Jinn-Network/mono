@@ -27,6 +27,39 @@ export interface StatusRollupV1Response {
   earnings: { pendingTotal: string; asset: 'reward' };
   paths: { earningDir: string | null; dbPath: string };
   exit: { blocking: boolean; hint: string | null };
+  /** Present only when --detail flag is passed. */
+  detail?: StatusDetailV1;
+}
+
+/**
+ * Operator diagnostic detail — last known values for each diagnostic dimension.
+ * Surfaced by `jinn status --detail` (audit finding U4).
+ */
+export interface StatusDetailV1 {
+  /** Last bootstrap step recorded in fleet state, or null if no fleet exists yet. */
+  lastBootstrapStep: string | null;
+  /** ISO timestamp when fleet state was last written. */
+  fleetUpdatedAt: string | null;
+  /** Last activity event recorded in SQLite (most recent daemon loop action). */
+  lastDaemonEvent: {
+    ts: string | null;
+    kind: string;
+    txHash: string | null;
+    outcome: string | null;
+  } | null;
+  /** Most recent Claude session outcome from engine working dir. */
+  lastClaudeSession: {
+    requestId: string;
+    sessionId: string;
+    startedAt: number;
+    endedAt: number;
+    durationMs: number;
+    aborted: boolean;
+  } | null;
+  /** Most recent on-chain transaction hash recorded in activity events. */
+  lastChainTx: string | null;
+  /** Prioritised list of operator actions. Same source as /v1/status nextActions. */
+  nextActions: string[];
 }
 
 function daemonState(shutdown: string | null): 'running' | 'stopped' | 'starting' {
@@ -34,12 +67,37 @@ function daemonState(shutdown: string | null): 'running' | 'stopped' | 'starting
   return 'stopped';
 }
 
+/**
+ * Produce a human-friendly RPC hint without leaking raw viem/node error text
+ * directly into `exit.hint`. The underlying error is preserved in `rpc.error`
+ * for structured consumers (audit U4 — raw viem errors in exit.hint).
+ */
+function friendlyRpcHint(rawError: string | undefined): string {
+  if (!rawError) return 'RPC unreachable — check rpcUrl in config.';
+  // Viem / fetch errors are verbose (stack frames, JSON-RPC method names, etc).
+  // Produce a short human hint while preserving the underlying text in rpc.error.
+  const lower = rawError.toLowerCase();
+  if (lower.includes('econnrefused') || lower.includes('connection refused') || lower.includes('fetch failed')) {
+    return 'RPC unreachable — connection refused. Check rpcUrl or network connectivity.';
+  }
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return 'RPC unreachable — request timed out. Check rpcUrl or network connectivity.';
+  }
+  if (lower.includes('unauthorized') || lower.includes('403') || lower.includes('401')) {
+    return 'RPC unreachable — authentication error. Check rpcUrl credentials.';
+  }
+  // Generic fallback: trim to first line only (removes viem stack noise)
+  const firstLine = rawError.split('\n')[0]?.trim() ?? rawError;
+  const truncated = firstLine.length > 120 ? `${firstLine.slice(0, 120)}…` : firstLine;
+  return `RPC unreachable — ${truncated}`;
+}
+
 function buildExitRollup(
   raw: GatheredStatusRaw,
   needsAttention: number,
 ): { blocking: boolean; hint: string | null } {
   if (!raw.rpc.ok) {
-    return { blocking: true, hint: raw.rpc.error ?? 'RPC unhealthy.' };
+    return { blocking: true, hint: friendlyRpcHint(raw.rpc.error) };
   }
   if (needsAttention > 0) {
     return { blocking: true, hint: 'Run `jinn fleet` for per-service detail.' };
@@ -78,7 +136,127 @@ function readVersionCommit(): { version: string; commit: string } {
   return versionCommitCache;
 }
 
-export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Response {
+/**
+ * Build the `detail` block for `jinn status --detail` (audit finding U4).
+ * Pulls from already-gathered GatheredStatusRaw — no extra I/O.
+ */
+export function assembleStatusDetailV1(raw: GatheredStatusRaw): StatusDetailV1 {
+  // Last bootstrap step: take the worst non-complete step across services,
+  // or 'complete' if all are complete, or null if no fleet exists.
+  let lastBootstrapStep: string | null = null;
+  let fleetUpdatedAt: string | null = null;
+  if (raw.fleet) {
+    fleetUpdatedAt = raw.fleet.updated_at ?? null;
+    const services = raw.fleet.services;
+    if (services.length > 0) {
+      const incomplete = services.filter(s => s.step !== 'complete');
+      if (incomplete.length > 0) {
+        // Return the step of the first incomplete service (lowest index)
+        const sorted = [...incomplete].sort((a, b) => a.index - b.index);
+        lastBootstrapStep = sorted[0]!.step;
+      } else {
+        lastBootstrapStep = 'complete';
+      }
+    }
+  }
+
+  // Last daemon activity event (most recent SQLite row)
+  let lastDaemonEvent: StatusDetailV1['lastDaemonEvent'] = null;
+  if (raw.recentActivity.length > 0) {
+    // recentActivity is ordered DESC by id in gather-status; first entry is newest
+    const latest = raw.recentActivity[0]!;
+    lastDaemonEvent = {
+      ts: latest.ts,
+      kind: latest.kind,
+      txHash: latest.txHash,
+      outcome: latest.outcome,
+    };
+  }
+
+  // Last chain tx: scan recent activity for a txHash
+  let lastChainTx: string | null = null;
+  for (const evt of raw.recentActivity) {
+    if (evt.txHash) {
+      lastChainTx = evt.txHash;
+      break;
+    }
+  }
+
+  // Last Claude session: from portfolioV0 (already gathered, no extra I/O)
+  let lastClaudeSession: StatusDetailV1['lastClaudeSession'] = null;
+  const outcomes = raw.portfolioV0?.recentClaudeOutcomes;
+  if (outcomes && outcomes.length > 0) {
+    const o = outcomes[0]!;
+    lastClaudeSession = {
+      requestId: o.requestId,
+      sessionId: o.sessionId,
+      startedAt: o.startedAt,
+      endedAt: o.endedAt,
+      durationMs: o.durationMs,
+      aborted: o.aborted,
+    };
+  }
+
+  // Next actions: reuse the buildNextActions logic from status-build via raw
+  // We reconstruct a minimal fleet summary for the shared helper.
+  const nextActions = buildNextActionsFromRaw(raw);
+
+  return {
+    lastBootstrapStep,
+    fleetUpdatedAt,
+    lastDaemonEvent,
+    lastClaudeSession,
+    lastChainTx,
+    nextActions,
+  };
+}
+
+/**
+ * Derive prioritised next actions from GatheredStatusRaw without importing
+ * the full assembleStatusV1 pipeline.
+ */
+function buildNextActionsFromRaw(raw: GatheredStatusRaw): string[] {
+  const actions: string[] = [];
+
+  if (!raw.rpc.ok) {
+    actions.push('Restore RPC access — check rpcUrl / network for live balances and rewards.');
+  }
+
+  const fleet = raw.fleet;
+  if (!fleet) {
+    actions.push('Run bootstrap (`jinn run` with JINN_PASSWORD) to create fleet and staking state.');
+  } else {
+    if (!fleet.master_address) {
+      actions.push('Complete earning bootstrap so master_address is recorded.');
+    }
+    for (const s of fleet.services) {
+      if (s.step !== 'complete') {
+        actions.push(`Resume service ${s.index}: local step "${s.step}" — re-run jinn run.`);
+      }
+    }
+  }
+
+  if (raw.master.address && raw.minMasterEthWei && raw.master.balanceWei !== undefined) {
+    try {
+      const bal = BigInt(raw.master.balanceWei);
+      const min = BigInt(raw.minMasterEthWei);
+      if (bal < min) {
+        actions.push('Fund master EOA with more ETH for gas (below configured minimum).');
+      }
+    } catch { /* ignore */ }
+  }
+
+  const dedup = [...new Set(actions)];
+  if (dedup.length === 0) {
+    dedup.push('No urgent actions — daemon loops and reward claims run on schedule.');
+  }
+  return dedup;
+}
+
+export function assembleStatusRollupV1(
+  raw: GatheredStatusRaw,
+  opts: { includeDetail?: boolean } = {},
+): StatusRollupV1Response {
   const { version, commit } = readVersionCommit();
   const services = raw.fleet?.services ?? [];
   const complete = services.filter(s => s.step === 'complete').length;
@@ -91,7 +269,7 @@ export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Re
   const blockNumber = Number(blockStr);
   const exit = buildExitRollup(raw, needsAttention);
 
-  return {
+  const base: StatusRollupV1Response = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     daemon: {
@@ -123,4 +301,10 @@ export function assembleStatusRollupV1(raw: GatheredStatusRaw): StatusRollupV1Re
     },
     exit,
   };
+
+  if (opts.includeDetail) {
+    base.detail = assembleStatusDetailV1(raw);
+  }
+
+  return base;
 }

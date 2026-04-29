@@ -41,8 +41,9 @@ password from that file automatically — no env var needed.
 jinn keys backup --output ~/jinn-mnemonic.txt  # mode 0600; treat as seed material
 ```
 
-Prefer to manage the password yourself? Set `JINN_PASSWORD` before
-`quickstart` and no file will be written:
+**Advanced / CI — manage the password yourself:** set `JINN_PASSWORD` before
+`quickstart` and no file will be written to disk. Use `--password-fd N` for
+CI pipelines that read from a secret manager:
 
 ```bash
 JINN_PASSWORD=your-secret jinn quickstart

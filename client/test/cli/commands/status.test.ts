@@ -103,4 +103,44 @@ describe('status command', () => {
     expect(out).not.toMatch(/^\{/);
     expect(exits).toEqual([]);
   });
+
+  // ── --detail flag (audit U4) ─────────────────────────────────────────────
+
+  it('--detail omitted: no detail key in JSON output', async () => {
+    const cmd = createStatusCommand(fakeDeps);
+    const { envelopes } = await runCommand(cmd);
+    const payload = envelopes[0] as Record<string, unknown>;
+    expect(payload['detail']).toBeUndefined();
+  });
+
+  it('--detail: includes detail block in JSON output', async () => {
+    const cmd = createStatusCommand(fakeDeps);
+    const { envelopes, exits } = await runCommand(cmd, { argv: ['--detail'] });
+    expect(exits).toEqual([]);
+    const payload = envelopes[0] as {
+      detail: {
+        lastBootstrapStep: string | null;
+        fleetUpdatedAt: string | null;
+        lastDaemonEvent: unknown;
+        lastClaudeSession: unknown;
+        lastChainTx: string | null;
+        nextActions: string[];
+      };
+    };
+    expect(payload.detail).toBeDefined();
+    // fleet has one incomplete service (service_staked) so lastBootstrapStep is not 'complete'
+    expect(payload.detail.lastBootstrapStep).toBe('service_staked');
+    expect(Array.isArray(payload.detail.nextActions)).toBe(true);
+    expect(payload.detail.nextActions.length).toBeGreaterThan(0);
+  });
+
+  it('--detail --human: includes readable detail section', async () => {
+    const cmd = createStatusCommand(fakeDeps);
+    const { raw, exits } = await runCommand(cmd, { argv: ['--detail', '--human'], tty: true });
+    expect(exits).toEqual([]);
+    const out = raw.join('');
+    expect(out).toContain('--- detail ---');
+    expect(out).toContain('bootstrap:');
+    expect(out).toContain('next actions:');
+  });
 });

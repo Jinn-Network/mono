@@ -69,6 +69,15 @@ const COMMANDS: CommandModule[] = [
   conformanceCommand,
 ];
 
+/**
+ * All registered CLI commands. Used by skill generators and conformance checks to keep
+ * SKILL.md and operator docs in sync with the actual registry.
+ * The internal `fleet-manage` alias is excluded; use the public `fleet <subverb>` form.
+ */
+export const CLI_COMMANDS: ReadonlyArray<CommandModule> = COMMANDS.filter(
+  (c) => c.name !== 'fleet-manage',
+);
+
 function publicCommandNames(commands: CommandModule[]): string[] {
   return commands.filter((c) => c.name !== 'fleet-manage').map((c) => c.name);
 }

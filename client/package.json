@@ -43,6 +43,8 @@
     "test:watch": "vitest",
     "test:claude-prediction": "yarn build && JINN_TEST_CLAUDE_PREDICTION=1 vitest run test/restorer/impls/claude-mcp-prediction/isolation.test.ts",
     "test:claude-prediction-apy": "yarn build && JINN_TEST_CLAUDE_PREDICTION_APY=1 vitest run test/restorer/impls/claude-mcp-prediction-apy/isolation.test.ts",
+    "skill:generate": "tsx scripts/skill-generate.ts",
+    "skill:check": "tsx scripts/skill-check.ts",
     "prepublishOnly": "yarn build && yarn test",
     "pack:smoke": "yarn pack -o jinn-client.tgz && node scripts/smoke-test-pack.mjs",
     "release:client": "node scripts/release-client.mjs",

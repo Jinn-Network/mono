@@ -1,14 +1,15 @@
-import { formatUnits, http, type Address, type PublicClient } from 'viem';
-import { base, baseSepolia } from 'viem/chains';
-import { createPublicClient } from 'viem';
+import { formatUnits } from 'viem';
 import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig as defaultLoadConfig, getConfigPathFromArgs as defaultGetConfigPathFromArgs } from '../../config.js';
-import { FleetBootstrapper } from '../../earning/bootstrap.js';
-import { getChainConfig as defaultGetChainConfig } from '../../earning/contracts.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
+import {
+  planFleetFunding as defaultPlanFleetFunding,
+  type FundingPlan,
+  type FundingPlanPartialReason,
+} from '../../earning/funding-plan.js';
 
 /** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
 function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
@@ -37,52 +38,70 @@ function formatAmount(wei: string, symbol: string): string {
   }
 }
 
+function describePartialReason(reason: FundingPlanPartialReason): string {
+  switch (reason) {
+    case 'no_keystore':
+      return 'no master keystore — run `jinn init` to create one';
+    case 'password_missing':
+      return 'keystore password missing — set JINN_PASSWORD or pass --password-fd';
+    case 'password_invalid':
+      return 'keystore password rejected — check JINN_PASSWORD';
+    case 'rpc_unreachable':
+      return 'RPC could not be reached — check JINN_RPC_URL / network';
+    case 'fleet_state_missing':
+      return 'no persisted fleet state yet — run `jinn bootstrap` to create one';
+    case 'fleet_state_invalid':
+      return 'fleet state file failed validation — see `jinn doctor`';
+    default:
+      return reason;
+  }
+}
+
 function humanFundRequirements(payload: {
   satisfied: boolean;
+  partial: boolean;
+  reasons: FundingPlanPartialReason[];
   requirements: FundRequirementRow[];
 }): string {
+  const lines: string[] = [];
   if (payload.satisfied) {
-    return 'Funding requirements satisfied. Nothing needed right now.';
+    lines.push('Funding requirements satisfied. Nothing needed right now.');
+  } else if (payload.requirements.length === 0 && payload.partial) {
+    lines.push('Funding requirements unknown — answer is partial.');
+  } else {
+    lines.push('Funding required before bootstrap can advance:');
+    for (const r of payload.requirements) {
+      const need = formatAmount(r.needWei, r.details.tokenSymbol);
+      const have = formatAmount(r.haveWei, r.details.tokenSymbol);
+      lines.push(`- ${r.role} @ ${r.address}: need ${need}, have ${have}`);
+    }
   }
-  const lines = ['Funding required before bootstrap can advance:'];
-  for (const r of payload.requirements) {
-    const need = formatAmount(r.needWei, r.details.tokenSymbol);
-    const have = formatAmount(r.haveWei, r.details.tokenSymbol);
-    lines.push(`- ${r.role} @ ${r.address}: need ${need}, have ${have}`);
+  if (payload.partial && payload.reasons.length > 0) {
+    lines.push('');
+    lines.push('Partial answer; could not fully evaluate funding:');
+    for (const r of payload.reasons) {
+      lines.push(`- ${describePartialReason(r)}`);
+    }
   }
   return lines.join('\n');
 }
 
 export interface FundRequirementsDeps extends BaseCommandDeps {
-  bootstrapperFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => FleetBootstrapper;
   resolveCliPassword: typeof defaultResolveCliPassword;
-  getChainConfig: typeof defaultGetChainConfig;
-  publicClientFactory: (rpcUrl: string, chainKey: 'base' | 'base-sepolia') => PublicClient;
+  /**
+   * Read-only funding plan probe. Production wires this to
+   * {@link planFleetFunding}. The contract for this command is that the
+   * function it calls MUST NOT mutate fleet state, request faucet funds,
+   * or send any chain transactions. Tests assert exactly that.
+   */
+  planFleetFunding: typeof defaultPlanFleetFunding;
 }
 
 const PRODUCTION_DEPS: FundRequirementsDeps = {
   loadConfig: defaultLoadConfig,
   getConfigPathFromArgs: defaultGetConfigPathFromArgs,
-  bootstrapperFactory: (config) => new FleetBootstrapper({
-    earningDir: config.earningDir,
-    chain: config.network === 'testnet' ? 'base-sepolia' : 'base',
-    rpcUrl: config.rpcUrl,
-    stakingMode: config.stakingMode,
-    targetServices: config.targetServices,
-    testnetL2DeploymentPath: config.testnetL2DeploymentPath,
-    testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
-    testnetMechDeploymentPath: config.testnetMechDeploymentPath,
-    testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
-    debug: config.debug,
-    pollIntervalMs: config.pollIntervalMs,
-  }),
   resolveCliPassword: defaultResolveCliPassword,
-  getChainConfig: defaultGetChainConfig,
-  publicClientFactory: (rpcUrl, chainKey) => {
-    const viemChain = chainKey === 'base' ? base : baseSepolia;
-    return createPublicClient({ chain: viemChain, transport: http(rpcUrl) }) as unknown as PublicClient;
-  },
+  planFleetFunding: defaultPlanFleetFunding,
 };
 
 export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODUCTION_DEPS): CommandModule {
@@ -113,27 +132,30 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
       return;
     }
 
+    // Password is *optional* for the read-only path. When absent we still
+    // produce a partial plan that lists what we could not learn — see
+    // docs/reviews/2026-04-28-operator-experience-audit.md (W1).
     const password = deps.resolveCliPassword(ctx.argv, ctx.env);
-    if (!password.ok) {
-      emitEnvelope(
-        {
-          code: 'invalid_invocation',
-          message: password.message,
-          hint: 'Set JINN_PASSWORD or pass --password-fd N, then re-run.',
-          exampleCli: 'jinn fund-requirements --json',
-          details: { field: 'keystore password', expected: 'non-empty string via environment or fd' },
-        },
-        { writer: ctx.writer, exit: ctx.exit },
-      );
-      return;
-    }
+    const passwordValue = password.ok ? password.password : undefined;
 
     const config = deps.loadConfig(configPath);
-    const bootstrapper = deps.bootstrapperFactory(config);
+    const chain = config.network === 'testnet' ? 'base-sepolia' : 'base';
 
-    let result: Awaited<ReturnType<FleetBootstrapper['bootstrap']>>;
+    let plan: FundingPlan;
     try {
-      result = await bootstrapper.bootstrap(password.password);
+      plan = await deps.planFleetFunding({
+        earningDir: config.earningDir,
+        chain,
+        rpcUrl: config.rpcUrl,
+        stakingMode: config.stakingMode,
+        targetServices: config.targetServices,
+        testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+        testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+        testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+        testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
+        password: passwordValue,
+      });
     } catch (err) {
       const cause = err instanceof Error ? err.message : String(err);
       const message =
@@ -155,77 +177,51 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
       return;
     }
 
+    const reasons: FundingPlanPartialReason[] = [...plan.reasons];
+    // If the user did not supply a password and we don't have a master
+    // address from persisted state, surface that in `reasons` exactly once.
+    if (!password.ok && !reasons.includes('password_missing')) {
+      reasons.push('password_missing');
+    }
+
     const requirements: FundRequirementRow[] = [];
-    if (result.funding) {
+    if (plan.master) {
       requirements.push({
         role: 'master',
-        address: result.funding.master_address,
+        address: plan.master.master_address,
         asset: 'native',
-        haveWei: result.funding.eth_balance,
-        needWei: result.funding.eth_required,
-        reason: result.message,
+        haveWei: plan.master.eth_balance,
+        needWei: plan.master.eth_required,
+        reason:
+          `Master wallet needs ETH to advance bootstrap (currently ${plan.master.eth_balance} wei, ` +
+          `needs ${plan.master.eth_required} wei more).`,
         blocks: 'bootstrap',
         details: { tokenAddress: null, tokenSymbol: 'ETH' },
       });
-    } else {
-      // Bootstrap is satisfied. Still probe per-Safe native ETH: the daemon's
-      // balance-topup-loop auto-tops from master at runtime, but operators
-      // running in tooling contexts (acceptance gate, CI, bare `submit-intent`)
-      // hit the mech-fee path before any topup tick fires. A Safe that holds
-      // less than the per-service `minSafeEth` threshold will silently fail on
-      // `createEvaluationJob`, wrapped as `GS013` at the Safe layer — surface
-      // it here so ops see the gap before running.
-      const chainKey = config.network === 'testnet' ? 'base-sepolia' : 'base';
-      const chainCfg = deps.getChainConfig(chainKey, {
-        testnetL2DeploymentPath: config.testnetL2DeploymentPath,
-        testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
-        testnetMechDeploymentPath: config.testnetMechDeploymentPath,
-        testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
-      });
-      const publicClient = deps.publicClientFactory(config.rpcUrl, chainKey);
-      const probeRows = await Promise.all(
-        result.fleet_state.services
-          .filter(svc => svc.step === 'complete' && svc.safe_address)
-          .map(async (svc): Promise<FundRequirementRow | null> => {
-            const address = svc.safe_address as string;
-            try {
-              const bal = await publicClient.getBalance({ address: address as Address });
-              if (bal >= chainCfg.minSafeEth) return null;
-              return {
-                role: `service_${svc.index}_safe`,
-                address,
-                asset: 'native',
-                haveWei: bal.toString(),
-                needWei: (chainCfg.minSafeEth - bal).toString(),
-                reason:
-                  `Service ${svc.index} Safe needs native ETH to pay mech fees (each evaluation job sends 99 wei). ` +
-                  `The daemon's balance-topup-loop auto-refills from master at runtime; funding it manually is ` +
-                  `required only when running CLI verbs (submit-intent, acceptance gate) outside the daemon.`,
-                blocks: 'run',
-                details: { tokenAddress: null, tokenSymbol: 'ETH' },
-              };
-            } catch (err) {
-              // Probe failures are not a funding gap on their own; emit a warning
-              // so operators can distinguish "Safe OK" from "couldn't tell".
-              const message = err instanceof Error ? err.message : String(err);
-              process.stderr.write(
-                `[warn] fund-requirements: failed to probe Safe ${address} for service ${svc.index}: ${message}\n`,
-              );
-              return null;
-            }
-          }),
-      );
-      for (const row of probeRows) {
-        if (row) requirements.push(row);
-      }
     }
+    for (const safe of plan.safes) {
+      requirements.push({
+        role: `service_${safe.serviceIndex}_safe`,
+        address: safe.safeAddress,
+        asset: safe.asset,
+        haveWei: safe.haveWei,
+        needWei: safe.needWei,
+        reason: safe.reason,
+        blocks: 'run',
+        details: { tokenAddress: null, tokenSymbol: 'ETH' },
+      });
+    }
+
+    const partial = plan.partial || !password.ok;
+    const satisfied = requirements.length === 0 && !partial;
 
     const payload = {
       schemaVersion: 1 as const,
       generatedAt: new Date().toISOString(),
       requirements,
-      satisfied: requirements.length === 0,
+      satisfied,
+      partial,
+      reasons: Array.from(new Set(reasons)),
     };
 
     emitResult(payload, (v) => humanFundRequirements(v as typeof payload), {
@@ -243,14 +239,22 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
     summary: 'List addresses that need funding before the next bootstrap step',
     helpText: `Usage: jinn fund-requirements [--human] [--config <path>] [--password-fd <fd>]
 
-Returns a JSON object listing every wallet that needs additional
-funding before the state machine can advance. Each entry names the
-wallet role (never the internal address alone), the asset role
-(native / bond / reward), the amount needed, and a token symbol
-lookup for operators that need to bridge or faucet.
+Read-only inspection: returns a JSON object listing every wallet that
+needs additional funding before the state machine can advance. This
+command never writes earning state, never requests faucet funds, and
+never sends chain transactions.
 
-When \`satisfied\` is true, the \`requirements\` array is empty and
-no funding is needed right now.
+Each entry names the wallet role (never the internal address alone),
+the asset role (native / bond / reward), the amount needed, and a token
+symbol lookup for operators that need to bridge or faucet.
+
+When \`satisfied\` is true, the \`requirements\` array is empty and no
+funding is needed right now.
+
+When \`partial\` is true, the answer is best-effort — for example because
+no keystore exists yet, the keystore password was not provided, or the
+RPC was unreachable. The \`reasons\` array enumerates what could not be
+evaluated so a host agent or operator can fix the gap and re-run.
 
 Examples:
   jinn fund-requirements

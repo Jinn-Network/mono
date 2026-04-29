@@ -41,24 +41,30 @@ npm install -g @jinn-network/client@latest
 Then:
 
 ```bash
-# Pick runtime mode + authenticate Claude (one-time, interactive).
+# Step 1 — Pick runtime mode + authenticate Claude (one-time, interactive).
 jinn auth
 
-# Provide a keystore password for the fleet wallet (env only).
-export JINN_PASSWORD='your-secure-password'
-# Use a testnet-dedicated earning directory so mainnet state stays separate.
-export JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet"
-export JINN_NETWORK=testnet
-
-# Zero-to-running: init → fund (auto via CDP) → bootstrap → run daemon.
-jinn quickstart
+# Step 2 — Zero-to-running: auto-password + init → fund (auto via CDP) → bootstrap → run daemon.
+#           Use a testnet-dedicated earning directory so mainnet state stays separate.
+JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet" JINN_NETWORK=testnet jinn quickstart
 ```
 
 Expected output:
 - `jinn auth` asks "how do you want to run the Jinn daemon?" Pick `bare` unless you've set up Docker Compose.
-- `jinn quickstart` prints: keystore created, master address, CDP drips landing, staking complete, daemon started on port 7331.
+- `jinn quickstart` prints: keystore created (auto-password saved to `~/.jinn-client/keystore-password`), master address, CDP drips landing, staking complete, daemon started on port 7331.
 
 If it ran through, you're done. Otherwise, skip to [Troubleshooting](#troubleshooting).
+
+### Advanced / CI: explicit password
+
+If you want to supply your own password instead of using the auto-generated one (recommended for production or scripted environments), set `JINN_PASSWORD` before calling `quickstart`:
+
+```bash
+export JINN_PASSWORD='your-secure-password'
+JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet" JINN_NETWORK=testnet jinn quickstart
+```
+
+When `JINN_PASSWORD` is set, no password file is written to disk. Use `--password-fd N` for CI pipelines where the password comes from a secret manager.
 
 ## What `jinn quickstart` does under the hood
 

@@ -4,7 +4,7 @@ import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
-import { loadConfig, getConfigPathFromArgs } from '../../config.js';
+import { loadConfig, getConfigPathFromArgs, buildConfigProvenance } from '../../config.js';
 import { FleetStateStore } from '../../earning/store.js';
 import {
   generateMnemonic,
@@ -53,10 +53,12 @@ async function run(ctx: CommandContext): Promise<void> {
     getConfigPathFromArgs(ctx.argv) ?? getConfigPathFromArgs(process.argv.slice(2));
   let configEarningDir: string | undefined;
   let configNetwork: 'mainnet' | 'testnet' | undefined;
+  let provenance: ReturnType<typeof buildConfigProvenance> | undefined;
   try {
     const cfg = loadConfig(configPath);
     configEarningDir = cfg.earningDir;
     configNetwork = cfg.network;
+    provenance = buildConfigProvenance(configPath, cfg, ctx.env);
   } catch {
     // Config file is optional; fall back to env var / default below.
   }
@@ -98,6 +100,7 @@ async function run(ctx: CommandContext): Promise<void> {
         cli: 'jinn fund-requirements',
         purpose: 'List addresses that need funding before bootstrap can advance.',
       },
+      ...(provenance !== undefined ? { config: provenance } : {}),
     },
     (v) => {
       const value = v as { master: string; keystoreDir: string; nextStep: { cli: string } };

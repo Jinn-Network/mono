@@ -22,6 +22,13 @@ export function renderTopLevelHelp(commands: CommandModule[]): string {
   lines.push('  fleet retire <index>                  Retire one service');
   lines.push('');
   lines.push('Operator map:');
+  lines.push('  New operator: run `jinn auth`, then `jinn quickstart`.');
+  lines.push('');
+  lines.push('  First run:');
+  lines.push('  jinn auth                             Authenticate Claude and set runtime mode (one-time)');
+  lines.push('  jinn quickstart                       Zero-to-running: init, bootstrap, start daemon');
+  lines.push('');
+  lines.push('  Day-to-day:');
   lines.push('  jinn run                              Start the daemon or fail with a structured next step');
   lines.push('  jinn doctor                           Check environment and config readiness');
   lines.push('  jinn fund-requirements                Show exact funding gaps');

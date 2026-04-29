@@ -2,7 +2,7 @@ import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
-import { loadConfig as defaultLoadConfig, getConfigPathFromArgs as defaultGetConfigPathFromArgs } from '../../config.js';
+import { loadConfig as defaultLoadConfig, getConfigPathFromArgs as defaultGetConfigPathFromArgs, buildConfigProvenance } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
 import {
@@ -196,6 +196,7 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
     }
 
     const state = result.fleet_state;
+    const provenance = buildConfigProvenance(configPath, config, ctx.env);
     const payload = {
       schemaVersion: 1 as const,
       generatedAt: new Date().toISOString(),
@@ -205,6 +206,7 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
         step: s.step,
         serviceId: s.service_id ?? null,
       })),
+      config: provenance,
     };
 
     emitResult(payload, (v) => humanBootstrapSuccess(v as typeof payload), {

@@ -4,11 +4,14 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { gatherIntrospectionRaw as defaultGatherIntrospectionRaw } from '../introspection-context.js';
 import { assembleStatusRollupV1 as defaultAssembleStatusRollupV1 } from '../../api/status-rollup-build.js';
-import type { StatusRollupV1Response } from '../../api/status-rollup-build.js';
+import type { StatusRollupV1Response, StatusDetailV1 } from '../../api/status-rollup-build.js';
+import { loadConfig, getConfigPathFromArgs, buildConfigProvenance, type ConfigProvenance } from '../../config.js';
 
 export interface StatusDeps {
   gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
   assembleStatusRollupV1: typeof defaultAssembleStatusRollupV1;
+  loadConfig?: typeof loadConfig;
+  getConfigPathFromArgs?: typeof getConfigPathFromArgs;
 }
 
 const PRODUCTION_DEPS: StatusDeps = {
@@ -16,22 +19,50 @@ const PRODUCTION_DEPS: StatusDeps = {
   assembleStatusRollupV1: defaultAssembleStatusRollupV1,
 };
 
+function humanDetail(d: StatusDetailV1): string {
+  const lines: string[] = ['', '--- detail ---'];
+  lines.push(`bootstrap: ${d.lastBootstrapStep ?? 'no fleet yet'}${d.fleetUpdatedAt ? ` (updated ${d.fleetUpdatedAt})` : ''}`);
+  if (d.lastDaemonEvent) {
+    const e = d.lastDaemonEvent;
+    lines.push(`last event: ${e.ts ?? 'unknown time'} ${e.kind}${e.outcome ? ` outcome=${e.outcome}` : ''}${e.txHash ? ` tx=${e.txHash.slice(0, 10)}…` : ''}`);
+  } else {
+    lines.push('last event: none yet');
+  }
+  if (d.lastClaudeSession) {
+    const s = d.lastClaudeSession;
+    const dur = Math.round(s.durationMs / 1000);
+    lines.push(`last claude session: req=${s.requestId.slice(0, 10)}… sess=${s.sessionId.slice(0, 8)}… dur=${dur}s${s.aborted ? ' ABORTED' : ''}`);
+  } else {
+    lines.push('last claude session: none yet');
+  }
+  lines.push(`last chain tx: ${d.lastChainTx ?? 'none yet'}`);
+  lines.push('next actions:');
+  for (const action of d.nextActions) {
+    lines.push(`  • ${action}`);
+  }
+  return lines.join('\n');
+}
+
 function humanStatus(v: StatusRollupV1Response): string {
   const health = v.exit.blocking ? `degraded: ${v.exit.hint ?? 'attention needed'}` : 'healthy';
-  return [
+  const parts = [
     `daemon=${v.daemon.state} network=${v.daemon.network} chain=${v.rpc.chainId} block=${v.rpc.blockNumber}`,
     `health=${health}`,
     `fleet: ${v.fleet.size} services, ${v.fleet.complete} complete, ${v.fleet.needsAttention} need attention`,
     `pending: ${v.earnings.pendingTotal} reward-wei`,
     v.exit.blocking && v.exit.hint ? `hint: ${v.exit.hint}` : '',
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean);
+  if (v.detail) {
+    parts.push(humanDetail(v.detail));
+  }
+  return parts.join('\n');
 }
 
 export function createStatusCommand(deps: StatusDeps = PRODUCTION_DEPS): CommandModule {
   return {
     name: 'status',
     summary: 'Daemon liveness + roll-up (poll this for monitoring; pull detail separately)',
-    helpText: `Usage: jinn status [--human]
+    helpText: `Usage: jinn status [--detail] [--human]
 
 Emits the §4.1 roll-up: daemon state, RPC reachability, fleet size /
 complete / needsAttention counts, pending earnings total, and a
@@ -45,14 +76,22 @@ A monitoring loop needs only these fields:
 All of (rpc.ok === true && fleet.needsAttention === 0 && exit.blocking === false)
 means healthy. Pull \`jinn fleet\` or \`jinn history\` for detail.
 
+--detail  Include diagnostic detail: last bootstrap step, last daemon event,
+          last Claude session, last chain tx, and next operator actions.
+          Addresses audit finding U4 — single "what's happening?" command.
+
 Examples:
   jinn status
-  jinn status --human
+  jinn status --detail
+  jinn status --detail --human
 `,
     async run(ctx: CommandContext): Promise<void> {
       let parsed;
       try {
-        parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS });
+        parsed = parseCommandArgs(ctx.argv, {
+          ...COMMON_FLAGS,
+          detail: { type: 'boolean' as const, default: false },
+        });
       } catch (err) {
         emitEnvelope(
           {
@@ -65,8 +104,24 @@ Examples:
         );
         return;
       }
+      const configPath =
+        (deps.getConfigPathFromArgs ?? getConfigPathFromArgs)(ctx.argv ?? []) ??
+        getConfigPathFromArgs(process.argv.slice(2));
+      let configProvenance: ConfigProvenance | undefined;
+      try {
+        const cfg = (deps.loadConfig ?? loadConfig)(configPath);
+        configProvenance = buildConfigProvenance(configPath, cfg, ctx.env);
+      } catch {
+        /* non-fatal — status works even without a valid config file */
+      }
+
       const raw = await deps.gatherIntrospectionRaw({ argv: ctx.argv });
-      const payload = deps.assembleStatusRollupV1(raw);
+      const rollup = deps.assembleStatusRollupV1(raw, {
+        includeDetail: Boolean(parsed.values.detail),
+      });
+      const payload = configProvenance !== undefined
+        ? { ...rollup, config: configProvenance }
+        : rollup;
       emitResult(
         payload,
         (v) => humanStatus(v as StatusRollupV1Response),

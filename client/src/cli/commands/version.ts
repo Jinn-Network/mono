@@ -6,7 +6,7 @@ import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
-import { loadConfig, getConfigPathFromArgs } from '../../config.js';
+import { loadConfig, getConfigPathFromArgs, buildConfigProvenance } from '../../config.js';
 import { getChainConfig } from '../../earning/contracts.js';
 import { computeDeploymentDigest } from '../deployment-digest.js';
 
@@ -60,6 +60,7 @@ async function run(ctx: CommandContext): Promise<void> {
   const configPath =
     getConfigPathFromArgs(ctx.argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
   const config = loadConfig(configPath);
+  const provenance = buildConfigProvenance(configPath, config, ctx.env);
   const chain = config.network === 'testnet' ? 'base-sepolia' : 'base';
   const chainConfig = getChainConfig(chain, {
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
@@ -95,6 +96,7 @@ async function run(ctx: CommandContext): Promise<void> {
       bond: { symbol: bondRewardSymbol, address: chainConfig.olasToken, decimals: 18 },
       reward: { symbol: bondRewardSymbol, address: chainConfig.olasToken, decimals: 18 },
     },
+    config: provenance,
   };
 
   emitResult(payload, (v) => humanVersion(v as typeof payload), {

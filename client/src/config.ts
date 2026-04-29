@@ -436,3 +436,109 @@ export function getConfigPathFromArgs(argv: string[] = process.argv): string | u
   const idx = argv.indexOf('--config');
   return idx >= 0 && argv[idx + 1] ? argv[idx + 1] : undefined;
 }
+
+// ── Config provenance ────────────────────────────────────────────────────────
+
+/**
+ * Env var names that map to JinnConfig fields (excluding password and
+ * security-sensitive vars that must never be surfaced even redacted).
+ *
+ * The list mirrors the `merged.*` assignments in `loadConfig` above.
+ * JINN_PASSWORD is intentionally absent — never list it.
+ */
+const TRACKED_ENV_VARS = [
+  'JINN_NETWORK',
+  'JINN_EARNING_DIR',
+  'JINN_DB_PATH',
+  'JINN_POLL_INTERVAL_MS',
+  'JINN_REWARD_CLAIM_INTERVAL_MS',
+  'JINN_BALANCE_TOPUP_INTERVAL_MS',
+  'JINN_API_PORT',
+  'JINN_CLAUDE_PATH',
+  'JINN_CLAUDE_MODEL',
+  'JINN_RUNTIME_MODE',
+  'JINN_PEERS',
+  'JINN_SUBGRAPH_URL',
+  'JINN_NODE_ENDPOINT',
+  'JINN_IPFS_REGISTRY_URL',
+  'JINN_IPFS_GATEWAY_URL',
+  'JINN_TESTNET_L2_DEPLOYMENT',
+  'JINN_TESTNET_TOKEN_DEPLOYMENT',
+  'JINN_TESTNET_MECH_DEPLOYMENT',
+  'JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT',
+  'JINN_STAKING_MODE',
+  'JINN_TARGET_SERVICES',
+  'JINN_DEBUG',
+  'JINN_RUN_LEGACY_MIGRATIONS',
+  'JINN_MASTER_ETH_DAILY_WEI',
+  'JINN_IDENTITY_REGISTRY_ADDRESS',
+  'JINN_VALIDATION_REGISTRY_ADDRESS',
+  'JINN_REPUTATION_ENABLED',
+  'JINN_RPC_URL',
+  'BASE_RPC_URL',
+  'BASE_SEPOLIA_RPC_URL',
+  'JINN_ARCHIVE_RPC_URL',
+  'JINN_DESIRED_STATES',
+  'JINN_ENGINE_WORKING_DIR_ROOT',
+  'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
+  'JINN_BUILD_COMMIT',
+] as const;
+
+export interface ConfigProvenance {
+  /** Resolved config file path, or null if only defaults were used. */
+  configPath: string | null;
+  /** Whether a config file was found and loaded. */
+  configLoaded: boolean;
+  /** Resolved network. */
+  network: 'mainnet' | 'testnet';
+  /** Resolved earning state directory. */
+  earningDir: string;
+  /** Resolved SQLite database path. */
+  dbPath: string;
+  /** Resolved runtime mode, or null if auto-detected. */
+  runtimeMode: string | null;
+  /**
+   * Env vars that were set and contributed to the resolved config.
+   * Values are always `"set"` — never the actual value.
+   * JINN_PASSWORD is never listed here.
+   */
+  envOverrides: Record<string, 'set'>;
+}
+
+/**
+ * Build a structured provenance block describing how the config was resolved.
+ *
+ * Pass the same `configPath` you passed to `loadConfig`, and the resulting
+ * `JinnConfig`. The helper inspects `process.env` to discover which tracked
+ * env vars were set; it never reads their values.
+ *
+ * @param configPath — the explicit config file path passed to `loadConfig`,
+ *   or undefined if the default path was used.
+ * @param config — the resolved `JinnConfig` returned by `loadConfig`.
+ * @param env — defaults to `process.env`; inject in tests.
+ */
+export function buildConfigProvenance(
+  configPath: string | undefined,
+  config: JinnConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): ConfigProvenance {
+  const filePath = configPath ?? DEFAULT_CONFIG_PATH;
+  const configLoaded = existsSync(filePath);
+
+  const envOverrides: Record<string, 'set'> = {};
+  for (const name of TRACKED_ENV_VARS) {
+    if (env[name] !== undefined) {
+      envOverrides[name] = 'set';
+    }
+  }
+
+  return {
+    configPath: configLoaded ? filePath : null,
+    configLoaded,
+    network: config.network,
+    earningDir: config.earningDir,
+    dbPath: config.dbPath,
+    runtimeMode: config.runtimeMode ?? null,
+    envOverrides,
+  };
+}
