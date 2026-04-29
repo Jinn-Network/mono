@@ -14,14 +14,152 @@ import {
   JINN_ROUTER_CLAIM_DELIVERY_V1_ABI,
   JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
   NATIVE_PAYMENT_TYPE,
+  type EvictionRecoveryConfig,
 } from './types.js';
+import { STAKING_ABI, STOLAS_DISTRIBUTOR_ABI } from '../../earning/contracts.js';
+import { isUnauthorizedAccountError } from '../../errors/unauthorized-account.js';
 import { CLAIM_REGISTRY_ABI } from '../claim-registry/abi.js';
 import { executeSafeTransaction } from './safe.js';
 import {
+  flattenErrorMessage,
   isRecoverableTransactionError,
+  viemSendTransactionWithRetry,
   waitForTransactionReceiptWithRetry,
   backoffDelay,
 } from '../../tx-retry.js';
+
+const EVICTED_STAKING_STATE = 2;
+const restakeLocks = new Map<string, Promise<void>>();
+
+async function withRestakeLock(key: string, fn: () => Promise<void>): Promise<void> {
+  const pending = restakeLocks.get(key) ?? Promise.resolve();
+
+  let releaseLock!: () => void;
+  const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
+  restakeLocks.set(key, newLock);
+
+  await pending;
+
+  try {
+    await fn();
+  } finally {
+    releaseLock();
+    if (restakeLocks.get(key) === newLock) {
+      restakeLocks.delete(key);
+    }
+  }
+}
+
+async function readStakingState(
+  publicClient: PublicClient,
+  recovery: EvictionRecoveryConfig,
+): Promise<number> {
+  return Number(await publicClient.readContract({
+    address: recovery.stakingProxyAddress,
+    abi: STAKING_ABI,
+    functionName: 'getStakingState',
+    args: [BigInt(recovery.serviceId)],
+  }));
+}
+
+async function restakeEvictedService(
+  publicClient: PublicClient,
+  recovery: EvictionRecoveryConfig,
+  label: string,
+): Promise<void> {
+  const lockKey = `${recovery.stakingProxyAddress.toLowerCase()}:${recovery.serviceId}`;
+
+  await withRestakeLock(lockKey, async () => {
+    const latestState = await readStakingState(publicClient, recovery);
+    if (latestState !== EVICTED_STAKING_STATE) {
+      console.error(
+        `[staking-recovery] ${label}: service ${recovery.serviceId} no longer evicted ` +
+        `(state=${latestState}); retrying original action`,
+      );
+      return;
+    }
+
+    const account = recovery.masterWalletClient.account;
+    if (!account) {
+      throw new Error('Eviction recovery cannot reStake: master wallet client has no account');
+    }
+
+    const data = encodeFunctionData({
+      abi: STOLAS_DISTRIBUTOR_ABI,
+      functionName: 'reStake',
+      args: [recovery.stakingProxyAddress, BigInt(recovery.serviceId)],
+    });
+
+    console.error(
+      `[staking-recovery] ${label}: service ${recovery.serviceId} is evicted; ` +
+      `calling distributor.reStake()`,
+    );
+
+    let txHash: Hex;
+    try {
+      txHash = await viemSendTransactionWithRetry(recovery.masterWalletClient, publicClient, {
+        account,
+        to: recovery.distributorAddress,
+        data,
+        gas: 1_500_000n,
+      });
+    } catch (err) {
+      const message = flattenErrorMessage(err);
+      if (isUnauthorizedAccountError(message)) {
+        throw new Error(
+          `Service ${recovery.serviceId} is evicted, but the configured master EOA is not authorized to reStake it. ` +
+          `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service; otherwise request owner / managing-agent recovery. ` +
+          `reStake revert: ${message}`,
+        );
+      }
+      throw err;
+    }
+
+    const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
+      onRetry: ({ attempt, message }) => {
+        console.error(`[staking-recovery] wait reStake receipt retry ${attempt}: ${message}`);
+      },
+    });
+    if (receipt.status !== 'success') {
+      throw new Error(`reStake failed for service ${recovery.serviceId}: ${txHash}`);
+    }
+
+    console.error(
+      `[staking-recovery] ${label}: reStake confirmed for service ${recovery.serviceId} ` +
+      `(tx=${txHash}); retrying original action`,
+    );
+  });
+}
+
+export async function withEvictionRecovery<T>(
+  publicClient: PublicClient,
+  recovery: EvictionRecoveryConfig | undefined,
+  label: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await action();
+  } catch (err) {
+    if (!recovery) throw err;
+
+    let stakingState: number;
+    try {
+      stakingState = await readStakingState(publicClient, recovery);
+    } catch (stateErr) {
+      console.error(
+        `[staking-recovery] ${label}: could not check staking state after failed action; ` +
+        `preserving original error. state check error: ${flattenErrorMessage(stateErr)}`,
+      );
+      throw err;
+    }
+    if (stakingState !== EVICTED_STAKING_STATE) {
+      throw err;
+    }
+
+    await restakeEvictedService(publicClient, recovery, label);
+    return action();
+  }
+}
 
 export async function submitRestorationJob(
   publicClient: PublicClient,
@@ -32,6 +170,7 @@ export async function submitRestorationJob(
   requestDataHex: Hex,
   priceWei: bigint,
   responseTimeout: bigint,
+  evictionRecovery?: EvictionRecoveryConfig,
 ): Promise<{ requestIds: string[]; txHash: Hex; receiptLogCount: number }> {
   const calldata = encodeFunctionData({
     abi: JINN_ROUTER_ABI,
@@ -39,12 +178,17 @@ export async function submitRestorationJob(
     args: [requestDataHex, mechAddress, priceWei, responseTimeout, NATIVE_PAYMENT_TYPE, '0x' as Hex],
   });
 
-  const txHash = await executeSafeTransaction(publicClient, walletClient, {
-    safeAddress,
-    to: routerAddress,
-    value: priceWei,
-    data: calldata,
-  });
+  const txHash = await withEvictionRecovery(
+    publicClient,
+    evictionRecovery,
+    'createRestorationJob',
+    () => executeSafeTransaction(publicClient, walletClient, {
+      safeAddress,
+      to: routerAddress,
+      value: priceWei,
+      data: calldata,
+    }),
+  );
 
   const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
     onRetry: ({ attempt, message }) => {
@@ -82,6 +226,7 @@ export async function submitEvaluationJob(
   requestDataHex: Hex,
   priceWei: bigint,
   responseTimeout: bigint,
+  evictionRecovery?: EvictionRecoveryConfig,
 ): Promise<string[]> {
   const calldata = encodeFunctionData({
     abi: JINN_ROUTER_ABI,
@@ -89,12 +234,17 @@ export async function submitEvaluationJob(
     args: [restorationRequestId, requestDataHex, mechAddress, priceWei, responseTimeout, NATIVE_PAYMENT_TYPE, '0x' as Hex],
   });
 
-  const txHash = await executeSafeTransaction(publicClient, walletClient, {
-    safeAddress,
-    to: routerAddress,
-    value: priceWei,
-    data: calldata,
-  });
+  const txHash = await withEvictionRecovery(
+    publicClient,
+    evictionRecovery,
+    'createEvaluationJob',
+    () => executeSafeTransaction(publicClient, walletClient, {
+      safeAddress,
+      to: routerAddress,
+      value: priceWei,
+      data: calldata,
+    }),
+  );
 
   const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
     onRetry: ({ attempt, message }) => {
@@ -162,6 +312,7 @@ export async function claimDelivery(
   routerAddress: Address,
   requestId: Hex,
   options: ClaimDeliveryOptions,
+  evictionRecovery?: EvictionRecoveryConfig,
 ): Promise<Hex> {
   if (await isDeliveryAlreadyClaimed(publicClient, routerAddress, requestId)) {
     console.error(`[router] claimDelivery: already claimed ${requestId}`);
@@ -189,12 +340,17 @@ export async function claimDelivery(
 
   for (let attempt = 1; attempt <= CLAIM_RETRY_ATTEMPTS; attempt++) {
     try {
-      return await executeSafeTransaction(publicClient, walletClient, {
-        safeAddress,
-        to: routerAddress,
-        value: 0n,
-        data: calldata,
-      });
+      return await withEvictionRecovery(
+        publicClient,
+        evictionRecovery,
+        'claimDelivery',
+        () => executeSafeTransaction(publicClient, walletClient, {
+          safeAddress,
+          to: routerAddress,
+          value: 0n,
+          data: calldata,
+        }),
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
 
@@ -614,6 +770,7 @@ export async function callDeliverToMarketplace(
   mechContractAddress: Address,
   requestIds: Hex[],
   datas: Hex[],
+  evictionRecovery?: EvictionRecoveryConfig,
 ): Promise<Hex> {
   const calldata = encodeFunctionData({
     abi: MECH_ABI,
@@ -622,12 +779,17 @@ export async function callDeliverToMarketplace(
   });
 
   try {
-    return await executeSafeTransaction(publicClient, walletClient, {
-      safeAddress,
-      to: mechContractAddress,
-      value: 0n,
-      data: calldata,
-    });
+    return await withEvictionRecovery(
+      publicClient,
+      evictionRecovery,
+      'deliverToMarketplace',
+      () => executeSafeTransaction(publicClient, walletClient, {
+        safeAddress,
+        to: mechContractAddress,
+        value: 0n,
+        data: calldata,
+      }),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Idempotent: if the mech already recorded this delivery (e.g. crash

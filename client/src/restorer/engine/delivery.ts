@@ -11,6 +11,7 @@
  */
 
 import type { Hex, PublicClient, WalletClient, Address } from 'viem';
+import type { EvictionRecoveryConfig } from '../../adapters/mech/types.js';
 import {
   cidToDigestHex,
 } from '../../adapters/mech/ipfs.js';
@@ -29,6 +30,7 @@ export interface DeliveryDeps {
   routerAddress: Address;
   /** v1 or v2 claimDelivery encoding — matches chain config */
   claimDeliveryVariant: 'v1' | 'v2';
+  evictionRecovery?: EvictionRecoveryConfig;
 }
 
 /**
@@ -92,6 +94,7 @@ export async function deliverAndClaim(
       deps.mechContractAddress,
       [requestId],
       [deliveryDigest],
+      deps.evictionRecovery,
     );
     console.log(`[restorer-engine] deliverToMarketplace tx=${deliveryTxHash}`);
 
@@ -115,6 +118,7 @@ export async function deliverAndClaim(
       variant: deps.claimDeliveryVariant,
       evidenceHash: deps.claimDeliveryVariant === 'v2' ? evidenceHash : undefined,
     },
+    deps.evictionRecovery,
   );
   console.log(`[restorer-engine] claimDelivery tx=${claimTxHash}`);
 

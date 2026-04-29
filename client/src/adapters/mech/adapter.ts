@@ -274,6 +274,7 @@ export class MechAdapter implements ExecutionAdapter {
       restorationDataHex,
       deliveryRate,
       maxTimeout,
+      this.config.evictionRecovery,
     );
     const restorationRequestIds = restorationJob.requestIds;
 
@@ -387,6 +388,7 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.mechContractAddress,
       [requestId as Hex],
       [deliveryDigest],
+      this.config.evictionRecovery,
     );
   }
 
@@ -477,6 +479,7 @@ export class MechAdapter implements ExecutionAdapter {
                   this.config.routerAddress,
                   requestId as `0x${string}`,
                   { variant, evidenceHash },
+                  this.config.evictionRecovery,
                 );
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
@@ -675,6 +678,7 @@ export class MechAdapter implements ExecutionAdapter {
         evaluationDataHex,
         deliveryRate,
         maxTimeout,
+        this.config.evictionRecovery,
       );
 
       if (evalRequestIds.length > 0) {

@@ -1,4 +1,12 @@
 import type { ClaimPolicy } from './claim-policy.js';
+import type { Address, WalletClient } from 'viem';
+
+export interface EvictionRecoveryConfig {
+  serviceId: number;
+  stakingProxyAddress: Address;
+  distributorAddress: Address;
+  masterWalletClient: WalletClient;
+}
 
 export interface MechAdapterConfig {
   rpcUrl: string;
@@ -15,6 +23,7 @@ export interface MechAdapterConfig {
   chainId: number;
   /** Base mainnet V1 vs Phase 1b V2 `claimDelivery` — align with `ChainConfig.routerClaimDeliveryVersion`. */
   routerClaimDeliveryVariant: 'v1' | 'v2';
+  evictionRecovery?: EvictionRecoveryConfig;
   claimPolicy?: ClaimPolicy;
   claimRegistryAddress?: `0x${string}`;
 }

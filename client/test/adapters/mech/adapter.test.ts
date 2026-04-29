@@ -113,6 +113,7 @@ describe('MechAdapter with JinnRouter', () => {
       expect.any(String),
       expect.any(BigInt),
       expect.any(BigInt),
+      undefined,
     );
 
     await adapter.stop();
@@ -342,6 +343,7 @@ describe('MechAdapter with JinnRouter', () => {
       v2Config.routerAddress,
       requestId,
       { variant: 'v2', evidenceHash: canonicalHash },
+      undefined,
     );
 
     await adapter.stop();
@@ -386,6 +388,7 @@ describe('MechAdapter with JinnRouter', () => {
       v2Config.routerAddress,
       requestId,
       { variant: 'v2', evidenceHash: undefined },
+      undefined,
     );
 
     await adapter.stop();
@@ -479,6 +482,7 @@ describe('MechAdapter with JinnRouter', () => {
       v2Config.routerAddress,
       requestId,
       { variant: 'v2', evidenceHash: expectedHash },
+      undefined,
     );
     expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(
       v2Config.ipfsGatewayUrl,

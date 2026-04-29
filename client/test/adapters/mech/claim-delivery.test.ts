@@ -10,7 +10,9 @@ vi.mock('../../../src/adapters/mech/safe.js', () => ({
 
 // MOCK_JUSTIFICATION: src/tx-retry.js wraps chain-RPC retry logic at the I/O boundary; mocking it is mocking the boundary.
 vi.mock('../../../src/tx-retry.js', () => ({
+  flattenErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
   waitForTransactionReceiptWithRetry: vi.fn(),
+  viemSendTransactionWithRetry: vi.fn(),
   isRecoverableTransactionError: vi.fn().mockReturnValue(true),
   backoffDelay: vi.fn().mockResolvedValue(undefined),
 }));

@@ -126,6 +126,7 @@ async function bootstrap(): Promise<{
   masterAddress: `0x${string}`;
   serviceIndex: number;
   serviceId: number | null;
+  stakingAddress: `0x${string}` | null;
   agentPrivateKey: `0x${string}`;
   safeAddress: `0x${string}`;
   mechAddress?: `0x${string}`;
@@ -251,6 +252,7 @@ async function bootstrap(): Promise<{
     masterAddress: state.master_address as `0x${string}`,
     serviceIndex: firstComplete.index,
     serviceId: firstComplete.service_id ?? null,
+    stakingAddress: firstComplete.staking_address ? (firstComplete.staking_address as `0x${string}`) : null,
     agentPrivateKey: agentPrivateKey as `0x${string}`,
     safeAddress: firstComplete.safe_address as `0x${string}`,
     mechAddress: firstComplete.mech_address ? (firstComplete.mech_address as `0x${string}`) : undefined,
@@ -323,6 +325,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     mechAddress,
     serviceIndex,
     serviceId,
+    stakingAddress,
     agentId,
     identityRegistryAddress,
   } = await bootstrap();
@@ -339,20 +342,6 @@ export async function main(): Promise<DaemonStartupInfo> {
       },
     });
   }
-
-  const adapter = new MechAdapter({
-    rpcUrl: config.rpcUrl,
-    mechMarketplaceAddress: MARKETPLACE_ADDRESS,
-    routerAddress: ROUTER_ADDRESS,
-    mechContractAddress: mechAddress,
-    safeAddress,
-    agentEoaPrivateKey: agentPrivateKey,
-    ipfsRegistryUrl: config.ipfsRegistryUrl,
-    ipfsGatewayUrl: config.ipfsGatewayUrl,
-    pollIntervalMs: config.pollIntervalMs,
-    chainId: config.network === 'testnet' ? 84532 : 8453,
-    routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
-  });
 
   const preflight = await checkClaudeBinary(config.claudePath);
   if (!preflight.ok) {
@@ -388,6 +377,34 @@ export async function main(): Promise<DaemonStartupInfo> {
   const masterAccount = deriveMasterSigner(mnemonicForMaster);
   const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
   const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
+
+  const evictionRecovery =
+    config.stakingMode === 'standard' &&
+    serviceId !== null &&
+    stakingAddress &&
+    CHAIN_CONFIG.distributorAddress
+      ? {
+          serviceId,
+          stakingProxyAddress: stakingAddress,
+          distributorAddress: CHAIN_CONFIG.distributorAddress as `0x${string}`,
+          masterWalletClient: masterWallet,
+        }
+      : undefined;
+
+  const adapter = new MechAdapter({
+    rpcUrl: config.rpcUrl,
+    mechMarketplaceAddress: MARKETPLACE_ADDRESS,
+    routerAddress: ROUTER_ADDRESS,
+    mechContractAddress: mechAddress,
+    safeAddress,
+    agentEoaPrivateKey: agentPrivateKey,
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    ipfsGatewayUrl: config.ipfsGatewayUrl,
+    pollIntervalMs: config.pollIntervalMs,
+    chainId: config.network === 'testnet' ? 84532 : 8453,
+    routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
+    evictionRecovery,
+  });
 
   // ── RestorationEngine wiring ─────────────────────────────────────────────────
 
@@ -463,6 +480,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     mechContractAddress: mechAddress,
     routerAddress: ROUTER_ADDRESS,
     claimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
+    evictionRecovery,
   };
 
   // Claim deps: use the network default when bundled, with env override for
