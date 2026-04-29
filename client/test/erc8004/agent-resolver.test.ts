@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolveAgentIdForManifest } from '../../src/discovery/agent-resolver.js';
+import { resolveAgentIdForManifest } from '../../src/erc8004/identity.js';
 
 const MANIFEST_HASH =
   '0xfeedfacedeadbeef00000000000000000000000000000000000000000000beef' as `0x${string}`;

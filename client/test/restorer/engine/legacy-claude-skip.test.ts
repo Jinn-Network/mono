@@ -25,12 +25,10 @@ async function buildEngineWith(store: Store, run: RestorerImpl['run'], implName 
     run,
   };
   const registry = {
-    resolveImplName: () => implName,
     findFor: () => impl,
   };
   const engine = new ExposedEngine({
     store,
-    registry,
     implRegistry: registry,
     paths: { workingDirRoot: join(root, 'work'), implStateDirRoot: join(root, 'impl') },
   });
@@ -68,12 +66,10 @@ describe('legacy-claude skip handling', () => {
         },
       };
       const registry = {
-        resolveImplName: () => 'legacy-claude',
         findFor: () => legacyClaude,
       };
       const opts: RestorationEngineOptions = {
         store,
-        registry,
         implRegistry: registry,
         paths: {
           workingDirRoot: join(root, 'work'),

@@ -4,17 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { Store } from '../../../src/store/store.js';
-import {
-  RestorationEngine,
-  type RestorerImplRegistry as EngineRegistry,
-} from '../../../src/restorer/engine/engine.js';
+import { RestorationEngine } from '../../../src/restorer/engine/engine.js';
 import type { PersistedIntent, PersistedIntentInput } from '../../../src/restorer/engine/persistence.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
 import type { RestorerImpl, RestorationOutput, ReadyStatus } from '../../../src/restorer/types.js';
 import type { ClaimRegistryClient } from '../../../src/adapters/claim-registry/client.js';
 import type { MarketplaceClaimer } from '../../../src/restorer/engine/claim.js';
-
-const noopResolver: EngineRegistry = { resolveImplName: () => null };
 
 function stubImpl(overrides: Partial<RestorerImpl> & { isReady?: () => Promise<ReadyStatus> } = {}): RestorerImpl {
   return {
@@ -78,7 +73,6 @@ describe('RestorationEngine.claim — impl gate', () => {
   it('refuses to claim when no impl is registered for the intent\'s kind', async () => {
     const engine = new TestEngine({
       store,
-      registry: noopResolver,
       paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
       claimDeps: makeClaimDeps(),
       implRegistry: { findFor: () => undefined },
@@ -99,7 +93,6 @@ describe('RestorationEngine.claim — impl gate', () => {
     });
     const engine = new TestEngine({
       store,
-      registry: noopResolver,
       paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
       claimDeps: makeClaimDeps(),
       implRegistry: { findFor: () => notReadyImpl },
@@ -119,7 +112,6 @@ describe('RestorationEngine.claim — impl gate', () => {
     const readyImpl = stubImpl({ isReady: async () => ({ ready: true }) });
     const engine = new TestEngine({
       store,
-      registry: noopResolver,
       paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
       claimDeps: makeClaimDeps(),
       implRegistry: { findFor: () => readyImpl },
@@ -136,7 +128,6 @@ describe('RestorationEngine.claim — impl gate', () => {
   it('does not gate when implRegistry is absent (legacy test-mode path)', async () => {
     const engine = new TestEngine({
       store,
-      registry: noopResolver,
       paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
       claimDeps: makeClaimDeps(),
       // No implRegistry — gate must no-op so raw claim path works.

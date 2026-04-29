@@ -30,6 +30,16 @@ export const DEFAULT_BY_KIND = {
   'prediction.v0': 'prediction-v0-baseline',
   'prediction.apy.v0': 'prediction-apy-v0-baseline',
 } as const;
+/**
+ * Default universal-wrap impl name (jinn-mono-0k2). When set, every
+ * non-evaluation dispatch routes through the named impl's `supports()` —
+ * historically claude-code-learner wrapping every restoration with the
+ * Orient/Strategize/Plan + specialist Execute + Debrief/Improve/Memory
+ * envelope. Operators flip this off via `restorers.wrapWith` to dispatch
+ * directly to specialists (raw-impl benchmarking, learning-envelope cost
+ * comparison).
+ */
+export const DEFAULT_WRAP_WITH = 'claude-code-learner';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -53,6 +63,7 @@ export function buildIntentsCliRegistry(
     byKind: resolveEffectiveByKind(config),
     default: 'legacy-claude',
     disabled: resolveEffectiveDisabled(config),
+    wrapWith: resolveEffectiveWrapWith(config),
   });
 
   // `implStateDirRoot` matches daemon/doctor construction; stub `isReady()` is
@@ -89,6 +100,31 @@ export function resolveEffectiveByKind(config: JinnConfig): Record<string, strin
     ...DEFAULT_BY_KIND,
     ...(config.restorers?.byKind ?? {}),
   };
+}
+
+/**
+ * Resolve the effective universal-wrap impl name (jinn-mono-0k2).
+ *
+ * Semantics: the user's `restorers.wrapWith` fully replaces the default —
+ * including when set to `null` (operator opting out) or a different impl
+ * name. Distinguishing "key absent" (use default) from "key explicitly
+ * undefined/null" (opt-out) is important: zod's optional() collapses both,
+ * so we treat any presence of `restorers` config as authoritative for
+ * wrapWith iff the operator wrote that key. Concretely: if the user wrote
+ * `restorers: { wrapWith: null }` they want it OFF; if they wrote
+ * `restorers: { byKind: { ... } }` (no wrapWith key) they want the default.
+ *
+ * In practice the `restorers` config object is parsed by zod into a flat
+ * record where missing keys remain undefined, so we keep this helper
+ * conservative: any explicitly-set wrapWith on the user config wins; an
+ * absent key falls back to the ship default.
+ */
+export function resolveEffectiveWrapWith(config: JinnConfig): string | undefined {
+  const r = config.restorers;
+  if (r && Object.prototype.hasOwnProperty.call(r, 'wrapWith')) {
+    return r.wrapWith ?? undefined;
+  }
+  return DEFAULT_WRAP_WITH;
 }
 
 /** Is an impl currently disabled in the effective config? */

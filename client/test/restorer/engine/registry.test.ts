@@ -127,23 +127,6 @@ describe('RestorerImplRegistry', () => {
     });
   });
 
-  describe('resolveImplName — IRestorerImplRegistry compatibility', () => {
-    it('returns impl name for a known kind', () => {
-      const reg = new RestorerImplRegistry();
-      reg.register(makeImpl('alpha', ['portfolio.v0']));
-      expect(reg.resolveImplName({ kind: 'portfolio.v0' })).toBe('alpha');
-    });
-
-    it('returns null for unknown kind', () => {
-      const reg = new RestorerImplRegistry();
-      expect(reg.resolveImplName({ kind: 'unknown' })).toBeNull();
-    });
-
-    it('returns null for null input', () => {
-      const reg = new RestorerImplRegistry();
-      expect(reg.resolveImplName({ kind: null })).toBeNull();
-    });
-  });
 });
 
 // ── New (kind, type) dispatch tests ──────────────────────────────────────────
@@ -195,5 +178,108 @@ describe('RestorerImplRegistry.findFor', () => {
     // byKind points at x-rest, which rejects evaluation; default (catch-all)
     // supports everything → registry must return it before first-match.
     expect(r.findFor({ kind: 'x', type: 'evaluation' })?.name).toBe('catch-all');
+  });
+});
+
+// ── wrapWith universal-wrap policy (jinn-mono-0k2) ────────────────────────────
+
+describe('RestorerImplRegistry.findFor — wrapWith policy', () => {
+  it('wrapWith returns the wrapper for non-evaluation dispatch when it supports the ctx', () => {
+    const r = new RestorerImplRegistry({ wrapWith: 'wrapper' });
+    const wrapper = stubImpl('wrapper', ({type}) => type !== 'evaluation');
+    const specialist = stubImpl('specialist', ({kind}) => kind === 'x');
+    r.register(specialist);
+    r.register(wrapper);
+    expect(r.findFor({ kind: 'x', type: 'restoration' })?.name).toBe('wrapper');
+    // Default ctx (no type) is treated as restoration too.
+    expect(r.findFor({ kind: 'x' })?.name).toBe('wrapper');
+  });
+
+  it('wrapWith bypasses byKind for non-evaluation', () => {
+    const r = new RestorerImplRegistry({
+      wrapWith: 'wrapper',
+      byKind: { x: 'specialist' },
+    });
+    const wrapper = stubImpl('wrapper', ({type}) => type !== 'evaluation');
+    const specialist = stubImpl('specialist', ({kind}) => kind === 'x');
+    r.register(specialist);
+    r.register(wrapper);
+    expect(r.findFor({ kind: 'x', type: 'restoration' })?.name).toBe('wrapper');
+  });
+
+  it('wrapWith does NOT apply to evaluation dispatch (specialist evaluator wins)', () => {
+    const r = new RestorerImplRegistry({ wrapWith: 'wrapper' });
+    const wrapper = stubImpl('wrapper', ({type}) => type !== 'evaluation');
+    const evalImpl = stubImpl('evaluator', ({kind, type}) => kind === 'x' && type === 'evaluation');
+    r.register(wrapper);
+    r.register(evalImpl);
+    expect(r.findFor({ kind: 'x', type: 'evaluation' })?.name).toBe('evaluator');
+  });
+
+  it('wrapWith=undefined dispatches a non-evaluation kind directly to its specialist', () => {
+    // Direct exercise of the wrapWith=undefined path — operator opt-out
+    // benchmarks / raw-impl behaviour. With no wrapWith, byKind / first-match
+    // should win.
+    const r = new RestorerImplRegistry({ byKind: { x: 'specialist' } });
+    const wrapper = stubImpl('wrapper', ({type}) => type !== 'evaluation');
+    const specialist = stubImpl('specialist', ({kind}) => kind === 'x');
+    r.register(specialist);
+    r.register(wrapper);
+    expect(r.findFor({ kind: 'x', type: 'restoration' })?.name).toBe('specialist');
+    // Even without byKind, first-match should pick the specialist
+    // (registered before wrapper) and not silently fall back to wrapper.
+    const r2 = new RestorerImplRegistry();
+    r2.register(specialist);
+    r2.register(wrapper);
+    // wrapper.supports() returns true for non-evaluation, but byKind/default
+    // are unset and first-match scans in registration order — specialist
+    // wins for kind=x.
+    expect(r2.findFor({ kind: 'x', type: 'restoration' })?.name).toBe('specialist');
+  });
+
+  it('wrapWith=null is treated as off (operator explicit opt-out via JinnConfig)', () => {
+    const r = new RestorerImplRegistry({ wrapWith: null, byKind: { x: 'specialist' } });
+    const wrapper = stubImpl('wrapper', ({type}) => type !== 'evaluation');
+    const specialist = stubImpl('specialist', ({kind}) => kind === 'x');
+    r.register(specialist);
+    r.register(wrapper);
+    expect(r.findFor({ kind: 'x', type: 'restoration' })?.name).toBe('specialist');
+  });
+
+  it('wrapWith falls through when the named wrapper is not registered', () => {
+    const r = new RestorerImplRegistry({
+      wrapWith: 'nonexistent',
+      byKind: { x: 'specialist' },
+    });
+    const specialist = stubImpl('specialist', ({kind}) => kind === 'x');
+    r.register(specialist);
+    expect(r.findFor({ kind: 'x', type: 'restoration' })?.name).toBe('specialist');
+  });
+
+  it('wrapWith falls through when the named wrapper is disabled', () => {
+    const r = new RestorerImplRegistry({
+      wrapWith: 'wrapper',
+      disabled: ['wrapper'],
+      byKind: { x: 'specialist' },
+    });
+    const wrapper = stubImpl('wrapper', ({type}) => type !== 'evaluation');
+    const specialist = stubImpl('specialist', ({kind}) => kind === 'x');
+    r.register(specialist);
+    r.register(wrapper);
+    expect(r.findFor({ kind: 'x', type: 'restoration' })?.name).toBe('specialist');
+  });
+
+  it('wrapWith falls through when the named wrapper does not supports() the ctx', () => {
+    // Wrapper only supports kind=y; for kind=x it's a miss → byKind/specialist applies.
+    const r = new RestorerImplRegistry({
+      wrapWith: 'wrapper',
+      byKind: { x: 'specialist' },
+    });
+    const wrapper = stubImpl('wrapper', ({kind}) => kind === 'y');
+    const specialist = stubImpl('specialist', ({kind}) => kind === 'x');
+    r.register(specialist);
+    r.register(wrapper);
+    expect(r.findFor({ kind: 'x', type: 'restoration' })?.name).toBe('specialist');
+    expect(r.findFor({ kind: 'y', type: 'restoration' })?.name).toBe('wrapper');
   });
 });

@@ -19,7 +19,6 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const ROOT = mkdtempSync(join(tmpdir(), 'jinn-impls-'));
-const NOOP_REGISTRY = { resolveImplName: () => null };
 
 function makeOpts(
   store: Parameters<RestorationEngineOptions['store']['db']['prepare']>[0] extends never ? never : any,
@@ -27,7 +26,6 @@ function makeOpts(
 ): RestorationEngineOptions {
   return {
     store,
-    registry: NOOP_REGISTRY,
     paths: { workingDirRoot: join(ROOT, 'work'), implStateDirRoot: join(ROOT, 'impl') },
     implRegistry,
   };

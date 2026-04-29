@@ -34,6 +34,7 @@ import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../
 import { bracketGridPoints } from '../../../venues/hyperliquid/grid.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { signCanonical } from '../../engine/signing.js';
+import { buildVerificationStub } from '../../engine/verification-stub.js';
 import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
 
 import {
@@ -694,13 +695,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
       sha256: restorationEnvelopeSha256,
     };
 
-    const verificationOfRestoration = {
-      claimedTier: 'self-signed' as const,  // TODO(plan-d): read from restoration envelope
-      sdkVersion: '0.0.0-stub',              // TODO(plan-d): real SDK version
-      timestamp: Date.now(),
-      checks: [{ name: 'stub', passed: true }],
-      overall: 'valid' as const,             // TODO(plan-d): real SDK outcome
-    };
+    const verificationOfRestoration = buildVerificationStub();
 
     const verdictPayload: Record<string, unknown> = {
       restorationEnvelope,

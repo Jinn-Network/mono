@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { ReputationRegistryClient } from '../../src/reputation/registry.js';
+import type { ReputationRegistryClient } from '../../src/erc8004/reputation.js';
 
 const RESTORER_AGENT_ID = 1234n;
 const MANIFEST_CID = 'bafyrestorer123';
@@ -24,29 +24,29 @@ function makeRegistry(
 
 describe('mapVerdictToScore (policy)', () => {
   it('PASS → 100/2 (= 1.00)', async () => {
-    const { mapVerdictToScore } = await import('../../src/reputation/feedback-hook.js');
+    const { mapVerdictToScore } = await import('../../src/erc8004/reputation.js');
     expect(mapVerdictToScore('PASS')).toEqual({ score: 100, scoreDecimals: 2 });
   });
 
   it('FAIL → 0/2 (= 0.00)', async () => {
-    const { mapVerdictToScore } = await import('../../src/reputation/feedback-hook.js');
+    const { mapVerdictToScore } = await import('../../src/erc8004/reputation.js');
     expect(mapVerdictToScore('FAIL')).toEqual({ score: 0, scoreDecimals: 2 });
   });
 
   it('REJECTED → null (no on-chain feedback)', async () => {
-    const { mapVerdictToScore } = await import('../../src/reputation/feedback-hook.js');
+    const { mapVerdictToScore } = await import('../../src/erc8004/reputation.js');
     expect(mapVerdictToScore('REJECTED')).toBeNull();
   });
 
   it('INDETERMINATE → null (no on-chain feedback)', async () => {
-    const { mapVerdictToScore } = await import('../../src/reputation/feedback-hook.js');
+    const { mapVerdictToScore } = await import('../../src/erc8004/reputation.js');
     expect(mapVerdictToScore('INDETERMINATE')).toBeNull();
   });
 });
 
 describe('submitEvaluatorFeedback', () => {
   it('submits feedback with manifest:<cid> URI + evidenceHash for PASS', async () => {
-    const { submitEvaluatorFeedback } = await import('../../src/reputation/feedback-hook.js');
+    const { submitEvaluatorFeedback } = await import('../../src/erc8004/reputation.js');
     const registry = makeRegistry();
 
     const outcome = await submitEvaluatorFeedback({
@@ -72,7 +72,7 @@ describe('submitEvaluatorFeedback', () => {
   });
 
   it('submits 0-score feedback for FAIL', async () => {
-    const { submitEvaluatorFeedback } = await import('../../src/reputation/feedback-hook.js');
+    const { submitEvaluatorFeedback } = await import('../../src/erc8004/reputation.js');
     const registry = makeRegistry();
     const outcome = await submitEvaluatorFeedback({
       registry,
@@ -90,7 +90,7 @@ describe('submitEvaluatorFeedback', () => {
   });
 
   it('skips feedback for REJECTED (eligibility miss, not quality)', async () => {
-    const { submitEvaluatorFeedback } = await import('../../src/reputation/feedback-hook.js');
+    const { submitEvaluatorFeedback } = await import('../../src/erc8004/reputation.js');
     const registry = makeRegistry();
     const outcome = await submitEvaluatorFeedback({
       registry,
@@ -106,7 +106,7 @@ describe('submitEvaluatorFeedback', () => {
   });
 
   it('skips feedback for INDETERMINATE (evaluator could not rederive)', async () => {
-    const { submitEvaluatorFeedback } = await import('../../src/reputation/feedback-hook.js');
+    const { submitEvaluatorFeedback } = await import('../../src/erc8004/reputation.js');
     const registry = makeRegistry();
     const outcome = await submitEvaluatorFeedback({
       registry,
@@ -122,7 +122,7 @@ describe('submitEvaluatorFeedback', () => {
   });
 
   it('catches "Self-feedback not allowed" revert and returns skipped', async () => {
-    const { submitEvaluatorFeedback } = await import('../../src/reputation/feedback-hook.js');
+    const { submitEvaluatorFeedback } = await import('../../src/erc8004/reputation.js');
     const registry = makeRegistry(() => {
       throw new Error('execution reverted: Self-feedback not allowed');
     });
@@ -140,7 +140,7 @@ describe('submitEvaluatorFeedback', () => {
   });
 
   it('catches ERC721NonexistentToken revert and returns skipped', async () => {
-    const { submitEvaluatorFeedback } = await import('../../src/reputation/feedback-hook.js');
+    const { submitEvaluatorFeedback } = await import('../../src/erc8004/reputation.js');
     const registry = makeRegistry(() => {
       throw new Error('ERC721NonexistentToken(1234)');
     });
@@ -158,7 +158,7 @@ describe('submitEvaluatorFeedback', () => {
   });
 
   it('catches arbitrary errors as failed (non-fatal — caller logs)', async () => {
-    const { submitEvaluatorFeedback } = await import('../../src/reputation/feedback-hook.js');
+    const { submitEvaluatorFeedback } = await import('../../src/erc8004/reputation.js');
     const registry = makeRegistry(() => {
       throw new Error('connection refused');
     });
@@ -179,7 +179,7 @@ describe('submitEvaluatorFeedback', () => {
   });
 
   it('forwards tag2 when supplied', async () => {
-    const { submitEvaluatorFeedback } = await import('../../src/reputation/feedback-hook.js');
+    const { submitEvaluatorFeedback } = await import('../../src/erc8004/reputation.js');
     const registry = makeRegistry();
     await submitEvaluatorFeedback({
       registry,

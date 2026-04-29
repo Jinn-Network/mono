@@ -1308,7 +1308,7 @@ async function main(): Promise<void> {
           ]);
 
           const { IdentityPublisher, PAYLOAD_TUPLE } = await import(
-            '../../src/discovery/identity-publisher.js'
+            '../../src/erc8004/index.js'
           );
           const { createWalletClient, decodeAbiParameters, http: httpTransport, keccak256, stringToBytes } =
             await import('viem');
@@ -1455,10 +1455,10 @@ async function main(): Promise<void> {
           }
 
           const { ReputationRegistryClient, REPUTATION_REGISTRY_ADDRESSES } = await import(
-            '../../src/reputation/registry.js'
+            '../../src/erc8004/index.js'
           );
           const { submitEvaluatorFeedback, mapVerdictToScore } = await import(
-            '../../src/reputation/feedback-hook.js'
+            '../../src/erc8004/index.js'
           );
           const { createWalletClient, http: httpTransport } = await import('viem');
           const { privateKeyToAccount, generatePrivateKey } = await import('viem/accounts');
@@ -1626,7 +1626,7 @@ async function main(): Promise<void> {
           // — production decouples them via independent validator selection.
 
           const { ValidationRegistryClient, VALIDATION_REGISTRY_ADDRESSES } = await import(
-            '../../src/validation/registry.js'
+            '../../src/erc8004/index.js'
           );
           const { createWalletClient, http: httpTransport, keccak256, stringToBytes } = await import('viem');
           const { privateKeyToAccount } = await import('viem/accounts');
@@ -2126,7 +2126,6 @@ async function main(): Promise<void> {
           shutdownTimeoutMs: 10000,
           apiPort: 7331,
           restorationEngine: {
-            registry: implRegistry,
             implRegistry,
             paths: {
               workingDirRoot: join(tmpDir!, 'e2e-engine-work'),
@@ -2918,7 +2917,7 @@ async function main(): Promise<void> {
     // ── Phase 13d: 8004 Registry + Subgraph Backfill ───────────────────────
 
     const { Registry8004 } = await import('../../src/discovery/registry.js');
-    const { queryArtifacts: querySubgraphArtifacts, getMetadataValue: getMeta } = await import('../../src/discovery/subgraph.js');
+    const { queryArtifacts: querySubgraphArtifacts, getMetadataValue: getMeta } = await import('../../src/erc8004/index.js');
 
     results.push(
       await runPhase('Phase 13d: 8004 Registry + Subgraph — register artifact, mock subgraph, backfill', async () => {
@@ -3730,4 +3729,13 @@ main().catch((err) => {
   console.error('Fatal error:', err);
   exitExpected = true;
   process.exit(1);
+});
+s.exit(1);
+});
+;
+s.exit(1);
+});
+;
+});
+
 });

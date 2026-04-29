@@ -145,10 +145,8 @@ export class IntentPostingService {
         detail: `Posted intent for desired state ${candidate.restorationJob.id} via ${candidate.sourceKey}`,
       }, 'creator');
 
-      // ERC-8004 per-execution registration is rebuilt under bead jinn-mono-3zk
-      // against the operator-rooted entity model (DR
-      // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
-      // The previous per-CID registerIntent path was deleted with PR #37 cleanup.
+      // ERC-8004 per-execution registration uses the operator-rooted entity model
+      // (DR docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
       this.store.upsertIntentPostRecord({
         creatorSafeAddress,
         sourceKey: candidate.sourceKey,

@@ -14,7 +14,6 @@ import {
   RestorationEngine,
   NotImplementedError,
   type RestorationEngineOptions,
-  type RestorerImplRegistry,
 } from '../../../src/restorer/engine/engine.js';
 import { IntentPersistence, type PersistedIntentInput } from '../../../src/restorer/engine/persistence.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
@@ -49,10 +48,6 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
 
 const TEST_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as `0x${string}`;
 
-const noopRegistry: RestorerImplRegistry = {
-  resolveImplName: () => null,
-};
-
 function mkTmp(): string {
   const dir = join(tmpdir(), `eng-pkg-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
@@ -76,7 +71,6 @@ function makeInput(requestId: string, tmp: string): PersistedIntentInput {
 function makeOpts(store: Store, tmp: string): RestorationEngineOptions {
   return {
     store,
-    registry: noopRegistry,
     paths: {
       workingDirRoot: join(tmp, 'restorations'),
       implStateDirRoot: join(tmp, 'impls'),
@@ -162,7 +156,6 @@ describe('Engine packaging integration', () => {
   it('pack() throws NotImplementedError when packagingDeps absent', async () => {
     const optsNoPackaging: RestorationEngineOptions = {
       store,
-      registry: noopRegistry,
       paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
     };
     const eng = new TestEngine(optsNoPackaging);
@@ -230,7 +223,6 @@ describe('Engine packaging integration', () => {
   it('deliver() throws NotImplementedError when deliveryDeps absent', async () => {
     const optsNoDelivery: RestorationEngineOptions = {
       store,
-      registry: noopRegistry,
       paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
     };
     const eng = new TestEngine(optsNoDelivery);
@@ -272,7 +264,6 @@ describe('Engine packaging integration', () => {
     // Engine with envelopeDeps missing safeAddress and no deliveryDeps
     const optsNoSafe: RestorationEngineOptions = {
       store,
-      registry: noopRegistry,
       paths: {
         workingDirRoot: join(tmp, 'restorations'),
         implStateDirRoot: join(tmp, 'impls'),

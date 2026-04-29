@@ -20,15 +20,13 @@ import { Store } from '../../../src/store/store.js';
 import {
   RestorationEngine,
   type RestorationEngineOptions,
-  type RestorerImplRegistry,
 } from '../../../src/restorer/engine/engine.js';
 import {
   IntentPersistence,
   type PersistedIntentInput,
 } from '../../../src/restorer/engine/persistence.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
-import type { ReputationRegistryClient } from '../../../src/reputation/registry.js';
-import type { ResolvedAgent } from '../../../src/discovery/agent-resolver.js';
+import type { ReputationRegistryClient, ResolvedAgent } from '../../../src/erc8004/index.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -69,10 +67,6 @@ const RESTORER_EVIDENCE_HASH =
 const RESTORER_AGENT_ID = 1234n;
 const RESTORER_MANIFEST_CID_FROM_SUBGRAPH = 'bafyrestorerCidFromSubgraph';
 
-const noopRegistry: RestorerImplRegistry = {
-  resolveImplName: () => null,
-};
-
 // A minimal restorer manifest JSON that the engine extracts evidenceHash from.
 function buildInlinedRestorationResult(): string {
   const restorerManifest = {
@@ -103,7 +97,6 @@ function makeOpts(
 ): RestorationEngineOptions {
   return {
     store,
-    registry: noopRegistry,
     paths: {
       workingDirRoot: '/tmp/eng-rep-fb-work',
       implStateDirRoot: '/tmp/eng-rep-fb-impl',

@@ -11,7 +11,6 @@ function minimalEngineConfig(): DaemonConfig['restorationEngine'] {
   const root = mkdtempSync(join(tmpdir(), 'jinn-daemon-test-'));
   const implRegistry = new RestorerImplRegistry({ default: 'legacy-claude' });
   return {
-    registry: implRegistry,
     implRegistry,
     paths: {
       workingDirRoot: join(root, 'work'),

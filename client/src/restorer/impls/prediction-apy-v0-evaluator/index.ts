@@ -5,6 +5,7 @@ import { createPublicClient, http } from 'viem';
 import { base, baseSepolia, mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { signCanonical } from '../../engine/signing.js';
+import { buildVerificationStub } from '../../engine/verification-stub.js';
 import type { PublicClient } from 'viem';
 import type { RestorerImpl, RestorationContext, RestorationOutput, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
@@ -316,13 +317,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
       sha256: envelopeSha256,
     };
 
-    const verificationOfRestoration = {
-      claimedTier: 'self-signed' as const,   // TODO(plan-d): read from restoration envelope
-      sdkVersion: '0.0.0-stub',              // TODO(plan-d): real SDK version
-      timestamp: Date.now(),
-      checks: [{ name: 'stub', passed: true }],
-      overall: 'valid' as const,             // TODO(plan-d): real SDK outcome
-    };
+    const verificationOfRestoration = buildVerificationStub();
 
     const verdictPayload: Record<string, unknown> = {
       restorationEnvelope,

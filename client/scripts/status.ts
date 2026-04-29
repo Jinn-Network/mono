@@ -77,7 +77,7 @@ function printHumanSummary(body: StatusV1Response): void {
   if (body.activity.recent.length > 0) {
     console.log('  recent:');
     for (const row of body.activity.recent.slice(0, 8)) {
-      console.log(`    ${row.role}  ${row.requestId}`);
+      console.log(`    ${row.kind}  ${row.requestId}`);
     }
   }
 

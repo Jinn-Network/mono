@@ -13,12 +13,12 @@ import { harvestOutput } from './harvest.js';
 
 /**
  * `RestorerImpl` shell. Bridges the engine's dispatch contract
- * (engine.ts:533: `await impl.run(ctx)`) into the harness adapter +
- * markdown plugin shipped by Plan 1.
+ * (`await impl.run(ctx)`) into the harness adapter + markdown plugin.
  *
- * Plan 2 supports() returns true for any kind. Plan 3 wraps this in a
- * first-match-wrapper that delegates Execute to the kind-specific
- * specialist when one exists.
+ * `supports()` returns true for any non-evaluation kind. `ClaudeCodeLearnerWrapper`
+ * (./wrapper.ts) is the first-match dispatcher that delegates Execute to a
+ * kind-specific specialist when one exists; this shim runs the plugin's full
+ * pipeline when no specialist matches.
  */
 export class ClaudeCodeLearnerImpl implements RestorerImpl {
   readonly name: string;

@@ -39,9 +39,8 @@ If not installed:
 npm install -g @jinn-network/client
 ```
 
-This gives you two binaries:
-- `jinn` — the operator CLI (17 verbs)
-- `jinn-mcp` — the MCP server for agent-to-agent operation
+This gives you one binary:
+- `jinn` — the operator CLI (17 verbs); run `jinn mcp` to start the MCP server
 
 ### Prerequisites
 
@@ -57,7 +56,8 @@ If the user wants their agent (Claude Code, Cursor, etc.) to operate jinn progra
 {
   "mcpServers": {
     "jinn": {
-      "command": "jinn-mcp"
+      "command": "jinn",
+      "args": ["mcp"]
     }
   }
 }
@@ -69,7 +69,7 @@ If the user wants their agent (Claude Code, Cursor, etc.) to operate jinn progra
   "mcpServers": {
     "jinn": {
       "command": "npx",
-      "args": ["-y", "-p", "@jinn-network/client", "jinn-mcp"]
+      "args": ["-y", "-p", "@jinn-network/client", "jinn", "mcp"]
     }
   }
 }

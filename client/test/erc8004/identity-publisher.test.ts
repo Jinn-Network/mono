@@ -15,7 +15,7 @@ import {
   encodeExecutionPayload,
   validatePayload,
   type ExecutionPayload,
-} from '../../src/discovery/identity-publisher.js';
+} from '../../src/erc8004/identity.js';
 
 // ── Spec test vectors (payload-schema §8) ─────────────────────────────────────
 

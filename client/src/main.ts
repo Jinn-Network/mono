@@ -404,11 +404,20 @@ export async function main(): Promise<DaemonStartupInfo> {
   // `config.restorers.disabled[]` fully overrides this default when present,
   // so `jinn intents enable <kind>` persists the opt-in by writing to that
   // list in ~/.jinn-client/config.json.
-  const { DEFAULT_DISABLED_IMPLS, DEFAULT_BY_KIND } = await import('./cli/intent-registry-access.js');
+  //
+  // wrapWith: defaults to 'claude-code-learner' so the learning envelope
+  // wraps every restoration kind out of the box (jinn-mono-0k2). Operators
+  // benchmarking or running raw specialist behaviour set
+  // `restorers.wrapWith: null` (or omit, when no other restorers config
+  // exists) to dispatch directly to specialists.
+  const { DEFAULT_DISABLED_IMPLS, DEFAULT_BY_KIND, DEFAULT_WRAP_WITH } = await import(
+    './cli/intent-registry-access.js'
+  );
   const implRegistry = new RestorerImplRegistry({
     byKind: { ...DEFAULT_BY_KIND },
     default: 'legacy-claude',
     disabled: [...DEFAULT_DISABLED_IMPLS],
+    wrapWith: DEFAULT_WRAP_WITH,
     ...(config.restorers ?? {}),
   });
 
@@ -488,9 +497,9 @@ export async function main(): Promise<DaemonStartupInfo> {
   // an IdentityPublisher so the engine anchors each envelope under the
   // operator's agent NFT via setMetadata. Otherwise log a warning — publishing
   // is disabled until bootstrap completes that step (jinn-mono-j07).
-  let identityPublisher: import('./discovery/identity-publisher.js').IdentityPublisher | undefined;
+  let identityPublisher: import('./erc8004/index.js').IdentityPublisher | undefined;
   if (agentId && identityRegistryAddress) {
-    const { IdentityPublisher } = await import('./discovery/identity-publisher.js');
+    const { IdentityPublisher } = await import('./erc8004/index.js');
     identityPublisher = new IdentityPublisher({
       identityRegistryAddress,
       agentId: BigInt(agentId),
@@ -528,7 +537,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     | undefined;
   if (agentId) {
     const { getReputationRegistryAddress, ReputationRegistryClient } = await import(
-      './reputation/registry.js'
+      './erc8004/index.js'
     );
     const chainId = config.network === 'testnet' ? 84532 : 8453;
     const reputationRegistryAddress = getReputationRegistryAddress(chainId);
@@ -540,7 +549,7 @@ export async function main(): Promise<DaemonStartupInfo> {
         safeAddress,
       });
       const { resolveAgentIdForManifest } = await import(
-        './discovery/agent-resolver.js'
+        './erc8004/index.js'
       );
       const subgraphUrl = config.subgraphUrl;
       reputationFeedback = {
@@ -624,9 +633,6 @@ export async function main(): Promise<DaemonStartupInfo> {
           }
         : undefined,
     restorationEngine: {
-      // TODO(jinn-mono-cy4): RestorationEngineOptions has redundant registry+implRegistry
-      // fields. Engine refactor should consolidate to one. Locked in this PR.
-      registry: implRegistry,
       paths: {
         workingDirRoot: config.engine.workingDirRoot,
         implStateDirRoot: config.engine.implStateDirRoot,

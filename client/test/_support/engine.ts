@@ -2,7 +2,6 @@ import {
   RestorationEngine,
   NotImplementedError,
   type RestorationEngineOptions,
-  type RestorerImplRegistry,
 } from '@/restorer/engine/engine.js';
 import {
   IntentPersistence,
@@ -13,8 +12,6 @@ import { IntentState } from '@/restorer/engine/state.js';
 import type { Store } from '@/store/store.js';
 
 import { randomBytes } from 'node:crypto';
-
-const NOOP_REGISTRY: RestorerImplRegistry = { resolveImplName: () => null };
 
 function nextId(): string { return `req-${randomBytes(4).toString('hex')}`; }
 
@@ -96,7 +93,6 @@ export class SpyEngine extends RestorationEngine {
     // The base class constructs IntentPersistence from opts.store.db; we shadow it.
     super({
       store: opts.store,
-      registry: NOOP_REGISTRY,
       paths: opts.paths ?? { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
       claimDeps: opts.claimDeps,
       implRegistry: opts.implRegistry,

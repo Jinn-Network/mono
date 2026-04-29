@@ -21,11 +21,10 @@ import { Store } from '../../../src/store/store.js';
 import {
   RestorationEngine,
   type RestorationEngineOptions,
-  type RestorerImplRegistry,
 } from '../../../src/restorer/engine/engine.js';
 import { IntentPersistence, type PersistedIntentInput } from '../../../src/restorer/engine/persistence.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
-import type { IdentityPublisher } from '../../../src/discovery/identity-publisher.js';
+import type { IdentityPublisher } from '../../../src/erc8004/index.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -61,10 +60,6 @@ const TEST_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae78
 const PACK_EVIDENCE_HASH = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee1' as Hex;
 const PACK_MANIFEST_CID = 'bafymock123';
 
-const noopRegistry: RestorerImplRegistry = {
-  resolveImplName: () => null,
-};
-
 function mkTmp(): string {
   const dir = join(tmpdir(), `eng-pub-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
@@ -78,7 +73,6 @@ function makeOpts(
 ): RestorationEngineOptions {
   return {
     store,
-    registry: noopRegistry,
     paths: {
       workingDirRoot: join(tmp, 'restorations'),
       implStateDirRoot: join(tmp, 'impls'),

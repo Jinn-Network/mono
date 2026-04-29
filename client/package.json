@@ -15,8 +15,7 @@
   },
   "bin": {
     "client": "./dist/bin/jinn.js",
-    "jinn": "./dist/bin/jinn.js",
-    "jinn-mcp": "./dist/bin/jinn-mcp.js"
+    "jinn": "./dist/bin/jinn.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,7 +37,7 @@
     "e2e:full-cycle": "tsx test/e2e/claude-code-learner-full-cycle.ts",
     "jinn": "tsx src/bin/jinn.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
-    "build": "tsc && chmod +x dist/bin/jinn.js dist/bin/jinn-mcp.js && mkdir -p dist/dashboard && cp src/dashboard/index.html dist/dashboard/index.html && node scripts/write-dist-build-meta.mjs",
+    "build": "tsc && chmod +x dist/bin/jinn.js && mkdir -p dist/dashboard && cp src/dashboard/index.html dist/dashboard/index.html && node scripts/write-dist-build-meta.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -57,7 +56,6 @@
     "status": "tsx scripts/status.ts",
     "e2e": "tsx test/e2e/validate.ts",
     "e2e:claude-code-learner": "tsx test/e2e/claude-code-learner-portfolio-v0.ts",
-    "e2e-portfolio-v0": "tsx test/e2e/portfolio-v0.ts",
     "e2e-prediction-apy-v0": "tsx test/e2e/prediction-apy-v0.ts",
     "e2e:prediction": "cd ../contracts && yarn compile && cd ../client && tsx test/e2e/prediction-v0.ts",
     "staking": "tsx test/e2e/staking.ts",

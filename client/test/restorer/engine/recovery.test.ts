@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Store } from '../../../src/store/store.js';
-import { RestorationEngine, NotImplementedError, type RestorationEngineOptions, type RestorerImplRegistry, type RecoveryReport } from '../../../src/restorer/engine/engine.js';
+import { RestorationEngine, NotImplementedError, type RestorationEngineOptions, type RecoveryReport } from '../../../src/restorer/engine/engine.js';
 import { IntentPersistence, type PersistedIntent, type PersistedIntentInput } from '../../../src/restorer/engine/persistence.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
 import { recoverInFlight } from '../../../src/restorer/engine/recovery.js';
@@ -8,12 +8,9 @@ import type { RestorationOutput } from '../../../src/restorer/types.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const noopRegistry: RestorerImplRegistry = { resolveImplName: () => null };
-
 function makeOpts(store: Store): RestorationEngineOptions {
   return {
     store,
-    registry: noopRegistry,
     paths: { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
   };
 }
@@ -344,7 +341,6 @@ describe('PACKAGING recovery: implOutputs persisted and hydrated on restart', ()
       // ── Phase 1: initial run ──────────────────────────────────────────────
       const engine1 = new PackHydrationEngine({
         store,
-        registry: { resolveImplName: () => null },
         paths: { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
       });
       const p = engine1.testPersistence;
@@ -391,7 +387,6 @@ describe('PACKAGING recovery: implOutputs persisted and hydrated on restart', ()
       // engine2 has the same DB but empty in-memory map.
       const engine2 = new PackHydrationEngine({
         store,
-        registry: { resolveImplName: () => null },
         paths: { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
       });
 
@@ -421,7 +416,6 @@ describe('PACKAGING recovery: implOutputs persisted and hydrated on restart', ()
 
       const engine = new PackHydrationEngine({
         store,
-        registry: { resolveImplName: () => null },
         paths: { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
       });
       const p = engine.testPersistence;

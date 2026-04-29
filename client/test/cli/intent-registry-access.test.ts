@@ -9,10 +9,12 @@ import {
   buildIntentsCliRegistry,
   DEFAULT_BY_KIND,
   DEFAULT_DISABLED_IMPLS,
+  DEFAULT_WRAP_WITH,
   isImplDisabled,
   resetImplForKindInConfig,
   resolveEffectiveByKind,
   resolveEffectiveDisabled,
+  resolveEffectiveWrapWith,
   setImplEnabledInConfig,
   setImplForKindInConfig,
 } from '../../src/cli/intent-registry-access.js';
@@ -97,6 +99,30 @@ describe('resolveEffectiveDisabled', () => {
   it('returns user list when restorers.disabled is set (full replace)', () => {
     const config = { restorers: { disabled: [] } } as unknown as JinnConfig;
     expect(resolveEffectiveDisabled(config)).toEqual([]);
+  });
+});
+
+describe('resolveEffectiveWrapWith', () => {
+  it('returns the ship default when restorers.wrapWith is unset (key absent)', () => {
+    expect(resolveEffectiveWrapWith({} as JinnConfig)).toBe(DEFAULT_WRAP_WITH);
+    const config = { restorers: { byKind: {} } } as unknown as JinnConfig;
+    expect(resolveEffectiveWrapWith(config)).toBe(DEFAULT_WRAP_WITH);
+  });
+
+  it('returns operator override when restorers.wrapWith is a non-empty string', () => {
+    const config = { restorers: { wrapWith: 'custom-wrapper' } } as unknown as JinnConfig;
+    expect(resolveEffectiveWrapWith(config)).toBe('custom-wrapper');
+  });
+
+  it('returns undefined when restorers.wrapWith is null (explicit opt-out)', () => {
+    const config = { restorers: { wrapWith: null } } as unknown as JinnConfig;
+    expect(resolveEffectiveWrapWith(config)).toBeUndefined();
+  });
+
+  it('returns undefined when restorers.wrapWith is explicitly undefined', () => {
+    // Operator wrote `wrapWith: undefined` in code (rare, but a valid opt-out).
+    const config = { restorers: { wrapWith: undefined } } as unknown as JinnConfig;
+    expect(resolveEffectiveWrapWith(config)).toBeUndefined();
   });
 });
 

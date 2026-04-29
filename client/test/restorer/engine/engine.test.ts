@@ -4,7 +4,6 @@ import {
   RestorationEngine,
   NotImplementedError,
   type RestorationEngineOptions,
-  type RestorerImplRegistry,
   type RecoveryReport,
 } from '../../../src/restorer/engine/engine.js';
 import { IntentPersistence, type PersistedIntent, type PersistedIntentInput } from '../../../src/restorer/engine/persistence.js';
@@ -14,14 +13,9 @@ import type { MarketplaceClaimer } from '../../../src/restorer/engine/claim.js';
 
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
-const noopRegistry: RestorerImplRegistry = {
-  resolveImplName: () => null,
-};
-
 function makeOpts(store: Store): RestorationEngineOptions {
   return {
     store,
-    registry: noopRegistry,
     paths: { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
   };
 }

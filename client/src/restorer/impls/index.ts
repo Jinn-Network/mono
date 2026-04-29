@@ -59,6 +59,13 @@ export interface RestorerEnv {
  * Build the canonical ordered list of first-party restorer / evaluator impls.
  * Registration order is stable: it matches historical `main.ts` first-match
  * behavior for `RestorerImplRegistry`.
+ *
+ * The claude-code-learner wrapper is registered alongside specialists; it does
+ * NOT win first-match by registration order. Universal-wrap behaviour is now
+ * a registry policy (`RestorerDispatchConfig.wrapWith`) — see jinn-mono-0k2.
+ * Default operator config sets `wrapWith: 'claude-code-learner'` so the
+ * learning envelope wraps every restoration kind by default; operators flip
+ * the policy off to dispatch directly to specialists.
  */
 export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
   const isStub = Boolean(env.stub);
@@ -149,8 +156,10 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
   );
 
   // Build the claude-code-learner wrapper LAST (so it sees all other impls
-  // as its specialists pool) but register it FIRST so it wins
-  // first-match for every kind.
+  // as its specialists pool). It is registered alongside specialists, NOT
+  // prepended — universal-wrap is now a registry policy
+  // (RestorerDispatchConfig.wrapWith) rather than an ordering trick. See
+  // jinn-mono-0k2.
   const learnerAdapter = new ClaudeCodeHarnessAdapter({
     claudePath: env.claudePath,
     claudeModel: env.claudeModel,
@@ -160,5 +169,6 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
     shim: learnerShim,
     specialists: [...out], // snapshot of specialists; wrapper does not delegate to itself
   });
-  return [learnerWrapper, ...out];
+  out.push(learnerWrapper);
+  return out;
 }

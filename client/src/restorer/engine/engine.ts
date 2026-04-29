@@ -40,16 +40,15 @@ import type {
   ExecutionPayload,
   ExecutionTier,
   IdentityPublisher,
-} from '../../discovery/identity-publisher.js';
-import type { ReputationRegistryClient } from '../../reputation/registry.js';
-import type {
+  ReputationRegistryClient,
   EvaluatorVerdict,
   FeedbackHookOutcome,
-} from '../../reputation/feedback-hook.js';
-import { submitEvaluatorFeedback } from '../../reputation/feedback-hook.js';
-import type { ResolvedAgent } from '../../discovery/agent-resolver.js';
+  ResolvedAgent,
+} from '../../erc8004/index.js';
+import { submitEvaluatorFeedback } from '../../erc8004/index.js';
 import type { Role } from '../../types/envelope.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
+import { buildInfo } from '../../build-info.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -63,18 +62,25 @@ export class NotImplementedError extends Error {
   }
 }
 
-// ── Registry stub (to be fleshed out in impl task) ───────────────────────────
+// ── Registry types ────────────────────────────────────────────────────────────
 
-export interface RestorerImplRegistry {
-  /** Returns the impl name for a given spec kind (and optional type), or null if none registered. */
-  resolveImplName(ctx: { kind: string | null; type?: 'restoration' | 'evaluation' }): string | null;
+/**
+ * Resolves a `RestorerImpl` for a given spec kind (and optional type), or
+ * returns `undefined` when nothing is registered/enabled.
+ *
+ * The engine only needs `findFor` — `resolveImplName` was a redundant alias
+ * for `findFor(...)?.name` and was removed under jinn-mono-qip (supersedes
+ * jinn-mono-cy4). Concrete implementation lives in
+ * `restorer/engine/registry.ts` (`RestorerImplRegistry`).
+ */
+export interface ImplRegistry {
+  findFor(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): RestorerImpl | undefined;
 }
 
 // ── Engine options ────────────────────────────────────────────────────────────
 
 export interface RestorationEngineOptions {
   store: Store;
-  registry: RestorerImplRegistry;
   paths: {
     workingDirRoot: string;
     implStateDirRoot: string;
@@ -111,9 +117,7 @@ export interface RestorationEngineOptions {
    * Impl registry for resolving which RestorerImpl to run.
    * When provided and findFor() returns an impl, runImpl() dispatches to it.
    */
-  implRegistry?: {
-    findFor(ctx: { kind: string; type?: 'restoration' | 'evaluation' }): RestorerImpl | undefined;
-  };
+  implRegistry?: ImplRegistry;
   /**
    * ERC-8004 Identity Registry per-execution publisher (jinn-mono-3zk).
    * When provided, the engine calls
@@ -167,7 +171,6 @@ export interface RecoveryReport {
 
 export class RestorationEngine {
   protected readonly persistence: IntentPersistence;
-  protected readonly registry: RestorerImplRegistry;
   protected readonly paths: RestorationEngineOptions['paths'];
   protected readonly claimDeps: RestorationEngineOptions['claimDeps'];
   protected readonly packagingDeps: RestorationEngineOptions['packagingDeps'];
@@ -197,7 +200,6 @@ export class RestorationEngine {
 
   constructor(opts: RestorationEngineOptions) {
     this.persistence = new IntentPersistence(opts.store.db);
-    this.registry = opts.registry;
     this.paths = opts.paths;
     this.claimDeps = opts.claimDeps;
     this.packagingDeps = opts.packagingDeps;
@@ -874,9 +876,7 @@ export class RestorationEngine {
       this.persistence.setManifestGeneratedAt(intent.requestId, generatedAt);
     }
 
-    // 5. Assemble + sign envelope → envelope CID now known
-    // TODO(build-info): replace 'dev' and the zero digest with real build-time
-    // constants from a future build-info.ts module generated at CI time.
+    // 5. Assemble + sign envelope → envelope CID now known.
     // trajectoryRef was computed in step 1b above (emitted after artifact upload).
     const envelopeTrajectory = trajectoryRef
       ? { cid: trajectoryRef.cid, sha256: trajectoryRef.sha256 }
@@ -902,10 +902,12 @@ export class RestorationEngine {
       window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
       executor: {
         implName: intent.implName ?? specKind,
-        implVersion: '1.0.0',
-        // TODO(build-info): populate from a build-time constants module.
-        clientGitSha: 'dev',
-        codeDigest: 'sha256:' + '0'.repeat(64),
+        // buildInfo resolves to real values in production builds; falls back to
+        // clearly-labelled placeholders ('dev' / 'sha256:dev-build') when running
+        // via tsx without a prior `yarn build` (dev mode).
+        implVersion: buildInfo.implVersion,
+        clientGitSha: buildInfo.clientGitSha,
+        codeDigest: buildInfo.codeDigest,
         signingKey: { kind: 'agent-eoa', pubkey: agentEoa },
       },
       evidenceTier,
@@ -922,19 +924,12 @@ export class RestorationEngine {
     const manifestCid = envelopeCid;
     const signatureHash = envelopeHash;
 
-    // 6. ERC-8004 per-execution registration (envelope + artifacts) is rebuilt
-    //    under beads jinn-mono-3zk and downstream against the operator-rooted
-    //    entity model — see DR
-    //    docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md.
-    //    The previous per-CID registerEnvelope / registerArtifactWithParent
-    //    path was deleted with PR #37 cleanup.
-
-    // 6b. ERC-8004 IdentityRegistry per-execution `setMetadata` fires in
-    //    deliver() AFTER claimDelivery succeeds (jinn-mono-3zk, PR#37 review2
-    //    must-fix #2). 'committed' must mean "observable on-chain evidenceHash
-    //    exists" — publishing before claim would lie during failures.
-    //    The evidenceHash (signatureHash) is persisted to DELIVERING state below
-    //    and reused by deliver().
+    // 6. ERC-8004 IdentityRegistry per-execution `setMetadata` fires in
+    //    deliver() AFTER claimDelivery succeeds. 'committed' must mean
+    //    "observable on-chain evidenceHash exists" — publishing before claim
+    //    would lie during failures. The evidenceHash (signatureHash) is
+    //    persisted to DELIVERING state below and reused by deliver().
+    //    Operator-rooted entity model: docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md.
 
     // 7. Build artifact CID map for persistence
     const artifactCids: Record<string, string> = {};

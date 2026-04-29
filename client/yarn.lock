@@ -467,7 +467,6 @@ __metadata:
   bin:
     client: ./dist/bin/jinn.js
     jinn: ./dist/bin/jinn.js
-    jinn-mcp: ./dist/bin/jinn-mcp.js
   languageName: unknown
   linkType: soft
 

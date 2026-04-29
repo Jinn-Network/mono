@@ -14,7 +14,6 @@ import { Store } from '../../../src/store/store.js';
 import {
   RestorationEngine,
   type RestorationEngineOptions,
-  type RestorerImplRegistry,
 } from '../../../src/restorer/engine/engine.js';
 import { IntentPersistence } from '../../../src/restorer/engine/persistence.js';
 import { IntentState, MissingEvidenceHashError } from '../../../src/restorer/engine/state.js';
@@ -27,13 +26,11 @@ import {
 
 // ── Test scaffolding ──────────────────────────────────────────────────────────
 
-const noopRegistry: RestorerImplRegistry = { resolveImplName: () => null };
 const engTestRoot = mkdtempSync(join(tmpdir(), 're-eng-'));
 
 function makeOpts(store: Store, implRegistry?: RestorationEngineOptions['implRegistry']): RestorationEngineOptions {
   return {
     store,
-    registry: noopRegistry,
     paths: { workingDirRoot: join(engTestRoot, 'work'), implStateDirRoot: join(engTestRoot, 'impl') },
     ...(implRegistry ? { implRegistry } : {}),
   };

@@ -5,7 +5,7 @@
  * ERC-20 balances on the old Safe are not swept yet — see TODO below.
  */
 
-import { formatEther, getAddress, zeroAddress, type Address, type Hex } from 'viem';
+import { encodeFunctionData, formatEther, getAddress, zeroAddress, type Address, type Hex } from 'viem';
 import { executeSafeTxDirect } from './safe-adapter.js';
 import type { ServiceState } from './types.js';
 import { createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
@@ -15,6 +15,7 @@ import {
   viemSendTransactionWithRetry,
   waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
+import { ERC20_ABI } from './contracts.js';
 
 function isZeroishAddress(addr: string | null | undefined): boolean {
   if (!addr) return true;
@@ -56,6 +57,14 @@ export function previousSafeBeingAbandoned(
   return null;
 }
 
+/** An ERC-20 token to sweep from the abandoned Safe. */
+export interface Erc20SweepToken {
+  /** Checksummed token contract address. */
+  address: string;
+  /** Human-readable symbol for log messages. */
+  symbol: string;
+}
+
 export interface SweepOrphanedServiceFundsParams {
   rpcUrl: string;
   network: JinnOnchainNetwork;
@@ -67,6 +76,13 @@ export interface SweepOrphanedServiceFundsParams {
   agentAddress: string;
   abandonedSafeAddress: string;
   minAgentReserveWei: bigint;
+  /**
+   * ERC-20 tokens to sweep from the abandoned Safe (e.g. OLAS bond).
+   * Each token with a non-zero balance on the Safe will be transferred
+   * to `masterAddress` via Safe.execTransaction. If omitted, no ERC-20
+   * sweep is attempted.
+   */
+  erc20Tokens?: Erc20SweepToken[];
 }
 
 /**
@@ -183,7 +199,80 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
     }
   }
 
-  // TODO: sweep ERC-20 (e.g. OLAS) from abandoned Safe via Safe.execTransaction(transfer).
+  // Sweep ERC-20 tokens (e.g. OLAS bond) from the abandoned Safe.
+  const erc20Tokens = params.erc20Tokens ?? [];
+  for (const token of erc20Tokens) {
+    let tokenAddress: Address;
+    try {
+      tokenAddress = getAddress(token.address) as Address;
+    } catch {
+      console.error(
+        `[jinn-earning] Service ${serviceIndex}: skipping ERC-20 sweep for invalid address ${token.address} (${token.symbol}).`,
+      );
+      continue;
+    }
+
+    let tokenBalance: bigint;
+    try {
+      tokenBalance = await publicClient.readContract({
+        address: tokenAddress,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [getAddress(abandonedSafeAddress) as Address],
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(
+        `[jinn-earning] Service ${serviceIndex}: could not read ${token.symbol} balance on Safe ${abandonedSafeAddress} (${msg}). Skipping ERC-20 sweep for this token.`,
+      );
+      continue;
+    }
+
+    if (tokenBalance === 0n) {
+      continue;
+    }
+
+    // Encode transfer(masterAddress, balance) calldata for the inner call.
+    const transferData = encodeFunctionData({
+      abi: ERC20_ABI,
+      functionName: 'transfer',
+      args: [getAddress(masterNorm) as Address, tokenBalance],
+    }) as Hex;
+
+    try {
+      const agentBal = await publicClient.getBalance({ address: getAddress(agentAddress) as Address });
+      if (agentBal < minAgentReserveWei) {
+        console.error(
+          `[jinn-earning] Service ${serviceIndex}: agent EOA lacks gas to sweep ${token.symbol} (${tokenBalance}) from Safe ${abandonedSafeAddress}. Fund agent and re-run bootstrap.`,
+        );
+        continue;
+      }
+
+      const { hash } = await executeSafeTxDirect({
+        rpcUrl,
+        signerKey: agentPrivateKey,
+        safeAddress: abandonedSafeAddress,
+        to: tokenAddress,
+        value: 0n,
+        data: transferData,
+      });
+      const receipt = await waitForTransactionReceiptWithRetry(publicClient, hash as Hex);
+      if (receipt.status !== 'success') {
+        console.error(
+          `[jinn-earning] Service ${serviceIndex}: ERC-20 sweep tx for ${token.symbol} failed or timed out (safe=${abandonedSafeAddress}, tx=${hash}). Re-run bootstrap to retry.`,
+        );
+      } else {
+        console.error(
+          `[jinn-earning] Service ${serviceIndex}: swept ${tokenBalance} ${token.symbol} from orphan Safe ${abandonedSafeAddress} to master (tx: ${hash}).`,
+        );
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(
+        `[jinn-earning] Service ${serviceIndex}: ERC-20 sweep failed for ${token.symbol} on Safe ${abandonedSafeAddress} (${msg}). Re-run bootstrap to retry or transfer manually to master ${masterNorm}.`,
+      );
+    }
+  }
 
   const agentAccount = privateKeyToAccount(agentPrivateKey);
   const agentWallet = createJinnWalletClient(rpcUrl, network, agentAccount);

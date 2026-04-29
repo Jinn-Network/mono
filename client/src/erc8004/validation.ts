@@ -35,116 +35,18 @@ import {
   type PublicClient,
   type WalletClient,
 } from 'viem';
+import { VALIDATION_REGISTRY_ABI } from './abis.js';
+import {
+  VALIDATION_REGISTRY_ADDRESSES,
+  getValidationRegistryAddress,
+} from './addresses.js';
 
-// ── ABI ──────────────────────────────────────────────────────────────────────
-//
-// Minimal slice of `subgraph/abis/ValidationRegistry.json`. Only the surfaces
-// this client touches are mirrored here, to keep the typed-ABI inference
-// tight and avoid drift if the full ABI is regenerated. Cross-checked against
-// `/tmp/erc8004-ref/ValidationRegistryUpgradeable.sol` (canonical
-// erc-8004/erc-8004-contracts).
-
-export const VALIDATION_REGISTRY_ABI = [
-  // ── Write functions ──────────────────────────────────────────────────────────
-  {
-    name: 'validationRequest',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'validatorAddress', type: 'address' },
-      { name: 'agentId', type: 'uint256' },
-      { name: 'requestURI', type: 'string' },
-      { name: 'requestHash', type: 'bytes32' },
-    ],
-    outputs: [],
-  },
-  {
-    name: 'validationResponse',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'requestHash', type: 'bytes32' },
-      { name: 'response', type: 'uint8' },
-      { name: 'responseURI', type: 'string' },
-      { name: 'responseHash', type: 'bytes32' },
-      { name: 'tag', type: 'string' },
-    ],
-    outputs: [],
-  },
-
-  // ── Read functions ──────────────────────────────────────────────────────────
-  {
-    name: 'getValidationStatus',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'requestHash', type: 'bytes32' }],
-    outputs: [
-      { name: 'validatorAddress', type: 'address' },
-      { name: 'agentId', type: 'uint256' },
-      { name: 'response', type: 'uint8' },
-      { name: 'responseHash', type: 'bytes32' },
-      { name: 'tag', type: 'string' },
-      { name: 'lastUpdate', type: 'uint256' },
-    ],
-  },
-  {
-    name: 'getAgentValidations',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'agentId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'bytes32[]' }],
-  },
-  {
-    name: 'getValidatorRequests',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'validatorAddress', type: 'address' }],
-    outputs: [{ name: '', type: 'bytes32[]' }],
-  },
-
-  // ── Events (kept for parity with the deployed ABI; consumers may decode
-  //   logs directly with this fragment). ───────────────────────────────────────
-  {
-    type: 'event',
-    name: 'ValidationRequest',
-    inputs: [
-      { name: 'validatorAddress', type: 'address', indexed: true },
-      { name: 'agentId', type: 'uint256', indexed: true },
-      { name: 'requestURI', type: 'string', indexed: false },
-      { name: 'requestHash', type: 'bytes32', indexed: true },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'ValidationResponse',
-    inputs: [
-      { name: 'validatorAddress', type: 'address', indexed: true },
-      { name: 'agentId', type: 'uint256', indexed: true },
-      { name: 'requestHash', type: 'bytes32', indexed: true },
-      { name: 'response', type: 'uint8', indexed: false },
-      { name: 'responseURI', type: 'string', indexed: false },
-      { name: 'responseHash', type: 'bytes32', indexed: false },
-      { name: 'tag', type: 'string', indexed: false },
-    ],
-  },
-] as const;
-
-// ── Address book ─────────────────────────────────────────────────────────────
-//
-// Source of truth: `subgraph/networks.json` (populated by `jinn-mono-fud` and
-// cross-checked against the canonical
-// `erc-8004/erc-8004-contracts@0463311…` reference). The vanity `0x8004…`
-// addresses are paired across mainnets and their respective testnets.
-
-export const VALIDATION_REGISTRY_ADDRESSES: Record<number, Address> = {
-  // Base mainnet
-  8453: '0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58',
-  // Base Sepolia
-  84532: '0x8004Cb1BF31DAf7788923b405b754f57acEB4272',
-  // Ethereum mainnet (shares Base mainnet vanity)
-  1: '0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58',
-  // Sepolia (shares Base Sepolia vanity)
-  11155111: '0x8004Cb1BF31DAf7788923b405b754f57acEB4272',
+// Re-exports so callers that imported these from the validation module
+// continue to work without touching `./abis.js` / `./addresses.js`.
+export {
+  VALIDATION_REGISTRY_ABI,
+  VALIDATION_REGISTRY_ADDRESSES,
+  getValidationRegistryAddress,
 };
 
 // ── Types ────────────────────────────────────────────────────────────────────

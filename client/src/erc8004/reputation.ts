@@ -1,5 +1,5 @@
 /**
- * ERC-8004 ReputationRegistry client.
+ * ERC-8004 ReputationRegistry surface.
  *
  * Wraps the deployed canonical ReputationRegistry (vanity 0x8004…) for
  * Jinn's evaluator-delivery feedback flow.
@@ -29,6 +29,45 @@
  * the evaluator's `claimDelivery` is the authoritative settlement, so a failed
  * `giveFeedback` is non-fatal.
  *
+ * Two layers live here:
+ *
+ *   1. `ReputationRegistryClient` — the typed wire-level wrapper.
+ *   2. `submitEvaluatorFeedback` + `mapVerdictToScore` — the engine-side
+ *      hook that maps an evaluator's verdict to a score and submits feedback.
+ *
+ * ── Restorer-agentId resolution ─────────────────────────────────────────────
+ *
+ * Resolving the restorer's `agentId` from the evaluator's perspective is
+ * deferred to `resolveAgentIdForManifest` in `./identity.js`. The hook here
+ * takes `restorerAgentId` as a direct input. The two natural resolution paths:
+ *
+ *   (b) subgraph query: `Operator { agentId } where executions_some: { manifestHash: <evidenceHash> }`
+ *   (c) on-chain scan of `IdentityRegistry.Registered` events for the
+ *       restorer's Safe (`getAgentByWallet` is not exposed on-chain).
+ *
+ * Subgraph (b) is the cheapest and aligns with the rest of the discovery
+ * surface; (c) is the fallback when the subgraph is unavailable.
+ *
+ * ── Score-mapping policy ─────────────────────────────────────────────────────
+ *
+ * The portfolio.v0 evaluator emits a `verdict ∈ {PASS, FAIL, INDETERMINATE,
+ * REJECTED}` plus a numeric Calmar score (string). The reputation registry
+ * takes a signed fixed-point. The mapping policy below is intentionally
+ * conservative:
+ *
+ *   - PASS         → score = 100, scoreDecimals = 2 (= 1.00)  → submit feedback.
+ *   - FAIL         → score =   0, scoreDecimals = 2 (= 0.00)  → submit feedback.
+ *   - REJECTED     → no feedback. The restorer was not eligible to attempt
+ *                    this intent (e.g. minClosedTrades unmet); a 0-score
+ *                    feedback would unfairly tarnish their reputation for a
+ *                    structural mismatch, not a quality failure.
+ *   - INDETERMINATE → no feedback. The evaluator could not rederive
+ *                    (HL unreachable, post-snapshot funding accrual not
+ *                    settled). Not a verdict on the restorer.
+ *
+ * If the impl emits a numeric score in `[0, 1]` separate from verdict, the
+ * caller should pre-multiply it by 100 and pass `scoreDecimals=2`.
+ *
  * Address constants (cross-checked against `subgraph/networks.json` and
  * `client/src/earning/contracts.ts` IdentityRegistry entries):
  *
@@ -47,156 +86,19 @@ import {
 } from 'viem';
 import { executeSafeTransaction } from '../adapters/mech/safe.js';
 import { waitForTransactionReceiptWithRetry } from '../tx-retry.js';
+import { REPUTATION_REGISTRY_ABI } from './abis.js';
+import {
+  REPUTATION_REGISTRY_ADDRESSES,
+  getReputationRegistryAddress,
+} from './addresses.js';
 
-// ── Canonical ReputationRegistry addresses ──────────────────────────────────
-
-/**
- * Canonical 0x8004… ReputationRegistry deployments. Source of truth:
- * `subgraph/networks.json`.
- */
-export const REPUTATION_REGISTRY_ADDRESSES: Record<number, Address> = {
-  // Base mainnet
-  8453: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
-  // Base Sepolia
-  84532: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-  // Ethereum mainnet (shares Base mainnet vanity)
-  1: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
-  // Ethereum Sepolia (shares Base Sepolia vanity)
-  11155111: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+// Re-exports so callers that imported these directly from the reputation
+// module continue to work without touching `./abis.js` / `./addresses.js`.
+export {
+  REPUTATION_REGISTRY_ABI,
+  REPUTATION_REGISTRY_ADDRESSES,
+  getReputationRegistryAddress,
 };
-
-/**
- * Resolve the ReputationRegistry address for a chainId, or `null` if the
- * chain is not known. Used by callers that already carry a chainId
- * (e.g. derived from `JinnConfig.network`).
- */
-export function getReputationRegistryAddress(chainId: number): Address | null {
-  return REPUTATION_REGISTRY_ADDRESSES[chainId] ?? null;
-}
-
-// ── ABI ─────────────────────────────────────────────────────────────────────
-//
-// Keep the ABI surface minimal: only the functions and events this client
-// touches. Signatures match the deployed contract — verify against
-// `/tmp/erc8004-ref/ReputationRegistryUpgradeable.sol` and
-// `subgraph/abis/ReputationRegistry.json`.
-//
-// `giveFeedback` takes `value: int128, valueDecimals: uint8`. The bead RFC
-// described `score: uint8`; the deployed contract has been updated to a
-// signed fixed-point. We map our public surface accordingly.
-
-export const REPUTATION_REGISTRY_ABI = [
-  {
-    type: 'function',
-    name: 'giveFeedback',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'agentId', type: 'uint256' },
-      { name: 'value', type: 'int128' },
-      { name: 'valueDecimals', type: 'uint8' },
-      { name: 'tag1', type: 'string' },
-      { name: 'tag2', type: 'string' },
-      { name: 'endpoint', type: 'string' },
-      { name: 'feedbackURI', type: 'string' },
-      { name: 'feedbackHash', type: 'bytes32' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'revokeFeedback',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'agentId', type: 'uint256' },
-      { name: 'feedbackIndex', type: 'uint64' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'appendResponse',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'agentId', type: 'uint256' },
-      { name: 'clientAddress', type: 'address' },
-      { name: 'feedbackIndex', type: 'uint64' },
-      { name: 'responseURI', type: 'string' },
-      { name: 'responseHash', type: 'bytes32' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'readFeedback',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'agentId', type: 'uint256' },
-      { name: 'clientAddress', type: 'address' },
-      { name: 'feedbackIndex', type: 'uint64' },
-    ],
-    outputs: [
-      { name: 'value', type: 'int128' },
-      { name: 'valueDecimals', type: 'uint8' },
-      { name: 'tag1', type: 'string' },
-      { name: 'tag2', type: 'string' },
-      { name: 'isRevoked', type: 'bool' },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'readAllFeedback',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'agentId', type: 'uint256' },
-      { name: 'clientAddresses', type: 'address[]' },
-      { name: 'tag1', type: 'string' },
-      { name: 'tag2', type: 'string' },
-      { name: 'includeRevoked', type: 'bool' },
-    ],
-    outputs: [
-      { name: 'clients', type: 'address[]' },
-      { name: 'feedbackIndexes', type: 'uint64[]' },
-      { name: 'values', type: 'int128[]' },
-      { name: 'valueDecimals', type: 'uint8[]' },
-      { name: 'tag1s', type: 'string[]' },
-      { name: 'tag2s', type: 'string[]' },
-      { name: 'revokedStatuses', type: 'bool[]' },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'getSummary',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'agentId', type: 'uint256' },
-      { name: 'clientAddresses', type: 'address[]' },
-      { name: 'tag1', type: 'string' },
-      { name: 'tag2', type: 'string' },
-    ],
-    outputs: [
-      { name: 'count', type: 'uint64' },
-      { name: 'summaryValue', type: 'int128' },
-      { name: 'summaryValueDecimals', type: 'uint8' },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'getClients',
-    stateMutability: 'view',
-    inputs: [{ name: 'agentId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'address[]' }],
-  },
-  {
-    type: 'function',
-    name: 'getLastIndex',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'agentId', type: 'uint256' },
-      { name: 'clientAddress', type: 'address' },
-    ],
-    outputs: [{ name: '', type: 'uint64' }],
-  },
-] as const;
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -622,3 +524,192 @@ export class ReputationRegistryClient {
 // Re-export ZERO_HASH for callers that need a sentinel filehash. Marked
 // `as const` is unnecessary — the type is already a literal Hex.
 export { ZERO_HASH };
+
+// ── Feedback hook ───────────────────────────────────────────────────────────
+
+/** Restorer-side outputs the hook needs to anchor the feedback on chain. */
+export interface RestorerExecutionRef {
+  /** ERC-8004 agentId of the restorer being reviewed. */
+  restorerAgentId: bigint;
+  /** IPFS CID of the restorer's manifest (NOT the evaluator's verdict). */
+  restorerManifestCid: string;
+  /** keccak256 of the restorer's signed manifest = evidenceHash on JinnRouter. */
+  restorerEvidenceHash: Hex;
+}
+
+/** Verdict-side output of the evaluator. */
+export interface EvaluatorVerdict {
+  verdict: 'PASS' | 'FAIL' | 'INDETERMINATE' | 'REJECTED';
+  /**
+   * Optional spec-kind label (e.g. `"portfolio.v0"`). Emitted as `tag1` so
+   * downstream subgraphs can filter feedback by execution kind cheaply
+   * (`tag1` is indexed on the `NewFeedback` event).
+   */
+  kind?: string;
+  /**
+   * Optional opaque tag2 — reserved for future use (e.g. evaluator software
+   * version). Default empty.
+   */
+  tag2?: string;
+}
+
+/** Mapped score input to `giveFeedback`. `null` means "do not submit". */
+export interface ScoreMapping {
+  score: number;
+  scoreDecimals: number;
+}
+
+/**
+ * Outcome of `submitEvaluatorFeedback`. The hook is fire-and-forget from the
+ * caller's perspective; this return type is for tests and observability.
+ */
+export type FeedbackHookOutcome =
+  | { kind: 'submitted'; txHash: Hex }
+  | { kind: 'skipped'; reason: 'verdict-not-eligible' | 'self-feedback' | 'agent-not-found' }
+  | { kind: 'failed'; error: string };
+
+/**
+ * Pure function: map a verdict to (score, scoreDecimals). Returns `null` for
+ * verdicts that should not produce on-chain feedback (REJECTED, INDETERMINATE)
+ * — see policy comment at the top of the module.
+ *
+ * Exported so tests pin the policy directly.
+ */
+export function mapVerdictToScore(verdict: EvaluatorVerdict['verdict']): ScoreMapping | null {
+  switch (verdict) {
+    case 'PASS':
+      // 1.00 — full pass.
+      return { score: 100, scoreDecimals: 2 };
+    case 'FAIL':
+      // 0.00 — quality failure; tarnishes the operator's reputation.
+      return { score: 0, scoreDecimals: 2 };
+    case 'REJECTED':
+    case 'INDETERMINATE':
+      // No feedback — see top-of-module policy comment.
+      return null;
+    default: {
+      // Defensive: unrecognised verdict → no feedback. Future verdicts that
+      // should emit feedback need an explicit case here; defaulting to "no
+      // feedback" is the safe path so we never silently apply a wrong score.
+      const exhaustive: never = verdict;
+      void exhaustive;
+      return null;
+    }
+  }
+}
+
+/**
+ * Submit feedback on the restorer's agent NFT. The body is the canonical
+ * `manifest:<cid>` URI + `evidenceHash` — the subgraph parses these to
+ * synthesize an `Execution` row joined to the operator.
+ *
+ * Errors are caught and returned as `{ kind: 'failed', ... }` — callers
+ * (the engine's deliver path) should log the outcome but never let it
+ * propagate. The on-chain `claimDelivery` already settled.
+ *
+ * Self-feedback (caller is owner/approved/operator of `restorerAgentId`)
+ * reverts on chain with a known string; we surface that as a graceful
+ * `{ kind: 'skipped', reason: 'self-feedback' }`.
+ */
+export async function submitEvaluatorFeedback(args: {
+  registry: ReputationRegistryClient;
+  ref: RestorerExecutionRef;
+  verdict: EvaluatorVerdict;
+  /** Optional logger; defaults to console.warn for failures. */
+  log?: (entry: { level: 'info' | 'warn' | 'error'; msg: string; data?: unknown }) => void;
+}): Promise<FeedbackHookOutcome> {
+  const { registry, ref, verdict } = args;
+  const log = args.log ?? defaultLog;
+
+  const mapped = mapVerdictToScore(verdict.verdict);
+  if (!mapped) {
+    log({
+      level: 'info',
+      msg: `[reputation] skipping giveFeedback for verdict=${verdict.verdict} (policy: no on-chain feedback)`,
+      data: { restorerAgentId: ref.restorerAgentId.toString(), verdict: verdict.verdict },
+    });
+    return { kind: 'skipped', reason: 'verdict-not-eligible' };
+  }
+
+  const giveArgs: GiveFeedbackArgs = {
+    restorerAgentId: ref.restorerAgentId,
+    score: mapped.score,
+    scoreDecimals: mapped.scoreDecimals,
+    manifestRef: `manifest:${ref.restorerManifestCid}`,
+    manifestHash: ref.restorerEvidenceHash,
+    ...(verdict.kind ? { tag1: verdict.kind } : {}),
+    ...(verdict.tag2 ? { tag2: verdict.tag2 } : {}),
+  };
+
+  try {
+    const txHash = await registry.giveFeedback(giveArgs);
+    log({
+      level: 'info',
+      msg: '[reputation] giveFeedback submitted',
+      data: {
+        restorerAgentId: ref.restorerAgentId.toString(),
+        verdict: verdict.verdict,
+        score: mapped.score,
+        scoreDecimals: mapped.scoreDecimals,
+        manifestCid: ref.restorerManifestCid,
+        txHash,
+      },
+    });
+    return { kind: 'submitted', txHash };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+
+    // Self-feedback guard: contract reverts with "Self-feedback not allowed"
+    // when the evaluator EOA/Safe is the owner/approved/operator of the
+    // restorer's agentId. This is structurally possible in single-operator
+    // dev setups; treat as a graceful skip.
+    if (msg.includes('Self-feedback not allowed')) {
+      log({
+        level: 'warn',
+        msg: '[reputation] giveFeedback skipped: evaluator is the restorer (self-feedback guard)',
+        data: { restorerAgentId: ref.restorerAgentId.toString() },
+      });
+      return { kind: 'skipped', reason: 'self-feedback' };
+    }
+
+    // Agent doesn't exist on chain. The contract reverts with the canonical
+    // ERC-721 error; surface as a graceful skip — the restorer hasn't yet
+    // minted (or we're querying the wrong chain).
+    if (msg.includes('ERC721NonexistentToken') || msg.includes('nonexistent')) {
+      log({
+        level: 'warn',
+        msg: '[reputation] giveFeedback skipped: restorer agentId not minted',
+        data: { restorerAgentId: ref.restorerAgentId.toString() },
+      });
+      return { kind: 'skipped', reason: 'agent-not-found' };
+    }
+
+    // Anything else: log warn (NOT error — the evaluator's claimDelivery
+    // already landed), surface as `failed` for tests/observability.
+    log({
+      level: 'warn',
+      msg: '[reputation] giveFeedback failed (non-fatal); claimDelivery already authoritative',
+      data: {
+        restorerAgentId: ref.restorerAgentId.toString(),
+        error: msg,
+      },
+    });
+    return { kind: 'failed', error: msg };
+  }
+}
+
+// ── Local helpers ───────────────────────────────────────────────────────────
+
+function defaultLog(entry: {
+  level: 'info' | 'warn' | 'error';
+  msg: string;
+  data?: unknown;
+}): void {
+  if (entry.level === 'error') {
+    console.error(entry.msg, entry.data ?? '');
+  } else if (entry.level === 'warn') {
+    console.warn(entry.msg, entry.data ?? '');
+  } else {
+    console.log(entry.msg, entry.data ?? '');
+  }
+}

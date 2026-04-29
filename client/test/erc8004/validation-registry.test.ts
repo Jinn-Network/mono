@@ -28,7 +28,7 @@ import {
   VALIDATION_REGISTRY_ABI,
   VALIDATION_REGISTRY_ADDRESSES,
   ValidationRegistryClient,
-} from '../../src/validation/registry.js';
+} from '../../src/erc8004/validation.js';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 

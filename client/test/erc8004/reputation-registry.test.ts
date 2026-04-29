@@ -51,7 +51,7 @@ beforeEach(() => {
 describe('REPUTATION_REGISTRY_ADDRESSES', () => {
   it('has canonical Base mainnet + Base Sepolia addresses', async () => {
     const { REPUTATION_REGISTRY_ADDRESSES, getReputationRegistryAddress } = await import(
-      '../../src/reputation/registry.js'
+      '../../src/erc8004/reputation.js'
     );
     expect(REPUTATION_REGISTRY_ADDRESSES[8453]).toBe('0x8004BAa17C55a88189AE136b182e5fdA19dE9b63');
     expect(REPUTATION_REGISTRY_ADDRESSES[84532]).toBe('0x8004B663056A597Dffe9eCcC1965A193B7388713');
@@ -63,7 +63,7 @@ describe('REPUTATION_REGISTRY_ADDRESSES', () => {
 describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
   it('encodes giveFeedback with canonical body convention (manifest:<cid> + manifestHash)', async () => {
     const { ReputationRegistryClient, REPUTATION_REGISTRY_ABI } = await import(
-      '../../src/reputation/registry.js'
+      '../../src/erc8004/reputation.js'
     );
     const { executeSafeTransaction } = await import('../../src/adapters/mech/safe.js');
 
@@ -112,7 +112,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
   });
 
   it('routes through Safe when safeAddress is configured', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const { executeSafeTransaction } = await import('../../src/adapters/mech/safe.js');
 
     const walletClient = makeWalletClient();
@@ -136,7 +136,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
   });
 
   it('falls back to direct EOA send when safeAddress is absent', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const { executeSafeTransaction } = await import('../../src/adapters/mech/safe.js');
 
     const walletClient = makeWalletClient();
@@ -160,7 +160,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
   });
 
   it('throws when called without a wallet client', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const client = new ReputationRegistryClient({
       reputationRegistryAddress: REPUTATION_ADDRESS,
       publicClient: makePublicClient(),
@@ -178,7 +178,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
 
   it('encodes endpoint + tag2 when supplied', async () => {
     const { ReputationRegistryClient, REPUTATION_REGISTRY_ABI } = await import(
-      '../../src/reputation/registry.js'
+      '../../src/erc8004/reputation.js'
     );
     const { executeSafeTransaction } = await import('../../src/adapters/mech/safe.js');
 
@@ -212,7 +212,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
 describe('ReputationRegistryClient.revokeFeedback / respondToFeedback', () => {
   it('encodes revokeFeedback calldata', async () => {
     const { ReputationRegistryClient, REPUTATION_REGISTRY_ABI } = await import(
-      '../../src/reputation/registry.js'
+      '../../src/erc8004/reputation.js'
     );
     const { executeSafeTransaction } = await import('../../src/adapters/mech/safe.js');
 
@@ -233,7 +233,7 @@ describe('ReputationRegistryClient.revokeFeedback / respondToFeedback', () => {
 
   it('encodes appendResponse calldata via respondToFeedback', async () => {
     const { ReputationRegistryClient, REPUTATION_REGISTRY_ABI } = await import(
-      '../../src/reputation/registry.js'
+      '../../src/erc8004/reputation.js'
     );
     const { executeSafeTransaction } = await import('../../src/adapters/mech/safe.js');
 
@@ -267,7 +267,7 @@ describe('ReputationRegistryClient.revokeFeedback / respondToFeedback', () => {
 
 describe('ReputationRegistryClient read paths', () => {
   it('readFeedback returns a record with score + decimals + flags', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const readContract = vi
       .fn()
       .mockResolvedValue([100n, 2, 'portfolio.v0', '', false]);
@@ -297,7 +297,7 @@ describe('ReputationRegistryClient read paths', () => {
   });
 
   it('readFeedback returns null when contract reverts with "index out of bounds"', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const readContract = vi.fn().mockRejectedValue(new Error('execution reverted: index out of bounds'));
     const client = new ReputationRegistryClient({
       reputationRegistryAddress: REPUTATION_ADDRESS,
@@ -312,7 +312,7 @@ describe('ReputationRegistryClient read paths', () => {
   });
 
   it('readAllFeedback decodes the parallel-arrays return shape', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const readContract = vi.fn().mockResolvedValue([
       [EVALUATOR_ADDRESS, EVALUATOR_ADDRESS],
       [1n, 2n],
@@ -342,7 +342,7 @@ describe('ReputationRegistryClient read paths', () => {
   });
 
   it('getSummary throws when called with empty clientAddresses (matches contract revert)', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const client = new ReputationRegistryClient({
       reputationRegistryAddress: REPUTATION_ADDRESS,
       publicClient: makePublicClient(),
@@ -353,7 +353,7 @@ describe('ReputationRegistryClient read paths', () => {
   });
 
   it('getSummary returns the on-chain tuple shape', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const readContract = vi.fn().mockResolvedValue([3n, 50n, 2]);
     const client = new ReputationRegistryClient({
       reputationRegistryAddress: REPUTATION_ADDRESS,
@@ -366,7 +366,7 @@ describe('ReputationRegistryClient read paths', () => {
   });
 
   it('getClients returns a mutable address[] copy', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const readContract = vi.fn().mockResolvedValue([EVALUATOR_ADDRESS]);
     const client = new ReputationRegistryClient({
       reputationRegistryAddress: REPUTATION_ADDRESS,
@@ -380,7 +380,7 @@ describe('ReputationRegistryClient read paths', () => {
   });
 
   it('getLastIndex returns a bigint', async () => {
-    const { ReputationRegistryClient } = await import('../../src/reputation/registry.js');
+    const { ReputationRegistryClient } = await import('../../src/erc8004/reputation.js');
     const readContract = vi.fn().mockResolvedValue(42n);
     const client = new ReputationRegistryClient({
       reputationRegistryAddress: REPUTATION_ADDRESS,

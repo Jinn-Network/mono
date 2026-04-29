@@ -32,7 +32,7 @@ When a single test file grows past ~400 LOC, split by aspect:
 - `test/cli/commands/foo/a.test.ts`, `test/cli/commands/foo/b.test.ts`
 
 E2E scripts live in `client/test/e2e/<scenario>.ts` and are invoked via
-`yarn e2e`, `yarn e2e-portfolio-v0`, etc. — not vitest.
+`yarn e2e`, `yarn e2e-prediction-apy-v0`, etc. — not vitest.
 
 ## What do I mock?
 
@@ -145,7 +145,6 @@ try {
 | `yarn test` | vitest (unit + integration) | < 15 s |
 | `yarn test:watch` | vitest in watch mode | — |
 | `yarn e2e` | one e2e scenario (validate) | < 2 min |
-| `yarn e2e-portfolio-v0` | portfolio e2e | < 2 min |
 | `yarn e2e-prediction-apy-v0` | prediction-apy e2e | < 2 min |
 | `yarn e2e:prediction` | prediction-v0 e2e (compiles contracts first) | < 3 min |
 | `yarn staking` | staking bootstrap e2e | < 2 min |

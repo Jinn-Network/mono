@@ -149,12 +149,21 @@ export const JinnConfigSchema = z.object({
    * byKind:   explicit spec.kind → impl name mapping (highest priority)
    * default:  fallback impl name when no kind-specific match is found
    * disabled: impl names to exclude from dispatch entirely
+   * wrapWith: universal-wrap impl name (jinn-mono-0k2). When set AND
+   *           registered + active + supports the ctx, that impl wins for
+   *           every non-evaluation dispatch — bypassing byKind/default/
+   *           first-match. Default ships as `'claude-code-learner'` so the
+   *           learning envelope wraps every restoration kind. Operators set
+   *           this to `null` (or any other registered wrapper-style impl
+   *           name) to flip it off / swap it out. Evaluations always
+   *           dispatch to specialists.
    */
   restorers: z
     .object({
       byKind: z.record(z.string()).optional(),
       default: z.string().optional(),
       disabled: z.array(z.string()).optional(),
+      wrapWith: z.string().nullable().optional(),
     })
     .optional(),
 
@@ -187,7 +196,7 @@ export const JinnConfigSchema = z.object({
    * ERC-8004 Identity Registry contract address on the configured chain.
    * Pre-rebuild config key (PR #37 cleanup left it in place). The post-rebuild
    * client (jinn-mono-j07/3zk) reads the address from
-   * `client/src/discovery/identity-publisher.ts` constants and from
+   * `client/src/erc8004/identity.ts` constants and from
    * `EarningState.identity_registry_address`; this config key is currently
    * unused but kept for backwards-compat with operator config files.
    * Env: JINN_IDENTITY_REGISTRY_ADDRESS
@@ -197,7 +206,7 @@ export const JinnConfigSchema = z.object({
   /**
    * ERC-8004 Validation Registry contract address on the configured chain.
    * Pre-rebuild config key. The post-rebuild client (jinn-mono-9jg) reads the
-   * address from `client/src/validation/registry.ts:VALIDATION_REGISTRY_ADDRESSES`;
+   * address from `client/src/erc8004/addresses.ts:VALIDATION_REGISTRY_ADDRESSES`;
    * this config key is currently unused but kept for backwards-compat.
    * Env: JINN_VALIDATION_REGISTRY_ADDRESS
    */

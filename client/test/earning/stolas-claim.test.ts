@@ -4,6 +4,7 @@ import type { WalletClient } from 'viem';
 import {
   listStolasClaimTargets,
   tickStolasDistributorClaims,
+  tickSelfBondStakingClaims,
 } from '../../src/earning/stolas-claim.js';
 import type { ServiceState } from '../../src/earning/types.js';
 import { TransientError } from '../../src/types/errors.js';
@@ -21,6 +22,11 @@ function publicClientWithReadFailure(message: string): PublicClient {
 }
 
 const noopWallet = {} as WalletClient;
+
+const VALID_SAFE = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const VALID_KEY = ('0x' + 'ab'.repeat(32)) as `0x${string}`;
+const VALID_RPC = 'http://127.0.0.1:8545';
+const STAKING_PROXY = '0x0000000000000000000000000000000000000002';
 
 describe('listStolasClaimTargets', () => {
   it('returns staking proxy and service id for post-stake steps only', () => {
@@ -140,7 +146,7 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
     const r = await tickStolasDistributorClaims(publicClient, noopWallet, {
       distributorAddress: dist,
       stakingMode: 'standard',
-      targets: [{ stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 }],
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1 }],
       retryDeps: { sendTx, waitForReceipt },
     });
 
@@ -158,7 +164,7 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
       tickStolasDistributorClaims(publicClient, noopWallet, {
         distributorAddress: dist,
         stakingMode: 'standard',
-        targets: [{ stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 }],
+        targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1 }],
         strict: true,
         retryDeps: { sendTx, waitForReceipt },
       }),
@@ -172,7 +178,7 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
       tickStolasDistributorClaims(publicClient, noopWallet, {
         distributorAddress: dist,
         stakingMode: 'standard',
-        targets: [{ stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 }],
+        targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1 }],
         strict: true,
         retryDeps: { sendTx, waitForReceipt },
       }),
@@ -187,7 +193,7 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
       tickStolasDistributorClaims(publicClient, noopWallet, {
         distributorAddress: dist,
         stakingMode: 'standard',
-        targets: [{ stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 }],
+        targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1 }],
         strict: true,
         retryDeps: { sendTx, waitForReceipt },
       }),
@@ -205,13 +211,201 @@ describe('tickStolasDistributorClaims failure accounting / strict', () => {
       distributorAddress: dist,
       stakingMode: 'standard',
       targets: [
-        { stakingProxy: '0x0000000000000000000000000000000000000002', serviceId: 1 },
+        { stakingProxy: STAKING_PROXY, serviceId: 1 },
         { stakingProxy: '0x0000000000000000000000000000000000000003', serviceId: 2 },
       ],
       strict: true,
       retryDeps: { sendTx, waitForReceipt },
     });
 
+    expect(r.submitted).toBe(1);
+    expect(r.failedRecoverable).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tickSelfBondStakingClaims
+// ---------------------------------------------------------------------------
+
+describe('tickSelfBondStakingClaims', () => {
+  it('skips with skippedWrongMode when stakingMode is standard', async () => {
+    const executeSafeTx = vi.fn();
+    const publicClient = {} as PublicClient;
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'standard',
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC }],
+      deps: { executeSafeTx, waitForReceipt: vi.fn() },
+    });
+
+    expect(r.skippedWrongMode).toBe(true);
+    expect(executeSafeTx).not.toHaveBeenCalled();
+  });
+
+  it('skips target missing safeAddress and counts skippedMissingConfig', async () => {
+    const executeSafeTx = vi.fn();
+    const publicClient = publicClientWithPendingReward(100n);
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'self-bond',
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1 }],
+      deps: { executeSafeTx, waitForReceipt: vi.fn() },
+    });
+
+    expect(r.attempted).toBe(1);
+    expect(r.skippedMissingConfig).toBe(1);
+    expect(executeSafeTx).not.toHaveBeenCalled();
+  });
+
+  it('skips target missing agentPrivateKey and counts skippedMissingConfig', async () => {
+    const executeSafeTx = vi.fn();
+    const publicClient = publicClientWithPendingReward(100n);
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'self-bond',
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, rpcUrl: VALID_RPC }],
+      deps: { executeSafeTx, waitForReceipt: vi.fn() },
+    });
+
+    expect(r.skippedMissingConfig).toBe(1);
+    expect(executeSafeTx).not.toHaveBeenCalled();
+  });
+
+  it('skips when pending reward is zero', async () => {
+    const executeSafeTx = vi.fn();
+    const publicClient = publicClientWithPendingReward(0n);
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'self-bond',
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC }],
+      deps: { executeSafeTx, waitForReceipt: vi.fn() },
+    });
+
+    expect(r.skippedNoPending).toBe(1);
+    expect(r.claimAttempted).toBe(0);
+    expect(executeSafeTx).not.toHaveBeenCalled();
+  });
+
+  it('calls executeSafeTxDirect with checkpointAndClaim calldata and records submitted claim', async () => {
+    const txHash = '0x' + 'cc'.repeat(32);
+    const executeSafeTx = vi.fn().mockResolvedValue({ hash: txHash });
+    const waitForReceipt = vi.fn().mockResolvedValue({ status: 'success' });
+    const publicClient = publicClientWithPendingReward(500n);
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'self-bond',
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 42, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC }],
+      deps: { executeSafeTx, waitForReceipt },
+    });
+
+    expect(executeSafeTx).toHaveBeenCalledOnce();
+    const call = executeSafeTx.mock.calls[0][0];
+    expect(call.safeAddress).toBe(VALID_SAFE);
+    expect(call.signerKey).toBe(VALID_KEY);
+    expect(call.rpcUrl).toBe(VALID_RPC);
+    // data should be the checkpointAndClaim(42) selector + args
+    expect(call.data).toMatch(/^0x/);
+    expect(r.submitted).toBe(1);
+    expect(r.claimAttempted).toBe(1);
+    expect(r.claims).toHaveLength(1);
+    expect(r.claims[0]).toMatchObject({
+      serviceId: 42,
+      txHash,
+      amountWei: '500',
+    });
+  });
+
+  it('counts failedPermanent when receipt status is not success', async () => {
+    const txHash = '0x' + 'dd'.repeat(32);
+    const executeSafeTx = vi.fn().mockResolvedValue({ hash: txHash });
+    const waitForReceipt = vi.fn().mockResolvedValue({ status: 'reverted' });
+    const publicClient = publicClientWithPendingReward(1n);
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'self-bond',
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC }],
+      deps: { executeSafeTx, waitForReceipt },
+    });
+
+    expect(r.submitted).toBe(0);
+    expect(r.failedPermanent).toBe(1);
+  });
+
+  it('counts failedRecoverable on recoverable Safe exec error (nonce too low)', async () => {
+    const executeSafeTx = vi.fn().mockRejectedValue(new Error('nonce too low'));
+    const publicClient = publicClientWithPendingReward(1n);
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'self-bond',
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC }],
+      deps: { executeSafeTx, waitForReceipt: vi.fn() },
+    });
+
+    expect(r.failedRecoverable).toBe(1);
+    expect(r.failedPermanent).toBe(0);
+  });
+
+  it('counts failedPermanent on non-recoverable error (insufficient funds)', async () => {
+    const executeSafeTx = vi.fn().mockRejectedValue(new Error('insufficient funds'));
+    const publicClient = publicClientWithPendingReward(1n);
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'self-bond',
+      targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC }],
+      deps: { executeSafeTx, waitForReceipt: vi.fn() },
+    });
+
+    expect(r.failedPermanent).toBe(1);
+    expect(r.failedRecoverable).toBe(0);
+  });
+
+  it('strict mode throws TransientError when all sends fail recoverably', async () => {
+    const executeSafeTx = vi.fn().mockRejectedValue(new Error('nonce too low'));
+    const publicClient = publicClientWithPendingReward(1n);
+
+    await expect(
+      tickSelfBondStakingClaims(publicClient, {
+        stakingMode: 'self-bond',
+        targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC }],
+        strict: true,
+        deps: { executeSafeTx, waitForReceipt: vi.fn() },
+      }),
+    ).rejects.toThrow(TransientError);
+  });
+
+  it('strict mode throws Error on permanent failure', async () => {
+    const executeSafeTx = vi.fn().mockRejectedValue(new Error('insufficient funds'));
+    const publicClient = publicClientWithPendingReward(1n);
+
+    await expect(
+      tickSelfBondStakingClaims(publicClient, {
+        stakingMode: 'self-bond',
+        targets: [{ stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC }],
+        strict: true,
+        deps: { executeSafeTx, waitForReceipt: vi.fn() },
+      }),
+    ).rejects.toThrow(/Self-bond claim: all/);
+  });
+
+  it('processes multiple targets and accounts for mixed outcomes', async () => {
+    const txHash = '0x' + 'ee'.repeat(32);
+    const executeSafeTx = vi
+      .fn()
+      .mockResolvedValueOnce({ hash: txHash })
+      .mockRejectedValueOnce(new Error('nonce too low'));
+    const waitForReceipt = vi.fn().mockResolvedValue({ status: 'success' });
+    const publicClient = publicClientWithPendingReward(10n);
+
+    const r = await tickSelfBondStakingClaims(publicClient, {
+      stakingMode: 'self-bond',
+      targets: [
+        { stakingProxy: STAKING_PROXY, serviceId: 1, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC },
+        { stakingProxy: '0x0000000000000000000000000000000000000003', serviceId: 2, safeAddress: VALID_SAFE, agentPrivateKey: VALID_KEY, rpcUrl: VALID_RPC },
+      ],
+      deps: { executeSafeTx, waitForReceipt },
+    });
+
+    expect(r.attempted).toBe(2);
     expect(r.submitted).toBe(1);
     expect(r.failedRecoverable).toBe(1);
   });
