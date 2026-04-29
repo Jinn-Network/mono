@@ -290,21 +290,21 @@ Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a v
 
 ## Design System
 
-> Migrating to `BRAND.md` (canonical) per `spec/2026-04-28-canonical-docs.md` — current contents remain authoritative until that follow-up lands.
+Voice and posture are canonical in [`BRAND.md`](BRAND.md) — read it before any user-facing artifact. The visual sidecar (tokens, spec) is below; folding it into `BRAND.md` is a separate spec.
 
 **Root-level quick reference** (for `impeccable` and other skill consumers):
-- [`PRODUCT.md`](PRODUCT.md) — register (default `brand`; override to `product` inside `client/`, `ui_kits/explorer/`, or any dashboard surface), users, brand personality, anti-references, and five strategic principles.
+- [`BRAND.md`](BRAND.md) — voice, headless-brand posture, protocol-vs-narrative split, content non-negotiables. Canonical.
 - [`DESIGN.md`](DESIGN.md) — visual spec in [Google Stitch format](https://stitch.withgoogle.com/docs/design-md/format/): YAML frontmatter with colours, typography, radii, spacing, and component tokens; six-section prose body (Overview, Colors, Typography, Elevation, Components, Do's and Don'ts).
 - [`DESIGN.json`](DESIGN.json) — sidecar extending the frontmatter with tonal ramps, canonical OKLCH, shadow/motion/breakpoint tokens, and drop-in component HTML/CSS.
 
-These three files are the root-level precipitate of `docs/design/jinn-design-system/`. If you're writing marketing copy, docs, slides, or product UI, start with PRODUCT.md + DESIGN.md. If you're extending the brand itself (new sigil, new palette variant, new surface treatment), continue to the long-form source below.
+These three files are the root-level precipitate of `docs/design/jinn-design-system/`. If you're writing marketing copy, docs, slides, or product UI, start with `BRAND.md` (voice + posture) and `DESIGN.md` (visual). If you're extending the brand itself (new sigil, new palette variant, new surface treatment), continue to the long-form source below.
 
 ---
 
 Jinn's design system lives at [`docs/design/jinn-design-system/`](docs/design/jinn-design-system/). **Read it before building any UI, slide, mock, docs page, marketing surface, or other user-facing artifact** — it's the source of truth for colors, type, voice, iconography, and surface rules.
 
 Entry points, in order:
-- [`docs/design/jinn-design-system/BRAND_POSTURE.md`](docs/design/jinn-design-system/BRAND_POSTURE.md) — what "headless" means here (grounded in Other Internet's [*Headless Brands*](https://otherinter.net/research/headless-brands/)); which parts are protocol vs. narrative
+- [`BRAND.md`](BRAND.md) — voice and headless-brand posture (grounded in Other Internet's [*Headless Brands*](https://otherinter.net/research/headless-brands/)); which parts are protocol vs. narrative. Canonical.
 - [`docs/design/jinn-design-system/project/README.md`](docs/design/jinn-design-system/project/README.md) — brand posture, voice/lexicon, visual foundations (colors, type, spacing, borders, shadows, radii, motion, layout), iconography
 - [`docs/design/jinn-design-system/project/SKILL.md`](docs/design/jinn-design-system/project/SKILL.md) — short operational manifest and non-negotiables
 - [`docs/design/jinn-design-system/project/colors_and_type.css`](docs/design/jinn-design-system/project/colors_and_type.css) + [`foundations.css`](docs/design/jinn-design-system/project/foundations.css) — copy these into any new HTML artifact; treat the CSS variables as the canonical tokens
