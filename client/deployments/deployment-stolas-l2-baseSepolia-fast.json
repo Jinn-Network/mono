@@ -21,7 +21,7 @@
     "safeMultisigWithRecoveryModule": "0x20F7b9b55a88e3b2561fe83B076DE52916C7eaf0",
     "collectorImpl": "0x6A7a3aBdbfF301A6212ebA1523E579399833C718",
     "collector": "0x21c52Be4F656435F97d0335B37e21B417c8b6DFa",
-    "distributorImpl": "0xf734551289f11431486D60621F4BDB0081887B34",
+    "distributorImpl": "0xD47e4Ff84d930631dbcfadc1C27d916D9a5cc2e1",
     "distributor": "0x20951FBDb4F9cB1f051ef416BCB11A9Cfe3CEf81",
     "multisigGuardImpl": "0xD6229A8b3D1b5824e824E6589469F85987379183",
     "multisigGuard": "0x77aE56B2B745b3e81002090749Ef59B72B688D5F",

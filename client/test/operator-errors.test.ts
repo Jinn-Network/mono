@@ -28,6 +28,15 @@ describe('formatBootstrapOperatorMessage', () => {
     expect(r.hint).toBeDefined();
   });
 
+  it('maps unauthorized restake to earning-dir guidance', () => {
+    const r = formatBootstrapOperatorMessage(
+      new Error('Service 1 is evicted, but master EOA 0x123 is not authorized to reStake it. reStake revert: UnauthorizedAccount(address)'),
+    );
+    expect(r.summary).toContain('not authorized to reStake');
+    expect(r.hint).toContain('JINN_EARNING_DIR');
+    expect(r.hint).not.toContain('setCuratingAgents');
+  });
+
   it('includes Error cause text', () => {
     const inner = new Error('GS013 inner');
     const outer = new Error('wrapper') as Error & { cause?: unknown };

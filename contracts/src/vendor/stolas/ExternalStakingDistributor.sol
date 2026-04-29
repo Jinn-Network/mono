@@ -800,8 +800,9 @@ contract ExternalStakingDistributor is Implementation, ERC721TokenReceiver {
             revert ZeroValue();
         }
 
-        // Check for access: curating agent or managing agent, or owner
-        if (!(mapCuratingAgents[msg.sender] || mapManagingAgents[msg.sender] || msg.sender == owner)) {
+        // Check for access: recorded service curating agent, managing agent, or owner
+        address serviceCuratingAgent = mapServiceIdCuratingAgents[serviceId];
+        if (!(msg.sender == serviceCuratingAgent || mapManagingAgents[msg.sender] || msg.sender == owner)) {
             revert UnauthorizedAccount(msg.sender);
         }
 

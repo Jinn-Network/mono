@@ -189,6 +189,7 @@ The `hl_open_position` MCP tool rejects invalid requests at the tool level befor
 ## Testnet-specific caveats
 
 - **stOLAS distributor pool is protocol-team-managed.** On mainnet, real stakers deposit JINN/OLAS and the pool grows naturally. On testnet there are no stakers, so the team pre-seeds the pool via a one-time bridge from Sepolia L1. If bootstrap fails with `Overflow(20, 0)` at `distributor.stake()`, the pool is drained — nothing you can do locally. Post in the testnet channel and re-run bootstrap after refill.
+- **Evicted services recover through the same operator wallet.** In standard mode, `distributor.stake()` records your master EOA as the service operator. If the service is evicted, rerun `jinn bootstrap` with the same `JINN_EARNING_DIR` and `JINN_PASSWORD`; the client calls `distributor.reStake()` from that master EOA. Per-operator whitelisting is not required.
 - **CDP faucet rate limits by address over 24h.** If you burn through your daily quota (rare — the drip loop runs ~50 × 0.0001 ETH in 50 seconds, well under CDP's cap), `jinn bootstrap` falls back to a manual-funding poll. Wait or fund via the portal: <https://portal.cdp.coinbase.com/products/faucet>.
 - **One HL master per test run.** If you reuse a master across experiments, expect position interference from leftover bots. Fresh master = clean signal.
 - **Claude Code CLI auth is machine-local.** Containers need the OAuth token mounted into a persistent volume (see the Docker Compose section of `client/README.md`).
@@ -227,6 +228,10 @@ The stOLAS pool is empty. This is a **protocol-team action** — operators canno
 ### Bootstrap fails with `Overflow(20, 0)` at `distributor.stake()`
 
 Same root cause as above — distributor pool drained.
+
+### Bootstrap says the master EOA is not authorized to `reStake`
+
+The service is evicted, but the current master EOA does not match the operator recorded on-chain for that service. Re-run with the same `JINN_EARNING_DIR` and `JINN_PASSWORD` used when the service was first staked. If the original keys are unavailable, ask the protocol team for owner / managing-agent recovery or start over with a fresh earning directory.
 
 ### Claude session exits in ~18 seconds with zero tool calls
 

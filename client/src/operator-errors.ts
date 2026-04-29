@@ -57,14 +57,13 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
   const msg = stringifyUnknown(error);
   const lower = msg.toLowerCase();
 
-  if (isUnauthorizedAccountError(msg) || msg.includes('curating-agent whitelist')) {
+  if (isUnauthorizedAccountError(msg) || msg.includes('not authorized to reStake')) {
     // Surfaces from `recoverEvictedService` when distributor.reStake reverts
-    // because the operator is not in mapCuratingAgents / mapManagingAgents on
-    // the stOLAS ExternalStakingDistributor. Keep the full actionable message
-    // so `setCuratingAgents` guidance isn't truncated by the 220-char cap.
+    // because the current master EOA is not the recorded service operator on
+    // the stOLAS ExternalStakingDistributor. Keep the full actionable message.
     return {
       summary: msg.split('reStake revert:')[0]?.trim() ?? msg,
-      hint: 'The evicted service cannot self-heal without the distributor owner pre-authorising this operator. See the summary for the setCuratingAgents call, or abandon-and-rebootstrap.',
+      hint: 'Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service. Otherwise request owner / managing-agent recovery or abandon-and-rebootstrap.',
     };
   }
 

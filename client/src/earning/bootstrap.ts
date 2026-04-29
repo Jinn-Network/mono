@@ -815,11 +815,10 @@ export class FleetBootstrapper {
     const svc = state.services.find(s => s.index === index)!;
     const serviceId = svc.service_id!;
 
-    // `distributor.stake()` writes only to guard-scoped curating-agent maps,
-    // never to the top-level `mapCuratingAgents` that `reStake()` reads —
-    // so plain operators will hit `UnauthorizedAccount` here unless the
-    // distributor owner pre-whitelisted them. Catch-and-surface below rather
-    // than retry forever.
+    // `reStake()` is operator-scoped: the master EOA must match the
+    // distributor's recorded `mapServiceIdCuratingAgents[serviceId]` entry.
+    // If it doesn't, the operator is likely using the wrong earning dir or
+    // password, or the service needs owner / managing-agent recovery.
     const masterAccount = deriveMasterSigner(mnemonic);
     const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
 
@@ -842,10 +841,9 @@ export class FleetBootstrapper {
       const message = flattenErrorMessage(err);
       if (isUnauthorizedAccountError(message)) {
         throw new Error(
-          `Service ${index} (service_id ${serviceId}) is evicted on the staking proxy and reStake is gated by the distributor's curating-agent whitelist. ` +
-          `Master EOA ${masterAccount.address} is not authorized. To recover: ` +
-          `(a) have the distributor owner call setCuratingAgents([${masterAccount.address}], [true]) on ${this.config.distributorAddress}, then re-run jinn bootstrap; or ` +
-          `(b) abandon this service and provision a new one (stOLAS bond stays with the old Safe until it's manually swept). ` +
+          `Service ${index} (service_id ${serviceId}) is evicted on the staking proxy, but master EOA ${masterAccount.address} is not authorized to reStake it. ` +
+          `The distributor only permits the recorded service operator, a managing agent, or the owner. ` +
+          `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service, then re-run jinn bootstrap; otherwise request owner / managing-agent recovery or abandon-and-rebootstrap. ` +
           `reStake revert: ${message}`,
         );
       }

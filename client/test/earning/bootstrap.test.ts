@@ -400,10 +400,9 @@ describe('Fleet bootstrap', () => {
       async (_s: any, _m: string, index: number) => {
         const masterAddress = '0xMASTERADDRESSLOCALFAKEMASTERADDRESSLOCAL';
         throw new Error(
-          `Service ${index} (service_id 42) is evicted on the staking proxy and reStake is gated by the distributor's curating-agent whitelist. ` +
-          `Master EOA ${masterAddress} is not authorized. To recover: ` +
-          `(a) have the distributor owner call setCuratingAgents([${masterAddress}], [true]) on 0xDISTRIBUTOR, then re-run jinn bootstrap; or ` +
-          `(b) abandon this service and provision a new one (stOLAS bond stays with the old Safe until it's manually swept). ` +
+          `Service ${index} (service_id 42) is evicted on the staking proxy, but master EOA ${masterAddress} is not authorized to reStake it. ` +
+          `The distributor only permits the recorded service operator, a managing agent, or the owner. ` +
+          `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service, then re-run jinn bootstrap; otherwise request owner / managing-agent recovery or abandon-and-rebootstrap. ` +
           `reStake revert: UnauthorizedAccount(address)`,
         );
       },
@@ -412,8 +411,9 @@ describe('Fleet bootstrap', () => {
     const result = await bootstrapper.bootstrap('test-password');
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/is evicted on the staking proxy/);
-    expect(result.message).toMatch(/curating-agent whitelist/);
-    expect(result.message).toMatch(/setCuratingAgents/);
+    expect(result.message).toMatch(/original master EOA/);
+    expect(result.message).toMatch(/JINN_EARNING_DIR/);
+    expect(result.message).not.toMatch(/setCuratingAgents/);
   });
 
   // ── ERC-8004 IdentityRegistry mint (jinn-mono-j07) ─────────────────────────
