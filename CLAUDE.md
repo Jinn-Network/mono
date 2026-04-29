@@ -8,6 +8,16 @@ Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a (JINN token 
 
 Jinn is a training protocol for agentic intents. It defines a loop (Creation → Execution → Evaluation → Knowledge) where intents are published with fees, participants attempt fulfillment, evaluators verify results, and knowledge accumulates to improve future attempts.
 
+## Canonical Docs
+
+Canonical docs are the repo's stable sources of truth. They change only via approved PRs (see `spec/2026-04-28-canonical-docs.md`). Always prefer canonical docs over restated information found elsewhere in the repo, and never redefine canonical content locally — link instead.
+
+- `SPEC.md` — read before reasoning about the protocol loop, roles, contracts, or phase boundaries
+- `THESIS.md` — read before writing positioning, pitch, strategic copy, or any "why Jinn" framing
+- `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)
+- `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
+- `GLOSSARY.md` — read whenever a Jinn-specific term appears; never redefine terms locally
+
 ## Repository Structure
 
 ```
@@ -279,6 +289,8 @@ To add a new **in-repo** `spec.kind` (typed spec, `jinn submit-intent --spec-fil
 Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a version, date, and author in the header.
 
 ## Design System
+
+> Migrating to `BRAND.md` (canonical) per `spec/2026-04-28-canonical-docs.md` — current contents remain authoritative until that follow-up lands.
 
 **Root-level quick reference** (for `impeccable` and other skill consumers):
 - [`PRODUCT.md`](PRODUCT.md) — register (default `brand`; override to `product` inside `client/`, `ui_kits/explorer/`, or any dashboard surface), users, brand personality, anti-references, and five strategic principles.

@@ -1,0 +1,22 @@
+name: Canonical docs check
+on: [pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify spec link for canonical-doc changes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          CANON='^(SPEC|THESIS|BRAND|GROWTH|GLOSSARY)\.md$'
+          changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          if echo "$changed" | grep -E "$CANON" > /dev/null; then
+            if ! echo "$changed" | grep -E '^spec/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' > /dev/null \
+               && ! echo "$PR_BODY" | grep -E 'spec/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md' > /dev/null; then
+              echo "Canonical doc changed but no spec/YYYY-MM-DD-*.md linked in PR body or diff."
+              exit 1
+            fi
+          fi
