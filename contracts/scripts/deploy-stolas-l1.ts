@@ -1,8 +1,16 @@
 /**
- * Deploy the full stOLAS L1 stack on Sepolia with JINN tokens.
+ * Deploy the full stOLAS L1 stack on Sepolia.
+ *
+ * ROLE CLARIFICATION: stOLAS is our Autonolas-staking fork. In our testnet it
+ * plays the OLAS role (operator onboarding + reward distribution). The token
+ * threaded through this script as `L1_JINN` / `L2_JINN` is the Phase 1a "Jinn"
+ * ERC20 deployed 2026-04-08 — on-chain name="Jinn"/symbol="JINN" but it serves
+ * as the OLAS-equivalent token in this layer. The actual JINN minted by the
+ * v0 cross-chain pipeline is a separate token (tJINN on testnet); see
+ * `deploy-jinn-mvi-l1.ts`.
  *
  * Deployment order:
- *   1. stJINN (ERC-4626 vault wrapping JINN)
+ *   1. stJINN (ERC-4626 vault wrapping the OLAS-equivalent token)
  *   2. Lock implementation (veJINN governance lock)
  *   3. Lock proxy
  *   4. UnstakeRelayer implementation

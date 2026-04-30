@@ -13,8 +13,9 @@ The release flow has four layers:
 
 1. fast CI in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 2. the fork-based local operator gate (`yarn release:operator-gate`)
-3. the manual real testnet Docker acceptance gate (`yarn release:testnet-acceptance`; first-time setup: `yarn setup:testnet-acceptance-operator`, see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
-4. the GitHub Release workflows for npm `latest` and GHCR
+3. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
+4. the manual real testnet Docker acceptance gate (`yarn release:testnet-acceptance`; first-time setup: `yarn setup:testnet-acceptance-operator`, see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
+5. the GitHub Release workflows for npm `latest` and GHCR
 
 The old host-installed full acceptance run remains available only as a secondary debug path:
 
@@ -36,6 +37,10 @@ Do this once because the package did not exist on npm initially.
    yarn build
    yarn pack:smoke
    yarn release:operator-gate
+   cd ../contracts
+   yarn test
+   forge install foundry-rs/forge-std --no-git
+   forge test --match-contract Invariant
    ```
 3. Publish manually:
    ```bash
@@ -83,7 +88,8 @@ npx @jinn-network/client@canary --help
    cd client
    yarn release:client --prepare
    ```
-   This runs the local gates, Docker testnet acceptance, and writes a report
+   This runs the local client gates, contract gates, Docker testnet acceptance
+   setup with bootstrap, the Docker acceptance gate itself, and writes a report
    under `client/release-runs/<version>-<timestamp>/`.
 4. Publish from that report:
    ```bash

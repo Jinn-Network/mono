@@ -179,6 +179,10 @@ export class RestorationEngine {
   protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
   protected readonly identityPublisher: RestorationEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: RestorationEngineOptions['reputationFeedback'];
+  /** Local SQLite-backed store; used to emit `restoration-result` /
+   *  `evaluation-verdict` artifact rows when a cycle completes via a
+   *  deterministic impl (the legacy claude/MCP path writes them itself). */
+  protected readonly store: Store;
 
   // Transient storage for impl output between runImpl and pack transitions.
   // Keyed by requestId; cleared after successful pack.
@@ -200,6 +204,7 @@ export class RestorationEngine {
 
   constructor(opts: RestorationEngineOptions) {
     this.persistence = new IntentPersistence(opts.store.db);
+    this.store = opts.store;
     this.paths = opts.paths;
     this.claimDeps = opts.claimDeps;
     this.packagingDeps = opts.packagingDeps;
@@ -1000,6 +1005,15 @@ export class RestorationEngine {
     });
     console.log(`[restorer-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
 
+    // Emit a SQLite artifact row so consumers (release acceptance gate, search
+    // API) see this cycle alongside legacy-claude / MCP-emitted rows. The
+    // legacy claude path writes via the MCP `submit_restoration_result` tool;
+    // deterministic impls (prediction-v0-baseline, prediction-v0-evaluator,
+    // …) don't go through MCP, so the engine emits on their behalf here.
+    // Idempotent: skips when a row for this requestId+tag already exists
+    // (legacy path may have already inserted).
+    this.emitCycleArtifact(intent, manifestCid, evidenceHash);
+
     // ── ERC-8004 setMetadata — fires AFTER claimDelivery succeeds ────────────
     //
     // Moved here from pack() per PR#37 review2 must-fix #2. 'committed' means
@@ -1080,6 +1094,51 @@ export class RestorationEngine {
    * inside `submitEvaluatorFeedback` / `mapVerdictToScore` in the
    * feedback-hook module; we just hand it the verdict.
    */
+  /**
+   * Insert a SQLite `artifacts` row for a successfully delivered cycle so the
+   * release acceptance gate (and the search API) can observe completion via
+   * the same surface as the legacy claude / MCP path.
+   *
+   * The legacy `legacy-claude` impl writes via the MCP `submit_restoration_result`
+   * tool when Claude reports success; deterministic impls don't go through MCP.
+   * This emitter closes that gap by writing the row from the engine when the
+   * cycle hits COMPLETE.
+   *
+   * Idempotent: if a row already exists for (requestId, tag) — e.g. the legacy
+   * MCP path got there first — we leave it alone.
+   */
+  private emitCycleArtifact(
+    intent: PersistedIntent,
+    manifestCid: string,
+    evidenceHash: `0x${string}` | null | undefined,
+  ): void {
+    const desiredStateId = intent.restorationJob?.id;
+    if (!desiredStateId) {
+      // Pre-migration intent rows had no desired_state_payload; the legacy
+      // path is the only thing that can emit artifacts for them, and it
+      // does so via MCP. Skip rather than synthesise an id.
+      return;
+    }
+    const intentType = intent.intentType ?? 'restoration';
+    const tag = intentType === 'evaluation' ? 'evaluation-verdict' : 'restoration-result';
+    const existing = this.store.getArtifactByRequestId(intent.requestId, tag);
+    if (existing) return;
+
+    this.store.insertArtifact({
+      id: randomUUID(),
+      desiredStateId,
+      requestId: intent.requestId,
+      title: `${tag}: ${intent.specKind ?? 'cycle'} (${intent.implName ?? 'engine'})`,
+      content: JSON.stringify({
+        manifestCid,
+        evidenceHash: evidenceHash ?? null,
+        implName: intent.implName,
+      }),
+      tags: [tag, 'success'],
+      outcome: 'SUCCESS',
+    });
+  }
+
   private async _maybePostEvaluatorFeedback(intent: PersistedIntent): Promise<void> {
     if (!this.reputationFeedback) return;
 

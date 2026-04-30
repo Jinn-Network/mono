@@ -1,0 +1,36 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-29T12:14:01.626Z",
+  "config": {
+    "timingProfile": "fast-test",
+    "votingDelaySeconds": 60,
+    "votingPeriodSeconds": 600,
+    "proposalThreshold": "0",
+    "quorumNumerator": 4,
+    "timelockMinDelaySeconds": 60
+  },
+  "distributor": {
+    "operatorRatio": "750000000000000000",
+    "daoRatio": "250000000000000000",
+    "wCreation": "1",
+    "wRestorationDelivery": "1",
+    "wEvaluationDelivery": "1"
+  },
+  "messenger": {
+    "mode": "mock",
+    "address": "0x30E2f1A5691a999053A54e8DAf9496CD7ccF2DFD",
+    "owner": "0x34516dB851f03f8E14d0c1cD56200175e914cCf0"
+  },
+  "handover": {
+    "renounceAdmin": false
+  },
+  "contracts": {
+    "JINN": "0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A",
+    "TimelockController": "0x5CE9c7E24f0509490a91a1cD285DDFF70A9C058D",
+    "JinnGovernor": "0xbbc43A1B5AC699de09577dAE4A1007a3bA704D9E",
+    "JinnDistributor": "0xaC9CD847660d05e77D82A3684aFC4EbFd94fBfe6",
+    "Messenger": "0x30E2f1A5691a999053A54e8DAf9496CD7ccF2DFD"
+  }
+}

@@ -24,6 +24,7 @@ import {
 } from 'viem';
 import { CLAIM_REGISTRY_ABI } from './abi.js';
 import { executeSafeTransaction } from '../mech/safe.js';
+import { SafeInnerRevertError } from '../mech/safe-revert.js';
 import { waitForTransactionReceiptWithRetry } from '../../tx-retry.js';
 
 export const ZERO_ADDRESS: Address = '0x0000000000000000000000000000000000000000';
@@ -43,6 +44,15 @@ export interface ClaimJobResult {
   txHash: string;
   /** True if we now hold the claim (new or pre-existing). */
   claimed: boolean;
+  /**
+   * Set when claimed=false. Disambiguates between:
+   *  - 'lost-race': another operator holds the claim (decoded from JobAlreadyClaimed)
+   *  - 'ineligible': eligibility checker rejected
+   *  - 'reverted':   tx reverted for an unknown reason
+   */
+  reason?: 'lost-race' | 'ineligible' | 'reverted';
+  /** When reason='lost-race', the address that won the race (if recoverable). */
+  competitor?: Address;
 }
 
 // ── ClaimRegistryClient ───────────────────────────────────────────────────────
@@ -119,7 +129,7 @@ export class ClaimRegistryClient {
         return { txHash: '', claimed: true };
       }
       // Someone else has an active claim
-      return { txHash: '', claimed: false };
+      return { txHash: '', claimed: false, reason: 'lost-race', competitor: existing.claimer };
     }
 
     const data = encodeFunctionData({
@@ -154,13 +164,32 @@ export class ClaimRegistryClient {
 
       return { txHash, claimed: true };
     } catch (err) {
+      // Decoded inner revert from Safe's GS013 wrapper — the actual on-chain
+      // failure cause is now legible.
+      if (err instanceof SafeInnerRevertError) {
+        if (err.decodedName === 'JobAlreadyClaimed') {
+          const competitor = err.decodedArgs?.[1] as Address | undefined;
+          // RPC eventual-consistency case: a prior attempt's tx mined but
+          // the daemon retried (e.g. waitForTransactionReceipt timed out),
+          // and the retry's gas-estimate reverts because the Safe already
+          // holds the claim. Treat as success.
+          if (competitor && competitor.toLowerCase() === this.safeAddress.toLowerCase()) {
+            return { txHash: '', claimed: true };
+          }
+          return { txHash: '', claimed: false, reason: 'lost-race', competitor };
+        }
+        if (err.decodedName === 'IneligibleToClaim') {
+          return { txHash: '', claimed: false, reason: 'ineligible' };
+        }
+        return { txHash: '', claimed: false, reason: 'reverted' };
+      }
       const message = err instanceof Error ? err.message : String(err);
       if (
         message.includes('JobAlreadyClaimed') ||
         message.includes('IneligibleToClaim') ||
         message.includes('execution reverted')
       ) {
-        return { txHash: '', claimed: false };
+        return { txHash: '', claimed: false, reason: 'reverted' };
       }
       throw err;
     }

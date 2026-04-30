@@ -271,6 +271,95 @@ describe('RestorationEngine', () => {
     });
   });
 
+  describe('emitCycleArtifact', () => {
+    function callEmit(
+      e: TestEngine,
+      intent: PersistedIntent,
+      manifestCid = 'bafkreitestmanifest',
+      evidenceHash: `0x${string}` | null = '0xabcd',
+    ): void {
+      (e as unknown as {
+        emitCycleArtifact(i: PersistedIntent, m: string, h: `0x${string}` | null): void;
+      }).emitCycleArtifact(intent, manifestCid, evidenceHash);
+    }
+
+    function makePersistedIntent(overrides: Partial<PersistedIntent> = {}): PersistedIntent {
+      return {
+        requestId: '0xreq1',
+        intentCid: 'bafyabc',
+        onchainCreationTx: '0xtx',
+        onchainCreationBlock: 1,
+        specKind: 'prediction.v0',
+        intentType: 'restoration',
+        implName: 'prediction-v0-baseline',
+        state: IntentState.COMPLETE,
+        stateUpdatedAt: 0,
+        workingDir: null,
+        implStateDir: null,
+        windowStartTs: 0,
+        windowEndTs: 0,
+        preSnapshotCapturedAt: null,
+        preSnapshotPayload: null,
+        postSnapshotCapturedAt: null,
+        postSnapshotPayload: null,
+        fillsPayload: null,
+        gatingClaim: null,
+        informationalClaim: null,
+        artifactCids: null,
+        manifestCid: null,
+        deliveryTxHash: null,
+        manifestGeneratedAt: null,
+        evidenceHash: null,
+        restorationJob: { id: 'pred-v0-auto-1714400000000', description: 'test' },
+        implOutputsJson: null,
+        failureReason: null,
+        failureAt: null,
+        ...overrides,
+      };
+    }
+
+    it('writes a restoration-result row for a successful restoration cycle', () => {
+      callEmit(engine, makePersistedIntent());
+      const row = store.getArtifactByRequestId('0xreq1', 'restoration-result');
+      expect(row).not.toBeNull();
+      expect(row!.outcome).toBe('SUCCESS');
+      expect(row!.tags).toContain('restoration-result');
+      expect(row!.tags).toContain('success');
+    });
+
+    it('writes an evaluation-verdict row for an evaluation cycle', () => {
+      callEmit(engine, makePersistedIntent({
+        requestId: '0xreq2',
+        intentType: 'evaluation',
+        implName: 'prediction-v0-evaluator',
+      }));
+      const restored = store.getArtifactByRequestId('0xreq2', 'restoration-result');
+      const evaluated = store.getArtifactByRequestId('0xreq2', 'evaluation-verdict');
+      expect(restored).toBeNull();
+      expect(evaluated).not.toBeNull();
+      expect(evaluated!.tags).toContain('evaluation-verdict');
+    });
+
+    it('is idempotent — second call leaves the existing row alone', () => {
+      const intent = makePersistedIntent();
+      callEmit(engine, intent, 'bafkreifirst');
+      const first = store.getArtifactByRequestId('0xreq1', 'restoration-result');
+      expect(first).not.toBeNull();
+      const firstId = first!.id;
+      callEmit(engine, intent, 'bafkreisecond');
+      const second = store.getArtifactByRequestId('0xreq1', 'restoration-result');
+      expect(second!.id).toBe(firstId);
+      // Content reflects the FIRST insert (legacy MCP rows must not be clobbered).
+      expect(second!.content).not.toContain('bafkreisecond');
+    });
+
+    it('skips rows when restorationJob is null (legacy pre-migration intents)', () => {
+      callEmit(engine, makePersistedIntent({ restorationJob: null }));
+      const row = store.getArtifactByRequestId('0xreq1', 'restoration-result');
+      expect(row).toBeNull();
+    });
+  });
+
   describe('process — COMPLETE / FAILED (terminal)', () => {
     it('is a no-op for COMPLETE', async () => {
       await engine.observe(makeInput());

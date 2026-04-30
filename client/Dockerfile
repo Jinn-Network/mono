@@ -28,6 +28,7 @@ RUN corepack enable && yarn install --immutable
 # Copy source and bundled deployment artifacts
 COPY src/ src/
 COPY deployments/ deployments/
+COPY plugins/ plugins/
 COPY scripts/ scripts/
 COPY tsconfig.json ./
 
@@ -62,6 +63,7 @@ RUN mkdir -p /root/.claude && ln -sf /root/.claude/claude.json /root/.claude.jso
 # Copy only what's needed to run
 COPY --from=build /app/dist dist/
 COPY --from=build /app/deployments deployments/
+COPY --from=build /app/plugins plugins/
 COPY --from=build /app/node_modules node_modules/
 COPY --from=build /app/package.json ./
 

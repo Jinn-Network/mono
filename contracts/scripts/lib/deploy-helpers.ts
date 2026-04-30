@@ -144,7 +144,7 @@ export async function deployL1Stack(
   // -----------------------------------------------------------------------
   // Step 1: JINN token — no constructor params, deployer becomes owner+minter
   // -----------------------------------------------------------------------
-  const JINN = await ethers.getContractFactory("JINN", deployer);
+  const JINN = await ethers.getContractFactory("src/vendor/governance/JINN.sol:JINN", deployer);
   const jinn = await JINN.deploy();
   await jinn.waitForDeployment();
 
@@ -343,5 +343,6 @@ export const FAST_TEST_DEPLOY_CONFIG: DeployConfig = {
   epochLen: 900,
   votePeriodSeconds: 900,
   weightVoteDelaySeconds: 900,
-  voteCheckpointHorizon: 1000,
+  /** Matches `VoteWeightingFast._maxNumPeriods()` (widened from 1_000 → 10_000 for Sepolia heartbeat stalls). */
+  voteCheckpointHorizon: 10_000,
 };

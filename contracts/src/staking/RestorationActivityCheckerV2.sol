@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.25;
+pragma solidity ^0.8.30;
+
+import {Implementation, OwnerOnly, ZeroAddress} from "../vendor/stolas/Implementation.sol";
 
 /// @dev Multisig interface for getting nonce
 interface IMultisig {
@@ -16,16 +18,8 @@ interface IJinnRouter {
     function evaluationDeliveryCount(address multisig) external view returns (uint256);
 }
 
-/// @dev Provided zero address.
-error ZeroAddress();
-
 /// @dev Zero value when it has to be different from zero.
 error ZeroValue();
-
-/// @dev Only owner can call this function.
-/// @param sender Sender address.
-/// @param owner Required owner address.
-error OwnerOnly(address sender, address owner);
 
 /// @dev Value exceeds maximum.
 /// @param value Provided value.
@@ -37,28 +31,41 @@ error Overflow(uint256 value, uint256 max);
 /// @param authorizedRouter Required authorized router address.
 error UnauthorizedRouter(address sender, address authorizedRouter);
 
+/// @dev Already initialized.
+error AlreadyInitialized();
+
 /// @title RestorationActivityCheckerV2 - Activity checker with SimHash-based anti-farming decay
 /// @author JIN Network
 /// @notice Extends V1 with evidence novelty checking. Activities submitted with evidence hashes
 ///         are weighted by novelty — novel evidence earns full weight, similar evidence earns
 ///         reduced (or zero) weight. The OLAS staking contract reads novelty-weighted counts
 ///         via getMultisigNonces() and isRatioPass(), so farming operators fail liveness checks.
+///
+///         **Proxy-deployed.** This contract is deployed as a logic implementation behind
+///         `vendor/stolas/Proxy.sol` (mainnet checker pattern at `0x477C41...`). Future
+///         hardening lands as a new implementation; the proxy's `changeImplementation(newImpl)`
+///         swaps logic in place, preserving stakers + activity state. Direct deploy + call
+///         is supported for unit tests (each test deploys a fresh impl and calls `initialize`).
 /// @dev Evidence SimHashes are computed off-chain by the client and submitted as bytes32.
 ///      Similarity is measured by Hamming distance between 256-bit SimHash values.
 ///      The contract stores a sliding window of recent hashes per multisig for comparison.
-contract RestorationActivityCheckerV2 {
+///
+///      Storage layout (declared first to last; matters for proxy upgrades):
+///        slot 0: `owner` (inherited from Implementation)
+///        slot 1: `livenessRatio` (storage; was immutable before proxy refactor)
+///        slot 2..N: counters, mappings, anti-farming params, router addresses
+///      All future implementations must preserve this layout. Add new state at the END.
+contract RestorationActivityCheckerV2 is Implementation {
     /// @dev Activity types that workers can record
     enum ActivityType { CREATE, DELIVER, EVALUATE }
 
-    // ============ Immutables ============
-
-    /// @dev Liveness ratio in the format of 1e18
-    uint256 public immutable livenessRatio;
-
     // ============ State ============
+    // Inherited from Implementation: address public owner (slot 0)
 
-    /// @dev Contract owner (can update anti-farming parameters)
-    address public owner;
+    /// @dev Liveness ratio in the format of 1e18.
+    ///      Storage (was `immutable` before the proxy refactor) so a future
+    ///      governance proposal can adjust without redeploying both impl+proxy.
+    uint256 public livenessRatio;
 
     /// @dev Raw activity count per multisig (monotonically increasing, for off-chain inspection)
     mapping(address => uint256) public activityCounts;
@@ -71,9 +78,25 @@ contract RestorationActivityCheckerV2 {
     ///      1 fully novel activity = 1e18 added. Similar evidence adds less (or zero).
     mapping(address => uint256) public noveltyWeightedCounts;
 
+    /// @dev Novelty-weighted creator credit per address (1e18 scale).
+    ///      ε creation gating: a creator is credited only when a delivery they posted
+    ///      passes the V2 checker's Hamming/SimHash novelty test. The credit equals
+    ///      the same `weight` granted to the deliverer, so creator credit decays in
+    ///      lockstep with farmed deliveries.
+    ///      Cross-chain JinnClaimEmitter reads this for ε creation rewards.
+    mapping(address => uint256) public verifiedCreations;
+
     /// @dev SimHash of evidence for each recorded activity, per multisig.
-    ///      Used by _computeNoveltyWeight to detect similarity.
+    ///      Stored as a fixed-size circular buffer of length `comparisonWindow`,
+    ///      indexed via `_evidenceWriteIndex`. New evidences overwrite the oldest
+    ///      entry once the window is full, so storage is bounded per multisig.
+    ///      Use `getEvidenceHashCount` and `getEvidenceHash(multisig, i)` to read
+    ///      back stored hashes (i indexes oldest..newest within the window).
     mapping(address => bytes32[]) public evidenceHashes;
+
+    /// @dev Next write slot for the circular buffer of evidence hashes per multisig.
+    ///      Always satisfies `_evidenceWriteIndex[multisig] < comparisonWindow`.
+    mapping(address => uint256) private _evidenceWriteIndex;
 
     // ============ Anti-farming parameters (owner-settable) ============
 
@@ -106,28 +129,45 @@ contract RestorationActivityCheckerV2 {
         uint256 noveltyWeight
     );
 
+    /// @dev Emitted when a creator is credited (ε creation gating). Fires from
+    ///      `recordRestorationEvidence` whenever the deliverer's evidence passes
+    ///      the novelty test (`weight > 0`). The creator receives credit equal to
+    ///      `weight` so creator credit aligns with the V2 checker's anti-farming
+    ///      decision.
+    event CreationCredited(
+        address indexed creator,
+        address indexed deliverer,
+        bytes32 evidenceHash,
+        uint256 weight
+    );
+
     event AntifarmingParametersUpdated(
         uint256 similarityThreshold,
         uint256 similarDecayMultiplier,
         uint256 comparisonWindow
     );
 
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    // OwnerUpdated comes from Implementation. No local OwnershipTransferred.
 
-    // ============ Constructor ============
+    // ============ Initialization ============
 
+    /// @notice Initialize the proxy storage. Called once via the Proxy's deploy-time
+    ///         delegatecall (see `vendor/stolas/Proxy.sol`). Subsequent calls revert.
+    ///         For unit tests that deploy the implementation directly, call `initialize`
+    ///         once to set up state.
     /// @param _livenessRatio Liveness ratio threshold (1e18 format)
-    /// @param _owner Contract owner
+    /// @param _owner Contract owner (gets `changeOwner` + `changeImplementation` rights)
     /// @param _similarityThreshold Hamming distance threshold (0-256)
     /// @param _similarDecayMultiplier Weight for similar evidence (1e18 scale)
     /// @param _comparisonWindow Number of recent hashes to compare against
-    constructor(
+    function initialize(
         uint256 _livenessRatio,
         address _owner,
         uint256 _similarityThreshold,
         uint256 _similarDecayMultiplier,
         uint256 _comparisonWindow
-    ) {
+    ) external {
+        if (owner != address(0)) revert AlreadyInitialized();
         if (_livenessRatio == 0) revert ZeroValue();
         if (_owner == address(0)) revert ZeroAddress();
         if (_similarityThreshold > 256) revert Overflow(_similarityThreshold, 256);
@@ -140,12 +180,16 @@ contract RestorationActivityCheckerV2 {
         similarDecayMultiplier = _similarDecayMultiplier;
         comparisonWindow = _comparisonWindow;
 
-        emit OwnershipTransferred(address(0), _owner);
+        emit OwnerUpdated(_owner);
     }
 
     // ============ Activity Recording ============
 
     /// @notice Record activity with evidence hash for anti-farming novelty checking.
+    ///         Only the authorized router can call this — the V2 checker is a single
+    ///         gate for "is this real work" (Architecture B), so unsanctioned writers
+    ///         cannot inflate the activity counts that drive OLAS rewards and JINN
+    ///         minting (audit finding C4).
     /// @param multisig The service multisig (Safe) address
     /// @param activityType 0=CREATE, 1=DELIVER, 2=EVALUATE
     /// @param evidenceHash SimHash of the evidence checkpoint data (computed off-chain)
@@ -154,14 +198,15 @@ contract RestorationActivityCheckerV2 {
         uint8 activityType,
         bytes32 evidenceHash
     ) external {
+        if (msg.sender != authorizedRouter) revert UnauthorizedRouter(msg.sender, authorizedRouter);
         require(multisig != address(0), "RestorationActivityCheckerV2: zero multisig");
         require(activityType <= uint8(ActivityType.EVALUATE), "RestorationActivityCheckerV2: invalid type");
 
         // Compute novelty weight by comparing against recent hashes
         uint256 weight = _computeNoveltyWeight(multisig, evidenceHash);
 
-        // Store the hash for future comparisons
-        evidenceHashes[multisig].push(evidenceHash);
+        // Store the hash for future comparisons (circular buffer of size comparisonWindow)
+        _writeEvidenceHash(multisig, evidenceHash);
 
         // Increment raw count (for backward compat / off-chain inspection)
         activityCounts[multisig] += 1;
@@ -175,24 +220,50 @@ contract RestorationActivityCheckerV2 {
 
     /// @notice Called by the JinnRouter when a restoration delivery is claimed with evidence.
     ///         Only the authorized router can call this.
-    /// @param multisig The service multisig (Safe) address
+    ///
+    ///         ε creation gating: when `weight > 0` (evidence passes the V2 Hamming
+    ///         test), the `creator` who posted the originating restoration job is
+    ///         credited with the same weight in `verifiedCreations[creator]`. This
+    ///         ties creator credit to the V2 checker's anti-farming decision —
+    ///         creators of cheap/repeat tasks accumulate decayed credit. Pass
+    ///         `address(0)` for `creator` to skip creator crediting.
+    /// @param multisig The deliverer's service multisig (Safe) address
+    /// @param creator  The original creator of the restoration job (looked up by
+    ///                 the router from `creators[requestId]`). May be `address(0)`
+    ///                 to skip ε creation crediting (e.g. legacy / unknown creator).
     /// @param evidenceHash SimHash of the restoration evidence
-    function recordRestorationEvidence(address multisig, bytes32 evidenceHash) external {
+    function recordRestorationEvidence(
+        address multisig,
+        address creator,
+        bytes32 evidenceHash
+    ) external {
         if (msg.sender != authorizedRouter) revert UnauthorizedRouter(msg.sender, authorizedRouter);
         require(multisig != address(0), "RestorationActivityCheckerV2: zero multisig");
 
         uint256 weight = _computeNoveltyWeight(multisig, evidenceHash);
-        evidenceHashes[multisig].push(evidenceHash);
+        _writeEvidenceHash(multisig, evidenceHash);
         noveltyWeightedCounts[multisig] += weight;
 
         emit ActivityRecordedWithEvidence(multisig, uint8(ActivityType.DELIVER), evidenceHash, weight);
+
+        // ε creation gating: credit the creator with the same weight when the
+        // delivery passes the novelty test (weight > 0). Skip when creator is
+        // unknown (address(0)) to keep this backward-compatible for callers
+        // that don't track creators.
+        if (weight > 0 && creator != address(0)) {
+            verifiedCreations[creator] += weight;
+            emit CreationCredited(creator, multisig, evidenceHash, weight);
+        }
     }
 
     /// @notice Record activity without evidence (backward compatible with V1).
     ///         Full weight is granted since we cannot assess novelty without evidence.
+    ///         Only the authorized router can call this — same Architecture B
+    ///         single-gate property as `recordActivityWithEvidence` (audit C4).
     /// @param multisig The service multisig (Safe) address
     /// @param activityType 0=CREATE, 1=DELIVER, 2=EVALUATE
     function recordActivity(address multisig, uint8 activityType) external {
+        if (msg.sender != authorizedRouter) revert UnauthorizedRouter(msg.sender, authorizedRouter);
         require(multisig != address(0), "RestorationActivityCheckerV2: zero multisig");
         require(activityType <= uint8(ActivityType.EVALUATE), "RestorationActivityCheckerV2: invalid type");
 
@@ -254,18 +325,60 @@ contract RestorationActivityCheckerV2 {
     // ============ View helpers ============
 
     /// @notice Get the number of stored evidence hashes for a multisig.
+    ///         Caps at `comparisonWindow` (circular buffer).
     function getEvidenceHashCount(address multisig) external view returns (uint256) {
         return evidenceHashes[multisig].length;
     }
 
-    /// @notice Get a specific evidence hash by index.
+    /// @notice Get a stored evidence hash by index. Index 0 returns the oldest
+    ///         hash currently in the window, the last valid index returns the
+    ///         newest. The buffer holds at most `comparisonWindow` entries.
     function getEvidenceHash(address multisig, uint256 index) external view returns (bytes32) {
-        return evidenceHashes[multisig][index];
+        bytes32[] storage hashes = evidenceHashes[multisig];
+        uint256 len = hashes.length;
+        require(index < len, "RestorationActivityCheckerV2: index out of bounds");
+
+        // Once full, the slot at `_evidenceWriteIndex` is the oldest entry
+        // (it's where the next write will go, overwriting the oldest). Before
+        // the buffer fills up the array is still being appended in order.
+        if (len < comparisonWindow) {
+            return hashes[index];
+        }
+        uint256 oldest = _evidenceWriteIndex[multisig];
+        return hashes[(oldest + index) % len];
+    }
+
+    // ============ Internal: Evidence buffer ============
+
+    /// @dev Write `newHash` into the per-multisig circular buffer of evidence
+    ///      hashes. Until the buffer reaches `comparisonWindow` entries we
+    ///      append; afterwards we overwrite the oldest slot. The write pointer
+    ///      `_evidenceWriteIndex[multisig]` always points at the next slot to
+    ///      overwrite, which (once full) is also the oldest entry.
+    function _writeEvidenceHash(address multisig, bytes32 newHash) internal {
+        bytes32[] storage hashes = evidenceHashes[multisig];
+        uint256 window = comparisonWindow;
+
+        if (hashes.length < window) {
+            // Pre-full: append. Write index stays 0 (default) and only takes
+            // effect once the buffer fills up — at which point slot 0 is the
+            // oldest entry and the next write should overwrite it.
+            hashes.push(newHash);
+            return;
+        }
+
+        // Buffer full — overwrite the oldest slot.
+        uint256 idx = _evidenceWriteIndex[multisig];
+        hashes[idx] = newHash;
+        unchecked {
+            _evidenceWriteIndex[multisig] = (idx + 1) % window;
+        }
     }
 
     // ============ Internal: Novelty computation ============
 
-    /// @dev Compare a new evidence hash against the multisig's recent hashes.
+    /// @dev Compare a new evidence hash against the multisig's stored hashes
+    ///      (already capped at `comparisonWindow` by the circular buffer).
     ///      Returns 1e18 for novel evidence, or similarDecayMultiplier for similar evidence.
     function _computeNoveltyWeight(address multisig, bytes32 newHash) internal view returns (uint256) {
         bytes32[] storage hashes = evidenceHashes[multisig];
@@ -276,11 +389,9 @@ contract RestorationActivityCheckerV2 {
             return 1e18;
         }
 
-        // Compare against the last `comparisonWindow` hashes
-        uint256 start = len > comparisonWindow ? len - comparisonWindow : 0;
+        // The buffer stores at most `comparisonWindow` hashes — compare against all of them.
         uint256 minDistance = 256; // Max possible Hamming distance
-
-        for (uint256 i = start; i < len; i++) {
+        for (uint256 i = 0; i < len; i++) {
             uint256 dist = _hammingDistance(newHash, hashes[i]);
             if (dist < minDistance) {
                 minDistance = dist;
@@ -352,12 +463,6 @@ contract RestorationActivityCheckerV2 {
         authorizedRouter = _authorizedRouter;
     }
 
-    /// @notice Transfer ownership.
-    function transferOwnership(address newOwner) external {
-        if (msg.sender != owner) revert OwnerOnly(msg.sender, owner);
-        if (newOwner == address(0)) revert ZeroAddress();
-        address oldOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
-    }
+    // Ownership transfer + implementation upgrade (`changeOwner`, `changeImplementation`)
+    // are inherited from Implementation. They emit OwnerUpdated / ImplementationUpdated.
 }

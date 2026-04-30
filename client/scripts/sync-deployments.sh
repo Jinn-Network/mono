@@ -19,6 +19,9 @@ FILES=(
   deployment-stolas-l2-baseSepolia-fast.json:deployment-stolas-l2-baseSepolia-fast.json
   deployment-jinn-testnet-faucet-baseSepolia.json:deployment-jinn-testnet-faucet-baseSepolia-fast.json
   deployment-claim-registry-baseSepolia.json:deployment-claim-registry-baseSepolia.json
+  deployment-jinn-mvi-l1-sepolia.json:deployment-jinn-mvi-l1-sepolia.json
+  deployment-jinn-mvi-l1-sepolia-fast.json:deployment-jinn-mvi-l1-sepolia-fast.json
+  deployment-jinn-mvi-l2-baseSepolia.json:deployment-jinn-mvi-l2-baseSepolia.json
 )
 
 for entry in "${FILES[@]}"; do

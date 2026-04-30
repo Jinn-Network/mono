@@ -83,15 +83,13 @@ These are intentionally distinct from the normal operator compose volumes.
    cp -n .env.acceptance.example .env.acceptance
    set -a && . ./.env && set +a
    ```
-2. One-time setup and funding checklist:
-   ```bash
-   yarn setup:testnet-acceptance-operator
-   ```
-3. Fund what `fund-requirements` printed, then finish bootstrap:
+2. One-time setup and bootstrap. On Base Sepolia, bootstrap attempts the
+   bundled CDP faucet automatically; manual ETH funding is only a fallback if
+   the faucet is unavailable or rate-limited:
    ```bash
    yarn setup:testnet-acceptance-operator --bootstrap
    ```
-4. Authenticate Claude for Docker (one-time, on your host machine):
+3. Authenticate Claude for Docker (one-time, on your host machine):
    ```bash
    claude setup-token
    ```
@@ -103,11 +101,11 @@ These are intentionally distinct from the normal operator compose volumes.
    infrastructure.
    Do not put this only in `.acceptance/docker-compose.env`; the next run will
    overwrite that file.
-5. Run the steady-state release gate:
+4. Run the steady-state release gate:
    ```bash
    yarn release:testnet-acceptance
    ```
-6. Review `client/acceptance-runs/<timestamp>-<runId>/summary.json`.
+5. Review `client/acceptance-runs/<timestamp>-<runId>/summary.json`.
 
 ## First-time setup
 
@@ -127,11 +125,47 @@ That script:
 - initializes the operator keystore inside `jinn-acceptance-data-volume`
 - prints Base Sepolia funding requirements
 
-After funding, finish bootstrap:
+To complete bootstrap, run:
 
 ```bash
 yarn setup:testnet-acceptance-operator --bootstrap
 ```
+
+On Base Sepolia, `bootstrap` attempts to fund the master wallet through the
+bundled CDP faucet. If the faucet is unavailable, rate-limited, or still cannot
+reach the bootstrap floor, the command prints the remaining manual funding
+requirement and can be re-run after funding.
+
+Docker acceptance sets testnet-specific gas floors in
+`client/.acceptance/config.json` (`minEoaGasWei=0.001 ETH`,
+`minSafeEthWei=0.0002 ETH`) so the release gate matches the bundled faucet
+budget. Override them with `JINN_TESTNET_ACCEPTANCE_MIN_EOA_GAS_WEI` and
+`JINN_TESTNET_ACCEPTANCE_MIN_SAFE_ETH_WEI` only when intentionally testing a
+larger runway.
+
+Docker acceptance gates on `prediction.v0` cycles produced by the testnet
+auto-intent generator (Chainlink Base Sepolia ETH/USD threshold predictions).
+Each cycle requires both a successful `restoration-result` artifact and a
+successful `evaluation-verdict` artifact for the same on-chain `request_id`.
+The default cycle target is one (smoke test, not soak); bump via
+`JINN_TESTNET_ACCEPTANCE_TARGET_CYCLES` if you want a larger sample.
+
+Cycle-shaping params are tuned for the gate via
+`JINN_PREDICTION_V0_WINDOW_MS=120000` and `JINN_PREDICTION_V0_RESOLVE_GAP_MS=60000`,
+so one full restoration → delivery → evaluation round-trip lands inside the
+20-min timeout. Default operator setup uses `600000` / `300000` (10-min window
++ 5-min resolve gap), unchanged.
+
+`prediction.v0` intents post through `JinnRouterV2`, not the shared
+`ClaimRegistry` — so the gate does not race third-party operators on the
+legacy registry surface.
+
+The acceptance config sets `restorers.wrapWith: null` to disable the
+`claude-code-learner` universal wrapper for the gate. The gate's job is to
+verify the protocol loop end-to-end via the base prediction.v0 impls
+(`prediction-v0-baseline` + `prediction-v0-evaluator`); the wrapper layer is
+separately validated and out of gate scope. Default operator setup keeps the
+wrapper enabled.
 
 Then authenticate Claude for Docker (on your host machine, one-time):
 

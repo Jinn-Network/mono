@@ -220,8 +220,11 @@ export async function bindAgentWalletToSafe(
     chainId,
   } = args;
 
-  // 1. Pick a deadline within the contract's 5-minute window.
-  const nowSec = BigInt(Math.floor(Date.now() / 1000));
+  // 1. Pick a deadline within the contract's 5-minute window. Use chain time
+  // rather than wall-clock time so forked/local chains that mine many blocks do
+  // not reject otherwise-fresh signatures as expired.
+  const latestBlock = await publicClient.getBlock();
+  const nowSec = latestBlock.timestamp;
   const deadline = args.deadline ?? nowSec + BigInt(DEFAULT_DEADLINE_OFFSET_SEC);
   const maxDeadline = nowSec + BigInt(IDENTITY_MAX_DEADLINE_DELAY_SEC);
   if (deadline > maxDeadline) {

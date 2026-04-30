@@ -60,6 +60,8 @@ const PRODUCTION_DEPS: BootstrapDeps = {
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
     testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
+    minEoaGasWei: config.minEoaGasWei,
+    minSafeEthWei: config.minSafeEthWei,
     pollIntervalMs: config.pollIntervalMs,
   }),
   resolveCliPassword: defaultResolveCliPassword,

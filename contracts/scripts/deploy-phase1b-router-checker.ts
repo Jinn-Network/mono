@@ -2,11 +2,17 @@
  * Deploy Phase 1b JinnRouterV2 + RestorationActivityCheckerV2 on Base Sepolia.
  *
  * Deployment order:
- *   1. RestorationActivityCheckerV2
+ *   1a. RestorationActivityCheckerV2 implementation
+ *   1b. Proxy (vendor/stolas/Proxy.sol) → checker proxy (this is what consumers bind to)
  *   2. JinnRouterV2 implementation
- *   3. JinnRouterProxy (delegatecalls to V2 impl, initialized with mechMarketplace + livenessRatio + checker)
- *   4. Wire checker: checker.setRouterAddresses(routerProxy, routerProxy)
- *   5. (Optional) Create a new StakingToken proxy via existing StakingFactory with activityChecker = checkerAddress
+ *   3. JinnRouterProxy (delegatecalls to V2 impl, initialized with mechMarketplace + livenessRatio + checker proxy)
+ *   4. Wire checker proxy: checker.setRouterAddresses(routerProxy, routerProxy)
+ *   5. (Optional) Create a new StakingToken proxy via existing StakingFactory with activityChecker = checker proxy
+ *
+ * Mainnet parity: the activity checker is deployed BEHIND a proxy so future
+ * hardening lands as `proxy.changeImplementation(newImpl)` — no checker state
+ * migration, no staking redeploy, no staker churn. Mirrors mainnet's
+ * `0x477C41...` checker proxy pattern.
  *
  * Required env:
  *   MECH_DEPLOYMENT_PATH  — path to Phase 1b mech deployment artifact (for mechMarketplace address)
@@ -201,23 +207,47 @@ async function main() {
     return out;
   };
 
-  // ── Step 1: Deploy RestorationActivityCheckerV2 ───────────────────────────
-  console.log("Step 1: Deploying RestorationActivityCheckerV2...");
+  // ── Step 1a: Deploy RestorationActivityCheckerV2 implementation ──────────
+  console.log("Step 1a: Deploying RestorationActivityCheckerV2 implementation...");
   const CheckerFactory = await ethers.getContractFactory(
     "RestorationActivityCheckerV2",
     deployer,
   );
-  const checker = await CheckerFactory.deploy(
+  const checkerImpl = await CheckerFactory.deploy(
+    await withNonce(gas(txOverrides, "standard")),
+  );
+  await checkerImpl.waitForDeployment();
+  const checkerImplAddress = await checkerImpl.getAddress();
+  console.log(`  RestorationActivityCheckerV2 impl: ${checkerImplAddress}`);
+
+  // ── Step 1b: Deploy Proxy (vendor/stolas/Proxy.sol) wrapping the impl ─────
+  // Mainnet parity: the canonical activity checker on Base mainnet is proxied
+  // (945-byte forwarding stub at 0x477C41Cccc8bd08027e40CEF80c25918C595a24d).
+  // Deploying behind a proxy here makes future logic upgrades a single
+  // `proxy.changeImplementation(newImpl)` instead of a checker redeploy +
+  // staking proxy redeploy + staker migration.
+  console.log("Step 1b: Deploying activity checker proxy (vendor/stolas/Proxy.sol)...");
+  const CheckerProxyFactory = await ethers.getContractFactory(
+    "src/vendor/stolas/Proxy.sol:Proxy",
+    deployer,
+  );
+  const checkerInitData = checkerImpl.interface.encodeFunctionData("initialize", [
     config.livenessRatio,
     deployerAddress,
     config.similarityThreshold,
     config.similarDecayMultiplier,
     config.comparisonWindow,
+  ]);
+  const checkerProxy = await CheckerProxyFactory.deploy(
+    checkerImplAddress,
+    checkerInitData,
     await withNonce(gas(txOverrides, "standard")),
   );
-  await checker.waitForDeployment();
-  const checkerAddress = await checker.getAddress();
-  console.log(`  RestorationActivityCheckerV2: ${checkerAddress}`);
+  await checkerProxy.waitForDeployment();
+  const checkerAddress = await checkerProxy.getAddress();
+  console.log(`  Activity checker proxy: ${checkerAddress}`);
+  // Re-attach as the checker contract (the impl ABI fronts the proxy).
+  const checker = CheckerFactory.attach(checkerAddress);
 
   // ── Step 2: Deploy JinnRouterV2 implementation ────────────────────────────
   console.log("Step 2: Deploying JinnRouterV2 implementation...");
@@ -411,10 +441,11 @@ async function main() {
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log("\n=== Deployment Summary ===");
   const summary: Record<string, string> = {
-    activityChecker:  checkerAddress,
-    jinnRouterV2Impl: routerV2ImplAddress,
-    jinnRouterProxy:  routerProxyAddress,
-    mechMarketplace:  mechMarketplaceAddress,
+    activityCheckerImpl:  checkerImplAddress,
+    activityChecker:      checkerAddress,        // proxy — what consumers bind to
+    jinnRouterV2Impl:     routerV2ImplAddress,
+    jinnRouterProxy:      routerProxyAddress,
+    mechMarketplace:      mechMarketplaceAddress,
   };
   if (stakingTokenAddress) {
     summary.stakingToken = stakingTokenAddress;
@@ -441,10 +472,11 @@ async function main() {
       comparisonWindow: config.comparisonWindow,
     },
     contracts: {
-      activityChecker:  checkerAddress,
-      jinnRouterV2Impl: routerV2ImplAddress,
-      jinnRouterProxy:  routerProxyAddress,
-      mechMarketplace:  mechMarketplaceAddress,
+      activityCheckerImpl:  checkerImplAddress,
+      activityChecker:      checkerAddress,        // proxy — bind here
+      jinnRouterV2Impl:     routerV2ImplAddress,
+      jinnRouterProxy:      routerProxyAddress,
+      mechMarketplace:      mechMarketplaceAddress,
       ...(stakingTokenAddress ? { stakingToken: stakingTokenAddress } : {}),
     },
   };

@@ -150,6 +150,21 @@ try {
 | `yarn staking` | staking bootstrap e2e | < 2 min |
 | `yarn stolas` | stolas bootstrap e2e | < 2 min |
 
+## Troubleshooting (client)
+
+### `better-sqlite3` NODE_MODULE_VERSION mismatch
+
+If `yarn test` fails loading SQLite with an ABI mismatch (built for a different Node than the one running), reinstall native deps against the active runtime:
+
+```bash
+cd client
+corepack enable   # pin Yarn via packageManager
+rm -rf node_modules
+yarn install
+```
+
+Use **Node 22** where possible (`engines` in `client/package.json`). CI should match that major version.
+
 ## CI gates
 
 - Every PR: `yarn typecheck` + `yarn test`.

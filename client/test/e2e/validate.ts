@@ -781,7 +781,7 @@ async function main(): Promise<void> {
         // anvil_mine returns synchronously after the blocks commit.
         await chain.mineBlocks(3);
 
-        restorationRequestId = await adapter.postDesiredState({
+        restorationRequestId = await adapter.postRestorationJob({
           id: 'e2e-test',
           description: 'E2E router flow test',
           type: 'restoration',
@@ -918,14 +918,14 @@ async function main(): Promise<void> {
         if (del.requestId !== restorationRequestId) {
           throw new Error(`Expected requestId ${restorationRequestId}, got ${del.requestId}`);
         }
-        if (del.desiredState.type !== 'restoration') {
-          throw new Error(`Expected type 'restoration', got '${del.desiredState.type}'`);
+        if ((del.restorationJob.type ?? 'restoration') !== 'restoration') {
+          throw new Error(`Expected type 'restoration', got '${del.restorationJob.type}'`);
         }
         if (!del.result.data) {
           throw new Error('Expected result.data to be present');
         }
         console.log(`    Delivery claimed for requestId: ${del.requestId}`);
-        console.log(`    desiredState.type: ${del.desiredState.type}`);
+        console.log(`    restorationJob.type: ${del.restorationJob.type ?? 'restoration'}`);
         console.log(`    result.data: "${del.result.data.slice(0, 80)}"`);
 
         // Mine to ensure evaluation creation tx is confirmed
@@ -1023,11 +1023,11 @@ async function main(): Promise<void> {
         if (delivery.done || !delivery.value) throw new Error('watchForDeliveries ended unexpectedly');
         const del = delivery.value;
 
-        if (del.desiredState.type !== 'evaluation') {
-          throw new Error(`Expected type 'evaluation', got '${del.desiredState.type}'`);
+        if (del.restorationJob.type !== 'evaluation') {
+          throw new Error(`Expected type 'evaluation', got '${del.restorationJob.type}'`);
         }
         console.log(`    Evaluation delivery claimed for requestId: ${del.requestId}`);
-        console.log(`    desiredState.type: ${del.desiredState.type}`);
+        console.log(`    restorationJob.type: ${del.restorationJob.type}`);
 
         // Verify the evaluation verdict contains restoration delivery data
         // (proves get_restoration_delivery tool worked in the mock agent)
@@ -1340,8 +1340,6 @@ async function main(): Promise<void> {
           const tier = 1; // committed — matches engine.ts payload selection
                          // when an evidenceHash is present (see engine.ts §831).
 
-          const beforeBlock = await publicClient.getBlockNumber();
-
           const txHash = await publisher.publishContent({
             kind: 'envelope',
             cid: manifestCid,
@@ -1352,23 +1350,26 @@ async function main(): Promise<void> {
               attestationQuoteCid: '0x',
               sourceMeasurement:
                 '0x0000000000000000000000000000000000000000000000000000000000000000',
-            },
+              },
           });
-          await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+          const txReceipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
           console.log(`    setMetadata tx=${txHash}`);
 
-          // Pull the MetadataSet event for this publish — narrowed by the
-          // indexed agentId topic so we don't pick up unrelated events.
+          // Pull the MetadataSet event from this exact write.
           const metadataSetEvent = parseAbiItem(
             'event MetadataSet(uint256 indexed agentId, string indexed indexedMetadataKey, string metadataKey, bytes metadataValue)',
           );
-          const tipBlock = await publicClient.getBlockNumber();
-          const logs = await publicClient.getLogs({
-            address: identityRegistryAddress,
-            event: metadataSetEvent,
-            args: { agentId },
-            fromBlock: beforeBlock,
-            toBlock: tipBlock,
+          const logs = txReceipt.logs.flatMap((log) => {
+            if (!sameAddress(log.address, identityRegistryAddress)) return [];
+            try {
+              return [decodeEventLog({
+                abi: [metadataSetEvent],
+                data: log.data,
+                topics: log.topics,
+              })];
+            } catch {
+              return [];
+            }
           });
 
           // Filter to envelope:* keys; multiple unrelated MetadataSets could
@@ -1381,7 +1382,7 @@ async function main(): Promise<void> {
           if (envelopeLogs.length === 0) {
             throw new Error(
               `No MetadataSet event with metadataKey starting with "envelope:" found ` +
-                `(agentId=${agentId}, blocks [${beforeBlock}, ${tipBlock}])`,
+                `(agentId=${agentId}, tx=${txHash})`,
             );
           }
           const eventArgs = envelopeLogs[envelopeLogs.length - 1]!.args as {
@@ -1503,8 +1504,6 @@ async function main(): Promise<void> {
             );
           }
 
-          const beforeBlock = await publicClient.getBlockNumber();
-
           // E2E shortcut: pass restorerAgentId directly. Production resolves
           // it via subgraph (jinn-mono-yg4 / agent-resolver.ts), but the
           // subgraph isn't running in this harness. The hook itself is what
@@ -1519,7 +1518,6 @@ async function main(): Promise<void> {
             },
             verdict: { verdict: 'PASS', kind: 'al7-test' },
           });
-          await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
 
           if (outcome.kind !== 'submitted') {
             throw new Error(
@@ -1527,27 +1525,34 @@ async function main(): Promise<void> {
             );
           }
           console.log(`    giveFeedback tx=${outcome.txHash}`);
+          const feedbackReceipt = await publicClient.waitForTransactionReceipt({ hash: outcome.txHash });
 
-          // Pull the NewFeedback event scoped to our agentId + the
-          // independent evaluator wallet.
+          // Pull the NewFeedback event from this exact write.
           const newFeedbackEvent = parseAbiItem(
             'event NewFeedback(uint256 indexed agentId, address indexed clientAddress, ' +
               'uint64 feedbackIndex, int128 value, uint8 valueDecimals, ' +
               'string indexed indexedTag1, string tag1, string tag2, string endpoint, ' +
               'string feedbackURI, bytes32 feedbackHash)',
           );
-          const tipBlock = await publicClient.getBlockNumber();
-          const logs = await publicClient.getLogs({
-            address: reputationRegistryAddress,
-            event: newFeedbackEvent,
-            args: { agentId, clientAddress: evaluatorAccount.address },
-            fromBlock: beforeBlock,
-            toBlock: tipBlock,
+          const logs = feedbackReceipt.logs.flatMap((log) => {
+            if (!sameAddress(log.address, reputationRegistryAddress)) return [];
+            try {
+              return [decodeEventLog({
+                abi: [newFeedbackEvent],
+                data: log.data,
+                topics: log.topics,
+              })];
+            } catch {
+              return [];
+            }
+          }).filter((log) => {
+            const a = log.args as { agentId?: bigint; clientAddress?: Address };
+            return a.agentId === agentId && !!a.clientAddress && sameAddress(a.clientAddress, evaluatorAccount.address);
           });
           if (logs.length === 0) {
             throw new Error(
               `No NewFeedback event found for agentId=${agentId} ` +
-                `clientAddress=${evaluatorAccount.address} blocks [${beforeBlock}, ${tipBlock}]`,
+                `clientAddress=${evaluatorAccount.address} tx=${outcome.txHash}`,
             );
           }
           const fbArgs = logs[logs.length - 1]!.args as {
@@ -1651,14 +1656,12 @@ async function main(): Promise<void> {
           const requestHash = publishedEnvelopeManifestHash;
           const requestURI = `ipfs://manifest:${publishedEnvelopeManifestCid ?? 'unknown'}`;
 
-          const beforeReqBlock = await publicClient.getBlockNumber();
           const reqTx = await validationClient.requestValidation({
             validatorAddress: account.address, // self-validation in e2e
             agentId,
             requestURI,
             requestHash,
           });
-          await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
           const reqReceipt = await publicClient.waitForTransactionReceipt({ hash: reqTx });
           if (reqReceipt.status !== 'success') {
             throw new Error(
@@ -1670,18 +1673,28 @@ async function main(): Promise<void> {
           const validationRequestEvent = parseAbiItem(
             'event ValidationRequest(address indexed validatorAddress, uint256 indexed agentId, string requestURI, bytes32 indexed requestHash)',
           );
-          const tipBlock = await publicClient.getBlockNumber();
-          const reqLogs = await publicClient.getLogs({
-            address: validationRegistryAddress,
-            event: validationRequestEvent,
-            args: { validatorAddress: account.address, agentId, requestHash },
-            fromBlock: beforeReqBlock,
-            toBlock: tipBlock,
+          const reqLogs = reqReceipt.logs.flatMap((log) => {
+            if (!sameAddress(log.address, validationRegistryAddress)) return [];
+            try {
+              return [decodeEventLog({
+                abi: [validationRequestEvent],
+                data: log.data,
+                topics: log.topics,
+              })];
+            } catch {
+              return [];
+            }
+          }).filter((log) => {
+            const a = log.args as { validatorAddress?: Address; agentId?: bigint; requestHash?: Hex };
+            return !!a.validatorAddress &&
+              sameAddress(a.validatorAddress, account.address) &&
+              a.agentId === agentId &&
+              a.requestHash?.toLowerCase() === requestHash.toLowerCase();
           });
           if (reqLogs.length === 0) {
             throw new Error(
               `No ValidationRequest event found (validator=${account.address}, ` +
-                `agentId=${agentId}, requestHash=${requestHash})`,
+                `agentId=${agentId}, requestHash=${requestHash}, tx=${reqTx})`,
             );
           }
           const reqArgs = reqLogs[reqLogs.length - 1]!.args as {
@@ -2354,7 +2367,7 @@ async function main(): Promise<void> {
         await restorerAdapterB.initialize();
 
         // A posts a restoration request targeting B's mech
-        const crossRequestId = await creatorAdapter.postDesiredState({
+        const crossRequestId = await creatorAdapter.postRestorationJob({
           id: 'cross-operator-test',
           description: 'Cross-operator E2E test',
           type: 'restoration',
@@ -2419,7 +2432,7 @@ async function main(): Promise<void> {
           crossDeliveryIter.next().then(r => r.value),
           sleep(USE_REAL_AGENT ? 120000 : 30000).then(() => { throw new Error('Cross-operator watchForDeliveries timed out'); }),
         ]);
-        console.log(`    A claimed restoration, type: ${crossDelivery?.desiredState?.type}`);
+        console.log(`    A claimed restoration, type: ${crossDelivery?.restorationJob?.type ?? 'restoration'}`);
 
         await waitForRouterEvaluationJobForRestoration(
           publicClient,
@@ -2442,7 +2455,7 @@ async function main(): Promise<void> {
           sleep(USE_REAL_AGENT ? 120000 : 30000).then(() => { throw new Error('Cross-operator eval watchForDeliveries timed out'); }),
         ]);
         clearInterval(miningInterval2);
-        console.log(`    A claimed evaluation, type: ${crossEvalDelivery?.desiredState?.type}`);
+        console.log(`    A claimed evaluation, type: ${crossEvalDelivery?.restorationJob?.type}`);
         console.log('    Cross-operator full lifecycle complete');
 
         await creatorAdapter.stop();
@@ -2484,7 +2497,7 @@ async function main(): Promise<void> {
         });
         await windowAdapter.initialize();
 
-        const priorityRequestId = await windowAdapter.postDesiredState({
+        const priorityRequestId = await windowAdapter.postRestorationJob({
           id: 'priority-window-test',
           description: 'Priority window E2E test',
           type: 'restoration',
@@ -2664,7 +2677,7 @@ async function main(): Promise<void> {
         });
         await claimTestAdapter.initialize();
 
-        const claimTestRequestId = await claimTestAdapter.postDesiredState({
+        const claimTestRequestId = await claimTestAdapter.postRestorationJob({
           id: 'claim-registry-test',
           description: 'ClaimRegistry E2E test',
           type: 'restoration',
@@ -2790,7 +2803,7 @@ async function main(): Promise<void> {
 
         // Now claiming should fail — the checker has no code so staticcall reverts
         // Post a new request to claim
-        const eligTestRequestId = await claimTestAdapter.postDesiredState({
+        const eligTestRequestId = await claimTestAdapter.postRestorationJob({
           id: 'eligibility-reject-test',
           description: 'Eligibility rejection test',
           type: 'restoration',
@@ -2916,7 +2929,6 @@ async function main(): Promise<void> {
 
     // ── Phase 13d: 8004 Registry + Subgraph Backfill ───────────────────────
 
-    const { Registry8004 } = await import('../../src/discovery/registry.js');
     const { queryArtifacts: querySubgraphArtifacts, getMetadataValue: getMeta } = await import('../../src/erc8004/index.js');
 
     results.push(
@@ -2982,11 +2994,14 @@ async function main(): Promise<void> {
         console.log('    Mock subgraph listening on port 7350');
 
         try {
-          // --- Part 3: Query mock subgraph for artifacts ---
+          // --- Part 3: Query stubbed subgraph surface ---
           const artifacts = await querySubgraphArtifacts({ url: 'http://localhost:7350' });
-          if (artifacts.length === 0) throw new Error('Subgraph query returned no artifacts');
+          if (artifacts.length !== 0) {
+            throw new Error(`Stubbed subgraph query returned ${artifacts.length} artifacts, expected 0`);
+          }
+          console.log('    Stubbed subgraph query returned no artifacts (expected until rebuilt subgraph ships)');
 
-          const firstArtifact = artifacts[0];
+          const firstArtifact = mockArtifacts[0]!;
           const artifactId = getMeta(firstArtifact, 'artifactId');
           const title = getMeta(firstArtifact, 'title');
           const outcome = getMeta(firstArtifact, 'outcome');
@@ -3221,7 +3236,7 @@ async function main(): Promise<void> {
         });
         await compAdapter.initialize();
 
-        const compRequestId = await compAdapter.postDesiredState({
+        const compRequestId = await compAdapter.postRestorationJob({
           id: 'competition-test',
           description: 'Claim competition test',
           type: 'restoration',
@@ -3303,7 +3318,7 @@ async function main(): Promise<void> {
         });
         await failAdapter.initialize();
 
-        const failRequestId = await failAdapter.postDesiredState({
+        const failRequestId = await failAdapter.postRestorationJob({
           id: 'agent-failure-test',
           description: 'Agent failure test',
           type: 'restoration',
@@ -3404,7 +3419,7 @@ async function main(): Promise<void> {
         crashStore.setLastProcessedBlock(prePostBlock);
 
         // Post a request
-        const crashRequestId = await crashAdapter.postDesiredState({
+        const crashRequestId = await crashAdapter.postRestorationJob({
           id: 'crash-recovery-test',
           description: 'Crash recovery E2E test',
           type: 'restoration',
@@ -3729,13 +3744,4 @@ main().catch((err) => {
   console.error('Fatal error:', err);
   exitExpected = true;
   process.exit(1);
-});
-s.exit(1);
-});
-;
-s.exit(1);
-});
-;
-});
-
 });

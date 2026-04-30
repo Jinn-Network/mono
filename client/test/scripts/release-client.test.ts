@@ -6,6 +6,7 @@ import {
   clientReleaseTag,
   parseStableVersion,
   redactSecrets,
+  releaseGateSteps,
   runRelease,
 } from '../../scripts/lib/release-client.mjs';
 
@@ -126,6 +127,12 @@ describe('release-client helpers', () => {
     expect(redacted).toContain('CLAUDE_CODE_OAUTH_TOKEN=[REDACTED]');
     expect(redacted).toContain('JINN_PASSWORD=[REDACTED]');
   });
+
+  it('bootstraps the Docker acceptance operator during release gates', () => {
+    const setup = releaseGateSteps(false).find((step: { id: string }) => step.id === 'gate-acceptance-setup');
+
+    expect(setup?.args).toEqual(['setup:testnet-acceptance-operator', '--bootstrap']);
+  });
 });
 
 describe('release-client runner', () => {
@@ -158,7 +165,21 @@ describe('release-client runner', () => {
       'build',
       'pack:smoke',
       'release:operator-gate',
+      'install --immutable',
+      'test',
     ]);
+    const forgeCalls = calls
+      .filter((call) => call.command === 'forge')
+      .map((call) => call.args.join(' '));
+    expect(forgeCalls).toEqual([
+      'install foundry-rs/forge-std --no-git',
+      'test --match-contract Invariant',
+    ]);
+    expect(calls.some((call) =>
+      call.command === 'yarn' &&
+      call.args.join(' ') === 'test' &&
+      call.cwd?.endsWith('/contracts'),
+    )).toBe(true);
   });
 
   it('fails before gates when HEAD is behind origin/main', async () => {

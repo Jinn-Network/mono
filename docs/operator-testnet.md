@@ -188,6 +188,15 @@ The `hl_open_position` MCP tool rejects invalid requests at the tool level befor
 
 ## Testnet-specific caveats
 
+- **Cross-chain JINN issuance burn-in uses MockMessenger.** On Base Sepolia,
+  canonical OP-Stack finality is too slow for active operator burn-in, so the
+  testnet distributor should be wired to `MockMessenger` and the daemon should
+  run with `JINN_MESSENGER_MODE=mock`. This is not a mainnet security claim:
+  MockMessenger mirrors the canonical `claimId` snapshot identity but skips the
+  OP finality wait. Canonical Base Sepolia is exercised separately as a
+  verifier-only canary by building the storage proof after finality and calling
+  `CanonicalOpStackMessenger.verifyClaim` via `eth_call`; do not swap the active
+  distributor messenger during burn-in.
 - **stOLAS distributor pool is protocol-team-managed.** On mainnet, real stakers deposit JINN/OLAS and the pool grows naturally. On testnet there are no stakers, so the team pre-seeds the pool via a one-time bridge from Sepolia L1. If bootstrap fails with `Overflow(20, 0)` at `distributor.stake()`, the pool is drained — nothing you can do locally. Post in the testnet channel and re-run bootstrap after refill.
 - **Evicted services recover through the same operator wallet.** In standard mode, `distributor.stake()` records your master EOA as the service operator. If the service is evicted, rerun `jinn bootstrap` with the same `JINN_EARNING_DIR` and `JINN_PASSWORD`; the client calls `distributor.reStake()` from that master EOA. Per-operator whitelisting is not required.
 - **CDP faucet rate limits by address over 24h.** If you burn through your daily quota (rare — the drip loop runs ~50 × 0.0001 ETH in 50 seconds, well under CDP's cap), `jinn bootstrap` falls back to a manual-funding poll. Wait or fund via the portal: <https://portal.cdp.coinbase.com/products/faucet>.

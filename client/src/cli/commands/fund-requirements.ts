@@ -154,6 +154,8 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
         testnetMechDeploymentPath: config.testnetMechDeploymentPath,
         testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
         testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
+        minEoaGasWei: config.minEoaGasWei,
+        minSafeEthWei: config.minSafeEthWei,
         password: passwordValue,
       });
     } catch (err) {

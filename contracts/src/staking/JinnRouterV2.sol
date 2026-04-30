@@ -2,8 +2,11 @@
 pragma solidity ^0.8.25;
 
 /// @dev Activity checker V2 interface — receives evidence hashes from the router.
+///      The third arg (`creator`) carries the address that posted the originating
+///      restoration job so the checker can apply ε creation gating: creators are
+///      credited only when their delivery passes the V2 Hamming/SimHash novelty test.
 interface IActivityCheckerV2 {
-    function recordRestorationEvidence(address multisig, bytes32 evidenceHash) external;
+    function recordRestorationEvidence(address multisig, address creator, bytes32 evidenceHash) external;
 }
 
 /// @dev Mech Marketplace interface — only the functions JinnRouterV2 needs
@@ -89,21 +92,28 @@ contract JinnRouterV2 {
     address public mechMarketplace;
     // Slot 3 — kept for proxy storage layout compatibility
     uint256 public livenessRatio;
-    // Slot 4
+    // Slot 4 — `initialized` (byte 0) and `activityChecker` (bytes 1..20) pack
+    //          into the same slot; do not split.
     bool public initialized;
-    // Slot 5
     address public activityChecker;
 
-    // Activity counters (slots 6-9)
+    // Activity counters (slots 5-8)
     mapping(address => uint256) public creationCount;
     mapping(address => uint256) public restorationDeliveryCount;
     mapping(address => uint256) public evaluationCreationCount;
     mapping(address => uint256) public evaluationDeliveryCount;
 
-    // Request tracking (slots 10-12)
+    // Request tracking (slots 9-11)
     mapping(bytes32 => JobType) public requestTypes;
     mapping(bytes32 => bool) public claimed;
     mapping(bytes32 => bool) public restorationDeliveryClaimed;
+
+    // ε creation gating (slot 12)
+    /// @dev Maps requestId → original creator (caller of `createRestorationJob`).
+    ///      Used by `claimDelivery` to forward the creator into the V2 checker so
+    ///      creator credit is gated by the same Hamming/SimHash novelty test as
+    ///      the deliverer's reward weight.
+    mapping(bytes32 => address) public creators;
 
     // ============================================================
     // Initialization
@@ -161,6 +171,9 @@ contract JinnRouterV2 {
         );
 
         requestTypes[requestId] = JobType.RESTORATION;
+        // Track the creator so claimDelivery can forward them into the V2
+        // checker for ε creation gating.
+        creators[requestId] = msg.sender;
 
         emit RestorationJobCreated(msg.sender, requestId);
     }
@@ -243,9 +256,15 @@ contract JinnRouterV2 {
             restorationDeliveryCount[msg.sender]++;
             restorationDeliveryClaimed[requestId] = true;
 
-            // Forward evidence to activity checker for anti-farming
+            // Forward evidence to activity checker for anti-farming. Pass the
+            // tracked creator so the checker can apply ε creation gating —
+            // creators are only credited when the delivery passes the novelty test.
             if (evidenceHash != bytes32(0) && activityChecker != address(0)) {
-                IActivityCheckerV2(activityChecker).recordRestorationEvidence(msg.sender, evidenceHash);
+                IActivityCheckerV2(activityChecker).recordRestorationEvidence(
+                    msg.sender,
+                    creators[requestId],
+                    evidenceHash
+                );
             }
         } else {
             // Evaluation delivery — evidence forwarding is not applicable

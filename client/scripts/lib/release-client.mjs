@@ -150,6 +150,7 @@ function relPath(from, to) {
 export function makeInitialReport({
   clientRoot,
   repoRoot,
+  contractsRoot,
   reportDir,
   mode,
   packageMeta,
@@ -165,6 +166,7 @@ export function makeInitialReport({
     updatedAt: startedAt,
     clientRoot,
     repoRoot,
+    contractsRoot,
     reportDir,
     reportPath: join(reportDir, 'report.json'),
     logsDir: join(reportDir, 'logs'),
@@ -187,6 +189,7 @@ function commandLabel(command, args) {
 export function makeReleaseContext(options = {}) {
   const clientRoot = resolve(options.clientRoot ?? DEFAULT_CLIENT_ROOT);
   const repoRoot = resolve(options.repoRoot ?? join(clientRoot, '..'));
+  const contractsRoot = resolve(options.contractsRoot ?? join(repoRoot, 'contracts'));
   const packageMeta = readPackageMetadata(clientRoot);
   const now = options.now ?? new Date();
   const mode = options.mode ?? 'prepare';
@@ -197,6 +200,7 @@ export function makeReleaseContext(options = {}) {
     : makeInitialReport({
       clientRoot,
       repoRoot,
+      contractsRoot,
       reportDir,
       mode,
       packageMeta,
@@ -207,6 +211,7 @@ export function makeReleaseContext(options = {}) {
   report.updatedAt = now.toISOString();
   report.clientRoot = clientRoot;
   report.repoRoot = repoRoot;
+  report.contractsRoot = contractsRoot;
   report.reportDir = reportDir;
   report.reportPath = join(reportDir, 'report.json');
   report.logsDir = join(reportDir, 'logs');
@@ -217,6 +222,7 @@ export function makeReleaseContext(options = {}) {
   return {
     clientRoot,
     repoRoot,
+    contractsRoot,
     packageMeta,
     report,
     commandRunner: options.commandRunner ?? createSpawnCommandRunner(),
@@ -466,25 +472,32 @@ export function runPreflights(context) {
 
 export function releaseGateSteps(skipAcceptance = false) {
   const steps = [
-    ['gate-yarn-install', 'yarn install --immutable', 'yarn', ['install', '--immutable']],
-    ['gate-typecheck', 'yarn typecheck', 'yarn', ['typecheck']],
-    ['gate-test', 'yarn test', 'yarn', ['test']],
-    ['gate-build', 'yarn build', 'yarn', ['build']],
-    ['gate-pack-smoke', 'yarn pack:smoke', 'yarn', ['pack:smoke']],
-    ['gate-operator', 'yarn release:operator-gate', 'yarn', ['release:operator-gate']],
+    ['gate-yarn-install', 'yarn install --immutable', 'yarn', ['install', '--immutable'], 'clientRoot'],
+    ['gate-typecheck', 'yarn typecheck', 'yarn', ['typecheck'], 'clientRoot'],
+    ['gate-test', 'yarn test', 'yarn', ['test'], 'clientRoot'],
+    ['gate-build', 'yarn build', 'yarn', ['build'], 'clientRoot'],
+    ['gate-pack-smoke', 'yarn pack:smoke', 'yarn', ['pack:smoke'], 'clientRoot'],
+    ['gate-operator', 'yarn release:operator-gate', 'yarn', ['release:operator-gate'], 'clientRoot'],
+    ['gate-contracts-install', 'contracts: yarn install --immutable', 'yarn', ['install', '--immutable'], 'contractsRoot'],
+    ['gate-contracts-test', 'contracts: yarn test', 'yarn', ['test'], 'contractsRoot'],
+    ['gate-contracts-foundry-install', 'contracts: forge install foundry-rs/forge-std --no-git', 'forge', ['install', 'foundry-rs/forge-std', '--no-git'], 'contractsRoot'],
+    ['gate-contracts-foundry-invariants', 'contracts: forge test --match-contract Invariant', 'forge', ['test', '--match-contract', 'Invariant'], 'contractsRoot'],
   ];
   if (!skipAcceptance) {
     steps.push(
-      ['gate-acceptance-setup', 'yarn setup:testnet-acceptance-operator', 'yarn', ['setup:testnet-acceptance-operator']],
-      ['gate-acceptance', 'yarn release:testnet-acceptance', 'yarn', ['release:testnet-acceptance']],
+      ['gate-acceptance-setup', 'yarn setup:testnet-acceptance-operator --bootstrap', 'yarn', ['setup:testnet-acceptance-operator', '--bootstrap'], 'clientRoot'],
+      ['gate-acceptance', 'yarn release:testnet-acceptance', 'yarn', ['release:testnet-acceptance'], 'clientRoot'],
     );
   }
-  return steps.map(([id, label, command, args]) => ({ id, label, command, args }));
+  return steps.map(([id, label, command, args, cwdKey]) => ({ id, label, command, args, cwdKey }));
 }
 
 export function runGateSequence(context) {
   for (const step of releaseGateSteps(context.skipAcceptance)) {
-    const result = runStep(context, step);
+    const result = runStep(context, {
+      ...step,
+      cwd: step.cwdKey === 'contractsRoot' ? context.contractsRoot : context.clientRoot,
+    });
     if (step.id === 'gate-acceptance' && result.result?.stdout) {
       const match = result.result.stdout.match(/client\/acceptance-runs\/[^\s"'`]+/);
       if (match) {

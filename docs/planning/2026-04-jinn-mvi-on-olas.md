@@ -132,6 +132,17 @@ control (caller != minter); no silent no-op, no
 - `owner = TimelockController`
 - Total supply at launch: **zero**
 
+**Testnet vs mainnet naming.** The constructor is parameterized
+on `name` and `symbol` (`constructor(string name_, string symbol_, address initialOwner)`)
+to disambiguate the v0 token from the Phase 1a JINN tokens
+(`0xc3ae831f...` L1 / `0xAB9a01cd...` L2) that play the OLAS-
+equivalent role in our testnet. Testnet deploys with `name =
+"JINN (testnet)"`, `symbol = "tJINN"`. Mainnet deploys with
+`name = "JINN"`, `symbol = "JINN"`. Driven by env vars
+`JINN_TOKEN_NAME` / `JINN_TOKEN_SYMBOL` in
+`scripts/deploy-jinn-mvi-l1.ts` with sensible defaults per
+chain.
+
 The switch from the solmate-based vendored JINN to an OZ-based
 version is the cost of getting standard Governor compatibility
 via `ERC20Votes` checkpoints. With Option B locked, we also drop
@@ -480,33 +491,50 @@ The daemon's `reward-claim-loop.ts` adds two new claim targets
 (emit on Base, redeem on Ethereum); operators don't need to
 manually orchestrate either step.
 
-**v0 testnet path: Phase-0/1a-style operator UX.** Until stOLAS
-testnet deployment is live, the v0 testnet uses the existing
-Phase-0/1a operator flow — operator bonds OLAS themselves via
-the 11-step earning bootstrap (wallet → Safe → service → staking
-→ mech). The cross-chain claim flow described above is the same
-in either case; only the bonding side differs. Once stOLAS
-testnet is available, the testnet flips to standard mode.
+**v0 testnet path: standard mode is the default.** The
+JINN-deployed stOLAS clone on Base Sepolia
+(`0x20951FBDb4F9cB1f051ef416BCB11A9Cfe3CEf81`) is live and
+operational; the daemon's earning bootstrap defaults to
+`stakingMode = 'standard'` (`client/src/earning/bootstrap.ts:138`).
+Self-bond mode (Phase-0/1a-style, where the operator bonds OLAS
+themselves via the 11-step earning bootstrap) remains supported
+as a permissionless fallback for operators who don't want to go
+through stOLAS, but is not the default. The cross-chain claim
+flow is identical in either case; only the bonding side differs.
+
+**v0 testnet messenger: mock-mode for fast iteration.** v0
+testnet currently runs `JINN_MESSENGER_MODE=mock`: the daemon
+plants fixtures directly in `MockMessenger` on Sepolia rather
+than waiting for canonical OP-Stack finality (~7 days). This is
+strictly a test-iteration shortcut — `MockMessenger` is not
+deployed on mainnet. Mainnet uses `CanonicalOpStackMessenger`
+exclusively, with full storage-proof + dispute-game finality
+(see "Cross-chain" under Locked Decisions §9). The daemon
+flips to canonical mode via env config; no contract change
+required at the daemon level.
 
 **OLAS disposition in standard mode (Locked Decisions §10).**
-What ultimately happens to OLAS rewards earned by Jinn services
-is an open decision. Candidate options under consideration:
+**Closed 2026-04-29** — see
+[`log/decisions/2026-04-29-olas-disposition-25-burn-self-bond.md`](../../log/decisions/2026-04-29-olas-disposition-25-burn-self-bond.md).
 
-- **Burn** the OLAS rewards (deflationary contribution to the
-  OLAS community).
-- **Route to the Jinn DAO treasury** (Governor decides eventual
-  use).
-- **Status quo: route to the operator's service multisig** (in
-  standard mode the operator doesn't actively use them).
-- **Route as yield to stOLAS depositors** (if stOLAS's economic
-  design expects staking rewards as the depositor's yield).
+- **Standard mode (stOLAS-backed):** 25% stOLAS depositor yield,
+  75% burn, 0% operator. Operator-paid-in-JINN-not-OLAS
+  invariant holds.
+- **Self-bond mode (operator-bonded):** 100% to operator-as-
+  curating-agent. They put up their own collateral; they earn
+  the yield.
+- **Selection rule:** curating-agent identity. stOLAS-as-
+  curating-agent → standard split applies; any other curating-
+  agent → self-bond rule applies.
+- **Burn target:** TBD at implementation; default per DR is a
+  dedicated `IrrevocableBurnVault` calling `OLAS.burn`. Testnet
+  uses `0x000000000000000000000000000000000000dEaD` as a
+  shortcut.
 
-The choice depends on on-chain investigation of the OLAS staking
-contract semantics and the stOLAS design — see the OLAS-tracking
-+ disposition design task. The v0 distributor's per-service
-accounting is independent of where the OLAS ends up; this
-decision affects the operator/depositor economics around Jinn
-services, not the JINN minting flow.
+The v0 distributor's per-service accounting is independent of
+where the OLAS ends up; this decision affects the operator/
+depositor economics around Jinn services, not the JINN minting
+flow. Implementation tracked in `jinn-mono-1yn`.
 
 **Governance participation.** Any operator holding JINN
 automatically has voting power on mainnet. No lockup required.
@@ -637,7 +665,7 @@ Summary table:
 | 6  | Optional checker upgrade          | Upgrade proxy to V2 on Base Sepolia pre-testnet-deploy; mainnet upgrade deferred | Locked |
 | 7  | Coexistence framing with OLAS     | "Jinn is the agentic-intent training protocol, launched on OLAS infrastructure" — eventual public framing; comms deferred until mainnet is back in scope | Locked |
 | 8  | `JINN.sol` rewrite details        | Pure mining ERC20Votes (Option B-conditional)                   | Locked    |
-| 10 | OLAS disposition + standard-mode UX | Standard-mode (stOLAS-backed, JINN-only operator UX) is the design target. OLAS disposition is **open** — candidate options surfaced (burn / DAO treasury / operator multisig / stOLAS depositor yield); decision deferred to the implementation spec | Standard-mode UX locked; disposition open |
+| 10 | OLAS disposition + standard-mode UX | Standard-mode (stOLAS-backed, JINN-only operator UX) is the design target. **OLAS disposition closed 2026-04-29** — standard-mode: 25% stOLAS depositor yield / 75% burn / 0% operator; self-bond: 100% to operator-as-curating-agent. See `log/decisions/2026-04-29-olas-disposition-25-burn-self-bond.md` | Locked    |
 
 §9 constraints (any future messenger swap must satisfy):
 1. Canonical voting power lives on mainnet.

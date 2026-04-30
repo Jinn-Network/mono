@@ -13,7 +13,7 @@ import {
   hasDockerAcceptanceClaudeToken,
   resolveDockerAcceptanceBaseEnv,
 } from '../../scripts/lib/docker-acceptance.mjs';
-import { summarizeArtifactRows } from '../../scripts/lib/acceptance-artifacts.mjs';
+import { isoToSqliteTimestamp, summarizeArtifactRows, summarizeRunWindowArtifacts } from '../../scripts/lib/acceptance-artifacts.mjs';
 
 const tempDirs: string[] = [];
 
@@ -65,7 +65,9 @@ describe('docker acceptance helpers', () => {
     expect(composeEnv.JINN_ACCEPTANCE_IMAGE).toBe('jinn-client:test');
     expect(composeEnv.JINN_PASSWORD).toBe('secret');
     expect(composeEnv.JINN_RPC_URL).toBe('https://public.example');
-    expect(composeEnv.JINN_DISABLE_AUTO_INTENTS).toBe('1');
+    expect(composeEnv.JINN_DISABLE_AUTO_INTENTS).toBe('0');
+    expect(composeEnv.JINN_PREDICTION_V0_WINDOW_MS).toBe('120000');
+    expect(composeEnv.JINN_PREDICTION_V0_RESOLVE_GAP_MS).toBe('60000');
     expect(composeEnv.JINN_ACCEPTANCE_CONFIG_FILE).toBe(dockerAcceptanceConfigPath(clientRoot));
     expect(dockerAcceptanceWorkspaceRoot(clientRoot)).toBe(join(clientRoot, '.acceptance'));
     expect(dockerAcceptanceComposeEnvPath(clientRoot)).toBe(join(clientRoot, '.acceptance', 'docker-compose.env'));
@@ -139,5 +141,137 @@ describe('artifact cycle summaries', () => {
     expect(summary.byRestorationJob.one.successfulEvaluations).toBe(1);
     expect(summary.byRestorationJob.two.successfulRestorations).toBe(1);
     expect(summary.byRestorationJob.two.successfulEvaluations).toBe(0);
+  });
+});
+
+describe('summarizeRunWindowArtifacts', () => {
+  const runStartAt = '2026-04-30T10:00:00.000Z';
+
+  it('counts a cycle complete only when both restoration and evaluation succeed for the same desired_state_id', () => {
+    // Real shape: SQLite stores `created_at` as `YYYY-MM-DD HH:MM:SS`
+    // (CURRENT_TIMESTAMP default), not ISO 8601. Restoration and evaluation
+    // phases each get their own on-chain request_id; they share the
+    // prediction.v0 auto-gen bucket id (`pred-v0-auto-<bucket>`) as
+    // desired_state_id.
+    const summary = summarizeRunWindowArtifacts(
+      [
+        {
+          desired_state_id: 'pred-v0-auto-1714464000000',
+          request_id: '0xrestreq1',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 10:03:00',
+        },
+        {
+          desired_state_id: 'pred-v0-auto-1714464000000',
+          request_id: '0xevalreq1',
+          tags: '["evaluation-verdict"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 10:06:00',
+        },
+        {
+          desired_state_id: 'pred-v0-auto-1714464120000',
+          request_id: '0xrestreq2',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 10:09:00',
+        },
+      ],
+      runStartAt,
+    );
+
+    expect(summary.completedCycles).toBe(1);
+    expect(summary.byDesiredStateId).toHaveLength(2);
+    const cycle1 = summary.byDesiredStateId.find((e) => e.desiredStateId === 'pred-v0-auto-1714464000000');
+    expect(cycle1?.restorationOk).toBe(true);
+    expect(cycle1?.evaluationOk).toBe(true);
+    expect(cycle1?.restorationRequestId).toBe('0xrestreq1');
+    expect(cycle1?.evaluationRequestId).toBe('0xevalreq1');
+    const cycle2 = summary.byDesiredStateId.find((e) => e.desiredStateId === 'pred-v0-auto-1714464120000');
+    expect(cycle2?.restorationOk).toBe(true);
+    expect(cycle2?.evaluationOk).toBe(false);
+  });
+
+  it('excludes rows created before runStartAt (SQLite TEXT format comparison)', () => {
+    const summary = summarizeRunWindowArtifacts(
+      [
+        {
+          desired_state_id: 'pred-v0-auto-old',
+          request_id: '0xstaleR',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 09:30:00',
+        },
+        {
+          desired_state_id: 'pred-v0-auto-old',
+          request_id: '0xstaleE',
+          tags: '["evaluation-verdict"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 09:45:00',
+        },
+      ],
+      runStartAt,
+    );
+
+    expect(summary.completedCycles).toBe(0);
+    expect(summary.byDesiredStateId).toHaveLength(0);
+  });
+
+  it('returns zero cycles for an empty row set', () => {
+    const summary = summarizeRunWindowArtifacts([], runStartAt);
+    expect(summary.completedCycles).toBe(0);
+    expect(summary.byDesiredStateId).toEqual([]);
+  });
+
+  it('does not silently exclude rows due to timezone interpretation mismatch', () => {
+    // Regression: SQLite `created_at` parsed via Date.parse() was treated as
+    // local time while ISO `runStartAt` (with Z) is UTC. With the local zone
+    // ahead of UTC, every SQLite row appeared "earlier" than runStartAt by a
+    // full TZ offset and was silently dropped — the live gate saw 0 cycles
+    // even when complete pairs existed.
+    const summary = summarizeRunWindowArtifacts(
+      [
+        {
+          desired_state_id: 'pred-v0-auto-1777545600000',
+          request_id: '0xrestreq',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          // SQLite-format, only seconds after the ISO runStartAt below.
+          created_at: '2026-04-30 10:00:30',
+        },
+        {
+          desired_state_id: 'pred-v0-auto-1777545600000',
+          request_id: '0xevalreq',
+          tags: '["evaluation-verdict"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 10:01:00',
+        },
+      ],
+      // runStartAt is the ISO format new Date().toISOString() produces.
+      '2026-04-30T10:00:00.000Z',
+    );
+    expect(summary.completedCycles).toBe(1);
+  });
+});
+
+describe('isoToSqliteTimestamp', () => {
+  it('rewrites ISO 8601 with milliseconds and Z to SQLite TEXT format', () => {
+    expect(isoToSqliteTimestamp('2026-04-30T10:18:50.041Z')).toBe('2026-04-30 10:18:50');
+  });
+
+  it('rewrites ISO 8601 without milliseconds to SQLite TEXT format', () => {
+    expect(isoToSqliteTimestamp('2026-04-30T10:18:50Z')).toBe('2026-04-30 10:18:50');
+  });
+
+  it('leaves SQLite-style timestamps unchanged', () => {
+    expect(isoToSqliteTimestamp('2026-04-30 10:18:50')).toBe('2026-04-30 10:18:50');
+  });
+
+  it('preserves comparison ordering against SQLite-stored timestamps', () => {
+    // Lexicographic check: with the bug, '2026-04-30T10:18:50.041Z' > '2026-04-30 10:35:00'
+    // (because 'T' > ' '), so a row dated 10:35 would be excluded by `>= '2026-04-30T10:18...'`.
+    // After conversion, '2026-04-30 10:18:50' < '2026-04-30 10:35:00' as expected.
+    const since = isoToSqliteTimestamp('2026-04-30T10:18:50.041Z');
+    expect(since < '2026-04-30 10:35:06').toBe(true);
   });
 });

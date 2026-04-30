@@ -1,0 +1,52 @@
+[profile.default]
+# Path layout — keep Hardhat's `artifacts/` untouched. Foundry writes to
+# `forge-out/` so the two toolchains can coexist on the same source tree.
+src = 'src'
+out = 'forge-out'
+libs = ['lib', 'node_modules']
+test = 'test'
+cache_path = 'forge-cache'
+
+# `solc` 0.8.30 uses cancun (matches hardhat.config.ts override for 0.8.30).
+solc = '0.8.30'
+evm_version = 'cancun'
+optimizer = true
+optimizer_runs = 1_000_000
+via_ir = true
+
+# Vendored OLAS contracts target older solc versions and pull in legacy
+# extension wiring that conflicts with the v0 jinn contracts. Foundry only
+# needs to compile what it tests; ignore everything except the v0 jinn
+# contracts and the V2 staking artifacts under audit.
+#
+# Hardhat remains the source of truth for full-tree compilation and unit
+# tests. Foundry's job is the invariant-test harness.
+script = 'script'
+
+# Keep Foundry compilation focused on the v0 audit surface so vendored
+# OLAS code (older solc versions, Tokenomics size limits) doesn't bleed
+# in. forge_test --match-contract Invariant only compiles what the test
+# tree imports, but we still need a clean global build for
+# `forge build`.
+no_match_path = '{src/vendor/**,src/staking/RestorationActivityChecker.sol,src/staking/JinnRouter.sol,src/staking/JinnRouterProxy.sol,src/staking/ActivityCheckerProxy.sol,src/stubs/**,src/testnet/**,src/claiming/**,src/jinn/distribution/DistributionTestMocks.sol,src/jinn/cross-chain/CrossChainTestMocks.sol,test/**.ts,test/**.test.ts}'
+
+# Invariant tuning — kept conservative for empty stubs. Real authoring
+# under a follow-up issue will tune these per-contract.
+[invariant]
+runs = 256
+depth = 15
+fail_on_revert = false
+call_override = false
+dictionary_weight = 80
+include_storage = true
+include_push_bytes = true
+
+[fuzz]
+runs = 256
+max_test_rejects = 65536
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false
+int_types = 'long'

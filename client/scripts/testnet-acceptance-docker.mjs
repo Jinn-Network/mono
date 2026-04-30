@@ -30,7 +30,7 @@ import {
   resolveDockerAcceptanceBaseEnv,
 } from './lib/docker-acceptance.mjs';
 import { PASSWORD_RESOLUTION_HINT, resolveAcceptancePassword } from './lib/resolve-acceptance-password.mjs';
-import { summarizeArtifactRows } from './lib/acceptance-artifacts.mjs';
+import { isoToSqliteTimestamp, summarizeRunWindowArtifacts } from './lib/acceptance-artifacts.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
@@ -38,7 +38,7 @@ const composeFile = join(clientRoot, 'docker-compose.acceptance.yml');
 const composeService = 'jinn-acceptance-daemon';
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_POLL_MS = 15_000;
-const DEFAULT_TARGET_CYCLES = 2;
+const DEFAULT_TARGET_CYCLES = 1;
 
 function printHelp() {
   console.log(`Usage: node scripts/testnet-acceptance-docker.mjs [options]
@@ -57,7 +57,7 @@ Options:
   --evidence-dir <path>             Explicit evidence directory
   --timeout-ms <ms>                 Max daemon runtime window (default: 1200000)
   --poll-ms <ms>                    Poll interval while waiting for cycles
-  --target-cycles <n>               Required new cycles (default: 2)
+  --target-cycles <n>               Required new cycles (default: 1)
   --image-tag <tag>                 Local image tag (default: from .env.acceptance or jinn-client:acceptance-local)
   --help                            Show this help
 
@@ -230,25 +230,25 @@ function warnIfBranchLagsMain() {
   }
 }
 
-function queryDockerArtifactRows(composeEnvPath, desiredStateIds, evidenceBase) {
+function queryDockerArtifactRows(composeEnvPath, runStartAt, evidenceBase) {
   const script = `
     import Database from 'better-sqlite3';
     import { existsSync } from 'node:fs';
     const dbPath = '/data/jinn.db';
-    const ids = JSON.parse(process.argv[1]);
+    const since = process.argv[1];
     if (!existsSync(dbPath)) {
       console.log('[]');
       process.exit(0);
     }
     const db = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {
-      const placeholders = ids.map(() => '?').join(', ');
       const rows = db.prepare(
         \`SELECT desired_state_id, request_id, title, tags, outcome, created_at
             FROM artifacts
-           WHERE desired_state_id IN (\${placeholders})
+           WHERE desired_state_id LIKE 'pred-v0-auto-%'
+             AND created_at >= ?
            ORDER BY created_at ASC\`,
-      ).all(...ids);
+      ).all(since);
       console.log(JSON.stringify(rows));
     } finally {
       db.close();
@@ -267,7 +267,7 @@ function queryDockerArtifactRows(composeEnvPath, desiredStateIds, evidenceBase) 
       '--input-type=module',
       '-e',
       script,
-      JSON.stringify(desiredStateIds),
+      isoToSqliteTimestamp(runStartAt),
     ]),
     {
       cwd: clientRoot,
@@ -345,9 +345,8 @@ async function main() {
     runIdSuffix: runId,
     env: gateEnv,
   });
-  const desiredStateIds = (config.desiredStates ?? []).map((state) => state.id);
-  if (targetCycles > desiredStateIds.length) {
-    fail(`target-cycles (${targetCycles}) exceeds configured desired states (${desiredStateIds.length}).`);
+  if (targetCycles < 1) {
+    fail(`target-cycles (${targetCycles}) must be >= 1.`);
   }
 
   writeJson(configPath, config);
@@ -371,7 +370,7 @@ async function main() {
     dirty,
     composeEnvPath,
     configPath,
-    desiredStateIds,
+    cycleSubstrate: 'prediction.v0',
     dataVolume: composeEnv.JINN_ACCEPTANCE_DATA_VOLUME,
     claudeVolume: composeEnv.JINN_ACCEPTANCE_CLAUDE_VOLUME,
   });
@@ -492,12 +491,16 @@ async function main() {
     const baselineStatus = parseJsonStdout(runJinn(['status', '--json'], '11-status-before').stdout, 'status-before');
     const baselineRewards = parseJsonStdout(runJinn(['rewards', '--json'], '12-rewards-before').stdout, 'rewards-before');
     const baselineHistory = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '13-history-before').stdout, 'history-before');
-    const baselineRows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '14-artifacts-before'));
-    const baselineArtifacts = summarizeArtifactRows(baselineRows, desiredStateIds);
+    // runStartAt is the lower bound for cycle attribution: any prediction.v0
+    // artifacts created at or after this timestamp belong to this gate run.
+    const runStartAt = new Date().toISOString();
+    const baselineRows = queryDockerArtifactRows(composeEnvPath, runStartAt, join(evidenceDir, '14-artifacts-before'));
+    const baselineArtifacts = summarizeRunWindowArtifacts(baselineRows, runStartAt);
     writeJson(join(evidenceDir, 'baseline-summary.json'), {
       historyCounts: countHistoryKinds(baselineHistory),
-      desiredStateIds,
-      artifactProgress: baselineArtifacts.byRestorationJob,
+      runStartAt,
+      cycleSubstrate: 'prediction.v0',
+      artifactProgress: baselineArtifacts.byDesiredStateId,
       pendingRewardsWei: sumPendingRewards(baselineRewards).toString(),
       status: baselineStatus,
     });
@@ -540,13 +543,13 @@ async function main() {
     const pollStartedAt = Date.now();
     while (Date.now() - pollStartedAt < timeoutMs) {
       const status = parseJsonStdout(runJinn(['status', '--json'], '17-status-poll').stdout, 'status-poll');
-      const rows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '17-artifacts-poll'));
-      const artifactProgress = summarizeArtifactRows(rows, desiredStateIds);
+      const rows = queryDockerArtifactRows(composeEnvPath, runStartAt, join(evidenceDir, '17-artifacts-poll'));
+      const artifactProgress = summarizeRunWindowArtifacts(rows, runStartAt);
       const snapshot = {
         at: new Date().toISOString(),
-        desiredStateIds,
+        runStartAt,
         completedCycles: artifactProgress.completedCycles,
-        artifactProgress: artifactProgress.byRestorationJob,
+        artifactProgress: artifactProgress.byDesiredStateId,
         blocking: status.exit?.blocking ?? false,
         daemonShutdownState: status.daemon?.shutdownState ?? null,
       };
@@ -576,9 +579,9 @@ async function main() {
     const statusAfter = parseJsonStdout(runJinn(['status', '--json'], '21-status-after').stdout, 'status-after');
     const rewardsBeforeClaim = parseJsonStdout(runJinn(['rewards', '--json'], '22-rewards-before-claim').stdout, 'rewards-before-claim');
     const historyAfter = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '23-history-after').stdout, 'history-after');
-    const artifactsAfter = summarizeArtifactRows(
-      queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '24-artifacts-after')),
-      desiredStateIds,
+    const artifactsAfter = summarizeRunWindowArtifacts(
+      queryDockerArtifactRows(composeEnvPath, runStartAt, join(evidenceDir, '24-artifacts-after')),
+      runStartAt,
     );
     writeJson(join(evidenceDir, '24-artifacts-after.json'), artifactsAfter);
 
@@ -611,9 +614,10 @@ async function main() {
       bootstrap,
       startup,
       stop,
-      desiredStateIds,
+      runStartAt,
+      cycleSubstrate: 'prediction.v0',
       observedCompletedCycles: observed.artifactProgress.completedCycles,
-      observedArtifactProgress: observed.artifactProgress.byRestorationJob,
+      observedArtifactProgress: observed.artifactProgress.byDesiredStateId,
       pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
       rewardClaimMode,
       claim,

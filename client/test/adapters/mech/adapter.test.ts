@@ -300,13 +300,18 @@ describe('MechAdapter with JinnRouter', () => {
     await adapter.stop();
   });
 
-  it('V2 claimDelivery uses canonical evidenceHash from store', async () => {
+  it('skips adapter-side claimDelivery for same-operator deliveries (engine claims atomically)', async () => {
+    // When iDelivered=true, the restorer engine's deliverAndClaim path has
+    // already claimed via the same JinnRouter call, atomic with deliverToMarketplace.
+    // The adapter must NOT re-attempt the claim — that path is vestigial and
+    // surfaced as confusing log noise (already-claimed / RequestNotFound /
+    // ZERO_EVIDENCE) for our own deliveries before this fix.
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
     const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
-    const canonicalHash = ('0x' + 'ca'.repeat(32)) as `0x${string}`;
     const requestId = '0x' + 'aa'.repeat(32);
+    // mechAddress matches safeAddress → iDelivered=true
     const mechAddress = ('0x' + '44'.repeat(20)).toLowerCase();
 
     vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
@@ -319,55 +324,7 @@ describe('MechAdapter with JinnRouter', () => {
     const mockStore = {
       getLastProcessedBlock: () => null,
       setLastProcessedBlock: vi.fn(),
-      getIntentEvidenceHash: vi.fn().mockReturnValue(canonicalHash),
-    };
-
-    const v2Config: MechAdapterConfig = { ...TEST_CONFIG, routerClaimDeliveryVariant: 'v2' };
-    const adapter = new MechAdapter(v2Config, mockStore as any);
-    await adapter.initialize();
-
-    // Ensure the deliver event is picked up
-    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(200n);
-    (adapter as any).deliveryBlockCursor = 100n;
-    // Mark it as delivered by our safe so shouldClaimDelivery is true
-    (adapter as any).pendingEvaluations.set(requestId, { id: 'ds-1', description: 'test' });
-
-    const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
-    await gen.next();
-
-    expect(mockStore.getIntentEvidenceHash).toHaveBeenCalledWith(requestId);
-    expect(claimDelivery).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      v2Config.safeAddress,
-      v2Config.routerAddress,
-      requestId,
-      { variant: 'v2', evidenceHash: canonicalHash },
-      undefined,
-    );
-
-    await adapter.stop();
-  });
-
-  it('V2 claimDelivery uses undefined evidenceHash when store has no hash', async () => {
-    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
-    const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
-    const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
-
-    const requestId = '0x' + 'aa'.repeat(32);
-    const mechAddress = ('0x' + '44'.repeat(20)).toLowerCase();
-
-    vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
-      requestId,
-      deliveryDataHex: '0x' + 'dd'.repeat(32),
-      mechAddress,
-    }]);
-    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'result' });
-
-    const mockStore = {
-      getLastProcessedBlock: () => null,
-      setLastProcessedBlock: vi.fn(),
-      getIntentEvidenceHash: vi.fn().mockReturnValue(null),
+      getIntentEvidenceHash: vi.fn(),
     };
 
     const v2Config: MechAdapterConfig = { ...TEST_CONFIG, routerClaimDeliveryVariant: 'v2' };
@@ -376,20 +333,17 @@ describe('MechAdapter with JinnRouter', () => {
 
     (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(200n);
     (adapter as any).deliveryBlockCursor = 100n;
+    // iCreatedRestoration=true (we posted this restoration), iDelivered=true
+    // (mechAddress === safeAddress) → same-operator → engine claimed already.
     (adapter as any).pendingEvaluations.set(requestId, { id: 'ds-1', description: 'test' });
 
     const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
     await gen.next();
 
-    expect(claimDelivery).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      v2Config.safeAddress,
-      v2Config.routerAddress,
-      requestId,
-      { variant: 'v2', evidenceHash: undefined },
-      undefined,
-    );
+    expect(claimDelivery).not.toHaveBeenCalled();
+    // Store lookup is gated on isCrossOperator now; same-operator path doesn't
+    // need the lookup either.
+    expect(mockStore.getIntentEvidenceHash).not.toHaveBeenCalled();
 
     await adapter.stop();
   });

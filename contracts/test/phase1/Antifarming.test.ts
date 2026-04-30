@@ -21,18 +21,29 @@ async function deployV2Checker(
     similarityThreshold?: bigint;
     similarDecayMultiplier?: bigint;
     comparisonWindow?: bigint;
+    authorizedRouter?: string; // address treated as the trusted router
   },
 ) {
   const deployerAddress = await deployer.getAddress();
   const Checker = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
-  const checker = await Checker.deploy(
+  const checker = await Checker.deploy();
+  await checker.waitForDeployment();
+  await (await checker.initialize(
     overrides?.livenessRatio ?? DEFAULT_LIVENESS_RATIO,
     deployerAddress,
     overrides?.similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD,
     overrides?.similarDecayMultiplier ?? DEFAULT_DECAY_MULTIPLIER,
     overrides?.comparisonWindow ?? DEFAULT_COMPARISON_WINDOW,
-  );
-  await checker.waitForDeployment();
+  )).wait();
+
+  // Wire deployer (or override) as the authorized router so unit tests can
+  // exercise recordActivity / recordActivityWithEvidence directly. The C4 fix
+  // gates these on authorizedRouter; without this wiring every direct call
+  // would revert with UnauthorizedRouter.
+  const authorizedRouter = overrides?.authorizedRouter ?? deployerAddress;
+  // setRouterAddresses requires both addresses non-zero; reuse authorizedRouter
+  // as jinnRouter (the read-only counter source) — fine for unit tests.
+  await (await checker.setRouterAddresses(authorizedRouter, authorizedRouter)).wait();
   return checker;
 }
 
@@ -66,39 +77,54 @@ describe("RestorationActivityCheckerV2 — Anti-Farming", function () {
       expect(await checker.owner()).to.equal(deployerAddress);
     });
 
-    it("reverts on zero liveness ratio", async function () {
+    async function deployUninitialized() {
       const Checker = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
+      const checker = await Checker.deploy();
+      await checker.waitForDeployment();
+      return { Checker, checker };
+    }
+
+    it("reverts on zero liveness ratio", async function () {
+      const { Checker, checker } = await deployUninitialized();
       await expect(
-        Checker.deploy(0, deployerAddress, DEFAULT_SIMILARITY_THRESHOLD, DEFAULT_DECAY_MULTIPLIER, DEFAULT_COMPARISON_WINDOW)
+        checker.initialize(0, deployerAddress, DEFAULT_SIMILARITY_THRESHOLD, DEFAULT_DECAY_MULTIPLIER, DEFAULT_COMPARISON_WINDOW)
       ).to.be.revertedWithCustomError(Checker, "ZeroValue");
     });
 
     it("reverts on zero owner", async function () {
-      const Checker = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
+      const { Checker, checker } = await deployUninitialized();
       await expect(
-        Checker.deploy(DEFAULT_LIVENESS_RATIO, ethers.ZeroAddress, DEFAULT_SIMILARITY_THRESHOLD, DEFAULT_DECAY_MULTIPLIER, DEFAULT_COMPARISON_WINDOW)
+        checker.initialize(DEFAULT_LIVENESS_RATIO, ethers.ZeroAddress, DEFAULT_SIMILARITY_THRESHOLD, DEFAULT_DECAY_MULTIPLIER, DEFAULT_COMPARISON_WINDOW)
       ).to.be.revertedWithCustomError(Checker, "ZeroAddress");
     });
 
     it("reverts on similarity threshold > 256", async function () {
-      const Checker = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
+      const { Checker, checker } = await deployUninitialized();
       await expect(
-        Checker.deploy(DEFAULT_LIVENESS_RATIO, deployerAddress, 257, DEFAULT_DECAY_MULTIPLIER, DEFAULT_COMPARISON_WINDOW)
+        checker.initialize(DEFAULT_LIVENESS_RATIO, deployerAddress, 257, DEFAULT_DECAY_MULTIPLIER, DEFAULT_COMPARISON_WINDOW)
       ).to.be.revertedWithCustomError(Checker, "Overflow");
     });
 
     it("reverts on decay multiplier > 1e18", async function () {
-      const Checker = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
+      const { Checker, checker } = await deployUninitialized();
       await expect(
-        Checker.deploy(DEFAULT_LIVENESS_RATIO, deployerAddress, DEFAULT_SIMILARITY_THRESHOLD, ethers.parseEther("1") + 1n, DEFAULT_COMPARISON_WINDOW)
+        checker.initialize(DEFAULT_LIVENESS_RATIO, deployerAddress, DEFAULT_SIMILARITY_THRESHOLD, ethers.parseEther("1") + 1n, DEFAULT_COMPARISON_WINDOW)
       ).to.be.revertedWithCustomError(Checker, "Overflow");
     });
 
     it("reverts on zero comparison window", async function () {
+      const { Checker, checker } = await deployUninitialized();
+      await expect(
+        checker.initialize(DEFAULT_LIVENESS_RATIO, deployerAddress, DEFAULT_SIMILARITY_THRESHOLD, DEFAULT_DECAY_MULTIPLIER, 0)
+      ).to.be.revertedWithCustomError(Checker, "ZeroValue");
+    });
+
+    it("reverts on double initialize", async function () {
+      const checker = await deployV2Checker(deployer);
       const Checker = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
       await expect(
-        Checker.deploy(DEFAULT_LIVENESS_RATIO, deployerAddress, DEFAULT_SIMILARITY_THRESHOLD, DEFAULT_DECAY_MULTIPLIER, 0)
-      ).to.be.revertedWithCustomError(Checker, "ZeroValue");
+        checker.initialize(DEFAULT_LIVENESS_RATIO, deployerAddress, DEFAULT_SIMILARITY_THRESHOLD, DEFAULT_DECAY_MULTIPLIER, DEFAULT_COMPARISON_WINDOW)
+      ).to.be.revertedWithCustomError(Checker, "AlreadyInitialized");
     });
   });
 
@@ -285,14 +311,17 @@ describe("RestorationActivityCheckerV2 — Anti-Farming", function () {
       // _computeNoveltyWeight: minDistance >= 0 is always true → always novel.
       // Actually: even identical hashes have distance 0 >= 0 → novel. So yes, disabled.
       const Checker = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
-      const checker = await Checker.deploy(
+      const checker = await Checker.deploy();
+      await checker.waitForDeployment();
+      await (await checker.initialize(
         DEFAULT_LIVENESS_RATIO,
         deployerAddress,
         0, // threshold = 0
         DEFAULT_DECAY_MULTIPLIER,
         DEFAULT_COMPARISON_WINDOW,
-      );
-      await checker.waitForDeployment();
+      )).wait();
+      // Authorize the deployer as the router so direct calls go through (C4 gate).
+      await (await checker.setRouterAddresses(deployerAddress, deployerAddress)).wait();
 
       const multisig = ethers.Wallet.createRandom().address;
       const hash = ethers.id("same-thing");
@@ -465,12 +494,13 @@ describe("RestorationActivityCheckerV2 — Anti-Farming", function () {
       ).to.be.revertedWithCustomError(checker, "ZeroValue");
     });
 
-    it("owner can transfer ownership", async function () {
+    it("owner can transfer ownership via changeOwner", async function () {
       const checker = await deployV2Checker(deployer);
       const [, newOwner] = await ethers.getSigners();
       const newOwnerAddress = await newOwner.getAddress();
 
-      await checker.transferOwnership(newOwnerAddress);
+      // Inherited from Implementation (vendor/stolas/Implementation.sol).
+      await checker.changeOwner(newOwnerAddress);
       expect(await checker.owner()).to.equal(newOwnerAddress);
 
       // Old owner can no longer call admin functions

@@ -417,59 +417,54 @@ export class MechAdapter implements ExecutionAdapter {
             const iCreatedEvaluation = this.pendingEvaluationClaims.has(requestId);
             if (!iDelivered && !iCreatedRestoration && !iCreatedEvaluation) continue;
 
-            // (a) Claim delivery on the router so `restorationDeliveryClaimed[requestId]` is set
-            // (required before createEvaluationJob can run).
-            // - Same-operator: we delivered (iDelivered) → our Safe claims and gets counter credit.
-            // - Cross-operator: we created the request (iCreatedRestoration) but another mech
-            //   delivered (iDelivered is false) → the creator Safe must still call claimDelivery
-            //   so the router flips `restorationDeliveryClaimed` for this requestId. Otherwise
-            //   tryCreateEvaluationJob never unblocks. See JinnRouter.claimDelivery in contracts.
+            // (a) Cross-operator claim path: we created a restoration but another
+            //     mech delivered it. The router still needs `restorationDeliveryClaimed`
+            //     flipped before `createEvaluationJob` can fire, so the creator Safe
+            //     submits the claim with an evidenceHash derived from the delivered
+            //     envelope on IPFS.
+            //
+            //     Same-operator deliveries (iDelivered=true) already claimed via the
+            //     restorer engine's deliverAndClaim path — that's atomic with the
+            //     deliverToMarketplace call. Skipping here avoids a redundant Safe-tx
+            //     attempt that would log spurious `already-claimed` / `RequestNotFound`
+            //     /  V2 evidenceHash errors for our own deliveries.
             const isCrossOperator = iCreatedRestoration && !iDelivered;
-            const shouldClaimDelivery = iDelivered || isCrossOperator;
-            if (shouldClaimDelivery) {
+            if (isCrossOperator) {
               try {
                 const variant = this.config.routerClaimDeliveryVariant;
                 let evidenceHash: `0x${string}` | undefined;
                 if (variant === 'v2') {
-                  if (iDelivered) {
-                    // Same-operator path: we signed the envelope, hash is in store.
-                    const stored = this.store?.getIntentEvidenceHash(requestId);
-                    if (stored) {
-                      evidenceHash = stored as `0x${string}`;
-                    }
-                  } else {
-                    // Cross-operator path: we did NOT deliver, so no local store entry.
-                    // Derive evidenceHash by fetching the delivered envelope from IPFS
-                    // and recomputing keccak256(JCS(envelope - signature)).
-                    // If derivation fails, skip claim and let the next watch loop retry.
-                    try {
-                      const deliveryDigest = deliveryDataHex.startsWith('0x')
-                        ? deliveryDataHex.slice(2)
-                        : deliveryDataHex;
-                      const envelopeCid = `f01551220${deliveryDigest}`;
-                      const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
-                        this.config.ipfsGatewayUrl,
-                        envelopeCid,
-                      );
-                      const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
-                      // Strip signature to recompute the hash over the unsigned body.
-                      const { signature, ...unsignedBody } = parsed;
-                      const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
-                      const recomputed = keccak256(jcsBytes);
-                      if (recomputed !== signature.hash) {
-                        console.error(
-                          `[mech] cross-operator claimDelivery skipped for ${requestId}: recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
-                        );
-                        continue;
-                      }
-                      evidenceHash = recomputed as `0x${string}`;
-                    } catch (deriveErr) {
+                  // Cross-operator: we did NOT deliver, so no local store entry.
+                  // Derive evidenceHash by fetching the delivered envelope from IPFS
+                  // and recomputing keccak256(JCS(envelope - signature)).
+                  // If derivation fails, skip claim and let the next watch loop retry.
+                  try {
+                    const deliveryDigest = deliveryDataHex.startsWith('0x')
+                      ? deliveryDataHex.slice(2)
+                      : deliveryDataHex;
+                    const envelopeCid = `f01551220${deliveryDigest}`;
+                    const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
+                      this.config.ipfsGatewayUrl,
+                      envelopeCid,
+                    );
+                    const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
+                    // Strip signature to recompute the hash over the unsigned body.
+                    const { signature, ...unsignedBody } = parsed;
+                    const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
+                    const recomputed = keccak256(jcsBytes);
+                    if (recomputed !== signature.hash) {
                       console.error(
-                        `[mech] cross-operator evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
-                        deriveErr,
+                        `[mech] cross-operator claimDelivery skipped for ${requestId}: recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
                       );
                       continue;
                     }
+                    evidenceHash = recomputed as `0x${string}`;
+                  } catch (deriveErr) {
+                    console.error(
+                      `[mech] cross-operator evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
+                      deriveErr,
+                    );
+                    continue;
                   }
                 }
                 await claimDelivery(

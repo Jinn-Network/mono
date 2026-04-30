@@ -46,6 +46,8 @@ const PRODUCTION_DEPS: FleetScaleDeps = {
     testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
     masterEthDailyEstimateWei: (config as any).masterEthDailyEstimateWei,
+    minEoaGasWei: config.minEoaGasWei,
+    minSafeEthWei: config.minSafeEthWei,
     pollIntervalMs: config.pollIntervalMs,
   }),
   retireFleetServiceOnChain: defaultRetireFleetServiceOnChain,

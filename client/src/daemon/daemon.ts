@@ -12,6 +12,7 @@ import type { X402Config } from '../x402/handler.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
+import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
 import type { IntentSource } from '../intents/sources.js';
 
@@ -43,6 +44,13 @@ export interface DaemonConfig {
    * Omitted or interval 0 → loop not started.
    */
   balanceTopup?: BalanceTopupLoopConfig;
+
+  /**
+   * Cross-chain JINN claim loop (jinn-mono-7x5). Emits ClaimTicket on L2,
+   * waits for finality (canonical) or plants a fixture (mock), and submits
+   * the L1 distributor claim. Omitted or interval 0 → loop not started.
+   */
+  jinnClaim?: JinnClaimLoopConfig;
 
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
@@ -80,6 +88,7 @@ export class Daemon {
   private readonly apiPort: number;
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
+  private jinnClaimLoop?: JinnClaimLoop;
 
   constructor(private readonly config: DaemonConfig) {
     this.store = new Store(config.dbPath);
@@ -107,6 +116,12 @@ export class Daemon {
     if (config.balanceTopup && config.balanceTopup.intervalMs > 0) {
       this.balanceTopupLoop = new BalanceTopupLoop({
         ...config.balanceTopup,
+        jinnStore: this.store,
+      });
+    }
+    if (config.jinnClaim && config.jinnClaim.intervalMs > 0) {
+      this.jinnClaimLoop = new JinnClaimLoop({
+        ...config.jinnClaim,
         jinnStore: this.store,
       });
     }
@@ -174,6 +189,11 @@ export class Daemon {
         this.balanceTopupLoop.run().catch(err => console.error('[daemon] balance-topup crashed:', err)),
       );
     }
+    if (this.jinnClaimLoop) {
+      this.loopPromises.push(
+        this.jinnClaimLoop.run().catch(err => console.error('[daemon] jinn-claim crashed:', err)),
+      );
+    }
   }
 
   async stop(): Promise<void> {
@@ -186,6 +206,7 @@ export class Daemon {
     this.deliveryWatcherLoop.stop();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
+    this.jinnClaimLoop?.stop();
     this.peerSync?.stop();
 
     // Stop the adapter to unblock any pending async iterators

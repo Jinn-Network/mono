@@ -83,7 +83,7 @@ export class RewardClaimLoop {
         serviceIndex,
         txHash: claim.txHash,
         outcome: 'ok',
-        detail: `Claimed ${claim.amountWei} reward wei for service ${claim.serviceId}`,
+        detail: `Submitted distributor.claim for service ${claim.serviceId} (pre-split queue: ${claim.amountWei} wei; operator collector-slot share only)`,
       }, 'reward-claim');
     }
   }

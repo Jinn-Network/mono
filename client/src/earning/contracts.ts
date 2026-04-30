@@ -32,6 +32,10 @@ export const DEFAULT_TESTNET_ARTIFACTS = {
   stolas: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
   faucet: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-testnet-faucet-baseSepolia-fast.json'),
   claimRegistry: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-claim-registry-baseSepolia.json'),
+  /** v0 MVI L1 stack (JINN, Timelock, Governor, Distributor, Messenger) on Sepolia. */
+  jinnMviL1: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-mvi-l1-sepolia.json'),
+  /** v0 MVI L2 emitter (JinnClaimEmitter) on Base Sepolia. */
+  jinnMviL2: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-mvi-l2-baseSepolia.json'),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -152,6 +156,31 @@ export interface ChainConfig {
    * Override with JINN_ROUTER_CLAIM_DELIVERY_VERSION=v1|v2.
    */
   routerClaimDeliveryVersion: 'v1' | 'v2';
+}
+
+export interface ChainGasOverrides {
+  minEoaGasWei?: string;
+  minSafeEthWei?: string;
+}
+
+function parseWeiOverride(value: string | undefined, name: string): bigint | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`${name} must be a non-negative wei integer string`);
+  }
+  return BigInt(value);
+}
+
+export function applyChainGasOverrides(config: ChainConfig, overrides: ChainGasOverrides): ChainConfig {
+  const minEoaGasEth = parseWeiOverride(overrides.minEoaGasWei, 'minEoaGasWei');
+  const minSafeEth = parseWeiOverride(overrides.minSafeEthWei, 'minSafeEthWei');
+  if (minEoaGasEth !== undefined) {
+    config.minEoaGasEth = minEoaGasEth;
+  }
+  if (minSafeEth !== undefined) {
+    config.minSafeEth = minSafeEth;
+  }
+  return config;
 }
 
 interface ChainConfigOverrides {
@@ -776,6 +805,230 @@ export const STOLAS_STAKING_SLOTS_ABI = [
     inputs: [],
     name: 'maxNumServices',
     outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+// ---------------------------------------------------------------------------
+// v0 MVI cross-chain claim flow (Phase B / jinn-mono-7x5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolved v0 MVI deployment surface.
+ *
+ * Two artifacts: an L1 stack (deployed by deploy-jinn-mvi-l1.ts) carrying
+ * JINN + Timelock + Governor + Distributor + Messenger; and an L2 emitter
+ * (separate deploy script) carrying just the JinnClaimEmitter address.
+ *
+ * The daemon's cross-chain claim loop reads `distributor` + `messenger` for
+ * the L1 submission step and `claimEmitter` for the L2 emit step.
+ */
+export interface JinnMviConfig {
+  jinn?: string;
+  timelock?: string;
+  governor?: string;
+  distributor?: string;
+  messenger?: string;
+  messengerMode?: 'canonical' | 'mock';
+  claimEmitter?: string;
+}
+
+interface JinnMviL1Artifact {
+  network?: string;
+  chainId?: number;
+  messenger?: { mode?: string; address?: string };
+  contracts?: {
+    JINN?: string;
+    TimelockController?: string;
+    JinnGovernor?: string;
+    JinnDistributor?: string;
+    Messenger?: string;
+  };
+}
+
+interface JinnMviL2Artifact {
+  network?: string;
+  chainId?: number;
+  contracts?: {
+    JinnClaimEmitter?: string;
+  };
+}
+
+/**
+ * Load and merge the v0 MVI L1/L2 deployment artifacts. Both are optional —
+ * the daemon falls back to direct address overrides from config / env when
+ * neither is present.
+ *
+ * Throws when an artifact path is supplied but the file is missing or
+ * malformed; this is the same fail-loud pattern as resolveBaseSepoliaConfig.
+ */
+export function loadJinnMviConfig(args: {
+  l1ArtifactPath?: string;
+  l2ArtifactPath?: string;
+  /** Direct overrides (config field or env var); take precedence over artifacts. */
+  distributorAddress?: string;
+  messengerAddress?: string;
+  claimEmitterAddress?: string;
+  messengerMode?: 'canonical' | 'mock';
+}): JinnMviConfig {
+  const out: JinnMviConfig = {};
+
+  if (args.l1ArtifactPath) {
+    const resolved = path.resolve(args.l1ArtifactPath);
+    if (!existsSync(resolved)) {
+      throw new Error(`Jinn MVI L1 artifact not found: ${resolved}`);
+    }
+    const artifact = JSON.parse(readFileSync(resolved, 'utf8')) as JinnMviL1Artifact;
+    out.jinn = artifact.contracts?.JINN;
+    out.timelock = artifact.contracts?.TimelockController;
+    out.governor = artifact.contracts?.JinnGovernor;
+    out.distributor = artifact.contracts?.JinnDistributor;
+    out.messenger = artifact.contracts?.Messenger ?? artifact.messenger?.address;
+    const rawMode = artifact.messenger?.mode;
+    if (rawMode === 'canonical' || rawMode === 'mock') {
+      out.messengerMode = rawMode;
+    }
+  }
+
+  if (args.l2ArtifactPath) {
+    const resolved = path.resolve(args.l2ArtifactPath);
+    if (!existsSync(resolved)) {
+      throw new Error(`Jinn MVI L2 artifact not found: ${resolved}`);
+    }
+    const artifact = JSON.parse(readFileSync(resolved, 'utf8')) as JinnMviL2Artifact;
+    out.claimEmitter = artifact.contracts?.JinnClaimEmitter;
+  }
+
+  // Direct overrides take precedence.
+  if (args.distributorAddress) out.distributor = args.distributorAddress;
+  if (args.messengerAddress) out.messenger = args.messengerAddress;
+  if (args.claimEmitterAddress) out.claimEmitter = args.claimEmitterAddress;
+  if (args.messengerMode) out.messengerMode = args.messengerMode;
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// JinnClaimEmitter / IClaimMessenger / JinnDistributor ABI fragments
+// ---------------------------------------------------------------------------
+
+export const JINN_CLAIM_EMITTER_ABI = [
+  {
+    type: 'event',
+    name: 'ClaimTicket',
+    inputs: [
+      { name: 'claimId', type: 'uint256', indexed: true },
+      { name: 'serviceId', type: 'uint256', indexed: true },
+      { name: 'verifiedCreations', type: 'uint256', indexed: false },
+      { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256', indexed: false },
+      { name: 'evaluationDeliveryCount', type: 'uint256', indexed: false },
+      { name: 'multisig', type: 'address', indexed: true },
+      { name: 'claimer', type: 'address', indexed: false },
+    ],
+  },
+  {
+    inputs: [{ name: 'serviceId', type: 'uint256' }],
+    name: 'emitClaim',
+    outputs: [{ name: 'claimId', type: 'uint256' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+export const CLAIM_TICKET_TOPIC0 = keccak256(
+  stringToBytes('ClaimTicket(uint256,uint256,uint256,uint256,uint256,address,address)'),
+);
+
+export const JINN_DISTRIBUTOR_ABI = [
+  {
+    inputs: [{ name: 'proof', type: 'bytes' }],
+    name: 'claim',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: '', type: 'uint256' }],
+    name: 'totalClaimedOperator',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: '', type: 'uint256' }],
+    name: 'totalClaimedDao',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'messenger',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+export const CLAIM_MESSENGER_ABI = [
+  {
+    inputs: [{ name: 'proof', type: 'bytes' }],
+    name: 'verifyClaim',
+    outputs: [
+      { name: 'serviceId', type: 'uint256' },
+      { name: 'verifiedCreations', type: 'uint256' },
+      { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
+      { name: 'evaluationDeliveryCount', type: 'uint256' },
+      { name: 'multisig', type: 'address' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+/**
+ * Mock messenger ABI — admin setFixture path used by burn-in to plant
+ * fixtures on Sepolia. The verifyClaim path matches IClaimMessenger.
+ */
+export const MOCK_MESSENGER_ABI = [
+  {
+    inputs: [
+      { name: 'claimId', type: 'uint256' },
+      {
+        name: 'f',
+        type: 'tuple',
+        components: [
+          { name: 'serviceId', type: 'uint256' },
+          { name: 'verifiedCreations', type: 'uint256' },
+          { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
+          { name: 'evaluationDeliveryCount', type: 'uint256' },
+          { name: 'multisig', type: 'address' },
+        ],
+      },
+    ],
+    name: 'setFixture',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'claimId', type: 'uint256' }],
+    name: 'fixtures',
+    outputs: [
+      { name: 'serviceId', type: 'uint256' },
+      { name: 'verifiedCreations', type: 'uint256' },
+      { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
+      { name: 'evaluationDeliveryCount', type: 'uint256' },
+      { name: 'multisig', type: 'address' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'owner',
+    outputs: [{ name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },

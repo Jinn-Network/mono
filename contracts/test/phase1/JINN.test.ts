@@ -16,7 +16,7 @@ describe('JINN', function () {
   beforeEach(async function () {
     [owner, minter, other] = await ethers.getSigners();
 
-    const JINNFactory = await ethers.getContractFactory('JINN');
+    const JINNFactory = await ethers.getContractFactory('src/vendor/governance/JINN.sol:JINN');
     jinn = await JINNFactory.deploy();
     await jinn.waitForDeployment();
   });

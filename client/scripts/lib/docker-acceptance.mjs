@@ -73,10 +73,13 @@ export function buildDockerComposeEnv({
     JINN_POLL_INTERVAL_MS: String(pollIntervalMs),
     JINN_REWARD_CLAIM_INTERVAL_MS: String(rewardClaimIntervalMs),
     JINN_TARGET_SERVICES: String(targetServices),
-    // Release acceptance uses its run-scoped desired states only. Testnet
-    // auto-intents add unrelated live-market jobs that can consume gas and
-    // make evidence harder to interpret.
-    JINN_DISABLE_AUTO_INTENTS: merged['JINN_DISABLE_AUTO_INTENTS'] ?? '1',
+    // Release acceptance gates on prediction.v0 cycles produced by the
+    // testnet auto-intent generator (kind=prediction.v0, id prefix
+    // `pred-v0-auto-…`). Leaving auto-intents enabled is required for the
+    // gate to observe the protocol loop end-to-end.
+    JINN_DISABLE_AUTO_INTENTS: merged['JINN_DISABLE_AUTO_INTENTS'] ?? '0',
+    JINN_PREDICTION_V0_WINDOW_MS: merged['JINN_PREDICTION_V0_WINDOW_MS'] ?? '120000',
+    JINN_PREDICTION_V0_RESOLVE_GAP_MS: merged['JINN_PREDICTION_V0_RESOLVE_GAP_MS'] ?? '60000',
     // Non-interactive Claude auth: output of `claude setup-token`. When set,
     // the daemon inside the container uses it directly and no keychain /
     // libsecret / browser login is required.

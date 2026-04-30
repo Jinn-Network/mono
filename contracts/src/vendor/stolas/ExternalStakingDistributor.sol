@@ -1,5 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
+//
+// ROLE CLARIFICATION (jinn-mono testnet history):
+// This contract is the OLAS-style ExternalStakingDistributor — a fork of
+// Autonolas' staking-as-a-service infrastructure. In our testnet it represents
+// the OLAS layer (operator onboarding + reward distribution). The token it
+// stakes/distributes is the "Jinn" / "JINN" ERC20 at 0xc3ae831f... (L1) and
+// 0xAB9a01cd... (L2) — those are deployed Phase 1a (2026-04-08) and play the
+// ROLE of OLAS in our setup. The actual JINN minted by the v0 cross-chain
+// pipeline (`src/jinn/distribution/JinnDistributor.sol`) is a separate ERC20
+// — `tJINN` / "JINN (testnet)" on testnet, plain `JINN` on mainnet. The
+// stOLAS naming is correct for this contract's role; do not rename to stJINN.
+// See `.claude/projects/.../memory/feedback_jinn_token_naming.md` for context.
 
 import {ERC721TokenReceiver} from "../registries/ERC721TokenReceiver.sol";
 import {Implementation, OwnerOnly, ZeroAddress} from "./Implementation.sol";

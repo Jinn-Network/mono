@@ -29,6 +29,7 @@ import {
   MECH_MARKETPLACE_CREATE_ABI,
   STOLAS_DISTRIBUTOR_ABI,
   STOLAS_STAKING_SLOTS_ABI,
+  applyChainGasOverrides,
   cidToBytes32,
   getChainConfig,
 } from './contracts.js';
@@ -110,6 +111,10 @@ export interface FleetBootstrapperOptions {
   debug?: boolean;
   /** Estimated master gas per day (wei) for runway warnings. */
   masterEthDailyEstimateWei?: bigint | string;
+  /** Optional bootstrap/top-up target override (wei). */
+  minEoaGasWei?: string;
+  /** Optional Safe ETH target override (wei). */
+  minSafeEthWei?: string;
   /**
    * When `masterEthDailyEstimateWei` is unset, blends a conservative daily estimate
    * from poll frequency (config.pollIntervalMs).
@@ -147,12 +152,15 @@ export class FleetBootstrapper {
       dailyOpt !== undefined
         ? BigInt(dailyOpt)
         : this.estimateMasterDailyGasWei(options.pollIntervalMs);
-    this.config = getChainConfig(this.chain, {
+    this.config = applyChainGasOverrides(getChainConfig(this.chain, {
       testnetL2DeploymentPath: options.testnetL2DeploymentPath,
       testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: options.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: options.testnetStolasDeploymentPath,
       testnetClaimRegistryDeploymentPath: options.testnetClaimRegistryDeploymentPath,
+    }), {
+      minEoaGasWei: options.minEoaGasWei ?? this.env['JINN_MIN_EOA_GAS_WEI'],
+      minSafeEthWei: options.minSafeEthWei ?? this.env['JINN_MIN_SAFE_ETH_WEI'],
     });
 
     if (options.rpcUrl) {
@@ -215,8 +223,11 @@ export class FleetBootstrapper {
           }
         }
       }
+      const completedCountBeforeFunding = state.services.filter(s => s.step === 'complete').length;
+      const standardFleetAlreadyComplete =
+        this.stakingMode === 'standard' && completedCountBeforeFunding >= this.targetServices;
       const requiredMasterEth = this.stakingMode === 'standard'
-        ? this.config.minEoaGasEth
+        ? (standardFleetAlreadyComplete ? 0n : this.config.minEoaGasEth)
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
       const autoFaucetEnabled = this.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
 

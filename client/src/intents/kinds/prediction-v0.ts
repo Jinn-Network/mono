@@ -31,6 +31,8 @@ export const predictionV0: SpecKind<PredictionV0AutoConfig> = {
       agentEoa: ctx.agentEoa,
       safeAddress: ctx.safeAddress,
       agentPrivateKey: ctx.agentPrivateKey,
+      windowDurationMs: ctx.predictionV0WindowMs,
+      resolveGapMs: ctx.predictionV0ResolveGapMs,
     };
   },
   ui: {

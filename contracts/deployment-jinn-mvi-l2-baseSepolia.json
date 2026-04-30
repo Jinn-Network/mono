@@ -1,0 +1,12 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x15e78734481bD31F6e183dad05225505a45ACd07",
+  "deployedAt": "2026-04-29T11:37:34.801Z",
+  "contracts": {
+    "JinnClaimEmitter": "0xDB2f776D78d9aF12792C2C0f9875465eDaa859E7",
+    "RestorationActivityCheckerV2": "0x0e1B5f264F4FAdcFAA950fb00c58d9A39C040f70",
+    "JinnRouterV2": "0x13dae57a54A7DF862113BcA8Ee2fd3dEf6a6A94A",
+    "ServiceRegistry": "0x31D3202d8744B16A120117A053459DDFAE93c855"
+  }
+}

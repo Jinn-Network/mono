@@ -15,6 +15,7 @@
 import { getAddress, type Address, type PublicClient } from 'viem';
 import {
   type ChainConfig,
+  applyChainGasOverrides,
   getChainConfig,
 } from './contracts.js';
 import { FleetStateStore } from './store.js';
@@ -33,6 +34,8 @@ export interface FundingPlanOptions {
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
   testnetClaimRegistryDeploymentPath?: string;
+  minEoaGasWei?: string;
+  minSafeEthWei?: string;
   /** Optional password — without it we cannot derive the master address from a keystore. */
   password?: string;
   /** Inject a public client (tests). Defaults to a viem client over rpcUrl. */
@@ -127,12 +130,15 @@ export async function planFleetFunding(
   const store = storeFactory(options.earningDir);
 
   const chainConfigResolver = options.chainConfigResolver ?? getChainConfig;
-  const config: ChainConfig = chainConfigResolver(chain, {
+  const config: ChainConfig = applyChainGasOverrides(chainConfigResolver(chain, {
     testnetL2DeploymentPath: options.testnetL2DeploymentPath,
     testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: options.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: options.testnetStolasDeploymentPath,
     testnetClaimRegistryDeploymentPath: options.testnetClaimRegistryDeploymentPath,
+  }), {
+    minEoaGasWei: options.minEoaGasWei,
+    minSafeEthWei: options.minSafeEthWei,
   });
   if (options.rpcUrl) {
     config.rpcUrl = options.rpcUrl;
@@ -217,9 +223,11 @@ export async function planFleetFunding(
     }
   }
 
+  const completedCount = fleetState?.services.filter((svc) => svc.step === 'complete').length ?? 0;
+  const standardFleetAlreadyComplete = stakingMode === 'standard' && completedCount >= targetServices;
   const requiredMasterEth =
     stakingMode === 'standard'
-      ? config.minEoaGasEth
+      ? (standardFleetAlreadyComplete ? 0n : config.minEoaGasEth)
       : SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);
 
   let master: FundingRequirement | undefined;

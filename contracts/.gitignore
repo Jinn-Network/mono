@@ -5,6 +5,13 @@ typechain-types/
 .env
 artifact-backups/
 
+# Foundry — coexists with Hardhat. Foundry writes its own artifact + cache
+# dirs so Hardhat's `artifacts/` and `cache/` stay untouched.
+forge-out/
+forge-cache/
+lib/
+broadcast/
+
 .yarn/*
 !.yarn/patches
 !.yarn/plugins

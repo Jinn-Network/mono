@@ -15,6 +15,11 @@ import {
   withRecoverableRetry,
   viemFeeOverridesForAttempt,
 } from '../../tx-retry.js';
+import {
+  SafeInnerRevertError,
+  decodeSafeInnerRevert,
+  formatDecodedRevert,
+} from './safe-revert.js';
 
 export function buildSafeSignature(signerAddress: string): Hex {
   const r = signerAddress.toLowerCase().replace('0x', '').padStart(64, '0');
@@ -104,31 +109,69 @@ async function executeSafeTransactionInner(
 
       const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex);
 
-      const hash = await walletClient.writeContract({
-        address: safeAddress,
-        abi: SAFE_ABI,
-        functionName: 'execTransaction',
-        args: [
-          to,
-          value,
-          data,
-          0,
-          0n,
-          0n,
-          0n,
-          '0x0000000000000000000000000000000000000000' as Address,
-          '0x0000000000000000000000000000000000000000' as Address,
-          safeSignature,
-        ],
-        account,
-        chain: walletClient.chain,
-        value: params.value,
-        ...feeOverrides,
-      });
+      let hash: Hex;
+      try {
+        hash = await walletClient.writeContract({
+          address: safeAddress,
+          abi: SAFE_ABI,
+          functionName: 'execTransaction',
+          args: [
+            to,
+            value,
+            data,
+            0,
+            0n,
+            0n,
+            0n,
+            '0x0000000000000000000000000000000000000000' as Address,
+            '0x0000000000000000000000000000000000000000' as Address,
+            safeSignature,
+          ],
+          account,
+          chain: walletClient.chain,
+          value: params.value,
+          ...feeOverrides,
+        });
+      } catch (writeErr) {
+        // viem pre-flight gas estimation may revert with GS013 when the inner
+        // call would fail. Decode the inner reason so callers (and tx-retry)
+        // can distinguish self-already-claimed from lost-race from transient.
+        const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
+        if (msg.includes('GS013') || msg.includes('GS026')) {
+          const inner = await decodeSafeInnerRevert(publicClient, params);
+          if (inner.decodedName) {
+            const formatted = formatDecodedRevert(inner.decodedName, inner.decodedArgs);
+            throw new SafeInnerRevertError(
+              `Safe execTransaction inner revert (estimate): ${formatted}`,
+              inner.innerSelector,
+              inner.innerData,
+              inner.decodedName,
+              inner.decodedArgs,
+              null,
+            );
+          }
+        }
+        throw writeErr;
+      }
       // Wait inside the retry attempt so reverted Safe executions caused by
       // stale nonce signatures (GS026/GS013) re-read nonce and re-sign.
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== 'success') {
+        // Safe v1.3 wraps inner reverts as GS013 — re-simulate to recover
+        // the actual selector + args for diagnostics and to let tx-retry
+        // mark known-permanent inner errors as non-recoverable.
+        const inner = await decodeSafeInnerRevert(publicClient, params);
+        if (inner.decodedName) {
+          const formatted = formatDecodedRevert(inner.decodedName, inner.decodedArgs);
+          throw new SafeInnerRevertError(
+            `Safe execTransaction inner revert: ${formatted} (txHash=${hash})`,
+            inner.innerSelector,
+            inner.innerData,
+            inner.decodedName,
+            inner.decodedArgs,
+            hash as Hex,
+          );
+        }
         throw new Error(`Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=${hash})`);
       }
       return hash;

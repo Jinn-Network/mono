@@ -45,6 +45,10 @@ export function collectTestnetAutoIntentGenerators(opts: {
   safeAddress?: `0x${string}`;
   /** Agent EOA private key — passed to generator configs that sign intents. */
   agentPrivateKey?: `0x${string}`;
+  /** Override prediction.v0 submission window (ms). */
+  predictionV0WindowMs?: number;
+  /** Override prediction.v0 window→resolveTs gap (ms). */
+  predictionV0ResolveGapMs?: number;
 }): { generators: Array<{ kind: string; generator: IntentGenerator }>; logLines: string[] } {
   const generators: Array<{ kind: string; generator: IntentGenerator }> = [];
   const logLines: string[] = [];
@@ -58,6 +62,8 @@ export function collectTestnetAutoIntentGenerators(opts: {
     agentEoa: opts.agentEoa,
     safeAddress: opts.safeAddress,
     agentPrivateKey: opts.agentPrivateKey,
+    predictionV0WindowMs: opts.predictionV0WindowMs,
+    predictionV0ResolveGapMs: opts.predictionV0ResolveGapMs,
   };
   for (const kind of knownKinds()) {
     const entry = SPEC_KINDS[kind] as SpecKind;

@@ -52,16 +52,30 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   if (lower.includes('user rejected') || lower.includes('user denied')) return false;
   if (lower.includes('rejected the request')) return false;
 
+  // SafeInnerRevertError carries the decoded inner revert (e.g. JobAlreadyClaimed
+  // when another operator wins a same-block claim race). Permanent inner errors
+  // can't unstick within the retry window — bail immediately so the daemon
+  // surfaces the real reason instead of burning the retry budget.
+  if (error && typeof error === 'object' && (error as { name?: string }).name === 'SafeInnerRevertError') {
+    const decodedName = (error as { decodedName?: string | null }).decodedName ?? null;
+    const PERMANENT = new Set([
+      'JobAlreadyClaimed',
+      'IneligibleToClaim',
+      'NoClaimExists',
+      'NotClaimOwner',
+      'DeliveryAlreadyClaimed',
+      'AlreadyClaimed',
+      'RequestNotFound',
+    ]);
+    if (decodedName != null && PERMANENT.has(decodedName)) return false;
+    // Unknown decoded inner — fall through to generic GS013 handling
+  }
+
   // Gnosis Safe 1.3.0 wraps every inner execTransaction revert as GS013 when
-  // safeTxGas == 0 && gasPrice == 0 (see GnosisSafe.sol §execTransaction:
-  // `require(success || safeTxGas != 0 || gasPrice != 0, "GS013")`). That
-  // hides the real cause, which in this codebase is often GS026 ("Invalid
-  // owner provided") from a stale-nonce signature when two Safe writes
-  // raced. The `executeSafeTransaction` lambda already re-reads the Safe
-  // nonce and re-signs on every retry, so treating GS013 as recoverable is
-  // self-healing for the racy case. A truly unrecoverable GS013 (e.g.
-  // downstream contract bug) still fails after maxAttempts with the same
-  // error — same end state as before.
+  // safeTxGas == 0 && gasPrice == 0. When the inner reason is decodable,
+  // SafeInnerRevertError above handles it. The remaining GS013/GS026 path
+  // covers stale-nonce signature races, which the `executeSafeTransaction`
+  // retry self-heals by re-reading nonce and re-signing.
   if (msg.includes('GS013')) return true;
   if (msg.includes('GS026')) return true;
 

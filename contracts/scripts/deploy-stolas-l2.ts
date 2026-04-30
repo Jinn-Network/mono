@@ -1,8 +1,17 @@
 /**
- * Deploy the full stOLAS L2 stack on Base Sepolia with JINN tokens.
+ * Deploy the full stOLAS L2 stack on Base Sepolia.
  *
- * This replaces the earlier deploy-stolas.ts which used the wrong JINN token.
- * All contracts use fast-test L2 JINN (0xAB9a01cd...).
+ * ROLE CLARIFICATION: stOLAS is our Autonolas-staking fork. In our testnet it
+ * plays the OLAS role (operator onboarding + reward distribution). The L2
+ * token threaded through this script (`L2_JINN`) is the Phase 1a bridged
+ * "Jinn" ERC20 at 0xAB9a01cd... (deployed 2026-04-08) — it has on-chain
+ * name="Jinn"/symbol="JINN" but serves as the OLAS-equivalent token here.
+ * The actual JINN minted by the v0 cross-chain pipeline is a separate token
+ * (tJINN on testnet); see `deploy-jinn-mvi-l2.ts` for the v0 emitter and
+ * `deploy-jinn-mvi-l1.ts` for the v0 minter (JinnDistributor).
+ *
+ * This replaces the earlier deploy-stolas.ts. All contracts use the L2
+ * Phase 1a token at 0xAB9a01cd... (fast-test variant).
  *
  * Deployment order:
  *   1. RecoveryModule

@@ -83,8 +83,16 @@ export async function executeTwoLayerClaim(
   if (!alreadyClaimed) {
     const result = await registryClient.claimJob(requestIdHex);
     if (!result.claimed) {
+      const detail =
+        result.reason === 'lost-race' && result.competitor
+          ? `lost claim race to ${result.competitor}`
+          : result.reason === 'lost-race'
+            ? 'lost claim race to another operator'
+            : result.reason === 'ineligible'
+              ? 'eligibility checker rejected'
+              : `tx reverted${result.reason ? ` (${result.reason})` : ''}`;
       throw new Error(
-        `[claim-orchestration] ClaimRegistry claim failed for ${claimWindow.requestId} — another operator may hold the claim`,
+        `[claim-orchestration] ClaimRegistry claim failed for ${claimWindow.requestId} — ${detail}`,
       );
     }
     registryClaimWasFresh = true;

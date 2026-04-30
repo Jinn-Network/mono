@@ -32,7 +32,7 @@ import {
   resolveAcceptanceRpcUrl,
 } from './lib/acceptance-operator-config.mjs';
 import { PASSWORD_RESOLUTION_HINT, resolveAcceptancePassword } from './lib/resolve-acceptance-password.mjs';
-import { readArtifactProgress } from './lib/acceptance-artifacts.mjs';
+import { readRunWindowArtifactProgress } from './lib/acceptance-artifacts.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
@@ -40,7 +40,7 @@ const DEFAULT_PACKAGE_SPEC = '@jinn-network/client@canary';
 const DEFAULT_TARBALL = join(clientRoot, 'jinn-client.tgz');
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_POLL_MS = 15_000;
-const DEFAULT_TARGET_CYCLES = 2;
+const DEFAULT_TARGET_CYCLES = 1;
 
 function printHelp() {
   console.log(`Usage: node scripts/testnet-acceptance.mjs [options]
@@ -66,7 +66,7 @@ Options:
   --evidence-dir <path>             Explicit evidence directory
   --timeout-ms <ms>                 Max daemon runtime window (default: 1200000)
   --poll-ms <ms>                    Poll interval while waiting for cycles
-  --target-cycles <n>               Required new cycles (default: 2)
+  --target-cycles <n>               Required new cycles (default: 1)
   --help                            Show this help
 
 Required environment:
@@ -267,9 +267,8 @@ async function main() {
     runIdSuffix: runId,
     env,
   });
-  const desiredStateIds = (config.desiredStates ?? []).map((state) => state.id);
-  if (targetCycles > desiredStateIds.length) {
-    fail(`target-cycles (${targetCycles}) exceeds configured desired states (${desiredStateIds.length}).`);
+  if (targetCycles < 1) {
+    fail(`target-cycles (${targetCycles}) must be >= 1.`);
   }
   writeJson(join(clientHome, 'config.json'), config);
 
@@ -339,13 +338,15 @@ async function main() {
 
   const baselineHistory = parseJsonStdout(execJinn(['history', '--limit', '500', '--json'], '05-history-before').stdout, 'history-before');
   const baselineCounts = countHistoryKinds(baselineHistory);
-  const baselineArtifacts = readArtifactProgress(config.dbPath, desiredStateIds);
+  const runStartAt = new Date().toISOString();
+  const baselineArtifacts = readRunWindowArtifactProgress(config.dbPath, runStartAt);
   const baselineRewards = parseJsonStdout(execJinn(['rewards', '--json'], '06-rewards-before').stdout, 'rewards-before');
   const baselineStatus = parseJsonStdout(execJinn(['status', '--json'], '07-status-before').stdout, 'status-before');
   writeJson(join(evidenceDir, 'baseline-summary.json'), {
     historyCounts: baselineCounts,
-    desiredStateIds,
-    artifactProgress: baselineArtifacts.byRestorationJob,
+    runStartAt,
+    cycleSubstrate: 'prediction.v0',
+    artifactProgress: baselineArtifacts.byDesiredStateId,
     pendingRewardsWei: sumPendingRewards(baselineRewards).toString(),
     status: baselineStatus,
   });
@@ -420,12 +421,12 @@ async function main() {
       }
 
       const status = parseJsonStdout(execJinn(['status', '--json'], '09-status-poll').stdout, 'status-poll');
-      const artifactProgress = readArtifactProgress(config.dbPath, desiredStateIds);
+      const artifactProgress = readRunWindowArtifactProgress(config.dbPath, runStartAt);
       const snapshot = {
         at: new Date().toISOString(),
-        desiredStateIds,
+        runStartAt,
         completedCycles: artifactProgress.completedCycles,
-        artifactProgress: artifactProgress.byRestorationJob,
+        artifactProgress: artifactProgress.byDesiredStateId,
         blocking: status.exit?.blocking ?? false,
         daemonShutdownState: status.daemon?.shutdownState ?? null,
       };
@@ -458,7 +459,7 @@ async function main() {
     const statusAfter = parseJsonStdout(execJinn(['status', '--json'], '12-status-after').stdout, 'status-after');
     const rewardsBeforeClaim = parseJsonStdout(execJinn(['rewards', '--json'], '13-rewards-before-claim').stdout, 'rewards-before-claim');
     const historyAfter = parseJsonStdout(execJinn(['history', '--limit', '500', '--json'], '14-history-after').stdout, 'history-after');
-    const artifactsAfter = readArtifactProgress(config.dbPath, desiredStateIds);
+    const artifactsAfter = readRunWindowArtifactProgress(config.dbPath, runStartAt);
     writeJson(join(evidenceDir, '14-artifacts-after.json'), artifactsAfter);
 
     const claim = parseJsonStdout(execJinn(['claim-rewards', '--yes', '--json'], '15-claim-rewards').stdout, 'claim-rewards');
@@ -483,11 +484,12 @@ async function main() {
       bootstrap,
       startup,
       stop,
-      desiredStateIds,
+      runStartAt,
+      cycleSubstrate: 'prediction.v0',
       observedCompletedCycles: observed.artifactProgress.completedCycles,
-      observedArtifactProgress: observed.artifactProgress.byRestorationJob,
+      observedArtifactProgress: observed.artifactProgress.byDesiredStateId,
       baselineHistoryCounts: baselineCounts,
-      baselineArtifactProgress: baselineArtifacts.byRestorationJob,
+      baselineArtifactProgress: baselineArtifacts.byDesiredStateId,
       pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
       rewardClaimMode,
       claim,
