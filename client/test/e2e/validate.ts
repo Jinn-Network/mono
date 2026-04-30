@@ -560,6 +560,45 @@ async function main(): Promise<void> {
 
   // API server for DAEMON_API_URL flow
   let restorerApiServer: import('../../src/api/server.js').ApiServer | undefined;
+  let e2eClaimRegistryAddress: Address | undefined;
+
+  async function deployClaimRegistryForE2e(): Promise<Address> {
+    if (e2eClaimRegistryAddress) return e2eClaimRegistryAddress;
+
+    const { createWalletClient: createWC } = await import('viem');
+    const { privateKeyToAccount } = await import('viem/accounts');
+    const { readFileSync: readFS, existsSync } = await import('node:fs');
+    const { join: joinPath } = await import('node:path');
+
+    const artifactPath = joinPath(__dirname, '..', '..', '..', 'contracts', 'artifacts', 'src', 'claiming', 'ClaimRegistry.sol', 'ClaimRegistry.json');
+    if (!existsSync(artifactPath)) {
+      throw new Error(`ClaimRegistry artifact not found (${artifactPath}); run contracts build before e2e`);
+    }
+    const artifact = JSON.parse(readFS(artifactPath, 'utf-8'));
+
+    const deployerKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
+    const deployerAccount = privateKeyToAccount(deployerKey);
+    await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [deployerAccount.address, '0x56BC75E2D63100000']);
+    const deployerWallet = createWC({
+      account: deployerAccount,
+      chain: base,
+      transport: http(ANVIL_RPC),
+    });
+
+    const constructorArgs = encodeAbiParameters(
+      [{ type: 'uint256' }, { type: 'address' }],
+      [60n, deployerAccount.address],
+    );
+    const deployHash = await deployerWallet.sendTransaction({
+      data: (artifact.bytecode + constructorArgs.slice(2)) as Hex,
+      chain: base,
+    });
+    await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
+    const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
+    e2eClaimRegistryAddress = deployReceipt.contractAddress as Address;
+    console.log(`    E2E ClaimRegistry deployed at: ${e2eClaimRegistryAddress}`);
+    return e2eClaimRegistryAddress;
+  }
 
   try {
     // ── Phase 1: Infrastructure ──────────────────────────────────────────────
@@ -2117,7 +2156,9 @@ async function main(): Promise<void> {
         }
 
         const claimRegistryAddress = (
-          process.env['JINN_CLAIM_REGISTRY_ADDRESS'] ?? CHAIN_CONFIG.claimRegistry ?? ''
+          process.env['JINN_CLAIM_REGISTRY_ADDRESS']
+          || CHAIN_CONFIG.claimRegistry
+          || await deployClaimRegistryForE2e()
         ) as string;
         const claimDeps = claimRegistryAddress
           ? {
@@ -2146,7 +2187,7 @@ async function main(): Promise<void> {
             },
             claimDeps,
             packagingDeps: { ipfsRegistryUrl: 'https://registry.autonolas.tech' },
-            manifestDeps: {
+            envelopeDeps: {
               ipfsRegistryUrl: 'https://registry.autonolas.tech',
               agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
               safeAddress: safeAddress as `0x${string}`,

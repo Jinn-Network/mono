@@ -172,9 +172,13 @@ describe('release-client runner', () => {
       .filter((call) => call.command === 'forge')
       .map((call) => call.args.join(' '));
     expect(forgeCalls).toEqual([
-      'install foundry-rs/forge-std --no-git',
       'test --match-contract Invariant',
     ]);
+    expect(calls.some((call) =>
+      call.command === 'node' &&
+      call.args.join(' ') === '../client/scripts/ensure-forge-std.mjs' &&
+      call.cwd?.endsWith('/contracts'),
+    )).toBe(true);
     expect(calls.some((call) =>
       call.command === 'yarn' &&
       call.args.join(' ') === 'test' &&

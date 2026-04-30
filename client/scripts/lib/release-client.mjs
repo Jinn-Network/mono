@@ -480,7 +480,7 @@ export function releaseGateSteps(skipAcceptance = false) {
     ['gate-operator', 'yarn release:operator-gate', 'yarn', ['release:operator-gate'], 'clientRoot'],
     ['gate-contracts-install', 'contracts: yarn install --immutable', 'yarn', ['install', '--immutable'], 'contractsRoot'],
     ['gate-contracts-test', 'contracts: yarn test', 'yarn', ['test'], 'contractsRoot'],
-    ['gate-contracts-foundry-install', 'contracts: forge install foundry-rs/forge-std --no-git', 'forge', ['install', 'foundry-rs/forge-std', '--no-git'], 'contractsRoot'],
+    ['gate-contracts-foundry-install', 'contracts: ensure forge-std', 'node', ['../client/scripts/ensure-forge-std.mjs'], 'contractsRoot'],
     ['gate-contracts-foundry-invariants', 'contracts: forge test --match-contract Invariant', 'forge', ['test', '--match-contract', 'Invariant'], 'contractsRoot'],
   ];
   if (!skipAcceptance) {

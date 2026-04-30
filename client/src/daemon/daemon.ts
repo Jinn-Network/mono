@@ -14,7 +14,8 @@ import { RestorationEngine, type RestorationEngineOptions } from '../restorer/en
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
-import type { IntentSource } from '../intents/sources.js';
+import { StaticConfiguredIntentSource, type IntentSource } from '../intents/sources.js';
+import type { RestorationJob } from '../types/index.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -57,6 +58,8 @@ export interface DaemonConfig {
 
   /** Restoration intent sources polled by CreatorLoop. */
   intentSources?: IntentSource[];
+  /** Backwards-compatible static intents; used when intentSources is omitted. */
+  desiredStates?: RestorationJob[];
 
   /**
    * Creator Safe address — used to scope CreatorLoop's SQLite idempotency
@@ -94,9 +97,11 @@ export class Daemon {
     this.store = new Store(config.dbPath);
     this.adapter = config.adapter;
     this.apiPort = config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
+    const intentSources = config.intentSources
+      ?? (config.desiredStates ? [new StaticConfiguredIntentSource(config.desiredStates)] : []);
     this.creatorLoop = new CreatorLoop(
       this.adapter,
-      config.intentSources ?? [],
+      intentSources,
       this.store,
       config.creatorSafeAddress,
     );

@@ -417,27 +417,21 @@ export class MechAdapter implements ExecutionAdapter {
             const iCreatedEvaluation = this.pendingEvaluationClaims.has(requestId);
             if (!iDelivered && !iCreatedRestoration && !iCreatedEvaluation) continue;
 
-            // (a) Cross-operator claim path: we created a restoration but another
-            //     mech delivered it. The router still needs `restorationDeliveryClaimed`
-            //     flipped before `createEvaluationJob` can fire, so the creator Safe
-            //     submits the claim with an evidenceHash derived from the delivered
-            //     envelope on IPFS.
+            // (a) Creator-side claim path: we created the restoration, so the
+            //     router needs `restorationDeliveryClaimed` flipped before
+            //     `createEvaluationJob` can fire. Production engine deliveries
+            //     usually claim atomically; this call is idempotent and also
+            //     covers legacy/test adapter deliveries that only wrote to the
+            //     marketplace.
             //
-            //     Same-operator deliveries (iDelivered=true) already claimed via the
-            //     restorer engine's deliverAndClaim path — that's atomic with the
-            //     deliverToMarketplace call. Skipping here avoids a redundant Safe-tx
-            //     attempt that would log spurious `already-claimed` / `RequestNotFound`
-            //     /  V2 evidenceHash errors for our own deliveries.
-            const isCrossOperator = iCreatedRestoration && !iDelivered;
-            if (isCrossOperator) {
+            //     For V2 claims we may not have a local store entry, so derive
+            //     evidenceHash from the delivered envelope on IPFS. If derivation
+            //     fails, skip and retry on a later poll.
+            if (iCreatedRestoration) {
               try {
                 const variant = this.config.routerClaimDeliveryVariant;
                 let evidenceHash: `0x${string}` | undefined;
                 if (variant === 'v2') {
-                  // Cross-operator: we did NOT deliver, so no local store entry.
-                  // Derive evidenceHash by fetching the delivered envelope from IPFS
-                  // and recomputing keccak256(JCS(envelope - signature)).
-                  // If derivation fails, skip claim and let the next watch loop retry.
                   try {
                     const deliveryDigest = deliveryDataHex.startsWith('0x')
                       ? deliveryDataHex.slice(2)
@@ -454,14 +448,14 @@ export class MechAdapter implements ExecutionAdapter {
                     const recomputed = keccak256(jcsBytes);
                     if (recomputed !== signature.hash) {
                       console.error(
-                        `[mech] cross-operator claimDelivery skipped for ${requestId}: recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
+                        `[mech] claimDelivery skipped for ${requestId}: recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
                       );
                       continue;
                     }
                     evidenceHash = recomputed as `0x${string}`;
                   } catch (deriveErr) {
                     console.error(
-                      `[mech] cross-operator evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
+                      `[mech] evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
                       deriveErr,
                     );
                     continue;

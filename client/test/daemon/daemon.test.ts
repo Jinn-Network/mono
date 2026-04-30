@@ -49,4 +49,19 @@ describe('Daemon', () => {
     await daemon.stop();
     expect(daemon.getShutdownState()).toBe('clean');
   });
+
+  it('accepts legacy desiredStates when intentSources are omitted', async () => {
+    const config: DaemonConfig = {
+      adapter: new LocalAdapter(),
+      runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
+      desiredStates: [{ id: 'legacy-static', description: 'legacy static intent' }],
+      dbPath: ':memory:',
+      restorationEngine: minimalEngineConfig(),
+    };
+
+    const daemon = new Daemon(config);
+    await daemon.start();
+    await daemon.stop();
+    expect(daemon.getShutdownState()).toBe('clean');
+  });
 });
