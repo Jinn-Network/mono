@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
@@ -9,6 +10,7 @@ import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../erc8004/index.js';
 import type { X402Config } from '../x402/handler.js';
+import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
@@ -27,6 +29,21 @@ export interface DaemonConfig {
   /** Engine tick interval (ms) for re-driving in-flight intents. Defaults to 5000. */
   pollIntervalMs?: number;
   apiPort?: number;
+  /**
+   * Bind host for the HTTP API server. Defaults to `127.0.0.1` so the
+   * daemon API is unreachable across the network unless operators opt in.
+   * Cost-mutating routes additionally require a bearer token.
+   */
+  apiBindHost?: string;
+  /**
+   * Bearer token required on cost-mutating API routes (`POST /artifacts`,
+   * `POST /v1/artifacts/acquire`). main.ts generates one at startup
+   * (or reads from `DAEMON_API_TOKEN`) and passes it here. When omitted
+   * (e.g. unit tests that don't exercise the cost-mutating routes), the
+   * Daemon synthesizes a random per-process token so the server still
+   * has something to compare against.
+   */
+  apiToken?: string;
   peers?: string[];
   signer?: EthHttpSigner;
   subgraphUrl?: string;
@@ -55,6 +72,16 @@ export interface DaemonConfig {
 
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
+
+  /**
+   * Daemon-side Corpus factory. Invoked after the Daemon constructs its
+   * Store so the corpus shares the same SQLite handle. When set, the API
+   * server exposes `POST /v1/artifacts/acquire` so the MCP subprocess can
+   * acquire artifacts without ever holding the agent EOA private key. Built
+   * in `main.ts` once `subgraphUrl` is configured. See
+   * spec/2026-04-30-phase-a-umbrella.md §4.
+   */
+  corpusFactory?: (store: Store) => Corpus;
 
   /** Restoration intent sources polled by CreatorLoop. */
   intentSources?: IntentSource[];
@@ -95,6 +122,7 @@ export class Daemon {
   private apiServer?: ApiServer;
   private peerSync?: PeerSync;
   private readonly apiPort: number;
+  private readonly apiToken: string;
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
   private jinnClaimLoop?: JinnClaimLoop;
@@ -103,6 +131,11 @@ export class Daemon {
     this.store = new Store(config.dbPath);
     this.adapter = config.adapter;
     this.apiPort = config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
+    // When the embedder didn't supply a token (e.g. a unit test that doesn't
+    // exercise the cost-mutating routes), fall back to a fresh random token
+    // so the API server still has something to compare bearer headers
+    // against. Production callers (main.ts) always pass an explicit token.
+    this.apiToken = config.apiToken ?? randomBytes(32).toString('hex');
     const intentSources = config.intentSources
       ?? (config.desiredStates ? [new StaticConfiguredIntentSource(config.desiredStates)] : []);
     this.creatorLoop = new CreatorLoop(
@@ -149,11 +182,17 @@ export class Daemon {
     emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 
     // Start HTTP API server
+    const corpus = this.config.corpusFactory
+      ? this.config.corpusFactory(this.store)
+      : undefined;
     this.apiServer = await startApiServer({
       port: this.apiPort,
+      bindHost: this.config.apiBindHost,
+      apiToken: this.apiToken,
       store: this.store,
       x402: this.config.x402,
       status: this.config.status,
+      corpus,
     });
 
     // Backfill remote artifacts from subgraph if configured

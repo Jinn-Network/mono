@@ -75,6 +75,17 @@ export const JinnConfigSchema = z.object({
   /** HTTP API port */
   apiPort: z.number().int().positive().default(7331),
 
+  /**
+   * Bind host for the HTTP API server. Defaults to `127.0.0.1` so the daemon
+   * is unreachable across the network out of the box — operators who need
+   * LAN access (or who terminate TLS in front of the daemon) opt in via this
+   * knob or `JINN_API_BIND_HOST`. Cost-mutating routes (`POST /artifacts`,
+   * `POST /v1/artifacts/acquire`) require a bearer token regardless; the
+   * bind host is the outer firewall.
+   * Env: JINN_API_BIND_HOST.
+   */
+  apiBindHost: z.string().optional(),
+
   /** Path to claude CLI binary */
   claudePath: z.string().default('claude'),
 
@@ -548,6 +559,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
   if (env['JINN_BALANCE_TOPUP_INTERVAL_MS']) merged.balanceTopupIntervalMs = Number.parseInt(env['JINN_BALANCE_TOPUP_INTERVAL_MS'], 10);
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
+  if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
   if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
@@ -741,6 +753,7 @@ const TRACKED_ENV_VARS = [
   'JINN_REWARD_CLAIM_INTERVAL_MS',
   'JINN_BALANCE_TOPUP_INTERVAL_MS',
   'JINN_API_PORT',
+  'JINN_API_BIND_HOST',
   'JINN_CLAUDE_PATH',
   'JINN_CLAUDE_MODEL',
   'JINN_RUNTIME_MODE',

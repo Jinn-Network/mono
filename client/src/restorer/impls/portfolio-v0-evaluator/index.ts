@@ -735,7 +735,7 @@ export class PortfolioV0Evaluator implements RestorerImpl {
           artifactType: 'evaluation_verdict',
           metadata: { verdict, score },
           tags: ['verdict', 'evaluation'],
-          access: { kind: 'open' },
+          access: { priceUsdc: '0' },
         },
       ],
     };

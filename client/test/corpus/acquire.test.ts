@@ -104,4 +104,49 @@ describe('acquireArtifactContent', () => {
     ).rejects.toThrow(/HashMismatch|hash mismatch/);
     expect(store.getNetworkArtifact(declaredSha)).toBeNull();
   });
+
+  it('self-store re-verifies sha256 and refuses to mirror corrupt bytes', async () => {
+    // Simulate cache-poisoning: served_artifacts row claims sha256=declaredSha
+    // but actually contains wrong bytes. The self-store fast path must NOT
+    // copy them into network_artifacts where peers could fetch via x402.
+    const declaredSha = 'a'.repeat(64);
+    const wrongBytes = Buffer.from('not what was promised');
+    const selfSafe = '0x' + 'f'.repeat(40);
+
+    // Direct-write into the DB so we can inject a row whose sha256 doesn't
+    // match its bytes (saveServedArtifact would compute the hash for us;
+    // we want to bypass that to mimic a corrupted row on disk).
+    const fakeStore = {
+      getNetworkArtifact: () => null,
+      getServedArtifact: () => ({
+        sha256: declaredSha,
+        artifactType: 'design_document',
+        envelopeCid: null,
+        content: wrongBytes,
+        priceUsdc: '0',
+        createdAt: '2026-04-30T00:00:00.000Z',
+      }),
+      saveNetworkArtifact: vi.fn(),
+      touchNetworkArtifactUsage: vi.fn(),
+    } as unknown as Store;
+
+    const acquireFn = vi.fn();
+    await expect(
+      acquireArtifactContent({
+        sha256: declaredSha,
+        artifactType: 'design_document',
+        access,
+        store: fakeStore,
+        selfSafeAddress: selfSafe,
+        privateKey: TEST_KEY,
+        acquireFn,
+        ownerSafe: selfSafe,
+      }),
+    ).rejects.toThrow(/HashMismatch|hash mismatch/);
+    // Critical: the corrupt bytes must not have been written to the
+    // peer-serving network_artifacts cache.
+    expect(fakeStore.saveNetworkArtifact).not.toHaveBeenCalled();
+    // We never fell through to origin either.
+    expect(acquireFn).not.toHaveBeenCalled();
+  });
 });

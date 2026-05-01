@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import * as fs from 'node:fs';
+import { existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -18,10 +18,10 @@ function resolveJinnMcpLauncher(explicitPath?: string): { command: string; args:
   const mcpDir = join(__dirname, '..', 'mcp');
   const js = join(mcpDir, 'server.js');
   const ts = join(mcpDir, 'server.ts');
-  if (fs.existsSync(js)) {
+  if (existsSync(js)) {
     return { command: process.execPath, args: [js] };
   }
-  if (fs.existsSync(ts)) {
+  if (existsSync(ts)) {
     return { command: process.execPath, args: ['--import', 'tsx', ts] };
   }
   return { command: process.execPath, args: [js] };
@@ -48,10 +48,10 @@ export class ClaudeRunner implements Runner {
     const prompt = buildPrompt(restorationJob);
 
     // Write MCP config to temp dir
-    const tmpDir = fs.mkdtempSync(join(tmpdir(), 'jinn-runner-'));
+    const tmpDir = mkdtempSync(join(tmpdir(), 'jinn-runner-'));
     const mcpConfigPath = join(tmpDir, 'mcp-config.json');
 
-    fs.writeFileSync(mcpConfigPath, JSON.stringify({
+    writeFileSync(mcpConfigPath, JSON.stringify({
       mcpServers: {
         'jinn-client': {
           command: this.mcpLauncher.command,
@@ -68,10 +68,16 @@ export class ClaudeRunner implements Runner {
               : '',
             STORE_PATH: context.storePath ?? '',
             DAEMON_API_URL: context.daemonApiUrl ?? '',
+            // Bearer token for the daemon's cost-mutating routes. MCP
+            // subprocess attaches this as `Authorization: Bearer <token>`
+            // on fetches to `POST /v1/artifacts/acquire` and
+            // `POST /artifacts`. Empty string when unset → daemon returns 401.
+            DAEMON_API_TOKEN: context.daemonApiToken ?? '',
+            // Subgraph + IPFS gateway only — both keyless. The agent EOA
+            // private key NEVER leaves the daemon process; acquire_artifact
+            // proxies through DAEMON_API_URL instead.
             JINN_CORPUS_SUBGRAPH_URL: context.corpusEnv?.subgraphUrl ?? '',
             JINN_CORPUS_IPFS_GATEWAY_URL: context.corpusEnv?.ipfsGatewayUrl ?? '',
-            JINN_CORPUS_AGENT_PRIVATE_KEY: context.corpusEnv?.agentPrivateKey ?? '',
-            JINN_CORPUS_SELF_SAFE_ADDRESS: context.corpusEnv?.selfSafeAddress ?? '',
           },
         },
       },
@@ -117,7 +123,7 @@ export class ClaudeRunner implements Runner {
 
       return { data: '' };
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   }
 }

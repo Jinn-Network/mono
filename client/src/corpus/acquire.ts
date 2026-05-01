@@ -8,11 +8,19 @@
 
 import { createHash } from 'node:crypto';
 import type { Store } from '../store/store.js';
-import { acquireArtifactWithPayment } from '../x402/acquire.js';
+import { acquireArtifactWithPayment, type AcquireWithPaymentResult } from '../x402/acquire.js';
 import type { ArtifactContent, RouteResolver } from './types.js';
 import { AcquireError, HashMismatchError } from './types.js';
 
-type AcquireFn = (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null>;
+/**
+ * Origin acquire function. Historically returned `Buffer | null`; the new
+ * discriminated union lets callers distinguish not_found vs payment_failed
+ * vs network_error. We accept either shape so test fakes that still return
+ * `Buffer | null` keep working.
+ */
+type AcquireFnLegacy = (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null>;
+type AcquireFnNew = (endpoint: string, sha256: string, privateKey: string) => Promise<AcquireWithPaymentResult>;
+type AcquireFn = AcquireFnLegacy | AcquireFnNew;
 
 export interface AcquireArtifactArgs {
   sha256: string;
@@ -67,6 +75,15 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
   if (ownerSafe && ownerSafe.toLowerCase() === selfSafeAddress.toLowerCase()) {
     const own = store.getServedArtifact(sha256);
     if (own) {
+      // Re-verify before mirroring. If served_artifacts has been corrupted
+      // (disk error, manual edit, future migration bug, etc.) we must NOT
+      // propagate the bad bytes into network_artifacts where peers can
+      // fetch them via x402. Throwing closes the cache-poisoning gap; the
+      // self-store path is now hash-equivalent to origin / route-resolver.
+      const actualSha = sha256Hex(own.content);
+      if (actualSha !== sha256) {
+        throw new HashMismatchError(sha256, actualSha, 'self-store', selfSafeAddress);
+      }
       // Mirror into cache so peer asks for the same content can hit cache (provenance: self-store-mirror).
       const ts = now();
       store.saveNetworkArtifact({
@@ -128,8 +145,25 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
   // 4. Origin fetch
   let bytes: Buffer | null;
   try {
-    bytes = await acquireFn(access.endpoint, sha256, privateKey);
+    const raw = await acquireFn(access.endpoint, sha256, privateKey);
+    // Accept both the legacy `Buffer | null` shape and the new discriminated
+    // union from acquireArtifactWithPayment. Buffer.isBuffer guards before
+    // we duck-type into the union.
+    if (raw === null || Buffer.isBuffer(raw)) {
+      bytes = raw;
+    } else if (raw.ok === true) {
+      bytes = raw.content;
+    } else {
+      // ok: false — preserve the reason so the caller / daemon route can
+      // surface it via AcquireError.cause.
+      throw new AcquireError(
+        sha256,
+        `origin fetch failed: ${raw.reason}${raw.message ? ` (${raw.message})` : ''}`,
+        raw,
+      );
+    }
   } catch (err) {
+    if (err instanceof AcquireError) throw err;
     throw new AcquireError(sha256, 'origin fetch failed', err);
   }
   if (!bytes) {

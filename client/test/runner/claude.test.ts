@@ -63,7 +63,7 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     expect(call.args).toContain('--mcp-config');
   });
 
-  it('writes JINN_CORPUS_* MCP env from context.corpusEnv (production credential path)', async () => {
+  it('writes JINN_CORPUS_* MCP env from context.corpusEnv (keyless URLs only — agent EOA stays daemon-side)', async () => {
     const { tracedSpawn } = await import('../../src/trajectory/index.js');
     let captured: { mcpServers: { 'jinn-client': { env: Record<string, string> } } } | undefined;
     vi.mocked(tracedSpawn).mockImplementation(async (opts) => {
@@ -82,8 +82,6 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     const corpusEnv = {
       subgraphUrl: 'https://sg.example/gql',
       ipfsGatewayUrl: 'https://gw.example',
-      agentPrivateKey: '0xc0ffee',
-      selfSafeAddress: '0xdeadbeef',
     };
     await runner.run(
       {
@@ -103,8 +101,11 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     const env = captured!.mcpServers['jinn-client'].env;
     expect(env.JINN_CORPUS_SUBGRAPH_URL).toBe('https://sg.example/gql');
     expect(env.JINN_CORPUS_IPFS_GATEWAY_URL).toBe('https://gw.example');
-    expect(env.JINN_CORPUS_AGENT_PRIVATE_KEY).toBe('0xc0ffee');
-    expect(env.JINN_CORPUS_SELF_SAFE_ADDRESS).toBe('0xdeadbeef');
+    // Security posture: the agent EOA private key NEVER crosses into the MCP
+    // subprocess. acquire_artifact proxies to the daemon at DAEMON_API_URL.
+    // See spec/2026-04-30-phase-a-umbrella.md §4.
+    expect(env.JINN_CORPUS_AGENT_PRIVATE_KEY).toBeUndefined();
+    expect(env.JINN_CORPUS_SELF_SAFE_ADDRESS).toBeUndefined();
   });
 
   it('does NOT call tracedSpawn when no trajectory is in RunnerContext', async () => {

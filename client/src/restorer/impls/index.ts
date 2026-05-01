@@ -42,6 +42,11 @@ export interface RestorerEnv {
   runner?: Runner;
   /** e.g. `http://127.0.0.1:${apiPort}` for {@link LegacyClaudeImpl} */
   daemonApiUrl?: string;
+  /**
+   * Bearer token for daemon API cost-mutating routes (forwarded to the MCP
+   * subprocess via env). Mirrors `daemonApiUrl` exactly.
+   */
+  daemonApiToken?: string;
   /** SQLite store path for MCP artifact handoff in {@link LegacyClaudeImpl}. */
   storePath?: string;
   /**
@@ -118,6 +123,7 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
         timeoutMs: 300_000,
         storePath: env.storePath,
         daemonApiUrl: env.daemonApiUrl,
+        daemonApiToken: env.daemonApiToken,
         corpusEnv: env.corpusEnv,
         stub: isStub,
       }),

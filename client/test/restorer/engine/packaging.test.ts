@@ -174,7 +174,7 @@ describe('walkArtifacts', () => {
     const session = artifacts.find((a) => a.artifactType === 'session_transcript');
     expect(session).toBeDefined();
     expect(session!.localPath).toContain('session-1.jsonl');
-    expect(session!.access?.kind).toBe('open');
+    expect(session!.access?.priceUsdc).toBe('0');
   });
 
   it('discovers markdown files at root as design_document', async () => {

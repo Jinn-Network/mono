@@ -22,11 +22,24 @@ export interface X402Config {
   /** Default 'eip155:8453' (Base mainnet). */
   network?: string;
   rpcUrl?: string;
+  /**
+   * @deprecated price comes from served_artifacts.priceUsdc per row; this
+   * field is ignored. Kept on the type for one cycle of caller compat.
+   */
+  pricePerArtifact?: string;
 }
 
 function dollarStringFromUsdc(usdc: string): string {
   // X402 'exact' scheme expects a string like '$0.001' for USDC amounts.
   return `$${usdc}`;
+}
+
+function mimeForArtifactType(artifactType: string | undefined): string {
+  if (!artifactType) return 'application/octet-stream';
+  const t = artifactType.toLowerCase();
+  if (t.includes('markdown') || t.includes('.md')) return 'text/markdown';
+  if (t.includes('tar') || t.includes('gz')) return 'application/gzip';
+  return 'application/octet-stream';
 }
 
 export function addX402Routes(app: Hono, store: Store, config: X402Config): void {
@@ -45,6 +58,8 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
     if (!row) return c.json({ error: 'Not found' }, 404);
 
     if (row.priceUsdc === '0') {
+      c.header('Content-Type', mimeForArtifactType(row.artifactType));
+      c.header('X-Artifact-Type', row.artifactType ?? '');
       return c.body(new Uint8Array(row.content));
     }
 
@@ -84,6 +99,8 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
       return c.json({ error: `Payment validation error: ${msg}`, accepts }, 402);
     }
 
+    c.header('Content-Type', mimeForArtifactType(row.artifactType));
+    c.header('X-Artifact-Type', row.artifactType ?? '');
     return c.body(new Uint8Array(row.content));
   });
 }

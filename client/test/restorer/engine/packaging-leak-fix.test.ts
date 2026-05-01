@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import { Store } from '../../../src/store/store.js';
 import { uploadArtifacts } from '../../../src/restorer/engine/packaging.js';
 
+const uploadToIpfsMock = vi.fn(async () => {
+  throw new Error('uploadArtifacts should NOT call uploadToIpfs in v0');
+});
+
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
-  uploadToIpfs: vi.fn(async () => {
-    throw new Error('uploadArtifacts should NOT call uploadToIpfs in v0');
-  }),
+  uploadToIpfs: uploadToIpfsMock,
   cidToDigestHex: vi.fn(),
   fetchFromIpfs: vi.fn(),
   fetchFromDigest: vi.fn(),
@@ -57,6 +59,7 @@ describe('uploadArtifacts (gating-leak-fix)', () => {
     const row = store.getServedArtifact(uploaded[0].sha256);
     expect(row).not.toBeNull();
     expect(row!.content.equals(bytes)).toBe(true);
+    expect(uploadToIpfsMock).not.toHaveBeenCalled();
   });
 
   it('throws if operatorEndpoint is missing and any artifact would be served', async () => {
@@ -106,5 +109,6 @@ describe('uploadArtifacts (gating-leak-fix)', () => {
     expect(row).not.toBeNull();
     expect(row!.priceUsdc).toBe('0.01');
     expect(row!.content.equals(bytes)).toBe(true);
+    expect(uploadToIpfsMock).not.toHaveBeenCalled();
   });
 });

@@ -61,4 +61,54 @@ describe('x402 handler — dynamic per-row price', () => {
     const res = await app.request(`/v1/artifacts/${'c'.repeat(64)}/content`);
     expect(res.status).toBe(404);
   });
+
+  // ─── Content-Type + X-Artifact-Type headers ────────────────────────────────
+
+  it('sets Content-Type: application/octet-stream and X-Artifact-Type for unknown type (free path)', async () => {
+    const sha256 = 'd'.repeat(64);
+    store.saveServedArtifact({
+      sha256,
+      artifactType: 'output.prediction.v0',
+      content: Buffer.from('data'),
+      priceUsdc: '0',
+      createdAt: '2026-04-30T00:00:00.000Z',
+    });
+
+    const res = await app.request(`/v1/artifacts/${sha256}/content`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toMatch(/application\/octet-stream/);
+    expect(res.headers.get('X-Artifact-Type')).toBe('output.prediction.v0');
+  });
+
+  it('sets Content-Type: text/markdown for markdown artifact type (free path)', async () => {
+    const sha256 = 'e'.repeat(64);
+    store.saveServedArtifact({
+      sha256,
+      artifactType: 'design_document.markdown',
+      content: Buffer.from('# Hello'),
+      priceUsdc: '0',
+      createdAt: '2026-04-30T00:00:00.000Z',
+    });
+
+    const res = await app.request(`/v1/artifacts/${sha256}/content`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toMatch(/text\/markdown/);
+    expect(res.headers.get('X-Artifact-Type')).toBe('design_document.markdown');
+  });
+
+  it('sets Content-Type: application/gzip for tarball artifact type (free path)', async () => {
+    const sha256 = 'f'.repeat(64);
+    store.saveServedArtifact({
+      sha256,
+      artifactType: 'output.bundle.tar.gz',
+      content: Buffer.from('fake-tar'),
+      priceUsdc: '0',
+      createdAt: '2026-04-30T00:00:00.000Z',
+    });
+
+    const res = await app.request(`/v1/artifacts/${sha256}/content`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toMatch(/application\/gzip/);
+    expect(res.headers.get('X-Artifact-Type')).toBe('output.bundle.tar.gz');
+  });
 });

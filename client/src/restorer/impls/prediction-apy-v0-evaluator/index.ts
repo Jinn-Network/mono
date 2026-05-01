@@ -358,7 +358,7 @@ export class PredictionApyV0Evaluator implements RestorerImpl {
           path: 'verdict.json',
           artifactType: 'evaluation_verdict',
           metadata: { verdict, score: scored.score },
-          access: { kind: 'open' },
+          access: { priceUsdc: '0' },
         },
       ],
     };

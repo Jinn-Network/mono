@@ -482,7 +482,7 @@ describe('Engine packaging integration', () => {
       venueRef: { name: 'hyperliquid' },
       gating: { verdict: 'PASS', score: '0.5' },
       verdictPayload,
-      artifacts: [{ path: 'verdict.json', artifactType: 'evaluation_verdict', tags: ['verdict'], access: { kind: 'open' } }],
+      artifacts: [{ path: 'verdict.json', artifactType: 'evaluation_verdict', tags: ['verdict'], access: { priceUsdc: '0' } }],
     };
 
     await engine.observe({

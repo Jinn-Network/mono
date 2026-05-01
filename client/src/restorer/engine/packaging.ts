@@ -31,6 +31,13 @@ import type { Store } from '../../store/store.js';
 import type { TrajectoryCollector } from '../../trajectory/collector.js';
 
 // ── OUTPUTS.json schema ───────────────────────────────────────────────────────
+//
+// OUTPUTS.json access descriptor shape (no `kind` field):
+//   { "endpoint": "https://…", "priceUsdc": "0" }       — free
+//   { "endpoint": "https://…", "priceUsdc": "0.001" }   — x402-gated
+//
+// Use explicit priceUsdc: "0" for free artifacts.
+// Omit the access object entirely to inherit the operator default price.
 
 const OutputEntrySchema = z.object({
   path: z.string(),
@@ -39,9 +46,8 @@ const OutputEntrySchema = z.object({
   tags: z.array(z.string()).optional(),
   access: z
     .object({
-      kind: z.enum(['open', 'x402-gated']),
       endpoint: z.string().optional(),
-      priceUsdc: z.string().optional(),
+      priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
     })
     .optional(),
 }).superRefine((val, ctx) => {
@@ -271,13 +277,13 @@ function sha256Hex(buf: Buffer): string {
 export async function walkArtifacts(
   workingDir: string,
   implArtifacts: OutputArtifact[] = [],
-): Promise<Array<{ localPath: string; artifactType: string; metadata?: Record<string, unknown>; tags?: string[]; access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string } }>> {
+): Promise<Array<{ localPath: string; artifactType: string; metadata?: Record<string, unknown>; tags?: string[]; access?: { endpoint?: string; priceUsdc?: string } }>> {
   const result: Array<{
     localPath: string;
     artifactType: string;
     metadata?: Record<string, unknown>;
     tags?: string[];
-    access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string };
+    access?: { endpoint?: string; priceUsdc?: string };
   }> = [];
 
   // 1. Check for OUTPUTS.json
@@ -341,7 +347,7 @@ export async function walkArtifacts(
       for (const name of readdirSync(sessionsDir)) {
         const full = join(sessionsDir, name);
         if (statSync(full).isFile() && !declared.has(full)) {
-          result.push({ localPath: full, artifactType: 'session_transcript', access: { kind: 'open' } });
+          result.push({ localPath: full, artifactType: 'session_transcript', access: { priceUsdc: '0' } });
         }
       }
     }
@@ -355,7 +361,7 @@ export async function walkArtifacts(
         extname(name).toLowerCase() === '.md' &&
         !declared.has(full)
       ) {
-        result.push({ localPath: full, artifactType: 'design_document', access: { kind: 'open' } });
+        result.push({ localPath: full, artifactType: 'design_document', access: { priceUsdc: '0' } });
       }
     }
 
@@ -365,7 +371,7 @@ export async function walkArtifacts(
       for (const name of readdirSync(logsDir)) {
         const full = join(logsDir, name);
         if (statSync(full).isFile() && !declared.has(full)) {
-          result.push({ localPath: full, artifactType: 'runtime_log', access: { kind: 'open' } });
+          result.push({ localPath: full, artifactType: 'runtime_log', access: { priceUsdc: '0' } });
         }
       }
     }
@@ -381,7 +387,7 @@ export async function walkArtifacts(
       localPath: tarballPath,
       artifactType: 'system_snapshot',
       metadata: { description: 'Full workingDir snapshot' },
-      access: { kind: 'open' },
+      access: { priceUsdc: '0' },
     });
   } catch (err) {
     console.warn(`[restorer-engine] workingDir tarball creation failed (non-fatal): ${err instanceof Error ? err.message : err}`);
@@ -408,7 +414,7 @@ export async function uploadArtifacts(
     artifactType: string;
     metadata?: Record<string, unknown>;
     tags?: string[];
-    access?: { kind?: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string };
+    access?: { endpoint?: string; priceUsdc?: string };
   }>,
   deps: PackagingDeps,
 ): Promise<UploadedArtifact[]> {

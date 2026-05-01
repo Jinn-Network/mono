@@ -364,7 +364,7 @@ export class PredictionV0Evaluator implements RestorerImpl {
           path: 'verdict.json',
           artifactType: 'evaluation_verdict',
           metadata: { verdict, score },
-          access: { kind: 'open' },
+          access: { priceUsdc: '0' },
         },
       ],
     };

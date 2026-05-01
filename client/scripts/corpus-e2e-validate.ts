@@ -11,7 +11,10 @@
  *   1. Bytes are non-empty
  *   2. network_artifacts row exists on B
  *   3. Second read uses the cache (no extra acquireFn call)
- *   4. Operator A's USDC balance increased by the price (when priceUsdc > 0)
+ *   (deferred to Anvil-fork e2e in Phase 1b: Operator A's USDC balance
+ *   increased by the price. Requires a real or mock x402 facilitator with
+ *   settlement tracking; the in-memory fakeAcquire stub used here has no
+ *   payment layer to introspect.)
  *
  * Usage:
  *   yarn corpus:e2e

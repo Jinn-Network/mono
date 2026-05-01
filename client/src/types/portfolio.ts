@@ -25,9 +25,8 @@ const ArtifactSchema = z.object({
   tags: z.array(z.string()).optional(),
   access: z
     .object({
-      kind: z.enum(['open', 'x402-gated']),
       endpoint: z.string().optional(),
-      priceUsdc: z.string().optional(),
+      priceUsdc: z.string().regex(/^\d+(\.\d+)?$/).optional(),
     })
     .optional(),
 });

@@ -18,7 +18,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
-import { handleSearchArtifacts } from './search-artifacts.js';
+import { handleSearchArtifactsOrLocalFallback } from './search-artifacts.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
 
 const server = new McpServer({
@@ -41,29 +41,38 @@ const requestId = process.env['REQUEST_ID'] ?? '';
 const storePath = process.env['STORE_PATH'] ?? '';
 const store = storePath ? new Store(storePath) : null;
 const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
+// Bearer token for daemon API cost-mutating routes. Empty string when
+// unset (e.g. legacy harness wiring) — the daemon will respond 401.
+const daemonApiToken = process.env['DAEMON_API_TOKEN'] ?? '';
 
 // ── Corpus ──────────────────────────────────────────────────────────────────
-// Build a corpus instance when the daemon supplied the necessary env vars.
-// Without it, `search_artifacts` / `acquire_artifact` fall back to local-only
-// fast paths and surface an error for the network branch. See spec §4.
-function buildCorpus(): Corpus | null {
+// Build a query-only corpus capability when the daemon supplied the keyless
+// URLs. The MCP subprocess gets `Pick<Corpus, 'query'>` — `acquire` and
+// `acquireBySha256` are NOT exposed here, so any future call site in this
+// process structurally cannot reach into the signer. `acquire_artifact`
+// proxies to the daemon over DAEMON_API_URL (which holds the agent EOA
+// private key in-process). See spec §4.
+//
+// `signer.privateKey` and `selfSafeAddress` are required by CorpusOptions
+// but unused by corpus.query. Placeholder values are confined to this
+// closure and never escape via the returned object.
+function buildCorpusQuery(): Pick<Corpus, 'query'> | null {
   if (!store) return null;
   const subgraphUrl = process.env['JINN_CORPUS_SUBGRAPH_URL'] ?? '';
   const ipfsGatewayUrl = process.env['JINN_CORPUS_IPFS_GATEWAY_URL'] ?? '';
-  const agentPrivateKey = process.env['JINN_CORPUS_AGENT_PRIVATE_KEY'] ?? '';
-  const selfSafeAddress = process.env['JINN_CORPUS_SELF_SAFE_ADDRESS'] ?? '';
-  if (!subgraphUrl || !ipfsGatewayUrl || !agentPrivateKey || !selfSafeAddress) {
+  if (!subgraphUrl || !ipfsGatewayUrl) {
     return null;
   }
-  return createCorpus({
+  const full = createCorpus({
     subgraphUrl,
     ipfsGatewayUrl,
     store,
-    signer: { privateKey: agentPrivateKey },
-    selfSafeAddress,
+    signer: { privateKey: '0x0' },
+    selfSafeAddress: '0x0000000000000000000000000000000000000000',
   });
+  return { query: full.query.bind(full) };
 }
-const corpus = buildCorpus();
+const corpus = buildCorpusQuery();
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -137,9 +146,11 @@ server.tool(
     // Publish via daemon API if available.
     if (daemonApiUrl) {
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (daemonApiToken) headers['Authorization'] = `Bearer ${daemonApiToken}`;
         const response = await fetch(`${daemonApiUrl}/artifacts`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify(artifact),
         });
         if (!response.ok) {
@@ -229,14 +240,7 @@ server.tool(
         content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured', local: [], network: [] }) }],
       };
     }
-    if (!corpus) {
-      // Local-only: still serve the fast path so agents can find their own work.
-      const local = store.searchOwnAndCached({ artifactType: args.kind, limit: args.limit ?? 50 });
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ local, network: [], warning: 'corpus not configured (missing JINN_CORPUS_* env vars); network results unavailable' }) }],
-      };
-    }
-    const out = await handleSearchArtifacts(corpus, store, args);
+    const out = await handleSearchArtifactsOrLocalFallback(corpus, store, args);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(out) }],
     };
@@ -245,7 +249,7 @@ server.tool(
 
 server.tool(
   'acquire_artifact',
-  'Fetch artifact bytes by sha256. Hits local-store (own served) and corpus cache fast paths first; falls through to network with x402 payment when necessary. Returns base64-encoded bytes and the fetch source.',
+  'Fetch artifact bytes by sha256. Hits local-store (own served) and corpus cache fast paths first; proxies to the daemon for network fetches (the daemon owns the agent EOA private key for x402 payments). Returns base64-encoded bytes and the fetch source.',
   {
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
     access: z.object({
@@ -261,39 +265,14 @@ server.tool(
         content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured' }) }],
       };
     }
-    if (!corpus) {
-      // Local-only: still allow self-store + cache hits to satisfy the request.
-      const own = store.getServedArtifact(args.sha256);
-      if (own) {
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({
-            sha256: args.sha256,
-            bytes: own.content.toString('base64'),
-            artifactType: own.artifactType,
-            source: 'self-store',
-            paidAmountUsdc: '0',
-          }) }],
-        };
-      }
-      const cached = store.getNetworkArtifact(args.sha256);
-      if (cached) {
-        store.touchNetworkArtifactUsage(args.sha256, new Date().toISOString());
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({
-            sha256: args.sha256,
-            bytes: cached.content.toString('base64'),
-            artifactType: cached.artifactType,
-            source: 'cache',
-            paidAmountUsdc: '0',
-          }) }],
-        };
-      }
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'corpus not configured and artifact not in local store' }) }],
-      };
-    }
-    try {
-      const out = await handleAcquireArtifact(corpus, store, args);
+    const result = await handleAcquireArtifact(
+      daemonApiUrl || undefined,
+      store,
+      args,
+      daemonApiToken || undefined,
+    );
+    if (result.ok) {
+      const out = result.content;
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({
           sha256: out.sha256,
@@ -304,11 +283,22 @@ server.tool(
           ...(out.sourceOperator ? { sourceOperator: out.sourceOperator } : {}),
         }) }],
       };
-    } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: `acquire failed: ${err instanceof Error ? err.message : String(err)}` }) }],
-      };
     }
+    // Structured failure — surface daemon-side reason verbatim so callers can
+    // discriminate hash_mismatch (don't retry) vs origin_null (transient).
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          error: result.error,
+          reason: result.reason,
+          sha256: result.sha256,
+          retryable: result.retryable,
+          ...(result.message ? { message: result.message } : {}),
+          ...(result.sourceOperator ? { sourceOperator: result.sourceOperator } : {}),
+        }),
+      }],
+    };
   },
 );
 

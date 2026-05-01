@@ -294,6 +294,7 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | claudePath | JINN_CLAUDE_PATH | claude |
 | pollIntervalMs | JINN_POLL_INTERVAL_MS | 5000 |
 | apiPort | JINN_API_PORT | 7331 |
+| apiBindHost | JINN_API_BIND_HOST | `127.0.0.1` (loopback only; set to `0.0.0.0` for LAN access — pairs with bearer-token auth on cost-mutating routes) |
 | dbPath | JINN_DB_PATH | ~/.jinn-client/jinn.db |
 | earningDir | JINN_EARNING_DIR | ~/.jinn-client/earning |
 | peers | JINN_PEERS | [] |

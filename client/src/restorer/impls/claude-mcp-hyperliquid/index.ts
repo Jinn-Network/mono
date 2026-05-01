@@ -648,7 +648,7 @@ export class ClaudeMcpHyperliquidImpl implements RestorerImpl {
         initiatedFillTids: session.initiatedFillTids,
       },
       tags: ['transcript', 'session'],
-      access: { kind: 'open' as const },
+      access: { priceUsdc: '0' },
     }));
 
     // ── Return RestorationOutput ──────────────────────────────────────────────

@@ -17,6 +17,7 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -45,6 +46,8 @@ import type { RestorerImpl } from './restorer/types.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
+import { createCorpus } from './corpus/index.js';
+import { Store } from './store/store.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedIntentSource, StaticConfiguredIntentSource } from './intents/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
@@ -320,6 +323,23 @@ export interface DaemonStartupInfo {
 
 export async function main(): Promise<DaemonStartupInfo> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
+
+  // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
+  //
+  // Cost-mutating API routes (`POST /v1/artifacts/acquire`, `POST /artifacts`)
+  // require an `Authorization: Bearer <token>` header. Read from env when
+  // operators want a stable token (e.g. multi-process tools); otherwise
+  // generate a fresh one per daemon process. Logged only as an 8-char prefix.
+  // The token is forwarded to the MCP subprocess via `DAEMON_API_TOKEN` env
+  // so `acquire_artifact` and `submit_restoration_result` can authenticate
+  // their calls back to the daemon.
+  const envToken = process.env['DAEMON_API_TOKEN']?.trim();
+  const apiToken = envToken && envToken.length > 0
+    ? envToken
+    : randomBytes(32).toString('hex');
+  if (!envToken) {
+    console.log(`[main] Generated DAEMON_API_TOKEN (prefix=${apiToken.slice(0, 8)}...)`);
+  }
 
   const rpcPreflight = await checkRpcNetwork(config);
   if (!rpcPreflight.ok) {
@@ -597,8 +617,6 @@ export async function main(): Promise<DaemonStartupInfo> {
       ? {
           subgraphUrl: config.subgraphUrl,
           ipfsGatewayUrl: config.ipfsGatewayUrl,
-          agentPrivateKey,
-          selfSafeAddress: safeAddress,
         }
       : undefined;
 
@@ -612,6 +630,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     runner,
     storePath: config.dbPath,
     daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
+    daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
     externalImpls,
     disabledNames: config.restorers?.disabled,
@@ -806,6 +825,30 @@ export async function main(): Promise<DaemonStartupInfo> {
       new GeneratedIntentSource(`generated:${kind}`, generator)),
   ];
 
+  // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
+  //
+  // Built once per daemon lifetime; the agent EOA private key stays in this
+  // process's memory and never crosses into the MCP subprocess. The MCP
+  // tool `acquire_artifact` proxies to `POST /v1/artifacts/acquire` instead.
+  // Disabled when subgraphUrl is unset — the API route is then absent and
+  // MCP falls back to local-only behaviour with a warning.
+  const corpusFactory = config.subgraphUrl?.trim()
+    ? (store: Store) =>
+        createCorpus({
+          subgraphUrl: config.subgraphUrl!,
+          ipfsGatewayUrl: config.ipfsGatewayUrl,
+          store,
+          signer: { privateKey: agentPrivateKey },
+          selfSafeAddress: safeAddress,
+        })
+    : undefined;
+  if (!corpusFactory) {
+    console.warn(
+      '[main] Corpus disabled (config.subgraphUrl not set); ' +
+        'MCP acquire_artifact / search_artifacts network branches will be unavailable.',
+    );
+  }
+
   const daemon = new Daemon({
     adapter,
     runner,
@@ -813,10 +856,13 @@ export async function main(): Promise<DaemonStartupInfo> {
     dbPath: config.dbPath,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
+    apiBindHost: config.apiBindHost ?? '127.0.0.1',
+    apiToken,
     peers: config.peers.length > 0 ? config.peers : undefined,
     subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
+    corpusFactory,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,

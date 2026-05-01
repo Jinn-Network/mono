@@ -159,7 +159,7 @@ describe('checkArtifactLinkage', () => {
       artifacts: [
         ...fx.envelope.artifacts,
         {
-          cid: 'bafy-orphan',
+          sha256: '0'.repeat(64),
           artifactType: 'runtime_log',
           metadata: {
             producedBy: { spanId: 'nonexistent-span-id', trajectoryCid: 'bafy-traj' },

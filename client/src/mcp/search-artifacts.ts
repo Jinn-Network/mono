@@ -21,6 +21,7 @@ export interface SearchArtifactsResult {
     createdAt: string;
   }>;
   network: EnvelopeRef[];
+  warning?: string;
 }
 
 export async function handleSearchArtifacts(
@@ -34,4 +35,33 @@ export async function handleSearchArtifacts(
   });
   const network = await corpus.query(args);
   return { local, network };
+}
+
+/**
+ * Wrapper that handles the corpus=null fallback by returning local results
+ * with a warning. Emits a `console.warn` so daemon stderr surfaces the
+ * misconfiguration via runner/claude.ts:243-245 for the operator. Use this
+ * from the MCP tool handler instead of branching inline.
+ */
+export async function handleSearchArtifactsOrLocalFallback(
+  corpus: Pick<Corpus, 'query'> | null,
+  store: Store,
+  args: CorpusQuery,
+): Promise<SearchArtifactsResult> {
+  if (!corpus) {
+    console.warn(
+      '[mcp:search_artifacts] corpus not configured (missing JINN_CORPUS_SUBGRAPH_URL or JINN_CORPUS_IPFS_GATEWAY_URL) — local-only results',
+    );
+    const local = store.searchOwnAndCached({
+      artifactType: args.kind,
+      limit: args.limit ?? 50,
+    });
+    return {
+      local,
+      network: [],
+      warning:
+        'corpus not configured (missing JINN_CORPUS_SUBGRAPH_URL or JINN_CORPUS_IPFS_GATEWAY_URL); network results unavailable',
+    };
+  }
+  return handleSearchArtifacts(corpus, store, args);
 }

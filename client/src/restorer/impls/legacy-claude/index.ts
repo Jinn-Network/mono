@@ -35,8 +35,15 @@ export interface LegacyClaudeConfig {
   /** Daemon API URL for MCP server */
   daemonApiUrl?: string;
   /**
+   * Bearer token for daemon API cost-mutating routes. Forwarded to the MCP
+   * subprocess via `DAEMON_API_TOKEN` env var.
+   */
+  daemonApiToken?: string;
+  /**
    * Corpus credentials forwarded to {@link RunnerContext.corpusEnv} so the MCP
-   * subprocess can authenticate for cross-operator x402 fetches.
+   * subprocess `search_artifacts` tool can hit the keyless subgraph + IPFS
+   * gateway. The agent EOA private key never crosses into the subprocess —
+   * `acquire_artifact` proxies through `daemonApiUrl` (with `daemonApiToken`).
    */
   corpusEnv?: RunnerContext['corpusEnv'];
   /**
@@ -94,6 +101,7 @@ export class LegacyClaudeImpl implements RestorerImpl {
       timeoutMs: this.config.timeoutMs ?? 300_000,
       storePath: this.config.storePath,
       daemonApiUrl: this.config.daemonApiUrl,
+      daemonApiToken: this.config.daemonApiToken,
       corpusEnv: this.config.corpusEnv,
     };
 
