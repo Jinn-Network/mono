@@ -1,5 +1,32 @@
 # Phase 1a: JINN Tokenomics Implementation Plan
 
+> **Status (2026-05-01): superseded for forward planning.** Phase 1a as
+> described shipped on Sepolia + Base Sepolia. The Phase 1b sections at
+> the tail of this plan (anti-farming decay, MechMarketplace + JinnRouterV2
+> + full daemon, "remaining Phase 1b work") are **subsumed by the Phase A
+> umbrella** under the knowledge-market substrate framing ratified in
+> DR-2026-04-30. Anti-farming decay, ve-JINN deployment, and full client
+> integration on testnet are already shipped; evidence-schema work is
+> executing through Phase A.1; the residual challenge mechanism is
+> re-homed to Phase B.2.
+>
+> **For current roadmap, read instead:**
+>
+> - `spec/2026-04-30-phase-a-umbrella.md` — Phase A.1 spec (the active
+>   operational frame)
+> - `docs/superpowers/plans/2026-04-30-phase-a-umbrella-plan.md` —
+>   implementation plan
+> - `log/decisions/2026-04-30-knowledge-market-vision-framing.md` —
+>   DR-2026-04-30 (six framing choices)
+> - GitHub Discussion [#59](https://github.com/Jinn-Network/mono/discussions/59)
+>   — *Jinn as the knowledge market — implementation roadmap proposal*
+> - GitHub Discussion [#57](https://github.com/Jinn-Network/mono/discussions/57)
+>   — *Unified GTM around the Prediction SolverNet* (paired GTM)
+>
+> The body of this plan is preserved unchanged as a historical record of
+> the Phase 1a tokenomics implementation and the Phase 1b additions made
+> through 2026-04-10.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deploy a working JINN token → treasury → bridge → staking distribution flow on Sepolia + Base Sepolia by forking OLAS contracts with minimal modifications.

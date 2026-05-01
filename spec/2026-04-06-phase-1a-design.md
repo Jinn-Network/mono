@@ -4,6 +4,34 @@
 > Date: 2026-04-06
 > Author: Oak, Claude
 
+> **Status (2026-05-01): superseded for forward planning.** Phase 1a as
+> described here shipped on Sepolia + Base Sepolia. The Phase 1b roadmap
+> in §9 of this document is **subsumed by the Phase A umbrella** under
+> the knowledge-market substrate framing ratified in DR-2026-04-30.
+> Anti-farming decay, ve-JINN deployment, and full client integration on
+> testnet are already shipped; evidence-schema work is executing through
+> Phase A.1; the residual challenge mechanism is re-homed to Phase B.2.
+> No structural conflict — the kill criterion in DR-2026-04-30 §"Door
+> type and reversibility" does not trip.
+>
+> **For current roadmap, read instead:**
+>
+> - `spec/2026-04-30-phase-a-umbrella.md` — Phase A.1 spec (the active
+>   operational frame)
+> - `docs/superpowers/plans/2026-04-30-phase-a-umbrella-plan.md` —
+>   implementation plan
+> - `log/decisions/2026-04-30-knowledge-market-vision-framing.md` —
+>   DR-2026-04-30 (six framing choices)
+> - GitHub Discussion [#59](https://github.com/Jinn-Network/mono/discussions/59)
+>   — *Jinn as the knowledge market — implementation roadmap proposal*
+>   (substrate vision)
+> - GitHub Discussion [#57](https://github.com/Jinn-Network/mono/discussions/57)
+>   — *Unified GTM around the Prediction SolverNet* (paired GTM)
+>
+> The body of this document is preserved unchanged as a historical record
+> of the Phase 1a deployment and the Phase 1b transition plan as
+> originally framed.
+
 ## 1. Overview
 
 Phase 1a deploys the core JINN tokenomics stack on testnet (Sepolia + Base Sepolia) by forking OLAS contracts with minimal or zero modifications. The goal is a working token → treasury → bridge → distribution flow that can be stood up, torn down, and redeployed cheaply until it feels solid.
