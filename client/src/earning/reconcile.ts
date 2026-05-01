@@ -102,7 +102,7 @@ export function reconcileStandardService(
   index: number,
   svc: ServiceState,
   chain: ServiceChainSignals,
-  ctx: { stakingContract: string },
+  ctx: { stakingContract: string; preserveExistingSetup?: boolean },
 ): ReconcilePatch | null {
   if (svc.service_id === null) return null;
 
@@ -113,6 +113,14 @@ export function reconcileStandardService(
   }
 
   if (chain.stakingState === 'revert') {
+    if (ctx.preserveExistingSetup) {
+      return {
+        message: `[jinn-earning] Service ${index}: existing setup could not be verified automatically. Leaving local service id and wallet fields unchanged for recovery/support.`,
+        patch: {
+          error: 'Existing setup could not be verified automatically; local setup was preserved.',
+        },
+      };
+    }
     return {
       message: `[jinn-earning] Service ${index}: persisted id=${id} is unknown to the staking contract (RPC reverted). Clearing local service id and Safe/mech fields; next bootstrap will run a fresh distributor stake().`,
       patch: clearServiceIdentity(),
@@ -126,6 +134,14 @@ export function reconcileStandardService(
 
   // Crashed after assigning service_id but before stake confirmed — or stale id
   if (svc.step === 'awaiting_stake' && chain.stakingState === 0) {
+    if (ctx.preserveExistingSetup) {
+      return {
+        message: `[jinn-earning] Service ${index}: existing setup appears inactive before bootstrap completed, but it uses a non-default setup address. Leaving local service id and wallet fields unchanged for recovery/support.`,
+        patch: {
+          error: 'Existing setup appears inactive; local setup was preserved for recovery.',
+        },
+      };
+    }
     return {
       message: `[jinn-earning] Service ${index}: local step was awaiting_stake but service_id=${id} is not staked on-chain. Clearing stale id/Safe/mech; next bootstrap will call distributor stake() cleanly.`,
       patch: clearServiceIdentity(),
@@ -153,6 +169,14 @@ export function reconcileStandardService(
   }
 
   if (STANDARD_POST_STAKE.has(svc.step) && chain.stakingState === 0) {
+    if (ctx.preserveExistingSetup) {
+      return {
+        message: `[jinn-earning] Service ${index}: existing setup appears inactive, but it uses a non-default setup address. Leaving local service id and wallet fields unchanged for recovery/support.`,
+        patch: {
+          error: 'Existing setup appears inactive; local setup was preserved for recovery.',
+        },
+      };
+    }
     return {
       message: `[jinn-earning] Service ${index}: on-chain staking is unstaked for id=${id} while local step was '${svc.step}' (e.g. unstakeAndWithdraw or a crashed tx). Resetting to awaiting_stake; next bootstrap will provision a new service via the distributor.`,
       patch: clearServiceIdentity(),
@@ -279,7 +303,7 @@ export function reconcileServiceAgainstChain(
   stakingMode: 'standard' | 'self-bond',
   svc: ServiceState,
   chain: ServiceChainSignals,
-  ctx: { stakingContract: string },
+  ctx: { stakingContract: string; preserveExistingSetup?: boolean },
 ): ReconcilePatch | null {
   if (stakingMode === 'standard') {
     return reconcileStandardService(svc.index, svc, chain, ctx);

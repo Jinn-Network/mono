@@ -36,6 +36,12 @@ function humanDetail(d: StatusDetailV1): string {
     lines.push('last claude session: none yet');
   }
   lines.push(`last chain tx: ${d.lastChainTx ?? 'none yet'}`);
+  if (d.latestSetupArchive) {
+    lines.push(
+      `previous setup archive: ${d.latestSetupArchive.backupStatePath} ` +
+      `(services ${d.latestSetupArchive.serviceIndexes.join(', ') || '-'})`,
+    );
+  }
   lines.push('next actions:');
   for (const action of d.nextActions) {
     lines.push(`  • ${action}`);

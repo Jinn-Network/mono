@@ -8,6 +8,7 @@ import type {
   IntentSessionInputs,
   ClaudeCodeLearnerConfig,
 } from './types.js';
+import type { ImplIntentPeek } from '../../types.js';
 import { resolvePluginRoot } from './plugin-path.js';
 import { harvestOutput } from './harvest.js';
 
@@ -15,7 +16,8 @@ import { harvestOutput } from './harvest.js';
  * `RestorerImpl` shell. Bridges the engine's dispatch contract
  * (`await impl.run(ctx)`) into the harness adapter + markdown plugin.
  *
- * `supports()` returns true for any non-evaluation kind. `ClaudeCodeLearnerWrapper`
+ * `supports()` is true for restoration jobs only (`type !== 'evaluation'`).
+ * `ClaudeCodeLearnerWrapper`
  * (./wrapper.ts) is the first-match dispatcher that delegates Execute to a
  * kind-specific specialist when one exists; this shim runs the plugin's full
  * pipeline when no specialist matches.
@@ -42,7 +44,7 @@ export class ClaudeCodeLearnerImpl implements RestorerImpl {
     this.slotRegistryJson = config.slotRegistryJson;
   }
 
-  supports(spec: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
+  supports(spec: ImplIntentPeek): boolean {
     return spec.type !== 'evaluation';
   }
 

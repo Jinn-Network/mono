@@ -6,6 +6,8 @@ import type {
   RestorationOutput,
   ReadyStatus,
   EnableResult,
+  ImplIntentPeek,
+  IntentEnableMetadata,
 } from '../../types.js';
 import type { RestorationJob } from '../../../types/desired-state.js';
 import type { ClaudeCodeLearnerImpl } from './restorer.js';
@@ -23,11 +25,12 @@ export interface ClaudeCodeLearnerWrapperConfig {
 }
 
 /**
- * First-match wrapper per spec §12. Wins for every kind via supports()
- * returning true; internally delegates Execute to the kind-specific
- * specialist when one exists, while the plugin's outer phases (Orient,
- * Strategize, Plan, Debrief, Improve, Memory consolidation) wrap around
- * it as the learning envelope.
+ * First-match wrapper per spec §12. `supports()` is true for restoration
+ * only (`type !== 'evaluation'`); internally delegates Execute and
+ * contextual gates (`isReady`, `enableMetadata`, `onEnable` / `onDisable`)
+ * to the kind-matched specialist when one exists, while the plugin's outer
+ * phases (Orient, Strategize, Plan, Debrief, Improve, Memory consolidation)
+ * wrap around it as the learning envelope.
  *
  * For intents with no specialist, the wrapper runs the plugin's full
  * pipeline including its own Execute (which spawns step-worker subagents).
@@ -44,18 +47,24 @@ export class ClaudeCodeLearnerWrapper implements RestorerImpl {
     this.version = config.shim.version;
   }
 
-  supports(spec: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
+  supports(spec: ImplIntentPeek): boolean {
     return spec.type !== 'evaluation';
   }
 
-  async isReady(spec?: { kind: string; type?: 'restoration' | 'evaluation' }): Promise<ReadyStatus> {
+  async isReady(spec?: ImplIntentPeek): Promise<ReadyStatus> {
     if (spec) {
       const specialist = this.findSpecialist(spec);
       if (!specialist?.isReady) return { ready: true };
-      return specialist.isReady();
+      return specialist.isReady(spec);
     }
     // No spec context — wrapper itself has no external deps; return ready.
     return { ready: true };
+  }
+
+  enableMetadata(spec?: ImplIntentPeek): IntentEnableMetadata | undefined {
+    if (!spec) return undefined;
+    const specialist = this.findSpecialist(spec);
+    return specialist?.enableMetadata?.(spec);
   }
 
   async canAttempt(intent: RestorationJob): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -66,15 +75,15 @@ export class ClaudeCodeLearnerWrapper implements RestorerImpl {
     return (await this.findSpecialist(spec)?.canAttempt?.(intent)) ?? { ok: true };
   }
 
-  async onEnable(args: Record<string, string | undefined>, spec?: { kind: string; type?: 'restoration' | 'evaluation' }): Promise<EnableResult> {
+  async onEnable(args: Record<string, string | undefined>, spec?: ImplIntentPeek): Promise<EnableResult> {
     if (spec) {
       const specialist = this.findSpecialist(spec);
-      if (specialist?.onEnable) return specialist.onEnable(args);
+      if (specialist?.onEnable) return specialist.onEnable(args, spec);
     }
     return { status: 'ready' };
   }
 
-  async onDisable(spec?: { kind: string; type?: 'restoration' | 'evaluation' }): Promise<void> {
+  async onDisable(spec?: ImplIntentPeek): Promise<void> {
     if (spec) {
       const specialist = this.findSpecialist(spec);
       await specialist?.onDisable?.();
@@ -87,7 +96,7 @@ export class ClaudeCodeLearnerWrapper implements RestorerImpl {
    * intent's kind/type. The wrapper itself is excluded from the
    * specialists list at construction time.
    */
-  private findSpecialist(spec: { kind: string; type?: 'restoration' | 'evaluation' }): RestorerImpl | null {
+  private findSpecialist(spec: ImplIntentPeek): RestorerImpl | null {
     for (const candidate of this.specialists) {
       if (candidate.supports(spec)) return candidate;
     }

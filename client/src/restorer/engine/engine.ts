@@ -468,7 +468,10 @@ export class RestorationEngine {
         throw new Error(reason);
       }
       if (impl.isReady) {
-        const status = await impl.isReady();
+        const status = await impl.isReady({
+          kind: intent.specKind,
+          type: intent.intentType ?? 'restoration',
+        });
         if (!status.ready) {
           const reason = `impl '${impl.name}' not ready: ${status.reason ?? 'unknown'}${status.nextStep?.cli ? ` — run \`${status.nextStep.cli}\`` : ''}`;
           this.persistence.markFailed(intent.requestId, reason);

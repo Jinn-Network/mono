@@ -18,7 +18,7 @@ import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig, getConfigPathFromArgs } from '../../config.js';
-import type { RestorerImpl, EnableResult, ReadyStatus } from '../../restorer/types.js';
+import type { RestorerImpl, EnableResult, ReadyStatus, ImplIntentPeek } from '../../restorer/types.js';
 import {
   buildIntentsCliRegistry,
   isImplDisabled,
@@ -41,10 +41,10 @@ function implFor(
   return registry.list().find((i) => i.name === implName) ?? null;
 }
 
-async function readinessOrDefault(impl: RestorerImpl): Promise<ReadyStatus> {
+async function readinessOrDefault(impl: RestorerImpl, spec?: ImplIntentPeek): Promise<ReadyStatus> {
   if (!impl.isReady) return { ready: true };
   try {
-    return await impl.isReady();
+    return await impl.isReady(spec);
   } catch (err) {
     return { ready: false, reason: err instanceof Error ? err.message : String(err) };
   }
@@ -112,8 +112,9 @@ async function runList(ctx: CommandContext, rest: string[]): Promise<void> {
     const impl = implFor(kind, registry, byKind);
     if (!impl) continue;
     const enabled = !isImplDisabled(impl.name, config);
-    const readyStatus = await readinessOrDefault(impl);
-    const description = impl.enableMetadata?.().description;
+    const restorationCtx: ImplIntentPeek = { kind, type: 'restoration' };
+    const readyStatus = await readinessOrDefault(impl, restorationCtx);
+    const description = impl.enableMetadata?.(restorationCtx)?.description;
     rows.push({
       kind,
       impl: impl.name,
@@ -187,9 +188,10 @@ async function runStatus(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
 
+  const restorationCtx: ImplIntentPeek = { kind, type: 'restoration' };
   const enabled = !isImplDisabled(impl.name, config);
-  const readyStatus = await readinessOrDefault(impl);
-  const metadata = impl.enableMetadata?.();
+  const readyStatus = await readinessOrDefault(impl, restorationCtx);
+  const metadata = impl.enableMetadata?.(restorationCtx);
 
   emitResult(
     {
@@ -284,7 +286,7 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
     // in to. `onDisable` on the previous impl is best-effort.
     if (currentImpl.onDisable) {
       try {
-        await currentImpl.onDisable();
+        await currentImpl.onDisable({ kind, type: 'restoration' });
       } catch (err) {
         console.error(`[intents] ${currentImpl.name}.onDisable threw during swap: ${err instanceof Error ? err.message : err}`);
       }
@@ -300,7 +302,9 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
 
   let result: EnableResult;
   try {
-    result = impl.onEnable ? await impl.onEnable(enableArgs) : { status: 'ready' };
+    result = impl.onEnable
+      ? await impl.onEnable(enableArgs, { kind, type: 'restoration' })
+      : { status: 'ready' };
   } catch (err) {
     emitEnvelope(
       {
@@ -427,7 +431,7 @@ async function runDisable(ctx: CommandContext, rest: string[]): Promise<void> {
   }
   if (impl.onDisable) {
     try {
-      await impl.onDisable();
+      await impl.onDisable({ kind, type: 'restoration' });
     } catch (err) {
       // Non-fatal: config was updated; impl-local cleanup problems shouldn't block.
       console.error(`[intents] ${impl.name}.onDisable threw: ${err instanceof Error ? err.message : err}`);

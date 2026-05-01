@@ -70,6 +70,14 @@ describe('assembleFleetV1', () => {
     expect(out.services[0]!.attention?.kind).toBe('low_gas');
   });
 
+  it('surfaces preserved setup errors as service attention', () => {
+    const raw = makeRaw();
+    raw.fleet!.services[0]!.error = 'Existing setup was preserved for recovery.';
+    const out = assembleFleetV1(raw);
+    expect(out.services[0]!.attention?.kind).toBe('reconcile_needed');
+    expect(out.services[0]!.attention?.hint).toContain('preserved for recovery');
+  });
+
   it('reports network=mainnet when fleet.chain is base', () => {
     const raw = makeRaw();
     raw.fleet = { ...raw.fleet!, chain: 'base' };

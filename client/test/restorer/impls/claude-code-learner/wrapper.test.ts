@@ -340,6 +340,32 @@ describe('ClaudeCodeLearnerWrapper', () => {
       expect(wrapper.enableMetadata?.()).toBeUndefined();
     });
 
+    it('enableMetadata(spec) delegates to kind-matched specialist only', () => {
+      const hyperliquidSpecialist = makeSpecialistWithGates(['hyperliquid.v0'], {
+        enableMetadata() {
+          return { description: 'hyperliquid-only metadata' };
+        },
+      });
+      const portfolioSpecialist = makeSpecialistWithGates(['portfolio.v0'], {
+        enableMetadata() {
+          return { description: 'portfolio-kind metadata' };
+        },
+      });
+      const adapter = new NoOpHarnessAdapter();
+      const shim = new ClaudeCodeLearnerImpl({ adapter });
+      const wrapper = new ClaudeCodeLearnerWrapper({
+        shim,
+        specialists: [hyperliquidSpecialist, portfolioSpecialist],
+      });
+
+      expect(wrapper.enableMetadata?.({ kind: 'portfolio.v0', type: 'restoration' })?.description).toBe(
+        'portfolio-kind metadata',
+      );
+      expect(wrapper.enableMetadata?.({ kind: 'hyperliquid.v0', type: 'restoration' })?.description).toBe(
+        'hyperliquid-only metadata',
+      );
+    });
+
     it('onEnable() returns ready status', async () => {
       const adapter = new NoOpHarnessAdapter();
       const shim = new ClaudeCodeLearnerImpl({ adapter });

@@ -59,6 +59,12 @@ export interface StatusDetailV1 {
   } | null;
   /** Most recent on-chain transaction hash recorded in activity events. */
   lastChainTx: string | null;
+  /** Latest automatic setup archive, when one exists. */
+  latestSetupArchive: {
+    updatedAt: string;
+    backupStatePath: string;
+    serviceIndexes: number[];
+  } | null;
   /** Prioritised list of operator actions. Same source as /v1/status nextActions. */
   nextActions: string[];
 }
@@ -185,6 +191,23 @@ export function assembleStatusDetailV1(raw: GatheredStatusRaw): StatusDetailV1 {
     }
   }
 
+  let latestSetupArchive: StatusDetailV1['latestSetupArchive'] = null;
+  const migrationEntries = raw.migrationArchive?.entries ?? [];
+  if (migrationEntries.length > 0) {
+    const sorted = [...migrationEntries].sort((a, b) =>
+      Date.parse(b.updated_at) - Date.parse(a.updated_at),
+    );
+    const latest = sorted[0]!;
+    latestSetupArchive = {
+      updatedAt: latest.updated_at,
+      backupStatePath: latest.backup_state_path,
+      serviceIndexes: sorted
+        .filter(e => e.backup_state_path === latest.backup_state_path)
+        .map(e => e.service_index)
+        .sort((a, b) => a - b),
+    };
+  }
+
   // Last Claude session: from portfolioV0 (already gathered, no extra I/O)
   let lastClaudeSession: StatusDetailV1['lastClaudeSession'] = null;
   const outcomes = raw.portfolioV0?.recentClaudeOutcomes;
@@ -210,6 +233,7 @@ export function assembleStatusDetailV1(raw: GatheredStatusRaw): StatusDetailV1 {
     lastDaemonEvent,
     lastClaudeSession,
     lastChainTx,
+    latestSetupArchive,
     nextActions,
   };
 }
@@ -233,6 +257,9 @@ function buildNextActionsFromRaw(raw: GatheredStatusRaw): string[] {
       actions.push('Complete earning bootstrap so master_address is recorded.');
     }
     for (const s of fleet.services) {
+      if (s.error) {
+        actions.push(`Service ${s.index}: ${s.error}`);
+      }
       if (!isOperationalServiceStep(s.step)) {
         actions.push(`Resume service ${s.index}: local step "${s.step}" — re-run jinn run.`);
       } else if (s.step === 'safe_binding_pending') {
@@ -265,7 +292,7 @@ export function assembleStatusRollupV1(
   const { version, commit } = readVersionCommit();
   const services = raw.fleet?.services ?? [];
   const complete = services.filter(s => isOperationalServiceStep(s.step)).length;
-  const needsAttention = services.filter(s => !isOperationalServiceStep(s.step)).length;
+  const needsAttention = services.filter(s => !isOperationalServiceStep(s.step) || s.error).length;
   const network: 'testnet' | 'mainnet' =
     raw.fleet?.chain === 'base' ? 'mainnet' : 'testnet';
   const phase = network === 'testnet' ? 'phase-1b' : 'phase-2';

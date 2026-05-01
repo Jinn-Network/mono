@@ -12,6 +12,7 @@ import {
   deriveAgentAddress,
 } from '../../src/earning/wallet.js';
 import { createDefaultFleetState } from '../../src/earning/types.js';
+import { DEPRECATED_BASE_SEPOLIA_STAKING_PROXY } from '../../src/earning/testnet-setup-migration.js';
 
 describe('Fleet bootstrap', () => {
   const dirs: string[] = [];
@@ -81,6 +82,120 @@ describe('Fleet bootstrap', () => {
 
     const state = await store.load();
     expect(getAddress(state.master_address!)).toBe(getAddress(expected));
+  });
+
+  it('requires master gas before automatic testnet setup migration even when legacy service is complete', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base-sepolia'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: DEPRECATED_BASE_SEPOLIA_STAKING_PROXY,
+          step: 'complete',
+          error: null,
+          agent_id: '123',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'aa'.repeat(32),
+          safe_bound_to_agent: true,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      env: { JINN_DISABLE_TESTNET_FAUCET: '1' },
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.funding).toBeDefined();
+    expect(result.message).toContain('Your master wallet needs more ETH');
+  });
+
+  it('preserves a non-default complete setup instead of failing during eviction recovery', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    const customStaking = '0x7777777777777777777777777777777777777777';
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: customStaking,
+          step: 'complete',
+          error: null,
+          agent_id: '123',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'aa'.repeat(32),
+          safe_bound_to_agent: true,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: 'revert',
+      stakingMultisig: null,
+      registryState: 4,
+      registryMultisig: '0x2222222222222222222222222222222222222222',
+      safeDeployed: true,
+    });
+    const getStakingStateSpy = vi
+      .spyOn(bootstrapper as any, 'getStakingState')
+      .mockRejectedValue(new Error('custom staking read failed'));
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(true);
+    expect(getStakingStateSpy).not.toHaveBeenCalled();
+    const svc = result.fleet_state.services[0]!;
+    expect(svc.service_id).toBe(42);
+    expect(svc.safe_address).toBe('0x2222222222222222222222222222222222222222');
+    expect(svc.staking_address).toBe(customStaking);
+    expect(svc.error).toContain('preserved');
   });
 
   it('detects legacy keystore and migrates', async () => {

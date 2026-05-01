@@ -7,7 +7,7 @@
  */
 
 import { existsSync } from 'fs';
-import { mkdir, readFile, rename, writeFile } from 'fs/promises';
+import { copyFile, mkdir, readFile, rename, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import {
@@ -22,6 +22,41 @@ export const DEFAULT_EARNING_DIR = path.join(os.homedir(), '.jinn-client', 'earn
 export const STATE_FILE = 'earning_state.json';
 export const MNEMONIC_KEYSTORE_FILE = 'master_keystore.json';
 export const LEGACY_KEYSTORE_FILE = 'agent_keystore.json';
+export const MIGRATIONS_FILE = 'earning_migrations.json';
+
+export type EarningMigrationKind = 'base-sepolia-standard-setup';
+export type EarningMigrationRetireStatus = 'pending' | 'retired' | 'already_inactive' | 'failed';
+
+export interface EarningMigrationArchiveEntry {
+  migration_id: string;
+  kind: EarningMigrationKind;
+  chain: 'base' | 'base-sepolia';
+  service_index: number;
+  created_at: string;
+  updated_at: string;
+  backup_state_path: string;
+  from: {
+    service_id: number | null;
+    safe_address: string | null;
+    mech_address: string | null;
+    staking_address: string | null;
+    step: string;
+    agent_id: string | null;
+  };
+  to: {
+    staking_address: string;
+  };
+  retire_status: EarningMigrationRetireStatus;
+  retire_tx_hash?: string | null;
+  retire_error?: string | null;
+  state_reset_at?: string | null;
+}
+
+export interface EarningMigrationArchive {
+  schemaVersion: 1;
+  updated_at: string;
+  entries: EarningMigrationArchiveEntry[];
+}
 
 /** Absolute path to the encrypted mnemonic keystore for a given earning dir. */
 export function mnemonicKeystorePath(earningDir: string): string {
@@ -67,6 +102,7 @@ export class FleetStateStore {
   private readonly statePath: string;
   private readonly mnemonicKeystorePath: string;
   private readonly legacyKeystorePath: string;
+  private readonly migrationsPath: string;
   private readonly earningDir: string;
 
   constructor(earningDir: string = DEFAULT_EARNING_DIR) {
@@ -74,6 +110,7 @@ export class FleetStateStore {
     this.statePath = path.join(earningDir, STATE_FILE);
     this.mnemonicKeystorePath = path.join(earningDir, MNEMONIC_KEYSTORE_FILE);
     this.legacyKeystorePath = path.join(earningDir, LEGACY_KEYSTORE_FILE);
+    this.migrationsPath = path.join(earningDir, MIGRATIONS_FILE);
   }
 
   get dir(): string {
@@ -158,6 +195,83 @@ export class FleetStateStore {
     const validated = FleetStateSchema.parse(next);
     await writeJsonAtomic(this.statePath, validated);
     return validated;
+  }
+
+  async backupStateFile(label: string): Promise<string | null> {
+    if (!existsSync(this.statePath)) {
+      return null;
+    }
+    await mkdir(this.earningDir, { recursive: true });
+    const safeLabel = label.replace(/[^a-zA-Z0-9_.-]/g, '-');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(this.earningDir, `${STATE_FILE}.${safeLabel}.${stamp}.bak`);
+    await copyFile(this.statePath, backupPath);
+    return backupPath;
+  }
+
+  async loadMigrationArchive(): Promise<EarningMigrationArchive> {
+    if (!existsSync(this.migrationsPath)) {
+      return {
+        schemaVersion: 1,
+        updated_at: new Date().toISOString(),
+        entries: [],
+      };
+    }
+
+    try {
+      const raw = await readFile(this.migrationsPath, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<EarningMigrationArchive>;
+      if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.entries)) {
+        return {
+          schemaVersion: 1,
+          updated_at: new Date().toISOString(),
+          entries: [],
+        };
+      }
+      return {
+        schemaVersion: 1,
+        updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : new Date().toISOString(),
+        entries: parsed.entries as EarningMigrationArchiveEntry[],
+      };
+    } catch {
+      return {
+        schemaVersion: 1,
+        updated_at: new Date().toISOString(),
+        entries: [],
+      };
+    }
+  }
+
+  async upsertMigrationArchiveEntry(
+    entry: Omit<EarningMigrationArchiveEntry, 'created_at' | 'updated_at'> & {
+      created_at?: string;
+      updated_at?: string;
+    },
+  ): Promise<EarningMigrationArchiveEntry> {
+    const archive = await this.loadMigrationArchive();
+    const now = new Date().toISOString();
+    const idx = archive.entries.findIndex(e => e.migration_id === entry.migration_id);
+    const existing = idx >= 0 ? archive.entries[idx]! : undefined;
+    const next: EarningMigrationArchiveEntry = {
+      ...(existing ?? {}),
+      ...entry,
+      created_at: existing?.created_at ?? entry.created_at ?? now,
+      updated_at: entry.updated_at ?? now,
+    };
+
+    if (idx >= 0) {
+      archive.entries[idx] = next;
+    } else {
+      archive.entries.push(next);
+    }
+
+    const saved: EarningMigrationArchive = {
+      schemaVersion: 1,
+      updated_at: now,
+      entries: archive.entries,
+    };
+    await writeJsonAtomic(this.migrationsPath, saved);
+    return next;
   }
 
   async patchFleet(patch: Partial<Omit<FleetState, 'services'>>): Promise<FleetState> {

@@ -96,6 +96,16 @@ export interface RestorationOutput {
 // ── Enable / readiness types ──────────────────────────────────────────────────
 
 /**
+ * Kind/type slice for contextual impl probes (`isReady`, `enableMetadata`,
+ * `onEnable` / `onDisable` delegation on wrappers). Mirrors the `supports()`
+ * discriminant.
+ */
+export type ImplIntentPeek = {
+  kind: string;
+  type?: 'restoration' | 'evaluation';
+};
+
+/**
  * Context-free readiness probe. "Are this impl's external dependencies
  * satisfied right now, regardless of any specific intent?" Used by
  * `jinn intents list|status` and by the claim-policy gate that refuses
@@ -211,18 +221,19 @@ export interface RestorerImpl {
   run(ctx: RestorationContext): Promise<RestorationOutput>;
 
   /**
-   * Context-free readiness probe. Zero-dep impls can omit this (treated
-   * as `{ ready: true }`). Impls with external deps (credentials, files,
-   * exchange approvals) report current readiness plus a `nextStep` hint.
+   * Readiness probe. Zero-dep impls can omit this (treated as `{ ready: true }`).
+   * When `spec` is provided (daemon pre-claim gate, `jinn intents`), wrappers
+   * should delegate to the kind-matched specialist instead of aggregating all.
    */
-  isReady?(): Promise<ReadyStatus>;
+  isReady?(spec?: ImplIntentPeek): Promise<ReadyStatus>;
 
   /**
    * Describes what `onEnable` wants from the caller. Consumed by
    * `jinn intents list` so the agent can tell the operator what a
    * specific kind's enable flow needs without triggering it first.
+   * With `spec`, wrappers delegate to the specialist for that kind.
    */
-  enableMetadata?(): IntentEnableMetadata;
+  enableMetadata?(spec?: ImplIntentPeek): IntentEnableMetadata | undefined;
 
   /**
    * Idempotent enable-state machine. Called by `jinn intents enable <kind>`.
@@ -242,7 +253,7 @@ export interface RestorerImpl {
    * Impls that omit this method cannot be enabled by the generic CLI;
    * they are either always-on (zero-dep) or require manual config.
    */
-  onEnable?(args: Record<string, string | undefined>): Promise<EnableResult>;
+  onEnable?(args: Record<string, string | undefined>, spec?: ImplIntentPeek): Promise<EnableResult>;
 
   /**
    * Optional inverse of `onEnable`. Invoked when the operator runs
@@ -251,5 +262,5 @@ export interface RestorerImpl {
    * that for explicit `jinn intents purge` or similar (out of scope
    * for this interface).
    */
-  onDisable?(): Promise<void>;
+  onDisable?(spec?: ImplIntentPeek): Promise<void>;
 }

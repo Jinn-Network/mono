@@ -7,11 +7,11 @@ import { Store } from '../../../src/store/store.js';
 import { RestorationEngine } from '../../../src/restorer/engine/engine.js';
 import type { PersistedIntent, PersistedIntentInput } from '../../../src/restorer/engine/persistence.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
-import type { RestorerImpl, RestorationOutput, ReadyStatus } from '../../../src/restorer/types.js';
+import type { RestorerImpl, RestorationOutput } from '../../../src/restorer/types.js';
 import type { ClaimRegistryClient } from '../../../src/adapters/claim-registry/client.js';
 import type { MarketplaceClaimer } from '../../../src/restorer/engine/claim.js';
 
-function stubImpl(overrides: Partial<RestorerImpl> & { isReady?: () => Promise<ReadyStatus> } = {}): RestorerImpl {
+function stubImpl(overrides: Partial<RestorerImpl> = {}): RestorerImpl {
   return {
     name: 'stub-impl',
     version: '1.0.0',
@@ -89,7 +89,10 @@ describe('RestorationEngine.claim — impl gate', () => {
 
   it('refuses to claim when impl reports not-ready', async () => {
     const notReadyImpl = stubImpl({
-      isReady: async () => ({ ready: false, reason: 'api-wallet not approved', nextStep: { description: 'do the thing', cli: 'jinn intents enable portfolio.v0 --confirm-approved' } }),
+      isReady: async (spec) => {
+        expect(spec).toEqual({ kind: 'portfolio.v0', type: 'restoration' });
+        return { ready: false, reason: 'api-wallet not approved', nextStep: { description: 'do the thing', cli: 'jinn intents enable portfolio.v0 --confirm-approved' } };
+      },
     });
     const engine = new TestEngine({
       store,
