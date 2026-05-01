@@ -35,6 +35,11 @@ export interface LegacyClaudeConfig {
   /** Daemon API URL for MCP server */
   daemonApiUrl?: string;
   /**
+   * Corpus credentials forwarded to {@link RunnerContext.corpusEnv} so the MCP
+   * subprocess can authenticate for cross-operator x402 fetches.
+   */
+  corpusEnv?: RunnerContext['corpusEnv'];
+  /**
    * When true (e.g. synthetic registry), `isReady` reports the daemon is required.
    * Production daemon should omit.
    */
@@ -89,6 +94,7 @@ export class LegacyClaudeImpl implements RestorerImpl {
       timeoutMs: this.config.timeoutMs ?? 300_000,
       storePath: this.config.storePath,
       daemonApiUrl: this.config.daemonApiUrl,
+      corpusEnv: this.config.corpusEnv,
     };
 
     let result: RestorationResult;

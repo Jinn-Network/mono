@@ -1,0 +1,33 @@
+import type {
+  RestorerImpl,
+  ExternalRestorerEnv,
+  RestorationContext,
+  RestorationOutput,
+} from '@jinn-network/restorer-sdk';
+
+export default function createRestorer(env: ExternalRestorerEnv): RestorerImpl {
+  return {
+    name: env.implName,
+    version: env.implVersion,
+    supports({ kind, type }) {
+      return kind === '{{kindString}}' && type !== 'evaluation';
+    },
+    async isReady() {
+      return env.stub
+        ? { ready: false, reason: 'stub mode' }
+        : { ready: true };
+    },
+    async run(ctx: RestorationContext): Promise<RestorationOutput> {
+      env.log({
+        level: 'info',
+        msg: 'forecaster.run',
+        data: { intentId: ctx.intent.id },
+      });
+      // TODO: call your existing forecasting pipeline here.
+      return {
+        venueRef: { name: '{{packageName}}' },
+        gating: { probability: 0.5 },
+      };
+    },
+  };
+}

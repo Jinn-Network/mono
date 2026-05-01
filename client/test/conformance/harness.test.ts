@@ -225,11 +225,13 @@ describe('runConformance — known-bad matrix', () => {
   it('FAIL: artifact linkage broken → artifacts.linkage fails', async () => {
     const fx = await buildGoodRestorationFixture();
     const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
-    // Corrupt the emit span's jinn.artifact.cid
+    // Corrupt the emit span's jinn.artifact.sha256 (linkage is sha256-keyed
+    // post jinn-mono-vy37.1.2 — artifacts no longer carry IPFS CIDs).
     const emitSpan = traj.spans.find(
       (s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit',
     );
-    emitSpan!.attributes['jinn.artifact.cid'] = 'bafy-nonexistent-orphan';
+    const orphanSha = '8'.repeat(64);
+    emitSpan!.attributes['jinn.artifact.sha256'] = orphanSha;
     const report = await runConformance({
       envelopeCid: fx.envelopeCid,
       options: {
@@ -241,7 +243,7 @@ describe('runConformance — known-bad matrix', () => {
     expect(report.overall).toBe('FAIL');
     const linkageCheck = report.checks.find((c) => c.id === 'artifacts.linkage');
     expect(linkageCheck?.passed).toBe(false);
-    expect(linkageCheck?.detail).toMatch(/bafy-nonexistent-orphan/);
+    expect(linkageCheck?.detail).toMatch(new RegExp(orphanSha));
   });
 
   it('FAIL: verdict sha256 mismatch → verdict.back-ref fails', async () => {

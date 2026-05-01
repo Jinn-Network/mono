@@ -1,0 +1,24 @@
+{
+  "name": "@jinn-examples/prefetch-markets-hook",
+  "version": "0.1.0",
+  "description": "Jinn Path 1 plug-in example — pre-orient hook that pre-fetches market state into workingDir/.cache/markets.json.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "private": true,
+  "files": [
+    "hooks/",
+    "jinn-plugin.json",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@jinn-network/client": "portal:../../../../client"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
+  }
+}

@@ -78,7 +78,10 @@ function makeOpts(
       implStateDirRoot: join(tmp, 'impls'),
     },
     packagingDeps: {
-      ipfsRegistryUrl: 'http://ipfs.test',
+      store,
+      operatorEndpoint: 'https://op.test',
+      defaultPriceUsdc: '0',
+      perArtifactTypePrice: {},
     },
     envelopeDeps: {
       ipfsRegistryUrl: 'http://ipfs.test',

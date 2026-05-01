@@ -91,6 +91,26 @@ Phases in order (full skill names shown):
 6. `claude-code-learner:improve` — mutate `implStateDir`, commit
 7. `claude-code-learner:memory-consolidation` — curate, separate commit
 
+## Plug-in slot registry
+
+If `workingDir/.coordinator/slots.json` exists, the daemon has supplied a Path 1 plug-in registry (see spec/2026-04-30-plug-in-surface.md §4). Phase skills consult their relevant slot category as they run; the coordinator itself only needs to surface the `hooks` slot.
+
+## Plug-in hooks
+
+Read `workingDir/.coordinator/slots.json` (if present). For each `hooks[]` entry, retain it for invocation:
+
+- `session-start` hooks run **once** before the first phase. The bundled `hooks/session-start` shell hook already ran during boot — these are *additional* hooks the plug-in author registered.
+- `pre-phase` / `post-phase` hooks run before / after each phase. If `slot.phase` is set, only run for that phase.
+- `session-end` hooks run after `memory-consolidation` (the last phase), regardless of failure.
+
+Invoke each hook via `Bash`: `bash <packageRoot>/<entry>` with environment variables set:
+
+- `JINN_INTENT_ID`, `JINN_INTENT_KIND`
+- `JINN_PHASE` (for `pre-phase` / `post-phase` only)
+- `JINN_WORKING_DIR`, `JINN_IMPL_STATE_DIR`
+
+Failures in hooks log a warning to `workingDir/.errors/hooks.log` but do not abort the session. The coordinator's failure handling continues unchanged.
+
 ## Constitution span
 
 After Strategize, read `workingDir/.strategize/constitution.json` and emit its fields as attributes on a `jinn.state_transition` span. If your harness exposes an OTel tracer, do this; otherwise the file itself is the constitution record (Debrief reads it from there).

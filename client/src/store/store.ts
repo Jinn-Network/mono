@@ -47,6 +47,58 @@ export interface BalanceCacheEntry {
   error?: string | null;
 }
 
+export interface ServedArtifactInput {
+  sha256: string;
+  artifactType: string;
+  requestId?: string | null;
+  envelopeCid?: string | null;
+  content: Buffer;
+  priceUsdc: string;
+  createdAt: string;
+}
+
+export interface ServedArtifactRow {
+  sha256: string;
+  artifactType: string;
+  requestId: string | null;
+  envelopeCid: string | null;
+  content: Buffer;
+  contentSize: number;
+  priceUsdc: string;
+  createdAt: string;
+}
+
+export type NetworkArtifactSource = 'origin' | 'route-resolver' | 'self-store-mirror';
+
+export interface NetworkArtifactInput {
+  sha256: string;
+  artifactType: string;
+  envelopeCid?: string | null;
+  content: Buffer;
+  source: NetworkArtifactSource;
+  sourceOperator?: string | null;
+  sourceEndpoint?: string | null;
+  paidAmountUsdc: string;
+  fetchedAt: string;
+  /** When set, links this blob to a row from the HTTP catalog / peer sync `artifacts.id`. */
+  peerCatalogId?: string | null;
+}
+
+export interface NetworkArtifactRow {
+  sha256: string;
+  artifactType: string;
+  envelopeCid: string | null;
+  content: Buffer;
+  contentSize: number;
+  source: NetworkArtifactSource;
+  sourceOperator: string | null;
+  sourceEndpoint: string | null;
+  paidAmountUsdc: string;
+  fetchedAt: string;
+  lastUsedAt: string;
+  peerCatalogId: string | null;
+}
+
 export type IntentPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
 
 export interface IntentPostRecord {
@@ -144,6 +196,38 @@ CREATE TABLE IF NOT EXISTS intent_posts (
 );
 CREATE INDEX IF NOT EXISTS idx_intent_posts_desired_state ON intent_posts (desired_state_id);
 
+CREATE TABLE IF NOT EXISTS served_artifacts (
+  sha256 TEXT PRIMARY KEY,
+  artifact_type TEXT NOT NULL,
+  request_id TEXT,
+  envelope_cid TEXT,
+  content BLOB NOT NULL,
+  content_size INTEGER NOT NULL,
+  price_usdc TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_request ON served_artifacts (request_id);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_envelope ON served_artifacts (envelope_cid);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_artifact_type ON served_artifacts (artifact_type);
+
+CREATE TABLE IF NOT EXISTS network_artifacts (
+  sha256 TEXT PRIMARY KEY,
+  artifact_type TEXT NOT NULL,
+  envelope_cid TEXT,
+  content BLOB NOT NULL,
+  content_size INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('origin', 'route-resolver', 'self-store-mirror')),
+  source_operator TEXT,
+  source_endpoint TEXT,
+  paid_amount_usdc TEXT NOT NULL,
+  fetched_at TEXT NOT NULL,
+  last_used_at TEXT NOT NULL,
+  peer_catalog_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_envelope ON network_artifacts (envelope_cid);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_artifact_type ON network_artifacts (artifact_type);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_last_used ON network_artifacts (last_used_at DESC);
+
 CREATE TABLE IF NOT EXISTS intent_post_locks (
   creator_safe_address TEXT NOT NULL,
   source_key TEXT NOT NULL,
@@ -171,7 +255,19 @@ export class Store {
     this.db.exec(SCHEMA);
     this.db.exec(RESTORATION_INTENTS_SCHEMA);
     this.ensureRewardClaimsTxIndex();
+    this.ensureNetworkArtifactsPeerCatalogId();
     this.backfillActivityEvents();
+  }
+
+  /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */
+  private ensureNetworkArtifactsPeerCatalogId(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(network_artifacts)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'peer_catalog_id')) {
+      this.db.exec(`ALTER TABLE network_artifacts ADD COLUMN peer_catalog_id TEXT`);
+    }
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_network_artifacts_peer_catalog ON network_artifacts (peer_catalog_id)`,
+    );
   }
 
   /** Idempotent: older DBs before idx_reward_claims_tx may lack the unique index. */
@@ -715,14 +811,27 @@ export class Store {
     });
   }
 
-  getArtifactContent(id: string): string | null {
-    const row = this.db.prepare('SELECT content FROM artifacts WHERE id = ?').get(id) as { content: string | null } | undefined;
-    return row?.content ?? null;
+  /**
+   * Text body for a catalog artifact id: local `artifacts.content`, else a peer-cached
+   * blob in `network_artifacts` (via `peer_catalog_id`).
+   */
+  resolveCatalogArtifactContent(id: string): string | null {
+    const local = this.db.prepare('SELECT content FROM artifacts WHERE id = ?').get(id) as
+      | { content: string | null }
+      | undefined;
+    if (local?.content != null) return local.content;
+
+    const net = this.db.prepare(
+      `SELECT content FROM network_artifacts WHERE peer_catalog_id = ? ORDER BY fetched_at DESC LIMIT 1`,
+    ).get(id) as { content: Buffer } | undefined;
+    if (!net) return null;
+    return net.content.toString('utf-8');
   }
 
-  getRemoteArtifactInfo(id: string): { endpoint: string; ownerAddress: string; price?: string } | null {
+  /** Endpoint / owner for a remote (peer-synced) catalog row in `artifacts`. */
+  getRemoteDiscoveryMetadata(id: string): { endpoint: string; ownerAddress: string; price?: string } | null {
     const row = this.db.prepare(
-      'SELECT endpoint, owner_address, price FROM artifacts WHERE id = ? AND remote = 1'
+      'SELECT endpoint, owner_address, price FROM artifacts WHERE id = ? AND remote = 1',
     ).get(id) as { endpoint: string; owner_address: string; price: string | null } | undefined;
     if (!row) return null;
     return {
@@ -740,8 +849,203 @@ export class Store {
     return { ...row, tags: JSON.parse(row.tags) as string[] };
   }
 
-  cacheRemoteContent(id: string, content: string): void {
-    this.db.prepare('UPDATE artifacts SET content = ? WHERE id = ?').run(content, id);
+  saveServedArtifact(input: ServedArtifactInput): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO served_artifacts
+         (sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at)
+       VALUES
+         (@sha256, @artifactType, @requestId, @envelopeCid, @content, @contentSize, @priceUsdc, @createdAt)`,
+    ).run({
+      sha256: input.sha256,
+      artifactType: input.artifactType,
+      requestId: input.requestId ?? null,
+      envelopeCid: input.envelopeCid ?? null,
+      content: input.content,
+      contentSize: input.content.length,
+      priceUsdc: input.priceUsdc,
+      createdAt: input.createdAt,
+    });
+  }
+
+  getServedArtifact(sha256: string): ServedArtifactRow | null {
+    const row = this.db.prepare(
+      `SELECT sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE sha256 = ?`,
+    ).get(sha256) as {
+      sha256: string;
+      artifact_type: string;
+      request_id: string | null;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      requestId: row.request_id,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      priceUsdc: row.price_usdc,
+      createdAt: row.created_at,
+    };
+  }
+
+  setServedArtifactEnvelopeCid(sha256: string, envelopeCid: string): void {
+    this.db.prepare(
+      `UPDATE served_artifacts SET envelope_cid = ? WHERE sha256 = ?`,
+    ).run(envelopeCid, sha256);
+  }
+
+  getServedArtifactsByRequestId(requestId: string): ServedArtifactRow[] {
+    const rows = this.db.prepare(
+      `SELECT sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE request_id = ? ORDER BY created_at ASC`,
+    ).all(requestId) as Array<{
+      sha256: string;
+      artifact_type: string;
+      request_id: string | null;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      requestId: row.request_id,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      priceUsdc: row.price_usdc,
+      createdAt: row.created_at,
+    }));
+  }
+
+  saveNetworkArtifact(input: NetworkArtifactInput): void {
+    if (input.peerCatalogId) {
+      this.db.prepare(`DELETE FROM network_artifacts WHERE peer_catalog_id = ?`).run(input.peerCatalogId);
+    }
+    this.db.prepare(
+      `INSERT OR REPLACE INTO network_artifacts
+         (sha256, artifact_type, envelope_cid, content, content_size, source,
+          source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at, peer_catalog_id)
+       VALUES
+         (@sha256, @artifactType, @envelopeCid, @content, @contentSize, @source,
+          @sourceOperator, @sourceEndpoint, @paidAmountUsdc, @fetchedAt, @fetchedAt, @peerCatalogId)`,
+    ).run({
+      sha256: input.sha256,
+      artifactType: input.artifactType,
+      envelopeCid: input.envelopeCid ?? null,
+      content: input.content,
+      contentSize: input.content.length,
+      source: input.source,
+      sourceOperator: input.sourceOperator ?? null,
+      sourceEndpoint: input.sourceEndpoint ?? null,
+      paidAmountUsdc: input.paidAmountUsdc,
+      fetchedAt: input.fetchedAt,
+      peerCatalogId: input.peerCatalogId ?? null,
+    });
+  }
+
+  getNetworkArtifact(sha256: string): NetworkArtifactRow | null {
+    const row = this.db.prepare(
+      `SELECT sha256, artifact_type, envelope_cid, content, content_size, source,
+              source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at,
+              peer_catalog_id
+       FROM network_artifacts WHERE sha256 = ?`,
+    ).get(sha256) as {
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      source: NetworkArtifactSource;
+      source_operator: string | null;
+      source_endpoint: string | null;
+      paid_amount_usdc: string;
+      fetched_at: string;
+      last_used_at: string;
+      peer_catalog_id: string | null;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      source: row.source,
+      sourceOperator: row.source_operator,
+      sourceEndpoint: row.source_endpoint,
+      paidAmountUsdc: row.paid_amount_usdc,
+      fetchedAt: row.fetched_at,
+      lastUsedAt: row.last_used_at,
+      peerCatalogId: row.peer_catalog_id,
+    };
+  }
+
+  touchNetworkArtifactUsage(sha256: string, ts: string): void {
+    this.db.prepare(
+      `UPDATE network_artifacts SET last_used_at = ? WHERE sha256 = ?`,
+    ).run(ts, sha256);
+  }
+
+  /**
+   * Local fast-path search across own (served) artifacts and cached (network)
+   * artifacts. Used by the MCP `search_artifacts` tool to prepend local
+   * matches to corpus query results.
+   */
+  searchOwnAndCached(filter: { artifactType?: string; limit: number }): Array<{
+    sha256: string;
+    artifactType: string;
+    source: 'served' | 'network';
+    envelopeCid: string | null;
+    createdAt: string;
+  }> {
+    const limit = Math.min(Math.max(1, filter.limit), 500);
+    const ownSql = filter.artifactType
+      ? `SELECT sha256, artifact_type, envelope_cid, created_at FROM served_artifacts WHERE artifact_type = @type ORDER BY created_at DESC LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, created_at FROM served_artifacts ORDER BY created_at DESC LIMIT @limit`;
+    const cachedSql = filter.artifactType
+      ? `SELECT sha256, artifact_type, envelope_cid, fetched_at FROM network_artifacts WHERE artifact_type = @type ORDER BY fetched_at DESC LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, fetched_at FROM network_artifacts ORDER BY fetched_at DESC LIMIT @limit`;
+    const params: Record<string, unknown> = { limit };
+    if (filter.artifactType) params['type'] = filter.artifactType;
+
+    const own = this.db.prepare(ownSql).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      created_at: string;
+    }>;
+    const cached = this.db.prepare(cachedSql).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      fetched_at: string;
+    }>;
+
+    return [
+      ...own.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'served' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.created_at,
+      })),
+      ...cached.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'network' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.fetched_at,
+      })),
+    ];
   }
 
   close(): void {

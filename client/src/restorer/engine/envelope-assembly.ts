@@ -18,6 +18,7 @@ import type {
   Artifact,
 } from '../../types/envelope.js';
 import { validatePayload } from '../../types/payloads/index.js';
+import { validateManifestForPublish } from './validate-manifest.js';
 
 export interface EnvelopeInputs {
   kind: string;
@@ -107,6 +108,12 @@ export async function assembleAndSignEnvelope(
       sig: signed.sig,
     },
   };
+
+  // Pre-publish manifest validation hook (Phase A.1, jinn-mono-vy37.1.3).
+  // Belt-and-suspenders that the artifact descriptors are fit for the corpus
+  // before the envelope hits IPFS. Throws ManifestValidationError on a
+  // missing/malformed access descriptor.
+  validateManifestForPublish(signedEnvelope);
 
   const envelopeCid = await uploadToIpfs(deps.ipfsRegistryUrl, signedEnvelope);
 

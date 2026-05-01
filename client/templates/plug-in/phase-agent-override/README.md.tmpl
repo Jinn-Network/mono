@@ -1,0 +1,30 @@
+# {{packageName}}
+
+Path 1 Jinn plug-in. Overrides the bundled claude-code-learner
+`{{agent}}` agent during the `{{phase}}` phase.
+
+## Install (operator)
+
+```bash
+yarn add {{packageName}}
+jinn plug-ins add {{packageName}} --entry $(node -p "require.resolve('{{packageName}}/package.json').replace(/\/package\.json$/, '')")
+```
+
+The daemon picks the override up at the next session-start: if the
+intent kind is in scope, the `{{phase}}` skill spawns this agent
+instead of the bundled `{{agent}}`.
+
+## Develop
+
+```bash
+yarn install
+yarn test
+```
+
+Edit `agents/{{phaseAgentName}}.md` — the override receives the same inputs as the
+bundled agent.
+
+## Spec
+
+`spec/2026-04-30-plug-in-surface.md` §4. Slot type:
+`phase-agent-override`.

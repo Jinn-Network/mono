@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
 import { buildPrompt } from '../../src/runner/claude.js';
 import { TrajectoryCollector } from '../../src/trajectory/collector.js';
 
@@ -60,6 +61,50 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     expect(call.stateTo).toBe('RAN_CLAUDE');
     expect(call.args).toContain('-p');
     expect(call.args).toContain('--mcp-config');
+  });
+
+  it('writes JINN_CORPUS_* MCP env from context.corpusEnv (production credential path)', async () => {
+    const { tracedSpawn } = await import('../../src/trajectory/index.js');
+    let captured: { mcpServers: { 'jinn-client': { env: Record<string, string> } } } | undefined;
+    vi.mocked(tracedSpawn).mockImplementation(async (opts) => {
+      const idx = opts.args.indexOf('--mcp-config');
+      const mcpPath = idx >= 0 ? opts.args[idx + 1] : undefined;
+      if (mcpPath) {
+        const raw = fs.readFileSync(mcpPath, 'utf8');
+        captured = JSON.parse(raw) as typeof captured;
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+
+    const { ClaudeRunner } = await import('../../src/runner/claude.js');
+    const collector = new TrajectoryCollector({ intentCid: 'bafy', runId: 'corpus-propagate' });
+    const runner = new ClaudeRunner({ claudePath: 'claude', model: 'test-model' });
+    const corpusEnv = {
+      subgraphUrl: 'https://sg.example/gql',
+      ipfsGatewayUrl: 'https://gw.example',
+      agentPrivateKey: '0xc0ffee',
+      selfSafeAddress: '0xdeadbeef',
+    };
+    await runner.run(
+      {
+        id: 'job-corpus',
+        description: 'Test',
+      } as unknown as import('../../src/types/desired-state.js').RestorationJob,
+      {
+        requestId: 'req-corpus' as unknown as import('../../src/types/index.js').RequestId,
+        workingDirectory: '/tmp/test',
+        timeoutMs: 5000,
+        trajectory: collector,
+        corpusEnv,
+      },
+    );
+
+    expect(captured).toBeDefined();
+    const env = captured!.mcpServers['jinn-client'].env;
+    expect(env.JINN_CORPUS_SUBGRAPH_URL).toBe('https://sg.example/gql');
+    expect(env.JINN_CORPUS_IPFS_GATEWAY_URL).toBe('https://gw.example');
+    expect(env.JINN_CORPUS_AGENT_PRIVATE_KEY).toBe('0xc0ffee');
+    expect(env.JINN_CORPUS_SELF_SAFE_ADDRESS).toBe('0xdeadbeef');
   });
 
   it('does NOT call tracedSpawn when no trajectory is in RunnerContext', async () => {

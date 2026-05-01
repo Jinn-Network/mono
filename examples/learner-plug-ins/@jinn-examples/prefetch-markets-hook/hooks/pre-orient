@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Pre-orient hook: fetch and cache market state before the Orient phase
+# spawns its explorer subagents. This is the example's stub — real builders
+# replace the curl with their actual market-state API.
+#
+# Environment (from coordinator's hook invocation):
+#   JINN_INTENT_ID, JINN_INTENT_KIND, JINN_PHASE,
+#   JINN_WORKING_DIR, JINN_IMPL_STATE_DIR
+
+set -euo pipefail
+
+if [ "${JINN_INTENT_KIND:-}" != "prediction.v0" ]; then
+  exit 0
+fi
+
+CACHE_DIR="${JINN_WORKING_DIR}/.cache"
+mkdir -p "$CACHE_DIR"
+
+# Stub: write a deterministic JSON keyed off intent id.
+# Real impl: curl / API call to fetch market state.
+SEED=$(printf '%s' "${JINN_INTENT_ID}" | shasum -a 256 | cut -c1-16)
+
+cat > "$CACHE_DIR/markets.json" <<EOF
+{
+  "fetchedAt": $(date +%s)000,
+  "intentId": "${JINN_INTENT_ID}",
+  "stub": true,
+  "markets": [
+    {
+      "marketId": "stub-${SEED}",
+      "yesPrice": 0.5,
+      "volume24h": 0
+    }
+  ]
+}
+EOF
+
+echo "[prefetch-markets-hook] cached market state to $CACHE_DIR/markets.json" >&2

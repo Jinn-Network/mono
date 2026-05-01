@@ -25,8 +25,9 @@ import { createGzip } from 'node:zlib';
 import { createWriteStream } from 'node:fs';
 import { z } from 'zod';
 import type { RestorationJob } from '../../types/desired-state.js';
-import type { Artifact, OutputArtifact } from '../../types/portfolio.js';
-import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
+import type { OutputArtifact } from '../../types/portfolio.js';
+import type { Artifact } from '../../types/envelope.js';
+import type { Store } from '../../store/store.js';
 import type { TrajectoryCollector } from '../../trajectory/collector.js';
 
 // ── OUTPUTS.json schema ───────────────────────────────────────────────────────
@@ -67,10 +68,18 @@ export interface UploadedArtifact extends Artifact {
 // ── Deps injected by engine ───────────────────────────────────────────────────
 
 export interface PackagingDeps {
-  ipfsRegistryUrl: string;
+  store: Store;
+  /** Operator's externally-reachable base URL (for artifact serving). */
+  operatorEndpoint: string;
+  /** Global operator default price in USDC (string, e.g. '0' or '0.001'). */
+  defaultPriceUsdc: string;
+  /** Per-artifactType price overrides. */
+  perArtifactTypePrice: Record<string, string>;
+  /** Restoration / evaluation request id (links served_artifacts row to envelope). */
+  requestId: string;
   /**
    * Optional trajectory collector. When provided, a `jinn.artifact.emit` span
-   * is added to the trajectory for each successfully uploaded artifact, and
+   * is added to the trajectory for each successfully written artifact, and
    * `artifact.metadata.producedBy` is set to `{ spanId, trajectoryCid: '' }`.
    * The engine backfills `trajectoryCid` after `emitTrajectory` completes.
    */
@@ -384,7 +393,12 @@ export async function walkArtifacts(
 // ── Upload pipeline ───────────────────────────────────────────────────────────
 
 /**
- * Upload all collected artifacts to IPFS.
+ * Write all collected artifacts to the operator-local served_artifacts store.
+ *
+ * Per spec/2026-04-30-phase-a-umbrella.md §1: artifact bytes are NEVER pinned
+ * to IPFS — they live behind the operator's HTTP server, gated by x402 when
+ * priceUsdc > 0. IPFS only holds the manifest envelope as a public discovery
+ * anchor (handled by the engine's envelope-assembly step).
  *
  * Returns an array of `UploadedArtifact` (= Artifact + localPath).
  */
@@ -394,34 +408,45 @@ export async function uploadArtifacts(
     artifactType: string;
     metadata?: Record<string, unknown>;
     tags?: string[];
-    access?: { kind: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string };
+    access?: { kind?: 'open' | 'x402-gated'; endpoint?: string; priceUsdc?: string };
   }>,
   deps: PackagingDeps,
 ): Promise<UploadedArtifact[]> {
+  if (!deps.operatorEndpoint) {
+    throw new Error(
+      'uploadArtifacts: operatorEndpoint is required (set operator.publicEndpoint in config)',
+    );
+  }
+
   const results: UploadedArtifact[] = [];
+  const now = new Date().toISOString();
 
   for (const art of artifacts) {
     try {
       const content = readFileSync(art.localPath);
       const hash = sha256Hex(content);
 
-      // Upload raw bytes as base64-encoded JSON envelope so IPFS receives JSON
-      // (consistent with how other uploads work via uploadToIpfs).
-      const envelope = {
-        artifactType: art.artifactType,
-        sha256: hash,
-        data: content.toString('base64'),
-      };
+      const priceUsdc =
+        art.access?.priceUsdc
+        ?? deps.perArtifactTypePrice[art.artifactType]
+        ?? deps.defaultPriceUsdc;
 
-      const cid = await uploadToIpfs(deps.ipfsRegistryUrl, envelope);
+      const endpoint = art.access?.endpoint ?? deps.operatorEndpoint;
+
+      deps.store.saveServedArtifact({
+        sha256: hash,
+        artifactType: art.artifactType,
+        requestId: deps.requestId,
+        content,
+        priceUsdc,
+        createdAt: now,
+      });
 
       const uploaded: UploadedArtifact = {
-        cid,
         sha256: hash,
         artifactType: art.artifactType,
-        metadata: art.metadata,
-        tags: art.tags,
-        access: art.access,
+        metadata: art.metadata as UploadedArtifact['metadata'],
+        access: { endpoint, priceUsdc },
         localPath: art.localPath,
       };
 
@@ -438,9 +463,8 @@ export async function uploadArtifacts(
           endTimeUnixNano: nowNano,
           attributes: {
             'jinn.span.kind': 'jinn.artifact.emit',
-            'jinn.artifact.cid': cid,
-            'jinn.artifact.artifactType': art.artifactType,
             'jinn.artifact.sha256': hash,
+            'jinn.artifact.artifactType': art.artifactType,
           },
           events: [],
           status: { code: 'OK' },
@@ -453,7 +477,7 @@ export async function uploadArtifacts(
 
       results.push(uploaded);
     } catch (err) {
-      console.error(`[restorer-engine] artifact upload failed for ${art.localPath}: ${err instanceof Error ? err.message : err}`);
+      console.error(`[restorer-engine] artifact write failed for ${art.localPath}: ${err instanceof Error ? err.message : err}`);
       // Non-fatal: continue with remaining artifacts
     }
   }

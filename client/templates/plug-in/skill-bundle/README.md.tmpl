@@ -1,0 +1,28 @@
+# {{packageName}}
+
+Path 1 Jinn plug-in. Bundles additional Claude Code skills into the
+claude-code-learner harness.
+
+## Install (operator)
+
+```bash
+yarn add {{packageName}}
+jinn plug-ins add {{packageName}} --entry $(node -p "require.resolve('{{packageName}}/package.json').replace(/\/package\.json$/, '')")
+```
+
+The daemon adds this package root to Claude Code's `--plugin-dir` list
+at session-start. Skills under `skills/` become discoverable by phase
+agents via the `Skill` tool.
+
+## Develop
+
+```bash
+yarn install
+yarn test
+```
+
+Add or replace skills under `skills/<name>/SKILL.md`.
+
+## Spec
+
+`spec/2026-04-30-plug-in-surface.md` §4. Slot type: `skill-bundle`.

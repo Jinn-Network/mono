@@ -1,0 +1,17 @@
+/**
+ * Minimal MCP server stub for {{packageName}}. Replace with real tool
+ * implementations. The server is spawned by the harness when this
+ * plug-in is installed; tools surface to phase agents under the
+ * plug-in's name (or `slot.namespace` if declared).
+ */
+
+// Replace with actual @modelcontextprotocol/sdk imports when implementing.
+console.error('{{packageName}}: MCP server starting (stub)');
+
+process.stdin.on('data', (chunk: Buffer) => {
+  // Echo loop — replace with proper JSON-RPC handling.
+  process.stdout.write(chunk);
+});
+
+process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', () => process.exit(0));

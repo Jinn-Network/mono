@@ -1,0 +1,48 @@
+import { describe, it, expect } from 'vitest';
+import createEvaluator from '../src/index.js';
+import type {
+  ExternalRestorerEnv,
+  RestorationContext,
+} from '@jinn-network/restorer-sdk';
+
+const env: ExternalRestorerEnv = {
+  implName: '{{packageName}}',
+  implVersion: '0.1.0',
+  network: '{{network}}',
+  implStateDir: '/tmp/{{packageNameSlug}}',
+  secrets: Object.freeze({}),
+  log: () => {},
+  stub: false,
+};
+
+const ctx: RestorationContext = {
+  intent: { id: 'eval-1', type: 'evaluation', spec: { kind: '{{kindString}}' } },
+  intentCid: undefined,
+  implStateDir: '/tmp/{{packageNameSlug}}',
+  workingDir: '/tmp/{{packageNameSlug}}-work',
+  log: () => {},
+  abort: new AbortController().signal,
+  msUntilEndTs: () => 60_000,
+};
+
+describe('{{packageName}}', () => {
+  it('supports the configured kind only as evaluation', () => {
+    const impl = createEvaluator(env);
+    expect(impl.supports({ kind: '{{kindString}}', type: 'evaluation' })).toBe(
+      true,
+    );
+    expect(impl.supports({ kind: '{{kindString}}', type: 'restoration' })).toBe(
+      false,
+    );
+    expect(impl.supports({ kind: 'other.v0', type: 'evaluation' })).toBe(false);
+  });
+
+  it('produces a verdictPayload with a score field', async () => {
+    const impl = createEvaluator(env);
+    const out = await impl.run(ctx);
+    expect(out.verdictPayload).toBeDefined();
+    expect(typeof (out.verdictPayload as Record<string, unknown>).score).toBe(
+      'number',
+    );
+  });
+});

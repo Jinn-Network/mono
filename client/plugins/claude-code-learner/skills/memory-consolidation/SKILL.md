@@ -15,6 +15,14 @@ Launch the consolidator; verify outputs.
 - `implStateDir/` and `workingDir/` (full)
 - `implStateDir/policy.json` (retention rules, size caps)
 
+## Consult slot registry
+
+Before spawning the bundled consolidator, check `workingDir/.coordinator/slots.json` (if present) for a `phase-agent-override` entry where `slot.phase === "memory-consolidation"` AND `slot.agent === "consolidator"` AND (`slot.scope` absent OR `intent.spec.kind` ∈ `slot.scope.matchKinds`). If a match exists, spawn the agent at `<entry.packageRoot>/<entry.slot.entry>` with the same inputs as the bundled consolidator. Otherwise proceed with the bundled `consolidator` agent.
+
+## Plug-in memory backends
+
+Also consult `slots.json.memoryBackends`. Each entry exposes MCP tools `embed(text)`, `query(vector, k)`, and `prune(maxAgeDays)` under the namespace `memory-<plugInName>` (per `client/src/restorer/impls/claude-code-learner/mcp-config.ts`). During curation, if a backend is the policy match for this kind (consult `implStateDir/policy.json`'s `memoryBackend.default` or `memoryBackend.perKind[kind]`), call `mcp__memory-<plugInName>__embed` to index relevant artifacts and `mcp__memory-<plugInName>__query` to retrieve analogous prior cases. Multiple backends can coexist; each is a distinct MCP namespace. If no `memoryBackends` entries are present, fall back to the bundled file-based curation (the existing behaviour).
+
 ## Launch the consolidator
 
 ```

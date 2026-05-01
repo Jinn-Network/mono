@@ -62,16 +62,23 @@ const restorationInputs: EnvelopeInputs = {
     signingKey: { kind: 'agent-eoa', pubkey: TEST_ADDRESS },
   },
   trajectory: {
-    cid: STUB_TRAJ_CID,
     sha256: 'a'.repeat(64),
+    access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
   },
   // Required artifact types: trajectory, system_snapshot, output.portfolio.v0
   // Plus one artifact linked to the emit span from buildGoodTrajectoryFixture.
   artifacts: [
-    { cid: STUB_TRAJ_CID, artifactType: 'trajectory', sha256: 'a'.repeat(64) },
-    { cid: 'bafy-system-snapshot-001', artifactType: 'system_snapshot', sha256: 'b'.repeat(64) },
     {
-      cid: FIXTURE_ARTIFACT_CID,
+      artifactType: 'trajectory',
+      sha256: 'a'.repeat(64),
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    },
+    {
+      artifactType: 'system_snapshot',
+      sha256: 'b'.repeat(64),
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    },
+    {
       artifactType: 'output.portfolio.v0',
       sha256: 'c'.repeat(64),
       metadata: {
@@ -81,6 +88,7 @@ const restorationInputs: EnvelopeInputs = {
           trajectoryCid: STUB_TRAJ_CID,
         },
       },
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
     },
   ],
   payload: {

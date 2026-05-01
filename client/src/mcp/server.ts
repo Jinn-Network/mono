@@ -17,6 +17,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { Store } from '../store/store.js';
+import { createCorpus, type Corpus } from '../corpus/index.js';
+import { handleSearchArtifacts } from './search-artifacts.js';
+import { handleAcquireArtifact } from './acquire-artifact.js';
 
 const server = new McpServer({
   name: 'jinn-client',
@@ -38,6 +41,29 @@ const requestId = process.env['REQUEST_ID'] ?? '';
 const storePath = process.env['STORE_PATH'] ?? '';
 const store = storePath ? new Store(storePath) : null;
 const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
+
+// ── Corpus ──────────────────────────────────────────────────────────────────
+// Build a corpus instance when the daemon supplied the necessary env vars.
+// Without it, `search_artifacts` / `acquire_artifact` fall back to local-only
+// fast paths and surface an error for the network branch. See spec §4.
+function buildCorpus(): Corpus | null {
+  if (!store) return null;
+  const subgraphUrl = process.env['JINN_CORPUS_SUBGRAPH_URL'] ?? '';
+  const ipfsGatewayUrl = process.env['JINN_CORPUS_IPFS_GATEWAY_URL'] ?? '';
+  const agentPrivateKey = process.env['JINN_CORPUS_AGENT_PRIVATE_KEY'] ?? '';
+  const selfSafeAddress = process.env['JINN_CORPUS_SELF_SAFE_ADDRESS'] ?? '';
+  if (!subgraphUrl || !ipfsGatewayUrl || !agentPrivateKey || !selfSafeAddress) {
+    return null;
+  }
+  return createCorpus({
+    subgraphUrl,
+    ipfsGatewayUrl,
+    store,
+    signer: { privateKey: agentPrivateKey },
+    selfSafeAddress,
+  });
+}
+const corpus = buildCorpus();
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -188,74 +214,99 @@ server.tool(
 
 server.tool(
   'search_artifacts',
-  'Search previously published knowledge artifacts',
+  'Search the corpus for relevant past trajectories and artifacts. Returns local fast-path hits (own served + cached network) plus subgraph-indexed network manifests with their full envelopes.',
   {
-    tags: z.array(z.string()).optional().describe('Filter by tags (e.g. ["restoration-result", "success"])'),
-    outcome: z.enum(['SUCCESS', 'FAILURE', 'UNKNOWN']).optional().describe('Filter by outcome'),
-    requestId: z.string().optional().describe('Filter by on-chain request ID'),
-    desiredStateId: z.string().optional().describe('Filter by desired state ID'),
-    after: z.string().optional().describe('Only return artifacts created after this ISO timestamp'),
-    before: z.string().optional().describe('Only return artifacts created before this ISO timestamp'),
-    limit: z.number().optional().describe('Max results (default 50)'),
+    kind: z.string().optional().describe('Intent kind (e.g. "output.prediction.v0")'),
+    intentCid: z.string().optional().describe('Filter to a specific intent CID'),
+    evidenceTier: z.enum(['self-signed', 'committed', 'attested']).optional(),
+    generatedAfter: z.number().int().optional().describe('Unix seconds — only manifests published after this time'),
+    generatedBefore: z.number().int().optional().describe('Unix seconds — only manifests published before this time'),
+    limit: z.number().int().optional().describe('Max results (default 50)'),
   },
-  async ({ tags, outcome, requestId, desiredStateId, after, before, limit }) => {
+  async (args) => {
     if (!store) {
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'No store configured', results: [] }) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured', local: [], network: [] }) }],
       };
     }
-    const results = store.searchArtifacts({ tags, outcome, requestId, desiredStateId, after, before, limit });
+    if (!corpus) {
+      // Local-only: still serve the fast path so agents can find their own work.
+      const local = store.searchOwnAndCached({ artifactType: args.kind, limit: args.limit ?? 50 });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ local, network: [], warning: 'corpus not configured (missing JINN_CORPUS_* env vars); network results unavailable' }) }],
+      };
+    }
+    const out = await handleSearchArtifacts(corpus, store, args);
     return {
-      content: [{ type: 'text' as const, text: JSON.stringify({ results }) }],
+      content: [{ type: 'text' as const, text: JSON.stringify(out) }],
     };
   },
 );
 
 server.tool(
   'acquire_artifact',
-  'Fetch the content of a remote artifact from a peer node',
+  'Fetch artifact bytes by sha256. Hits local-store (own served) and corpus cache fast paths first; falls through to network with x402 payment when necessary. Returns base64-encoded bytes and the fetch source.',
   {
-    id: z.string().describe('Artifact ID to acquire'),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    access: z.object({
+      endpoint: z.string().url(),
+      priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
+    }),
+    envelopeCid: z.string().optional(),
+    artifactType: z.string().optional(),
   },
-  async ({ id }) => {
+  async (args) => {
     if (!store) {
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'No store configured' }) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured' }) }],
       };
     }
-
-    // Check if content is already cached locally
-    const cached = store.getArtifactContent(id);
-    if (cached) {
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ id, content: cached, cached: true }) }],
-      };
-    }
-
-    // Check if we know where to fetch it
-    const remoteInfo = store.getRemoteArtifactInfo(id);
-    if (!remoteInfo) {
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: `Artifact ${id} not found (no remote info)` }) }],
-      };
-    }
-
-    // Fetch from peer
-    try {
-      const response = await fetch(`${remoteInfo.endpoint}/artifacts/${id}/content`);
-      if (!response.ok) {
+    if (!corpus) {
+      // Local-only: still allow self-store + cache hits to satisfy the request.
+      const own = store.getServedArtifact(args.sha256);
+      if (own) {
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ error: `Fetch failed: ${response.status}` }) }],
+          content: [{ type: 'text' as const, text: JSON.stringify({
+            sha256: args.sha256,
+            bytes: own.content.toString('base64'),
+            artifactType: own.artifactType,
+            source: 'self-store',
+            paidAmountUsdc: '0',
+          }) }],
         };
       }
-      const data = await response.json() as { content: string };
-      store.cacheRemoteContent(id, data.content);
+      const cached = store.getNetworkArtifact(args.sha256);
+      if (cached) {
+        store.touchNetworkArtifactUsage(args.sha256, new Date().toISOString());
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({
+            sha256: args.sha256,
+            bytes: cached.content.toString('base64'),
+            artifactType: cached.artifactType,
+            source: 'cache',
+            paidAmountUsdc: '0',
+          }) }],
+        };
+      }
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ id, content: data.content, cached: false }) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'corpus not configured and artifact not in local store' }) }],
+      };
+    }
+    try {
+      const out = await handleAcquireArtifact(corpus, store, args);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({
+          sha256: out.sha256,
+          bytes: out.bytes.toString('base64'),
+          artifactType: out.artifactType,
+          source: out.source,
+          paidAmountUsdc: out.paidAmountUsdc,
+          ...(out.sourceOperator ? { sourceOperator: out.sourceOperator } : {}),
+        }) }],
       };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: `Fetch error: ${err instanceof Error ? err.message : String(err)}` }) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: `acquire failed: ${err instanceof Error ? err.message : String(err)}` }) }],
       };
     }
   },

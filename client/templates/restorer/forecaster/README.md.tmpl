@@ -1,0 +1,25 @@
+# {{packageName}}
+
+Jinn external restorer impl for `{{kindString}}` on `{{network}}`.
+
+## Quickstart
+
+```bash
+yarn install
+yarn test       # unit tests
+yarn build      # produces dist/
+```
+
+Edit `src/index.ts` to plug in your forecasting pipeline. The `run()` method receives a `RestorationContext` (intent + workingDir + capability handles) and returns a `RestorationOutput`.
+
+## Publishing
+
+1. Compute your tarball CID + sha256: `npm pack && ipfs add *.tgz` and `shasum -a 256 *.tgz`.
+2. Update `jinn.manifest.json` with the resulting CID + hash.
+3. Sign the manifest with your ed25519 key (see `spec/2026-05-executor-trust-boundary.md` §5.2).
+4. Pin tarball + signed manifest on IPFS.
+5. Operators install via `jinn impls add ipfs://<manifest-cid>`.
+
+## Spec
+
+See `spec/2026-04-30-plug-in-surface.md` §3.3.1 (forecaster pattern).

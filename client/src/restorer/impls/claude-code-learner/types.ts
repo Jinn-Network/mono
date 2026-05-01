@@ -4,7 +4,9 @@ import type { RestorationContext } from '../../types.js';
  * Typed allowlist of env keys the wrapper may inject into the harness child
  * process. Adding a new key requires an explicit update here.
  */
-export type KnownAdapterEnvKey = 'JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE';
+export type KnownAdapterEnvKey =
+  | 'JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE'
+  | 'JINN_SLOT_REGISTRY_JSON';
 
 /**
  * Inputs the shim derives from RestorationContext and hands to the

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "@jinn-examples/polymarket-forecaster",
+  "version": "0.1.0",
+  "description": "Path 2 worked example — Polymarket forecaster for prediction.v0 on Base.",
+  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "entry": "./dist/index.js",
+  "package": {
+    "cid": "bafybeiplaceholderplaceholderplaceholderplaceholderplaceholder",
+    "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "capabilities": {
+    "rpc": [
+      { "chainId": 8453, "methods": ["eth_call", "eth_blockNumber"] }
+    ]
+  },
+  "signature": {
+    "alg": "ed25519",
+    "publicKey": "PLACEHOLDER",
+    "sig": "PLACEHOLDER"
+  },
+  "license": "MIT"
+}

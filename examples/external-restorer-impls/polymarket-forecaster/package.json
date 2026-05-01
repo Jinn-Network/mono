@@ -1,0 +1,35 @@
+{
+  "name": "@jinn-examples/polymarket-forecaster",
+  "version": "0.1.0",
+  "description": "Path 2 worked example — Polymarket forecaster external restorer impl for prediction.v0.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "jinn.manifest.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "vitest run test/e2e-anvil.test.ts"
+  },
+  "dependencies": {
+    "@jinn-network/restorer-sdk": "portal:../../../packages/restorer-sdk"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
+  }
+}

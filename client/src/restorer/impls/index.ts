@@ -3,7 +3,7 @@
  * Used by the daemon entrypoint and `jinn intents` CLI (stub mode).
  */
 
-import type { Runner } from '../../runner/runner.js';
+import type { Runner, RunnerContext } from '../../runner/runner.js';
 import type { RestorerImpl } from '../types.js';
 import { LegacyClaudeImpl } from './legacy-claude/index.js';
 import { ClaudeMcpHyperliquidImpl } from './claude-mcp-hyperliquid/index.js';
@@ -49,10 +49,43 @@ export interface RestorerEnv {
    */
   legacyClaudeWorkingDirectory?: string;
   /**
+   * Corpus env for {@link LegacyClaudeImpl} / MCP `jinn-client` tools
+   * (`search_artifacts`, `acquire_artifact`).
+   */
+  corpusEnv?: RunnerContext['corpusEnv'];
+  /**
    * Root for impl-scoped state dirs (e.g. hyperliquid api-wallet). Defaults under
    * `~/.jinn-client/engine/impl-state` when unset — wired from `config.engine` in main.
    */
   implStateDirRoot?: string;
+  /**
+   * Pre-loaded external (operator-supplied) restorer impls — produced by
+   * `loadExternalImpl()` in `client/src/restorer/external-impls/`. Appended to
+   * the in-repo construction list before the claude-code-learner wrapper so
+   * the wrapper sees them as specialists. See plan
+   * `docs/superpowers/plans/2026-04-30-plug-in-surface-path-2-foundation.md`
+   * step 5.7.
+   */
+  externalImpls?: readonly RestorerImpl[];
+  /**
+   * Pre-built serialised slot registry for Path 1 plug-ins (the bundled
+   * claude-code-learner impl's plug-in surface). Built once in main.ts
+   * by calling `loadPlugIns` + `serialiseRegistry` against
+   * `config.learnerPlugIns[]`. Threaded into the learner shim so it can
+   * forward the registry into the harness via `JINN_SLOT_REGISTRY_JSON`.
+   *
+   * See spec/2026-04-30-plug-in-surface.md §4 and plan
+   * docs/superpowers/plans/2026-04-30-plug-in-surface-path-1-mechanism.md
+   * Tasks 4–5.
+   */
+  slotRegistryJson?: string;
+  /**
+   * Impl names to filter out of the returned list entirely (different from
+   * `RestorerImplRegistry.disabled`, which only suppresses dispatch). Useful
+   * when a fleet wants to construct without paying the cost of an in-repo
+   * impl that has external deps.
+   */
+  disabledNames?: readonly string[];
 }
 
 /**
@@ -85,6 +118,7 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
         timeoutMs: 300_000,
         storePath: env.storePath,
         daemonApiUrl: env.daemonApiUrl,
+        corpusEnv: env.corpusEnv,
         stub: isStub,
       }),
     );
@@ -155,6 +189,12 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
         }),
   );
 
+  // Operator-supplied external impls are appended *before* the learner
+  // wrapper so the wrapper sees them as specialists too.
+  if (env.externalImpls && env.externalImpls.length > 0) {
+    out.push(...env.externalImpls);
+  }
+
   // Build the claude-code-learner wrapper LAST (so it sees all other impls
   // as its specialists pool). It is registered alongside specialists, NOT
   // prepended — universal-wrap is now a registry policy
@@ -164,11 +204,19 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
     claudePath: env.claudePath,
     claudeModel: env.claudeModel,
   });
-  const learnerShim = new ClaudeCodeLearnerImpl({ adapter: learnerAdapter });
+  const learnerShim = new ClaudeCodeLearnerImpl({
+    adapter: learnerAdapter,
+    slotRegistryJson: env.slotRegistryJson,
+  });
   const learnerWrapper = new ClaudeCodeLearnerWrapper({
     shim: learnerShim,
     specialists: [...out], // snapshot of specialists; wrapper does not delegate to itself
   });
   out.push(learnerWrapper);
+
+  if (env.disabledNames && env.disabledNames.length > 0) {
+    const disabled = new Set(env.disabledNames);
+    return out.filter((impl) => !disabled.has(impl.name));
+  }
   return out;
 }

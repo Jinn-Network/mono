@@ -23,6 +23,17 @@ Choose from these typical categories; add or omit based on the intent:
 3. **own-history** — list prior runs of this kind by this operator. Include if `implStateDir/runs/index.json` exists or the harness exposes a knowledge-tree query.
 4. **others-history** — recent runs of this kind by other operators. Include only if `implStateDir/policy.json` sets `allowCrossOperatorReads: true` AND the harness exposes the query tool.
 
+## Plug-in topic explorers
+
+In addition to the bundled topic categories above, consult `workingDir/.coordinator/slots.json` (if present). For each entry in `topicExplorers` matching `slot.phase === "orient"` AND (`slot.scope` absent OR `intent.spec.kind` ∈ `slot.scope.matchKinds`):
+
+- Treat it as an additional topic to gather. Topic name is `slot.topic`.
+- Spawn an explorer subagent (same shape as the bundled explorer, but with the explorer-role file at `<entry.packageRoot>/<entry.slot.entry>` instead of the bundled `explorer` role).
+- Inputs to the explorer are unchanged (topic, intent, scope, workingDir, implStateDir, outputPath = `workingDir/.orient/<topic>.json`, msUntilEndTs).
+- Include the topic's results in the collation (`workingDir/.orient/summary.json`'s `topics[]` array).
+
+Topic-name collisions: if a plug-in declares a topic that matches a bundled name (`intent-parse`, `world-state`, `own-history`, `others-history`), the plug-in's explorer replaces the bundled fan-out for that topic. Surface a one-line note in `summary.json.flags`. See spec/2026-04-30-plug-in-surface.md §4.
+
 ## Launch explorers
 
 For each topic chosen, spawn an `explorer` subagent via the Agent tool:

@@ -1,0 +1,24 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+describe('{{packageName}} manifest', () => {
+  it('jinn-plugin.json declares a phase-agent-override slot', () => {
+    const manifest = JSON.parse(
+      readFileSync(join(__dirname, '..', 'jinn-plugin.json'), 'utf8'),
+    );
+    expect(manifest.name).toBe('{{packageName}}');
+    expect(manifest.slots).toHaveLength(1);
+    expect(manifest.slots[0].type).toBe('phase-agent-override');
+    expect(manifest.slots[0].phase).toBe('{{phase}}');
+    expect(manifest.slots[0].agent).toBe('{{agent}}');
+  });
+
+  it('declared agent file exists', () => {
+    const manifest = JSON.parse(
+      readFileSync(join(__dirname, '..', 'jinn-plugin.json'), 'utf8'),
+    );
+    const entry = manifest.slots[0].entry;
+    expect(existsSync(join(__dirname, '..', entry))).toBe(true);
+  });
+});

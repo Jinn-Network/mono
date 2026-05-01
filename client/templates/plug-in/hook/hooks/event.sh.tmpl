@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# {{packageName}} — {{event}} hook.
+#
+# Inputs (from environment, set by the coordinator skill):
+#   JINN_INTENT_ID, JINN_INTENT_KIND
+#   JINN_PHASE          — set for pre-phase / post-phase events
+#   JINN_WORKING_DIR    — session ephemeral dir
+#   JINN_IMPL_STATE_DIR — operator-private durable dir
+#
+# Failures here log a warning to JINN_WORKING_DIR/.errors/hooks.log but
+# do not abort the session.
+
+set -euo pipefail
+
+echo "{{packageName}} {{event}}: intent=${JINN_INTENT_ID:-unknown} phase=${JINN_PHASE:-n/a}"

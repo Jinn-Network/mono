@@ -34,11 +34,14 @@ import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from './earning/wallet.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
+import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { RestorerImplRegistry } from './restorer/engine/registry.js';
 import { buildRestorerImpls } from './restorer/impls/index.js';
+import { loadExternalImpl } from './restorer/external-impls/index.js';
+import type { RestorerImpl } from './restorer/types.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
@@ -512,7 +515,93 @@ export async function main(): Promise<DaemonStartupInfo> {
     ...(config.restorers ?? {}),
   });
 
+  // Load operator-supplied external restorer impls (Path 2 plug-in surface).
+  // Each entry in `config.restorers.externalImpls` is verified against
+  // `config.trustedImplSigners` before its factory is invoked. Failed loads
+  // are logged + skipped — they don't bring down the daemon.
+  const externalImpls: RestorerImpl[] = [];
+  const trustedSigners = config.trustedImplSigners ?? [];
+  const externalEntries = config.restorers?.externalImpls ?? [];
+  if (externalEntries.length > 0) {
+    for (const entry of externalEntries) {
+      const result = await loadExternalImpl({
+        entry: {
+          name: entry.name,
+          entry: entry.entry,
+          package: entry.package,
+          version: entry.version,
+        },
+        trustedSigners,
+        env: {
+          implName: entry.name,
+          implVersion: '0.0.0', // overridden by manifest validation below
+          network: config.network,
+          implStateDir: join(config.engine.implStateDirRoot, entry.name),
+          secrets: Object.freeze({}),
+          log: ({ level, msg, data }) =>
+            console.log(`[external-impl:${entry.name}] [${level}] ${msg}`, data ?? ''),
+          stub: false,
+        },
+      });
+      if (result.kind === 'ok') {
+        externalImpls.push(result.impl);
+        console.log(`[main] Loaded external impl: ${result.impl.name}@${result.impl.version}`);
+      } else {
+        console.warn(
+          `[main] Failed to load external impl ${entry.name}: ${result.reason}` +
+            (result.detail ? ` (${result.detail})` : ''),
+        );
+      }
+    }
+  }
+
+  // ── Path 1 plug-ins (claude-code-learner slot registry) ──────────────────────
+  // Load operator-installed Path 1 plug-ins from `config.learnerPlugIns[]`,
+  // assemble the in-memory slot registry, and serialise it for hand-off to
+  // the learner shim (which forwards via env to the spawned harness).
+  // See spec/2026-04-30-plug-in-surface.md §4.
+  let slotRegistryJson: string | undefined;
+  const learnerPlugIns = config.learnerPlugIns ?? [];
+  if (learnerPlugIns.length > 0) {
+    const { loadPlugIns, serialiseRegistry } = await import(
+      './restorer/plug-ins/index.js'
+    );
+    // Read the bundled claude-code-learner version from its plugin.json.
+    // main.ts is at client/src/main.ts (src) or client/dist/main.js (compiled);
+    // probe both relative locations so the same code works in both contexts.
+    const __mainDir = dirname(fileURLToPath(import.meta.url));
+    const pluginJsonSrc = join(__mainDir, '../plugins/claude-code-learner/.claude-plugin/plugin.json');
+    const pluginJsonDist = join(__mainDir, '../../plugins/claude-code-learner/.claude-plugin/plugin.json');
+    const pluginJsonPath = existsSync(pluginJsonSrc) ? pluginJsonSrc : pluginJsonDist;
+    const learnerVersion = (
+      JSON.parse(readFileSync(pluginJsonPath, 'utf8')) as { version: string }
+    ).version;
+    const result = await loadPlugIns({
+      entries: learnerPlugIns,
+      learnerVersion,
+    });
+    for (const w of result.warnings) console.warn(`[plug-ins] ${w}`);
+    for (const e of result.errors)
+      console.error(`[plug-ins] ${e.plugInName}: ${e.reason}`);
+    slotRegistryJson = JSON.stringify(
+      serialiseRegistry(result.registry, learnerVersion),
+    );
+    console.log(
+      `[main] Loaded ${learnerPlugIns.length - result.errors.length}/${learnerPlugIns.length} Path 1 plug-in(s)`,
+    );
+  }
+
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) intents
+  const corpusEnv: RunnerContext['corpusEnv'] | undefined =
+    config.subgraphUrl?.trim()
+      ? {
+          subgraphUrl: config.subgraphUrl,
+          ipfsGatewayUrl: config.ipfsGatewayUrl,
+          agentPrivateKey,
+          selfSafeAddress: safeAddress,
+        }
+      : undefined;
+
   for (const impl of buildRestorerImpls({
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
@@ -524,6 +613,10 @@ export async function main(): Promise<DaemonStartupInfo> {
     storePath: config.dbPath,
     daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
     implStateDirRoot: config.engine.implStateDirRoot,
+    externalImpls,
+    disabledNames: config.restorers?.disabled,
+    slotRegistryJson,
+    corpusEnv,
   })) {
     implRegistry.register(impl);
   }
@@ -532,11 +625,34 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
-  // Packaging deps: IPFS upload (ERC-8004 per-artifact registration is rebuilt
-  // under jinn-mono-3zk; see DR
-  // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
+  // Packaging deps: artifact bytes are written to served_artifacts (operator-local
+  // SQLite) and served via the operator's HTTP server with x402 gating per
+  // spec/2026-04-30-phase-a-umbrella.md §1. IPFS only holds the manifest envelope.
+  // The `store` field is filled by Daemon (which owns the SQLite handle); here
+  // we just configure the endpoint + price defaults from `config.operator`
+  // (Phase 3, jinn-mono-vy37.1.3). Operators who don't declare an operator
+  // block fall back to the daemon's local API port so dev/test runs still work
+  // — but the resulting envelopes won't be reachable from outside the host.
+  const operatorPublicEndpoint =
+    config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
+  const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
+  const operatorPerTypePrice = config.operator?.perArtifactTypePrice ?? {};
+  if (!config.operator?.publicEndpoint) {
+    console.warn(
+      '[main] config.operator.publicEndpoint not set; defaulting to local API port. ' +
+        'External evaluators will not be able to fetch artifacts from this operator. ' +
+        'Set operator.publicEndpoint (or JINN_OPERATOR_PUBLIC_ENDPOINT) before going live.',
+    );
+  }
   const packagingDeps = {
-    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    operatorEndpoint: operatorPublicEndpoint,
+    defaultPriceUsdc: operatorDefaultPrice,
+    perArtifactTypePrice: operatorPerTypePrice,
+  };
+  const operatorConfig = {
+    publicEndpoint: operatorPublicEndpoint,
+    defaultPriceUsdc: operatorDefaultPrice,
+    perArtifactTypePrice: operatorPerTypePrice,
   };
 
   // Envelope assembly deps: sign envelopes with agent EOA private key
@@ -761,6 +877,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       implRegistry,
       identityPublisher,
       reputationFeedback,
+      operatorConfig,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

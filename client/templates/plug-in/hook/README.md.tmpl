@@ -1,0 +1,24 @@
+# {{packageName}}
+
+Path 1 Jinn plug-in. Runs a custom hook at the `{{event}}` event of
+each claude-code-learner session.
+
+## Install (operator)
+
+```bash
+yarn add {{packageName}}
+jinn plug-ins add {{packageName}} --entry $(node -p "require.resolve('{{packageName}}/package.json').replace(/\/package\.json$/, '')")
+```
+
+## Develop
+
+```bash
+yarn install
+yarn test
+```
+
+Edit `hooks/{{event}}.sh` to add your hook behaviour.
+
+## Spec
+
+`spec/2026-04-30-plug-in-surface.md` §4. Slot type: `hook`.

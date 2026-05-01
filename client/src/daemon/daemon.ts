@@ -74,7 +74,13 @@ export interface DaemonConfig {
    * evaluator impls; health-check intents with no spec use `legacy-claude` via
    * the registry default.
    */
-  restorationEngine: Omit<RestorationEngineOptions, 'store'>;
+  restorationEngine: Omit<RestorationEngineOptions, 'store' | 'packagingDeps'> & {
+    /**
+     * Packaging deps minus `store` (Daemon owns the SQLite handle and threads
+     * it in at construction time).
+     */
+    packagingDeps?: Omit<NonNullable<RestorationEngineOptions['packagingDeps']>, 'store'>;
+  };
 }
 
 export class Daemon {
@@ -110,6 +116,9 @@ export class Daemon {
     this.restorationEngine = new RestorationEngine({
       ...config.restorationEngine,
       store: this.store,
+      packagingDeps: config.restorationEngine.packagingDeps
+        ? { ...config.restorationEngine.packagingDeps, store: this.store }
+        : undefined,
     });
 
     if (config.rewardClaim && config.rewardClaim.intervalMs > 0) {

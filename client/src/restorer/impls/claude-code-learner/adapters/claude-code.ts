@@ -1,8 +1,15 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessAdapter, IntentSessionInputs } from '../types.js';
+import {
+  mergeMcpConfig,
+  mergeMemoryBackendsIntoMcpConfig,
+  pluginDirsForSession,
+  type McpConfig,
+} from '../mcp-config.js';
+import type { SerialisedRegistry } from '../../../plug-ins/serialise.js';
 
 export interface ClaudeCodeHarnessAdapterConfig {
   /** Path to the `claude` executable. Default: 'claude' (from PATH). */
@@ -124,10 +131,64 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     const prompt = buildInitialPrompt(inputs);
     const args: string[] = ['-p', prompt];
     if (this.claudeModel) args.push('--model', this.claudeModel);
-    args.push('--plugin-dir', pluginRoot);
+
+    // Path 1 plug-in surface: when the shim has a slot registry, build
+    // the harness mcp-config (mcp-tool + memory-backend slots) and union
+    // the plug-in skill-bundle package roots with the bundled plugin
+    // root. See spec/2026-04-30-plug-in-surface.md §4 + plan tasks 9.5 / 10.2.
+    const registryJson = inputs.adapterEnv?.JINN_SLOT_REGISTRY_JSON;
+    let pluginDirs: string[] = [pluginRoot];
+    let mcpConfigPath: string | undefined;
+    if (registryJson) {
+      try {
+        const registry = JSON.parse(registryJson) as SerialisedRegistry;
+        const baseline: McpConfig = { mcpServers: {} };
+        const withTools = mergeMcpConfig(
+          baseline,
+          registry.mcpTools.map((s) => ({
+            plugInName: s.plugInName,
+            plugInVersion: registry.learnerVersion,
+            packageRoot: s.packageRoot,
+            slot: s.slot,
+          })),
+        );
+        const withMemory = mergeMemoryBackendsIntoMcpConfig(
+          withTools,
+          registry.memoryBackends.map((s) => ({
+            plugInName: s.plugInName,
+            plugInVersion: registry.learnerVersion,
+            packageRoot: s.packageRoot,
+            slot: s.slot,
+          })),
+        );
+        if (Object.keys(withMemory.mcpServers).length > 0) {
+          mcpConfigPath = join(inputs.workingDir, '.coordinator', 'mcp.json');
+          mkdirSync(join(inputs.workingDir, '.coordinator'), { recursive: true });
+          writeFileSync(mcpConfigPath, JSON.stringify(withMemory, null, 2));
+        }
+        pluginDirs = pluginDirsForSession(
+          { skillBundles: registry.skillBundles },
+          pluginRoot,
+        );
+      } catch (err) {
+        // Bad registry JSON should not abort the spawn — log and continue
+        // with the bundled plugin only.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[claude-code-adapter] failed to apply slot registry: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath);
+    for (const dir of pluginDirs) args.push('--plugin-dir', dir);
 
     const env = buildAgentEnv({
       IMPL_STATE_DIR: inputs.implStateDir,
+      // Surfaced for the session-start hook so Path 1 plug-in slot
+      // registry can be materialised into workingDir/.coordinator/slots.json.
+      WORKING_DIR: inputs.workingDir,
+      JINN_WORKING_DIR: inputs.workingDir,
       JINN_CLAUDE_CODE_LEARNER_PLUGIN_ROOT: pluginRoot,
       ...(inputs.adapterEnv ?? {}),
     });

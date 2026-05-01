@@ -122,7 +122,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // GET /artifacts/:id/content (free, no payment gate)
   app.get('/artifacts/:id/content', (c) => {
     const id = c.req.param('id');
-    const content = store.getArtifactContent(id);
+    const content = store.resolveCatalogArtifactContent(id);
     if (content === null) {
       return c.json({ error: 'Artifact not found or no content' }, 404);
     }

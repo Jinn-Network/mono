@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "@jinn-examples/prefetch-markets-hook",
+  "version": "0.1.0",
+  "description": "Pre-orient hook that pre-fetches relevant market state into workingDir/.cache/markets.json so Orient explorers don't re-fetch.",
+  "compatibility": {
+    "claudeCodeLearner": ">=0.1.0 <0.2.0",
+    "supportedKinds": ["prediction.v0"]
+  },
+  "slots": [
+    {
+      "type": "hook",
+      "event": "pre-phase",
+      "phase": "orient",
+      "entry": "hooks/pre-orient",
+      "scope": { "matchKinds": ["prediction.v0"] }
+    }
+  ],
+  "license": "MIT"
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "@example/forecaster",
+  "version": "0.1.0",
+  "description": "Example prediction.v0 forecaster.",
+  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "entry": "./dist/index.js",
+  "package": {
+    "cid": "bafybeigexampleexampleexampleexampleexampleexampleexample",
+    "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "capabilities": {
+    "rpc": [
+      { "chainId": 8453, "methods": ["eth_call", "eth_blockNumber"] }
+    ]
+  },
+  "signature": {
+    "alg": "ed25519",
+    "publicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "sig": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  },
+  "license": "MIT"
+}

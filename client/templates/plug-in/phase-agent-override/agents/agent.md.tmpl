@@ -1,0 +1,26 @@
+---
+name: {{phaseAgentName}}
+description: Override for the bundled claude-code-learner {{agent}} agent in the {{phase}} phase.
+---
+
+# {{phaseAgentName}}
+
+This is a stub override agent. Replace the body below with your custom
+{{phase}}/{{agent}} logic. The override receives the same inputs as the
+bundled agent — see the bundled
+`client/plugins/claude-code-learner/agents/{{agent}}.md` for the contract.
+
+## Inputs
+
+(Document what your override expects here.)
+
+## Outputs
+
+(Document what your override produces here.)
+
+## Notes
+
+- Inherits trust from the harness — no per-plug-in capability allow-list.
+- Phase skills route to this override only when `intent.spec.kind` matches
+  the `scope.matchKinds` declared in `jinn-plugin.json` (or unconditionally
+  when `scope` is absent).

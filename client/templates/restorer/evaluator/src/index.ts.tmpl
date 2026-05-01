@@ -1,0 +1,35 @@
+import type {
+  RestorerImpl,
+  ExternalRestorerEnv,
+  RestorationContext,
+  RestorationOutput,
+} from '@jinn-network/restorer-sdk';
+
+export default function createEvaluator(env: ExternalRestorerEnv): RestorerImpl {
+  return {
+    name: env.implName,
+    version: env.implVersion,
+    supports({ kind, type }) {
+      return kind === '{{kindString}}' && type === 'evaluation';
+    },
+    async isReady() {
+      return env.stub
+        ? { ready: false, reason: 'stub mode' }
+        : { ready: true };
+    },
+    async run(ctx: RestorationContext): Promise<RestorationOutput> {
+      env.log({
+        level: 'info',
+        msg: 'evaluator.run',
+        data: { intentId: ctx.intent.id },
+      });
+      // TODO: read the restoration envelope under evaluation, fetch ground-truth
+      // from your oracle, compute your score. Replace this stub with your impl.
+      return {
+        venueRef: { name: '{{packageName}}' },
+        gating: { score: 0, scoringRule: 'placeholder' },
+        verdictPayload: { score: 0, scoringRule: 'placeholder' },
+      };
+    },
+  };
+}

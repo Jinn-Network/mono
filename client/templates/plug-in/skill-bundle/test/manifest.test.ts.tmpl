@@ -1,0 +1,21 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+describe('{{packageName}} skill-bundle plug-in', () => {
+  it('declares a skill-bundle slot', () => {
+    const manifest = JSON.parse(
+      readFileSync(join(__dirname, '..', 'jinn-plugin.json'), 'utf8'),
+    );
+    expect(manifest.name).toBe('{{packageName}}');
+    expect(manifest.slots[0].type).toBe('skill-bundle');
+    expect(manifest.slots[0].skillsDir).toBe('skills');
+  });
+
+  it('skills directory + Claude Code plugin manifest exist', () => {
+    expect(existsSync(join(__dirname, '..', 'skills'))).toBe(true);
+    expect(
+      existsSync(join(__dirname, '..', '.claude-plugin', 'plugin.json')),
+    ).toBe(true);
+  });
+});

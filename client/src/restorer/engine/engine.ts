@@ -97,8 +97,11 @@ export interface RestorationEngineOptions {
   /**
    * Packaging dependencies. When provided, pack() is functional.
    * When absent, pack() falls back to NotImplementedError.
+   *
+   * `requestId` is filled per-call by the engine from the in-flight intent;
+   * `collector` is wired per-call from `trajectoryCollectors`.
    */
-  packagingDeps?: PackagingDeps;
+  packagingDeps?: Omit<PackagingDeps, 'requestId' | 'collector'>;
   /**
    * Envelope assembly dependencies. When provided, pack() can assemble + sign.
    * When absent, pack() falls back to NotImplementedError.
@@ -156,6 +159,21 @@ export interface RestorationEngineOptions {
     client: ReputationRegistryClient;
     resolveAgentId: (manifestHash: `0x${string}`) => Promise<ResolvedAgent | null>;
   };
+  /**
+   * Operator-local artifact serving config (Phase A.1, jinn-mono-vy37.1.3).
+   *
+   * `publicEndpoint` is the externally-reachable base URL stamped onto every
+   * artifact + trajectory `access.endpoint`. `defaultPriceUsdc` and
+   * `perArtifactTypePrice` are pinned here so the engine doesn't have to thread
+   * them through `packagingDeps` separately for trajectory refs.
+   *
+   * Required for production wiring; tests may construct a synthetic value.
+   */
+  operatorConfig?: {
+    publicEndpoint: string;
+    defaultPriceUsdc: string;
+    perArtifactTypePrice: Record<string, string>;
+  };
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -179,6 +197,7 @@ export class RestorationEngine {
   protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
   protected readonly identityPublisher: RestorationEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: RestorationEngineOptions['reputationFeedback'];
+  protected readonly operatorConfig: RestorationEngineOptions['operatorConfig'];
   /** Local SQLite-backed store; used to emit `restoration-result` /
    *  `evaluation-verdict` artifact rows when a cycle completes via a
    *  deterministic impl (the legacy claude/MCP path writes them itself). */
@@ -213,6 +232,7 @@ export class RestorationEngine {
     this.implRegistry = opts.implRegistry;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
+    this.operatorConfig = opts.operatorConfig;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -728,11 +748,13 @@ export class RestorationEngine {
     // jinn.artifact.emit spans and attach producedBy back-refs (Task 16 forward
     // linkage). emitTrajectory is called AFTER upload so artifact spans are included.
     const collector = this.trajectoryCollectors.get(intent.requestId);
-    const packagingDepsWithCollector = collector
-      ? { ...this.packagingDeps, collector }
-      : this.packagingDeps;
+    const packagingDepsWithReq: PackagingDeps = {
+      ...this.packagingDeps,
+      requestId: intent.requestId,
+      ...(collector ? { collector } : {}),
+    };
     const rawArtifacts = await walkArtifacts(workingDir, implArtifacts);
-    const uploadedArtifacts = await uploadArtifacts(rawArtifacts, packagingDepsWithCollector);
+    const uploadedArtifacts = await uploadArtifacts(rawArtifacts, packagingDepsWithReq);
 
     // 1b. Emit trajectory to IPFS now that all artifact spans have been added.
     // Non-fatal — envelope assembly continues with envelope.trajectory = null if upload fails.
@@ -883,8 +905,20 @@ export class RestorationEngine {
 
     // 5. Assemble + sign envelope → envelope CID now known.
     // trajectoryRef was computed in step 1b above (emitted after artifact upload).
+    // Per the post-gating-fix schema, trajectory references carry sha256 + access
+    // (the operator HTTP endpoint that serves the bytes). Phase 3 (jinn-mono-vy37.1.3)
+    // sources this from the engine's operatorConfig; absent operatorConfig (e.g. test
+    // fixtures) falls back to packagingDeps.operatorEndpoint, then to a localhost
+    // sentinel so suites that don't exercise the publish path still pack cleanly.
+    const operatorEndpointForTraj =
+      this.operatorConfig?.publicEndpoint
+      ?? this.packagingDeps?.operatorEndpoint
+      ?? 'http://localhost:7331';
     const envelopeTrajectory = trajectoryRef
-      ? { cid: trajectoryRef.cid, sha256: trajectoryRef.sha256 }
+      ? {
+          sha256: trajectoryRef.sha256,
+          access: { endpoint: operatorEndpointForTraj, priceUsdc: '0' },
+        }
       : null;
 
     // evidenceTier reflects the on-chain commitment state at the time of signing.
@@ -936,10 +970,21 @@ export class RestorationEngine {
     //    persisted to DELIVERING state below and reused by deliver().
     //    Operator-rooted entity model: docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md.
 
-    // 7. Build artifact CID map for persistence
+    // 7. Build artifact sha256 map for persistence.
+    // Post-gating-fix (spec §1): artifacts no longer have IPFS CIDs — bytes
+    // live in served_artifacts keyed by sha256. We reuse the legacy
+    // `artifactCids` persistence column (key: localPath) but populate it with
+    // sha256 hashes so downstream readers still get a stable identifier.
     const artifactCids: Record<string, string> = {};
     for (const art of uploadedArtifacts) {
-      artifactCids[art.localPath] = art.cid;
+      artifactCids[art.localPath] = art.sha256;
+    }
+
+    // Backfill envelope_cid (manifestCid) on every served_artifacts row so
+    // the operator can answer manifest-rooted lookups later. Done after the
+    // manifest CID is known.
+    for (const art of uploadedArtifacts) {
+      this.store.setServedArtifactEnvelopeCid(art.sha256, manifestCid);
     }
 
     // 8. Persist DELIVERING with manifest CID + artifact CIDs + evidence hash.

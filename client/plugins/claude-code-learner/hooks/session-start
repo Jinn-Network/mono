@@ -35,4 +35,15 @@ fi
 git config user.name "claude-code-learner"
 git config user.email "claude-code-learner@jinn.local"
 
+# Path 1 plug-in slot-registry hand-off (spec/2026-04-30-plug-in-surface.md §4):
+# the daemon serialises config.learnerPlugIns[] into JINN_SLOT_REGISTRY_JSON;
+# we materialise it under the session's workingDir so phase skills can `Read`
+# it without needing access to the daemon process env.
+WORKING_DIR_FOR_SLOTS="${WORKING_DIR:-${JINN_WORKING_DIR:-}}"
+if [[ -n "${JINN_SLOT_REGISTRY_JSON:-}" && -n "$WORKING_DIR_FOR_SLOTS" ]]; then
+  mkdir -p "$WORKING_DIR_FOR_SLOTS/.coordinator"
+  printf '%s\n' "$JINN_SLOT_REGISTRY_JSON" > "$WORKING_DIR_FOR_SLOTS/.coordinator/slots.json"
+  echo "session-start: wrote slot registry to $WORKING_DIR_FOR_SLOTS/.coordinator/slots.json"
+fi
+
 echo "session-start: implStateDir ready at $(pwd) (HEAD=$(git rev-parse HEAD))"

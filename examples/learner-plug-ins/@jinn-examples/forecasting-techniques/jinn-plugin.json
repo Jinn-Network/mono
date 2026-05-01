@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "@jinn-examples/forecasting-techniques",
+  "version": "0.1.0",
+  "description": "Skill bundle of forecasting-technique skills loadable by claude-code-learner phase agents (especially the strategist).",
+  "compatibility": {
+    "claudeCodeLearner": ">=0.1.0 <0.2.0",
+    "supportedKinds": ["prediction.v0"]
+  },
+  "slots": [
+    {
+      "type": "skill-bundle",
+      "skillsDir": "skills",
+      "scope": { "matchKinds": ["prediction.v0"] }
+    }
+  ],
+  "license": "MIT"
+}

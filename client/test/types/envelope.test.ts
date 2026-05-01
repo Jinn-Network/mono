@@ -96,9 +96,9 @@ describe('UnsignedEnvelopeSchema', () => {
       ...baseEnv,
       artifacts: [
         {
-          cid: 'bafy-art',
           artifactType: 'system_snapshot',
           sha256: 'cd'.repeat(32),
+          access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
         },
       ],
     };
@@ -106,7 +106,7 @@ describe('UnsignedEnvelopeSchema', () => {
 
     const envWithRole = {
       ...baseEnv,
-      artifacts: [{ cid: 'bafy-art', role: 'system_snapshot' }],
+      artifacts: [{ role: 'system_snapshot', sha256: 'cd'.repeat(32) }],
     };
     expect(() => UnsignedEnvelopeSchema.parse(envWithRole)).toThrow();
   });

@@ -25,12 +25,21 @@ export class ClaudeCodeLearnerImpl implements RestorerImpl {
   readonly version: string;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
+  /**
+   * Pre-built serialised slot registry (Path 1 plug-ins) threaded into the
+   * harness via `JINN_SLOT_REGISTRY_JSON`. Constructed once at daemon boot
+   * from `config.learnerPlugIns[]`. See plan Task 5.
+   */
+  private readonly slotRegistryJson: string | undefined;
 
-  constructor(config: ClaudeCodeLearnerConfig) {
+  constructor(
+    config: ClaudeCodeLearnerConfig & { slotRegistryJson?: string },
+  ) {
     this.adapter = config.adapter;
     this.name = config.name ?? 'claude-code-learner';
     this.version = config.version ?? '0.1.0-shim';
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
+    this.slotRegistryJson = config.slotRegistryJson;
   }
 
   supports(spec: { kind: string; type?: 'restoration' | 'evaluation' }): boolean {
@@ -52,6 +61,13 @@ export class ClaudeCodeLearnerImpl implements RestorerImpl {
     ctx: RestorationContext,
     adapterEnv: Record<string, string>,
   ): Promise<RestorationOutput> {
+    // Merge the pre-built slot registry (if any) into adapterEnv so the
+    // session-start hook in the harness writes it to slots.json.
+    const adapterEnvMerged: Record<string, string> = { ...adapterEnv };
+    if (this.slotRegistryJson) {
+      adapterEnvMerged.JINN_SLOT_REGISTRY_JSON = this.slotRegistryJson;
+    }
+
     const window = ctx.intent.window ?? { startTs: 0, endTs: 0 };
     const inputs: IntentSessionInputs = {
       intentId: ctx.intent.id,
@@ -64,7 +80,8 @@ export class ClaudeCodeLearnerImpl implements RestorerImpl {
       windowEndTs: window.endTs,
       msUntilEndTs: ctx.msUntilEndTs(),
       abort: ctx.abort,
-      adapterEnv: Object.keys(adapterEnv).length > 0 ? adapterEnv : undefined,
+      adapterEnv:
+        Object.keys(adapterEnvMerged).length > 0 ? adapterEnvMerged : undefined,
     };
 
     await this.adapter.runIntent(inputs, this.pluginRoot);

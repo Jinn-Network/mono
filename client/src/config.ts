@@ -292,7 +292,74 @@ export const JinnConfigSchema = z.object({
       default: z.string().optional(),
       disabled: z.array(z.string()).optional(),
       wrapWith: z.string().nullable().optional(),
+      /**
+       * Operator-supplied external impls — Path 2 plug-in surface.
+       *
+       * Each entry points the daemon at a manifest-bearing package on disk
+       * (typically inside `node_modules/`); `client/src/main.ts` invokes
+       * `loadExternalImpl()` for each entry at boot, validates the manifest
+       * against `trustedImplSigners`, and registers the resulting impl in
+       * the restorer registry. See
+       * `docs/superpowers/plans/2026-04-30-plug-in-surface-path-2-foundation.md`
+       * step 5.7-5.8.
+       */
+      externalImpls: z
+        .array(
+          z.object({
+            name: z.string(),
+            entry: z.string(),
+            package: z.string().optional(),
+            /**
+             * Optional pinned version. When set, the loader rejects the
+             * impl if its manifest's `version` does not match this string
+             * exactly — guards against silent upgrades of an on-disk
+             * package without an explicit operator config change
+             * (Finding 10).
+             */
+            version: z.string().optional(),
+          }),
+        )
+        .optional(),
     })
+    .optional(),
+
+  /**
+   * Trusted ed25519 publishers for external restorer impls. The daemon
+   * refuses to load any external impl whose manifest signature is not
+   * verifiable against one of these public keys.
+   *
+   * `publicKey` is base64-encoded raw ed25519. `label` is operator-facing
+   * provenance only.
+   */
+  trustedImplSigners: z
+    .array(
+      z.object({
+        alg: z.literal('ed25519'),
+        publicKey: z.string(),
+        label: z.string().optional(),
+      }),
+    )
+    .optional(),
+
+  /**
+   * Path 1 plug-ins for the bundled `claude-code-learner` impl — npm
+   * packages on disk that contribute phase-agent overrides, topic
+   * explorers, MCP tools, skill bundles, memory backends, or hooks via
+   * `jinn-plugin.json`.
+   *
+   * Each entry's `entry` is the absolute (or cwd-relative) path to the
+   * plug-in package root containing `package.json` + `jinn-plugin.json`.
+   * The CLI command `jinn plug-ins {list|add|remove|show}` edits this
+   * field. See spec/2026-04-30-plug-in-surface.md §4 and
+   * docs/superpowers/plans/2026-04-30-plug-in-surface-path-1-mechanism.md.
+   */
+  learnerPlugIns: z
+    .array(
+      z.object({
+        name: z.string(),
+        entry: z.string(),
+      }),
+    )
     .optional(),
 
   /**
@@ -304,6 +371,44 @@ export const JinnConfigSchema = z.object({
     .object({
       workingDirRoot: z.string().optional(),
       implStateDirRoot: z.string().optional(),
+    })
+    .optional(),
+
+  /**
+   * Operator-local artifact serving configuration (Phase A.1, jinn-mono-vy37.1).
+   *
+   * Per spec/2026-04-30-phase-a-umbrella.md §1, restoration artifact bytes
+   * stay on the operator's filesystem (served_artifacts) and are dispensed
+   * via the operator's HTTP API with x402 gating when `priceUsdc > 0`. The
+   * envelope's `artifact.access.endpoint` field tells consumers where to
+   * fetch each artifact; `priceUsdc` declares the asking price.
+   *
+   * `publicEndpoint` is the externally-reachable base URL that gets stamped
+   * into every artifact descriptor. `defaultPriceUsdc` is the fallback price
+   * when neither OUTPUTS.json nor `perArtifactTypePrice` provides a value.
+   * `perArtifactTypePrice` lets operators charge per artifactType.
+   *
+   * Resolution precedence in `uploadArtifacts`:
+   *   OUTPUTS.json `access.priceUsdc` > `perArtifactTypePrice[artifactType]`
+   *   > `defaultPriceUsdc`.
+   *
+   * Env overrides:
+   *   JINN_OPERATOR_PUBLIC_ENDPOINT
+   *   JINN_OPERATOR_DEFAULT_PRICE_USDC
+   */
+  operator: z
+    .object({
+      publicEndpoint: z.string().url(),
+      defaultPriceUsdc: z
+        .string()
+        .regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string')
+        .default('0'),
+      perArtifactTypePrice: z
+        .record(
+          z.string(),
+          z.string().regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string'),
+        )
+        .default({}),
     })
     .optional(),
 
@@ -508,6 +613,24 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.reputationEnabled = rv === '1' || rv === 'true' || rv === 'yes';
   }
 
+  if (
+    env['JINN_OPERATOR_PUBLIC_ENDPOINT'] ||
+    env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
+  ) {
+    const prevOp = typeof merged['operator'] === 'object' && merged['operator'] !== null
+      ? (merged['operator'] as Record<string, unknown>)
+      : {};
+    merged['operator'] = {
+      ...prevOp,
+      ...(env['JINN_OPERATOR_PUBLIC_ENDPOINT']
+        ? { publicEndpoint: env['JINN_OPERATOR_PUBLIC_ENDPOINT'] }
+        : {}),
+      ...(env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
+        ? { defaultPriceUsdc: env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] }
+        : {}),
+    };
+  }
+
   if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
     const prev = typeof merged['engine'] === 'object' && merged['engine'] !== null
       ? (merged['engine'] as Record<string, unknown>)
@@ -660,6 +783,8 @@ const TRACKED_ENV_VARS = [
   'JINN_DESIRED_STATES',
   'JINN_ENGINE_WORKING_DIR_ROOT',
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
+  'JINN_OPERATOR_PUBLIC_ENDPOINT',
+  'JINN_OPERATOR_DEFAULT_PRICE_USDC',
   'JINN_BUILD_COMMIT',
 ] as const;
 

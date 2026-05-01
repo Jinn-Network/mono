@@ -178,15 +178,16 @@ describe('checkArtifactLinkage', () => {
     expect(result.detail).toMatch(/nonexistent/);
   });
 
-  it('fails when a jinn.artifact.emit span references a CID not in envelope.artifacts', async () => {
+  it('fails when a jinn.artifact.emit span references a sha256 not in envelope.artifacts', async () => {
     const fx = await buildGoodRestorationFixture();
     const traj = buildGoodTrajectoryFixture(fx.intent.id);
-    // Corrupt the emit span's CID to one not in envelope.artifacts
+    // Corrupt the emit span's sha256 to one not in envelope.artifacts
     const emitSpan = traj.spans.find(
       (s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit',
     );
     expect(emitSpan).toBeDefined();
-    emitSpan!.attributes['jinn.artifact.cid'] = 'bafy-orphan-cid';
+    const orphanSha = '9'.repeat(64);
+    emitSpan!.attributes['jinn.artifact.sha256'] = orphanSha;
     const ctx: ConformanceContext = {
       envelope: fx.envelope,
       trajectory: traj as unknown,
@@ -195,7 +196,7 @@ describe('checkArtifactLinkage', () => {
     };
     const result = checkArtifactLinkage(ctx);
     expect(result.passed).toBe(false);
-    expect(result.detail).toMatch(/bafy-orphan-cid/);
+    expect(result.detail).toMatch(new RegExp(orphanSha));
   });
 
   it('fails when envelope is not loaded', () => {

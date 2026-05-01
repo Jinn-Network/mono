@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "@jinn-examples/polymarket-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing Polymarket market state queries to the claude-code-learner harness.",
+  "compatibility": {
+    "claudeCodeLearner": ">=0.1.0 <0.2.0",
+    "supportedKinds": ["prediction.v0"]
+  },
+  "slots": [
+    {
+      "type": "mcp-tool",
+      "command": "node",
+      "args": ["./dist/server.js"],
+      "namespace": "polymarket"
+    }
+  ],
+  "license": "MIT"
+}

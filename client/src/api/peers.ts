@@ -5,6 +5,7 @@
  * and stores results as remote artifacts in the local SQLite store.
  */
 
+import { createHash } from 'node:crypto';
 import type { Store } from '../store/store.js';
 import {
   signRequestWithErc8128,
@@ -82,8 +83,8 @@ export class PeerSync {
 
     let synced = 0;
     for (const artifact of data.results) {
-      // Skip if we already have this artifact locally
-      const existing = this.store.getArtifactContent(artifact.id);
+      // Skip if we already have this artifact body (local row or peer-cached network blob)
+      const existing = this.store.resolveCatalogArtifactContent(artifact.id);
       if (existing !== null) continue;
 
       this.store.insertRemoteArtifact({
@@ -103,7 +104,10 @@ export class PeerSync {
   }
 
   async acquireContent(artifactId: string): Promise<string | null> {
-    const info = this.store.getRemoteArtifactInfo(artifactId);
+    const cached = this.store.resolveCatalogArtifactContent(artifactId);
+    if (cached !== null) return cached;
+
+    const info = this.store.getRemoteDiscoveryMetadata(artifactId);
     if (!info) return null;
 
     const url = `${info.endpoint}/artifacts/${artifactId}/content`;
@@ -121,8 +125,19 @@ export class PeerSync {
     }
 
     const data = await response.json() as { content: string };
-    // Cache locally
-    this.store.cacheRemoteContent(artifactId, data.content);
+    const buf = Buffer.from(data.content, 'utf-8');
+    const sha256 = createHash('sha256').update(buf).digest('hex');
+    this.store.saveNetworkArtifact({
+      sha256,
+      artifactType: 'api-catalog',
+      content: buf,
+      source: 'origin',
+      sourceOperator: info.ownerAddress || null,
+      sourceEndpoint: info.endpoint,
+      paidAmountUsdc: '0',
+      fetchedAt: new Date().toISOString(),
+      peerCatalogId: artifactId,
+    });
     return data.content;
   }
 }

@@ -7,6 +7,7 @@
 import type { RestorationJob } from '../types/desired-state.js';
 import type { OutputArtifact, RationaleEntry, Snapshot } from '../types/portfolio.js';
 import type { TrajectoryCollector } from '../trajectory/index.js';
+import type { ScopedSigner, ScopedRpc, ScopedSecrets } from './capability/index.js';
 
 // ── RestorationContext ────────────────────────────────────────────────────────
 
@@ -34,6 +35,24 @@ export interface RestorationContext {
    * envelope.trajectory with the resulting { cid, sha256 }.
    */
   trajectory: TrajectoryCollector;
+  /**
+   * Scoped signer capability. Present when the daemon is providing a
+   * signing surface to this impl per its manifest allow-list. Absent
+   * for stub-mode CLI introspection.
+   * Spec: `spec/2026-05-executor-trust-boundary.md` §3.2.
+   */
+  signer?: ScopedSigner;
+  /**
+   * Scoped read-only RPC client. Method-filtered, rate-limited, and
+   * chain-scoped per the impl's manifest.
+   * Spec: `spec/2026-05-executor-trust-boundary.md` §3.3.
+   */
+  rpc?: ScopedRpc;
+  /**
+   * Per-impl secret bag, populated by `onEnable`.
+   * Spec: `spec/2026-05-executor-trust-boundary.md` §3.4.
+   */
+  secrets?: ScopedSecrets;
 }
 
 // ── RestorationOutput ─────────────────────────────────────────────────────────

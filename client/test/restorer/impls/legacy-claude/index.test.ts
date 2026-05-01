@@ -2,7 +2,7 @@
  * Tests for LegacyClaudeImpl — the RestorerImpl fallback for spec=undefined intents.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -167,6 +167,21 @@ describe('LegacyClaudeImpl', () => {
 
       const [, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [RestorationJob, RunnerContext];
       expect(calledCtx.workingDirectory).toBe('/custom-default');
+    });
+
+    it('passes corpusEnv through to RunnerContext for MCP credential forwarding', async () => {
+      const runner: Runner = { run: vi.fn().mockResolvedValue({ data: '' }) };
+      const corpusEnv = {
+        subgraphUrl: 'https://subgraph.example/graphql',
+        ipfsGatewayUrl: 'https://gateway.example',
+        agentPrivateKey: `0x${'a'.repeat(64)}`,
+        selfSafeAddress: `0x${'b'.repeat(40)}`,
+      };
+      const impl = new LegacyClaudeImpl({ runner, corpusEnv });
+      await impl.run(makeContext(makeIntent(), workingDir));
+
+      const [, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [RestorationJob, RunnerContext];
+      expect(calledCtx.corpusEnv).toEqual(corpusEnv);
     });
   });
 });

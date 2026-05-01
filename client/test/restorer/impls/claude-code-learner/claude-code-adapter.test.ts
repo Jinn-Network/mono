@@ -83,6 +83,89 @@ describe('ClaudeCodeHarnessAdapter', () => {
     await expect(adapter.runIntent(makeInputs({ abort: ac.signal }), '/p')).resolves.toBeUndefined();
   });
 
+  it('wires Path 1 plug-ins into --mcp-config and --plugin-dir from JINN_SLOT_REGISTRY_JSON', async () => {
+    const { mkdtempSync, rmSync, existsSync, readFileSync } = await import(
+      'node:fs'
+    );
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'cc-adapter-slots-'));
+    try {
+      const registry = {
+        builtAt: new Date().toISOString(),
+        learnerVersion: '0.1.0',
+        phaseAgentOverrides: [],
+        topicExplorers: [],
+        mcpTools: [
+          {
+            plugInName: '@jinn-examples/polymarket-mcp',
+            packageRoot: '/tmp/poly',
+            slot: {
+              type: 'mcp-tool',
+              command: 'node',
+              args: ['/tmp/poly/dist/server.js'],
+              namespace: 'polymarket',
+            },
+          },
+        ],
+        skillBundles: [
+          {
+            plugInName: '@jinn-examples/forecasting-techniques',
+            packageRoot: '/tmp/skills',
+            slot: { type: 'skill-bundle', skillsDir: 'skills' },
+          },
+        ],
+        memoryBackends: [
+          {
+            plugInName: '@jinn-examples/vector-store-memory',
+            packageRoot: '/tmp/vec',
+            slot: {
+              type: 'memory-backend',
+              command: 'node',
+              args: ['/tmp/vec/dist/server.js'],
+            },
+          },
+        ],
+        hooks: [],
+      };
+      const spawnFn = vi.fn(() => makeFakeChild(0));
+      const adapter = new ClaudeCodeHarnessAdapter({
+        _spawnFn: spawnFn as unknown as typeof import('node:child_process').spawn,
+      });
+      await adapter.runIntent(
+        makeInputs({
+          workingDir: tmp,
+          adapterEnv: { JINN_SLOT_REGISTRY_JSON: JSON.stringify(registry) },
+        }),
+        '/path/to/plugin',
+      );
+      const args = spawnFn.mock.calls[0][1] as string[];
+      // Bundled plugin + skill-bundle plug-in package root both get --plugin-dir
+      expect(args).toEqual(
+        expect.arrayContaining(['--plugin-dir', '/path/to/plugin']),
+      );
+      expect(args).toEqual(
+        expect.arrayContaining(['--plugin-dir', '/tmp/skills']),
+      );
+      // --mcp-config points at a file the adapter wrote in workingDir
+      const mcpIdx = args.indexOf('--mcp-config');
+      expect(mcpIdx).toBeGreaterThan(-1);
+      const mcpPath = args[mcpIdx + 1] ?? '';
+      expect(existsSync(mcpPath)).toBe(true);
+      const mcp = JSON.parse(readFileSync(mcpPath, 'utf8')) as {
+        mcpServers: Record<string, { command: string; args: string[] }>;
+      };
+      // mcp-tool slot present under its declared namespace
+      expect(mcp.mcpServers).toHaveProperty('polymarket');
+      // memory-backend slot present under memory-* prefix
+      expect(mcp.mcpServers).toHaveProperty(
+        'memory-@jinn-examples/vector-store-memory',
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('passes --model flag when claudeModel is set', async () => {
     const spawnFn = vi.fn(() => makeFakeChild(0));
     const adapter = new ClaudeCodeHarnessAdapter({

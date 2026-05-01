@@ -1,0 +1,24 @@
+# {{packageName}}
+
+Path 1 Jinn plug-in. Adds the topic `{{topic}}` to the bundled
+claude-code-learner `{{phase}}` phase fan-out.
+
+## Install (operator)
+
+```bash
+yarn add {{packageName}}
+jinn plug-ins add {{packageName}} --entry $(node -p "require.resolve('{{packageName}}/package.json').replace(/\/package\.json$/, '')")
+```
+
+## Develop
+
+```bash
+yarn install
+yarn test
+```
+
+Edit `agents/{{topic}}-explorer.md` to define the gathering behaviour.
+
+## Spec
+
+`spec/2026-04-30-plug-in-surface.md` §4. Slot type: `topic-explorer`.

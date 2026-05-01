@@ -11,6 +11,18 @@ import {
 } from '../../../src/restorer/engine/packaging.js';
 import type { RestorationJob } from '../../../src/types/desired-state.js';
 import { TrajectoryCollector } from '../../../src/trajectory/collector.js';
+import { Store } from '../../../src/store/store.js';
+
+function mkPkgDeps(extra: { collector?: TrajectoryCollector } = {}) {
+  return {
+    store: new Store(':memory:'),
+    operatorEndpoint: 'https://op.test',
+    defaultPriceUsdc: '0',
+    perArtifactTypePrice: {} as Record<string, string>,
+    requestId: '0x' + 'a'.repeat(64),
+    ...extra,
+  };
+}
 
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn().mockResolvedValue('bafyartifact123'),
@@ -332,10 +344,7 @@ describe('uploadArtifacts — trajectory collector', () => {
     writeFileSync(join(workDir, 'notes.md'), '# Notes');
 
     const collector = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-1' });
-    const deps = {
-      ipfsRegistryUrl: 'http://ipfs.test',
-      collector,
-    };
+    const deps = mkPkgDeps({ collector });
 
     const artifacts = await uploadArtifacts(
       [
@@ -350,9 +359,10 @@ describe('uploadArtifacts — trajectory collector', () => {
     const emitSpans = spans.filter((s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit');
     expect(emitSpans).toHaveLength(2);
 
-    // Each span must carry the expected attributes
-    const cidAttr = emitSpans.map((s) => s.attributes['jinn.artifact.cid']);
-    expect(cidAttr.every((c) => typeof c === 'string' && c.length > 0)).toBe(true);
+    // Each span carries a sha256 attribute (cid attribute removed in
+    // jinn-mono-vy37.1.2 — artifacts are no longer pinned to IPFS).
+    const sha256Hex = emitSpans.map((s) => s.attributes['jinn.artifact.sha256']);
+    expect(sha256Hex.every((c) => typeof c === 'string' && /^[0-9a-f]{64}$/.test(c as string))).toBe(true);
 
     const typeAttrs = emitSpans.map((s) => s.attributes['jinn.artifact.artifactType']);
     expect(typeAttrs).toContain('generated_file');
@@ -377,10 +387,9 @@ describe('uploadArtifacts — trajectory collector', () => {
     mkdirSync(workDir, { recursive: true });
     writeFileSync(join(workDir, 'out.txt'), 'data');
 
-    const deps = { ipfsRegistryUrl: 'http://ipfs.test' };
     const artifacts = await uploadArtifacts(
       [{ localPath: join(workDir, 'out.txt'), artifactType: 'generated_file' }],
-      deps,
+      mkPkgDeps(),
     );
 
     // No producedBy metadata when collector is absent
@@ -400,7 +409,7 @@ describe('uploadArtifacts — trajectory collector', () => {
         { localPath: join(workDir, 'a.txt'), artifactType: 'execution_log' },
         { localPath: join(workDir, 'b.txt'), artifactType: 'execution_log' },
       ],
-      { ipfsRegistryUrl: 'http://ipfs.test', collector },
+      mkPkgDeps({ collector }),
     );
 
     const { spans } = collector.snapshot();
@@ -422,7 +431,7 @@ describe('uploadArtifacts — trajectory collector', () => {
     const collector = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-y' });
     const artifacts = await uploadArtifacts(
       [{ localPath: join(workDir, 'file.txt'), artifactType: 'generated_file', metadata: { custom: 'value' } }],
-      { ipfsRegistryUrl: 'http://ipfs.test', collector },
+      mkPkgDeps({ collector }),
     );
 
     expect(artifacts).toHaveLength(1);

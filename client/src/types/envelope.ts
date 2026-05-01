@@ -69,21 +69,16 @@ const AttestationSchema = z.object({
 });
 
 const TrajectoryRefSchema = z.object({
-  cid: z.string().min(1),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  access: z
-    .object({
-      kind: z.enum(['open', 'x402-gated']),
-      endpoint: z.string().optional(),
-      priceUsdc: z.string().optional(),
-    })
-    .optional(),
+  access: z.object({
+    endpoint: z.string().url(),
+    priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
+  }),
 });
 
 const ArtifactSchema = z.object({
-  cid: z.string().min(1),
   artifactType: z.string().min(1),
-  sha256: z.string().optional(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
   metadata: z
     .object({
       description: z.string().optional(),
@@ -96,13 +91,10 @@ const ArtifactSchema = z.object({
         .optional(),
     })
     .optional(),
-  access: z
-    .object({
-      kind: z.enum(['open', 'x402-gated']),
-      endpoint: z.string().optional(),
-      priceUsdc: z.string().optional(),
-    })
-    .optional(),
+  access: z.object({
+    endpoint: z.string().url(),
+    priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
+  }),
 });
 
 export type Artifact = z.infer<typeof ArtifactSchema>;
