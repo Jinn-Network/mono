@@ -37,6 +37,8 @@ const ERC20_BALANCE_OF_ABI = [
   },
 ] as const;
 
+const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+
 export interface StatusGatherConfig {
   earningDir: string;
   rpcUrl: string;
@@ -314,7 +316,10 @@ export async function gatherGatheredStatusRaw(
     ...baseRaw,
     fleet,
     rpc: { ok: false, error: undefined },
-    minMasterEthWei: chainCfg.minEoaGasEth.toString(),
+    minMasterEthWei: (
+      chainCfg.minEoaGasEth *
+      (fleet && fleet.services.length > 0 ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+    ).toString(),
     master: {
       address: fleet?.master_address ?? null,
     },

@@ -30,7 +30,7 @@ cd client
 cp .env.acceptance.example .env.acceptance
 ```
 
-**Keystore password** — set `JINN_PASSWORD` (or `JINN_TESTNET_ACCEPTANCE_PASSWORD`) in `.env.acceptance` *or* rely on the same file the CLI uses after `jinn quickstart`:
+**Keystore password** — set `JINN_PASSWORD` (or `JINN_TESTNET_ACCEPTANCE_PASSWORD`) in `.env.acceptance` *or* rely on the same file the CLI uses after `jinn run`:
 
 - `~/.jinn-client/keystore-password`
 

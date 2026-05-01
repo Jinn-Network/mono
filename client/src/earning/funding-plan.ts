@@ -8,7 +8,7 @@
  * bootstrap state machine.
  *
  * The mutating counterpart lives in `FleetBootstrapper.bootstrap()` and
- * is invoked by `jinn bootstrap`/`jinn run`/`jinn quickstart`.
+ * is invoked by `jinn bootstrap`/`jinn run`.
  *
  * See: docs/reviews/2026-04-28-operator-experience-audit.md (W1).
  */
@@ -20,7 +20,7 @@ import {
 } from './contracts.js';
 import { FleetStateStore } from './store.js';
 import { decryptMnemonic, deriveMasterAddress } from './wallet.js';
-import type { FleetState, FundingRequirement, StakingMode } from './types.js';
+import { isOperationalServiceStep, type FleetState, type FundingRequirement, type StakingMode } from './types.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from './viem-clients.js';
 
 export interface FundingPlanOptions {
@@ -90,6 +90,7 @@ export interface FundingPlan {
 }
 
 const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
+const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
 const addr = (value: string): Address => getAddress(value) as Address;
 
@@ -223,11 +224,17 @@ export async function planFleetFunding(
     }
   }
 
-  const completedCount = fleetState?.services.filter((svc) => svc.step === 'complete').length ?? 0;
+  const completedCount = fleetState?.services.filter((svc) => isOperationalServiceStep(svc.step)).length ?? 0;
   const standardFleetAlreadyComplete = stakingMode === 'standard' && completedCount >= targetServices;
+  const standardFleetHasInProgressServices =
+    stakingMode === 'standard' && (fleetState?.services.length ?? 0) > 0;
   const requiredMasterEth =
     stakingMode === 'standard'
-      ? (standardFleetAlreadyComplete ? 0n : config.minEoaGasEth)
+      ? (
+          standardFleetAlreadyComplete
+            ? 0n
+            : config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+        )
       : SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);
 
   let master: FundingRequirement | undefined;
@@ -246,7 +253,7 @@ export async function planFleetFunding(
   const safes: SafeFundingRow[] = [];
   if (!master && fleetState) {
     for (const svc of fleetState.services) {
-      if (svc.step !== 'complete' || !svc.safe_address) continue;
+      if (!isOperationalServiceStep(svc.step) || !svc.safe_address) continue;
       const safeAddr = addr(svc.safe_address);
       const bal = await safeGetBalance(publicClient, safeAddr);
       if (bal === null) {

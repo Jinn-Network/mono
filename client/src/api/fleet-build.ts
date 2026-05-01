@@ -6,19 +6,13 @@
  */
 
 import type { GatheredStatusRaw } from './status-build.js';
-import type { ServiceState } from '../earning/types.js';
+import { isOperationalServiceStep, isStakedLikeServiceStep, type ServiceState } from '../earning/types.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
-
-const STAKED_LIKE_STEPS = new Set([
-  'staked',
-  'mech_deployed',
-  'complete',
-  'service_staked',
-]);
 
 type AttentionKind =
   | 'none'
   | 'low_gas'
+  | 'identity_binding_pending'
   | 'evicted'
   | 'stake_missing'
   | 'bond_insufficient'
@@ -66,7 +60,14 @@ function computeAttention(
       exampleCli: 'jinn fund-requirements --json',
     };
   }
-  if (svc.step !== 'complete') {
+  if (svc.step === 'safe_binding_pending') {
+    return {
+      kind: 'identity_binding_pending',
+      hint: 'Service is running; ERC-8004 Safe-to-agent binding is pending retry.',
+      exampleCli: 'jinn bootstrap --json',
+    };
+  }
+  if (!isOperationalServiceStep(svc.step)) {
     return {
       kind: 'reconcile_needed',
       hint: `Service ${displayFleetServiceIndex(svc)} is at step ${svc.step}. Run jinn bootstrap to advance.`,
@@ -104,7 +105,7 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
       },
     },
     staking: {
-      staked: STAKED_LIKE_STEPS.has(svc.step),
+      staked: isStakedLikeServiceStep(svc.step),
       evicted: false,
       sinceBlock: null,
     },

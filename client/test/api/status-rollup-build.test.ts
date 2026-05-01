@@ -197,6 +197,7 @@ describe('assembleStatusRollupV1', () => {
   it('detail.lastClaudeSession reflects most recent outcome', () => {
     const raw = makeRaw();
     raw.portfolioV0 = {
+      totals: { delivered: 0, failed: 0, active: 0 },
       inFlight: [],
       recentVerdicts: [],
       recentSnapshots: [],

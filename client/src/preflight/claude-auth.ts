@@ -3,20 +3,23 @@
  *
  * Three contexts are recognised:
  *   - 'container'      — running inside a Docker container (/.dockerenv exists)
- *   - 'docker-compose' — a docker-compose.yml with a jinn-daemon service lives in cwd
+ *   - 'docker-compose' — explicitly opted-in via env / config
  *   - 'bare'           — plain host environment (default)
  *
  * Priority:
- *   1. JINN_RUNTIME_MODE env var (authoritative; CI/scripted operators)
- *   2. `runtimeMode` field in the resolved config (persisted by `jinn auth`)
- *   3. Filesystem heuristic (container → docker-compose → bare) as a last resort
+ *   1. JINN_RUNTIME_MODE env var (authoritative; CI / scripted operators)
+ *   2. `runtimeMode` field in the resolved config (persisted by jinn-auth split)
+ *   3. /.dockerenv presence -> 'container' (the only filesystem-guessable mode)
+ *   4. Default 'bare'
  *
- * The filesystem path is a LAST RESORT because running from the `client/`
- * checkout dir misdetects as docker-compose (the package's own compose file
- * names `jinn-daemon`). Operators should set `runtimeMode` at `jinn auth`.
+ * We deliberately do NOT guess `docker-compose` from a docker-compose.yml in
+ * cwd. That heuristic misfired for anyone running from the client/ checkout
+ * (the package ships its own compose file naming jinn-daemon) and nothing in
+ * the runtime can verify the host is actually orchestrating us via compose.
+ * Operators in real docker-compose set the env var or persist the mode.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -34,8 +37,6 @@ export interface DetectContextOptions {
   env?: NodeJS.ProcessEnv;
   /** Override the /.dockerenv existence check (for testing). */
   dockerenvExists?: boolean;
-  /** Override the docker-compose.yml jinn-daemon check (for testing). */
-  composeServiceExists?: boolean;
 }
 
 export interface SpawnResult {
@@ -69,11 +70,9 @@ export interface LoginResult {
 
 /**
  * Determine which environment Claude is running in.
- * When `dockerenvExists` / `composeServiceExists` are omitted the function
- * inspects the filesystem directly.
+ * When `dockerenvExists` is omitted the function inspects the filesystem directly.
  */
 export function detectAuthContext(opts: DetectContextOptions): AuthContext {
-  const { cwd } = opts;
   const env = opts.env ?? process.env;
 
   // 1. JINN_RUNTIME_MODE env var (CI / scripted operators).
@@ -82,14 +81,13 @@ export function detectAuthContext(opts: DetectContextOptions): AuthContext {
     return envMode;
   }
 
-  // 2. Explicit config (persisted by `jinn auth`).
+  // 2. Explicit config (persisted by jinn-auth split).
   if (opts.configuredMode) {
     return opts.configuredMode;
   }
 
-  // 3. Filesystem heuristic — last resort. Flawed inside the client/ checkout dir
-  // because the package's own docker-compose.yml names jinn-daemon. Prefer
-  // setting runtimeMode explicitly.
+  // 3. /.dockerenv -> 'container'. This is the only filesystem signal we trust:
+  // it means the runtime IS a Docker container, no ambiguity.
   const inContainer =
     opts.dockerenvExists !== undefined
       ? opts.dockerenvExists
@@ -97,25 +95,10 @@ export function detectAuthContext(opts: DetectContextOptions): AuthContext {
 
   if (inContainer) return 'container';
 
-  const hasComposeService =
-    opts.composeServiceExists !== undefined
-      ? opts.composeServiceExists
-      : _composeHasJinnDaemon(cwd);
-
-  if (hasComposeService) return 'docker-compose';
-
+  // 4. Default 'bare'. We deliberately do NOT guess 'docker-compose' from a
+  // local docker-compose.yml — that heuristic misfired for anyone running
+  // from the client/ checkout dir.
   return 'bare';
-}
-
-function _composeHasJinnDaemon(cwd: string): boolean {
-  const composePath = join(cwd, 'docker-compose.yml');
-  if (!existsSync(composePath)) return false;
-  try {
-    const content = readFileSync(composePath, 'utf8');
-    return content.includes('jinn-daemon');
-  } catch {
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------

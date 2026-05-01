@@ -33,6 +33,8 @@ export interface ReconcilePatch {
 const STANDARD_POST_STAKE: ReadonlySet<ServiceStep> = new Set([
   'staked',
   'mech_deployed',
+  'agent_registered',
+  'safe_binding_pending',
   'complete',
 ]);
 
@@ -40,6 +42,8 @@ const SELF_BOND_STAKE_STEPS: ReadonlySet<ServiceStep> = new Set([
   'service_staked',
   'staked',
   'mech_deployed',
+  'agent_registered',
+  'safe_binding_pending',
   'complete',
 ]);
 
@@ -62,6 +66,7 @@ const STEP_ORDER: ServiceStep[] = [
   'staked',
   'mech_deployed',
   'agent_registered',
+  'safe_binding_pending',
   'complete',
 ];
 

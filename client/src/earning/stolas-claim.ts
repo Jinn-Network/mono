@@ -33,6 +33,8 @@ import { TransientError } from '../types/errors.js';
 const STEPS_WITH_STAKING_REWARDS: ReadonlySet<ServiceStep> = new Set([
   'staked',
   'mech_deployed',
+  'agent_registered',
+  'safe_binding_pending',
   'complete',
 ]);
 

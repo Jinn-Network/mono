@@ -14,7 +14,7 @@ TL;DR for human operators:
 ```bash
 npm install -g @jinn-network/client@latest
 jinn auth           # one-time: pick runtime mode + authenticate Claude
-jinn quickstart     # creates wallet, funds via CDP faucet, starts the daemon
+jinn run            # creates wallet, funds via CDP faucet, starts the daemon
 ```
 
 TL;DR for agent-assisted operators (Claude Code / Codex / Cursor / Gemini):
@@ -26,7 +26,7 @@ jinn plugin install     # wires the jinn-operator skill + MCP into your agent
 
 Then open your agent and paste:
 
-> Set up a Jinn Network testnet operator on this machine. Run `jinn quickstart`,
+> Set up a Jinn Network testnet operator on this machine. Run `jinn run`,
 > fund the master address via CDP if needed, and report back when the daemon is
 > running. Keep me in the loop if anything needs my input.
 

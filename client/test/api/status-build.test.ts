@@ -127,4 +127,28 @@ describe('assembleStatusV1', () => {
     expect(j.statusMode).toBe('full');
     expect(j.nextActions.some(a => a.includes('RPC'))).toBe(true);
   });
+
+  it('reports total rewards as claimed plus claimable', () => {
+    const raw: GatheredStatusRaw = {
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      pendingStakingRewardsWei: '200',
+      claimedByService: {
+        0: { total: '300', lastAt: '2026-01-01T00:00:00.000Z', lastTxHash: '0xabc' },
+        1: { total: '500', lastAt: '2026-01-01T00:00:01.000Z', lastTxHash: '0xdef' },
+      },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.rewards.claimedStakingRewardsWei).toBe('800');
+    expect(j.rewards.totalStakingRewardsWei).toBe('1000');
+  });
 });

@@ -2,7 +2,7 @@
  * Pure assembly for GET /v1/status JSON (testable without RPC or filesystem).
  */
 
-import type { FleetState } from '../earning/types.js';
+import { isOperationalServiceStep, isStakedLikeServiceStep, type FleetState } from '../earning/types.js';
 import type { PortfolioV0Status } from './portfolio-v0-build.js';
 
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
@@ -83,6 +83,10 @@ export interface StatusV1Response {
       safeAddress: string | null;
       mechAddress: string | null;
       stakingAddress: string | null;
+      agentId: string | null;
+      identityRegistryAddress: string | null;
+      safeBoundToAgent: boolean;
+      identityBindingStatus: 'bound' | 'pending' | 'not_applicable';
     }>;
     stakedLikeCount: number;
     completeCount: number;
@@ -95,6 +99,8 @@ export interface StatusV1Response {
     claimLoopIntervalMs: number;
     lastClaimTickAt: string | null;
     pendingStakingRewardsWei?: string;
+    claimedStakingRewardsWei: string;
+    totalStakingRewardsWei?: string;
     pendingRewardsError?: string;
   };
   masterGas: {
@@ -113,13 +119,6 @@ export interface StatusV1Response {
   /** portfolio.v0 lifecycle data — optional, absent when not available. */
   portfolioV0?: PortfolioV0Status;
 }
-
-const STAKED_LIKE_STEPS = new Set([
-  'staked',
-  'mech_deployed',
-  'complete',
-  'service_staked',
-]);
 
 /**
  * Match bootstrap heuristic for master daily gas when config omits JINN_MASTER_ETH_DAILY_WEI.
@@ -155,9 +154,19 @@ function fleetSummary(fleet: FleetState | null): StatusV1Response['fleet'] {
     safeAddress: s.safe_address,
     mechAddress: s.mech_address,
     stakingAddress: s.staking_address,
+    agentId: s.agent_id ?? null,
+    identityRegistryAddress: s.identity_registry_address ?? null,
+    safeBoundToAgent: s.safe_bound_to_agent === true,
+    identityBindingStatus: (
+      s.safe_bound_to_agent === true
+        ? 'bound'
+        : s.agent_id && s.safe_address
+          ? 'pending'
+          : 'not_applicable'
+    ) as 'bound' | 'pending' | 'not_applicable',
   }));
-  const stakedLikeCount = fleet.services.filter(s => STAKED_LIKE_STEPS.has(s.step)).length;
-  const completeCount = fleet.services.filter(s => s.step === 'complete').length;
+  const stakedLikeCount = fleet.services.filter(s => isStakedLikeServiceStep(s.step)).length;
+  const completeCount = fleet.services.filter(s => isOperationalServiceStep(s.step)).length;
   return {
     loaded: true,
     chain: fleet.chain,
@@ -183,6 +192,18 @@ function computeRunwayDaysExcess(
   }
   if (balanceWei <= 0n) return '0';
   return (balanceWei / daily).toString();
+}
+
+function sumClaimedRewardsWei(raw: GatheredStatusRaw): bigint {
+  let total = 0n;
+  for (const claim of Object.values(raw.claimedByService ?? {})) {
+    try {
+      total += BigInt(claim.total);
+    } catch {
+      /* ignore malformed legacy rows */
+    }
+  }
+  return total;
 }
 
 function buildEarningsHint(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fleet']): string {
@@ -222,8 +243,10 @@ function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fl
       actions.push('Complete earning bootstrap so master_address is recorded.');
     }
     for (const s of raw.fleet?.services ?? []) {
-      if (s.step !== 'complete') {
+      if (!isOperationalServiceStep(s.step)) {
         actions.push(`Resume service ${s.index}: local step "${s.step}" — re-run jinn run.`);
+      } else if (s.step === 'safe_binding_pending') {
+        actions.push(`Service ${s.index}: identity binding pending; daemon will retry setAgentWallet on next bootstrap.`);
       }
     }
   }
@@ -265,6 +288,15 @@ function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fl
 export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
   const fleetSum = fleetSummary(raw.fleet);
   const mode: 'full' | 'sqlite_only' = raw.hintsScope === 'sqlite_only' ? 'sqlite_only' : 'full';
+  const claimedRewardsWei = sumClaimedRewardsWei(raw);
+  let pendingRewardsWei: bigint | undefined;
+  if (raw.pendingStakingRewardsWei !== undefined) {
+    try {
+      pendingRewardsWei = BigInt(raw.pendingStakingRewardsWei);
+    } catch {
+      pendingRewardsWei = undefined;
+    }
+  }
   const runway =
     raw.master.balanceWei !== undefined
       ? computeRunwayDaysExcess(
@@ -292,6 +324,11 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
       claimLoopIntervalMs: raw.rewardClaimIntervalMs,
       lastClaimTickAt: raw.lastRewardClaimTickAt,
       pendingStakingRewardsWei: raw.pendingStakingRewardsWei,
+      claimedStakingRewardsWei: claimedRewardsWei.toString(),
+      totalStakingRewardsWei:
+        pendingRewardsWei !== undefined
+          ? (claimedRewardsWei + pendingRewardsWei).toString()
+          : claimedRewardsWei.toString(),
       pendingRewardsError: raw.pendingRewardsError,
     },
     masterGas: {

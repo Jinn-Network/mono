@@ -16,7 +16,6 @@ import { ConfigLoadError } from '../config.js';
 import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
 import initCommand from './commands/init.js';
-import quickstartCommand from './commands/quickstart.js';
 import authCommand from './commands/auth.js';
 import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
@@ -42,12 +41,12 @@ import conformanceCommand from './commands/conformance.js';
 import createCommand from './commands/create.js';
 import implsCommand from './commands/impls.js';
 import plugInsCommand from './commands/plug-ins.js';
+import uiCommand from './commands/ui.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
   doctorCommand,
   initCommand,
-  quickstartCommand,
   authCommand,
   bootstrapCommand,
   fundRequirementsCommand,
@@ -73,6 +72,7 @@ const COMMANDS: CommandModule[] = [
   createCommand,
   implsCommand,
   plugInsCommand,
+  uiCommand,
 ];
 
 /**

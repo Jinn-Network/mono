@@ -15,6 +15,7 @@ import {
   tickStolasDistributorClaims,
   type StolasClaimTickResult,
 } from '../earning/stolas-claim.js';
+import type { FleetState } from '../earning/types.js';
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
@@ -48,6 +49,41 @@ export async function runRewardClaimOnce(cfg: RewardClaimTickConfig): Promise<St
   });
 }
 
+export function recordRewardClaimResult(
+  jinnStore: Store,
+  state: FleetState,
+  result: StolasClaimTickResult,
+  distributorAddress: string | undefined,
+  source = 'reward-claim',
+): void {
+  if (result.claims.length === 0) return;
+  const serviceByStakingId = new Map<number, (typeof state.services)[number]>();
+  for (const svc of state.services) {
+    if (svc.service_id != null) serviceByStakingId.set(svc.service_id, svc);
+  }
+  for (const claim of result.claims) {
+    const svc = serviceByStakingId.get(claim.serviceId);
+    if (!svc) continue;
+    const serviceIndex = displayFleetServiceIndex(svc);
+    jinnStore.recordRewardClaim({
+      ts: new Date().toISOString(),
+      serviceIndex,
+      serviceId: claim.serviceId,
+      stakingProxy: claim.stakingProxy,
+      distributor: distributorAddress ?? '0x',
+      txHash: claim.txHash,
+      amountWei: claim.amountWei,
+    });
+    emitEvent(jinnStore, {
+      kind: 'reward_claimed',
+      serviceIndex,
+      txHash: claim.txHash,
+      outcome: 'ok',
+      detail: `Submitted distributor.claim for service ${claim.serviceId} (pre-split queue: ${claim.amountWei} wei; operator collector-slot share only)`,
+    }, source);
+  }
+}
+
 export class RewardClaimLoop {
   private stopped = false;
 
@@ -61,31 +97,13 @@ export class RewardClaimLoop {
     const result = await runRewardClaimOnce(this.config);
     if (!this.config.jinnStore || result.claims.length === 0) return;
     const state = await this.config.store.load(this.config.chain);
-    const serviceByStakingId = new Map<number, (typeof state.services)[number]>();
-    for (const svc of state.services) {
-      if (svc.service_id != null) serviceByStakingId.set(svc.service_id, svc);
-    }
-    for (const claim of result.claims) {
-      const svc = serviceByStakingId.get(claim.serviceId);
-      if (!svc) continue;
-      const serviceIndex = displayFleetServiceIndex(svc);
-      this.config.jinnStore.recordRewardClaim({
-        ts: new Date().toISOString(),
-        serviceIndex,
-        serviceId: claim.serviceId,
-        stakingProxy: claim.stakingProxy,
-        distributor: this.config.distributorAddress ?? '0x',
-        txHash: claim.txHash,
-        amountWei: claim.amountWei,
-      });
-      emitEvent(this.config.jinnStore, {
-        kind: 'reward_claimed',
-        serviceIndex,
-        txHash: claim.txHash,
-        outcome: 'ok',
-        detail: `Submitted distributor.claim for service ${claim.serviceId} (pre-split queue: ${claim.amountWei} wei; operator collector-slot share only)`,
-      }, 'reward-claim');
-    }
+    recordRewardClaimResult(
+      this.config.jinnStore,
+      state,
+      result,
+      this.config.distributorAddress,
+      'reward-claim',
+    );
   }
 
   async run(): Promise<void> {

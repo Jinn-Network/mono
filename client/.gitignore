@@ -8,6 +8,9 @@ jinn-client.tgz
 .acceptance/
 acceptance-runs/
 release-runs/
+test-results/
+playwright-report/
+playwright/.cache/
 
 .yarn/*
 !.yarn/patches

@@ -16,6 +16,7 @@ import type { Store } from '../store/store.js';
 import { viemSendTransactionWithRetry, waitForTransactionReceiptWithRetry } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
+import { isOperationalServiceStep } from '../earning/types.js';
 
 export interface BalanceTopupLoopConfig {
   intervalMs: number;
@@ -51,7 +52,7 @@ export class BalanceTopupLoop {
     if (!masterAccount) return;
 
     for (const svc of state.services) {
-      if (svc.step !== 'complete') continue;
+      if (!isOperationalServiceStep(svc.step)) continue;
       if (!svc.agent_address || !svc.safe_address) continue;
       const displayIndex = displayFleetServiceIndex(svc);
 

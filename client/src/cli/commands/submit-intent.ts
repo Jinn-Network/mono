@@ -18,6 +18,7 @@ import { signIntentV1 } from '../../intents/signing.js';
 import { IntentPostingService } from '../../intents/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
 import { walletPrivateKeyAtIndex } from '../../earning/wallet.js';
+import { isOperationalServiceStep } from '../../earning/types.js';
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -153,7 +154,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
   if (dryRun) {
     const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-    const service = raw.fleet?.services.find(s => s.step === 'complete');
+    const service = raw.fleet?.services.find(s => isOperationalServiceStep(s.step));
     if (!service?.safe_address) {
       emitEnvelope(
         {
@@ -162,7 +163,7 @@ async function run(ctx: CommandContext): Promise<void> {
             'No bootstrapped service available to submit intents from. Run `jinn bootstrap` first.',
           hint: 'Run `jinn fund-requirements` to see outstanding funding, then `jinn bootstrap`.',
           exampleCli: 'jinn bootstrap --human',
-          details: { field: 'fleet.services', expected: 'at least one service at step=complete' },
+          details: { field: 'fleet.services', expected: 'at least one operational service' },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Operator-app first-run polish (jinn-mono-mc24): a brand-new operator can run `jinn run` with no env var, no setup, no input.
+  - `jinn run` now auto-generates a keystore password if `JINN_PASSWORD` isn't set and `~/.jinn-client/keystore-password` doesn't already exist (mode 0600). Replaces the previous fatal-exit on missing env var.
+  - Daemon API server now starts BEFORE init/bootstrap; the operator panel auto-opens immediately and shows progress while init/bootstrap runs.
+  - New top-level loading screen in the SPA renders during init / `mode: 'uninitialized'`, with spinner + latest event status line + collapsible event log; transitions to the four-region App once `/v1/bootstrap` is ready.
+  - `ClaudeAuthCard` is now a "Sign in with Claude" button (in `bare` runtime mode); the daemon spawns `claude /login` server-side via the existing `buildLoginCommand` helper. Docker / container modes still surface the appropriate CLI command since the daemon can't reach the operator's host browser.
+  - Keystore password change is now a `SettingsCard` in the panel (`POST /v1/setup/change-password`). The existing `jinn keys change-password` CLI continues to work for scripted use.
+  - Removed the unreachable `KeystoreCreateCard` and `POST /v1/setup/keystore` endpoint (daemon now owns keystore creation; the panel observes).
+- Removed the `jinn quickstart` verb; `jinn run` now subsumes its zero-to-running flow (resolve/generate password, init wallet, bootstrap fleet, then start the daemon in the foreground). The corresponding MCP tool was renamed `jinn_run`. Existing scripts using `jinn quickstart` should switch to `jinn run`. (jinn-mono-zqm2)
+
 ## 0.1.3
 
 - Added the v0 testnet cross-chain JINN claim loop, including bundled Sepolia/Base Sepolia MVI deployment artifacts, MockMessenger burn-in support, and canonical OP-Stack verifier canary tooling.

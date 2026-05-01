@@ -16,6 +16,7 @@ import {
   loadConfig as defaultLoadConfig,
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
 } from '../../config.js';
+import { isOperationalServiceStep } from '../../earning/types.js';
 
 export interface FleetScaleDeps extends BaseCommandDeps {
   gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
@@ -242,7 +243,7 @@ export function createFleetScaleCommand(deps: FleetScaleDeps = PRODUCTION_DEPS):
           action: 'grow',
           from: current,
           to,
-          servicesComplete: state.services.filter(s => s.step === 'complete').length,
+          servicesComplete: state.services.filter(s => isOperationalServiceStep(s.step)).length,
           message: result.message,
         },
         (v) => {

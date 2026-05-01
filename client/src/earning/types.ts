@@ -8,11 +8,13 @@ export type StakingMode = z.infer<typeof StakingModeSchema>;
 // ── Service step progression ─────────────────────────────────────────────────
 //
 // Standard (stOLAS) mode:
-//   awaiting_stake -> staked -> mech_deployed -> agent_registered -> complete
+//   awaiting_stake -> staked -> mech_deployed -> agent_registered ->
+//   safe_binding_pending -> complete
 //
 // Self-bond mode (legacy):
 //   awaiting_stake -> service_created -> service_activated -> agents_registered ->
-//   service_deployed -> service_staked -> mech_deployed -> agent_registered -> complete
+//   service_deployed -> service_staked -> mech_deployed -> agent_registered ->
+//   safe_binding_pending -> complete
 //
 // `agent_registered` is the ERC-8004 IdentityRegistry mint
 // (one agent NFT per operator Safe; see
@@ -28,10 +30,33 @@ export const ServiceStepSchema = z.enum([
   'staked',
   'mech_deployed',
   'agent_registered',
+  'safe_binding_pending',
   'complete',
 ]);
 
 export type ServiceStep = z.infer<typeof ServiceStepSchema>;
+
+export const OPERATIONAL_SERVICE_STEPS = new Set<ServiceStep>([
+  'safe_binding_pending',
+  'complete',
+]);
+
+export const STAKED_LIKE_SERVICE_STEPS = new Set<ServiceStep>([
+  'staked',
+  'mech_deployed',
+  'agent_registered',
+  'safe_binding_pending',
+  'complete',
+  'service_staked',
+]);
+
+export function isOperationalServiceStep(step: ServiceStep | string): boolean {
+  return step === 'complete' || step === 'safe_binding_pending';
+}
+
+export function isStakedLikeServiceStep(step: ServiceStep | string): boolean {
+  return STAKED_LIKE_SERVICE_STEPS.has(step as ServiceStep);
+}
 
 // ── Per-service state ────────────────────────────────────────────────────────
 

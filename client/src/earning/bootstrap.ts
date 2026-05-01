@@ -60,7 +60,7 @@ import type {
   ServiceStep,
   StakingMode,
 } from './types.js';
-import { createDefaultServiceState } from './types.js';
+import { createDefaultServiceState, isOperationalServiceStep } from './types.js';
 import {
   formatBootstrapOperatorMessage,
   isJinnDebug,
@@ -89,6 +89,7 @@ import type { Account } from 'viem/accounts';
 const addr = (value: string): Address => getAddress(value) as Address;
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
+const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
 /** Conservative default: ~0.001 ETH/day master gas if not configured. */
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
@@ -125,6 +126,12 @@ export interface FleetBootstrapperOptions {
    * Provided in tests to avoid hitting the real CDP endpoint.
    */
   requestFunding?: typeof requestTestnetFunding;
+  /**
+   * When true, bootstrap may request Base Sepolia faucet drips before returning
+   * an awaiting-funding result. `jinn run` disables this so the panel can make
+   * testnet funding an explicit operator action.
+   */
+  autoTestnetFaucet?: boolean;
 }
 
 export class FleetBootstrapper {
@@ -138,6 +145,7 @@ export class FleetBootstrapper {
   private readonly masterEthDailyEstimateWei: bigint;
   private readonly env: NodeJS.ProcessEnv;
   private readonly requestFunding: typeof requestTestnetFunding;
+  private readonly autoTestnetFaucet: boolean;
 
   constructor(options: FleetBootstrapperOptions = {}) {
     this.store = new FleetStateStore(options.earningDir);
@@ -147,6 +155,8 @@ export class FleetBootstrapper {
     this.targetServices = options.targetServices ?? 1;
     this.debug = options.debug ?? isJinnDebug();
     this.requestFunding = options.requestFunding ?? requestTestnetFunding;
+    this.autoTestnetFaucet =
+      options.autoTestnetFaucet ?? this.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
     const dailyOpt = options.masterEthDailyEstimateWei;
     this.masterEthDailyEstimateWei =
       dailyOpt !== undefined
@@ -223,13 +233,19 @@ export class FleetBootstrapper {
           }
         }
       }
-      const completedCountBeforeFunding = state.services.filter(s => s.step === 'complete').length;
+      const completedCountBeforeFunding = state.services.filter(s => isOperationalServiceStep(s.step)).length;
       const standardFleetAlreadyComplete =
         this.stakingMode === 'standard' && completedCountBeforeFunding >= this.targetServices;
+      const standardFleetHasInProgressServices =
+        this.stakingMode === 'standard' && state.services.length > 0;
       const requiredMasterEth = this.stakingMode === 'standard'
-        ? (standardFleetAlreadyComplete ? 0n : this.config.minEoaGasEth)
+        ? (
+            standardFleetAlreadyComplete
+              ? 0n
+              : this.config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+          )
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
-      const autoFaucetEnabled = this.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
+      const autoFaucetEnabled = this.autoTestnetFaucet;
 
       // Re-sum system ETH (master + agent/safe balances for self-bond mode).
       // Hoisted so the drip loop below can refresh cheaply.
@@ -333,14 +349,16 @@ export class FleetBootstrapper {
       // eviction recovery check (since on-chain state may have changed since
       // the daemon was last running — e.g., evicted due to inactivity).
       for (const svc of state.services) {
-        if (svc.step !== 'complete') {
+        if (!isOperationalServiceStep(svc.step)) {
           console.error(`[fleet-bootstrap] Resuming service ${svc.index} at step '${svc.step}'`);
+        } else if (svc.step === 'safe_binding_pending') {
+          console.error(`[fleet-bootstrap] Resuming service ${svc.index} at step 'safe_binding_pending'`);
         }
         state = await this.resumeService(state, mnemonic, svc.index);
       }
 
       // Then create new services if needed
-      const completedCount = state.services.filter(s => s.step === 'complete').length;
+      const completedCount = state.services.filter(s => isOperationalServiceStep(s.step)).length;
       const needed = this.targetServices - completedCount;
 
       if (needed > 0) {
@@ -355,7 +373,7 @@ export class FleetBootstrapper {
       return {
         ok: true,
         fleet_state: state,
-        message: `Fleet bootstrap complete. ${state.services.filter(s => s.step === 'complete').length}/${this.targetServices} services running.`,
+        message: `Fleet bootstrap complete. ${state.services.filter(s => isOperationalServiceStep(s.step)).length}/${this.targetServices} services running.`,
       };
     } catch (error) {
       const { summary, hint } = formatBootstrapOperatorMessage(error);
@@ -605,7 +623,7 @@ export class FleetBootstrapper {
     if (
       this.stakingMode === 'standard' &&
       svc.service_id !== null &&
-      (svc.step === 'complete' || svc.step === 'mech_deployed' || svc.step === 'staked')
+      (isOperationalServiceStep(svc.step) || svc.step === 'mech_deployed' || svc.step === 'staked')
     ) {
       const onChainState = await this.getStakingState(svc.service_id);
       if (onChainState === 2) {
@@ -617,19 +635,16 @@ export class FleetBootstrapper {
       }
     }
 
-    if (svc.step === 'complete') {
-      // Legacy operator recovery: agent NFT was minted (agent_id set) but the
-      // Safe was never bound via IdentityRegistry.setAgentWallet. This happens
-      // for operators who ran bootstrap after the mint step landed (jinn-mono-j07)
-      // but before the Safe-binding feature shipped (jinn-mono-aev). Without this
-      // check they would remain permanently unbound.
+    if (isOperationalServiceStep(svc.step)) {
+      // Identity binding retry: services at `safe_binding_pending` are already
+      // staked and operational, but their ERC-8004 Safe→agentId link still
+      // needs to be written. Older `complete` services with safe_bound=false
+      // are treated the same way so legacy operators self-heal on resume.
       if (svc.agent_id && svc.safe_address && svc.safe_bound_to_agent !== true) {
         console.error(
-          `[fleet-bootstrap] Service ${index}: legacy agent_id=${svc.agent_id} with unbound Safe; running binding step.`,
+          `[fleet-bootstrap] Service ${index}: agent_id=${svc.agent_id} with unbound Safe; running binding step.`,
         );
         state = await this.stepRegisterAgent(state, mnemonic, index);
-        // Restore step to complete after the binding sub-step finishes.
-        state = await this.store.updateService(index, { step: 'complete' });
       }
       return state;
     }
@@ -660,13 +675,13 @@ export class FleetBootstrapper {
       updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
     }
 
-    if (updatedSvc.step === 'mech_deployed' || updatedSvc.step === 'agent_registered') {
+    if (
+      updatedSvc.step === 'mech_deployed' ||
+      updatedSvc.step === 'agent_registered' ||
+      updatedSvc.step === 'safe_binding_pending'
+    ) {
       state = await this.stepRegisterAgent(state, mnemonic, index);
       updatedSvc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
-    }
-
-    if (updatedSvc.step === 'agent_registered') {
-      state = await this.store.updateService(index, { step: 'complete' });
     }
 
     return this.store.load(this.chain);
@@ -714,13 +729,9 @@ export class FleetBootstrapper {
       svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
     }
 
-    if (svc.step === 'mech_deployed' || svc.step === 'agent_registered') {
+    if (svc.step === 'mech_deployed' || svc.step === 'agent_registered' || svc.step === 'safe_binding_pending') {
       state = await this.stepRegisterAgent(state, mnemonic, index);
       svc = (await this.store.load(this.chain)).services.find(s => s.index === index)!;
-    }
-
-    if (svc.step === 'agent_registered') {
-      state = await this.store.updateService(index, { step: 'complete' });
     }
 
     return this.store.load(this.chain);
@@ -987,11 +998,10 @@ export class FleetBootstrapper {
    *    `svc.safe_bound_to_agent` already true short-circuits the bind.
    *    See `agent-wallet-binding.ts` + spec §4.1.
    *
-   * Folded into a single step (rather than a discrete state) because the
-   * existing `safe_bound_to_agent` flag already provides per-effect
-   * idempotency, and the order is fixed (mint → bind → complete). Both
-   * sub-steps re-enter cleanly on the existing `mech_deployed |
-   * agent_registered` step guard.
+   * The bind is a discrete operational state (`safe_binding_pending`) because
+   * the service is already staked and runnable once the mint exists. A failed
+   * binding should be visible and resumable, but should not block the daemon
+   * from reaching the running dashboard.
    */
   private async stepRegisterAgent(
     state: FleetState,
@@ -1024,7 +1034,7 @@ export class FleetBootstrapper {
       agentId = svc.agent_id;
       svc = await this.firstServiceUpdate(index, {
         identity_registry_address: svc.identity_registry_address ?? getAddress(identityRegistry),
-        step: 'agent_registered',
+        step: svc.step === 'safe_binding_pending' ? 'safe_binding_pending' : 'agent_registered',
       });
     } else {
       // v0: empty agentURI. The richer agent card (per §6 of the spec) is
@@ -1078,6 +1088,7 @@ export class FleetBootstrapper {
         identity_registry_address: getAddress(identityRegistry),
         agent_registered_tx: mintTxHash,
         step: 'agent_registered',
+        error: null,
       });
     }
 
@@ -1090,33 +1101,61 @@ export class FleetBootstrapper {
         `[fleet-bootstrap] Service ${index}: Safe already bound to agentId=${agentId} ` +
         `(safe=${svc.safe_address}); skipping setAgentWallet.`,
       );
+      svc = await this.firstServiceUpdate(index, {
+        step: 'complete',
+        error: null,
+      });
     } else if (!svc.safe_address) {
       console.error(
         `[fleet-bootstrap] Service ${index}: no safe_address — cannot bind agent NFT ` +
         `(agentId=${agentId}). Bootstrap will leave safe_bound_to_agent=false; this is ` +
         `unexpected for the standard staking topology.`,
       );
+      svc = await this.firstServiceUpdate(index, {
+        step: 'safe_binding_pending',
+        error: 'safe_address_missing_for_agent_wallet_binding',
+      });
     } else {
+      const safeAddress = svc.safe_address;
       console.error(
-        `[fleet-bootstrap] Service ${index}: binding Safe ${svc.safe_address} to ` +
+        `[fleet-bootstrap] Service ${index}: binding Safe ${safeAddress} to ` +
         `agentId=${agentId} via setAgentWallet (ERC-1271).`,
       );
-      const result = await bindAgentWalletToSafe({
-        identityRegistryAddress: addr(identityRegistry),
-        agentId: BigInt(agentId),
-        safeAddress: addr(svc.safe_address),
-        agentEoaAccount: agentSigner,
-        agentEoaWalletClient: agentWallet,
-        publicClient: this.publicClient,
-        chainId: this.config.chainId,
-      });
-      console.error(
-        `[fleet-bootstrap] Service ${index}: setAgentWallet succeeded ` +
-        `(tx=${result.txHash}, safe=${svc.safe_address}).`,
-      );
       svc = await this.firstServiceUpdate(index, {
-        safe_bound_to_agent: true,
+        step: 'safe_binding_pending',
+        error: null,
       });
+      try {
+        const result = await bindAgentWalletToSafe({
+          identityRegistryAddress: addr(identityRegistry),
+          agentId: BigInt(agentId),
+          safeAddress: addr(safeAddress),
+          agentEoaAccount: agentSigner,
+          agentEoaWalletClient: agentWallet,
+          publicClient: this.publicClient,
+          chainId: this.config.chainId,
+        });
+        console.error(
+          `[fleet-bootstrap] Service ${index}: setAgentWallet succeeded ` +
+          `(tx=${result.txHash}, safe=${safeAddress}).`,
+        );
+        svc = await this.firstServiceUpdate(index, {
+          safe_bound_to_agent: true,
+          step: 'complete',
+          error: null,
+        });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[fleet-bootstrap] Service ${index}: setAgentWallet failed; continuing with ` +
+          `safe_bound_to_agent=false (${reason}).`,
+        );
+        svc = await this.firstServiceUpdate(index, {
+          safe_bound_to_agent: false,
+          step: 'safe_binding_pending',
+          error: `safe_binding_failed: ${reason}`,
+        });
+      }
     }
 
     return this.store.load(this.chain);

@@ -5,6 +5,7 @@
  */
 
 import type { GatheredStatusRaw } from './status-build.js';
+import { isOperationalServiceStep } from '../earning/types.js';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,19 +142,21 @@ function readVersionCommit(): { version: string; commit: string } {
  * Pulls from already-gathered GatheredStatusRaw — no extra I/O.
  */
 export function assembleStatusDetailV1(raw: GatheredStatusRaw): StatusDetailV1 {
-  // Last bootstrap step: take the worst non-complete step across services,
-  // or 'complete' if all are complete, or null if no fleet exists.
+  // Last bootstrap step: take the worst non-operational step across services,
+  // surface safe_binding_pending if present, or 'complete' if all are fully bound.
   let lastBootstrapStep: string | null = null;
   let fleetUpdatedAt: string | null = null;
   if (raw.fleet) {
     fleetUpdatedAt = raw.fleet.updated_at ?? null;
     const services = raw.fleet.services;
     if (services.length > 0) {
-      const incomplete = services.filter(s => s.step !== 'complete');
+      const incomplete = services.filter(s => !isOperationalServiceStep(s.step));
       if (incomplete.length > 0) {
         // Return the step of the first incomplete service (lowest index)
         const sorted = [...incomplete].sort((a, b) => a.index - b.index);
         lastBootstrapStep = sorted[0]!.step;
+      } else if (services.some(s => s.step === 'safe_binding_pending')) {
+        lastBootstrapStep = 'safe_binding_pending';
       } else {
         lastBootstrapStep = 'complete';
       }
@@ -230,8 +233,10 @@ function buildNextActionsFromRaw(raw: GatheredStatusRaw): string[] {
       actions.push('Complete earning bootstrap so master_address is recorded.');
     }
     for (const s of fleet.services) {
-      if (s.step !== 'complete') {
+      if (!isOperationalServiceStep(s.step)) {
         actions.push(`Resume service ${s.index}: local step "${s.step}" — re-run jinn run.`);
+      } else if (s.step === 'safe_binding_pending') {
+        actions.push(`Service ${s.index}: identity binding pending; daemon will retry setAgentWallet on next bootstrap.`);
       }
     }
   }
@@ -259,8 +264,8 @@ export function assembleStatusRollupV1(
 ): StatusRollupV1Response {
   const { version, commit } = readVersionCommit();
   const services = raw.fleet?.services ?? [];
-  const complete = services.filter(s => s.step === 'complete').length;
-  const needsAttention = services.length - complete;
+  const complete = services.filter(s => isOperationalServiceStep(s.step)).length;
+  const needsAttention = services.filter(s => !isOperationalServiceStep(s.step)).length;
   const network: 'testnet' | 'mainnet' =
     raw.fleet?.chain === 'base' ? 'mainnet' : 'testnet';
   const phase = network === 'testnet' ? 'phase-1b' : 'phase-2';

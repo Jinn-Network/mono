@@ -35,6 +35,7 @@
 
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { getAddress } from 'viem';
+import { isOperationalServiceStep } from '../earning/types.js';
 import { base, baseSepolia } from 'viem/chains';
 import type { FleetStateStore } from '../earning/store.js';
 import type { Store } from '../store/store.js';
@@ -141,7 +142,7 @@ export class JinnClaimLoop {
     for (const svc of state.services) {
       if (this.stopped) break;
       // Only services with a multisig + service id are eligible.
-      if (svc.step !== 'complete' && svc.step !== 'mech_deployed') continue;
+      if (!isOperationalServiceStep(svc.step) && svc.step !== 'mech_deployed') continue;
       if (svc.service_id == null || !svc.safe_address) continue;
 
       const displayIndex = displayFleetServiceIndex(svc);

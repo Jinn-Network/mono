@@ -10,20 +10,34 @@
  *   2. Config file (~/.jinn-client/config.json or --config <path>)
  *   3. Built-in defaults
  *
- * JINN_PASSWORD (env-only) is required for keystore encryption.
+ * Keystore password (used to encrypt the wallet at rest) resolves in this
+ * order: JINN_PASSWORD env var → ~/.jinn-client/keystore-password file →
+ * auto-generated random value (persisted mode 0600 to that same file). A
+ * brand-new operator can run `jinn run` with no env var and no input.
  *
  * Canonical operator command:
  *   jinn run
  */
 
 import { config as dotenvConfig } from 'dotenv';
-import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync as writeFileSyncMain } from 'node:fs';
+import { homedir } from 'node:os';
+import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
+import { Store } from './store/store.js';
+import { startApiServer, type ApiServer } from './api/server.js';
+import { ensureUiToken } from './api/ui-token.js';
+import { attachAgentWs } from './agent/agent-ws.js';
+import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
-import { emitEnvelope } from './errors/envelope.js';
+import { buildEnvelope, emitEnvelope, type ErrorCode } from './errors/envelope.js';
+import {
+  clearBootstrapError,
+  persistBootstrapError,
+} from './errors/persisted-bootstrap-error.js';
+import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
 import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
@@ -31,7 +45,12 @@ import { FleetBootstrapper } from './earning/bootstrap.js';
 import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
-import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
+import {
+  isOperationalServiceStep,
+  type FleetState,
+  type ServiceState,
+  type ServiceStep,
+} from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from './earning/wallet.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
@@ -47,25 +66,66 @@ import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
 import { createCorpus } from './corpus/index.js';
-import { Store } from './store/store.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedIntentSource, StaticConfiguredIntentSource } from './intents/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
+import { openBrowser } from './cli/open-browser.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
-// ── Password (env-only — never in config files) ────────────────────────────
+// ── Password (env > file > auto-generated) ─────────────────────────────────
+//
+// Resolution order:
+//   1. JINN_PASSWORD env var (explicit operator-set, never in config files)
+//   2. ~/.jinn-client/keystore-password (file from a previous auto-gen)
+//   3. Auto-generate a 32-byte hex string, persist mode 0600, and reuse next run
+//
+// Auto-generation matches what `jinn quickstart` used to do so a brand-new
+// operator can run `jinn run` with no env var, no setup, no input. The
+// known security trade-off is documented in client/src/cli/password.ts:
+// plaintext on disk + encrypted keystore on the same disk only defends
+// against casual snooping. Treat the wallet as hot until rotated.
 
-const PASSWORD: string = (() => {
-  const p = process.env['JINN_PASSWORD'];
-  if (!p) {
-    console.error('Fatal: JINN_PASSWORD environment variable is required.');
-    console.error('This password encrypts your agent keystore.');
-    process.exit(1);
+function resolveOrGenerateKeystorePassword(): {
+  password: string;
+  source: 'env' | 'file' | 'generated';
+  filePath?: string;
+} {
+  const envPw = process.env['JINN_PASSWORD'];
+  if (envPw && envPw.length > 0) {
+    return { password: envPw, source: 'env' };
   }
-  return p;
-})();
+
+  const home = process.env['HOME'] ?? homedir();
+  const pwFilePath = join(home, '.jinn-client', 'keystore-password');
+  if (existsSync(pwFilePath)) {
+    const fromDisk = readFileSync(pwFilePath, 'utf-8').trim();
+    if (fromDisk.length > 0) {
+      return { password: fromDisk, source: 'file', filePath: pwFilePath };
+    }
+  }
+
+  const generated = cryptoRandomBytes(32).toString('hex');
+  mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
+  writeFileSyncMain(pwFilePath, generated + '\n', { mode: 0o600 });
+  return { password: generated, source: 'generated', filePath: pwFilePath };
+}
+
+const passwordResolution = resolveOrGenerateKeystorePassword();
+const PASSWORD: string = passwordResolution.password;
+// Sub-commands (e.g. the embedded `init` invocation below) read JINN_PASSWORD
+// from env. Mirror our resolved value so they don't have to redo this dance.
+process.env['JINN_PASSWORD'] = PASSWORD;
+
+if (passwordResolution.source === 'generated') {
+  console.log('━'.repeat(64));
+  console.log('A keystore password was auto-generated for you.');
+  console.log(`  Stored at: ${passwordResolution.filePath}`);
+  console.log('  Mode 0600. Treat the wallet as hot until you rotate the password.');
+  console.log('  To rotate: JINN_NEW_PASSWORD=<new> jinn keys change-password');
+  console.log('━'.repeat(64));
+}
 
 // ── Load config ─────────────────────────────────────────────────────────────
 
@@ -117,6 +177,8 @@ const STANDARD_SERVICE_PROGRESSION: readonly ServiceStep[] = [
   'awaiting_stake',
   'staked',
   'mech_deployed',
+  'agent_registered',
+  'safe_binding_pending',
   'complete',
 ];
 
@@ -128,6 +190,8 @@ const SELF_BOND_SERVICE_PROGRESSION: readonly ServiceStep[] = [
   'service_deployed',
   'service_staked',
   'mech_deployed',
+  'agent_registered',
+  'safe_binding_pending',
   'complete',
 ];
 
@@ -139,14 +203,15 @@ function bootstrapIncompleteSteps(state: FleetState): { currentStep: string; nex
       : STANDARD_SERVICE_PROGRESSION;
   const byIndex = [...state.services].sort((a, b) => a.index - b.index);
   const focus: ServiceState | undefined =
-    byIndex.find(s => s.step === 'complete' && !s.safe_address) ??
-    byIndex.find(s => s.step !== 'complete') ??
+    byIndex.find(s => isOperationalServiceStep(s.step) && !s.safe_address) ??
+    byIndex.find(s => !isOperationalServiceStep(s.step)) ??
+    byIndex.find(s => s.step === 'safe_binding_pending') ??
     byIndex[0];
 
   if (!focus) {
     return { currentStep: 'awaiting_service', nextStep: 'awaiting_stake' };
   }
-  if (focus.step === 'complete' && !focus.safe_address) {
+  if (isOperationalServiceStep(focus.step) && !focus.safe_address) {
     return { currentStep: 'complete', nextStep: 'bootstrap' };
   }
   const i = progression.indexOf(focus.step);
@@ -176,6 +241,29 @@ async function bootstrap(): Promise<{
 }> {
   console.log('[main] Running fleet bootstrap...');
 
+  // A fresh bootstrap attempt clears any stale error breadcrumb. If this run
+  // hits the same failure, it'll be re-persisted below; if it succeeds (or
+  // proceeds past the previously-failed step), the panel returns to a clean
+  // state on the next /v1/bootstrap poll.
+  clearBootstrapError(config.earningDir);
+
+  // Persist the envelope to disk before emitEnvelope's process.exit fires,
+  // so /v1/bootstrap can surface it to the panel after the daemon has
+  // exited (operator restart → panel reload → error visible).
+  function failBootstrap(input: {
+    code: ErrorCode;
+    message: string;
+    hint?: string;
+    exampleCli?: string;
+    details?: Record<string, unknown>;
+  }): never {
+    const envelope = buildEnvelope(input);
+    persistBootstrapError(envelope, config.earningDir);
+    emitEnvelope(input);
+    // Unreachable in production (emitEnvelope exits); satisfies `never`.
+    throw new Error('unreachable');
+  }
+
   const bootstrapper = new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: NETWORK_CHAIN,
@@ -192,28 +280,118 @@ async function bootstrap(): Promise<{
     minEoaGasWei: config.minEoaGasWei,
     minSafeEthWei: config.minSafeEthWei,
     pollIntervalMs: config.pollIntervalMs,
+    autoTestnetFaucet: process.env['JINN_AUTO_TESTNET_FAUCET'] === '1',
   });
 
-  const result = await bootstrapper.bootstrap(PASSWORD);
+  // Funding poll: stay up while waiting for the operator to fund the wallet.
+  // The setup-mode API server is already running; the panel renders the
+  // funding card and auto-advances when funds land. Daemon-side, we poll
+  // bootstrap on a 15s tick and only escalate (exit) if a non-funding error
+  // occurs or the configured timeout elapses. Each tick re-runs the full
+  // bootstrap state machine — completed steps are no-ops, so this is safe.
+  // Testnet faucet funding is panel-driven: bootstrap reports the funding gate,
+  // and the operator clicks the funding action before this loop can advance.
+  const FUNDING_POLL_INTERVAL_MS = 15_000;
+  const fundingTimeoutMs = (() => {
+    const raw = process.env['JINN_FUNDING_TIMEOUT_MS'];
+    if (!raw) return Number.POSITIVE_INFINITY;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : Number.POSITIVE_INFINITY;
+  })();
 
-  if (result.funding) {
-    emitEnvelope({
-      code: 'funding_required',
-      message: result.message,
-      hint: 'Fund the listed address and re-run this command.',
-      exampleCli: 'jinn fund-requirements --json',
-      details: {
-        role: 'master',
-        address: result.funding.master_address,
-        asset: 'native',
-        needWei: result.funding.eth_required,
-        haveWei: result.funding.eth_balance,
-      },
-    });
+  emitProgress({
+    type: 'progress',
+    phase: 'bootstrap',
+    step: 'advance_state_machine',
+    estimatedWaitMs: 60_000,
+  });
+
+  const fundingStartedAt = Date.now();
+  let result: Awaited<ReturnType<typeof bootstrapper.bootstrap>>;
+  let lastFundingMessage = '';
+  const fundingGatePath = join(config.earningDir, 'bootstrap-funding.json');
+  const persistFundingGate = (funding: NonNullable<Awaited<ReturnType<typeof bootstrapper.bootstrap>>['funding']>): void => {
+    mkdirSync(config.earningDir, { recursive: true, mode: 0o700 });
+    writeFileSyncMain(fundingGatePath, `${JSON.stringify({
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      ...funding,
+    }, null, 2)}\n`, { mode: 0o600 });
+  };
+  const clearFundingGate = (): void => {
+    try {
+      unlinkSync(fundingGatePath);
+    } catch {
+      // best-effort: absent/stale funding gate should not affect bootstrap
+    }
+  };
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    result = await bootstrapper.bootstrap(PASSWORD);
+    if (!result.funding) {
+      clearFundingGate();
+      break;
+    }
+    persistFundingGate(result.funding);
+
+    // Emit a structured event so the panel's Visibility region shows the gate.
+    // Dedupe by message to avoid spamming the ring buffer on each poll.
+    const fundingMsg = result.message ?? 'awaiting funding';
+    if (fundingMsg !== lastFundingMessage) {
+      emitStructured({
+        kind: 'fleet',
+        message: fundingMsg,
+        details: {
+          phase: 'awaiting_funding',
+          role: 'master',
+          address: result.funding.master_address,
+          asset: 'native',
+          needWei: result.funding.eth_required,
+          haveWei: result.funding.eth_balance,
+        },
+      });
+      // Mirror the structured event to NDJSON progress for --json-progress
+      // consumers (CI, agents). Same dedup gate so we don't spam stdout.
+      emitProgress({
+        type: 'progress',
+        phase: 'bootstrap',
+        step: 'awaiting_funding',
+        blocking: true,
+        nextAction:
+          'Fund the address shown in addresses.fundingAddress, then wait for automatic retry.',
+        addresses: { fundingAddress: result.funding.master_address },
+        estimatedWaitMs: 1_800_000,
+      });
+      lastFundingMessage = fundingMsg;
+    }
+
+    const elapsed = Date.now() - fundingStartedAt;
+    if (elapsed >= fundingTimeoutMs) {
+      failBootstrap({
+        code: 'funding_required',
+        message: `${result.message} (timeout after ${Math.round(elapsed / 1000)}s)`,
+        hint: 'Fund the listed address and re-run this command.',
+        exampleCli: 'jinn fund-requirements --json',
+        details: {
+          role: 'master',
+          address: result.funding.master_address,
+          asset: 'native',
+          needWei: result.funding.eth_required,
+          haveWei: result.funding.eth_balance,
+        },
+      });
+    }
+
+    console.log(
+      `[main] Awaiting funding... (${Math.round(elapsed / 1000)}s elapsed; ` +
+      `will retry in ${FUNDING_POLL_INTERVAL_MS / 1000}s)`,
+    );
+    await new Promise((r) => setTimeout(r, FUNDING_POLL_INTERVAL_MS));
   }
 
   if (!result.ok) {
-    emitEnvelope({
+    failBootstrap({
       code: 'fatal',
       message: result.message,
       hint: 'Bootstrap failed before the fleet reached a runnable state.',
@@ -261,10 +439,12 @@ async function bootstrap(): Promise<{
     }
   }
 
-  // Use the first complete service for the daemon
-  const firstComplete = state.services.find(s => s.step === 'complete');
+  // Use the first operational service for the daemon. `safe_binding_pending`
+  // means staking/mech are live; only the ERC-8004 Safe→agent metadata bind
+  // is still retrying.
+  const firstComplete = state.services.find(s => isOperationalServiceStep(s.step));
   if (!firstComplete || !firstComplete.safe_address) {
-    emitEnvelope({
+    failBootstrap({
       code: 'bootstrap_incomplete',
       message: 'Bootstrap completed but no service is ready.',
       hint: 'Re-run to continue the state machine toward a running fleet.',
@@ -283,7 +463,7 @@ async function bootstrap(): Promise<{
 
   console.log(`[main] Fleet bootstrap complete.`);
   console.log(`  Master:  ${state.master_address}`);
-  console.log(`  Services: ${state.services.filter(s => s.step === 'complete').length}/${config.targetServices}`);
+  console.log(`  Services: ${state.services.filter(s => isOperationalServiceStep(s.step)).length}/${config.targetServices}`);
   console.log(`  Active:  service ${firstComplete.service_id} (agent ${firstComplete.agent_address})`);
   if (firstComplete.mech_address) {
     console.log(`  Mech:    ${firstComplete.mech_address}`);
@@ -321,7 +501,35 @@ export interface DaemonStartupInfo {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-export async function main(): Promise<DaemonStartupInfo> {
+/**
+ * --json-progress: emit NDJSON progress envelopes on stdout during long
+ * phases (init, bootstrap, daemon startup). The `jinn run --json-progress`
+ * flag flips JINN_JSON_PROGRESS=1 in run.ts before calling main(); when
+ * unset this is a no-op so tests / non-flag invocations stay silent on
+ * stdout.
+ */
+function progressEnabled(): boolean {
+  return process.env['JINN_JSON_PROGRESS'] === '1';
+}
+
+interface ProgressEnvelope {
+  type: 'progress';
+  phase: 'init' | 'bootstrap' | 'daemon';
+  step: string;
+  attempt?: number;
+  blocking?: boolean;
+  nextAction?: string;
+  addresses?: Record<string, string>;
+  estimatedWaitMs?: number;
+}
+
+function emitProgress(envelope: ProgressEnvelope): void {
+  if (progressEnabled()) {
+    process.stdout.write(JSON.stringify(envelope) + '\n');
+  }
+}
+
+export async function main(): Promise<DaemonStartupInfo | void> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
 
   // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
@@ -336,10 +544,15 @@ export async function main(): Promise<DaemonStartupInfo> {
   const envToken = process.env['DAEMON_API_TOKEN']?.trim();
   const apiToken = envToken && envToken.length > 0
     ? envToken
-    : randomBytes(32).toString('hex');
+    : cryptoRandomBytes(32).toString('hex');
   if (!envToken) {
     console.log(`[main] Generated DAEMON_API_TOKEN (prefix=${apiToken.slice(0, 8)}...)`);
   }
+
+  // The keystore-presence probe happens twice: once now (to decide initial
+  // setup-mode) and once after we run init below (to flip the controller).
+  const masterKeystorePath = join(config.earningDir, 'master_keystore.json');
+  const legacyKeystorePath = join(config.earningDir, 'agent_keystore.json');
 
   const rpcPreflight = await checkRpcNetwork(config);
   if (!rpcPreflight.ok) {
@@ -376,6 +589,213 @@ export async function main(): Promise<DaemonStartupInfo> {
     });
   }
 
+  // ── Setup-mode API server ────────────────────────────────────────────────
+  // Start the operator-facing API early so the SPA can show bootstrap
+  // progress while we may still be waiting on funding. The daemon loops are
+  // gated until bootstrap completes — we just bring up the API + handshake +
+  // /v1/bootstrap + /v1/events + /v1/status here. The same Store instance is
+  // later passed into Daemon so we don't double-open the SQLite file.
+  const sharedStore = new Store(config.dbPath);
+  const earningStateStore = new FleetStateStore(config.earningDir);
+  const initialFleet = await earningStateStore.tryLoadExisting();
+  const initialServices = initialFleet?.services ?? [];
+  const initialAllComplete =
+    initialServices.length > 0 && initialServices.every((s) => isOperationalServiceStep(s.step));
+  const setupController = createSetupModeController({
+    keystoreExists: existsSync(masterKeystorePath),
+    allComplete: initialAllComplete,
+  });
+
+  const uiToken = ensureUiToken();
+  const handshakeKey = cryptoRandomBytes(16).toString('hex');
+  const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
+  let corpusForApi: ReturnType<typeof createCorpus> | undefined;
+
+  let setupApiServer: ApiServer;
+  try {
+    setupApiServer = await startApiServer({
+      port: config.apiPort,
+      store: sharedStore,
+      apiToken,
+      bindHost: apiBindHost,
+      corpus: config.subgraphUrl?.trim() ? () => corpusForApi : undefined,
+      ui: { token: uiToken, handshakeKey },
+      admin: {
+        onRestartRequested: () => {
+          console.log('[main] Restart requested via operator MCP. Exiting...');
+          process.exit(0);
+        },
+      },
+      bootstrap: { earningDir: config.earningDir },
+      setup: {
+        earningDir: config.earningDir,
+        chain: NETWORK_CHAIN,
+        rpcUrl: config.rpcUrl,
+        minEoaGasWei: (CHAIN_CONFIG.minEoaGasEth * 2n).toString(),
+      },
+      status: {
+        earningDir: config.earningDir,
+        rpcUrl: config.rpcUrl,
+        network: config.network,
+        pollIntervalMs: config.pollIntervalMs,
+        masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
+        rewardClaimIntervalMs: config.rewardClaimIntervalMs,
+        testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+        testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+        testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+        testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
+        engine: config.engine,
+      },
+    });
+  } catch (error) {
+    sharedStore.close();
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'EADDRINUSE') {
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message: `Port ${config.apiPort} is already in use. Stop the other daemon or set JINN_API_PORT / apiPort to another port.`,
+        hint: 'Set JINN_API_PORT to a free port, or stop the process currently listening on the dashboard/API port.',
+        exampleCli: 'JINN_API_PORT=7332 jinn run',
+        details: {
+          field: 'apiPort',
+          port: config.apiPort,
+          reason: 'EADDRINUSE',
+        },
+      });
+    }
+    throw error;
+  }
+  process.env['JINN_UI_HANDSHAKE_URL'] =
+    `http://127.0.0.1:${setupApiServer.port}/?k=${handshakeKey}`;
+  // Auto-open the operator panel as soon as the setup-mode API is up so the
+  // operator can watch bootstrap progress (including the funding wait, which
+  // is the whole point of starting the API early). Suppressed by setting
+  // JINN_NO_UI=1 — `jinn run --no-ui` translates the flag into this env var.
+  if (process.env['JINN_NO_UI'] !== '1') {
+    openBrowser(process.env['JINN_UI_HANDSHAKE_URL']!);
+  }
+  console.log(
+    `[main] Setup-mode API up (mode=${setupController.mode()}). ` +
+      `Dashboard: http://127.0.0.1:${setupApiServer.port}`,
+  );
+
+  // ── Operator agent WebSocket bridge ──────────────────────────────────────
+  // Mount /api/agent/ws on the same HTTP server so the SPA's xterm.js panel
+  // can attach to a long-lived embedded `claude` subprocess. The embedded
+  // session reads MCP config we materialise to disk so it can reach the
+  // operator MCP server (`jinn mcp`) for tool calls.
+  const operatorMcpConfigPath = join(homedir(), '.jinn-client', 'operator-mcp-config.json');
+  try {
+    mkdirSync(dirname(operatorMcpConfigPath), { recursive: true });
+    writeFileSyncMain(
+      operatorMcpConfigPath,
+      JSON.stringify(
+        {
+          mcpServers: {
+            'jinn-operator': {
+              command: 'jinn',
+              args: ['mcp'],
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+  } catch (err) {
+    console.warn(
+      `[main] Failed to write operator MCP config at ${operatorMcpConfigPath}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+  attachAgentWs({
+    httpServer: setupApiServer.server,
+    uiToken,
+    claudePath: config.claudePath ?? 'claude',
+    cwd: process.cwd(),
+    mcpConfigPath: operatorMcpConfigPath,
+  });
+  console.log(`[main] Agent WS bridge mounted at ws://127.0.0.1:${setupApiServer.port}/api/agent/ws`);
+
+  // ── Init-if-missing ──────────────────────────────────────────────────────
+  // If the keystore is missing but we have a password, run `jinn init` now so
+  // bootstrap has something to decrypt. Idempotent: init is a no-op when the
+  // keystore already exists. This makes `jinn run` work first-time on a fresh
+  // host. We run AFTER startApiServer so the operator's panel can already
+  // render the loading screen / setup steps while init does its work — the
+  // /v1/bootstrap endpoint reports `mode:'uninitialized'` until init writes
+  // earning_state.json, then the panel transitions on the next 3s poll.
+  if (!existsSync(masterKeystorePath) && !existsSync(legacyKeystorePath)) {
+    emitProgress({
+      type: 'progress',
+      phase: 'init',
+      step: 'creating_wallet',
+      estimatedWaitMs: 2000,
+    });
+    emitStructured({ kind: 'system', message: 'creating wallet keystore' });
+    console.log('[main] No keystore found — initializing wallet from password.');
+    const initCmd = (await import('./cli/commands/init.js')).default;
+    let initExitCode = 0;
+    await initCmd.run({
+      argv: ['--json'],
+      stdoutIsTty: false,
+      writer: { write: (_s: string) => true }, // discard init's structured output
+      exit: (code) => {
+        initExitCode = code;
+      },
+      env: { ...process.env, JINN_PASSWORD: PASSWORD },
+    });
+    if (initExitCode !== 0) {
+      console.error('[main] init failed; cannot continue.');
+      await setupApiServer.close().catch(() => undefined);
+      sharedStore.close();
+      process.exit(initExitCode);
+    }
+    emitStructured({ kind: 'system', message: 'wallet keystore ready' });
+    // Refresh the controller so the panel's loading screen knows the
+    // keystore is on disk and we're transitioning into bootstrap.
+    setupController.refresh({ keystoreExists: true, allComplete: false });
+  }
+
+  let bootstrapResult;
+  try {
+    bootstrapResult = await bootstrap();
+  } catch (err) {
+    // If bootstrap throws (vs. emitEnvelope-exits), tear down the API we
+    // just started so we don't leave a dangling listener on the port.
+    await setupApiServer.close().catch(() => undefined);
+    sharedStore.close();
+    throw err;
+  }
+
+  // Bootstrap completed — flip the controller into 'running' so any waiters
+  // (future loops gated on this) unblock.
+  setupController.refresh({ keystoreExists: true, allComplete: true });
+
+  // ── --no-daemon: exit cleanly after bootstrap completes ──────────────────
+  // `jinn run --no-daemon` flips JINN_NO_DAEMON=1 in run.ts. Emit a JSON
+  // summary on stdout and exit 0 so CI / agent flows can stop after the
+  // bootstrap state machine reaches 'complete' without paying for the
+  // long-lived daemon.
+  // We close the setup-mode API server here because its listening socket
+  // would otherwise hold the event loop open and prevent process exit.
+  if (process.env['JINN_NO_DAEMON'] === '1') {
+    console.log('[main] --no-daemon: bootstrap complete, exiting before daemon loops.');
+    await setupApiServer.close().catch(() => undefined);
+    sharedStore.close();
+    const summary = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      verb: 'run',
+      status: 'ready' as const,
+      masterAddress: bootstrapResult.masterAddress,
+      dashboardUrl: `http://127.0.0.1:${config.apiPort}`,
+    };
+    process.stdout.write(JSON.stringify(summary) + '\n');
+    process.exit(0);
+  }
+
   const {
     agentPrivateKey,
     masterAddress,
@@ -386,7 +806,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     stakingAddress,
     agentId,
     identityRegistryAddress,
-  } = await bootstrap();
+  } = bootstrapResult;
 
   if (!mechAddress) {
     emitEnvelope({
@@ -834,13 +1254,13 @@ export async function main(): Promise<DaemonStartupInfo> {
   // MCP falls back to local-only behaviour with a warning.
   const corpusFactory = config.subgraphUrl?.trim()
     ? (store: Store) =>
-        createCorpus({
+        (corpusForApi = createCorpus({
           subgraphUrl: config.subgraphUrl!,
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           store,
           signer: { privateKey: agentPrivateKey },
           selfSafeAddress: safeAddress,
-        })
+        }))
     : undefined;
   if (!corpusFactory) {
     console.warn(
@@ -854,9 +1274,11 @@ export async function main(): Promise<DaemonStartupInfo> {
     runner,
     intentSources,
     dbPath: config.dbPath,
+    store: sharedStore,
+    apiServer: setupApiServer,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
-    apiBindHost: config.apiBindHost ?? '127.0.0.1',
+    apiBindHost,
     apiToken,
     peers: config.peers.length > 0 ? config.peers : undefined,
     subgraphUrl: config.subgraphUrl,
@@ -941,10 +1363,14 @@ export async function main(): Promise<DaemonStartupInfo> {
         : undefined,
   });
 
-  // Graceful shutdown
+  // Graceful shutdown — Daemon doesn't own the API server or Store in this
+  // flow (they were created in setup-mode before bootstrap), so we close
+  // them explicitly after Daemon.stop() completes.
   const shutdown = async (signal: string) => {
     console.log(`\n[main] Received ${signal}, shutting down...`);
     await daemon.stop();
+    await setupApiServer.close().catch(() => undefined);
+    sharedStore.close();
     console.log('[main] Shutdown complete.');
     process.exit(0);
   };
@@ -964,6 +1390,13 @@ export async function main(): Promise<DaemonStartupInfo> {
     }
   };
   process.on('exit', removePidfile);
+
+  emitProgress({
+    type: 'progress',
+    phase: 'daemon',
+    step: 'starting',
+    estimatedWaitMs: 5000,
+  });
 
   try {
     await daemon.start();

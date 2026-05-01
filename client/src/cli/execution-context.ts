@@ -8,7 +8,7 @@ import type { WalletClient } from 'viem';
 import { loadConfig, getConfigPathFromArgs, type JinnConfig } from '../config.js';
 import { getChainConfig, type ChainConfig } from '../earning/contracts.js';
 import { FleetStateStore } from '../earning/store.js';
-import type { FleetState, ServiceState } from '../earning/types.js';
+import { isOperationalServiceStep, type FleetState, type ServiceState } from '../earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from '../earning/wallet.js';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
 import { MechAdapter } from '../adapters/mech/adapter.js';
@@ -41,7 +41,7 @@ function mergeArgvForConfig(argv?: string[]): string | undefined {
 }
 
 export function pickPrimaryMechService(services: ServiceState[]): ServiceState | undefined {
-  return services.find(s => s.step === 'complete' && s.safe_address && s.mech_address);
+  return services.find(s => isOperationalServiceStep(s.step) && s.safe_address && s.mech_address);
 }
 
 export type CreateCliExecutionContextOptions = {

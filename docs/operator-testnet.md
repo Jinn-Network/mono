@@ -46,27 +46,27 @@ jinn auth
 
 # Step 2 — Zero-to-running: auto-password + init → fund (auto via CDP) → bootstrap → run daemon.
 #           Use a testnet-dedicated earning directory so mainnet state stays separate.
-JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet" JINN_NETWORK=testnet jinn quickstart
+JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet" JINN_NETWORK=testnet jinn run
 ```
 
 Expected output:
 - `jinn auth` asks "how do you want to run the Jinn daemon?" Pick `bare` unless you've set up Docker Compose.
-- `jinn quickstart` prints: keystore created (auto-password saved to `~/.jinn-client/keystore-password`), master address, CDP drips landing, staking complete, daemon started on port 7331.
+- `jinn run` prints: keystore created (auto-password saved to `~/.jinn-client/keystore-password`), master address, CDP drips landing, staking complete, daemon started on port 7331.
 
 If it ran through, you're done. Otherwise, skip to [Troubleshooting](#troubleshooting).
 
 ### Advanced / CI: explicit password
 
-If you want to supply your own password instead of using the auto-generated one (recommended for production or scripted environments), set `JINN_PASSWORD` before calling `quickstart`:
+If you want to supply your own password instead of using the auto-generated one (recommended for production or scripted environments), set `JINN_PASSWORD` before calling `jinn run`:
 
 ```bash
 export JINN_PASSWORD='your-secure-password'
-JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet" JINN_NETWORK=testnet jinn quickstart
+JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet" JINN_NETWORK=testnet jinn run
 ```
 
 When `JINN_PASSWORD` is set, no password file is written to disk. Use `--password-fd N` for CI pipelines where the password comes from a secret manager.
 
-## What `jinn quickstart` does under the hood
+## What `jinn run` does under the hood
 
 The state machine, one line per step:
 
@@ -261,7 +261,7 @@ Run the interactive login it suggests. For bare mode: `claude auth login` in a T
 ```bash
 rm -rf ~/.jinn-client/earning-testnet
 rm -rf /tmp/jinn-engine-working /tmp/jinn-engine-impl-state
-jinn quickstart
+jinn run
 ```
 
 Safe — no on-chain state is lost; `jinn bootstrap` reconciles any existing services against the chain.

@@ -13,12 +13,12 @@ import {
 // ---------------------------------------------------------------------------
 
 describe('detectAuthContext', () => {
-  it('returns "bare" when no Docker indicators exist', () => {
+  it('returns "bare" by default when no signal is present', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-'));
     const result = detectAuthContext({
       cwd: dir,
       dockerenvExists: false,
-      composeServiceExists: false,
+      env: {},
     });
     expect(result).toBe('bare');
   });
@@ -28,27 +28,42 @@ describe('detectAuthContext', () => {
     const result = detectAuthContext({
       cwd: dir,
       dockerenvExists: true,
-      composeServiceExists: false,
+      env: {},
     });
     expect(result).toBe('container');
   });
 
-  it('returns "docker-compose" when composeServiceExists is true', () => {
+  it('returns the env-supplied mode when JINN_RUNTIME_MODE is set', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-'));
     const result = detectAuthContext({
       cwd: dir,
       dockerenvExists: false,
-      composeServiceExists: true,
+      env: { JINN_RUNTIME_MODE: 'docker-compose' },
     });
     expect(result).toBe('docker-compose');
   });
 
-  it('returns "bare" when composeServiceExists is false', () => {
+  it('returns the configuredMode when supplied', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-'));
     const result = detectAuthContext({
       cwd: dir,
       dockerenvExists: false,
-      composeServiceExists: false,
+      configuredMode: 'docker-compose',
+      env: {},
+    });
+    expect(result).toBe('docker-compose');
+  });
+
+  it('does NOT auto-detect docker-compose from cwd contents (deliberately)', () => {
+    // Prior behavior misfired for anyone running from the client/ checkout dir.
+    // Now: a docker-compose.yml in cwd alone is not enough — operator must
+    // opt in via env var or configured mode.
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-'));
+    writeFileSync(join(dir, 'docker-compose.yml'), 'services:\n  jinn-daemon:\n    image: x\n');
+    const result = detectAuthContext({
+      cwd: dir,
+      dockerenvExists: false,
+      env: {},
     });
     expect(result).toBe('bare');
   });

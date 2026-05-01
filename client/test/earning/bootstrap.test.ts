@@ -462,7 +462,7 @@ describe('Fleet bootstrap', () => {
     // whole viem write+receipt path. The real implementation drives the
     // state store the same way; what we assert here is the wiring (it
     // gets called) + the resulting transition through agent_registered
-    // to complete.
+    // to safe_binding_pending when the bind is not yet done.
     const stepRegisterSpy = vi
       .spyOn(bootstrapper as any, 'stepRegisterAgent')
       .mockImplementation(async (_s: any, _m: any, index: number) => {
@@ -472,7 +472,7 @@ describe('Fleet bootstrap', () => {
           identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
           agent_registered_tx: '0x' + 'ab'.repeat(32),
           safe_bound_to_agent: false,
-          step: 'agent_registered',
+          step: 'safe_binding_pending',
         });
       });
 
@@ -482,7 +482,7 @@ describe('Fleet bootstrap', () => {
     expect(stepRegisterSpy).toHaveBeenCalledTimes(1);
     expect(result.fleet_state.services).toHaveLength(1);
     const svc = result.fleet_state.services[0];
-    expect(svc.step).toBe('complete');
+    expect(svc.step).toBe('safe_binding_pending');
     expect(svc.agent_id).toBe('7');
     expect(svc.identity_registry_address).toBe(
       '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
@@ -651,7 +651,7 @@ describe('Fleet bootstrap', () => {
     const next = await (bootstrapper as any).stepRegisterAgent(fleet, mnemonic, 1);
 
     const svc = next.services.find((s: any) => s.index === 1);
-    expect(svc.step).toBe('agent_registered');
+    expect(svc.step).toBe('complete');
     expect(svc.agent_id).toBe('999');
     // identity_registry_address is preserved from the prior persisted value.
     expect(svc.identity_registry_address).toBe(
@@ -736,11 +736,63 @@ describe('Fleet bootstrap', () => {
     expect(callArgs.chainId).toBe(8453);
   });
 
+  it('agent_registered step does not block bootstrap when setAgentWallet bind reverts', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'agent_registered',
+          error: null,
+          agent_id: '777',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'dd'.repeat(32),
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
+    vi.spyOn(bindingMod, 'bindAgentWalletToSafe').mockRejectedValue(new Error('bind reverted'));
+
+    const fleet = await store.load('base');
+    const next = await (bootstrapper as any).resumeServiceStandard(fleet, mnemonic, 1);
+
+    const svc = next.services.find((s: any) => s.index === 1);
+    expect(svc.step).toBe('safe_binding_pending');
+    expect(svc.agent_id).toBe('777');
+    expect(svc.safe_bound_to_agent).toBe(false);
+    expect(svc.error).toContain('safe_binding_failed');
+  });
+
   it('resume path: complete service with agent_id + safe_bound_to_agent=false runs binding step', async () => {
     // Should-fix #3: legacy operator who minted agent NFT (agent_id set) but
     // never ran the Safe-binding step (safe_bound_to_agent=false). Resuming
-    // with step='complete' must detect this and call stepRegisterAgent once,
-    // then remain 'complete'.
+    // with step='complete' must detect this and call stepRegisterAgent once.
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);
 

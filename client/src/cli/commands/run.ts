@@ -1,3 +1,7 @@
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
@@ -47,6 +51,39 @@ function humanRunSummary(value: unknown): string {
   ].join('\n');
 }
 
+/**
+ * Parse a duration string into milliseconds.
+ *
+ * Accepts shapes like '30s', '15m', '1h', or raw '1800000' (ms). The literal
+ * tokens 'none' / 'infinite' / 'never' return Number.POSITIVE_INFINITY (sentinel
+ * for "wait forever"; callers translate to "don't set the env var" so A3's
+ * default of POSITIVE_INFINITY in main() takes over). Returns null on parse
+ * failure so callers can emit a structured invalid_invocation envelope.
+ */
+function parseDurationToMs(s: string | undefined): number | null {
+  if (!s) return null;
+  const lower = s.toLowerCase().trim();
+  if (lower === 'none' || lower === 'infinite' || lower === 'never') {
+    return Number.POSITIVE_INFINITY;
+  }
+  const m = /^(\d+)\s*(ms|s|m|h)?$/.exec(lower);
+  if (!m) return null;
+  const n = Number.parseInt(m[1]!, 10);
+  const unit = m[2] ?? 'ms';
+  switch (unit) {
+    case 'ms':
+      return n;
+    case 's':
+      return n * 1000;
+    case 'm':
+      return n * 60_000;
+    case 'h':
+      return n * 3_600_000;
+    default:
+      return null;
+  }
+}
+
 export interface RunDeps extends BaseCommandDeps {
   checkRpcNetwork: typeof defaultCheckRpcNetwork;
   rpcNetworkFailureHint: typeof defaultRpcNetworkFailureHint;
@@ -76,7 +113,8 @@ export function createRunCommand(deps: RunDeps = PRODUCTION_DEPS): CommandModule
   return {
     name: 'run',
     summary: 'Start the daemon in the foreground; stops on SIGINT/SIGTERM',
-    helpText: `Usage: jinn run [--human] [--config <path>] [--password-fd <fd>]
+    helpText: `Usage: jinn run [--human] [--config <path>] [--password-fd <fd>] [--no-ui]
+                [--no-daemon] [--funding-timeout <duration>] [--json-progress]
 
 Long-running. Starts the creator, restorer, and delivery-watcher
 loops and runs until the process receives SIGINT or SIGTERM. Before
@@ -87,9 +125,26 @@ By default, stdout emits a single machine-readable startup record and
 all progress / runtime logs go to stderr. Use \`--human\` for a concise
 terminal summary instead.
 
+By default, the operator panel is opened in your default browser once the
+daemon's API server is up. Pass \`--no-ui\` to suppress this.
+
+Flags:
+  --human                Print a concise terminal summary instead of JSON.
+  --no-ui                Suppress automatic browser open (default: open the operator panel).
+  --no-daemon            Stop after bootstrap completes; do not start daemon
+                         loops. Emits a JSON summary on stdout and exits 0.
+  --funding-timeout <d>  Bound the wait when the wallet needs funding. Accepts
+                         '30s', '15m', '1h', or 'none' (default; wait forever).
+  --json-progress        Emit NDJSON progress envelopes on stdout during long
+                         phases (preflight, init, bootstrap). Useful for
+                         agent / CI consumption.
+
 Examples:
   jinn run
   jinn run --human
+  jinn run --no-ui
+  jinn run --no-daemon --json
+  jinn run --funding-timeout 30m --json-progress
   printf '%s\n' secret | jinn run --password-fd 0
 
 Failure example (funding gate):
@@ -105,6 +160,10 @@ Failure example (funding gate):
           args: ctx.argv,
           options: {
             ...COMMON_FLAGS,
+            'no-ui': { type: 'boolean', default: false },
+            'no-daemon': { type: 'boolean', default: false },
+            'funding-timeout': { type: 'string' },
+            'json-progress': { type: 'boolean', default: false },
           },
           allowPositionals: false,
         });
@@ -122,22 +181,51 @@ Failure example (funding gate):
         return;
       }
 
-      const password = deps.resolveCliPassword(ctx.argv, ctx.env);
-      if (!password.ok) {
-        emitEnvelope(
-          {
-            code: 'invalid_invocation',
-            message: password.message,
-            hint: 'Set JINN_PASSWORD or pass --password-fd N, then re-run.',
-            exampleCli: 'jinn run',
-            details: { field: 'keystore password', expected: 'non-empty string via environment' },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
+      // Resolve password: env > file > auto-generate (matches what
+      // `jinn quickstart` used to do). A brand-new operator can run
+      // `jinn run` with no env var, no setup, no input. Plaintext lives at
+      // ~/.jinn-client/keystore-password (mode 0600) so the next run reuses
+      // the same value. The known security trade-off is documented in
+      // client/src/cli/password.ts.
+      let resolvedPassword: string;
+      const probe = deps.resolveCliPassword(ctx.argv, ctx.env);
+      if (probe.ok) {
+        resolvedPassword = probe.password;
+      } else {
+        const home = ctx.env['HOME'] ?? homedir();
+        const pwFilePath = join(home, '.jinn-client', 'keystore-password');
+        // Defensive: probe.ok=false means neither env, fd, nor a non-empty
+        // file existed. Generate, persist, and continue.
+        const generated = randomBytes(32).toString('hex');
+        try {
+          mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
+          writeFileSync(pwFilePath, generated + '\n', { mode: 0o600 });
+        } catch (err) {
+          emitEnvelope(
+            {
+              code: 'invalid_invocation',
+              message: `Failed to persist auto-generated keystore password to ${pwFilePath}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+              hint: 'Check filesystem permissions on $HOME/.jinn-client, or set JINN_PASSWORD explicitly.',
+              exampleCli: 'jinn run',
+              details: { field: 'keystore password', expected: 'writable ~/.jinn-client' },
+            },
+            { writer: ctx.writer, exit: ctx.exit },
+          );
+          return;
+        }
+        resolvedPassword = generated;
+        // Stderr-only: stdout is reserved for the structured startup record.
+        process.stderr.write('━'.repeat(64) + '\n');
+        process.stderr.write('A keystore password was auto-generated for you.\n');
+        process.stderr.write(`  Stored at: ${pwFilePath}\n`);
+        process.stderr.write('  Mode 0600. Treat the wallet as hot until you rotate the password.\n');
+        process.stderr.write('  To rotate: JINN_NEW_PASSWORD=<new> jinn keys change-password\n');
+        process.stderr.write('━'.repeat(64) + '\n');
       }
       // environment plumbing for the spawned daemon — out of DI scope
-      process.env['JINN_PASSWORD'] = password.password;
+      process.env['JINN_PASSWORD'] = resolvedPassword;
       const configPath = deps.getConfigPathFromArgs(ctx.argv);
       const config = deps.loadConfig(configPath);
       const rpcPreflight = await deps.checkRpcNetwork(config);
@@ -182,6 +270,52 @@ Failure example (funding gate):
       if (!(parsed.values.human as boolean)) {
         routeConsoleToStderr();
       }
+      // Translate --no-ui flag into JINN_NO_UI env var so main() (which owns
+      // the auto-open, since it knows when the API server first comes up)
+      // can honour it. The flag itself stays for backwards compat.
+      if (parsed.values['no-ui'] as boolean) {
+        process.env['JINN_NO_UI'] = '1';
+      }
+
+      // Translate --funding-timeout into JINN_FUNDING_TIMEOUT_MS so main()'s
+      // funding-poll loop (A3) honours it. 'none' / 'infinite' / 'never' map
+      // to "don't set the env var" — main() defaults to POSITIVE_INFINITY
+      // (wait forever) when unset.
+      const fundingTimeoutFlag = parsed.values['funding-timeout'] as string | undefined;
+      if (fundingTimeoutFlag !== undefined) {
+        const ms = parseDurationToMs(fundingTimeoutFlag);
+        if (ms === null) {
+          emitEnvelope(
+            {
+              code: 'invalid_invocation',
+              message: `--funding-timeout must be a duration like '30s', '15m', '1h', or 'none' (got '${fundingTimeoutFlag}')`,
+              hint: 'Use a unit suffix (s/m/h) or the literal token "none" to wait forever.',
+              exampleCli: 'jinn run --funding-timeout 30m',
+              details: { field: 'funding-timeout' },
+            },
+            { writer: ctx.writer, exit: ctx.exit },
+          );
+          return;
+        }
+        if (Number.isFinite(ms)) {
+          process.env['JINN_FUNDING_TIMEOUT_MS'] = String(ms);
+        }
+        // For 'none'/'infinite'/'never' → don't set the env var; main()'s
+        // poll loop defaults to infinite when unset.
+      }
+
+      // Translate --no-daemon into JINN_NO_DAEMON so main() exits cleanly
+      // after bootstrap completes (before constructing the Daemon).
+      if (parsed.values['no-daemon'] as boolean) {
+        process.env['JINN_NO_DAEMON'] = '1';
+      }
+
+      // Translate --json-progress into JINN_JSON_PROGRESS so main() emits
+      // NDJSON progress envelopes at the major phase boundaries.
+      if (parsed.values['json-progress'] as boolean) {
+        process.env['JINN_JSON_PROGRESS'] = '1';
+      }
+
       const payload = await deps.mainFn();
       emitResult(payload, humanRunSummary, {
         json: Boolean(parsed.values.json),

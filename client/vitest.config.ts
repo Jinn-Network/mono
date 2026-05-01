@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['test/**/*.test.ts'],
-    exclude: ['test/e2e/**', 'node_modules/**'],
+    exclude: ['test/e2e/**', 'test/**/*.e2e.test.ts', 'node_modules/**'],
     alias: {
       '@test/': fileURLToPath(new URL('./test/_support/', import.meta.url)),
       '@/': fileURLToPath(new URL('./src/', import.meta.url)),

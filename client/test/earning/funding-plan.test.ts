@@ -153,7 +153,7 @@ describe('planFleetFunding (read-only funding plan)', () => {
     await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'pw'));
     await store.save({ ...createDefaultFleetState('base'), master_address: masterAddress });
 
-    const getBalance = vi.fn(async () => 1_000_000_000_000_000n); // 0.001 ETH < 0.005
+    const getBalance = vi.fn(async () => 1_000_000_000_000_000n); // 0.001 ETH < 0.010
     const plan = await planFleetFunding({
       earningDir,
       chain: 'base',
@@ -166,8 +166,8 @@ describe('planFleetFunding (read-only funding plan)', () => {
     expect(plan.partial).toBe(false);
     expect(plan.master?.master_address).toBe(masterAddress);
     expect(plan.master?.eth_balance).toBe('1000000000000000');
-    // shortfall = 0.005 - 0.001 = 0.004 ETH
-    expect(plan.master?.eth_required).toBe('4000000000000000');
+    // shortfall = 0.010 - 0.001 = 0.009 ETH
+    expect(plan.master?.eth_required).toBe('9000000000000000');
   });
 
   it('does not call any mutating method on the fleet store', async () => {

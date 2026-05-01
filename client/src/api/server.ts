@@ -16,8 +16,9 @@ import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import type { Server as HttpServer } from 'node:http';
+import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Store } from '../store/store.js';
 import { addX402Routes, type X402Config } from '../x402/handler.js';
@@ -28,6 +29,11 @@ import {
 import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
+import { addEventsRoutes } from './events-endpoint.js';
+import { addBootstrapRoutes } from './bootstrap-endpoint.js';
+import { addHandshakeRoutes, requireUiToken } from './handshake.js';
+import { addAdminRoutes } from './admin-endpoint.js';
+import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -59,33 +65,66 @@ export interface ApiServerConfig {
    * key.
    *
    * SECURITY: this route signs x402 payments with the agent EOA. It has no
-   * authentication. An attacker who can reach this port can post fabricated
+   * UI authentication; callers need the daemon bearer token. An attacker who
+   * can reach this port and token can post fabricated
    * `access.endpoint` URLs and drain the operator's USDC balance via the
-   * payment dance. The API server's bind host is `0.0.0.0` (see the
-   * `serve(...)` call at the bottom of this file) — operators must firewall
-   * the daemon API port externally. Scoped auth on this route is tracked
-   * as a follow-up.
+   * payment dance.
    *
    * Asymmetry with `search_artifacts`: search is keyless (subgraph + IPFS
    * gateway only) and stays client-side in the MCP server. Acquire is the
    * only path that needs the signing key for x402 payments, so it's the only
    * one that moves to the daemon. See spec/2026-04-30-phase-a-umbrella.md §4.
    */
-  corpus?: Corpus;
+  corpus?: Corpus | (() => Corpus | undefined);
+  /** When set, GET /v1/bootstrap reads <earningDir>/earning_state.json. */
+  bootstrap?: { earningDir: string };
+  /** Optional panel-driven setup actions such as testnet faucet funding. */
+  setup?: SetupRoutesConfig;
+  /** When set, /auth/handshake is mounted and SPA-only routes are gated by the token. */
+  ui?: { token: string; handshakeKey: string };
+  /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
+  admin?: { onRestartRequested: () => void };
 }
 
 export interface ApiServer {
   port: number;
   close(): Promise<void>;
+  /** Underlying node http.Server, exposed so other subsystems (e.g. agent WS bridge)
+   *  can mount on the same port. */
+  server: HttpServer;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-let dashboardHtml: string;
-try {
-  dashboardHtml = readFileSync(join(__dirname, '..', 'dashboard', 'index.html'), 'utf-8');
-} catch {
-  dashboardHtml = '<html><body><p>Dashboard not found. Rebuild with <code>yarn build</code>.</p></body></html>';
+const dashboardDir = join(__dirname, '..', 'dashboard');
+const assetsDir = join(dashboardDir, 'assets');
+
+function readSpaIndex(): string {
+  try {
+    return readFileSync(join(dashboardDir, 'index.html'), 'utf-8');
+  } catch {
+    return '<html><body><p>SPA not built. Run <code>yarn build</code>.</p></body></html>';
+  }
 }
+
+const ASSET_MIME: Record<string, string> = {
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.html': 'text/html; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+};
 
 export async function startApiServer(config: ApiServerConfig): Promise<ApiServer> {
   const { store } = config;
@@ -125,7 +164,23 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     return;
   };
 
-  app.get('/', (c) => c.html(dashboardHtml));
+  // SPA index at /
+  app.get('/', (c) => c.html(readSpaIndex()));
+
+  // Static SPA assets emitted by Vite into dist/dashboard/assets/.
+  app.get('/assets/:filename', (c) => {
+    const filename = c.req.param('filename');
+    // Prevent path traversal: filename must not contain separators.
+    if (!filename || filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+      return c.notFound();
+    }
+    const filePath = normalize(join(assetsDir, filename));
+    if (!filePath.startsWith(assetsDir)) return c.notFound();
+    if (!existsSync(filePath)) return c.notFound();
+    const data = readFileSync(filePath);
+    const mime = ASSET_MIME[extname(filename).toLowerCase()] ?? 'application/octet-stream';
+    return new Response(new Uint8Array(data), { headers: { 'content-type': mime } });
+  });
 
   app.get('/v1/status', async (c) => {
     try {
@@ -143,6 +198,34 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       );
     }
   });
+
+  addEventsRoutes(app);
+
+  if (config.bootstrap) {
+    addBootstrapRoutes(app, config.bootstrap);
+  }
+
+  if (config.ui) {
+    addHandshakeRoutes(app, config.ui);
+    // Gate SPA-only routes (do NOT gate /v1/status or /artifacts/*).
+    app.use('/v1/events', requireUiToken(config.ui.token));
+    app.use('/v1/events/*', requireUiToken(config.ui.token));
+    app.use('/v1/bootstrap', requireUiToken(config.ui.token));
+  }
+
+  if (config.ui && config.admin) {
+    app.use('/api/admin/*', requireUiToken(config.ui.token));
+    addAdminRoutes(app, config.admin);
+  }
+
+  if (config.ui) {
+    // Setup routes (claude auth probe + login spawn, keystore password change)
+    // gated behind the UI token so external callers can't fingerprint the host
+    // or rotate keys.
+    app.use('/v1/auth/*', requireUiToken(config.ui.token));
+    app.use('/v1/setup/*', requireUiToken(config.ui.token));
+    addSetupRoutes(app, config.setup);
+  }
 
   // x402 payment-gated routes (if configured)
   if (config.x402) {
@@ -253,13 +336,21 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // side of x402 needs the signing key, so only the buyer path moves here.
   // See spec/2026-04-30-phase-a-umbrella.md §4.
   if (config.corpus) {
-    const corpus = config.corpus;
+    const resolveCorpus = (): Corpus | undefined =>
+      typeof config.corpus === 'function' ? config.corpus() : config.corpus;
     // Single-flight: dedupe concurrent acquires for the same sha256 so two
     // MCP tool calls within the same restoration don't double-pay or race
     // the cache. Map entries clear themselves once the inner promise settles.
     const inFlight = new Map<string, Promise<ArtifactContent>>();
 
     app.post('/v1/artifacts/acquire', requireBearer, async (c) => {
+      const corpus = resolveCorpus();
+      if (!corpus) {
+        return c.json(
+          { ok: false, reason: 'corpus_unavailable', error: 'corpus is not ready', retryable: true },
+          503,
+        );
+      }
       let body: Record<string, unknown>;
       try {
         body = await c.req.json<Record<string, unknown>>();
@@ -345,6 +436,23 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     });
   }
 
+  // SPA fallback: any unmatched non-API GET path returns the SPA index.
+  // Lets the SPA own client-side routing without 404s on deep links.
+  app.get('*', (c) => {
+    const path = c.req.path;
+    if (
+      path.startsWith('/v1') ||
+      path.startsWith('/artifacts') ||
+      path.startsWith('/auth') ||
+      path.startsWith('/api') ||
+      path.startsWith('/x402') ||
+      path.startsWith('/assets')
+    ) {
+      return c.notFound();
+    }
+    return c.html(readSpaIndex());
+  });
+
   return new Promise((resolve, reject) => {
     const server = serve({
       fetch: app.fetch,
@@ -354,9 +462,16 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       const addr = server.address();
       const actualPort = (typeof addr === 'object' && addr) ? addr.port : config.port;
       console.log(`[api] Listening on port ${actualPort}`);
+      if (config.ui) {
+        const handshakeUrl = `http://127.0.0.1:${actualPort}/?k=${config.ui.handshakeKey}`;
+        console.log(`[api] UI handshake URL: ${handshakeUrl}`);
+      }
       resolve({
         port: actualPort,
         close: () => new Promise<void>((res) => server.close(() => res())),
+        // serve() returns Server | Http2Server | Http2SecureServer; we never
+        // pass http2/https opts so it's always a node http.Server at runtime.
+        server: server as HttpServer,
       });
     });
 

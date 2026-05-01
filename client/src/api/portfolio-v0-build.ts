@@ -76,6 +76,12 @@ export interface ClaudeOutcomeSummary {
 }
 
 export interface PortfolioV0Status {
+  totals: {
+    /** Tasks that reached terminal success and delivered their result. */
+    delivered: number;
+    failed: number;
+    active: number;
+  };
   /** Intents currently being processed (not in a terminal state). */
   inFlight: InFlightIntentSummary[];
   /** Last N completed or failed intents — most recent first. */
@@ -147,6 +153,11 @@ export function gatherPortfolioV0Status(
     (a, b) => b.stateUpdatedAt - a.stateUpdatedAt,
   );
   const recentVerdicts = allTerminal.slice(0, RECENT_VERDICTS_LIMIT).map(toVerdict);
+  const totals = {
+    delivered: complete.length,
+    failed: failed.length,
+    active: inFlight.length,
+  };
 
   // Recent system_snapshot artifacts (tagged with 'system_snapshot')
   let recentSnapshots: SnapshotSummary[] = [];
@@ -169,7 +180,7 @@ export function gatherPortfolioV0Status(
 
   const recentClaudeOutcomes = gatherRecentClaudeOutcomes(workingDirRoot);
 
-  return { inFlight, recentVerdicts, recentSnapshots, recentClaudeOutcomes };
+  return { totals, inFlight, recentVerdicts, recentSnapshots, recentClaudeOutcomes };
 }
 
 /**

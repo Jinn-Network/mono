@@ -4,6 +4,20 @@ Date: 2026-04-28
 Task: `jinn-mono-964`
 Lens: an AI agent helping a human operator go from "I want to run a Jinn node" to "my node is operating productively."
 
+> **Update (jinn-mono-zqm2):** `jinn quickstart` has been removed; `jinn run`
+> now subsumes its behaviour (init + funding check + bootstrap + foreground
+> daemon, with the same auto-password and progressive-disclosure semantics).
+> The corresponding MCP tool was renamed `jinn_run`. This audit's references
+> to `jinn quickstart` (the verb and the MCP tool `jinn_quickstart`) describe
+> the pre-zqm2 surface; underlying findings still apply to the unified
+> `jinn run` where they were not surface-specific. Findings partially or
+> fully closed by the unification: U5 (the "two canonical recipes"
+> dichotomy is gone — there is now one first-run command), H2 (the
+> help/`quickstart` vs `run` confusion is moot — the dichotomy is gone).
+> Findings still open against `jinn run`: U1 (MCP parity), U3 (structured
+> progress stream), W4 (plaintext password before preflight), H1 (skill
+> content freshness).
+
 ## Entrypoint Analysis
 
 The simplest plausible agent path is now `jinn --help` -> `jinn auth` -> `jinn quickstart` -> `jinn status`. That is the right shape: the top-level help names `quickstart`, the README leads with `jinn auth` and `jinn quickstart`, and operational verbs default to JSON for headless callers.

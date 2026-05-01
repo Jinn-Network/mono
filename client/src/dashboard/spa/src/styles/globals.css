@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Brand tokens — mirrored from cargo/DESIGN.md / DESIGN.json */
+:root {
+  --bg: #0c1628;
+  --bg-elevated: #142340;
+  --bg-sunken: #070d18;
+  --fg: #f2f7fc;
+  --fg-muted: #a4b0c2;
+  --fg-dim: #7d8ba3;
+  --border: #1f3a66;
+  --border-strong: #7aa7dc;
+  --border-accent: #c9a048;
+  --accent-sky: #7aa7dc;
+  --accent-sky-hover: #a8c8ea;
+  --accent-gold: #dcb866;
+  --accent-gold-hover: #ead08e;
+  --vow-green: #6a9b8f;
+  --wane: #b8802f;
+  --break-red: #a85a5a;
+  --seer-violet: #7a6db0;
+
+  --radius-1: 4px;
+  --radius-2: 6px;
+  --radius-3: 10px;
+
+  --serif: 'Instrument Serif', 'Times New Roman', serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-feature-settings: 'ss01' on, 'ss02' on, 'cv01' on;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Shared atomic helpers — used across regions for consistency */
+.j-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--fg-dim);
+}
+
+.j-display {
+  font-family: var(--serif);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.05;
+}
+
+.j-mono {
+  font-family: var(--mono);
+}
+
+.j-rule {
+  height: 1px;
+  background: var(--border);
+}
+
+.j-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+}
+
+.j-card-bare {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid var(--accent-sky);
+  outline-offset: 2px;
+}
+
+/* xterm wrapping — force the agent panel terminal to fill its box so
+   claude's TUI doesn't overflow the column. */
+.xterm,
+.xterm-viewport,
+.xterm-screen {
+  width: 100% !important;
+}

@@ -4,9 +4,10 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { createCliSignerContext } from '../execution-context.js';
-import { runRewardClaimOnce } from '../../daemon/reward-claim-loop.js';
+import { recordRewardClaimResult, runRewardClaimOnce } from '../../daemon/reward-claim-loop.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import { TransientError } from '../../types/errors.js';
+import { Store } from '../../store/store.js';
 
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -53,7 +54,7 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const { networkChain, chainConfig, fleetStore, masterWallet, publicClient } = built.ctx;
+  const { config, networkChain, chainConfig, fleetStore, masterWallet, publicClient } = built.ctx;
 
   try {
     const tick = await runRewardClaimOnce({
@@ -64,6 +65,21 @@ async function run(ctx: CommandContext): Promise<void> {
       distributorAddress: chainConfig.distributorAddress,
       strict: true,
     });
+    if (tick.claims.length > 0) {
+      const latestState = await fleetStore.load(networkChain);
+      const jinnStore = new Store(config.dbPath);
+      try {
+        recordRewardClaimResult(
+          jinnStore,
+          latestState,
+          tick,
+          chainConfig.distributorAddress,
+          'claim-rewards',
+        );
+      } finally {
+        jinnStore.close();
+      }
+    }
     emitResult(
       {
         schemaVersion: 1,
@@ -77,6 +93,7 @@ async function run(ctx: CommandContext): Promise<void> {
         claimAttempted: tick.claimAttempted,
         failedRecoverable: tick.failedRecoverable,
         failedPermanent: tick.failedPermanent,
+        claims: tick.claims,
       },
       (v) => {
         const value = v as { attempted: number; submitted: number; failedRecoverable: number; failedPermanent: number };

@@ -1,6 +1,6 @@
 ---
 name: jinn-operator
-description: Set up and operate a Jinn Network agent. Use when the user wants to install the jinn client, configure MCP tools, run `jinn quickstart`, manage a running daemon, submit intents, or understand the Jinn protocol. Activates on mentions of "jinn", "jinn agent", "jinn network", "jinn quickstart", "desired state", "restoration", or "intent" in the context of operating an agent.
+description: Set up and operate a Jinn Network agent. Use when the user wants to install the jinn client, configure MCP tools, run `jinn run`, manage a running daemon, submit intents, or understand the Jinn protocol. Activates on mentions of "jinn", "jinn agent", "jinn network", "jinn run", "desired state", "restoration", or "intent" in the context of operating an agent.
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 
@@ -54,11 +54,10 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn version` | Print client version, protocol phase, and resolved token map |
 | `jinn doctor` | Preflight checks: answers "would jinn run work?" without running it |
 | `jinn init` | Generate the master wallet and write the encrypted keystore |
-| `jinn quickstart` | Zero-to-running in one command: init, fund, bootstrap, run |
 | `jinn auth` | Check Claude authentication and persist how the operator runs the daemon |
 | `jinn bootstrap` | Advance the fleet state machine toward a running daemon |
 | `jinn fund-requirements` | List addresses that need funding before the next bootstrap step |
-| `jinn run` | Start the daemon in the foreground; stops on SIGINT/SIGTERM |
+| `jinn run` | Zero-to-running in one command: init, fund, bootstrap, then start the daemon in the foreground (stops on SIGINT/SIGTERM) |
 | `jinn stop` | Signal a running jinn daemon to shut down gracefully |
 | `jinn status` | Daemon liveness + roll-up (poll this for monitoring; pull detail separately) |
 | `jinn fleet` | Per-service fleet detail (wallets, staking, rewards, attention) |
@@ -125,7 +124,7 @@ Once configured, these MCP tools become available:
 | `jinn_intents_enable` | MUTATING: Opt in to restoring a specific intent kind. Idempotent. Calls impl.onEnable which may write config. Fast unless impl requires external action. Pass extra_args as space-separated "--key=value" pairs for impl-specific options (e.g. "--hl-master=0x..."). |
 | `jinn_intents_disable` | MUTATING: Opt out of restoring a specific intent kind. Writes config. Idempotent. Fast (<1s). |
 | `jinn_init` | MUTATING. Create the master wallet and write the encrypted keystore. Idempotent: re-runs return the existing master address. Requires confirm: true; default is preview (no filesystem write). |
-| `jinn_quickstart` | MUTATING: Zero-to-running in one call: resolve/generate password, init wallet, bootstrap fleet, start daemon. Idempotent — safe to call repeatedly; resumes from last completed step. Long-running: can take up to 30 minutes if funding is required. Returns a progress stream via --json-progress; poll jinn_status to monitor after this returns. Use no_daemon=true to skip starting the daemon (useful for CI or when the daemon is managed separately). |
+| `jinn_run` | MUTATING: Zero-to-running in one call: resolve/generate password, init wallet, bootstrap fleet, start daemon. Idempotent — safe to call repeatedly; resumes from last completed step. Long-running: can take up to 30 minutes if funding is required. Returns a progress stream via --json-progress; poll jinn_status to monitor after this returns. Use no_daemon=true to skip starting the daemon (useful for CI or when the daemon is managed separately). |
 | `jinn_bootstrap` | MUTATING. Advance the fleet state machine. Idempotent. May take several minutes; can post on-chain transactions and request testnet faucet funds. Returns funding_required if a wallet needs ETH. Requires confirm: true; default is preview (no chain or filesystem mutation). |
 | `jinn_submit_intent` | MUTATING. Post a desired state (restoration job) to the protocol. Idempotent by id. Sends an on-chain transaction and pays gas when confirmed. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
 | `jinn_claim_rewards` | MUTATING. Pull pending protocol rewards to the fleet multisigs. Idempotent: zero-delta exits 0. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
@@ -134,7 +133,7 @@ Once configured, these MCP tools become available:
 | `jinn_stop_daemon` | MUTATING. Stop the running jinn daemon. Idempotent: returns success even if already stopped. Requires confirm: true; default is preview (does not signal any process). |
 <!-- skill:mcp-table:end -->
 
-## Phase 3: Quickstart (Zero to Running)
+## Phase 3: Zero to Running
 
 The canonical first-run path — run these two commands in order:
 
@@ -143,11 +142,11 @@ The canonical first-run path — run these two commands in order:
 jinn auth
 
 # Step 2 — zero-to-running: auto-generates a keystore password, then init → fund → bootstrap → run.
-jinn quickstart
+jinn run
 ```
 
 `jinn auth` persists the runtime-mode choice so all subsequent commands agree on how to spawn Claude.
-`jinn quickstart` then:
+`jinn run` then:
 1. Generates a random keystore password (saved to `~/.jinn-client/keystore-password`, mode 0600)
 2. Creates the master wallet
 3. Funds via Coinbase CDP faucet (automatic on testnet)
@@ -158,23 +157,23 @@ When it finishes: **open `http://localhost:7331`** for the operator dashboard.
 
 ### Advanced / CI: explicit password
 
-If you want to manage the password yourself (recommended for production or CI pipelines), set `JINN_PASSWORD` before calling `quickstart`. No file will be written to disk:
+If you want to manage the password yourself (recommended for production or CI pipelines), set `JINN_PASSWORD` before calling `jinn run`. No file will be written to disk:
 
 ```bash
-JINN_PASSWORD=their-password jinn quickstart
+JINN_PASSWORD=their-password jinn run
 ```
 
 For CI, prefer reading the password from a file descriptor: `--password-fd N`.
 
-### If quickstart stops at "funding required":
+### If `jinn run` stops at "funding required":
 
 The automatic faucet may have rate-limited (1 claim per 24 hours per address). Options:
-- Wait 24 hours and re-run `jinn quickstart`
+- Wait 24 hours and re-run `jinn run`
 - Fund manually: go to https://portal.cdp.coinbase.com/products/faucet, send testnet ETH to the printed master address, then re-run
 
 ## Phase 3.5: Opting In to Intent Kinds
 
-After quickstart, the daemon participates in `legacy` (health-check) and `prediction.v0` intents by default. Other intent kinds are **off by default** because they require operator-specific credentials (exchange authorizations, API keys, etc.).
+After `jinn run` brings the fleet up, the daemon participates in `legacy` (health-check) and `prediction.v0` intents by default. Other intent kinds are **off by default** because they require operator-specific credentials (exchange authorizations, API keys, etc.).
 
 ### Generic flow (applies to every intent kind with external deps)
 
@@ -286,7 +285,7 @@ Shows pending vs claimed rewards per service.
 
 ### Changing the Auto-Generated Password
 
-If the user started with `jinn quickstart` and wants to set their own password:
+If the user started with `jinn run` and wants to set their own password:
 
 ```bash
 JINN_NEW_PASSWORD=their-new-password jinn keys change-password
@@ -330,7 +329,7 @@ Bootstrap may need multiple runs if it hit a funding gate partway through. Re-ru
 
 When operating jinn tools, keep this mental model:
 
-- **`jinn quickstart`** is the one-shot setup. After this, the daemon is running.
+- **`jinn run`** is the one-shot setup. After this, the daemon is running.
 - **`jinn status`** is your health check. Poll it to know if things are working.
 - **`jinn submit-intent`** is the main action verb. This is how you create work on the network.
 - **`jinn fleet`** tells you about your staked services and their state.

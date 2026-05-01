@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRunCommand } from '../../../src/cli/commands/run.js';
 import { makeCommandCtx } from '@test/cli.js';
 import type { RunDeps } from '../../../src/cli/commands/run.js';
@@ -40,23 +43,37 @@ function makeFakeDeps(overrides: Partial<RunDeps> = {}): RunDeps {
 
 describe('run command', () => {
   let fakeDeps: RunDeps;
+  let fakeHome: string;
 
   beforeEach(() => {
     fakeDeps = makeFakeDeps();
+    fakeHome = mkdtempSync(join(tmpdir(), 'jinn-run-test-home-'));
   });
 
-  it('requires JINN_PASSWORD', async () => {
+  afterEach(() => {
+    if (fakeHome) {
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('auto-generates a keystore password when none is set', async () => {
     const run = createRunCommand(fakeDeps);
-    const { ctx, writes, exits } = makeCommandCtx({ env: {} });
+    const { ctx } = makeCommandCtx({ env: { HOME: fakeHome } });
     await run.run(ctx);
-    const parsed = JSON.parse(writes[writes.length - 1]);
-    expect(parsed.code).toBe('invalid_invocation');
-    expect(exits).toEqual([11]);
+    // mainFn must have been invoked (no early exit on missing password).
+    expect(fakeDeps.mainFn).toHaveBeenCalled();
+    // Auto-generated password file persists at ~/.jinn-client/keystore-password.
+    const pwPath = join(fakeHome, '.jinn-client', 'keystore-password');
+    expect(existsSync(pwPath)).toBe(true);
+    const persisted = readFileSync(pwPath, 'utf-8').trim();
+    expect(persisted.length).toBeGreaterThanOrEqual(32);
+    // process.env was set so the daemon picks it up.
+    expect(process.env['JINN_PASSWORD']).toBe(persisted);
   });
 
   it('delegates to mainFn() when JINN_PASSWORD is set', async () => {
     const run = createRunCommand(fakeDeps);
-    const { ctx, writes } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
+    const { ctx, writes } = makeCommandCtx({ env: { JINN_PASSWORD: 'test', HOME: fakeHome } });
     await run.run(ctx);
     expect(fakeDeps.mainFn).toHaveBeenCalled();
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -68,7 +85,7 @@ describe('run command', () => {
       checkApiPortAvailable: vi.fn(async () => ({ ok: false as const, port: 7331, code: 'EADDRINUSE', message: 'in use' })) as unknown as RunDeps['checkApiPortAvailable'],
     });
     const run = createRunCommand(fakeDeps);
-    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
+    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test', HOME: fakeHome } });
     await run.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.code).toBe('invalid_invocation');

@@ -19,6 +19,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -43,7 +44,7 @@ import bootstrapCommand from '../cli/commands/bootstrap.js';
 import submitIntentCommand from '../cli/commands/submit-intent.js';
 import defaultStopCommand from '../cli/commands/stop.js';
 import claimRewardsCommand from '../cli/commands/claim-rewards.js';
-import defaultQuickstartCommand from '../cli/commands/quickstart.js';
+import defaultRunCommand from '../cli/commands/run.js';
 import updateCommand from '../cli/commands/update.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -270,12 +271,41 @@ export async function stopDetachedDaemon(
   return { ok: false, payload: result.text };
 }
 
+// ── Live-state helpers (HTTP calls into the running daemon) ─────────────────
+//
+// The 5 live-state tools below talk to the daemon's HTTP API on the same
+// machine (JINN_API_PORT, default 7331). The protected routes (/v1/events/*,
+// /v1/bootstrap, /api/admin/*) are gated by `requireUiToken`. The MCP server
+// is a child process spawned by the embedded claude session, so it does not
+// have the SPA's cookie. It authenticates by reading the UI token from disk
+// and sending it as the `x-jinn-ui-token` header (the same middleware accepts
+// both forms — see api/handshake.ts).
+
+function uiTokenFromDisk(): string | null {
+  const path = join(homedir(), '.jinn-client', 'ui-token');
+  if (!existsSync(path)) return null;
+  try {
+    return readFileSync(path, 'utf-8').trim();
+  } catch {
+    return null;
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const t = uiTokenFromDisk();
+  return t ? { 'x-jinn-ui-token': t } : {};
+}
+
+function apiPort(): number {
+  return Number(process.env['JINN_API_PORT'] ?? 7331);
+}
+
 // ── Server factory ──────────────────────────────────────────────────────────
 
 export interface OperatorServerDeps {
   initCommand?: CommandModule;
   stopCommand?: CommandModule;
-  quickstartCommand?: CommandModule;
+  runCommand?: CommandModule;
   bootstrapCommand?: CommandModule;
   submitIntentCommand?: CommandModule;
 }
@@ -283,7 +313,7 @@ export interface OperatorServerDeps {
 export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
   const initCommand = deps.initCommand ?? defaultInitCommand;
   const stopCommand = deps.stopCommand ?? defaultStopCommand;
-  const quickstartCommand = deps.quickstartCommand ?? defaultQuickstartCommand;
+  const runCommand = deps.runCommand ?? defaultRunCommand;
   const bootstrapCmd = deps.bootstrapCommand ?? bootstrapCommand;
   const submitIntentCmd = deps.submitIntentCommand ?? submitIntentCommand;
   const server = new McpServer({
@@ -470,21 +500,52 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
   );
 
   server.tool(
-    'jinn_quickstart',
+    'jinn_run',
     [
-      'MUTATING: Zero-to-running in one call: resolve/generate password, init wallet, bootstrap fleet, start daemon.',
-      'Idempotent — safe to call repeatedly; resumes from last completed step.',
+      'MUTATING: Run the Jinn daemon end-to-end. Initializes the keystore (if missing),',
+      'bootstraps the fleet (with funding poll), and starts the daemon loops.',
+      'Idempotent — safe to call repeatedly; resumes from the last completed step.',
       'Long-running: can take up to 30 minutes if funding is required.',
       'Returns a progress stream via --json-progress; poll jinn_status to monitor after this returns.',
-      'Use no_daemon=true to skip starting the daemon (useful for CI or when the daemon is managed separately).',
+      'Use no_daemon=true to exit after bootstrap (useful for CI or when the daemon is managed separately).',
+      'Requires confirm: true; default is preview (no mutation).',
     ].join(' '),
     {
+      confirm: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe('Must be true to actually start the run flow. Default false returns a preview.'),
       no_daemon: z.boolean().optional().default(false).describe('Stop after bootstrap; do not start the daemon'),
+      funding_timeout: z
+        .string()
+        .optional()
+        .describe("Bound the wait when the wallet needs funding. Accepts '30s', '15m', '1h', or 'none'."),
     },
-    async ({ no_daemon }) => {
+    async ({ confirm, no_daemon, funding_timeout }) => {
+      if (!confirm) {
+        return previewResponse(
+          buildPreviewEnvelope({
+            tool: 'jinn_run',
+            description:
+              'Would init the keystore (if missing), bootstrap the fleet, and start the daemon loops end-to-end.',
+            effects: [
+              'May write the encrypted keystore and an auto-generated keystore-password file.',
+              'Advances the bootstrap state machine: Safe deployment, OLAS service registration, staking, mech.',
+              'May post on-chain transactions and request testnet faucet funds.',
+              'Starts long-lived daemon loops unless no_daemon=true.',
+            ],
+            callerArgs: {
+              ...(no_daemon ? { no_daemon: true } : {}),
+              ...(funding_timeout ? { funding_timeout } : {}),
+            },
+          }),
+        );
+      }
       const argv = ['--json', '--json-progress'];
       if (no_daemon) argv.push('--no-daemon');
-      return runToolCommand(quickstartCommand, argv, process.env);
+      if (funding_timeout) argv.push('--funding-timeout', funding_timeout);
+      return runToolCommand(runCommand, argv, process.env);
     },
   );
 
@@ -717,6 +778,169 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
         return { content: [{ type: 'text' as const, text: JSON.stringify(result.payload) }] };
       }
       return { content: [{ type: 'text' as const, text: result.payload }], isError: true };
+    },
+  );
+
+  // ━━ Live-state tools (HTTP into the running daemon) ━━━━━━━━━━━━━━━━━━━━━━
+  //
+  // Unlike the read-only and write tools above, which run CLI command modules
+  // in-process, these tools call the daemon's HTTP API directly. They require
+  // the daemon to be running. Auth uses the UI token loaded from
+  // ~/.jinn-client/ui-token sent in the `x-jinn-ui-token` header.
+
+  server.tool(
+    'activity_list',
+    'List recent structured daemon events. Filter by kinds: intent, reward, fleet, system, error, log.',
+    {
+      kinds: z.array(z.enum(['intent', 'reward', 'fleet', 'system', 'error', 'log'])).optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+    },
+    async ({ kinds, limit }) => {
+      const port = apiPort();
+      const q = new URLSearchParams();
+      if (kinds && kinds.length > 0) q.set('kinds', kinds.join(','));
+      if (limit !== undefined) q.set('limit', String(limit));
+      const url = `http://127.0.0.1:${port}/v1/events/recent?${q.toString()}`;
+      try {
+        const res = await fetch(url, { headers: authHeaders() });
+        const body = (await res.json()) as { events: unknown[] };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'bootstrap_state',
+    'Get the current bootstrap state machine: mode (setup|running|uninitialized), current step, services, master address, chain.',
+    {},
+    async () => {
+      const port = apiPort();
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/v1/bootstrap`, { headers: authHeaders() });
+        const body = await res.json();
+        return { content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'daemon_restart',
+    'Request a daemon restart. Requires confirm=true. The daemon will shut down gracefully and the process will exit; the supervising shell or systemd unit must restart it.',
+    { confirm: z.boolean().optional() },
+    async ({ confirm }) => {
+      if (!confirm) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                preview: 'would request daemon shutdown',
+                confirm_with: 'daemon_restart with confirm=true',
+              }),
+            },
+          ],
+        };
+      }
+      const port = apiPort();
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/admin/restart`, {
+          method: 'POST',
+          headers: authHeaders(),
+        });
+        const body = await res.json();
+        return { content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'loop_pause',
+    'Pause a daemon loop by name (creator | engine_watcher | engine_tick | delivery_watcher | reward_claim | balance_topup | jinn_claim | peer_sync). NOTE: stubbed in v1-Slim; returns not_implemented.',
+    {
+      loop: z.string(),
+      confirm: z.boolean().optional(),
+    },
+    async ({ loop, confirm }) => {
+      if (!confirm) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                preview: `would pause loop=${loop}`,
+                confirm_with: `loop_pause with confirm=true and loop=${loop}`,
+              }),
+            },
+          ],
+        };
+      }
+      const port = apiPort();
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:${port}/api/admin/loop/${encodeURIComponent(loop)}/pause`,
+          { method: 'POST', headers: authHeaders() },
+        );
+        const body = await res.json();
+        return { content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'loop_resume',
+    'Resume a previously-paused daemon loop. NOTE: stubbed in v1-Slim; returns not_implemented.',
+    {
+      loop: z.string(),
+      confirm: z.boolean().optional(),
+    },
+    async ({ loop, confirm }) => {
+      if (!confirm) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                preview: `would resume loop=${loop}`,
+                confirm_with: `loop_resume with confirm=true and loop=${loop}`,
+              }),
+            },
+          ],
+        };
+      }
+      const port = apiPort();
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:${port}/api/admin/loop/${encodeURIComponent(loop)}/resume`,
+          { method: 'POST', headers: authHeaders() },
+        );
+        const body = await res.json();
+        return { content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }],
+          isError: true,
+        };
+      }
     },
   );
 
