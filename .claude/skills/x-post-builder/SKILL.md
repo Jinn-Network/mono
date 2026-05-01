@@ -208,6 +208,71 @@ Append to `growth/skills/x-algorithm-grader/references/calibration-log.md` with:
 
 After ~10 logged posts, the grader's calibration step recommends multiplier adjustments. This is how the model becomes Oak's model rather than the generic 2026 model.
 
+## Mode: bridge-post
+
+A bridge post is a 3-tweet thread that names a structural gap several candidates are independently shipping toward, framed so each candidate sees their own work and a shared frame. Different from an original-thesis post (closed argument) and from a reaction (responds to one external trigger).
+
+### Inputs
+
+- A bridge angle from `cluster-model` skill output (growth-log §2 entry, dated, with form=broadcast).
+- 2–4 candidate handles whose work the post should name. Pulled from growth-log §3 active threads or §1 cluster snapshot.
+- Voice anchor: `BRAND.md` *Lead from structure, not from fear*. The bridge post leads from the gap and the construction, never from the antagonist.
+
+### Output structure
+
+Three tweets:
+
+**Tweet 1 — gap-name (240–259 chars, sweet zone, 1.2× algo multiplier).**
+- Format: *"X is shipped (project A). Y is shipped (project B). Z is shipped (project C). What hasn't shipped: [the gap]. The binding constraint isn't [obvious wrong answer]. It's [the actual gap, claim-shaped]."*
+- Voice: declarative, plain-prose, no emoji.
+- Author-reply trap: closing claim is contestable.
+
+**Tweet 2 — layer-map (240–259 chars).**
+- Format: *"What's already in place, partial: [layer 1 work] ([candidate A]). [Layer 2 work] ([candidate B]). [Layer 3 work] ([candidate C]). [Layer 4 work] ([candidate D]). None alone closes the loop."*
+- Names projects (not handles, except where the project handle and the operator handle differ — then prefer the operator handle).
+- Each candidate sees their own work credited accurately.
+
+**Tweet 3 — tie-claim (71–100 chars, sweet zone, 1.3× algo multiplier).**
+- Format: *"[The unifying principle] is what ties them together — and it's the layer that hasn't shipped."*
+- Short, sharp, contestable.
+
+### Procedure
+
+1. **Read the bridge angle.** From `cluster-model` output or growth-log §2.
+2. **Confirm 2–4 candidates whose work the layers map to.** Pull from growth-log §3.
+3. **Draft tweet 1** in the gap-name shape. Constrain to 240–259 chars.
+4. **Draft tweet 2** in the layer-map shape. Each candidate gets one mention.
+5. **Draft tweet 3** in the tie-claim shape. Constrain to 71–100 chars.
+6. **Hand off to `x-algorithm-grader`** for binding-constraint check and single-edit recommendation.
+7. **If grader returns score ≥0.7**, output the thread for scheduling (Typefully or manual). Otherwise apply the grader's edit and re-grade.
+8. **Schedule for cluster-peak window:** Tue–Thu 09:00–14:00 target-tz.
+
+### Worked example (2026-05-01)
+
+Bridge angle: *"the outer loop with stake is the layer that hasn't shipped."* Candidates: `@TreebeardAI`, `@tracememcom`, `@boydcohen` / Observer Protocol, `@Vtrivedy10` / LangChain Deep Agents.
+
+Tweet 1: *"The agent economy has identity (ERC-8004), payment (x402), and execution (PoAA). What it doesn't have, deployed end-to-end: independent outcome verification with stake. The binding constraint isn't a smarter model. It's a verification loop with skin in the game."*
+
+Tweet 2: *"What's already in place, partial: rating from outside the platform (Treebeard). Enforcement before execution (TraceMem). Post-execution verification (Observer Protocol). Eval-harness inner loops (LangChain Deep Agents). None alone closes the loop."*
+
+Tweet 3: *"The outer loop with stake is what ties them together — and it's the layer that hasn't shipped."*
+
+### Voice constraints (mode-specific)
+
+In addition to general x-post-builder voice constraints:
+
+- **Do not @-tag the candidates** in the post. Naming the project (or the operator's first name + product) is sufficient and avoids fishing-for-attention register.
+- **Each candidate sees their own work named accurately.** If you can't credit accurately, leave them out.
+- **Avoid framing the bridge as competition.** The post says "none alone closes the loop", not "we have what they don't".
+- **Do not name Jinn.** The bridge is a frame, not a pitch. Jinn is the unstated implication — readers who want to act on it find Oak's other posts.
+
+### Composition
+
+- **Inputs:** `cluster-model` output (bridge angle), growth-log §3 (candidates).
+- **Outputs:** 3-tweet draft thread + scheduled post (manual handoff to Typefully).
+- **Hand-off:** `x-algorithm-grader` runs between drafting and scheduling.
+- **Consumed by:** `growth-day` (surfaces ready bridge posts as Tier A actions).
+
 ## Failure modes
 
 - **Floods.** More than one question per response during elicitation. The user answers only the first; the rest waste tokens and slow the build.

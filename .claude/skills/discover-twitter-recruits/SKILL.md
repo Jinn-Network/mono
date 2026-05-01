@@ -132,6 +132,15 @@ After any invocation that leads to outreach, append to `references/discovery-log
 
 After 5–10 entries, review whether the audience profile or search vocabulary needs adjustment. The model is a starting point; the discovery log is what makes it Jinn's recruitment lattice rather than a generic Twitter-search guide.
 
+## Two logs — calibration vs operational
+
+This skill maintains two logs with distinct purposes:
+
+- **`references/discovery-log.md`** — skill calibration evidence. Recommendation rationale + outcome + lesson, kept in repo so the skill learns over time. Anonymise where the lesson is generalisable. Update this file after any outreach attempt that produces a clear lesson.
+- **`growth/.local/growth-log.md`** — operational state. Live thread state, drafts, pending replies, candidate handles in operational form. Gitignored. Updated by Oak and by `growth-watcher` / `growth-day` skills.
+
+Do not write live operational state into `discovery-log.md`. Do not duplicate calibration lessons into `growth-log.md`. The boundary is sharp because the failure mode of conflating them is real — calibration evidence in the operational log produces noise; operational state in the calibration log produces leakage.
+
 ## Out of scope
 
 This skill does not:

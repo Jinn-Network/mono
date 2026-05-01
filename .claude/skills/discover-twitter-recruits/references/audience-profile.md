@@ -46,6 +46,8 @@ These look thesis-aligned in language but do not convert. Each is a real failure
 | Generic crypto-AI shillers | Token-pumping register, hashtag spam, no real artefact. Caught by language-pattern matching; rejected on profile-check. |
 | VC analysts / "AI x crypto" thread-writers | Won't operate, won't build. May reach an audience that includes operators, but the audience routes through them only when the thesis is already public — i.e. once recruitment is mature, not as a recruitment channel. |
 | Bots dressed as builders | OpenClaw agents (🦞 sign-off), one-shot zinger accounts, shill rings posting identical-shape content. Always rejected. See `search-strategy.md` §3 for detection. |
+| Real-product-with-token-pump | An account ships a thesis-aligned product (registry, oracle, eval tool) but the surrounding feed is `$TICKER` shilling, gated-by-token-holding social engineering, or pump-style RTs. The product does not outweigh the §4 patterns. The @gingersamurai lesson generalises: profile-check the *whole feed*, not the on-thesis tweet. Example failure: `@helixaxyz` (real ERC-8004 reputation oracle + heavy `$CRED` shilling). |
+| Same content posted multiple days from one account (cron / scheduled repost pattern) | YELLOW — likely a content-agent or scheduling tool, not a shill ring. Not a hard kill. Profile-check for a human operator behind the project (look for tags / co-builders / hackathon submissions). Re-route recommendation to the human if found. Distinct from shill-ring (identical content across many accounts on the same day = HARD kill). Example: `@Maxibtc2009` (cron content-agent for Observer Protocol; re-routed to `@boydcohen`). |
 
 ## §4. Defining traits of real recruits
 
@@ -60,3 +62,25 @@ When in doubt between a Priority 1/2 candidate and an out-of-scope one, the foll
 ## §5. The two-tier rule
 
 The skill's main list contains *only* Priority 1 and Priority 2 accounts that pass the profile-check. Amplifiers go in a separate tier. Out-of-scope candidates that were considered but rejected go in the SKIPPED section (audit trail, not output). The boundary between tiers must be sharp — collapsing them is the most common failure mode of this kind of discovery work.
+
+## §6. The canonical first-touch bridge
+
+All successful first-touch outreach in this skill's calibration history follows the same shape:
+
+> Methodology question that engages a specific gap the candidate has already named, asking them to extend their thinking one step further toward the Jinn frame, without naming Jinn.
+
+Sub-patterns by cluster (full detail in `cluster-model/references/bridge-shapes.md`):
+
+- **AI cluster:** flip the eval economics — task distribution from external creators with stake.
+- **Crypto cluster:** agents-as-participants in mech-design they already understand.
+- **AI × crypto cluster:** name the layer they ship as scaffolding for the outer loop with stake.
+- **Bitcoin-maxi-adjacent:** trust-score adversarial mechanism design (stake / reputation / external rater).
+
+The question must not be answerable from the candidate's own README, post, or pinned thread. Proves you actually engaged with the work.
+
+Calibration evidence (2026-04-29 to 2026-05-01):
+- `@yieldfreaks` — peer-recognition reply within 5 hours.
+- `@ta_eis_eauton` (Silverarrow) — warm reply, cross-linked to `@Vtrivedy10`.
+- `@TreebeardAI`, `@Vtrivedy10`, `@boydcohen` — outreach in flight; pending outcomes will refine the sub-patterns.
+
+Do not skip this section when proposing a first-touch reply. If the proposed question fails the not-answerable-from-README test, rework it.

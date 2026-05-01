@@ -13,6 +13,7 @@ These query shapes have been tried and produced shill / consultant / bot results
 | `bird search "agentic future architecture"` | Catches enterprise consultants writing CIO-register thinkpieces. |
 | `bird search "agent ownership / value capture"` | Catches VC analysts and "AI x crypto" thread-writers. |
 | `bird search "<thesis quote verbatim>"` | Catches accounts whose entire output is rephrased landing-page copy. |
+| `bird search "olas pearl"` / `bird search "bittensor subnet operator"` (audience-name vocabulary, no post-filter) | Surfaces marketing-quest accounts (NEAR Legion, BASE quest, daily-GM-on-Robinhood-Chain pattern) and signal-bots before real builders. The vocabulary is correct; the lack of post-filter is the bug. Always combine audience-name vocabulary with the post-filter in §7. |
 
 The common failure mode in all five: thesis vocabulary is now broadly ambient. Searching for it surfaces the people *talking about* the space, not the people *building in* it.
 
@@ -110,3 +111,23 @@ Stop a discovery session early if:
 - The user's stated topic does not map to any §2.1, §2.2, or §2.3 vocabulary. Ask once which audience they are aiming at, or surface that no recruitable audience exists for the topic.
 
 The skill's value is *what it doesn't recommend* as much as what it does. Returning three real candidates with the audit trail beats returning eight padded ones.
+
+## §7. Programmatic post-filter (audience-name vocabulary)
+
+When `bird search` over audience-name vocabulary returns >25 results, apply this post-filter before profile-checking. The filter is heuristic; tune as needed.
+
+**Reject the candidate if any of the following hold across their last ~12 posts:**
+
+- **Token-ticker prelude rate ≥ 40%.** Posts beginning with `$XXX` or containing `CA: 0x...`. Heuristic regex: `^\$[A-Z]{2,6}\b` or `\bCA:\s*0x[a-fA-F0-9]{8,}` over the candidate's recent timeline.
+- **Hashtag-stack rate ≥ 30%.** Posts containing 3+ consecutive hashtags (`#X #Y #Z`) or posts where hashtags are >25% of the post's word count.
+- **🚨-prefix or all-caps-screaming pattern ≥ 30%.** Posts starting with `🚨`, `BREAKING`, `ATTENTION`, or 5+ consecutive uppercase words.
+- **Marketing-register density ≥ 25%.** Posts containing any of: `we are so early`, `this is a game changer`, `the future is`, `you don't want to miss`, `bullish doesn't even cover it`, `next 100x`, `gem unlock`, `alpha leak`. Combined match.
+
+**Do not auto-reject** if a candidate's recent timeline has 0–2 of these patterns alongside substantive builder posts. Use judgement; the filter is a triage aid, not a verdict.
+
+**Confirmed examples of the filter working** (2026-05-01 round):
+- `@bittingthembits` — substantive Bittensor analysis but >40% token-ticker prelude rate ($TAO leading); rejected for recruit list.
+- `@TheTaoDesk` — auto-generated alpha alerts, hashtag-stack ≥40%, 🚨-prefix ≥40%; rejected.
+- `@maxbettorwinnor` / `@bollaks101` / `@DkingYooo18516` — all rejected via this filter pattern.
+
+**The filter must run before profile-checking deeper.** Saves discovery time on candidates who would have failed §3 anyway.
