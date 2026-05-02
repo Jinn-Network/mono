@@ -55,6 +55,8 @@ export interface AuthProbeResult {
 export interface ProbeOptions {
   context: AuthContext;
   cwd: string;
+  /** CLI path to use in bare/container modes. Docker-compose runs inside the service image. */
+  claudePath?: string;
   /** Inject a pre-computed spawn result (for testing). */
   spawnResult?: SpawnResult;
 }
@@ -112,7 +114,7 @@ export function detectAuthContext(opts: DetectContextOptions): AuthContext {
 export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
   const { context, cwd } = opts;
 
-  const sr: SpawnResult = opts.spawnResult ?? _spawnAuthStatus(context, cwd);
+  const sr: SpawnResult = opts.spawnResult ?? _spawnAuthStatus(context, cwd, opts.claudePath);
 
   if (sr.status !== 0) {
     return {
@@ -155,7 +157,7 @@ export function probeClaudeAuth(opts: ProbeOptions): AuthProbeResult {
   };
 }
 
-function _spawnAuthStatus(context: AuthContext, cwd: string): SpawnResult {
+function _spawnAuthStatus(context: AuthContext, cwd: string, claudePath = 'claude'): SpawnResult {
   let command: string;
   let args: string[];
 
@@ -176,7 +178,7 @@ function _spawnAuthStatus(context: AuthContext, cwd: string): SpawnResult {
       'status',
     ];
   } else {
-    command = 'claude';
+    command = claudePath;
     args = ['auth', 'status'];
   }
 
@@ -198,6 +200,7 @@ function _spawnAuthStatus(context: AuthContext, cwd: string): SpawnResult {
 export function buildLoginCommand(
   context: AuthContext,
   cwd: string,
+  claudePath = 'claude',
 ): { command: string; args: string[] } {
   if (context === 'docker-compose') {
     return {
@@ -219,5 +222,5 @@ export function buildLoginCommand(
     };
   }
 
-  return { command: 'claude', args: ['auth', 'login'] };
+  return { command: claudePath, args: ['auth', 'login'] };
 }

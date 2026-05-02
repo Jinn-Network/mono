@@ -29,7 +29,13 @@ import { decryptMnemonic, encryptMnemonic } from '../earning/wallet.js';
 import { requestTestnetFunding } from '../earning/faucet.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from '../earning/viem-clients.js';
 import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
+import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
 import { triggerAgentSpawn } from '../agent/agent-ws.js';
+import { DEFAULT_CONFIG_PATH, persistTopLevelConfigValue } from '../config.js';
+import {
+  installClaudeCodeLocally,
+  type ExecFileAsync,
+} from '../setup/claude-code-install.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -41,21 +47,49 @@ export interface SetupRoutesConfig {
   chain?: JinnOnchainNetwork;
   rpcUrl?: string;
   minEoaGasWei?: string;
+  claudePath?: string;
+  getClaudePath?: () => string;
+  runtimeMode?: 'bare' | 'docker-compose' | 'container';
+  configPath?: string;
+  claudeInstallRoot?: string;
+  checkClaudeBinary?: typeof checkClaudeBinary;
+  probeClaudeAuth?: typeof probeClaudeAuth;
+  execFileAsync?: ExecFileAsync;
+  persistConfigValue?: typeof persistTopLevelConfigValue;
+  onClaudePathSelected?: (claudePath: string) => void;
   requestFunding?: typeof requestTestnetFunding;
   maxFaucetIters?: number;
   interDripPauseMs?: number;
 }
 
 export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void {
-  app.get('/v1/auth/claude', (c) => {
+  const checkBinary = config.checkClaudeBinary ?? checkClaudeBinary;
+  const probeAuth = config.probeClaudeAuth ?? probeClaudeAuth;
+  const persistConfigValue = config.persistConfigValue ?? persistTopLevelConfigValue;
+  const currentClaudePath = (): string => config.getClaudePath?.() ?? config.claudePath ?? 'claude';
+  let installInFlight: Promise<InstallClaudeCodeResponse> | null = null;
+
+  app.get('/v1/auth/claude', async (c) => {
     const cwd = process.cwd();
-    const context = detectAuthContext({ cwd });
-    const probe = probeClaudeAuth({ context, cwd });
+    const context = detectAuthContext({ cwd, configuredMode: config.runtimeMode });
+    const claudePath = currentClaudePath();
+    const binary = await checkBinary(claudePath);
+    if (!binary.ok) {
+      return c.json({
+        schemaVersion: 1,
+        authenticated: false,
+        context,
+        detail: binary.detail,
+        binary,
+      });
+    }
+    const probe = probeAuth({ context, cwd, claudePath });
     return c.json({
       schemaVersion: 1,
       authenticated: probe.authenticated,
       context,
       detail: probe.detail,
+      binary,
       ...(probe.email !== undefined ? { email: probe.email } : {}),
     });
   });
@@ -67,6 +101,24 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   // spawn; this endpoint is the manual gate-opener for fresh installs.
   app.post('/v1/auth/claude/spawn', async (c) => {
     const result = await triggerAgentSpawn();
+    return c.json(result, result.ok ? 202 : 500);
+  });
+
+  app.post('/v1/setup/claude/install', async (c) => {
+    if (!installInFlight) {
+      installInFlight = installClaudeCodeForOperator({
+        configuredClaudePath: currentClaudePath(),
+        configPath: config.configPath,
+        installRoot: config.claudeInstallRoot,
+        checkBinary,
+        execFileAsync: config.execFileAsync,
+        persistConfigValue,
+        onClaudePathSelected: config.onClaudePathSelected,
+      }).finally(() => {
+        installInFlight = null;
+      });
+    }
+    const result = await installInFlight;
     return c.json(result, result.ok ? 202 : 500);
   });
 
@@ -252,4 +304,101 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       );
     }
   });
+}
+
+export interface InstallClaudeCodeResponse {
+  ok: boolean;
+  status: 'already_present' | 'installed' | 'install_failed';
+  detail: string;
+  binary?: ClaudeBinaryCheckResult;
+}
+
+interface InstallClaudeCodeForOperatorOptions {
+  configuredClaudePath: string;
+  configPath?: string;
+  installRoot?: string;
+  checkBinary: typeof checkClaudeBinary;
+  execFileAsync?: ExecFileAsync;
+  persistConfigValue: typeof persistTopLevelConfigValue;
+  onClaudePathSelected?: (claudePath: string) => void;
+}
+
+async function persistSelectedClaudePath(
+  claudePath: string,
+  opts: Pick<InstallClaudeCodeForOperatorOptions, 'configPath' | 'persistConfigValue' | 'onClaudePathSelected'>,
+): Promise<void> {
+  opts.persistConfigValue('claudePath', claudePath, opts.configPath ?? DEFAULT_CONFIG_PATH);
+  opts.onClaudePathSelected?.(claudePath);
+}
+
+async function installClaudeCodeForOperator(
+  opts: InstallClaudeCodeForOperatorOptions,
+): Promise<InstallClaudeCodeResponse> {
+  const configured = await opts.checkBinary(opts.configuredClaudePath);
+  if (configured.ok) {
+    return {
+      ok: true,
+      status: 'already_present',
+      detail: 'Claude Code is already available',
+      binary: configured,
+    };
+  }
+
+  const onPath = opts.configuredClaudePath === 'claude'
+    ? configured
+    : await opts.checkBinary('claude');
+  if (onPath.ok) {
+    try {
+      await persistSelectedClaudePath('claude', opts);
+    } catch (err) {
+      return {
+        ok: false,
+        status: 'install_failed',
+        detail: `Claude Code is on PATH, but Jinn could not save that setting: ${err instanceof Error ? err.message : String(err)}`,
+        binary: onPath,
+      };
+    }
+    return {
+      ok: true,
+      status: 'already_present',
+      detail: 'Claude Code is already available on PATH',
+      binary: onPath,
+    };
+  }
+
+  const installed = await installClaudeCodeLocally({
+    installRoot: opts.installRoot,
+    execFileAsync: opts.execFileAsync,
+  });
+  if (!installed.ok || !installed.claudePath) {
+    return { ok: false, status: 'install_failed', detail: installed.detail };
+  }
+
+  const binary = await opts.checkBinary(installed.claudePath);
+  if (!binary.ok) {
+    return {
+      ok: false,
+      status: 'install_failed',
+      detail: binary.detail,
+      binary,
+    };
+  }
+
+  try {
+    await persistSelectedClaudePath(installed.claudePath, opts);
+  } catch (err) {
+    return {
+      ok: false,
+      status: 'install_failed',
+      detail: `Claude Code installed, but Jinn could not save that setting: ${err instanceof Error ? err.message : String(err)}`,
+      binary,
+    };
+  }
+
+  return {
+    ok: true,
+    status: 'installed',
+    detail: 'Claude Code installed',
+    binary,
+  };
 }

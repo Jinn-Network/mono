@@ -122,6 +122,10 @@ async function run(ctx: CommandContext): Promise<void> {
       throw error;
     }
   }
+  const claudePath =
+    'claudePath' in config && typeof config.claudePath === 'string'
+      ? config.claudePath
+      : 'claude';
 
   // ── Resolve runtime mode ─────────────────────────────────────────────────
   // Order: --mode flag > config.runtimeMode > (interactive prompt if TTY)
@@ -156,7 +160,7 @@ async function run(ctx: CommandContext): Promise<void> {
   // If still unset (non-TTY, no flag, no config), fall through to filesystem detection below.
 
   const context = detectAuthContext({ cwd, configuredMode: runtimeMode });
-  const probe = probeClaudeAuth({ context, cwd });
+  const probe = probeClaudeAuth({ context, cwd, claudePath });
 
   if (probe.authenticated) {
     const payload = {
@@ -204,7 +208,7 @@ async function run(ctx: CommandContext): Promise<void> {
     );
   }
 
-  const { command, args } = buildLoginCommand(context, cwd);
+  const { command, args } = buildLoginCommand(context, cwd, claudePath);
   const result = spawnSync(command, args, { stdio: 'inherit' });
 
   if (result.status !== 0) {
@@ -221,7 +225,7 @@ async function run(ctx: CommandContext): Promise<void> {
   }
 
   // Re-probe to verify
-  const reProbe = probeClaudeAuth({ context, cwd });
+  const reProbe = probeClaudeAuth({ context, cwd, claudePath });
 
   if (reProbe.authenticated) {
     const payload = {

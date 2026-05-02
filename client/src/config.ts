@@ -14,9 +14,9 @@
  * (mainnet V1, testnet V2) for JinnRouter claimDelivery encoding.
  */
 
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
@@ -488,7 +488,7 @@ export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'task
 // ── Defaults ────────────────────────────────────────────────────────────────
 
 const DEFAULT_DIR = join(homedir(), '.jinn-client');
-const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
+export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
 
 export type ConfigLoadErrorCode =
   | 'config_file_not_found'
@@ -840,6 +840,29 @@ export function loadConfig(configPath?: string): JinnConfig {
 export function getConfigPathFromArgs(argv: string[] = process.argv): string | undefined {
   const idx = argv.indexOf('--config');
   return idx >= 0 && argv[idx + 1] ? argv[idx + 1] : undefined;
+}
+
+/**
+ * Merge one top-level value into the operator config file. Used by local setup
+ * flows that discover a durable setting after the daemon has already started.
+ */
+export function persistTopLevelConfigValue(
+  key: string,
+  value: unknown,
+  configPath?: string,
+): string {
+  const filePath = configPath ?? DEFAULT_CONFIG_PATH;
+  let current: Record<string, unknown> = {};
+  if (existsSync(filePath)) {
+    current = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+  }
+  current[key] = value;
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+  writeFileSync(filePath, JSON.stringify(current, null, 2) + '\n', { encoding: 'utf-8' });
+  return filePath;
 }
 
 // ── Config provenance ────────────────────────────────────────────────────────

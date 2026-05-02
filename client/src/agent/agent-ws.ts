@@ -34,6 +34,7 @@ import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import { spawnOperatorClaude, OperatorClaudeSpawnError, type OperatorClaude } from './operator-claude.js';
 import { detectAutoModeAvailable, type AutoModeAvailability } from './auto-mode-detect.js';
 import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
+import { checkClaudeBinary } from '../preflight/claude-binary.js';
 
 export interface AgentWsConfig {
   httpServer: HttpServer;
@@ -78,6 +79,12 @@ export function getActiveSessionController(): SessionController | null {
   return activeController;
 }
 
+export function updateAgentClaudePath(claudePath: string): void {
+  if (storedConfig) {
+    storedConfig = { ...storedConfig, claudePath };
+  }
+}
+
 function stripAnsi(s: string): string {
   return s.replace(ANSI_PATTERN, '');
 }
@@ -96,6 +103,15 @@ async function ensureSession(): Promise<
   if (!spawnAllowed) return null;
 
   const cfg = storedConfig;
+  const binary = await checkClaudeBinary(cfg.claudePath);
+  if (!binary.ok) {
+    return {
+      error: new OperatorClaudeSpawnError(
+        binary.detail,
+        'Install Claude Code from the operator panel, then sign in with Claude.',
+      ),
+    };
+  }
   const auto = await detectAutoModeAvailable(cfg.claudePath);
 
   let session: OperatorClaude;
@@ -211,7 +227,7 @@ function probeAlreadyAuthedOnStartup(cfg: AgentWsConfig): void {
   try {
     const cwd = cfg.cwd;
     const context = detectAuthContext({ cwd });
-    const probe = probeClaudeAuth({ context, cwd });
+    const probe = probeClaudeAuth({ context, cwd, claudePath: cfg.claudePath });
     if (probe.authenticated) {
       spawnAllowed = true;
     }

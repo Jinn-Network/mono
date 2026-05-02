@@ -75,7 +75,7 @@ export function Onboarding(): JSX.Element {
     queryFn: () => api.getBootstrap(),
     refetchInterval: 2000,
   });
-  const { data: claudeAuth } = useQuery<ClaudeAuthState>({
+  const { data: claudeAuth, refetch: refetchClaudeAuth } = useQuery<ClaudeAuthState>({
     queryKey: ['claude-auth'],
     queryFn: () => api.getClaudeAuth(),
     refetchInterval: 4000,
@@ -133,8 +133,8 @@ export function Onboarding(): JSX.Element {
               return (
                 <PhaseRow key={p} phase={p} status={showError ? 'error' : status}>
                   {showError && <BootstrapErrorCard envelope={bootstrapError} />}
-                  {!showError && p === 1 && status === 'active' && (
-                    <SignInRowContent context={claudeAuth?.context ?? 'bare'} />
+                  {!showError && p === 1 && status === 'active' && claudeAuth && (
+                    <SignInRowContent auth={claudeAuth} onAuthChanged={() => { void refetchClaudeAuth(); }} />
                   )}
                   {!showError && p === 3 && status === 'active' && masterAddress && (
                     <AwaitingFundingCard
@@ -198,10 +198,17 @@ function NetworkBadge({ chain }: { chain?: string }): JSX.Element {
   );
 }
 
-function SignInRowContent({ context }: { context: string }): JSX.Element {
+function SignInRowContent({
+  auth,
+  onAuthChanged,
+}: {
+  auth: ClaudeAuthState;
+  onAuthChanged: () => void;
+}): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const isContainer = context !== 'bare';
+  const isContainer = auth.context !== 'bare';
+  const binaryMissing = auth.binary.ok === false;
 
   const onClick = async (): Promise<void> => {
     setErr(null);
@@ -218,6 +225,23 @@ function SignInRowContent({ context }: { context: string }): JSX.Element {
     }
   };
 
+  const onInstall = async (): Promise<void> => {
+    setErr(null);
+    setBusy(true);
+    try {
+      const res = await api.installClaudeCode();
+      if (!res.ok) {
+        setErr(res.detail || 'Failed to install Claude Code');
+        return;
+      }
+      onAuthChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to install Claude Code');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div
       className="px-5 py-4 flex flex-col gap-3"
@@ -227,29 +251,53 @@ function SignInRowContent({ context }: { context: string }): JSX.Element {
         borderRadius: 'var(--radius-2)',
       }}
     >
-      <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
-        Claude runs the agent panel and the daemon's restorations. One sign-in
-        covers both — this is the only auth step you'll take.
-      </p>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={busy}
-        className="self-start px-4 py-2 j-label hover:opacity-90 disabled:opacity-50"
-        style={{
-          background: 'var(--seer-violet)',
-          color: 'var(--fg)',
-          borderRadius: 'var(--radius-1)',
-        }}
-      >
-        {busy ? 'Opening…' : 'Sign in with Claude →'}
-      </button>
-      {isContainer && (
-        <p className="j-mono text-[11px]" style={{ color: 'var(--fg-dim)' }}>
-          Container mode: after you sign in, copy the OAuth code from the auth
-          page and paste it into the agent terminal where claude is waiting at
-          'Paste code here'.
-        </p>
+      {binaryMissing ? (
+        <>
+          <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
+            Jinn needs the Claude Code CLI to run the operator agent and complete
+            work.
+          </p>
+          <button
+            type="button"
+            onClick={onInstall}
+            disabled={busy}
+            className="self-start px-4 py-2 j-label hover:opacity-90 disabled:opacity-50"
+            style={{
+              background: 'var(--seer-violet)',
+              color: 'var(--fg)',
+              borderRadius: 'var(--radius-1)',
+            }}
+          >
+            {busy ? 'Installing…' : 'Install Claude Code'}
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
+            Claude runs the agent panel and the daemon's restorations. One sign-in
+            covers both — this is the only auth step you'll take.
+          </p>
+          <button
+            type="button"
+            onClick={onClick}
+            disabled={busy}
+            className="self-start px-4 py-2 j-label hover:opacity-90 disabled:opacity-50"
+            style={{
+              background: 'var(--seer-violet)',
+              color: 'var(--fg)',
+              borderRadius: 'var(--radius-1)',
+            }}
+          >
+            {busy ? 'Opening…' : 'Sign in with Claude →'}
+          </button>
+          {isContainer && (
+            <p className="j-mono text-[11px]" style={{ color: 'var(--fg-dim)' }}>
+              Container mode: after you sign in, copy the OAuth code from the auth
+              page and paste it into the agent terminal where claude is waiting at
+              'Paste code here'.
+            </p>
+          )}
+        </>
       )}
       {err && (
         <p className="j-mono text-xs" style={{ color: 'var(--break-red)' }}>

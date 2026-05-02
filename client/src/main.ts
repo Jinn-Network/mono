@@ -29,7 +29,7 @@ import { loadConfig, getConfigPathFromArgs } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
 import { ensureUiToken } from './api/ui-token.js';
-import { attachAgentWs } from './agent/agent-ws.js';
+import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { buildEnvelope, emitEnvelope, type ErrorCode } from './errors/envelope.js';
@@ -633,6 +633,13 @@ export async function main(): Promise<DaemonStartupInfo | void> {
         chain: NETWORK_CHAIN,
         rpcUrl: config.rpcUrl,
         minEoaGasWei: (CHAIN_CONFIG.minEoaGasEth * 2n).toString(),
+        getClaudePath: () => config.claudePath,
+        runtimeMode: config.runtimeMode,
+        configPath: CONFIG_PATH,
+        onClaudePathSelected: (claudePath) => {
+          config.claudePath = claudePath;
+          updateAgentClaudePath(claudePath);
+        },
       },
       status: {
         earningDir: config.earningDir,
@@ -828,7 +835,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   }
 
   const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
-  const authProbe = probeClaudeAuth({ context: authContext, cwd: process.cwd() });
+  const authProbe = probeClaudeAuth({ context: authContext, cwd: process.cwd(), claudePath: config.claudePath });
   if (!authProbe.authenticated) {
     emitEnvelope({
       code: 'invalid_invocation',

@@ -26,6 +26,15 @@ export const api = {
     return jfetch<{ events: StructuredEvent[] }>(`/v1/events/recent?${q.toString()}`);
   },
   getClaudeAuth: () => jfetch<ClaudeAuthState>('/v1/auth/claude'),
+  installClaudeCode: () =>
+    jfetch<{
+      ok: boolean;
+      status: 'already_present' | 'installed' | 'install_failed';
+      detail: string;
+      binary?: ClaudeAuthState['binary'];
+    }>('/v1/setup/claude/install', {
+      method: 'POST',
+    }),
   signInClaude: () =>
     jfetch<{ ok: boolean; reason?: string }>('/v1/auth/claude/spawn', {
       method: 'POST',

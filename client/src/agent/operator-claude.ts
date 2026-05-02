@@ -141,6 +141,14 @@ export async function spawnOperatorClaude(cfg: OperatorClaudeConfig): Promise<Op
       kill: () => pty.kill(),
     };
   } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT') {
+      throw new OperatorClaudeSpawnError(
+        `Claude Code CLI not found: ${cfg.claudePath}`,
+        'Install Claude Code from the operator panel, then sign in with Claude.',
+        err,
+      );
+    }
     // node-pty's prebuilt binary loaded but posix_spawnp / fork failed at runtime.
     // This is the ABI-mismatch case — the JS wrapper resolves but the native
     // module's internals can't actually spawn. Falling back to plain spawn

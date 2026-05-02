@@ -47,5 +47,10 @@ export interface ClaudeAuthState {
   authenticated: boolean;
   context: 'bare' | 'docker-compose' | 'container';
   detail: string;
+  binary: {
+    ok: boolean;
+    detail: string;
+    resolvedPath?: string;
+  };
   email?: string;
 }

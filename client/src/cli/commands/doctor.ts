@@ -278,7 +278,7 @@ export function createDoctorCommand(deps: DoctorDeps = PRODUCTION_DEPS): Command
   async function checkClaudeAuth(config: JinnConfig): Promise<CheckResult> {
     const cwd = process.cwd();
     const context = deps.detectAuthContext({ cwd, configuredMode: config.runtimeMode });
-    const probe = deps.probeClaudeAuth({ context, cwd });
+    const probe = deps.probeClaudeAuth({ context, cwd, claudePath: config.claudePath });
     return {
       name: 'claude_auth',
       ok: probe.authenticated,

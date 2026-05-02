@@ -126,6 +126,20 @@ describe('probeClaudeAuth', () => {
     });
     expect(result.authenticated).toBe(false);
   });
+
+  it('accepts a configured claudePath while preserving injected probe results', () => {
+    const result = probeClaudeAuth({
+      context: 'bare',
+      cwd: '/tmp',
+      claudePath: '/custom/claude',
+      spawnResult: {
+        status: 0,
+        stdout: JSON.stringify({ loggedIn: true }),
+        stderr: '',
+      },
+    });
+    expect(result.authenticated).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -142,6 +156,12 @@ describe('buildLoginCommand', () => {
   it('returns direct claude command for container context', () => {
     const result = buildLoginCommand('container', '/some/path');
     expect(result.command).toBe('claude');
+    expect(result.args).toEqual(['auth', 'login']);
+  });
+
+  it('uses configured claude path for bare login commands', () => {
+    const result = buildLoginCommand('bare', '/some/path', '/custom/claude');
+    expect(result.command).toBe('/custom/claude');
     expect(result.args).toEqual(['auth', 'login']);
   });
 
