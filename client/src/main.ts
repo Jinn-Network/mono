@@ -943,11 +943,11 @@ export async function main(): Promise<DaemonStartupInfo | void> {
 
   const solverNetRegistry = await loadSolverNets(config);
   for (const net of solverNetRegistry.list()) {
-    const plugins = [net.canonicalPlugin, ...net.plugins]
+    const plugins = net.plugins
       .map((plugin) => `${plugin.name}@${plugin.version}`)
       .join(', ');
     console.log(
-      `[main] Loaded SolverNet: ${net.name} solverType=${net.solverType} harness=${net.harness} plugins=${plugins}`,
+      `[main] Loaded SolverNet: ${net.name} solverType=${net.solverType} contract=${net.contract.evaluationFunction.id} harness=${net.harness} plugins=${plugins}`,
     );
   }
 

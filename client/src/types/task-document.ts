@@ -42,6 +42,7 @@ const TaskV1Fields = {
   role: z.enum(['restoration', 'evaluation']).default('restoration'),
   description: z.string().min(1),
   window: WindowSchema,
+  claimPolicy: z.record(z.unknown()).optional(),
   spec: NoLegacyKindSchema,
   eligibility: z.record(z.unknown()),
   creator: CreatorSchema,

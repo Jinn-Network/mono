@@ -42,9 +42,10 @@
     "e2e:full-cycle": "tsx test/e2e/claude-code-learner-full-cycle.ts",
     "jinn": "tsx src/bin/jinn.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
-    "build": "yarn build:spa && tsc && chmod +x dist/bin/jinn.js && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs dist/scripts/ && node scripts/write-dist-build-meta.mjs",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "build:sdk": "yarn --cwd ../packages/sdk install --immutable && yarn --cwd ../packages/sdk build",
+    "build": "yarn build:sdk && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs dist/scripts/ && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs",
+    "typecheck": "yarn build:sdk && tsc --noEmit",
+    "test": "yarn build:sdk && vitest run",
     "test:watch": "vitest",
     "test:claude-prediction": "yarn build && JINN_TEST_CLAUDE_PREDICTION=1 vitest run test/harnesses/impls/claude-mcp-prediction/isolation.test.ts",
     "test:claude-prediction-apy": "yarn build && JINN_TEST_CLAUDE_PREDICTION_APY=1 vitest run test/harnesses/impls/claude-mcp-prediction-apy/isolation.test.ts",
@@ -106,6 +107,7 @@
     "@coinbase/cdp-sdk": "^1.48.2"
   },
   "devDependencies": {
+    "@jinn-network/sdk": "portal:../packages/sdk",
     "@playwright/test": "^1.59.1",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",

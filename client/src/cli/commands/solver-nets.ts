@@ -14,7 +14,6 @@ type SolverPluginEntry = string | { name?: string; source: string; version?: str
 interface SolverNetConfig {
   enabled?: boolean;
   solverType: string;
-  canonicalPlugin: SolverPluginEntry;
   harness?: string;
   plugins?: SolverPluginEntry[];
   taskGenerator?: { enabled?: boolean };
@@ -52,10 +51,9 @@ function ensureSolverNets(cfg: ConfigShape): Record<string, SolverNetConfig> {
 function predictionDefault(): SolverNetConfig {
   return {
     enabled: true,
-    solverType: 'prediction.v0',
-    canonicalPlugin: 'bundled:jinn-prediction-plugin',
-    harness: 'claude-code-learner',
-    plugins: [],
+    solverType: 'prediction.v1',
+    harness: 'prediction-v1-baseline',
+    plugins: ['bundled:jinn-prediction-plugin'],
     taskGenerator: { enabled: true },
   };
 }
@@ -96,7 +94,7 @@ function enableArgs(rest: string[]): Record<string, string | undefined> {
 
 const command: CommandModule = {
   name: 'solver-nets',
-  summary: 'Manage SolverNet activation, Harness selection, and SolverNet-scoped plugins',
+  summary: 'Manage SolverNet activation, Harness selection, and runtime plugin packs',
   helpText: `Usage:
   jinn solver-nets list [--config <path>]
   jinn solver-nets show <name> [--config <path>]
@@ -132,7 +130,6 @@ const command: CommandModule = {
           enabled: net.enabled,
           solverType: net.solverType,
           harness: net.harness,
-          canonicalPlugin: net.canonicalPlugin,
           pluginCount: net.plugins.length,
           taskGeneratorEnabled: net.taskGenerator.enabled,
         })),
@@ -181,7 +178,7 @@ const command: CommandModule = {
         if (harness?.onEnable) {
           enableResult = await harness.onEnable({
             solverNet: { name: loadedNet.name, solverType: loadedNet.solverType },
-            runtimePlugins: [loadedNet.canonicalPlugin, ...loadedNet.plugins],
+            runtimePlugins: loadedNet.plugins,
             args: enableArgs(rest),
           });
         }

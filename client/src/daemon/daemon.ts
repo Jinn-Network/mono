@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { ExecutionAdapter } from '../adapters/adapter.js';
+import { isTaskFirstExecutionAdapter, type ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
 import { CreatorLoop } from './creator.js';
@@ -13,12 +13,13 @@ import type { X402Config } from '../x402/handler.js';
 import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
+import { TaskRunState } from '../harnesses/engine/state.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
-import type { Task } from '../types/index.js';
+import type { Task, TaskRequest } from '../types/index.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -425,57 +426,81 @@ export class Daemon {
   private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
     const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h
 
-    for await (const request of this.adapter.watchForRequests()) {
-      if (this.engineStopped) break;
-      if (!request.requestId) continue;
-
-      const solverType = request.task.solverType ?? undefined;
-      const windowStartTs = request.task.window?.startTs ?? Date.now();
-      const windowEndTs = request.task.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
-
-      // Warn on missing provenance; local/test adapters may legitimately lack it.
-      if (!request.taskCid) {
-        console.warn(`[daemon] task ${request.requestId} missing provenance field taskCid — manifest integrity checks may fail`);
-      }
-      if (!request.onchainCreationTx) {
-        console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationTx — manifest integrity checks may fail`);
-      }
-      if (request.onchainCreationBlock == null) {
-        console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationBlock — manifest integrity checks may fail`);
-      }
-
-      try {
-        await engine.observe({
-          requestId: request.requestId,
-          taskCid: request.taskCid ?? '',
-          onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
-          onchainCreationBlock: request.onchainCreationBlock ?? 0,
-          solverType,
-          taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
-          windowStartTs,
-          windowEndTs,
-          task: request.task,
-        });
-
-        // Drive the engine state machine for this request.
-        // process() advances one transition per call; the engine handles retries
-        // internally on the next daemon iteration if the task is re-encountered.
-        // Fire-and-forget: each task processes independently. SQLite serialises
-        // writes through better-sqlite3's synchronous interface, so concurrent
-        // process() calls don't corrupt state. Future readers: do NOT await — that
-        // would serialise all task processing into a single queue.
-        engine.process(request.requestId).catch(err => {
-          console.error(`[daemon] engine.process failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
+    if (isTaskFirstExecutionAdapter(this.adapter)) {
+      for await (const task of this.adapter.watchForTasks()) {
+        if (this.engineStopped) break;
+        const taskId = task.taskId ?? task.id;
+        if (!taskId) continue;
+        try {
+          const request = await this.adapter.claimTask(taskId);
+          await this._observeAndProcessRequest(engine, request, DEFAULT_WINDOW_MS);
+        } catch (err) {
+          console.error(`[daemon] TaskCoordinator claim failed for task ${taskId}:`, err instanceof Error ? err.message : err);
           emitEvent(this.store, {
             kind: 'tick_error',
-            requestId: request.requestId,
-            solverType,
+            requestId: taskId,
+            solverType: task.solverType,
             outcome: 'failed',
             detail: err instanceof Error ? err.message : String(err),
           }, 'daemon');
-        });
-      } catch (err) {
-        console.error(`[daemon] engine.observe failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
+        }
+      }
+      return;
+    }
+
+    for await (const request of this.adapter.watchForRequests()) {
+      if (this.engineStopped) break;
+      await this._observeAndProcessRequest(engine, request, DEFAULT_WINDOW_MS);
+    }
+  }
+
+  private async _observeAndProcessRequest(
+    engine: TaskEngine,
+    request: TaskRequest,
+    defaultWindowMs: number,
+  ): Promise<void> {
+    if (!request.requestId) return;
+
+    const solverType = request.task.solverType ?? undefined;
+    const windowStartTs = request.task.window?.startTs ?? Date.now();
+    const windowEndTs = request.task.window?.endTs ?? (windowStartTs + defaultWindowMs);
+
+    // Warn on missing provenance; local/test adapters may legitimately lack it.
+    if (!request.taskCid) {
+      console.warn(`[daemon] task ${request.requestId} missing provenance field taskCid — manifest integrity checks may fail`);
+    }
+    if (!request.onchainCreationTx) {
+      console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationTx — manifest integrity checks may fail`);
+    }
+    if (request.onchainCreationBlock == null) {
+      console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationBlock — manifest integrity checks may fail`);
+    }
+
+    try {
+      await engine.observe({
+        requestId: request.requestId,
+        taskId: request.taskId ?? request.task.taskId ?? request.task.id,
+        attemptIndex: request.attemptIndex ?? request.task.attemptNumber,
+        taskCid: request.taskCid ?? '',
+        onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
+        onchainCreationBlock: request.onchainCreationBlock ?? 0,
+        solverType,
+        taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
+        initialState: request.alreadyClaimed ? TaskRunState.CLAIMED : undefined,
+        windowStartTs,
+        windowEndTs,
+        task: request.task,
+      });
+
+      // Drive the engine state machine for this request.
+      // process() advances one transition per call; the engine handles retries
+      // internally on the next daemon iteration if the task is re-encountered.
+      // Fire-and-forget: each task processes independently. SQLite serialises
+      // writes through better-sqlite3's synchronous interface, so concurrent
+      // process() calls don't corrupt state. Future readers: do NOT await — that
+      // would serialise all task processing into a single queue.
+      engine.process(request.requestId).catch(err => {
+        console.error(`[daemon] engine.process failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
         emitEvent(this.store, {
           kind: 'tick_error',
           requestId: request.requestId,
@@ -483,7 +508,16 @@ export class Daemon {
           outcome: 'failed',
           detail: err instanceof Error ? err.message : String(err),
         }, 'daemon');
-      }
+      });
+    } catch (err) {
+      console.error(`[daemon] engine.observe failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
+      emitEvent(this.store, {
+        kind: 'tick_error',
+        requestId: request.requestId,
+        solverType,
+        outcome: 'failed',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 'daemon');
     }
   }
 

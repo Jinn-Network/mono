@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,21 +21,28 @@ describe('auth command', () => {
   });
 
   it('emits either a success result or invalid_invocation on non-TTY (no flags)', async () => {
-    const { ctx, writes, exits } = makeCommandCtx({ tty: false });
-    await auth.run(ctx);
-    expect(writes.length).toBeGreaterThanOrEqual(1);
-    const parsed = JSON.parse(writes[writes.length - 1]!);
-    if (exits.length === 0) {
-      // Authenticated: success result
-      expect(parsed.schemaVersion).toBe(1);
-      expect(typeof parsed.authenticated).toBe('boolean');
-      expect(parsed.authenticated).toBe(true);
-      expect(typeof parsed.context).toBe('string');
-      expect(typeof parsed.detail).toBe('string');
-    } else {
-      // Not authenticated on non-TTY: invalid_invocation
-      expect(parsed.code).toBe('invalid_invocation');
-      expect(exits).toEqual([11]);
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-auth-config-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, JSON.stringify({}), 'utf-8');
+    try {
+      const { ctx, writes, exits } = makeCommandCtx({ argv: ['--config', configPath], tty: false });
+      await auth.run(ctx);
+      expect(writes.length).toBeGreaterThanOrEqual(1);
+      const parsed = JSON.parse(writes[writes.length - 1]!);
+      if (exits.length === 0) {
+        // Authenticated: success result
+        expect(parsed.schemaVersion).toBe(1);
+        expect(typeof parsed.authenticated).toBe('boolean');
+        expect(parsed.authenticated).toBe(true);
+        expect(typeof parsed.context).toBe('string');
+        expect(typeof parsed.detail).toBe('string');
+      } else {
+        // Not authenticated on non-TTY: invalid_invocation
+        expect(parsed.code).toBe('invalid_invocation');
+        expect(exits).toEqual([11]);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

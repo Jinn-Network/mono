@@ -145,8 +145,9 @@ describe('loadConfig RPC override handling', () => {
     expect(config.rpcUrl).toBe('https://universal.env.example');
   });
 
-  it('defaults stakingMode to standard', () => {
-    const config = loadConfig();
+  it('defaults stakingMode to standard', async () => {
+    const configPath = await writeConfigFile({});
+    const config = loadConfig(configPath);
     expect(config.stakingMode).toBe('standard');
   });
 
@@ -162,15 +163,17 @@ describe('loadConfig RPC override handling', () => {
     expect(config.rpcUrl).toBe('https://sepolia.base.org');
   });
 
-  it('accepts self-bond stakingMode from env', () => {
+  it('accepts self-bond stakingMode from env', async () => {
+    const configPath = await writeConfigFile({});
     process.env['JINN_STAKING_MODE'] = 'self-bond';
-    const config = loadConfig();
+    const config = loadConfig(configPath);
     expect(config.stakingMode).toBe('self-bond');
     delete process.env['JINN_STAKING_MODE'];
   });
 
-  it('defaults targetServices to 1', () => {
-    const config = loadConfig();
+  it('defaults targetServices to 1', async () => {
+    const configPath = await writeConfigFile({});
+    const config = loadConfig(configPath);
     expect(config.targetServices).toBe(1);
   });
 
@@ -179,6 +182,36 @@ describe('loadConfig RPC override handling', () => {
       const config = loadConfig(configPath);
       expect(config.tasks).toEqual([]);
     });
+  });
+
+  it('defaults prediction SolverNet to contract-owned prediction.v1 with optional runtime plugin pack', async () => {
+    const configPath = await writeConfigFile({});
+    const config = loadConfig(configPath);
+    expect(config.solverNets.prediction).toMatchObject({
+      enabled: true,
+      solverType: 'prediction.v1',
+      harness: 'prediction-v1-baseline',
+      plugins: ['bundled:jinn-prediction-plugin'],
+      taskGenerator: { enabled: true },
+    });
+    expect(config.solverNets.prediction).not.toHaveProperty('canonicalPlugin');
+  });
+
+  it('rejects removed canonicalPlugin SolverNet config', async () => {
+    const configPath = await writeConfigFile({
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          canonicalPlugin: 'bundled:jinn-prediction-plugin',
+          harness: 'prediction-v1-baseline',
+          plugins: [],
+          taskGenerator: { enabled: true },
+        },
+      },
+    });
+
+    expect(() => loadConfig(configPath)).toThrow(/canonicalPlugin is no longer supported/);
   });
 
   it('preserves portfolio.v0 Task fields (window, spec, eligibility) through config parsing', async () => {
@@ -331,13 +364,15 @@ describe('loadConfig RPC override handling', () => {
     expect(config.testnetClaimRegistryDeploymentPath).toBe('/tmp/from-env-claim-registry.json');
   });
 
-  it('identityRegistryAddress is undefined by default', () => {
-    const config = loadConfig();
+  it('identityRegistryAddress is undefined by default', async () => {
+    const configPath = await writeConfigFile({});
+    const config = loadConfig(configPath);
     expect(config.identityRegistryAddress).toBeUndefined();
   });
 
-  it('validationRegistryAddress is undefined by default', () => {
-    const config = loadConfig();
+  it('validationRegistryAddress is undefined by default', async () => {
+    const configPath = await writeConfigFile({});
+    const config = loadConfig(configPath);
     expect(config.validationRegistryAddress).toBeUndefined();
   });
 
@@ -357,35 +392,39 @@ describe('loadConfig RPC override handling', () => {
     expect(config.validationRegistryAddress).toBe('0xabcdef1234567890abcdef1234567890abcdef12');
   });
 
-  it('reads identityRegistryAddress from env var', () => {
+  it('reads identityRegistryAddress from env var', async () => {
+    const configPath = await writeConfigFile({});
     process.env['JINN_IDENTITY_REGISTRY_ADDRESS'] = '0xaabbccdd00000000000000000000000000000001';
     try {
-      const config = loadConfig();
+      const config = loadConfig(configPath);
       expect(config.identityRegistryAddress).toBe('0xaabbccdd00000000000000000000000000000001');
     } finally {
       delete process.env['JINN_IDENTITY_REGISTRY_ADDRESS'];
     }
   });
 
-  it('reads validationRegistryAddress from env var', () => {
+  it('reads validationRegistryAddress from env var', async () => {
+    const configPath = await writeConfigFile({});
     process.env['JINN_VALIDATION_REGISTRY_ADDRESS'] = '0xaabbccdd00000000000000000000000000000002';
     try {
-      const config = loadConfig();
+      const config = loadConfig(configPath);
       expect(config.validationRegistryAddress).toBe('0xaabbccdd00000000000000000000000000000002');
     } finally {
       delete process.env['JINN_VALIDATION_REGISTRY_ADDRESS'];
     }
   });
 
-  it('reputationEnabled defaults to false', () => {
-    const config = loadConfig();
+  it('reputationEnabled defaults to false', async () => {
+    const configPath = await writeConfigFile({});
+    const config = loadConfig(configPath);
     expect(config.reputationEnabled).toBe(false);
   });
 
-  it('accepts reputationEnabled=true from env var', () => {
+  it('accepts reputationEnabled=true from env var', async () => {
+    const configPath = await writeConfigFile({});
     process.env['JINN_REPUTATION_ENABLED'] = '1';
     try {
-      const config = loadConfig();
+      const config = loadConfig(configPath);
       expect(config.reputationEnabled).toBe(true);
     } finally {
       delete process.env['JINN_REPUTATION_ENABLED'];
@@ -416,8 +455,9 @@ describe('buildConfigProvenance', () => {
     expect(prov.configPath).toBe(configPath);
   });
 
-  it('returns configLoaded=false and configPath=null when no config file exists', () => {
-    const config = loadConfig();
+  it('returns configLoaded=false and configPath=null when no config file exists', async () => {
+    const configPath = await writeConfigFile({});
+    const config = loadConfig(configPath);
     const nonExistentPath = path.join(os.tmpdir(), 'jinn-no-such-config-' + Date.now() + '.json');
     const prov = buildConfigProvenance(nonExistentPath, config, {});
     expect(prov.configLoaded).toBe(false);

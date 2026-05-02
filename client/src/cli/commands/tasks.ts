@@ -102,7 +102,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 
   const specFilePath = parsed.values['spec-file'] as string | undefined;
-  let specOverlay: { solverType?: string; window?: any; spec?: any; eligibility?: any } | undefined;
+  let specOverlay: { solverType?: string; window?: any; claimPolicy?: any; spec?: any; eligibility?: any } | undefined;
   if (specFilePath) {
     let raw: Record<string, unknown>;
     try {
@@ -164,6 +164,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       specOverlay = {
         solverType: solverTypeStr,
         window: parsedOverlay.window,
+        claimPolicy: parsedOverlay.claimPolicy,
         spec: parsedOverlay.spec,
         eligibility: parsedOverlay.eligibility,
       };
@@ -239,7 +240,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
     const agentEoaAddress = privateKeyToAccount(agentEoaPrivateKey).address;
     const overlay = specOverlay ?? {};
-    const taskKind = overlay.solverType ?? requestedSolverType ?? solverTypeFromNet ?? 'prediction.v0';
+    const taskKind = overlay.solverType ?? requestedSolverType ?? solverTypeFromNet ?? 'prediction.v1';
     const taskWindow = overlay.window ?? { startTs: Date.now(), endTs: Date.now() + 86_400_000 };
     const taskDoc: TaskV1 = {
       schemaVersion: 'task.v1',
@@ -248,6 +249,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       role: 'restoration',
       description,
       window: taskWindow,
+      ...(overlay.claimPolicy ? { claimPolicy: overlay.claimPolicy } : {}),
       spec: ((overlay.spec as Record<string, unknown> | undefined) ?? {}) as TaskV1['spec'],
       eligibility: overlay.eligibility ?? {},
       creator: {

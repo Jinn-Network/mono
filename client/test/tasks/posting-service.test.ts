@@ -147,6 +147,34 @@ describe('TaskPostingService', () => {
     await adapter.stop();
   });
 
+  it('accepts Task-first post receipts with TaskCoordinator metadata', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+
+    vi.spyOn(adapter, 'postTask').mockResolvedValue({
+      taskId: '42',
+      taskCid: 'bafy-task',
+      txHash: `0x${'a'.repeat(64)}`,
+    });
+    const candidate = {
+      task: { id: 'prediction-v1-task', description: 'Task-first post', solverType: 'prediction.v1' },
+      sourceKey: 'generated:prediction.v1',
+      postingPolicy: { kind: 'once_per_bucket', bucketKey: 'polymarket:0xabc' } as const,
+    };
+
+    const result = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+
+    expect(result.requestId).toBe('42');
+    expect(result.taskCoordinatorTaskId).toBe('42');
+    expect(result.taskCid).toBe('bafy-task');
+    expect(result.txHash).toBe(`0x${'a'.repeat(64)}`);
+
+    store.close();
+    await adapter.stop();
+  });
+
   // ERC-8004 per-execution registration is rebuilt under bead jinn-mono-3zk
   // against the operator-rooted entity model — see DR
   // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md. The

@@ -27,7 +27,8 @@ export interface Task {
 }
 
 export interface OutputArtifact {
-  type: string;
+  artifactType: string;
+  type?: string;
   path?: string;
   cid?: string;
   [key: string]: unknown;

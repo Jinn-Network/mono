@@ -4,9 +4,9 @@ import { validateSolverPluginManifest } from './validator.js';
 import type { SolverPluginManifest } from './types.js';
 
 export const MANIFEST_LOOKUP_ORDER = [
+  'jinn.plugin.json',
   '.claude-plugin/plugin.json',
   'gemini-extension.json',
-  'jinn.plugin.json',
 ] as const;
 
 export function findSolverPluginManifest(root: string): string {

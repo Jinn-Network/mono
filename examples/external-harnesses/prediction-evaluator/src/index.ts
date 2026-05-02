@@ -15,7 +15,7 @@ import type {
   ExternalHarnessEnv,
   HarnessContext,
   Solution,
-} from '@jinn-network/harness-sdk';
+} from '@jinn-network/sdk/harness';
 import { brier } from './score.js';
 import { fetchResolution } from './oracle-stub.js';
 

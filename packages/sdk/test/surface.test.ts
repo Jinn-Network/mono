@@ -4,18 +4,28 @@ import {
   SkippableError,
 } from '../src/index.js';
 import type {
+  Task,
+  Solution,
+} from '../src/index.js';
+import type {
   Harness,
   HarnessContext,
-  Solution,
   ExternalHarnessEnv,
   ExternalHarnessFactory,
   JinnManifest,
   ScopedSigner,
   ScopedRpc,
   ScopedSecrets,
-} from '../src/index.js';
+} from '../src/harness.js';
 
-describe('@jinn-network/harness-sdk surface', () => {
+describe('@jinn-network/sdk surface', () => {
+  it('root exports generic protocol types', () => {
+    const task: Task = { id: 'i', description: 'test', solverType: 'test.v0' };
+    const out: Solution = { venueRef: { name: 'x' }, gating: {} };
+    expect(task.solverType).toBe('test.v0');
+    expect(out.venueRef.name).toBe('x');
+  });
+
   it('exports REQUIRES_LIVE_DAEMON_READINESS', () => {
     expect(REQUIRES_LIVE_DAEMON_READINESS.ready).toBe(false);
     expect(REQUIRES_LIVE_DAEMON_READINESS.reason).toBe('requires live daemon');
@@ -96,8 +106,4 @@ describe('@jinn-network/harness-sdk surface', () => {
     expect(ctx.signer).toBeUndefined();
   });
 
-  it('Solution shape compiles with minimal fields', () => {
-    const out: Solution = { venueRef: { name: 'x' }, gating: {} };
-    expect(out.venueRef.name).toBe('x');
-  });
 });

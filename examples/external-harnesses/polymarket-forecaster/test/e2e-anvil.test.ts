@@ -18,7 +18,7 @@ import createHarness from '../src/index.js';
 import type {
   ExternalHarnessEnv,
   HarnessContext,
-} from '@jinn-network/harness-sdk';
+} from '@jinn-network/sdk/harness';
 
 const ANVIL_PORT = 8765;
 

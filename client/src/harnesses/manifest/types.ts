@@ -1,7 +1,7 @@
 /**
  * Daemon-side manifest types. Same shape as the SDK manifest type;
  * mirrored locally so the client doesn't have to depend on
- * @jinn-network/harness-sdk at runtime (the SDK is a publish-time
+ * @jinn-network/sdk/harness at runtime (the SDK is a publish-time
  * boundary).
  */
 

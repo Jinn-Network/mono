@@ -22,10 +22,14 @@ export const TaskSchema = z.object({
   role: z.enum(['restoration', 'evaluation']).optional(),
   attemptId: z.string().optional(),
   attemptNumber: z.number().int().optional(),
+  taskId: z.string().optional(),
   restorationRequestId: z.string().optional(),
 
   // §3 — optional lifecycle window
   window: WindowSchema.optional(),
+
+  // TaskCoordinator claim semantics; solverType-specific specs may require it.
+  claimPolicy: z.record(z.unknown()).optional(),
 
   // §3 — typed task payload; dispatcher is top-level `solverType`.
   spec: z.record(z.unknown()).optional(),
@@ -44,10 +48,12 @@ export interface Task {
   role?: 'restoration' | 'evaluation';
   attemptId?: string;
   attemptNumber?: number;
+  taskId?: string;
   restorationRequestId?: string;
 
   // §3 extensions (all optional for backwards compat)
   window?: Window;
+  claimPolicy?: Record<string, unknown>;
   spec?: Record<string, unknown>;
   eligibility?: Record<string, unknown>;
 
@@ -81,8 +87,10 @@ export function parseTask(input: unknown): Task {
     role: parsed.role ?? signedTask?.role,
     attemptId: parsed.attemptId ?? signedRuntime?.attemptId,
     attemptNumber: parsed.attemptNumber ?? signedRuntime?.attemptNumber,
+    taskId: parsed.taskId,
     restorationRequestId: parsed.restorationRequestId ?? signedRuntime?.restorationRequestId,
     window: parsed.window ?? signedTask?.window,
+    claimPolicy: parsed.claimPolicy ?? signedTask?.claimPolicy,
     spec,
     eligibility: parsed.eligibility ?? signedTask?.eligibility,
     signedTask,
@@ -94,6 +102,12 @@ export interface TaskRequest {
   task: Task;
   payment?: string;
   timeout?: number;
+
+  // TaskCoordinator provenance. Optional until the v3 adapter lands.
+  taskId?: string;
+  attemptIndex?: number;
+  /** True when the adapter already performed TaskCoordinator claimTask(). */
+  alreadyClaimed?: boolean;
 
   // On-chain provenance from the RestorationJobCreated / MarketplaceRequest event
   taskCid?: string;                 // IPFS CID of the Task payload

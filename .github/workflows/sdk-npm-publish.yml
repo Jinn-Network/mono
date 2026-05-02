@@ -1,0 +1,95 @@
+name: SDK npm Publish
+
+on:
+  push:
+    branches: [main]
+    paths: ['packages/sdk/**']
+  release:
+    types: [published]
+
+# Trusted publishing (OIDC): register this workflow on npmjs for
+# @jinn-network/sdk.
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    working-directory: packages/sdk
+
+jobs:
+  publish:
+    name: Publish SDK package
+    if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'sdk-v')
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - run: npm install -g npm@11.5.1
+      - run: corepack enable
+      - run: yarn install --immutable
+
+      - name: Resolve publish metadata
+        id: meta
+        shell: bash
+        run: |
+          PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
+            DIST_TAG="canary"
+          else
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            case "${RELEASE_TAG}" in
+              sdk-v*)
+                PUBLISH_VERSION="${RELEASE_TAG#sdk-v}"
+                ;;
+              *)
+                echo "::notice::Skipping non-SDK release tag ${RELEASE_TAG}"
+                exit 0
+                ;;
+            esac
+
+            if [ "${PUBLISH_VERSION}" != "${PACKAGE_VERSION}" ]; then
+              echo "::error::Release tag version ${PUBLISH_VERSION} does not match packages/sdk/package.json version ${PACKAGE_VERSION}"
+              exit 1
+            fi
+
+            DIST_TAG="latest"
+          fi
+
+          echo "package_version=${PACKAGE_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "publish_version=${PUBLISH_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "dist_tag=${DIST_TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Patch package version for canary publish
+        if: github.event_name == 'push'
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${{ steps.meta.outputs.publish_version }}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn build
+
+      - name: Publish canary
+        if: steps.meta.outputs.dist_tag == 'canary'
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --tag canary
+
+      - name: Publish stable
+        if: steps.meta.outputs.dist_tag == 'latest'
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public

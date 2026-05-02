@@ -11,6 +11,8 @@ import { PortfolioV0Evaluator } from './portfolio-v0-evaluator/index.js';
 import { PredictionV0BaselineImpl } from './prediction-v0-baseline/index.js';
 import { PredictionV0Evaluator } from './prediction-v0-evaluator/index.js';
 import { ClaudeMcpPredictionImpl } from './claude-mcp-prediction/index.js';
+import { PredictionV1BaselineImpl } from './prediction-v1-baseline/index.js';
+import { PredictionV1Evaluator } from './prediction-v1-evaluator/index.js';
 import { PredictionApyV0BaselineImpl } from './prediction-apy-v0-baseline/index.js';
 import { ClaudeMcpPredictionApyImpl } from './claude-mcp-prediction-apy/index.js';
 import { PredictionApyV0Evaluator } from './prediction-apy-v0-evaluator/index.js';
@@ -77,7 +79,7 @@ export interface HarnessEnv {
    * impl that has external deps.
    */
   disabledNames?: readonly string[];
-  /** Resolved SolverPlugin package roots passed to plugin-aware Harnesses. */
+  /** Resolved runtime plugin pack roots passed to plugin-aware Harnesses. */
 }
 
 /**
@@ -150,6 +152,16 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
           evaluatorSafeAddress: env.safe!,
           rpcUrl: env.rpcUrl,
         }),
+  );
+  out.push(
+    new PredictionV1BaselineImpl({
+      stub: isStub,
+    }),
+  );
+  out.push(
+    isStub
+      ? new PredictionV1Evaluator({ stub: true })
+      : new PredictionV1Evaluator(),
   );
   out.push(
     new PredictionApyV0BaselineImpl({

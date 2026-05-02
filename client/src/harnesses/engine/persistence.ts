@@ -10,7 +10,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { assertValidTransition, TERMINAL_STATES, type TaskRunState } from './state.js';
+import { assertValidTransition, TaskRunState, TERMINAL_STATES, type TaskRunState as TaskRunStateType } from './state.js';
 import type { Task } from '../../types/task.js';
 
 // ── Concurrency error ─────────────────────────────────────────────────────────
@@ -24,10 +24,10 @@ import type { Task } from '../../types/task.js';
  */
 export class ConcurrentTransitionError extends Error {
   readonly requestId: string;
-  readonly expectedState: TaskRunState;
+  readonly expectedState: TaskRunStateType;
   readonly attemptedNewState: string;
 
-  constructor(requestId: string, expectedState: TaskRunState, attemptedNewState: string) {
+  constructor(requestId: string, expectedState: TaskRunStateType, attemptedNewState: string) {
     super(
       `ConcurrentTransitionError: ${requestId} expected state=${expectedState} but DB row has changed (attempted=${attemptedNewState})`,
     );
@@ -43,6 +43,8 @@ export class ConcurrentTransitionError extends Error {
 export const TASK_RUNS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS task_runs (
   request_id              TEXT PRIMARY KEY,
+  task_id                 TEXT,
+  attempt_index           INTEGER,
   task_cid              TEXT NOT NULL,
   onchain_creation_tx     TEXT NOT NULL,
   onchain_creation_block  INTEGER NOT NULL,
@@ -107,12 +109,16 @@ CREATE INDEX IF NOT EXISTS idx_task_runs_window_start_ts
 /** Input when first observing an task from an on-chain event. */
 export interface PersistedTaskRunInput {
   requestId: string;
+  taskId?: string;
+  attemptIndex?: number;
   taskCid: string;
   onchainCreationTx: string;
   onchainCreationBlock: number;
   solverType?: string;
   /** 'restoration' (default) or 'evaluation'. Captured from Task.type at observe() time. */
   taskRole?: 'restoration' | 'evaluation';
+  /** Initial row state. Task-first adapters can start at CLAIMED after claimTask(). */
+  initialState?: typeof TaskRunState.DISCOVERED | typeof TaskRunState.CLAIMED;
   windowStartTs: number;
   windowEndTs: number;
   /**
@@ -128,6 +134,8 @@ export interface PersistedTaskRunInput {
 /** Full persisted task row (all columns). */
 export interface PersistedTaskRun {
   requestId: string;
+  taskId: string | null;
+  attemptIndex: number | null;
   taskCid: string;
   onchainCreationTx: string;
   onchainCreationBlock: number;
@@ -135,7 +143,7 @@ export interface PersistedTaskRun {
   taskRole: 'restoration' | 'evaluation' | null;
   implName: string | null;
 
-  state: TaskRunState;
+  state: TaskRunStateType;
   stateUpdatedAt: number;
 
   workingDir: string | null;
@@ -216,6 +224,8 @@ export type TaskRunPatch = Partial<{
 
 interface RawRow {
   request_id: string;
+  task_id: string | null;
+  attempt_index: number | null;
   task_cid: string;
   onchain_creation_tx: string;
   onchain_creation_block: number;
@@ -266,6 +276,8 @@ function runAdditiveMigrations(db: Database.Database): void {
     { column: 'solution_outputs_json',     ddl: 'ALTER TABLE task_runs ADD COLUMN solution_outputs_json TEXT' },
     { column: 'runtime_plugins_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN runtime_plugins_json TEXT' },
     { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
+    { column: 'task_id',             ddl: 'ALTER TABLE task_runs ADD COLUMN task_id TEXT' },
+    { column: 'attempt_index',       ddl: 'ALTER TABLE task_runs ADD COLUMN attempt_index INTEGER' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
@@ -296,13 +308,15 @@ function parseJson<T>(raw: string | null): T | null {
 function rowToTaskRun(row: RawRow): PersistedTaskRun {
   return {
     requestId: row.request_id,
+    taskId: row.task_id ?? null,
+    attemptIndex: row.attempt_index ?? null,
     taskCid: row.task_cid,
     onchainCreationTx: row.onchain_creation_tx,
     onchainCreationBlock: row.onchain_creation_block,
     solverType: row.solver_type,
     taskRole: (row.task_role ?? null) as 'restoration' | 'evaluation' | null,
     implName: row.impl_name,
-    state: row.state as TaskRunState,
+    state: row.state as TaskRunStateType,
     stateUpdatedAt: row.state_updated_at,
     workingDir: row.working_dir,
     implStateDir: row.impl_state_dir,
@@ -349,21 +363,24 @@ export class TaskRunPersistence {
   insertDiscovered(input: PersistedTaskRunInput): void {
     this.db.prepare(`
       INSERT OR IGNORE INTO task_runs (
-        request_id, task_cid, onchain_creation_tx, onchain_creation_block,
+        request_id, task_id, attempt_index, task_cid, onchain_creation_tx, onchain_creation_block,
         solver_type, task_role, state, state_updated_at, window_start_ts, window_end_ts,
         task_payload
       ) VALUES (
-        @requestId, @taskCid, @onchainCreationTx, @onchainCreationBlock,
-        @solverType, @taskRole, 'DISCOVERED', @now, @windowStartTs, @windowEndTs,
+        @requestId, @taskId, @attemptIndex, @taskCid, @onchainCreationTx, @onchainCreationBlock,
+        @solverType, @taskRole, @initialState, @now, @windowStartTs, @windowEndTs,
         @taskPayload
       )
     `).run({
       requestId: input.requestId,
+      taskId: input.taskId ?? input.task.id,
+      attemptIndex: input.attemptIndex ?? input.task.attemptNumber ?? null,
       taskCid: input.taskCid,
       onchainCreationTx: input.onchainCreationTx,
       onchainCreationBlock: input.onchainCreationBlock,
       solverType: input.solverType ?? null,
       taskRole: input.taskRole ?? null,
+      initialState: input.initialState ?? TaskRunState.DISCOVERED,
       now: Date.now(),
       windowStartTs: input.windowStartTs,
       windowEndTs: input.windowEndTs,
@@ -375,7 +392,7 @@ export class TaskRunPersistence {
    * Transition an task to a new state. Validates the transition and writes
    * the new state + optional patch fields atomically (persist-before-invoke).
    */
-  transition(requestId: string, toState: TaskRunState, patch: TaskRunPatch = {}): void {
+  transition(requestId: string, toState: TaskRunStateType, patch: TaskRunPatch = {}): void {
     const existing = this.getByRequestId(requestId);
     if (!existing) {
       throw new Error(`Task run not found: ${requestId}`);
@@ -499,7 +516,7 @@ export class TaskRunPersistence {
   }
 
   /** Fetch all tasks in a given state. */
-  getByState(state: TaskRunState): PersistedTaskRun[] {
+  getByState(state: TaskRunStateType): PersistedTaskRun[] {
     const rows = this.db.prepare(
       'SELECT * FROM task_runs WHERE state = ? ORDER BY window_start_ts ASC',
     ).all(state) as RawRow[];

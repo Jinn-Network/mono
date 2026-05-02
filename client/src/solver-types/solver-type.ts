@@ -8,6 +8,7 @@ import type { TaskGenerator } from '../tasks/sources.js';
 /** Overlay fields merged into Task when posting from --spec-file. */
 export type ParsedSpecOverlay = {
   window: unknown;
+  claimPolicy?: unknown;
   spec: unknown;
   eligibility: unknown;
 };

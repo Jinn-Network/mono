@@ -9,6 +9,9 @@
  *   - Unknown flag → emits error envelope
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import conformance from '../../../src/cli/commands/conformance.js';
 import type { CommandContext } from '../../../src/cli/command.js';
@@ -33,6 +36,17 @@ vi.mock('../../../src/conformance/harness.js', () => ({
   runConformance: runConformanceMock,
 }));
 
+const tempDirs: string[] = [];
+
+function withTempConfig(argv: string[]): string[] {
+  if (argv.includes('--config')) return argv;
+  const dir = mkdtempSync(join(tmpdir(), 'jinn-conformance-config-'));
+  tempDirs.push(dir);
+  const configPath = join(dir, 'config.json');
+  writeFileSync(configPath, JSON.stringify({}), 'utf-8');
+  return [...argv, '--config', configPath];
+}
+
 function makeCtx(argv: string[] = []): {
   ctx: CommandContext;
   writes: string[];
@@ -41,7 +55,7 @@ function makeCtx(argv: string[] = []): {
   const writes: string[] = [];
   const exits: number[] = [];
   const ctx: CommandContext = {
-    argv,
+    argv: argv.some((arg) => arg === '--envelope-cid') ? withTempConfig(argv) : argv,
     stdoutIsTty: false,
     writer: { write: (s: string) => { writes.push(s); return true; } },
     exit: (code: number) => { exits.push(code); },
@@ -57,6 +71,9 @@ describe('conformance command', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('emits an error envelope when --envelope-cid is missing', async () => {

@@ -11,7 +11,7 @@ import type {
   ExternalHarnessEnv,
   HarnessContext,
   Solution,
-} from '@jinn-network/harness-sdk';
+} from '@jinn-network/sdk/harness';
 import { fetchMarketSnapshot } from './polymarket-client.js';
 
 export default function createHarness(

@@ -50,7 +50,7 @@ import type {
   HarnessContext,
   Solution,
   ExternalHarnessEnv,
-} from '@jinn-network/harness-sdk';
+} from '@jinn-network/sdk/harness';
 
 export default function createHarness(env: ExternalHarnessEnv): Harness {
   return {

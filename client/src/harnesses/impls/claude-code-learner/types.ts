@@ -21,7 +21,7 @@ export interface TaskSessionInputs {
   implStateDir: string;
   /** Ephemeral workingDir for this attempt */
   workingDir: string;
-  /** Additional SolverPlugin package roots to pass through host plugin loading. */
+  /** Additional runtime plugin pack roots to pass through host plugin loading. */
   pluginRoots?: string[];
   /** Window timestamps (ms since epoch) */
   windowStartTs: number;
@@ -100,6 +100,6 @@ export interface ClaudeCodeLearnerConfig {
    * the impl directory via `plugin-path.ts`. Tests may override.
    */
   pluginRoot?: string;
-  /** SolverPlugin roots loaded by the daemon. */
-  solverPluginRoots?: string[];
+  /** Runtime plugin pack roots loaded by the daemon. */
+  runtimePluginRoots?: string[];
 }

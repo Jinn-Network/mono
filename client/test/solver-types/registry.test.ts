@@ -12,6 +12,7 @@ describe('SOLVER_TYPES manifest', () => {
     expect(knownSolverTypes()).toEqual([
       'portfolio.v0',
       'prediction.v0',
+      'prediction.v1',
       'prediction.apy.v0',
       'learner-loop-test',
     ]);
@@ -133,6 +134,67 @@ describe('SOLVER_TYPES manifest', () => {
     expect(out.spec).not.toHaveProperty('kind');
   });
 
+  it('prediction.v1 parseSpec returns Task-first overlay fields', async () => {
+    const raw = {
+      id: 'pm-1',
+      description: 'Forecast a binary Polymarket round',
+      solverType: 'prediction.v1',
+      role: 'restoration',
+      window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
+      claimPolicy: {
+        kind: 'parallel',
+        maxClaims: 25,
+        maxClaimsPerSolver: 1,
+        claimWindow: 'task-window',
+        selection: 'all-valid-solutions-scored',
+        economics: 'testnet-flat',
+      },
+      spec: {
+        question: { kind: 'binary', text: 'Will test pass?', yesLabel: 'YES', noLabel: 'NO' },
+        source: {
+          type: 'prediction-market',
+          venue: 'polymarket',
+          url: 'https://polymarket.com/event/test',
+          identifiers: {
+            marketId: '1',
+            conditionId: '0xabc',
+            yesTokenId: 'yes-token',
+            noTokenId: 'no-token',
+          },
+        },
+        resolution: {
+          expectedResolutionTime: '2026-05-04T00:00:00.000Z',
+          rulesText: 'Resolve according to the listed source.',
+          rulesUrl: 'https://polymarket.com/event/test',
+          timezone: 'UTC',
+        },
+        consensusSnapshot: {
+          sampledAt: '2026-05-02T00:00:00.000Z',
+          probabilityYes: '0.6200',
+          method: 'best-bid-ask-midpoint',
+          bestBidYes: '0.6000',
+          bestAskYes: '0.6400',
+          spread: '0.0400',
+          source: 'polymarket-clob',
+        },
+        eligibilitySnapshot: {
+          sampledAt: '2026-05-02T00:00:00.000Z',
+          timeToResolutionHours: 48,
+          liquidityUsd: '12000',
+          volume24hUsd: '2600',
+          orderbookAgeSeconds: 1,
+          selectionReason: 'weekly-binary-liquid-clear-rules',
+        },
+      },
+      eligibility: { dedupKey: 'polymarket:0xabc' },
+    };
+    const out = await SOLVER_TYPES['prediction.v1']!.parseSpec(raw);
+    expect(out.window).toEqual(raw.window);
+    expect(out.claimPolicy).toEqual(raw.claimPolicy);
+    expect(out.spec).toEqual(raw.spec);
+    expect(out.eligibility).toEqual(raw.eligibility);
+  });
+
   it('collectTestnetAutoTaskGenerators registers kinds via getTestnetAutoConfig', () => {
     const { generators, logLines } = collectTestnetAutoTaskGenerators({
       network: 'testnet',
@@ -140,9 +202,10 @@ describe('SOLVER_TYPES manifest', () => {
       autoTasksDisabled: false,
       env: { ...process.env, JINN_ENABLE_APY_AUTO_TASKS: '1' },
     });
-    expect(generators.length).toBe(2);
-    expect(generators.map((g) => g.solverType)).toEqual(['prediction.v0', 'prediction.apy.v0']);
+    expect(generators.length).toBe(3);
+    expect(generators.map((g) => g.solverType)).toEqual(['prediction.v0', 'prediction.v1', 'prediction.apy.v0']);
     expect(logLines.some((l) => l.includes('prediction.v0'))).toBe(true);
+    expect(logLines.some((l) => l.includes('prediction.v1'))).toBe(true);
     expect(logLines.some((l) => l.includes('prediction.apy.v0'))).toBe(true);
   });
 });

@@ -25,7 +25,7 @@ import { isInsidePackageDir } from '../../util/path-safety.js';
 /**
  * Daemon-side mirror of the SDK's `ExternalHarnessEnv`. Kept local
  * (not imported from the SDK at runtime) so the client doesn't add a
- * runtime dependency on @jinn-network/harness-sdk; the shape is part
+ * runtime dependency on @jinn-network/sdk/harness; the shape is part
  * of the published Path 2 contract.
  */
 export interface ExternalHarnessEnv {

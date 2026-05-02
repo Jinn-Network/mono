@@ -1,89 +1,15 @@
 {
   "name": "jinn-prediction-plugin",
-  "version": "0.1.0",
-  "description": "Prediction SolverPlugin for prediction.v0 tasks.",
-  "jinn": {
-    "solverType": "prediction.v0",
-    "schemas": {
-      "task": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "required": ["id", "description", "solverType", "role", "spec", "window"],
-        "properties": {
-          "id": { "type": "string" },
-          "description": { "type": "string" },
-          "solverType": { "const": "prediction.v0" },
-          "role": { "enum": ["restoration", "evaluation"] },
-          "spec": {
-            "type": "object",
-            "required": ["question", "oracle"],
-            "properties": {
-              "question": {
-                "type": "object",
-                "required": ["kind", "text"],
-                "properties": {
-                  "kind": { "enum": ["threshold", "range"] },
-                  "text": { "type": "string" }
-                },
-                "additionalProperties": true
-              },
-              "oracle": {
-                "type": "object",
-                "required": ["venue"],
-                "properties": {
-                  "venue": { "type": "string" }
-                },
-                "additionalProperties": true
-              }
-            },
-            "additionalProperties": true
-          },
-          "window": {
-            "type": "object",
-            "required": ["startTs", "endTs"],
-            "properties": {
-              "startTs": { "type": "number" },
-              "endTs": { "type": "number" }
-            },
-            "additionalProperties": false
-          },
-          "eligibility": { "type": "object" }
-        },
-        "additionalProperties": true
-      },
-      "solution": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "required": ["prediction", "confidence"],
-        "properties": {
-          "prediction": { "type": "number" },
-          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-          "rationale": { "type": "string" },
-          "sources": { "type": "array", "items": { "type": "string" } }
-        },
-        "additionalProperties": true
-      },
-      "verdict": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "required": ["verdict", "score"],
-        "properties": {
-          "verdict": { "enum": ["PASS", "FAIL", "REJECTED", "INDETERMINATE"] },
-          "score": { "type": "number", "minimum": 0, "maximum": 1 },
-          "scoreBasis": { "type": "string" }
-        },
-        "additionalProperties": true
-      }
-    },
-    "mcpServers": {
-      "polymarket": {
-        "command": "node",
-        "args": ["mcp/polymarket-server.mjs"]
-      }
-    },
-    "skills": [
-      "skills/base-rate-forecasting/SKILL.md",
-      "skills/calibration/SKILL.md"
-    ]
+  "version": "0.2.0",
+  "description": "Prediction reference plugin pack for prediction.v1 tasks.",
+  "skills": [
+    "./skills/base-rate-forecasting/",
+    "./skills/calibration/"
+  ],
+  "mcpServers": {
+    "polymarket": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/polymarket-server.mjs"]
+    }
   }
 }

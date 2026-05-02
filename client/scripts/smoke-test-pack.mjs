@@ -23,6 +23,7 @@ if (!existsSync(tarball)) {
 }
 
 const smokeDir = mkdtempSync(join(tmpdir(), 'jinn-pack-smoke-'));
+const smokeEnv = { ...process.env, HOME: smokeDir, NO_COLOR: '1' };
 
 function parseJsonOrExit(stdout, context) {
   try {
@@ -63,7 +64,7 @@ try {
   const run = spawnSync('npm', ['exec', '--', 'jinn', 'version', '--json'], {
     cwd: smokeDir,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
+    env: smokeEnv,
   });
   if (run.status !== 0) {
     console.error(run.stderr || run.stdout);
@@ -76,7 +77,7 @@ try {
   const npxDirect = spawnSync('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], {
     cwd: smokeDir,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
+    env: smokeEnv,
   });
   if (npxDirect.status !== 0) {
     console.error(npxDirect.stderr || npxDirect.stdout);
@@ -87,7 +88,7 @@ try {
   const npxLegacy = spawnSync('npx', ['-p', tarball, 'jinn', 'version', '--json'], {
     cwd: smokeDir,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
+    env: smokeEnv,
   });
   if (npxLegacy.status !== 0) {
     console.error(npxLegacy.stderr || npxLegacy.stdout);

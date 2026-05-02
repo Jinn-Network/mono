@@ -1,0 +1,23 @@
+{
+  "name": "@jinn-network/prediction-plugin",
+  "version": "0.2.0",
+  "description": "Reference Prediction plugin pack for prediction.v1 Polymarket forecasting tasks.",
+  "jinn": {
+    "supports": ["prediction.v1"],
+    "capabilities": {
+      "tools": {
+        "polymarket": ["market.read", "orderbook.read"]
+      }
+    },
+    "mcpServers": {
+      "polymarket": {
+        "command": "node",
+        "args": ["mcp/polymarket-server.mjs"]
+      }
+    },
+    "skills": [
+      "skills/base-rate-forecasting/SKILL.md",
+      "skills/calibration/SKILL.md"
+    ]
+  }
+}

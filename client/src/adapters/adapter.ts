@@ -6,13 +6,22 @@ import type {
   DeliveredResult,
 } from '../types/index.js';
 
+export interface TaskPostReceipt {
+  /** TaskCoordinator task id when posting through the Task-first lifecycle. */
+  taskId?: string;
+  /** Legacy/restoration marketplace request id, present only on request-first adapters. */
+  requestId?: RequestId;
+  taskCid?: string;
+  txHash?: `0x${string}`;
+}
+
 export interface ExecutionAdapter {
   readonly name: string;
 
   initialize(): Promise<void>;
 
   // Creator
-  postTask(state: Task): Promise<RequestId>;
+  postTask(state: Task): Promise<RequestId | TaskPostReceipt>;
 
   /**
    * Optional: returns the IPFS CID of the most recently posted Task payload.
@@ -32,4 +41,18 @@ export interface ExecutionAdapter {
 
   // Lifecycle
   stop(): Promise<void>;
+}
+
+export interface TaskFirstExecutionAdapter extends ExecutionAdapter {
+  watchForTasks(): AsyncIterable<Task>;
+  claimTask(taskId: string): Promise<TaskRequest & {
+    taskId: string;
+    attemptIndex: number;
+    alreadyClaimed: true;
+  }>;
+}
+
+export function isTaskFirstExecutionAdapter(adapter: ExecutionAdapter): adapter is TaskFirstExecutionAdapter {
+  const candidate = adapter as Partial<TaskFirstExecutionAdapter>;
+  return typeof candidate.watchForTasks === 'function' && typeof candidate.claimTask === 'function';
 }

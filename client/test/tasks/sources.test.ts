@@ -137,6 +137,66 @@ describe('GeneratedTaskSource', () => {
     expect(policy.bucketKey).toBe('1700000000000:1700003600000');
   });
 
+  it('uses Polymarket conditionId as generated bucketKey', async () => {
+    const job: Task = {
+      id: 'prediction-v1',
+      description: 'prediction',
+      solverType: 'prediction.v1',
+      spec: {
+        question: { text: 'Will test pass?' },
+        source: {
+          venue: 'polymarket',
+          url: 'https://polymarket.com/event/test-market',
+          identifiers: { conditionId: '0xabc' },
+        },
+      },
+      window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
+    };
+    const generator = vi.fn(async () => job);
+    const source = new GeneratedTaskSource('gen:prediction.v1', generator);
+    const [candidate] = await source.collect(new Date());
+
+    const policy = candidate.postingPolicy as { kind: 'once_per_bucket'; bucketKey: string };
+    expect(policy.bucketKey).toBe('polymarket:0xabc');
+  });
+
+  it('falls back to normalized source URL when conditionId is unavailable', async () => {
+    const job: Task = {
+      id: 'prediction-v1',
+      description: 'prediction',
+      solverType: 'prediction.v1',
+      spec: {
+        question: { text: 'Will test pass?' },
+        source: {
+          venue: 'polymarket',
+          url: 'https://polymarket.com/event/Test Market!',
+          identifiers: {},
+        },
+      },
+      window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
+    };
+    const generator = vi.fn(async () => job);
+    const source = new GeneratedTaskSource('gen:prediction.v1', generator);
+    const [candidate] = await source.collect(new Date());
+
+    const policy = candidate.postingPolicy as { kind: 'once_per_bucket'; bucketKey: string };
+    expect(policy.bucketKey).toBe('polymarket:polymarket-com-event-test-market');
+  });
+
+  it('wraps multiple generated Tasks from one poll', async () => {
+    const jobs: Task[] = [
+      { id: 'gen-1', description: 'first', window: { startTs: 1, endTs: 2 } },
+      { id: 'gen-2', description: 'second', window: { startTs: 3, endTs: 4 } },
+    ];
+    const generator = vi.fn(async () => jobs);
+    const source = new GeneratedTaskSource('gen:batch', generator);
+    const candidates = await source.collect(new Date());
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map((candidate) => candidate.task.id)).toEqual(['gen-1', 'gen-2']);
+    expect(candidates.map((candidate) => candidate.sourceKey)).toEqual(['gen:batch', 'gen:batch']);
+  });
+
   it('falls back to id as bucketKey when no window', async () => {
     const job: Task = { id: 'no-window-1', description: 'no window' };
     const generator = vi.fn(async () => job);

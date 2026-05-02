@@ -5,6 +5,7 @@
 import type { TaskGenerator } from '../tasks/sources.js';
 import { portfolioV0 } from './portfolio-v0.js';
 import { predictionV0 } from './prediction-v0.js';
+import { predictionV1 } from './prediction-v1.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
 import { learnerLoopTest } from './learner-loop-test.js';
 import type { SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
@@ -16,6 +17,7 @@ export { PREDICTION_V0_KIND } from './constants.js';
 export const SOLVER_TYPES: Record<string, SolverTypeDefinition<any>> = {
   'portfolio.v0': portfolioV0,
   'prediction.v0': predictionV0,
+  'prediction.v1': predictionV1,
   'prediction.apy.v0': predictionApyV0,
   'learner-loop-test': learnerLoopTest,
 };

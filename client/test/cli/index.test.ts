@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli/index.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,15 +15,17 @@ function captureIo() {
   };
 }
 
-async function withTempFleetEnv<T>(fn: () => Promise<T>): Promise<T> {
+async function withTempFleetEnv<T>(fn: (configPath: string) => Promise<T>): Promise<T> {
   const prevDbPath = process.env.JINN_DB_PATH;
   const prevEarningDir = process.env.JINN_EARNING_DIR;
   const root = mkdtempSync(`${tmpdir()}/jinn-cli-fleet-`);
   process.env.JINN_DB_PATH = join(root, 'jinn.db');
   process.env.JINN_EARNING_DIR = join(root, 'earning');
+  const configPath = join(root, 'config.json');
+  writeFileSync(configPath, JSON.stringify({}), 'utf-8');
 
   try {
-    return await fn();
+    return await fn(configPath);
   } finally {
     if (prevDbPath === undefined) delete process.env.JINN_DB_PATH;
     else process.env.JINN_DB_PATH = prevDbPath;
@@ -129,9 +131,9 @@ describe('runCli', () => {
   });
 
   it('keeps fleet introspection for fleet --human', async () => {
-    await withTempFleetEnv(async () => {
+    await withTempFleetEnv(async (configPath) => {
       const io = captureIo();
-      await runCli(['fleet', '--human'], {
+      await runCli(['fleet', '--config', configPath, '--human'], {
         writer: io.writer,
         exit: io.exit,
         stdoutIsTty: true,
@@ -149,9 +151,9 @@ describe('runCli', () => {
     process.env.XDG_CONFIG_HOME = home;
 
     try {
-      await withTempFleetEnv(async () => {
+      await withTempFleetEnv(async (configPath) => {
         const io = captureIo();
-        await runCli(['fleet', '--human'], {
+        await runCli(['fleet', '--config', configPath, '--human'], {
           writer: io.writer,
           exit: io.exit,
           stdoutIsTty: true,

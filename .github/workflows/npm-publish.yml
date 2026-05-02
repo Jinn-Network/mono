@@ -20,6 +20,7 @@ defaults:
 jobs:
   publish:
     name: Publish package
+    if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'client-v')
     runs-on: ubuntu-latest
     environment: npm-publish
     env:

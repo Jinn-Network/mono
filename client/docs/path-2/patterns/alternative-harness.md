@@ -47,7 +47,7 @@ import type {
   HarnessContext,
   Solution,
   ExternalHarnessEnv,
-} from '@jinn-network/harness-sdk';
+} from '@jinn-network/sdk/harness';
 import { createCoordinator } from './coordinator.js';
 
 export default function createHarness(env: ExternalHarnessEnv): Harness {

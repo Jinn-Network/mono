@@ -38,7 +38,7 @@ describe('runCreate (forecaster pattern)', () => {
 
     const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
     expect(pkg.name).toBe('@example/test-forecaster');
-    expect(pkg.dependencies['@jinn-network/harness-sdk']).toBeTruthy();
+    expect(pkg.dependencies['@jinn-network/sdk']).toBe('^0.1.0');
 
     const manifest = JSON.parse(
       readFileSync(join(pkgRoot, 'jinn.manifest.json'), 'utf8'),
@@ -144,6 +144,8 @@ describe('runCreate (evaluator pattern)', () => {
     const indexTs = readFileSync(join(target, 'src/index.ts'), 'utf8');
     expect(indexTs).toContain("role === 'evaluation'");
     expect(indexTs).not.toContain('{{');
+    const pkg = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'));
+    expect(pkg.dependencies['@jinn-network/sdk']).toBe('^0.1.0');
 
     const manifest = JSON.parse(
       readFileSync(join(target, 'jinn.manifest.json'), 'utf8'),
@@ -187,6 +189,8 @@ describe('runCreate (alternative-harness pattern)', () => {
     const indexTs = readFileSync(join(target, 'src/index.ts'), 'utf8');
     expect(indexTs).not.toContain('{{');
     expect(indexTs).toContain("solverType === 'prediction.v0'");
+    const pkg = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'));
+    expect(pkg.dependencies['@jinn-network/sdk']).toBe('^0.1.0');
   });
 
   it('rejects unknown patterns', async () => {

@@ -67,6 +67,8 @@ describe('runAdditiveMigrations', () => {
     expect(columns).toContain('manifest_generated_at');
     expect(columns).toContain('evidence_hash');
     expect(columns).toContain('task_payload');
+    expect(columns).toContain('task_id');
+    expect(columns).toContain('attempt_index');
 
     db.close();
   });
@@ -116,6 +118,27 @@ describe('TaskRunPersistence', () => {
       p.insertDiscovered(makeInput({ solverType: undefined }));
       const intent = p.getByRequestId('req-001');
       expect(intent!.solverType).toBeNull();
+    });
+
+    it('persists TaskCoordinator task id and attempt index', () => {
+      p.insertDiscovered(makeInput({
+        taskId: '42',
+        attemptIndex: 1,
+        task: { id: 'task-42', description: 'test', attemptNumber: 1 },
+      }));
+      const intent = p.getByRequestId('req-001');
+      expect(intent!.taskId).toBe('42');
+      expect(intent!.attemptIndex).toBe(1);
+    });
+
+    it('can start already-claimed TaskCoordinator requests at CLAIMED', () => {
+      p.insertDiscovered(makeInput({
+        taskId: '42',
+        attemptIndex: 0,
+        initialState: TaskRunState.CLAIMED,
+      }));
+      const intent = p.getByRequestId('req-001');
+      expect(intent!.state).toBe(TaskRunState.CLAIMED);
     });
   });
 

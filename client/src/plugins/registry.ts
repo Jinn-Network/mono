@@ -13,7 +13,7 @@ export class SolverPluginRegistry {
   }
 
   forSolverType(solverType: string): LoadedSolverPlugin[] {
-    return [...this.plugins.values()].filter((plugin) => plugin.solverType === solverType);
+    return [...this.plugins.values()].filter((plugin) => plugin.supports.includes(solverType));
   }
 
   list(): LoadedSolverPlugin[] {

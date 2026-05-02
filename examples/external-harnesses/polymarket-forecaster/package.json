@@ -26,7 +26,7 @@
     "test:e2e": "vitest run test/e2e-anvil.test.ts"
   },
   "dependencies": {
-    "@jinn-network/harness-sdk": "portal:../../../packages/harness-sdk"
+    "@jinn-network/sdk": "portal:../../../packages/sdk"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

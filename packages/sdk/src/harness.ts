@@ -1,9 +1,3 @@
-// @jinn-network/harness-sdk
-//
-// Stable contract surface for Jinn external Harness / evaluator
-// implementations. External impl authors depend on this package, NOT
-// on @jinn-network/client directly.
-
 export type {
   Address,
   Hex,
@@ -67,7 +61,7 @@ export interface HarnessContext {
 
 /**
  * Construction-time environment passed to the impl factory.
- * See spec/2026-05-external-restorer-impls.md §3.2.
+ * Per-attempt Task inputs are provided through HarnessContext.
  */
 export interface ExternalHarnessEnv {
   readonly implName: string;
@@ -96,7 +90,6 @@ export interface Harness {
 }
 
 /**
- * External-impl factory: default-export shape per
- * spec/2026-05-external-restorer-impls.md §3.2.
+ * External-impl factory: default-export shape for external Harness packages.
  */
 export type ExternalHarnessFactory = (env: ExternalHarnessEnv) => Harness;

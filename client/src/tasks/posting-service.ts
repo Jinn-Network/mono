@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getAddress } from 'viem';
-import type { ExecutionAdapter } from '../adapters/adapter.js';
+import type { ExecutionAdapter, TaskPostReceipt } from '../adapters/adapter.js';
 import { emitEvent } from '../observability/emit-event.js';
 import type { Store } from '../store/store.js';
 import type { TaskPostRecord, TaskPostingPolicyType } from '../store/store.js';
@@ -12,6 +12,9 @@ const POST_LOCK_STALE_AFTER_MS = 60_000;
 
 export interface TaskPostResult {
   requestId: RequestId;
+  taskCoordinatorTaskId?: string;
+  taskCid?: string;
+  txHash?: `0x${string}`;
   task: Task;
   attemptNumber: number;
   attemptId: string;
@@ -111,7 +114,11 @@ export class TaskPostingService {
         attemptId,
         attemptNumber,
       };
-      const requestId = await this.adapter.postTask(task);
+      const postReceipt = normalizePostReceipt(await this.adapter.postTask(task));
+      const requestId = postReceipt.requestId ?? postReceipt.taskId;
+      if (!requestId) {
+        throw new Error(`Task post adapter did not return requestId or taskId for ${candidate.task.id}`);
+      }
 
       this.store.recordOwnActivity(requestId, 'created');
       emitEvent(this.store, {
@@ -137,6 +144,9 @@ export class TaskPostingService {
       });
       return {
         requestId,
+        taskCoordinatorTaskId: postReceipt.taskId,
+        taskCid: postReceipt.taskCid,
+        txHash: postReceipt.txHash,
         task,
         attemptNumber,
         attemptId,
@@ -175,4 +185,8 @@ export class TaskPostingService {
       source,
     };
   }
+}
+
+function normalizePostReceipt(result: RequestId | TaskPostReceipt): TaskPostReceipt {
+  return typeof result === 'string' ? { requestId: result } : result;
 }

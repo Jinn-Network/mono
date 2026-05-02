@@ -1,0 +1,54 @@
+{
+  "name": "@jinn-network/sdk",
+  "version": "0.1.0",
+  "description": "Stable SDK surface for Jinn SolverNets, Harnesses, plugins, and typed payloads.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./harness": {
+      "import": "./dist/harness.js",
+      "types": "./dist/harness.d.ts"
+    },
+    "./plugins": {
+      "import": "./dist/plugins.js",
+      "types": "./dist/plugins.d.ts"
+    },
+    "./solvernets": {
+      "import": "./dist/solvernets/index.js",
+      "types": "./dist/solvernets/index.d.ts"
+    },
+    "./solvernets/prediction-v1": {
+      "import": "./dist/solvernets/prediction-v1.js",
+      "types": "./dist/solvernets/prediction-v1.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "prepublishOnly": "yarn build && yarn test",
+    "pack:smoke": "yarn pack -o jinn-sdk.tgz && node scripts/smoke-test-pack.mjs",
+    "release:sdk": "node scripts/release-sdk.mjs"
+  },
+  "dependencies": {
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
+  }
+}

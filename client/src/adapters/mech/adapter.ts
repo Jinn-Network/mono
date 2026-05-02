@@ -318,6 +318,7 @@ export class MechAdapter implements ExecutionAdapter {
       role: state.role ?? 'restoration',
       description: state.description,
       window: state.window ?? { startTs: now, endTs: now + 86_400_000 },
+      claimPolicy: state.claimPolicy,
       spec: state.spec ?? {},
       eligibility: state.eligibility ?? {},
       creator: {

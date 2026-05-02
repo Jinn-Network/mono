@@ -4,7 +4,7 @@ import { createMockHarness } from '../src/mock-harness.js';
 import type {
   ExternalHarnessEnv,
   HarnessContext,
-} from '@jinn-network/harness-sdk';
+} from '@jinn-network/sdk/harness';
 import type { HarnessAdapter, HarnessPromptArgs } from '../src/harness.js';
 
 const env: ExternalHarnessEnv = {

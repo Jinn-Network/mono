@@ -47,7 +47,7 @@ import type {
   HarnessContext,
   Solution,
   ExternalHarnessEnv,
-} from '@jinn-network/harness-sdk';
+} from '@jinn-network/sdk/harness';
 
 export default function createEvaluator(env: ExternalHarnessEnv): Harness {
   return {

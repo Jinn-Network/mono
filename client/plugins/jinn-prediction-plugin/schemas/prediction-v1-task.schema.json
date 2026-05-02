@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["id", "description", "solverType", "role", "window", "claimPolicy", "spec"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "solverType": { "const": "prediction.v1" },
+    "role": { "enum": ["restoration", "evaluation"] },
+    "window": {
+      "type": "object",
+      "required": ["startTs", "endTs"],
+      "properties": {
+        "startTs": { "type": "number" },
+        "endTs": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "claimPolicy": {
+      "type": "object",
+      "required": ["kind", "maxClaims", "maxClaimsPerSolver", "claimWindow", "selection", "economics"],
+      "properties": {
+        "kind": { "const": "parallel" },
+        "maxClaims": { "type": "integer", "minimum": 1 },
+        "maxClaimsPerSolver": { "type": "integer", "minimum": 1 },
+        "claimWindow": { "const": "task-window" },
+        "selection": { "const": "all-valid-solutions-scored" },
+        "economics": { "const": "testnet-flat" }
+      },
+      "additionalProperties": true
+    },
+    "spec": {
+      "type": "object",
+      "required": ["question", "source", "resolution", "consensusSnapshot", "eligibilitySnapshot"],
+      "properties": {
+        "question": {
+          "type": "object",
+          "required": ["kind", "text", "yesLabel", "noLabel"],
+          "properties": {
+            "kind": { "const": "binary" },
+            "text": { "type": "string", "minLength": 1 },
+            "yesLabel": { "const": "YES" },
+            "noLabel": { "const": "NO" }
+          },
+          "additionalProperties": false
+        },
+        "source": {
+          "type": "object",
+          "required": ["type", "venue", "url", "identifiers"],
+          "properties": {
+            "type": { "const": "prediction-market" },
+            "venue": { "const": "polymarket" },
+            "url": { "type": "string", "format": "uri" },
+            "identifiers": {
+              "type": "object",
+              "required": ["marketId", "conditionId", "yesTokenId", "noTokenId"],
+              "properties": {
+                "marketId": { "type": "string", "minLength": 1 },
+                "conditionId": { "type": "string", "minLength": 1 },
+                "yesTokenId": { "type": "string", "minLength": 1 },
+                "noTokenId": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "resolution": {
+          "type": "object",
+          "required": ["expectedResolutionTime", "rulesText", "rulesUrl"],
+          "properties": {
+            "expectedResolutionTime": { "type": "string", "format": "date-time" },
+            "rulesText": { "type": "string", "minLength": 1 },
+            "rulesUrl": { "type": "string", "format": "uri" },
+            "timezone": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "consensusSnapshot": {
+          "type": "object",
+          "required": ["sampledAt", "probabilityYes", "method", "bestBidYes", "bestAskYes", "spread", "source"],
+          "properties": {
+            "sampledAt": { "type": "string", "format": "date-time" },
+            "probabilityYes": { "$ref": "#/$defs/probability" },
+            "method": { "const": "best-bid-ask-midpoint" },
+            "bestBidYes": { "$ref": "#/$defs/probability" },
+            "bestAskYes": { "$ref": "#/$defs/probability" },
+            "spread": { "$ref": "#/$defs/probability" },
+            "source": { "const": "polymarket-clob" }
+          },
+          "additionalProperties": false
+        },
+        "eligibilitySnapshot": {
+          "type": "object",
+          "required": ["sampledAt", "timeToResolutionHours", "liquidityUsd", "volume24hUsd", "orderbookAgeSeconds", "selectionReason"],
+          "properties": {
+            "sampledAt": { "type": "string", "format": "date-time" },
+            "timeToResolutionHours": { "type": "number" },
+            "liquidityUsd": { "type": "string" },
+            "volume24hUsd": { "type": "string" },
+            "orderbookAgeSeconds": { "type": "number", "minimum": 0 },
+            "selectionReason": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "eligibility": { "type": "object" }
+  },
+  "$defs": {
+    "probability": {
+      "type": "string",
+      "pattern": "^(0(\\.\\d+)?|1(\\.0+)?)$"
+    }
+  },
+  "additionalProperties": true
+}

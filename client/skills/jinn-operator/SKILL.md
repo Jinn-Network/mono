@@ -204,7 +204,7 @@ SolverPlugins are scoped to SolverNets, not injected globally into Harnesses:
 
 - `jinn solver-nets set-harness prediction <harness>` changes the Harness used for restoration Tasks.
 - `jinn solver-nets add-plugin prediction <source>` attaches an extra SolverPlugin to only that SolverNet.
-- `jinn solver-nets doctor prediction` validates the canonical plugin, extra plugins, schemas, and Harness wiring.
+- `jinn solver-nets doctor prediction` validates the SolverNet contract, runtime plugin packs, and Harness wiring.
 
 ### Disabling
 

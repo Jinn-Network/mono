@@ -1,0 +1,13 @@
+{
+  "name": "jinn-prediction-plugin",
+  "version": "0.2.0",
+  "description": "Prediction reference plugin pack for prediction.v1 tasks.",
+  "mcpServers": {
+    "polymarket": {
+      "command": "node",
+      "args": ["${extensionPath}/mcp/polymarket-server.mjs"],
+      "cwd": "${extensionPath}"
+    }
+  },
+  "contextFileName": "GEMINI.md"
+}

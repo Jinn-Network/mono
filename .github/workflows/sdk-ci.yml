@@ -1,0 +1,49 @@
+name: SDK CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/sdk/**'
+      - '.github/workflows/sdk-ci.yml'
+      - '.github/workflows/sdk-npm-publish.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/sdk/**'
+      - '.github/workflows/sdk-ci.yml'
+      - '.github/workflows/sdk-npm-publish.yml'
+
+defaults:
+  run:
+    working-directory: packages/sdk
+
+jobs:
+  check:
+    name: Typecheck, Test & Pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn build
+      - run: yarn pack:smoke
+
+  client-compat:
+    name: Client Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn typecheck

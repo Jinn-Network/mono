@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../../src/config.js';
@@ -9,6 +9,10 @@ function loadTestnetConfig() {
   const prev = { ...process.env };
   // Isolate from the developer's real ~/.jinn-client/config.json.
   const tmp = mkdtempSync(join(tmpdir(), 'jinn-digest-home-'));
+  const configDir = join(tmp, '.jinn-client');
+  const configPath = join(configDir, 'config.json');
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(configPath, JSON.stringify({ network: 'testnet' }), 'utf-8');
   process.env.HOME = tmp;
   process.env.JINN_NETWORK = 'testnet';
   delete process.env.JINN_TESTNET_L2_DEPLOYMENT;
@@ -17,7 +21,7 @@ function loadTestnetConfig() {
   delete process.env.JINN_TESTNET_STOLAS_DEPLOYMENT;
   delete process.env.JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT;
   try {
-    return loadConfig();
+    return loadConfig(configPath);
   } finally {
     process.env = prev;
     rmSync(tmp, { recursive: true, force: true });

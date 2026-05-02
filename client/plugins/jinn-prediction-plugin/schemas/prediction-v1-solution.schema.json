@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["probabilityYes", "submittedAt", "format", "modelId"],
+  "properties": {
+    "probabilityYes": {
+      "type": "string",
+      "pattern": "^(0(\\.\\d+)?|1(\\.0+)?)$"
+    },
+    "submittedAt": { "type": "string", "format": "date-time" },
+    "format": { "const": "decimal" },
+    "modelId": { "type": "string", "minLength": 1 },
+    "confidence": { "enum": ["low", "medium", "high"] },
+    "methodology": { "type": "string" },
+    "evidenceCids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reasoningCid": { "type": "string", "minLength": 1 },
+    "sourceRefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "url"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "format": "uri" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

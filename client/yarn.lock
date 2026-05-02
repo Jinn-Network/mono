@@ -650,6 +650,7 @@ __metadata:
     "@coinbase/cdp-sdk": "npm:^1.48.2"
     "@ethereumjs/wallet": "npm:^10.0.0"
     "@hono/node-server": "npm:^1.19.12"
+    "@jinn-network/sdk": "portal:../packages/sdk"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
     "@msgpack/msgpack": "npm:^3.0.0"
     "@noble/ed25519": "npm:^3.1.0"
@@ -713,6 +714,14 @@ __metadata:
     xterm-addon-fit: "npm:^0.8.0"
     xterm-addon-web-links: "npm:^0.9.0"
   languageName: unknown
+  linkType: soft
+
+"@jinn-network/sdk@portal:../packages/sdk::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/sdk@portal:../packages/sdk::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    zod: "npm:^3.22.0"
+  languageName: node
   linkType: soft
 
 "@jridgewell/gen-mapping@npm:^0.3.12, @jridgewell/gen-mapping@npm:^0.3.2, @jridgewell/gen-mapping@npm:^0.3.5":

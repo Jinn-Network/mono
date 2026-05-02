@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["verdict", "resolutionSource", "task", "solutionEnvelope", "benchmark", "checks"],
+  "properties": {
+    "verdict": { "enum": ["SCORED", "REJECTED", "INVALID", "INDETERMINATE"] },
+    "outcome": { "enum": ["YES", "NO", "INVALID"] },
+    "resolvedAt": { "type": "string", "format": "date-time" },
+    "resolutionSource": {
+      "type": "object",
+      "required": ["venue", "url", "marketId", "conditionId"],
+      "properties": {
+        "venue": { "const": "polymarket" },
+        "url": { "type": "string", "format": "uri" },
+        "marketId": { "type": "string", "minLength": 1 },
+        "conditionId": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "task": {
+      "type": "object",
+      "required": ["cid", "id"],
+      "properties": {
+        "cid": { "type": "string" },
+        "id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "solutionEnvelope": {
+      "type": "object",
+      "required": ["cid", "sha256"],
+      "properties": {
+        "cid": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "claimed": {
+      "type": "object",
+      "required": ["probabilityYes", "submittedAt", "modelId"],
+      "properties": {
+        "probabilityYes": { "type": "string", "pattern": "^(0(\\.\\d+)?|1(\\.0+)?)$" },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "modelId": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "benchmark": {
+      "type": "object",
+      "required": ["probabilityYes", "sampledAt", "method"],
+      "properties": {
+        "probabilityYes": { "type": "string", "pattern": "^(0(\\.\\d+)?|1(\\.0+)?)$" },
+        "sampledAt": { "type": "string", "format": "date-time" },
+        "method": { "const": "best-bid-ask-midpoint" }
+      },
+      "additionalProperties": false
+    },
+    "scores": {
+      "type": "object",
+      "required": ["scoreBasis", "solverBrier", "consensusBrier", "brierSpread"],
+      "properties": {
+        "scoreBasis": { "const": "brier-loss.v1" },
+        "solverBrier": { "type": "string" },
+        "consensusBrier": { "type": "string" },
+        "brierSpread": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["PASS", "FAIL", "SKIP", "INDETERMINATE"] },
+          "detail": {}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

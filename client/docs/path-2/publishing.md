@@ -97,7 +97,7 @@ The signing algorithm matches `client/src/harnesses/manifest/` (the Phase A.2 ve
 
 ```ts
 import { sign } from '@noble/ed25519';
-import { canonicalize } from './canonical.js';   // from packages/harness-sdk
+import { canonicalize } from './canonical.js';   // from packages/sdk
 
 const manifest = JSON.parse(readFileSync('jinn.manifest.json', 'utf8'));
 const { signature, ...payload } = manifest;

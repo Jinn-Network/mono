@@ -1,7 +1,7 @@
 /**
  * `jinn solver-plugins show|validate|pack` — author/curator tooling.
  *
- * These commands inspect SolverPlugin packages. They do not activate plugins;
+ * These commands inspect SolverNet helper plugin packages. They do not activate plugins;
  * operators attach plugins to SolverNets with `jinn solver-nets add-plugin`.
  */
 
@@ -37,7 +37,7 @@ async function show(ctx: CommandContext, rest: string[]): Promise<void> {
       plugin: {
         name: plugin.name,
         version: plugin.version,
-        solverType: plugin.solverType,
+        supports: plugin.supports,
         source: plugin.source,
         sourceKind: plugin.sourceKind,
         root: plugin.root,
@@ -72,7 +72,7 @@ async function validate(ctx: CommandContext, rest: string[]): Promise<void> {
       plugin: {
         name: plugin.name,
         version: plugin.version,
-        solverType: plugin.solverType,
+        supports: plugin.supports,
         sha256: plugin.sha256,
         manifestPath: plugin.manifestPath,
       },
@@ -134,7 +134,7 @@ async function pack(ctx: CommandContext, rest: string[]): Promise<void> {
       plugin: {
         name: manifest.name,
         version: manifest.version,
-        solverType: manifest.jinn.solverType,
+        supports: manifest.jinn?.supports ?? [],
         manifestPath,
         sha256,
       },
@@ -152,14 +152,14 @@ async function pack(ctx: CommandContext, rest: string[]): Promise<void> {
 
 const command: CommandModule = {
   name: 'solver-plugins',
-  summary: 'Inspect, validate, and pack SolverPlugin packages',
+  summary: 'Inspect, validate, and pack SolverNet helper plugin packages',
   helpText: `Usage:
   jinn solver-plugins show <source-or-path>
   jinn solver-plugins validate <source-or-path>
   jinn solver-plugins pack <path> [--out <file.tgz>]
 
-SolverPlugin commands are author and curator tooling. They do not activate a
-plugin for runtime use. Attach runtime plugins with:
+Solver plugin commands are author and curator tooling. They do not activate a
+plugin for runtime use. Attach optional runtime packs with:
   jinn solver-nets add-plugin <solver-net> <source>
 `,
   async run(ctx) {

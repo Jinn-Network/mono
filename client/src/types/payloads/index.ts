@@ -8,6 +8,10 @@ import {
   PredictionV0VerdictPayloadSchema,
 } from './prediction-v0.js';
 import {
+  PredictionV1RestorationPayloadSchema,
+  PredictionV1VerdictPayloadSchema,
+} from './prediction-v1.js';
+import {
   PredictionApyV0RestorationPayloadSchema,
   PredictionApyV0VerdictPayloadSchema,
 } from './prediction-apy-v0.js';
@@ -32,6 +36,10 @@ export const SOLVER_TYPE_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
     restoration: PredictionV0RestorationPayloadSchema,
     verdict: PredictionV0VerdictPayloadSchema,
   },
+  'prediction.v1': {
+    restoration: PredictionV1RestorationPayloadSchema,
+    verdict: PredictionV1VerdictPayloadSchema,
+  },
   'prediction.apy.v0': {
     restoration: PredictionApyV0RestorationPayloadSchema,
     verdict: PredictionApyV0VerdictPayloadSchema,
@@ -54,4 +62,5 @@ export function validatePayload(solverType: string, role: Role, payload: unknown
 
 export * from './portfolio-v0.js';
 export * from './prediction-v0.js';
+export * from './prediction-v1.js';
 export * from './prediction-apy-v0.js';
