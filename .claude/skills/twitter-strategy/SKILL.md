@@ -76,9 +76,23 @@ Flag drift in either direction:
 
 ### Step 6 — Output
 
-Print the structured review (format below) inline in chat. Do not write to disk — this skill is a lens, not a state file.
+Print the structured review (format below) inline in chat. Do not write the review itself to disk — this skill is a lens, not a state file. The freshness stamp in Step 7 is the only persisted artefact.
 
 If `growth-day` invokes this skill, the review feeds the day's drift flag.
+
+### Step 7 — Write the freshness stamp
+
+After printing the review, write a freshness stamp to `growth/.local/twitter-strategy-last-run.md`. Overwrite each run; do not append. Format:
+
+```
+# Twitter strategy — last run
+
+YYYY-MM-DDTHH:MM:SSZ
+Window: 7d / 30d
+Drift flags: N
+```
+
+This file is read by `growth-day` Step 0 to detect freshness without re-running the lens.
 
 ## Output format
 

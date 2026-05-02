@@ -66,10 +66,10 @@ If a search returns mostly noise after the filter, refine the vocabulary for nex
 Each cluster's §1 entry has three sub-sections:
 
 - **Frame (current):** one-paragraph synthesis of how the cluster is thinking *as of this refresh*. Replace the prior frame *only* if today's evidence shifts it; otherwise keep the prior frame and add a one-line dated note (`2026-MM-DD: no frame shift; N new evidence points added`).
-- **Evidence (cumulative, dated):** append today's verbatim quotes with handle, date, URL. Do not delete prior evidence — the historical record is the dynamic model. Group by date so a reader can see the cluster's drift over weeks.
+- **Evidence (cumulative, dated):** append today's evidence under a new `Sampled this run: YYYY-MM-DD — N handles via "<vocab>" search; M passed §7 filter` sub-heading, then list verbatim quotes with handle, date, URL beneath. Do not delete prior `Sampled this run:` blocks — the historical record is the dynamic model. The literal `Sampled this run: YYYY-MM-DD` prefix lets `growth-day` Step 0 detect freshness with a simple grep.
 - **Gap to Jinn (current + drift log):** the current synthesis of where the cluster sits relative to the THESIS frame, plus a dated change-log when the gap shifts (`2026-MM-DD: gap refined from X to Y because [evidence]`).
 
-If a cluster genuinely produced no new evidence (e.g., search returned no usable handles after the filter), say so explicitly: `2026-MM-DD: refresh attempted; 0 new evidence (filter rejected all)` — that itself is data.
+If a cluster genuinely produced no new evidence (e.g., search returned no usable handles after the filter), still write the `Sampled this run: YYYY-MM-DD` heading with `0 new evidence (filter rejected all)` underneath — that itself is data, and it keeps the freshness stamp current.
 
 ### Step 4 — Identify bridge angles
 
