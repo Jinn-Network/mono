@@ -1,0 +1,49 @@
+import { describe, it, expect } from 'vitest';
+import createEvaluator from '../src/index.js';
+import type {
+  ExternalHarnessEnv,
+  HarnessContext,
+} from '@jinn-network/harness-sdk';
+
+const env: ExternalHarnessEnv = {
+  implName: '{{packageName}}',
+  implVersion: '0.1.0',
+  network: '{{network}}',
+  implStateDir: '/tmp/{{packageNameSlug}}',
+  secrets: Object.freeze({}),
+  log: () => {},
+  stub: false,
+};
+
+const ctx: HarnessContext = {
+  task: { id: 'eval-1', description: 'eval', role: 'evaluation', solverType: '{{solverTypeString}}', spec: {} },
+  taskCid: undefined,
+  implStateDir: '/tmp/{{packageNameSlug}}',
+  workingDir: '/tmp/{{packageNameSlug}}-work',
+  log: () => {},
+  abort: new AbortController().signal,
+  msUntilEndTs: () => 60_000,
+  trajectory: { addSpan: () => ({}) },
+};
+
+describe('{{packageName}}', () => {
+  it('supports the configured SolverType only as evaluation', () => {
+    const impl = createEvaluator(env);
+    expect(impl.supports({ solverType: '{{solverTypeString}}', role: 'evaluation' })).toBe(
+      true,
+    );
+    expect(impl.supports({ solverType: '{{solverTypeString}}', role: 'restoration' })).toBe(
+      false,
+    );
+    expect(impl.supports({ solverType: 'other.v0', role: 'evaluation' })).toBe(false);
+  });
+
+  it('produces a verdictPayload with a score field', async () => {
+    const impl = createEvaluator(env);
+    const out = await impl.run(ctx);
+    expect(out.verdictPayload).toBeDefined();
+    expect(typeof (out.verdictPayload as Record<string, unknown>).score).toBe(
+      'number',
+    );
+  });
+});

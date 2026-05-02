@@ -7,7 +7,7 @@
  * Per DR §4.3 (`docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md`):
  *
  *   At evaluator-delivery settlement, the evaluator calls
- *   `giveFeedback(restorerAgentId, ...)` with a body naming the specific
+ *   `giveFeedback(harnessAgentId, ...)` with a body naming the specific
  *   manifest CID / `evidenceHash` the verdict pertains to. Reputation
  *   accrues to the operator's `agentId`; the body anchors which execution
  *   the feedback is about.
@@ -23,7 +23,7 @@
  *
  * Self-feedback guard: the contract reverts on self-feedback (caller cannot
  * be the agent owner / approved / operator). For Jinn's typical deployment
- * the evaluator is a different operator from the restorer, so this is a no-op;
+ * the evaluator is a different operator from the harness, so this is a no-op;
  * but in single-operator dev/test setups the same Safe may evaluate its own
  * restoration. Callers are expected to catch the revert and log gracefully —
  * the evaluator's `claimDelivery` is the authoritative settlement, so a failed
@@ -35,15 +35,15 @@
  *   2. `submitEvaluatorFeedback` + `mapVerdictToScore` — the engine-side
  *      hook that maps an evaluator's verdict to a score and submits feedback.
  *
- * ── Restorer-agentId resolution ─────────────────────────────────────────────
+ * ── Harness-agentId resolution ─────────────────────────────────────────────
  *
- * Resolving the restorer's `agentId` from the evaluator's perspective is
+ * Resolving the harness's `agentId` from the evaluator's perspective is
  * deferred to `resolveAgentIdForManifest` in `./identity.js`. The hook here
- * takes `restorerAgentId` as a direct input. The two natural resolution paths:
+ * takes `harnessAgentId` as a direct input. The two natural resolution paths:
  *
  *   (b) subgraph query: `Operator { agentId } where executions_some: { manifestHash: <evidenceHash> }`
  *   (c) on-chain scan of `IdentityRegistry.Registered` events for the
- *       restorer's Safe (`getAgentByWallet` is not exposed on-chain).
+ *       harness's Safe (`getAgentByWallet` is not exposed on-chain).
  *
  * Subgraph (b) is the cheapest and aligns with the rest of the discovery
  * surface; (c) is the fallback when the subgraph is unavailable.
@@ -57,13 +57,13 @@
  *
  *   - PASS         → score = 100, scoreDecimals = 2 (= 1.00)  → submit feedback.
  *   - FAIL         → score =   0, scoreDecimals = 2 (= 0.00)  → submit feedback.
- *   - REJECTED     → no feedback. The restorer was not eligible to attempt
- *                    this intent (e.g. minClosedTrades unmet); a 0-score
+ *   - REJECTED     → no feedback. The harness was not eligible to attempt
+ *                    this task (e.g. minClosedTrades unmet); a 0-score
  *                    feedback would unfairly tarnish their reputation for a
  *                    structural mismatch, not a quality failure.
  *   - INDETERMINATE → no feedback. The evaluator could not rederive
  *                    (HL unreachable, post-snapshot funding accrual not
- *                    settled). Not a verdict on the restorer.
+ *                    settled). Not a verdict on the harness.
  *
  * If the impl emits a numeric score in `[0, 1]` separate from verdict, the
  * caller should pre-multiply it by 100 and pass `scoreDecimals=2`.
@@ -180,8 +180,8 @@ export interface FeedbackSummary {
 // ── Argument types ──────────────────────────────────────────────────────────
 
 export interface GiveFeedbackArgs {
-  /** ERC-8004 agentId of the restorer being reviewed. */
-  restorerAgentId: bigint;
+  /** ERC-8004 agentId of the harness being reviewed. */
+  harnessAgentId: bigint;
   /** Numerator. e.g. 100 with `scoreDecimals=2` → 1.00. Range: int128. */
   score: number | bigint;
   /** Exponent: `score / 10^scoreDecimals`. Contract bounds: <= 18. */
@@ -252,7 +252,7 @@ export class ReputationRegistryClient {
   // ── Write paths ──────────────────────────────────────────────────────────
 
   /**
-   * Submit feedback on a restorer's agent NFT. The body identifies the
+   * Submit feedback on a harness's agent NFT. The body identifies the
    * manifest being evaluated via `feedbackURI = "manifest:<cid>"` and
    * `feedbackHash = manifestHash` (the evidenceHash committed in
    * `claimDelivery`).
@@ -273,7 +273,7 @@ export class ReputationRegistryClient {
       abi: REPUTATION_REGISTRY_ABI,
       functionName: 'giveFeedback',
       args: [
-        args.restorerAgentId,
+        args.harnessAgentId,
         value,
         args.scoreDecimals,
         args.tag1 ?? '',
@@ -527,25 +527,25 @@ export { ZERO_HASH };
 
 // ── Feedback hook ───────────────────────────────────────────────────────────
 
-/** Restorer-side outputs the hook needs to anchor the feedback on chain. */
-export interface RestorerExecutionRef {
-  /** ERC-8004 agentId of the restorer being reviewed. */
-  restorerAgentId: bigint;
-  /** IPFS CID of the restorer's manifest (NOT the evaluator's verdict). */
-  restorerManifestCid: string;
-  /** keccak256 of the restorer's signed manifest = evidenceHash on JinnRouter. */
-  restorerEvidenceHash: Hex;
+/** Harness-side outputs the hook needs to anchor the feedback on chain. */
+export interface HarnessExecutionRef {
+  /** ERC-8004 agentId of the harness being reviewed. */
+  harnessAgentId: bigint;
+  /** IPFS CID of the harness's manifest (NOT the evaluator's verdict). */
+  harnessManifestCid: string;
+  /** keccak256 of the harness's signed manifest = evidenceHash on JinnRouter. */
+  harnessEvidenceHash: Hex;
 }
 
 /** Verdict-side output of the evaluator. */
 export interface EvaluatorVerdict {
   verdict: 'PASS' | 'FAIL' | 'INDETERMINATE' | 'REJECTED';
   /**
-   * Optional spec-kind label (e.g. `"portfolio.v0"`). Emitted as `tag1` so
-   * downstream subgraphs can filter feedback by execution kind cheaply
+   * Optional solverType label (e.g. `"portfolio.v0"`). Emitted as `tag1` so
+   * downstream subgraphs can filter feedback by SolverType cheaply
    * (`tag1` is indexed on the `NewFeedback` event).
    */
-  kind?: string;
+  solverType?: string;
   /**
    * Optional opaque tag2 — reserved for future use (e.g. evaluator software
    * version). Default empty.
@@ -599,7 +599,7 @@ export function mapVerdictToScore(verdict: EvaluatorVerdict['verdict']): ScoreMa
 }
 
 /**
- * Submit feedback on the restorer's agent NFT. The body is the canonical
+ * Submit feedback on the harness's agent NFT. The body is the canonical
  * `manifest:<cid>` URI + `evidenceHash` — the subgraph parses these to
  * synthesize an `Execution` row joined to the operator.
  *
@@ -607,13 +607,13 @@ export function mapVerdictToScore(verdict: EvaluatorVerdict['verdict']): ScoreMa
  * (the engine's deliver path) should log the outcome but never let it
  * propagate. The on-chain `claimDelivery` already settled.
  *
- * Self-feedback (caller is owner/approved/operator of `restorerAgentId`)
+ * Self-feedback (caller is owner/approved/operator of `harnessAgentId`)
  * reverts on chain with a known string; we surface that as a graceful
  * `{ kind: 'skipped', reason: 'self-feedback' }`.
  */
 export async function submitEvaluatorFeedback(args: {
   registry: ReputationRegistryClient;
-  ref: RestorerExecutionRef;
+  ref: HarnessExecutionRef;
   verdict: EvaluatorVerdict;
   /** Optional logger; defaults to console.warn for failures. */
   log?: (entry: { level: 'info' | 'warn' | 'error'; msg: string; data?: unknown }) => void;
@@ -626,18 +626,18 @@ export async function submitEvaluatorFeedback(args: {
     log({
       level: 'info',
       msg: `[reputation] skipping giveFeedback for verdict=${verdict.verdict} (policy: no on-chain feedback)`,
-      data: { restorerAgentId: ref.restorerAgentId.toString(), verdict: verdict.verdict },
+      data: { harnessAgentId: ref.harnessAgentId.toString(), verdict: verdict.verdict },
     });
     return { kind: 'skipped', reason: 'verdict-not-eligible' };
   }
 
   const giveArgs: GiveFeedbackArgs = {
-    restorerAgentId: ref.restorerAgentId,
+    harnessAgentId: ref.harnessAgentId,
     score: mapped.score,
     scoreDecimals: mapped.scoreDecimals,
-    manifestRef: `manifest:${ref.restorerManifestCid}`,
-    manifestHash: ref.restorerEvidenceHash,
-    ...(verdict.kind ? { tag1: verdict.kind } : {}),
+    manifestRef: `manifest:${ref.harnessManifestCid}`,
+    manifestHash: ref.harnessEvidenceHash,
+    ...(verdict.solverType ? { tag1: verdict.solverType } : {}),
     ...(verdict.tag2 ? { tag2: verdict.tag2 } : {}),
   };
 
@@ -647,11 +647,11 @@ export async function submitEvaluatorFeedback(args: {
       level: 'info',
       msg: '[reputation] giveFeedback submitted',
       data: {
-        restorerAgentId: ref.restorerAgentId.toString(),
+        harnessAgentId: ref.harnessAgentId.toString(),
         verdict: verdict.verdict,
         score: mapped.score,
         scoreDecimals: mapped.scoreDecimals,
-        manifestCid: ref.restorerManifestCid,
+        manifestCid: ref.harnessManifestCid,
         txHash,
       },
     });
@@ -661,25 +661,25 @@ export async function submitEvaluatorFeedback(args: {
 
     // Self-feedback guard: contract reverts with "Self-feedback not allowed"
     // when the evaluator EOA/Safe is the owner/approved/operator of the
-    // restorer's agentId. This is structurally possible in single-operator
+    // harness's agentId. This is structurally possible in single-operator
     // dev setups; treat as a graceful skip.
     if (msg.includes('Self-feedback not allowed')) {
       log({
         level: 'warn',
-        msg: '[reputation] giveFeedback skipped: evaluator is the restorer (self-feedback guard)',
-        data: { restorerAgentId: ref.restorerAgentId.toString() },
+        msg: '[reputation] giveFeedback skipped: evaluator is the harness (self-feedback guard)',
+        data: { harnessAgentId: ref.harnessAgentId.toString() },
       });
       return { kind: 'skipped', reason: 'self-feedback' };
     }
 
     // Agent doesn't exist on chain. The contract reverts with the canonical
-    // ERC-721 error; surface as a graceful skip — the restorer hasn't yet
+    // ERC-721 error; surface as a graceful skip — the harness hasn't yet
     // minted (or we're querying the wrong chain).
     if (msg.includes('ERC721NonexistentToken') || msg.includes('nonexistent')) {
       log({
         level: 'warn',
-        msg: '[reputation] giveFeedback skipped: restorer agentId not minted',
-        data: { restorerAgentId: ref.restorerAgentId.toString() },
+        msg: '[reputation] giveFeedback skipped: harness agentId not minted',
+        data: { harnessAgentId: ref.harnessAgentId.toString() },
       });
       return { kind: 'skipped', reason: 'agent-not-found' };
     }
@@ -690,7 +690,7 @@ export async function submitEvaluatorFeedback(args: {
       level: 'warn',
       msg: '[reputation] giveFeedback failed (non-fatal); claimDelivery already authoritative',
       data: {
-        restorerAgentId: ref.restorerAgentId.toString(),
+        harnessAgentId: ref.harnessAgentId.toString(),
         error: msg,
       },
     });

@@ -7,7 +7,7 @@
 import type { GatheredStatusRaw } from './status-build.js';
 
 type EventKind =
-  | 'intent_posted'
+  | 'task_posted'
   | 'request_claimed'
   | 'delivery_submitted'
   | 'evaluation_submitted'
@@ -22,7 +22,7 @@ export interface HistoryEvent {
   serviceIndex: number;
   kind: EventKind;
   subkind?: string;
-  intentId: string | null;
+  taskId: string | null;
   txHash: string | null;
   outcome: 'ok' | 'failed' | 'pending';
 }
@@ -43,14 +43,14 @@ export interface HistoryOptions {
 function toEventKind(kind: string): EventKind {
   switch (kind) {
     case 'created':
-      return 'intent_posted';
+      return 'task_posted';
     case 'claimed':
       return 'request_claimed';
     case 'delivered':
       return 'delivery_submitted';
     case 'evaluated':
       return 'evaluation_submitted';
-    case 'intent_posted':
+    case 'task_posted':
     case 'request_claimed':
     case 'delivery_submitted':
     case 'evaluation_submitted':
@@ -108,7 +108,7 @@ export function assembleHistoryV1(
       serviceIndex: e.serviceIndex ?? 0,
       kind,
       ...(kind === 'other' ? { subkind: e.kind } : {}),
-      intentId: e.requestId ?? null,
+      taskId: e.requestId ?? null,
       txHash: e.txHash ?? null,
       outcome: e.outcome === 'failed' ? 'failed' : 'ok',
     };

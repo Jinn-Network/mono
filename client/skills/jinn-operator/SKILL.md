@@ -1,6 +1,6 @@
 ---
 name: jinn-operator
-description: Set up and operate a Jinn Network agent. Use when the user wants to install the jinn client, configure MCP tools, run `jinn run`, manage a running daemon, submit intents, or understand the Jinn protocol. Activates on mentions of "jinn", "jinn agent", "jinn network", "jinn run", "desired state", "restoration", or "intent" in the context of operating an agent.
+description: Set up and operate a Jinn Network agent. Use when the user wants to install the jinn client, configure MCP tools, run `jinn run` or `jinn quickstart`, manage a running daemon, submit Tasks, or understand the Jinn protocol. Activates on mentions of "jinn", "jinn agent", "jinn network", "jinn run", "jinn quickstart", "Task", "SolverNet", "restoration", or "SolverPlugin" in the context of operating an agent.
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 
@@ -10,7 +10,7 @@ Guides you through installing, configuring, and operating a Jinn Network agent.
 
 ## What Is Jinn
 
-Jinn is a training protocol for agentic intents. It defines a loop:
+Jinn is a training protocol for agentic Tasks. It defines a loop:
 
 ```
 Creation  -->  Execution  -->  Evaluation  -->  Knowledge
@@ -18,8 +18,8 @@ Creation  -->  Execution  -->  Evaluation  -->  Knowledge
    +-----------------------------------------------+
 ```
 
-1. **Creation** — a creator publishes a *desired state* (an intent describing what should be true)
-2. **Execution** — a restorer claims the intent and attempts to make it true
+1. **Creation** — a creator publishes a Task describing work the network should perform
+2. **Execution** — a Solver claims the Task and attempts to solve it through the selected SolverNet
 3. **Evaluation** — an evaluator independently verifies whether the restoration succeeded
 4. **Knowledge** — artifacts (learnings, evidence) accumulate to improve future attempts
 
@@ -62,16 +62,18 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn status` | Daemon liveness + roll-up (poll this for monitoring; pull detail separately) |
 | `jinn fleet` | Per-service fleet detail (wallets, staking, rewards, attention) |
 | `jinn balance` | Flat per-wallet balance map across master and service wallets |
-| `jinn history` | Recent protocol activity (intents, claims, deliveries, evaluations, rewards) |
+| `jinn history` | Recent protocol activity (Tasks, claims, deliveries, evaluations, rewards) |
 | `jinn rewards` | Earned vs claimed per service, per asset; next checkpoint time |
 | `jinn logs` | Structured event log (one JSON object per line) |
-| `jinn submit-intent` | Post a desired state (restoration job) to the protocol |
+| `jinn tasks` | Submit, list, and inspect Tasks |
+| `jinn solver-nets` | Enable SolverNets, select Harnesses, and attach SolverNet-scoped SolverPlugins |
+| `jinn harnesses` | List, inspect, add, and remove Harnesses |
+| `jinn solver-plugins` | Validate, inspect, and pack SolverPlugin packages |
+| `jinn integrations` | Configure host AI tools to use the Jinn MCP server and operator skill |
 | `jinn claim-rewards` | Pull pending protocol rewards to the fleet multisigs |
 | `jinn withdraw` | Sweep master / agents per withdraw flags |
 | `jinn keys` | Keystore management: backup, change-password |
-| `jinn plugin` | Configure AI tools to use Jinn MCP server and operator skill |
-| `jinn update` | Update the client package and refresh plugins in all configured AI tools |
-| `jinn intents` | List, enable, or disable restoration of specific intent kinds. |
+| `jinn update` | Update the client package and refresh integrations in all configured AI tools |
 | `jinn mcp` | Run the operator MCP server over stdio |
 | `jinn migrate-agent-id` | Backfill ERC-8004 agent_id on legacy complete services (jinn-mono-jgp) |
 | `jinn conformance` | Run the envelope + trajectory conformance suite against a signed envelope CID |
@@ -81,7 +83,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 
 If the user wants their agent (Claude Code, Cursor, etc.) to operate jinn programmatically, configure the MCP server:
 
-**For Claude Code** — run `jinn plugin install` (installs automatically) or add to project/user MCP settings manually:
+**For Claude Code** — run `jinn integrations install` (installs automatically) or add to project/user MCP settings manually:
 ```json
 {
   "mcpServers": {
@@ -116,19 +118,19 @@ Once configured, these MCP tools become available:
 | `jinn_status` | Daemon liveness and fleet health roll-up. Read-only. Poll this to monitor progress. Fast (<2s). |
 | `jinn_fleet` | Per-service fleet detail: wallets, staking status, activity counts. Read-only. Fast (<5s). |
 | `jinn_balance` | Flat per-wallet balance map across master and service wallets. Read-only. Requires RPC. Fast (<5s). |
-| `jinn_history` | Recent protocol activity: intents, claims, deliveries, evaluations, rewards. Read-only from local DB. Fast (<2s). |
+| `jinn_history` | Recent protocol activity: Tasks, claims, deliveries, evaluations, rewards. Read-only from local DB. Fast (<2s). |
 | `jinn_logs` | Recent activity event log from the local SQLite store. Read-only. Fast (<2s). Returns events with ts, level, component, msg fields. Call with limit=100 for monitoring; increase for deeper history. |
 | `jinn_rewards` | Pending and claimed reward balances per staked service. Read-only. Requires RPC access. Fast (<5s). Returns per-service pending/claimed amounts and next checkpoint time. |
-| `jinn_intents_list` | List all registered intent kinds with their enabled/ready state. Read-only. Fast (<2s). |
-| `jinn_intents_status` | Detailed status for one intent kind: impl, enabled, ready, nextStep. Read-only. Fast (<2s). |
-| `jinn_intents_enable` | MUTATING: Opt in to restoring a specific intent kind. Idempotent. Calls impl.onEnable which may write config. Fast unless impl requires external action. Pass extra_args as space-separated "--key=value" pairs for impl-specific options (e.g. "--hl-master=0x..."). |
-| `jinn_intents_disable` | MUTATING: Opt out of restoring a specific intent kind. Writes config. Idempotent. Fast (<1s). |
+| `jinn_solver_nets_list` | List configured SolverNets with their enabled state, solverType, selected Harness, and plugin set. Read-only. Fast (<2s). |
+| `jinn_solver_nets_show` | Detailed status for one SolverNet. Read-only. Fast (<2s). |
+| `jinn_solver_nets_enable` | MUTATING: Enable a SolverNet and optionally select a Harness. Idempotent. May call Harness onEnable with SolverNet context. |
+| `jinn_solver_nets_disable` | MUTATING: Disable a SolverNet. Writes config. Idempotent. Fast (<1s). |
+| `jinn_tasks_submit` | MUTATING. Post a Task to the protocol. Idempotent by id. Sends an on-chain transaction and pays gas when confirmed. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
 | `jinn_init` | MUTATING. Create the master wallet and write the encrypted keystore. Idempotent: re-runs return the existing master address. Requires confirm: true; default is preview (no filesystem write). |
 | `jinn_run` | MUTATING: Zero-to-running in one call: resolve/generate password, init wallet, bootstrap fleet, start daemon. Idempotent — safe to call repeatedly; resumes from last completed step. Long-running: can take up to 30 minutes if funding is required. Returns a progress stream via --json-progress; poll jinn_status to monitor after this returns. Use no_daemon=true to skip starting the daemon (useful for CI or when the daemon is managed separately). |
 | `jinn_bootstrap` | MUTATING. Advance the fleet state machine. Idempotent. May take several minutes; can post on-chain transactions and request testnet faucet funds. Returns funding_required if a wallet needs ETH. Requires confirm: true; default is preview (no chain or filesystem mutation). |
-| `jinn_submit_intent` | MUTATING. Post a desired state (restoration job) to the protocol. Idempotent by id. Sends an on-chain transaction and pays gas when confirmed. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
 | `jinn_claim_rewards` | MUTATING. Pull pending protocol rewards to the fleet multisigs. Idempotent: zero-delta exits 0. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
-| `jinn_update` | MUTATING: Update the client package and refresh installed plugins. Step 1: npm update -g @jinn-network/client Step 2: jinn plugin install (refreshes skills in all configured AI tools). May take 1-2 minutes. Use skip_npm=true to only refresh plugins with the current version. |
+| `jinn_update` | MUTATING: Update the client package and refresh installed integrations. Step 1: npm update -g @jinn-network/client Step 2: jinn integrations install (refreshes skills in all configured AI tools). May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version. |
 | `jinn_start_daemon` | MUTATING. Start the jinn daemon as a detached background process. Spawns a long-lived child process and writes a pidfile. Requires confirm: true; default is preview (does not spawn a process). |
 | `jinn_stop_daemon` | MUTATING. Stop the running jinn daemon. Idempotent: returns success even if already stopped. Requires confirm: true; default is preview (does not signal any process). |
 <!-- skill:mcp-table:end -->
@@ -171,90 +173,53 @@ The automatic faucet may have rate-limited (1 claim per 24 hours per address). O
 - Wait 24 hours and re-run `jinn run`
 - Fund manually: go to https://portal.cdp.coinbase.com/products/faucet, send testnet ETH to the printed master address, then re-run
 
-## Phase 3.5: Opting In to Intent Kinds
+## Phase 3.5: Opting In to SolverNets
 
-After `jinn run` brings the fleet up, the daemon participates in `legacy` (health-check) and `prediction.v0` intents by default. Other intent kinds are **off by default** because they require operator-specific credentials (exchange authorizations, API keys, etc.).
+After `jinn run` brings the fleet up, the Prediction SolverNet is enabled by default. Other
+SolverNets are off by default because they may require operator-specific
+credentials, APIs, or Harness choices.
 
-### Generic flow (applies to every intent kind with external deps)
+### Generic flow
 
-**Always start with `list`.** It tells you what's enabled, what's ready, and for disabled kinds, what running `enable` would need.
+Start with `list`. It tells you which SolverNets are enabled, which SolverType
+each one serves, and which Harness each one uses.
 
 ```bash
-jinn intents list --human
+jinn solver-nets list
 ```
 
 Example output for a fresh operator:
 ```
-kind           enabled   ready   notes
-portfolio.v0   no        no      HL api-wallet not provisioned
-prediction.v0  yes       yes
+name          solverType       enabled   harness
+prediction    prediction.v0    yes       claude-code-learner
 ```
 
-### Enabling a kind (idempotent state machine)
+### Enabling a SolverNet
 
 ```bash
-jinn intents enable <kind> [--key=value ...]
+jinn solver-nets enable <name> [--harness <name>]
 ```
 
-The command is idempotent. Rerun the same command until the response has `"status": "ready"`. Intermediate states tell you exactly what to do:
+SolverPlugins are scoped to SolverNets, not injected globally into Harnesses:
 
-- `"status": "missing_args"` — the envelope lists `required` args. Re-run with them. Shape:
-  ```json
-  {
-    "status": "missing_args",
-    "required": [{"name": "hl-master", "description": "...", "required": true}],
-    "example": {"cli": "jinn intents enable portfolio.v0 --hl-master 0x..."}
-  }
-  ```
-
-- `"status": "waiting_for_external_action"` — the operator needs to do something out-of-band (e.g., approve an api-wallet on an exchange). Show the `action.description` and `action.url` to the operator. When they confirm done, run the command in `nextInvocation.cli`. Shape:
-  ```json
-  {
-    "status": "waiting_for_external_action",
-    "action": {"description": "...", "url": "https://..."},
-    "details": {"apiWalletAddress": "0x..."},
-    "nextInvocation": {"cli": "jinn intents enable <kind> --confirm-approved", "purpose": "..."}
-  }
-  ```
-
-- `"status": "ready"` — the kind is enabled. The daemon will now claim intents of this kind. No further action.
-
-- `"status": "error"` — surface `message` to the operator.
+- `jinn solver-nets set-harness prediction <harness>` changes the Harness used for restoration Tasks.
+- `jinn solver-nets add-plugin prediction <source>` attaches an extra SolverPlugin to only that SolverNet.
+- `jinn solver-nets doctor prediction` validates the canonical plugin, extra plugins, schemas, and Harness wiring.
 
 ### Disabling
 
 ```bash
-jinn intents disable <kind>
+jinn solver-nets disable <name>
 ```
 
-Removes the kind from the operator's claim rotation. Preserves any generated key material so a later `enable` doesn't re-initialize exchange approvals.
-
-### Example: enabling portfolio.v0
-
-portfolio.v0 requires a Hyperliquid master account (holds USDC) and an approved HL api-wallet (agent key). The enable flow walks the operator through it:
-
-1. Run list to see what's needed:
-   ```bash
-   jinn intents list --human
-   jinn intents status portfolio.v0 --human
-   ```
-
-2. First invocation generates the api-wallet keypair and returns `waiting_for_external_action` with the wallet address and the HL URL:
-   ```bash
-   jinn intents enable portfolio.v0 --hl-master 0xYOUR_HL_MASTER
-   ```
-
-3. Surface the wallet address and URL to the operator. They approve the address on HL (Settings → API Wallets → Add).
-
-4. Once they confirm, re-run with `--confirm-approved`:
-   ```bash
-   jinn intents enable portfolio.v0 --confirm-approved
-   ```
-   Envelope returns `"status": "ready"`. Config is updated. Daemon will claim future portfolio.v0 requests.
+Removes the SolverNet from the operator's claim rotation. It does not uninstall
+the Harness or delete SolverPlugin packages.
 
 ### Runtime guardrail
 
-The daemon checks each impl's readiness before spending gas on a claim transaction. If a portfolio.v0 request arrives and the api-wallet is missing/unapproved, the intent is marked FAILED locally with a reason pointing back to `jinn intents enable portfolio.v0 ...`. No gas wasted.
+The daemon checks SolverNet and Harness readiness before spending gas on a claim
+transaction. If a Task arrives for an unknown or disabled SolverNet, the daemon
+does not claim it.
 
 ## Phase 4: Ongoing Operation
 
@@ -265,15 +230,19 @@ The daemon checks each impl's readiness before spending gas on a claim transacti
 - **Fleet detail:** `jinn fleet` shows each service's step, Safe, mech, staking status
 - **Balances:** `jinn balance` shows master and service wallet balances
 
-### Submitting Intents
+### Submitting Tasks
 
-To post a desired state for the network to work on:
+To post a Task for the network to work on:
 
 ```bash
-jinn submit-intent --id my-intent --description "The service publishes a daily summary" --yes
+jinn tasks submit --id my-task --description "The service publishes a daily summary" --solver-net prediction --yes
 ```
 
-Or via MCP: call `jinn_submit_intent` with `id` and `description`. Mutating MCP tools default to a preview envelope; pass `confirm: true` to actually post on-chain. Other mutating tools (`jinn_init`, `jinn_bootstrap`, `jinn_start_daemon`, `jinn_stop_daemon`) follow the same `confirm: true` rule.
+Or via MCP: call `jinn_tasks_submit` with `id`, `description`, and either
+`solver_net` or `solver_type`. Mutating MCP tools default to a preview envelope;
+pass `confirm: true` to actually post on-chain. Other mutating tools
+(`jinn_init`, `jinn_bootstrap`, `jinn_start_daemon`, `jinn_stop_daemon`) follow
+the same `confirm: true` rule.
 
 ### Checking Rewards
 
@@ -331,11 +300,12 @@ When operating jinn tools, keep this mental model:
 
 - **`jinn run`** is the one-shot setup. After this, the daemon is running.
 - **`jinn status`** is your health check. Poll it to know if things are working.
-- **`jinn submit-intent`** is the main action verb. This is how you create work on the network.
+- **`jinn tasks submit`** is the main action verb. This is how you create work on the network.
+- **`jinn solver-nets`** is how you choose which SolverNets this operator participates in and which Harness each SolverNet uses.
 - **`jinn fleet`** tells you about your staked services and their state.
 - **`jinn bootstrap`** is idempotent. If anything is stuck, re-running it is always safe.
 - **`funding_required`** means "the wallet needs ETH." On testnet, this should auto-resolve via faucet. If not, the user needs to fund manually.
-- The daemon runs three loops: creator (posts intents), restorer (claims and fulfills intents), delivery-watcher (evaluates results). All three run automatically once the daemon starts.
+- The daemon runs three loops: creator (posts Tasks), Solver (claims and solves Tasks), delivery-watcher (evaluates results). All three run automatically once the daemon starts.
 
 ## Network Details
 

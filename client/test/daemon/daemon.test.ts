@@ -5,11 +5,11 @@ import { describe, it, expect } from 'vitest';
 import { Daemon, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
-import { RestorerImplRegistry } from '../../src/restorer/engine/registry.js';
+import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 
 function minimalEngineConfig(): DaemonConfig['restorationEngine'] {
   const root = mkdtempSync(join(tmpdir(), 'jinn-daemon-test-'));
-  const implRegistry = new RestorerImplRegistry({ default: 'legacy-claude' });
+  const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
   return {
     implRegistry,
     paths: {
@@ -24,7 +24,7 @@ describe('Daemon', () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
-      intentSources: [],
+      taskSources: [],
       dbPath: ':memory:',
       restorationEngine: minimalEngineConfig(),
     };
@@ -38,7 +38,7 @@ describe('Daemon', () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
-      intentSources: [],
+      taskSources: [],
       dbPath: ':memory:',
       restorationEngine: minimalEngineConfig(),
     };
@@ -50,11 +50,11 @@ describe('Daemon', () => {
     expect(daemon.getShutdownState()).toBe('clean');
   });
 
-  it('accepts legacy desiredStates when intentSources are omitted', async () => {
+  it('accepts static configured Tasks when taskSources are omitted', async () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
-      desiredStates: [{ id: 'legacy-static', description: 'legacy static intent' }],
+      tasks: [{ id: 'legacy-static', description: 'legacy static task' }],
       dbPath: ':memory:',
       restorationEngine: minimalEngineConfig(),
     };

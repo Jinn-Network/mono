@@ -1,0 +1,35 @@
+import type {
+  Harness,
+  ExternalHarnessEnv,
+  HarnessContext,
+  Solution,
+} from '@jinn-network/harness-sdk';
+
+export default function createEvaluator(env: ExternalHarnessEnv): Harness {
+  return {
+    name: env.implName,
+    version: env.implVersion,
+    supports({ solverType, role }) {
+      return solverType === '{{solverTypeString}}' && role === 'evaluation';
+    },
+    async isReady() {
+      return env.stub
+        ? { ready: false, reason: 'stub mode' }
+        : { ready: true };
+    },
+    async run(ctx: HarnessContext): Promise<Solution> {
+      env.log({
+        level: 'info',
+        msg: 'evaluator.run',
+        data: { taskId: ctx.task.id },
+      });
+      // TODO: read the restoration envelope under evaluation, fetch ground-truth
+      // from your oracle, compute your score. Replace this stub with your impl.
+      return {
+        venueRef: { name: '{{packageName}}' },
+        gating: { score: 0, scoringRule: 'placeholder' },
+        verdictPayload: { score: 0, scoringRule: 'placeholder' },
+      };
+    },
+  };
+}

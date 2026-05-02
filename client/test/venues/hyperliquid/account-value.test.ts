@@ -5,7 +5,7 @@
  * perps margin only. Accounts holding USDC on the spot side (whether on
  * Portfolio Margin or classic) see accountValue=0 there, even though the
  * account has usable equity. The unified helper sums perps + spot USDC so
- * the restorer and evaluator agree on a single equity figure that matches
+ * the harness and evaluator agree on a single equity figure that matches
  * HL's own portfolio-endpoint `accountValueHistory`.
  */
 

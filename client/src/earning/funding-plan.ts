@@ -270,7 +270,7 @@ export async function planFleetFunding(
         reason:
           `Service ${svc.index} Safe needs native ETH to pay mech fees (each evaluation job sends 99 wei). ` +
           `The daemon's balance-topup-loop auto-refills from master at runtime; funding it manually is ` +
-          `required only when running CLI verbs (submit-intent, acceptance gate) outside the daemon.`,
+          `required only when running CLI verbs (tasks submit, acceptance gate) outside the daemon.`,
       });
     }
   }

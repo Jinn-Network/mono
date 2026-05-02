@@ -256,7 +256,7 @@ export async function gatherGatheredStatusRaw(
     requestId: row.requestId,
     serviceIndex: row.serviceIndex,
     txHash: row.txHash,
-    specKind: row.specKind,
+    solverType: row.solverType,
     outcome: row.outcome,
   }));
   const lastRewardClaimTickAt = store.getConfigValue('last_reward_claim_tick_at');

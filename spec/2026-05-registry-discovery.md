@@ -9,6 +9,13 @@
 > Audit: `jinn-mono-j75` §7.2.3, §8 decision #1
 > Sibling specs: `spec/2026-05-schema-versioning.md`, `spec/2026-05-executor-trust-boundary.md`, `spec/2026-05-external-restorer-impls.md`
 
+> Vocabulary status: this spec predates
+> `spec/2026-05-01-harness-pack-architecture.md`. Read
+> `RestorerImpl` as `Harness`, `EvaluatorImpl` as an evaluation Harness,
+> `restorers.externalImpls` as the pre-rename form of
+> `harnesses.externalImpls`, and intent-kind language as SolverType language.
+> The old terms remain below only to preserve the original decision record.
+
 ## Vocabulary note (2026-04-28)
 
 The audit (`jinn-mono-j75`) and v1 of this spec used "plug-in" for the

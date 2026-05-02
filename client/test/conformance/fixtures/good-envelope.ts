@@ -10,13 +10,13 @@
  */
 
 import { vi } from 'vitest';
-import { assembleAndSignEnvelope } from '../../../src/restorer/engine/envelope-assembly.js';
+import { assembleAndSignEnvelope } from '../../../src/harnesses/engine/envelope-assembly.js';
 import type {
   EnvelopeInputs,
   EnvelopeAssemblyDeps,
-} from '../../../src/restorer/engine/envelope-assembly.js';
+} from '../../../src/harnesses/engine/envelope-assembly.js';
 import type { SignedEnvelope } from '../../../src/types/envelope.js';
-import type { SignedIntentV1 } from '../../../src/types/intent.js';
+import type { Task } from '../../../src/types/task.js';
 import { createHash } from 'node:crypto';
 import {
   buildGoodTrajectoryFixture,
@@ -28,23 +28,23 @@ export const TEST_PK: `0x${string}` =
   '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
 export const TEST_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
-const STUB_INTENT_CID = 'bafy-test-intent-001';
+const STUB_TASK_CID = 'bafy-test-task-001';
 const STUB_TRAJ_CID = 'bafy-test-trajectory-001';
 
 // ─── Restoration fixture ─────────────────────────────────────────────────────
 
 export interface RestorationFixture {
-  intent: SignedIntentV1;
+  task: Task;
   envelope: SignedEnvelope;
   envelopeBytes: Uint8Array;
   envelopeCid: string;
 }
 
 const restorationInputs: EnvelopeInputs = {
-  kind: 'portfolio.v0',
+  solverType: 'portfolio.v0',
   role: 'restoration',
-  intent: {
-    cid: STUB_INTENT_CID,
+  task: {
+    cid: STUB_TASK_CID,
     onchainCreationTx: '0x' + 'ab'.repeat(32),
     onchainCreationBlock: 100,
     requestId: '0x' + 'cd'.repeat(32),
@@ -59,6 +59,8 @@ const restorationInputs: EnvelopeInputs = {
     implVersion: '1.0.0',
     clientGitSha: 'abc123',
     codeDigest: 'sha256:' + 'ab'.repeat(32),
+    runtimeBundleDigest: 'sha256:' + 'bc'.repeat(32),
+    plugins: [],
     signingKey: { kind: 'agent-eoa', pubkey: TEST_ADDRESS },
   },
   trajectory: {
@@ -115,26 +117,18 @@ export async function buildGoodRestorationFixture(): Promise<RestorationFixture>
   const result = await assembleAndSignEnvelope(restorationInputs, deps);
   const envelopeBytes = new TextEncoder().encode(JSON.stringify(result.envelope));
 
-  const stubIntent: SignedIntentV1 = {
-    schemaVersion: 'intent.v1',
-    id: STUB_INTENT_CID,
-    kind: 'portfolio.v0',
-    description: 'Test restoration intent',
+  const stubTask: Task = {
+    id: STUB_TASK_CID,
+    description: 'Test restoration Task',
+    solverType: 'portfolio.v0',
+    role: 'restoration',
     window: { startTs: 1, endTs: 86400001 },
-    spec: { kind: 'portfolio.v0' },
+    spec: {},
     eligibility: {},
-    creator: { safeAddress: TEST_ADDRESS, agentEoa: TEST_ADDRESS },
-    createdAt: 1700000000000,
-    signature: {
-      algo: 'secp256k1',
-      signer: TEST_ADDRESS,
-      hash: '0x' + '11'.repeat(32),
-      sig: '0x' + '22'.repeat(65),
-    },
   };
 
   return {
-    intent: stubIntent,
+    task: stubTask,
     envelope: result.envelope,
     envelopeBytes,
     envelopeCid: 'bafy-test-restoration-001',
@@ -164,10 +158,10 @@ export async function buildGoodVerdictFixture(): Promise<VerdictFixture> {
   const restorationCid = 'bafy-test-restoration-001';
 
   const verdictInputs: EnvelopeInputs = {
-    kind: 'portfolio.v0',
+    solverType: 'portfolio.v0',
     role: 'verdict',
-    intent: {
-      cid: STUB_INTENT_CID,
+    task: {
+      cid: STUB_TASK_CID,
       onchainCreationTx: '0x' + 'ab'.repeat(32),
       onchainCreationBlock: 100,
       requestId: '0x' + 'cd'.repeat(32),
@@ -182,6 +176,8 @@ export async function buildGoodVerdictFixture(): Promise<VerdictFixture> {
       implVersion: '1.0.0',
       clientGitSha: 'abc123',
       codeDigest: 'sha256:' + 'ab'.repeat(32),
+      runtimeBundleDigest: 'sha256:' + 'bc'.repeat(32),
+      plugins: [],
       signingKey: { kind: 'agent-eoa', pubkey: TEST_ADDRESS },
     },
     artifacts: [],

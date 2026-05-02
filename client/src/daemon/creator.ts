@@ -1,14 +1,14 @@
 import type { ExecutionAdapter } from '../adapters/adapter.js';
-import type { RestorationJob, RequestId } from '../types/index.js';
+import type { Task, RequestId } from '../types/index.js';
 import type { Store } from '../store/store.js';
 import { PermanentError, TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
-import { IntentPostingService } from '../intents/posting-service.js';
-import type { IntentSource } from '../intents/sources.js';
+import { TaskPostingService } from '../tasks/posting-service.js';
+import type { TaskSource } from '../tasks/sources.js';
 
 export interface ActiveAttempt {
-  restorationJob: RestorationJob;
+  task: Task;
   attemptNumber: number;
   restorationRequestId: string;
   status: 'pending' | 'resolved';
@@ -19,22 +19,22 @@ export class CreatorLoop {
   private attempts = new Map<string, ActiveAttempt>();
   private stopResolve: (() => void) | null = null;
   private stopPromise: Promise<void>;
-  private readonly postingService: IntentPostingService;
+  private readonly postingService: TaskPostingService;
 
   private static readonly PERMANENT_FAILURE_BACKOFF_MS = 30 * 60 * 1000;
 
-  private static failureCacheKey(state: RestorationJob, safeAddress?: string): string {
+  private static failureCacheKey(state: Task, safeAddress?: string): string {
     const prefix = safeAddress ? `create_failed:${safeAddress}` : 'create_failed';
     return `${prefix}:${state.id}`;
   }
 
   constructor(
     private readonly adapter: ExecutionAdapter,
-    private readonly intentSources: IntentSource[],
+    private readonly taskSources: TaskSource[],
     private readonly store: Store,
     private readonly safeAddress?: string,
   ) {
-    this.postingService = new IntentPostingService(adapter, store);
+    this.postingService = new TaskPostingService(adapter, store);
     this.stopPromise = new Promise(resolve => {
       this.stopResolve = resolve;
     });
@@ -43,7 +43,7 @@ export class CreatorLoop {
   async tick(): Promise<RequestId | null> {
     const now = Date.now();
     const candidates = [];
-    for (const source of this.intentSources) {
+    for (const source of this.taskSources) {
       try {
         const result = await source.collect(new Date(now));
         candidates.push(...result);
@@ -53,7 +53,7 @@ export class CreatorLoop {
     }
 
     for (const candidate of candidates) {
-      const state = candidate.restorationJob;
+      const state = candidate.task;
       const failureKey = CreatorLoop.failureCacheKey(state, this.safeAddress);
       const failedAt = this.store.getConfigValue(failureKey);
       if (failedAt) {
@@ -66,15 +66,12 @@ export class CreatorLoop {
       try {
         const postResult = await this.postingService.postCandidate(candidate, {
           creatorSafeAddress: this.safeAddress,
-          legacyConfigKeys: [
-            this.safeAddress ? `created_intent:${this.safeAddress}:${state.id}` : `created_intent:${state.id}`,
-          ],
         });
         if (postResult.idempotent) continue;
 
         const requestId = postResult.requestId;
         this.attempts.set(state.id, {
-          restorationJob: state,
+          task: state,
           attemptNumber: postResult.attemptNumber,
           restorationRequestId: requestId,
           status: 'pending',

@@ -1,8 +1,8 @@
 /**
  * portfolio.v0 dashboard data assembly (§10 step 8 of spec/2026-04-17-portfolio-v0-design.md).
  *
- * Collects in-flight restoration intents, recent verdicts (COMPLETE / FAILED
- * terminal intents), and recent system_snapshot artifacts for the /v1/status
+ * Collects in-flight restoration tasks, recent verdicts (COMPLETE / FAILED
+ * terminal tasks), and recent system_snapshot artifacts for the /v1/status
  * response under the `portfolioV0` key.
  *
  * Designed to be called from gather-status.ts with the Store instance. Does not
@@ -13,19 +13,19 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Store } from '../store/store.js';
-import { IntentPersistence } from '../restorer/engine/persistence.js';
-import type { PersistedIntent } from '../restorer/engine/persistence.js';
+import { TaskRunPersistence } from '../harnesses/engine/persistence.js';
+import type { PersistedTaskRun } from '../harnesses/engine/persistence.js';
 
-/** Default per-intent engine work root; kept in sync with `config.engine.workingDirRoot`. */
+/** Default per-task engine work root; kept in sync with `config.engine.workingDirRoot`. */
 export const DEFAULT_ENGINE_WORKING_DIR_ROOT = join(homedir(), '.jinn-client', 'engine', 'work');
 const RECENT_CLAUDE_OUTCOMES_LIMIT = 10;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-export interface InFlightIntentSummary {
+export interface InFlightTaskSummary {
   requestId: string;
   state: string;
-  specKind: string | null;
+  solverType: string | null;
   implName: string | null;
   windowStartTs: number;
   windowEndTs: number;
@@ -38,7 +38,7 @@ export interface VerdictSummary {
   requestId: string;
   state: 'COMPLETE' | 'FAILED';
   implName: string | null;
-  specKind: string | null;
+  solverType: string | null;
   windowStartTs: number;
   windowEndTs: number;
   stateUpdatedAt: number;
@@ -82,9 +82,9 @@ export interface PortfolioV0Status {
     failed: number;
     active: number;
   };
-  /** Intents currently being processed (not in a terminal state). */
-  inFlight: InFlightIntentSummary[];
-  /** Last N completed or failed intents — most recent first. */
+  /** Tasks currently being processed (not in a terminal state). */
+  inFlight: InFlightTaskSummary[];
+  /** Last N completed or failed tasks — most recent first. */
   recentVerdicts: VerdictSummary[];
   /** Recent system_snapshot artifacts from the store — most recent first. */
   recentSnapshots: SnapshotSummary[];
@@ -102,31 +102,31 @@ export interface PortfolioV0Status {
 const RECENT_VERDICTS_LIMIT = 10;
 const RECENT_SNAPSHOTS_LIMIT = 5;
 
-function toInFlight(intent: PersistedIntent): InFlightIntentSummary {
+function toInFlightTask(task: PersistedTaskRun): InFlightTaskSummary {
   return {
-    requestId: intent.requestId,
-    state: intent.state,
-    specKind: intent.specKind,
-    implName: intent.implName,
-    windowStartTs: intent.windowStartTs,
-    windowEndTs: intent.windowEndTs,
-    stateUpdatedAt: intent.stateUpdatedAt,
-    lastError: intent.failureReason,
+    requestId: task.requestId,
+    state: task.state,
+    solverType: task.solverType,
+    implName: task.implName,
+    windowStartTs: task.windowStartTs,
+    windowEndTs: task.windowEndTs,
+    stateUpdatedAt: task.stateUpdatedAt,
+    lastError: task.failureReason,
   };
 }
 
-function toVerdict(intent: PersistedIntent): VerdictSummary {
+function toVerdict(task: PersistedTaskRun): VerdictSummary {
   return {
-    requestId: intent.requestId,
-    state: intent.state as 'COMPLETE' | 'FAILED',
-    implName: intent.implName,
-    specKind: intent.specKind,
-    windowStartTs: intent.windowStartTs,
-    windowEndTs: intent.windowEndTs,
-    stateUpdatedAt: intent.stateUpdatedAt,
-    failureReason: intent.failureReason,
-    manifestCid: intent.manifestCid,
-    deliveryTxHash: intent.deliveryTxHash,
+    requestId: task.requestId,
+    state: task.state as 'COMPLETE' | 'FAILED',
+    implName: task.implName,
+    solverType: task.solverType,
+    windowStartTs: task.windowStartTs,
+    windowEndTs: task.windowEndTs,
+    stateUpdatedAt: task.stateUpdatedAt,
+    failureReason: task.failureReason,
+    manifestCid: task.manifestCid,
+    deliveryTxHash: task.deliveryTxHash,
   };
 }
 
@@ -134,19 +134,19 @@ function toVerdict(intent: PersistedIntent): VerdictSummary {
 
 /**
  * Gather portfolio.v0 dashboard data from SQLite. Safe to call even when the
- * restoration_intents table does not exist yet (table created on first Store
+ * task_runs table does not exist yet (table created on first Store
  * construction, so this is always present when the daemon is running).
  */
 export function gatherPortfolioV0Status(
   store: Store,
   workingDirRoot: string = DEFAULT_ENGINE_WORKING_DIR_ROOT,
 ): PortfolioV0Status {
-  const persistence = new IntentPersistence(store.db);
+  const persistence = new TaskRunPersistence(store.db);
 
-  // In-flight: all non-terminal intents
-  const inFlight = persistence.getInFlight().map(toInFlight);
+  // In-flight: all non-terminal task runs
+  const inFlight = persistence.getInFlight().map(toInFlightTask);
 
-  // Recent verdicts: last N COMPLETE + FAILED intents combined, newest first
+  // Recent verdicts: last N COMPLETE + FAILED task runs combined, newest first
   const complete = persistence.getByState('COMPLETE');
   const failed = persistence.getByState('FAILED');
   const allTerminal = [...complete, ...failed].sort(
@@ -184,7 +184,7 @@ export function gatherPortfolioV0Status(
 }
 
 /**
- * Scan session outcome files: each intent dir under `workingDirRoot` may contain
+ * Scan session outcome files: each task dir under `workingDirRoot` may contain
  * `sessions/<id>/outcome.json`. Return the most recent N. Swallows all filesystem
  * errors so a missing or malformed working dir never breaks the status endpoint.
  */

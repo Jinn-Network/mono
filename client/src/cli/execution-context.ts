@@ -61,7 +61,7 @@ async function buildCliSignerContext(
         code: 'invalid_invocation',
         message: pw.message,
         hint: 'Use JINN_PASSWORD or --password-fd N.',
-        exampleCli: 'jinn submit-intent --id x --description "…" --yes',
+        exampleCli: 'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
         details: { field: 'keystore password' },
       },
     };
@@ -188,7 +188,7 @@ export async function createCliExecutionContext(
         code: 'transient_error',
         message: `Mech adapter initialization failed (RPC or network): ${cause}`,
         hint: 'Retry after the RPC endpoint is healthy.',
-        exampleCli: 'jinn submit-intent --id x --description "…" --dry-run',
+        exampleCli: 'jinn tasks submit --id x --description "…" --solver-net prediction --dry-run',
         details: { cause },
       },
     };

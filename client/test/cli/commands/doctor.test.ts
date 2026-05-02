@@ -8,7 +8,7 @@ const fakeDeps = {
     rpcUrl: 'http://fake',
     apiPort: 7331,
     claudePath: 'claude',
-    desiredStates: [],
+    tasks: [],
     engine: { implStateDirRoot: '/tmp/fake-impl-state', workingDirRoot: '/tmp/fake-work' },
     earningDir: '/tmp/fake-earning',
     dbPath: '/tmp/fake.db',

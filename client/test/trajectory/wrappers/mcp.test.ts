@@ -4,7 +4,7 @@ import { tracedMcpCall } from '../../../src/trajectory/wrappers/mcp.js';
 
 describe('tracedMcpCall', () => {
   it('emits a jinn.mcp_call span with server + tool attrs', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     const res = await tracedMcpCall({
       collector: c,
       server: 'hyperliquid',
@@ -22,7 +22,7 @@ describe('tracedMcpCall', () => {
   });
 
   it('redacts secret arg values', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     await tracedMcpCall({
       collector: c,
       server: 'x',
@@ -37,7 +37,7 @@ describe('tracedMcpCall', () => {
   });
 
   it('records ERROR on throw and rethrows', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     await expect(
       tracedMcpCall({
         collector: c,

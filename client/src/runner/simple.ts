@@ -1,4 +1,4 @@
-import type { RestorationJob, RestorationResult } from '../types/index.js';
+import type { Task, TaskResult } from '../types/index.js';
 import type { Runner, RunnerContext } from './runner.js';
 
 export type RestorationFn = (description: string, context?: Record<string, unknown>) => Promise<string>;
@@ -6,8 +6,8 @@ export type RestorationFn = (description: string, context?: Record<string, unkno
 export class SimpleRunner implements Runner {
   constructor(private readonly fn: RestorationFn) {}
 
-  async run(restorationJob: RestorationJob, _context: RunnerContext): Promise<RestorationResult> {
-    const data = await this.fn(restorationJob.description, restorationJob.context);
+  async run(task: Task, _context: RunnerContext): Promise<TaskResult> {
+    const data = await this.fn(task.description, task.context);
     return { data };
   }
 }

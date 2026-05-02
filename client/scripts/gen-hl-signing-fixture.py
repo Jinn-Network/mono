@@ -2,7 +2,7 @@
 Regenerate the Hyperliquid L1-action golden signing fixture.
 
 Used as ground truth by
-client/test/restorer/impls/claude-mcp-hyperliquid/index.test.ts (or similar)
+client/test/harnesses/impls/claude-mcp-hyperliquid/index.test.ts (or similar)
 — the TypeScript implementation of hlExchangePost() must reproduce this
 signature byte-for-byte for the same (privkey, action, nonce) tuple.
 
@@ -10,7 +10,7 @@ Usage:
     python3 -m venv /tmp/hl-fixture-venv
     /tmp/hl-fixture-venv/bin/pip install hyperliquid-python-sdk
     /tmp/hl-fixture-venv/bin/python client/scripts/gen-hl-signing-fixture.py \
-        > client/test/restorer/impls/claude-mcp-hyperliquid/fixtures/hl-signing-golden.json
+        > client/test/harnesses/impls/claude-mcp-hyperliquid/fixtures/hl-signing-golden.json
 """
 
 import json

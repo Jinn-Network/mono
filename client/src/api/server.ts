@@ -7,7 +7,7 @@
  *   GET  /v1/status  (daemon health, fleet hints, RPC — best-effort)
  *   GET  /artifacts/search?tags=a,b&outcome=SUCCESS&limit=50
  *   GET  /artifacts/:id/content
- *   POST /artifacts  { id, desiredStateId, requestId, title, content, tags, outcome }
+ *   POST /artifacts  { id, taskId, requestId, title, content, tags, outcome }
  *   GET  /x402/artifacts/:id/content  (payment-gated, if x402 configured)
  */
 
@@ -273,12 +273,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     const tags = c.req.query('tags')?.split(',').filter(Boolean);
     const outcome = c.req.query('outcome') ?? undefined;
     const requestId = c.req.query('requestId') ?? undefined;
-    const desiredStateId = c.req.query('desiredStateId') ?? undefined;
+    const taskId = c.req.query('taskId') ?? undefined;
     const after = c.req.query('after') ?? undefined;
     const before = c.req.query('before') ?? undefined;
     const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!) : undefined;
 
-    const results = store.searchArtifacts({ tags, outcome, requestId, desiredStateId, after, before, limit });
+    const results = store.searchArtifacts({ tags, outcome, requestId, taskId, after, before, limit });
     return c.json({ results });
   });
 
@@ -310,7 +310,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
     store.insertArtifact({
       id,
-      desiredStateId: (body.desiredStateId as string) ?? '',
+      taskId: (body.taskId as string) ?? '',
       requestId: (body.requestId as string) ?? '',
       title,
       content,

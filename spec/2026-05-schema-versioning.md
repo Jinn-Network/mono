@@ -8,6 +8,13 @@
 > Informs: `docs/reviews/2026-04-22-architecture-audit-j75.md` §6 gap #5, §7.2.2, §8 decision #2
 > Extends: `spec/2026-04-14-client-surface.md`
 
+> Vocabulary status: this spec predates
+> `spec/2026-05-01-harness-pack-architecture.md`. Read "intent kind" as
+> `SolverType`, `spec.kind` as top-level `solverType`, and `intentCid` as
+> `taskCid` unless the text is explicitly discussing deployed legacy data or
+> legacy CLI command names. The old terms remain below only to preserve the
+> original decision record.
+
 ## 1. Purpose and scope
 
 This spec defines the **versioning policy** for intent kinds and their

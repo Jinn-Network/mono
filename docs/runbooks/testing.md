@@ -11,7 +11,7 @@ Four tiers. Most tests belong in the **integration** tier.
    zod schema validators, pure helpers.
 2. **Integration** — orchestration; real target module against **fake** external
    boundaries from `test/_support/`. This is the default tier for CLI commands,
-   engine state-machine logic, API builders, restorer impls, and daemon loops.
+   engine state-machine logic, API builders, harnesses, and daemon loops.
 3. **E2E** — real anvil fork, real IPFS, real or mocked Claude. One file per
    protocol scenario in `client/test/e2e/`.
 4. **Manual acceptance** — `yarn release:testnet-acceptance`. Out of scope for
@@ -106,7 +106,7 @@ describe('doctor command', () => {
 ```ts
 import { describe, it, expect } from 'vitest';
 import { withTempStore } from '@test/store.js';
-import { makeIntentInput, createStateMachineSpy } from '@test/engine.js';
+import { makeTaskInput, createStateMachineSpy } from '@test/engine.js';
 
 describe('engine lifecycle', () => {
   it('transitions DISCOVERED → claim', async () => {
@@ -115,8 +115,8 @@ describe('engine lifecycle', () => {
         store,
         onClaim: async () => { /* success */ },
       });
-      const intent = engine.testPersistence.insertDiscovered(makeIntentInput());
-      await engine.claim(intent);
+      const task = engine.testPersistence.insertDiscovered(makeTaskInput());
+      await engine.claim(task);
       expect(calls).toContain('claim');
     });
   });

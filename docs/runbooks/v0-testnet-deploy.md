@@ -292,7 +292,7 @@ yarn jinn run
 
 The daemon should:
 1. Read existing earning state (`earning-v0-2026-04-29/earning_state.json`) — bootstrap is already complete.
-2. Start the three loops: creator, restorer, delivery-watcher (Phase 0 mech work).
+2. Start the three loops: creator, solver, delivery-watcher (Phase 0 mech work).
 3. Start the `JinnClaimLoop` (new in v0): periodic `emitClaim` on Base Sepolia → fixture+claim on Sepolia.
 
 ### Step 5.2 — confirm the first claim cycle (within ~10 min)

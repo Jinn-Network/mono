@@ -78,7 +78,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
     });
 
     const txHash = await client.giveFeedback({
-      restorerAgentId: RESTORER_AGENT_ID,
+      harnessAgentId: RESTORER_AGENT_ID,
       score: 100,
       scoreDecimals: 2,
       manifestRef: `manifest:${MANIFEST_CID}`,
@@ -124,7 +124,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
     });
 
     await client.giveFeedback({
-      restorerAgentId: RESTORER_AGENT_ID,
+      harnessAgentId: RESTORER_AGENT_ID,
       score: 100,
       scoreDecimals: 2,
       manifestRef: `manifest:${MANIFEST_CID}`,
@@ -147,7 +147,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
     });
 
     const txHash = await client.giveFeedback({
-      restorerAgentId: RESTORER_AGENT_ID,
+      harnessAgentId: RESTORER_AGENT_ID,
       score: 0,
       scoreDecimals: 2,
       manifestRef: `manifest:${MANIFEST_CID}`,
@@ -167,7 +167,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
     });
     await expect(
       client.giveFeedback({
-        restorerAgentId: RESTORER_AGENT_ID,
+        harnessAgentId: RESTORER_AGENT_ID,
         score: 100,
         scoreDecimals: 2,
         manifestRef: `manifest:${MANIFEST_CID}`,
@@ -190,7 +190,7 @@ describe('ReputationRegistryClient.giveFeedback (calldata + routing)', () => {
     });
 
     await client.giveFeedback({
-      restorerAgentId: RESTORER_AGENT_ID,
+      harnessAgentId: RESTORER_AGENT_ID,
       score: 100,
       scoreDecimals: 2,
       manifestRef: `manifest:${MANIFEST_CID}`,

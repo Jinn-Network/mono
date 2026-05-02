@@ -184,8 +184,8 @@ describe('assembleStatusRollupV1', () => {
   it('detail.lastDaemonEvent reflects most recent activity row', () => {
     const raw = makeRaw();
     raw.recentActivity = [
-      { id: 10, ts: '2026-04-28T10:00:00Z', kind: 'delivered', requestId: 'req-1', serviceIndex: 1, txHash: '0xabc', specKind: null, outcome: 'success' },
-      { id: 9, ts: '2026-04-28T09:00:00Z', kind: 'created', requestId: 'req-0', serviceIndex: null, txHash: null, specKind: null, outcome: null },
+      { id: 10, ts: '2026-04-28T10:00:00Z', kind: 'delivered', requestId: 'req-1', serviceIndex: 1, txHash: '0xabc', solverType: null, outcome: 'success' },
+      { id: 9, ts: '2026-04-28T09:00:00Z', kind: 'created', requestId: 'req-0', serviceIndex: null, txHash: null, solverType: null, outcome: null },
     ];
     const detail = assembleStatusDetailV1(raw);
     expect(detail.lastDaemonEvent?.kind).toBe('delivered');
@@ -196,7 +196,7 @@ describe('assembleStatusRollupV1', () => {
   it('detail.lastChainTx is null when no tx hashes in activity', () => {
     const raw = makeRaw();
     raw.recentActivity = [
-      { id: 1, ts: '2026-04-28T10:00:00Z', kind: 'created', requestId: 'r', serviceIndex: null, txHash: null, specKind: null, outcome: null },
+      { id: 1, ts: '2026-04-28T10:00:00Z', kind: 'created', requestId: 'r', serviceIndex: null, txHash: null, solverType: null, outcome: null },
     ];
     const detail = assembleStatusDetailV1(raw);
     expect(detail.lastChainTx).toBeNull();

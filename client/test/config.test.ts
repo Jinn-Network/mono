@@ -174,23 +174,23 @@ describe('loadConfig RPC override handling', () => {
     expect(config.targetServices).toBe(1);
   });
 
-  it('defaults desiredStates to an empty list', () => {
+  it('defaults tasks to an empty list', () => {
     return writeConfigFile({}).then((configPath) => {
       const config = loadConfig(configPath);
-      expect(config.desiredStates).toEqual([]);
+      expect(config.tasks).toEqual([]);
     });
   });
 
-  it('preserves portfolio.v0 RestorationJob fields (window, spec, eligibility) through config parsing', async () => {
+  it('preserves portfolio.v0 Task fields (window, spec, eligibility) through config parsing', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
-      desiredStates: [
+      tasks: [
         {
           id: 'portfolio-test-1',
           description: 'Achieve 5% equity return on Hyperliquid testnet.',
+          solverType: 'portfolio.v0',
           window: { startTs: 1_700_000_000_000, endTs: 1_700_086_400_000 },
           spec: {
-            kind: 'portfolio.v0',
             account: { venue: 'hyperliquid-testnet', masterAddress: '0xdeadbeef' },
             target: { metric: 'equity_return_pct', minReturnPct: 5 },
             constraint: { maxDrawdownPct: 10 },
@@ -206,12 +206,13 @@ describe('loadConfig RPC override handling', () => {
     delete process.env['JINN_NETWORK'];
 
     const config = loadConfig(configPath);
-    const ds = config.desiredStates[0];
+    const ds = config.tasks[0];
 
     expect(ds).toBeDefined();
     expect(ds!.id).toBe('portfolio-test-1');
     expect(ds!.window).toEqual({ startTs: 1_700_000_000_000, endTs: 1_700_086_400_000 });
-    expect(ds!.spec).toMatchObject({ kind: 'portfolio.v0' });
+    expect(ds!.solverType).toBe('portfolio.v0');
+    expect(ds!.spec?.kind).toBeUndefined();
     expect(ds!.eligibility).toEqual({ minClosedTrades: 20, minTradedNotionalMultiple: 5.0 });
   });
 

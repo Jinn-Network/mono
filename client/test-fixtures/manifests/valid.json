@@ -3,7 +3,7 @@
   "name": "@example/forecaster",
   "version": "0.1.0",
   "description": "Example prediction.v0 forecaster.",
-  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "supportedSolverTypes": ["prediction.v0>=1.0.0"],
   "entry": "./dist/index.js",
   "package": {
     "cid": "bafybeigexampleexampleexampleexampleexampleexampleexample",

@@ -1,6 +1,6 @@
 # @jinn-network/client
 
-Jinn protocol client. Runs a headless daemon that participates in the Jinn training loop: create, restore, and evaluate desired states, and earn rewards for measured work.
+Jinn protocol client. Runs a headless daemon that participates in the Jinn training loop: create Tasks, solve them through Harnesses, evaluate Solutions, and earn rewards for measured work.
 
 **New operator?** Start with the full testnet runbook:
 <https://github.com/Jinn-Network/mono/blob/main/docs/operator-testnet.md>
@@ -137,13 +137,13 @@ MCP-capable tool, you can skip the shell commands above. After installing
 the client, wire Jinn into your agent:
 
 ```bash
-jinn plugin install
+jinn integrations install
 ```
 
 This detects every supported tool on your machine and, for each one, adds the
 `jinn mcp` MCP server plus a copy of the `jinn-operator` skill. Supported:
 Claude Code, Claude Desktop, Cursor, VS Code, Gemini CLI, Antigravity, Codex.
-Run `jinn plugin list --human` to see what's detected.
+Run `jinn integrations doctor --human` to see what's detected.
 
 Then open your agent and paste:
 
@@ -155,37 +155,39 @@ The `jinn-operator` skill activates on mentions of "jinn", "jinn network", and
 "jinn run", then walks your agent through install, auth, bootstrap, and
 daemon lifecycle. You stay in the loop for funding decisions.
 
-## Opting in to specific intent kinds
+## Opting in to SolverNets
 
 After `jinn run`, your daemon participates in deterministic `prediction.v0`
-intents by default on testnet (via the auto-intent generator). Other kinds —
-like `portfolio.v0`, which
+Tasks by default on testnet through the Prediction SolverNet. Other SolverNets,
+like one for `portfolio.v0`, which
 executes trades against a Hyperliquid master account — are **off by default**
 because they need credentials only you can provide. This prevents your daemon
 from claiming a request it can't actually fulfill.
 
-Inspect and toggle participation with `jinn intents`:
+Inspect and toggle participation with `jinn solver-nets`:
 
 ```bash
-jinn intents list --human                          # every kind, current state
-jinn intents status portfolio.v0 --human           # details for one kind
-jinn intents enable prediction.v0 --impl claude-mcp-prediction
-jinn intents enable portfolio.v0 --hl-master 0x... # start the opt-in flow
-jinn intents enable portfolio.v0 --confirm-approved
-jinn intents disable portfolio.v0                  # opt out, keep state
-jinn intents reset prediction.v0                   # reset kind->impl override
+jinn solver-nets list --human
+jinn solver-nets show prediction --human
+jinn solver-nets enable prediction --harness claude-code-learner
+jinn solver-nets set-harness prediction prediction-v0-baseline
+jinn solver-nets add-plugin prediction bundled:jinn-prediction-plugin
+jinn solver-nets disable prediction
+jinn solver-nets doctor prediction
 ```
 
-Each `enable` is an idempotent state machine. Rerun until the envelope reports
-`"status": "ready"`. When the flow needs something from you (an exchange
-approval, an API key), it returns `waiting_for_external_action` with the URL
-and the exact command to rerun next. Agents with the `jinn-operator` skill
-installed know how to walk an operator through any kind automatically — just
-paste "enable portfolio.v0 for me" and they'll take it from there.
+SolverPlugins are attached to SolverNets, not Harnesses. Changing a SolverNet's
+Harness changes the executor used for future Tasks, while the SolverNet's
+canonical and extra plugin set follows the SolverNet. Each `enable` is an
+idempotent state machine. Rerun until the envelope reports `"status": "ready"`.
+When the flow needs something from you (an exchange approval, an API key), it
+returns `waiting_for_external_action` with the URL and the exact command to
+rerun next. Agents with the `jinn-operator` skill installed know how to walk an
+operator through a SolverNet automatically.
 
 **Safety net:** before spending gas on a claim, the daemon checks whether the
-responsible impl is actually ready. If a portfolio.v0 request arrives and your
-api-wallet isn't approved, the daemon records the intent as FAILED locally
+responsible Harness is actually ready. If a portfolio.v0 request arrives and your
+api-wallet isn't approved, the daemon records the Task as FAILED locally
 with a clear reason instead of wasting gas claiming it.
 
 ## Docker
@@ -258,8 +260,8 @@ docker run --rm ghcr.io/jinn-network/client:latest version --json
 | `jinn fund-requirements` | List what needs funding | Yes |
 | `jinn stop` | Signal a running daemon to stop | Yes |
 | `jinn version` | Version, phase, deployment digest | Yes |
-| `jinn update` | Update the client package + refresh plugins | Yes |
-| `jinn plugin install` | Wire Jinn into Claude Code / Codex / other AI tools | Yes |
+| `jinn update` | Update the client package + refresh integrations | Yes |
+| `jinn integrations install` | Wire Jinn into Claude Code / Codex / other AI tools | Yes |
 
 ### Monitoring
 
@@ -273,7 +275,7 @@ docker run --rm ghcr.io/jinn-network/client:latest version --json
 | `jinn logs` | Structured event stream |
 | `jinn logs --follow` | Live tail of lifecycle events |
 
-Operator panel: when `jinn run` is active, open [`http://127.0.0.1:7331/`](http://127.0.0.1:7331/) for live in-flight intents, verdicts, earnings, fleet balances, recent activity, and next actions. See [Operator panel](#operator-panel-local-web-ui) above for auth + setup-mode details.
+Operator panel: when `jinn run` is active, open [`http://127.0.0.1:7331/`](http://127.0.0.1:7331/) for live in-flight Tasks, verdicts, earnings, fleet balances, recent activity, and next actions. See [Operator panel](#operator-panel-local-web-ui) above for auth + setup-mode details.
 
 ### Actions
 
@@ -281,7 +283,7 @@ All action verbs support `--dry-run` and `--yes`.
 
 | Command | Purpose |
 |---|---|
-| `jinn submit-intent` | Publish a desired state |
+| `jinn tasks submit` | Publish a Task |
 | `jinn claim-rewards` | Pull pending protocol rewards |
 | `jinn fleet scale --to N` | Grow or shrink fleet |
 | `jinn fleet retire <index>` | Retire one service |
@@ -320,7 +322,7 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | dbPath | JINN_DB_PATH | ~/.jinn-client/jinn.db |
 | earningDir | JINN_EARNING_DIR | ~/.jinn-client/earning |
 | peers | JINN_PEERS | [] |
-| desiredStates | JINN_DESIRED_STATES | [] (testnet auto-intent generator posts `prediction.v0`) |
+| tasks | JINN_TASKS | [] (testnet auto-task generator posts `prediction.v0`) |
 
 `JINN_PASSWORD` is env-only (keystore encryption, never in config files). Alternatively, use `--password-fd <N>` to read from a file descriptor.
 
@@ -388,8 +390,8 @@ Quick answers to the things that typically surprise new operators:
 
 The daemon runs three concurrent loops:
 
-1. **CreatorLoop** — posts desired states as restoration jobs
-2. **RestorerLoop** — claims requests, spawns Claude to attempt restoration, submits results
+1. **CreatorLoop** — posts Tasks via the deployed restoration-job contract boundary
+2. **TaskEngine** — claims requests, runs the selected Harness, submits Solutions
 3. **DeliveryWatcherLoop** — claims deliveries, creates evaluation jobs
 
 Each loop call increments on-chain activity counters. Staking contracts read these at checkpoints to determine reward eligibility.

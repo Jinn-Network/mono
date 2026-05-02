@@ -5,7 +5,7 @@
  * §3.1 trajectory-signing-granularity row.
  *
  * Walks every span in order:
- *   - span[0].jinn.prevSpanHash must equal computeGenesisHash(envelope.intent.cid)
+ *   - span[0].jinn.prevSpanHash must equal computeGenesisHash(envelope.task.cid)
  *   - span[n].jinn.prevSpanHash must equal computePrevSpanHash(span[n-1])
  *
  * Skipped when trajectory is absent.
@@ -28,17 +28,17 @@ export function checkHashChainIntegrity(ctx: ConformanceContext): CheckResult {
   const traj = ctx.trajectory as TrajLike | null | undefined;
   if (!traj) return { id, layer, passed: true, skipped: true };
 
-  const intentCid = (ctx.envelope as { intent?: { cid?: string } } | undefined)?.intent?.cid;
-  if (!intentCid) {
+  const taskCid = (ctx.envelope as { task?: { cid?: string } } | undefined)?.task?.cid;
+  if (!taskCid) {
     return {
       id,
       layer,
       passed: false,
-      detail: 'envelope.intent.cid missing; cannot compute genesis hash',
+      detail: 'envelope.task.cid missing; cannot compute genesis hash',
     };
   }
 
-  const genesis = computeGenesisHash(intentCid);
+  const genesis = computeGenesisHash(taskCid);
   let expectedPrev: string = genesis;
 
   for (let i = 0; i < traj.spans.length; i++) {

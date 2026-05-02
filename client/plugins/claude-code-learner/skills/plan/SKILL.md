@@ -12,13 +12,9 @@ Launch the planner; persist its output.
 
 - `workingDir/.strategize/strategy.json`
 - `workingDir/.orient/summary.json` for grounding
-- `implStateDir/plans/<kind>/` if any prior promoted plan templates
+- `implStateDir/plans/<solverType>/` if any prior promoted plan templates
 - The intent
 - On replan: `workingDir/.plan/replan-context.json` (failure context written by Execute) and any prior `workingDir/.plan/plan-v<N>.json` archives. Read these to ground the new plan in what just failed.
-
-## Consult slot registry
-
-Before spawning the bundled planner, check `workingDir/.coordinator/slots.json` (if present) for a `phase-agent-override` entry where `slot.phase === "plan"` AND `slot.agent === "planner"` AND (`slot.scope` absent OR `intent.spec.kind` ∈ `slot.scope.matchKinds`). If a match exists, spawn the agent at `<entry.packageRoot>/<entry.slot.entry>` with the same inputs as the bundled planner. Otherwise proceed with the bundled `planner` agent. See spec/2026-04-30-plug-in-surface.md §4 for slot routing rules.
 
 ## Launch the planner
 
@@ -28,7 +24,7 @@ Pass it inputs:
   intent              = <copy of intent>
   strategyPath        = workingDir/.strategize/strategy.json
   orientSummaryPath   = workingDir/.orient/summary.json
-  priorPlanTemplatesPath = implStateDir/plans/<kind>/ (or null)
+  priorPlanTemplatesPath = implStateDir/plans/<solverType>/ (or null)
   replanContextPath   = workingDir/.plan/replan-context.json (or null on first plan)
   priorPlanArchives   = [workingDir/.plan/plan-v1.json, ...] (or empty on first plan)
   workingDir          = <path>

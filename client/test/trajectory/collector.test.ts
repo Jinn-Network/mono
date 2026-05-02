@@ -5,7 +5,7 @@ import { computeGenesisHash, computePrevSpanHash } from '../../src/trajectory/ha
 describe('TrajectoryCollector', () => {
   let c: TrajectoryCollector;
   beforeEach(() => {
-    c = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-1' });
+    c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-1' });
   });
 
   it('starts with empty spans and zero redactions', () => {
@@ -23,7 +23,7 @@ describe('TrajectoryCollector', () => {
       events: [],
       status: { code: 'OK' },
     });
-    expect(span.attributes['jinn.prevSpanHash']).toBe(computeGenesisHash('bafy-intent'));
+    expect(span.attributes['jinn.prevSpanHash']).toBe(computeGenesisHash('bafy-task'));
   });
 
   it('assigns jinn.prevSpanHash = hash(previous) on subsequent spans', () => {

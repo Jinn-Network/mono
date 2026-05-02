@@ -10,7 +10,7 @@
  */
 
 import type { EvidenceTier, SignedEnvelope } from '../types/envelope.js';
-import type { SignedIntentV1 } from '../types/intent.js';
+import type { Task } from '../types/task.js';
 
 export interface CheckResult {
   /** Dotted identifier: `<area>.<check>` — e.g. `envelope.schema`, `trajectory.hash-chain`. */
@@ -54,8 +54,8 @@ export interface ConformanceOptions {
   ipfsRegistryUrl?: string;
   /** Pre-fetched envelope bytes (skip IPFS fetch). */
   envelopeBytes?: Buffer | Uint8Array;
-  /** Pre-loaded intent (skip IPFS fetch). */
-  intent?: SignedIntentV1;
+  /** Pre-loaded Task (skip IPFS fetch). */
+  task?: Task;
   /** Pre-fetched trajectory bytes (skip IPFS fetch). */
   trajectoryBytes?: Buffer | Uint8Array;
   /** Pre-loaded trajectory (skip IPFS fetch). */
@@ -75,7 +75,7 @@ export interface ConformanceContext {
   envelopeCid: string;
   envelopeBytes?: Uint8Array;
   envelope?: SignedEnvelope;
-  intent?: SignedIntentV1;
+  task?: Task;
   trajectoryBytes?: Uint8Array;
   trajectory?: unknown; // typed after Plan D schema lands
   sourceBundle?: { files: Map<string, string>; manifest?: Record<string, unknown> };

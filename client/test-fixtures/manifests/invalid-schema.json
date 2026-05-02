@@ -2,7 +2,7 @@
   "schemaVersion": "1.0.0",
   "name": "@example/forecaster",
   "version": "not-a-semver",
-  "supportedKinds": [],
+  "supportedSolverTypes": [],
   "entry": "./dist/index.js",
   "package": { "cid": "bafy", "hash": "sha256:0000" },
   "capabilities": {},

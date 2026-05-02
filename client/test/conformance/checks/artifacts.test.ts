@@ -126,7 +126,7 @@ describe('checkArtifactVocabulary', () => {
 describe('checkArtifactLinkage', () => {
   it('passes when all artifacts and spans are correctly linked', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.intent.id);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     const ctx: ConformanceContext = {
       envelope: fx.envelope,
       trajectory: traj as unknown,
@@ -153,7 +153,7 @@ describe('checkArtifactLinkage', () => {
 
   it('fails when an artifact.producedBy.spanId points to nonexistent span', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.intent.id);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     const env = {
       ...fx.envelope,
       artifacts: [
@@ -180,7 +180,7 @@ describe('checkArtifactLinkage', () => {
 
   it('fails when a jinn.artifact.emit span references a sha256 not in envelope.artifacts', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.intent.id);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     // Corrupt the emit span's sha256 to one not in envelope.artifacts
     const emitSpan = traj.spans.find(
       (s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit',

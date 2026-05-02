@@ -14,12 +14,12 @@
  * (mainnet V1, testnet V2) for JinnRouter claimDelivery encoding.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { RestorationJobSchema, parseRestorationJob } from './types/desired-state.js';
-import type { RestorationJob } from './types/desired-state.js';
+import { TaskSchema, parseTask } from './types/task.js';
+import type { Task } from './types/task.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -114,8 +114,8 @@ export const JinnConfigSchema = z.object({
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint: z.string().optional(),
 
-  /** Desired states to create and restore. Empty by default; testnet auto-intents fill the loop. */
-  desiredStates: z.array(RestorationJobSchema).default([]),
+  /** Tasks to create and solve. Empty by default; enabled SolverNet generators fill the loop. */
+  tasks: z.array(TaskSchema).default([]),
 
   /** IPFS upload endpoint */
   ipfsRegistryUrl: z.string().default('https://registry.autonolas.tech'),
@@ -281,36 +281,20 @@ export const JinnConfigSchema = z.object({
   predictionV0ResolveGapMs: z.number().int().positive().optional(),
 
   /**
-   * Operator-controlled impl dispatch for the restorer engine.
-   *
-   * Wired by daemon (jinn-mono-bv5); engine consumes via RestorerImplRegistry config.
-   *
-   * byKind:   explicit spec.kind → impl name mapping (highest priority)
-   * default:  fallback impl name when no kind-specific match is found
-   * disabled: impl names to exclude from dispatch entirely
-   * wrapWith: universal-wrap impl name (jinn-mono-0k2). When set AND
-   *           registered + active + supports the ctx, that impl wins for
-   *           every non-evaluation dispatch — bypassing byKind/default/
-   *           first-match. Default ships as `'claude-code-learner'` so the
-   *           learning envelope wraps every restoration kind. Operators set
-   *           this to `null` (or any other registered wrapper-style impl
-   *           name) to flip it off / swap it out. Evaluations always
-   *           dispatch to specialists.
+   * Operator-controlled Harness inventory.
    */
-  restorers: z
+  harnesses: z
     .object({
-      byKind: z.record(z.string()).optional(),
       default: z.string().optional(),
       disabled: z.array(z.string()).optional(),
-      wrapWith: z.string().nullable().optional(),
       /**
-       * Operator-supplied external impls — Path 2 plug-in surface.
+       * Operator-supplied external harness impls.
        *
        * Each entry points the daemon at a manifest-bearing package on disk
        * (typically inside `node_modules/`); `client/src/main.ts` invokes
        * `loadExternalImpl()` for each entry at boot, validates the manifest
        * against `trustedImplSigners`, and registers the resulting impl in
-       * the restorer registry. See
+       * the harness registry. See
        * `docs/superpowers/plans/2026-04-30-plug-in-surface-path-2-foundation.md`
        * step 5.7-5.8.
        */
@@ -334,8 +318,43 @@ export const JinnConfigSchema = z.object({
     })
     .optional(),
 
+  /** SolverNet activation, canonical SolverPlugin, and Harness selection. */
+  solverNets: z.record(z.object({
+    enabled: z.boolean().default(true),
+    solverType: z.string(),
+    canonicalPlugin: z.union([
+      z.string(),
+      z.object({
+        name: z.string().optional(),
+        source: z.string(),
+        version: z.string().optional(),
+      }),
+    ]),
+    harness: z.string().default('claude-code-learner'),
+    plugins: z.array(z.union([
+      z.string(),
+      z.object({
+        name: z.string().optional(),
+        source: z.string(),
+        version: z.string().optional(),
+      }),
+    ])).default([]),
+    taskGenerator: z.object({
+      enabled: z.boolean().default(true),
+    }).default({ enabled: true }),
+  })).default({
+    prediction: {
+      enabled: true,
+      solverType: 'prediction.v0',
+      canonicalPlugin: 'bundled:jinn-prediction-plugin',
+      harness: 'claude-code-learner',
+      plugins: [],
+      taskGenerator: { enabled: true },
+    },
+  }),
+
   /**
-   * Trusted ed25519 publishers for external restorer impls. The daemon
+   * Trusted ed25519 publishers for external harness impls. The daemon
    * refuses to load any external impl whose manifest signature is not
    * verifiable against one of these public keys.
    *
@@ -353,28 +372,7 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
-   * Path 1 plug-ins for the bundled `claude-code-learner` impl — npm
-   * packages on disk that contribute phase-agent overrides, topic
-   * explorers, MCP tools, skill bundles, memory backends, or hooks via
-   * `jinn-plugin.json`.
-   *
-   * Each entry's `entry` is the absolute (or cwd-relative) path to the
-   * plug-in package root containing `package.json` + `jinn-plugin.json`.
-   * The CLI command `jinn plug-ins {list|add|remove|show}` edits this
-   * field. See spec/2026-04-30-plug-in-surface.md §4 and
-   * docs/superpowers/plans/2026-04-30-plug-in-surface-path-1-mechanism.md.
-   */
-  learnerPlugIns: z
-    .array(
-      z.object({
-        name: z.string(),
-        entry: z.string(),
-      }),
-    )
-    .optional(),
-
-  /**
-   * Restoration engine durable directories (per-intent work + impl state).
+   * Restoration engine durable directories (per-task work + impl state).
    * Defaults under ~/.jinn-client/engine/. Env: JINN_ENGINE_WORKING_DIR_ROOT,
    * JINN_ENGINE_IMPL_STATE_DIR_ROOT.
    */
@@ -480,10 +478,10 @@ const DEFAULT_ENGINE = {
   implStateDirRoot: join(homedir(), '.jinn-client', 'engine', 'impl-state'),
 } as const;
 
-/** JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and desiredStates with id always assigned. */
-export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'desiredStates' | 'engine'> & {
+/** JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and tasks with id always assigned. */
+export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'tasks' | 'engine'> & {
   rpcUrl: string;
-  desiredStates: RestorationJob[];
+  tasks: Task[];
   engine: { workingDirRoot: string; implStateDirRoot: string };
 };
 
@@ -495,8 +493,8 @@ const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
 export type ConfigLoadErrorCode =
   | 'config_file_not_found'
   | 'config_json_invalid'
-  | 'desired_states_file_not_found'
-  | 'desired_states_json_invalid'
+  | 'tasks_file_not_found'
+  | 'tasks_json_invalid'
   | 'config_invalid';
 
 export class ConfigLoadError extends Error {
@@ -509,6 +507,106 @@ export class ConfigLoadError extends Error {
     this.code = code;
     this.details = details;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function timestampForBackup(date = new Date()): string {
+  return date.toISOString().replace(/[:.]/g, '-');
+}
+
+function solverNetSlugFor(solverType: string): string {
+  if (solverType === 'prediction.v0') return 'prediction';
+  if (solverType === 'prediction.apy.v0') return 'prediction-apy';
+  if (solverType === 'portfolio.v0') return 'portfolio';
+  return solverType.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
+}
+
+function defaultCanonicalPluginFor(solverType: string): string {
+  if (solverType === 'prediction.v0') return 'bundled:jinn-prediction-plugin';
+  return `bundled:${solverType.replace(/[^a-zA-Z0-9._-]+/g, '-')}-plugin`;
+}
+
+function normalizeSolverNetPlugin(plugin: unknown, solverType: string): unknown {
+  if (typeof plugin === 'string' && plugin.length > 0) {
+    return plugin.startsWith('bundled:')
+      || plugin.startsWith('file:')
+      || plugin.startsWith('path:')
+      || plugin.startsWith('npm:')
+      || plugin.startsWith('git:')
+      || plugin.startsWith('github:')
+      || plugin.startsWith('claude:')
+      ? plugin
+      : `bundled:${plugin}`;
+  }
+  if (isRecord(plugin)) return plugin;
+  return defaultCanonicalPluginFor(solverType);
+}
+
+export function migrateHarnessConfigFileValues(
+  values: Record<string, unknown>,
+): { values: Record<string, unknown>; changed: boolean } {
+  const next: Record<string, unknown> = { ...values };
+  let changed = false;
+
+  const solverNetsInput = next['solverNets'];
+  const solverNets: Record<string, unknown> = {};
+  if (Array.isArray(solverNetsInput)) {
+    for (const item of solverNetsInput) {
+      if (!isRecord(item) || typeof item['solverType'] !== 'string') continue;
+      const solverType = item['solverType'];
+      const slug = typeof item['name'] === 'string' ? item['name'] : solverNetSlugFor(solverType);
+      solverNets[slug] = {
+        enabled: item['enabled'] !== false,
+        solverType,
+        canonicalPlugin: normalizeSolverNetPlugin(item['canonicalPlugin'] ?? item['plugin'], solverType),
+        harness: typeof item['harness'] === 'string'
+          ? item['harness']
+          : 'claude-code-learner',
+        plugins: Array.isArray(item['plugins']) ? item['plugins'] : [],
+        taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
+      };
+    }
+    changed = true;
+  } else if (isRecord(solverNetsInput)) {
+    for (const [name, item] of Object.entries(solverNetsInput)) {
+      if (!isRecord(item) || typeof item['solverType'] !== 'string') {
+        solverNets[name] = item;
+        continue;
+      }
+      const solverType = item['solverType'];
+      solverNets[name] = {
+        enabled: item['enabled'] !== false,
+        solverType,
+        canonicalPlugin: normalizeSolverNetPlugin(item['canonicalPlugin'] ?? item['plugin'], solverType),
+        harness: typeof item['harness'] === 'string'
+          ? item['harness']
+          : 'claude-code-learner',
+        plugins: Array.isArray(item['plugins']) ? item['plugins'] : [],
+        taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
+      };
+    }
+  }
+
+  if (!solverNets['prediction']) {
+    solverNets['prediction'] = {
+      enabled: true,
+      solverType: 'prediction.v0',
+      canonicalPlugin: normalizeSolverNetPlugin(undefined, 'prediction.v0'),
+      harness: 'claude-code-learner',
+      plugins: [],
+      taskGenerator: { enabled: true },
+    };
+    changed = true;
+  }
+
+  if (Object.keys(solverNets).length > 0) {
+    next['solverNets'] = solverNets;
+  }
+
+  return { values: next, changed };
 }
 
 // ── Loader ──────────────────────────────────────────────────────────────────
@@ -537,6 +635,14 @@ export function loadConfig(configPath?: string): JinnConfig {
           cause: error instanceof Error ? error.message : String(error),
         },
       );
+    }
+    const migrated = migrateHarnessConfigFileValues(fileValues);
+    if (migrated.changed) {
+      const backupPath = `${filePath}.bak.${timestampForBackup()}`;
+      copyFileSync(filePath, backupPath);
+      writeFileSync(filePath, JSON.stringify(migrated.values, null, 2) + '\n', 'utf-8');
+      fileValues = migrated.values;
+      console.error(`[config] Migrated ${filePath}; backup written to ${backupPath}`);
     }
     console.error(`[config] Loaded ${filePath}`);
   } else if (configPath) {
@@ -671,24 +777,24 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.archiveRpcUrl = env['JINN_ARCHIVE_RPC_URL'];
   }
 
-  // desiredStates from env points to a JSON file
-  if (env['JINN_DESIRED_STATES']) {
-    const statesPath = env['JINN_DESIRED_STATES'];
-    if (!existsSync(statesPath)) {
+  // tasks from env points to a JSON file
+  if (env['JINN_TASKS']) {
+    const tasksPath = env['JINN_TASKS'];
+    if (!existsSync(tasksPath)) {
       throw new ConfigLoadError(
-        'desired_states_file_not_found',
-        `JINN_DESIRED_STATES file not found: ${statesPath}`,
-        { path: statesPath },
+        'tasks_file_not_found',
+        `JINN_TASKS file not found: ${tasksPath}`,
+        { path: tasksPath },
       );
     }
     try {
-      merged.desiredStates = JSON.parse(readFileSync(statesPath, 'utf-8'));
+      merged.tasks = JSON.parse(readFileSync(tasksPath, 'utf-8'));
     } catch (error) {
       throw new ConfigLoadError(
-        'desired_states_json_invalid',
-        `Invalid JSON in JINN_DESIRED_STATES file: ${statesPath}`,
+        'tasks_json_invalid',
+        `Invalid JSON in JINN_TASKS file: ${tasksPath}`,
         {
-          path: statesPath,
+          path: tasksPath,
           cause: error instanceof Error ? error.message : String(error),
         },
       );
@@ -719,8 +825,8 @@ export function loadConfig(configPath?: string): JinnConfig {
   return {
     ...parsed,
     rpcUrl: parsed.rpcUrl ?? defaultRpcUrl,
-    // parseRestorationJob assigns a UUID to any entry missing an id
-    desiredStates: parsed.desiredStates.map(parseRestorationJob),
+    // parseTask assigns a UUID to any entry missing an id
+    tasks: parsed.tasks.map(parseTask),
     engine: {
       workingDirRoot: parsed.engine?.workingDirRoot ?? DEFAULT_ENGINE.workingDirRoot,
       implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,
@@ -793,7 +899,7 @@ const TRACKED_ENV_VARS = [
   'BASE_RPC_URL',
   'BASE_SEPOLIA_RPC_URL',
   'JINN_ARCHIVE_RPC_URL',
-  'JINN_DESIRED_STATES',
+  'JINN_TASKS',
   'JINN_ENGINE_WORKING_DIR_ROOT',
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',

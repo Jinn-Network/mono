@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { checkHashAndSignature } from '../../../src/conformance/checks/hash-signature.js';
 import type { ConformanceContext } from '../../../src/conformance/types.js';
-import { assembleAndSignEnvelope } from '../../../src/restorer/engine/envelope-assembly.js';
-import type { EnvelopeInputs, EnvelopeAssemblyDeps } from '../../../src/restorer/engine/envelope-assembly.js';
+import { assembleAndSignEnvelope } from '../../../src/harnesses/engine/envelope-assembly.js';
+import type { EnvelopeInputs, EnvelopeAssemblyDeps } from '../../../src/harnesses/engine/envelope-assembly.js';
 
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn(async () => 'bafy-mock-cid'),
@@ -16,10 +16,10 @@ const TEST_PK: `0x${string}` = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a
 const TEST_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
 const baseInputs: EnvelopeInputs = {
-  kind: 'portfolio.v0',
+  solverType: 'portfolio.v0',
   role: 'restoration',
-  intent: {
-    cid: 'bafy-intent',
+  task: {
+    cid: 'bafy-task',
     onchainCreationTx: '0x' + 'ab'.repeat(32),
     onchainCreationBlock: 100,
     requestId: '0x' + 'cd'.repeat(32),
@@ -34,6 +34,8 @@ const baseInputs: EnvelopeInputs = {
     implVersion: '1.0.0',
     clientGitSha: 'abc123',
     codeDigest: 'sha256:' + 'ab'.repeat(32),
+    runtimeBundleDigest: 'sha256:' + 'bc'.repeat(32),
+    plugins: [],
     signingKey: {
       kind: 'agent-eoa',
       pubkey: TEST_ADDRESS,

@@ -9,7 +9,7 @@ const spawnMock = vi.fn();
 const stopRunMock = vi.fn();
 const initRunMock = vi.fn();
 const bootstrapRunMock = vi.fn();
-const submitIntentRunMock = vi.fn();
+const tasksRunMock = vi.fn();
 
 // MOCK_JUSTIFICATION: node:child_process is a leaf Node built-in; spawn is a syscall and cannot be DI'd without a shim module we don't own.
 vi.mock('node:child_process', async (importOriginal) => {
@@ -42,11 +42,11 @@ const fakeBootstrapCommand: CommandModule = {
   run: bootstrapRunMock,
 };
 
-const fakeSubmitIntentCommand: CommandModule = {
-  name: 'submit-intent',
+const fakeTasksCommand: CommandModule = {
+  name: 'tasks',
   summary: '',
   helpText: '',
-  run: submitIntentRunMock,
+  run: tasksRunMock,
 };
 
 function makeSuccessCommand(name: string, payload: unknown): CommandModule {
@@ -91,15 +91,15 @@ const EXPECTED_TOOLS = [
   'jinn_history',
   'jinn_logs',
   'jinn_rewards',
-  'jinn_intents_list',
-  'jinn_intents_status',
+  'jinn_solver_nets_list',
+  'jinn_solver_nets_show',
   // mutating (require confirm)
-  'jinn_intents_enable',
-  'jinn_intents_disable',
+  'jinn_solver_nets_enable',
+  'jinn_solver_nets_disable',
   'jinn_init',
   'jinn_run',
   'jinn_bootstrap',
-  'jinn_submit_intent',
+  'jinn_tasks_submit',
   'jinn_claim_rewards',
   'jinn_update',
   'jinn_start_daemon',
@@ -252,45 +252,45 @@ describe('jinn_logs tool', () => {
   });
 });
 
-describe('jinn_intents_list / status / enable / disable tools', () => {
+describe('jinn_solver_nets_list / status / enable / disable tools', () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
     vi.useRealTimers();
   });
 
-  it('jinn_intents_list returns content', async () => {
+  it('jinn_solver_nets_list returns content', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_intents_list.handler({}, {});
+    const result = await server._registeredTools.jinn_solver_nets_list.handler({}, {});
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_status requires kind arg', async () => {
+  it('jinn_solver_nets_show requires name arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_intents_status.handler(
-      { kind: 'portfolio.v0' },
+    const result = await server._registeredTools.jinn_solver_nets_show.handler(
+      { name: 'prediction' },
       {},
     );
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_enable requires kind arg', async () => {
+  it('jinn_solver_nets_enable requires name arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_intents_enable.handler(
-      { kind: 'portfolio.v0', extra_args: undefined },
+    const result = await server._registeredTools.jinn_solver_nets_enable.handler(
+      { name: 'prediction', extra_args: undefined },
       {},
     );
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_disable requires kind arg', async () => {
+  it('jinn_solver_nets_disable requires name arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_intents_disable.handler(
-      { kind: 'portfolio.v0' },
+    const result = await server._registeredTools.jinn_solver_nets_disable.handler(
+      { name: 'prediction' },
       {},
     );
     expect(result).toHaveProperty('content');
@@ -469,50 +469,50 @@ describe('mutating MCP tools require explicit confirm', () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it('jinn_submit_intent returns a preview envelope by default and does not call --yes', async () => {
+  it('jinn_tasks_submit returns a preview envelope by default and does not call --yes', async () => {
     let capturedArgv: string[] | undefined;
-    submitIntentRunMock.mockImplementation(async (ctx: CommandContext) => {
+    tasksRunMock.mockImplementation(async (ctx: CommandContext) => {
       capturedArgv = ctx.argv;
-      ctx.writer.write(JSON.stringify({ dryRun: true, verb: 'submit-intent' }));
+      ctx.writer.write(JSON.stringify({ dryRun: true, verb: 'tasks submit' }));
       ctx.exit(0);
     });
 
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
-    const server = createOperatorServer({ submitIntentCommand: fakeSubmitIntentCommand });
-    const result = await server._registeredTools.jinn_submit_intent.handler(
-      { id: 'abc', description: 'Test intent' },
+    const server = createOperatorServer({ tasksCommand: fakeTasksCommand });
+    const result = await server._registeredTools.jinn_tasks_submit.handler(
+      { id: 'abc', description: 'Test Task' },
       {},
     );
 
     // Underlying CLI was invoked, but in --dry-run mode (preview).
-    expect(submitIntentRunMock).toHaveBeenCalledTimes(1);
+    expect(tasksRunMock).toHaveBeenCalledTimes(1);
     expect(capturedArgv).toContain('--dry-run');
     expect(capturedArgv).not.toContain('--yes');
 
     const parsed = JSON.parse((result.content[0] as { text: string }).text);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.status).toBe('preview');
-    expect(parsed.tool).toBe('jinn_submit_intent');
+    expect(parsed.tool).toBe('jinn_tasks_submit');
     expect(parsed.followUp).toEqual({
-      tool: 'jinn_submit_intent',
-      arguments: { id: 'abc', description: 'Test intent', confirm: true },
+      tool: 'jinn_tasks_submit',
+      arguments: { id: 'abc', description: 'Test Task', confirm: true },
     });
     // The CLI's own dry-run output is included for transparency.
-    expect(parsed.cliDryRun).toEqual({ dryRun: true, verb: 'submit-intent' });
+    expect(parsed.cliDryRun).toEqual({ dryRun: true, verb: 'tasks submit' });
   });
 
-  it('jinn_submit_intent passes --yes (not --dry-run) when confirm: true', async () => {
+  it('jinn_tasks_submit passes --yes (not --dry-run) when confirm: true', async () => {
     let capturedArgv: string[] | undefined;
-    submitIntentRunMock.mockImplementation(async (ctx: CommandContext) => {
+    tasksRunMock.mockImplementation(async (ctx: CommandContext) => {
       capturedArgv = ctx.argv;
       ctx.writer.write(JSON.stringify({ status: 'submitted' }));
       ctx.exit(0);
     });
 
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
-    const server = createOperatorServer({ submitIntentCommand: fakeSubmitIntentCommand });
-    const result = await server._registeredTools.jinn_submit_intent.handler(
-      { id: 'abc', description: 'Test intent', confirm: true },
+    const server = createOperatorServer({ tasksCommand: fakeTasksCommand });
+    const result = await server._registeredTools.jinn_tasks_submit.handler(
+      { id: 'abc', description: 'Test Task', confirm: true },
       {},
     );
 
@@ -561,7 +561,7 @@ describe('mutating MCP tools require explicit confirm', () => {
       'jinn_init',
       'jinn_run',
       'jinn_bootstrap',
-      'jinn_submit_intent',
+      'jinn_tasks_submit',
       'jinn_start_daemon',
       'jinn_stop_daemon',
     ];

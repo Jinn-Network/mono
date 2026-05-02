@@ -12,13 +12,13 @@ import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } fro
 import type { X402Config } from '../x402/handler.js';
 import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
-import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
+import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
-import { StaticConfiguredIntentSource, type IntentSource } from '../intents/sources.js';
-import type { RestorationJob } from '../types/index.js';
+import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
+import type { Task } from '../types/index.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -27,7 +27,7 @@ export interface DaemonConfig {
   runner: Runner;
   dbPath: string;
   shutdownTimeoutMs?: number;
-  /** Engine tick interval (ms) for re-driving in-flight intents. Defaults to 5000. */
+  /** Engine tick interval (ms) for re-driving in-flight tasks. Defaults to 5000. */
   pollIntervalMs?: number;
   apiPort?: number;
   /**
@@ -107,10 +107,10 @@ export interface DaemonConfig {
    */
   store?: Store;
 
-  /** Restoration intent sources polled by CreatorLoop. */
-  intentSources?: IntentSource[];
-  /** Backwards-compatible static intents; used when intentSources is omitted. */
-  desiredStates?: RestorationJob[];
+  /** Restoration task sources polled by CreatorLoop. */
+  taskSources?: TaskSource[];
+  /** Backwards-compatible static tasks; used when taskSources is omitted. */
+  tasks?: Task[];
 
   /**
    * Creator Safe address — used to scope CreatorLoop's SQLite idempotency
@@ -120,24 +120,24 @@ export interface DaemonConfig {
   creatorSafeAddress?: string;
 
   /**
-   * RestorationEngine — sole path for marketplace request → claim → run → deliver.
-   * Evaluation intents (`type === 'evaluation'`) dispatch via `supports()` to
-   * evaluator impls; health-check intents with no spec use `legacy-claude` via
+   * TaskEngine — sole path for marketplace request → claim → run → deliver.
+   * Evaluation tasks (`role === 'evaluation'`) dispatch via `supports()` to
+   * evaluation Harnesses; health-check tasks with no solverType use `legacy-claude` via
    * the registry default.
    */
-  restorationEngine: Omit<RestorationEngineOptions, 'store' | 'packagingDeps'> & {
+  restorationEngine: Omit<TaskEngineOptions, 'store' | 'packagingDeps'> & {
     /**
      * Packaging deps minus `store` (Daemon owns the SQLite handle and threads
      * it in at construction time).
      */
-    packagingDeps?: Omit<NonNullable<RestorationEngineOptions['packagingDeps']>, 'store'>;
+    packagingDeps?: Omit<NonNullable<TaskEngineOptions['packagingDeps']>, 'store'>;
   };
 }
 
 export class Daemon {
   private store: Store;
   private creatorLoop: CreatorLoop;
-  private restorationEngine: RestorationEngine;
+  private restorationEngine: TaskEngine;
   private engineStopped = false;
   private deliveryWatcherLoop: DeliveryWatcherLoop;
   private adapter: ExecutionAdapter;
@@ -168,17 +168,17 @@ export class Daemon {
     // so the API server still has something to compare bearer headers
     // against. Production callers (main.ts) always pass an explicit token.
     this.apiToken = config.apiToken ?? randomBytes(32).toString('hex');
-    const intentSources = config.intentSources
-      ?? (config.desiredStates ? [new StaticConfiguredIntentSource(config.desiredStates)] : []);
+    const taskSources = config.taskSources
+      ?? (config.tasks ? [new StaticConfiguredTaskSource(config.tasks)] : []);
     this.creatorLoop = new CreatorLoop(
       this.adapter,
-      intentSources,
+      taskSources,
       this.store,
       config.creatorSafeAddress,
     );
     this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter, this.store);
 
-    this.restorationEngine = new RestorationEngine({
+    this.restorationEngine = new TaskEngine({
       ...config.restorationEngine,
       store: this.store,
       packagingDeps: config.restorationEngine.packagingDeps
@@ -411,65 +411,65 @@ export class Daemon {
 
   /**
    * Bridge loop: consumes adapter.watchForRequests() and routes each request to
-   * the RestorationEngine via observe() + process().
+   * the TaskEngine via observe() + process().
    *
-   * For legacy intents (no spec), the engine dispatches to the legacy-claude impl.
-   * For portfolio.v0 intents, the engine dispatches to claude-mcp-hyperliquid.
-   * For portfolio.v0.eval intents, the engine dispatches to portfolio-v0-evaluator.
+   * For tasks without solverType, the engine dispatches to the legacy-claude Harness.
+   * For portfolio.v0 tasks, the engine dispatches to claude-mcp-hyperliquid.
+   * For portfolio.v0.eval tasks, the engine dispatches to portfolio-v0-evaluator.
    *
-   * On-chain provenance (intentCid, onchainCreationTx, onchainCreationBlock) is
-   * populated from the RestorationRequest when available (MechAdapter sets these
-   * from the MarketplaceRequest event log). Legacy paths that don't populate them
+   * On-chain provenance (taskCid, onchainCreationTx, onchainCreationBlock) is
+   * populated from the TaskRequest when available (MechAdapter sets these
+   * from the MarketplaceRequest event log). Adapter paths that don't populate them
    * fall back to safe defaults with a warning.
    */
-  private async _runEngineWatcherLoop(engine: RestorationEngine): Promise<void> {
+  private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
     const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h
 
     for await (const request of this.adapter.watchForRequests()) {
       if (this.engineStopped) break;
       if (!request.requestId) continue;
 
-      const specKind = request.restorationJob.spec?.kind ?? undefined;
-      const windowStartTs = request.restorationJob.window?.startTs ?? Date.now();
-      const windowEndTs = request.restorationJob.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
+      const solverType = request.task.solverType ?? undefined;
+      const windowStartTs = request.task.window?.startTs ?? Date.now();
+      const windowEndTs = request.task.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
 
-      // Warn on missing provenance — legacy intents may legitimately lack it.
-      if (!request.intentCid) {
-        console.warn(`[daemon] intent ${request.requestId} missing provenance field intentCid — manifest integrity checks may fail`);
+      // Warn on missing provenance; local/test adapters may legitimately lack it.
+      if (!request.taskCid) {
+        console.warn(`[daemon] task ${request.requestId} missing provenance field taskCid — manifest integrity checks may fail`);
       }
       if (!request.onchainCreationTx) {
-        console.warn(`[daemon] intent ${request.requestId} missing provenance field onchainCreationTx — manifest integrity checks may fail`);
+        console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationTx — manifest integrity checks may fail`);
       }
       if (request.onchainCreationBlock == null) {
-        console.warn(`[daemon] intent ${request.requestId} missing provenance field onchainCreationBlock — manifest integrity checks may fail`);
+        console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationBlock — manifest integrity checks may fail`);
       }
 
       try {
         await engine.observe({
           requestId: request.requestId,
-          intentCid: request.intentCid ?? '',
+          taskCid: request.taskCid ?? '',
           onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
           onchainCreationBlock: request.onchainCreationBlock ?? 0,
-          specKind,
-          intentType: (request.restorationJob.type ?? 'restoration') as 'restoration' | 'evaluation',
+          solverType,
+          taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,
           windowEndTs,
-          restorationJob: request.restorationJob,
+          task: request.task,
         });
 
         // Drive the engine state machine for this request.
         // process() advances one transition per call; the engine handles retries
-        // internally on the next daemon iteration if the intent is re-encountered.
-        // Fire-and-forget: each intent processes independently. SQLite serialises
+        // internally on the next daemon iteration if the task is re-encountered.
+        // Fire-and-forget: each task processes independently. SQLite serialises
         // writes through better-sqlite3's synchronous interface, so concurrent
         // process() calls don't corrupt state. Future readers: do NOT await — that
-        // would serialise all intent processing into a single queue.
+        // would serialise all task processing into a single queue.
         engine.process(request.requestId).catch(err => {
           console.error(`[daemon] engine.process failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
           emitEvent(this.store, {
             kind: 'tick_error',
             requestId: request.requestId,
-            specKind,
+            solverType,
             outcome: 'failed',
             detail: err instanceof Error ? err.message : String(err),
           }, 'daemon');
@@ -479,7 +479,7 @@ export class Daemon {
         emitEvent(this.store, {
           kind: 'tick_error',
           requestId: request.requestId,
-          specKind,
+          solverType,
           outcome: 'failed',
           detail: err instanceof Error ? err.message : String(err),
         }, 'daemon');
@@ -505,7 +505,7 @@ export class Daemon {
 
       this.store.insertRemoteArtifact({
         id: artifactId,
-        desiredStateId: '',
+        taskId: '',
         requestId: '',
         title,
         tags,

@@ -1,9 +1,12 @@
 {
   "adapter": "local",
-  "desiredStates": [
+  "tasks": [
     {
       "id": "example-1",
-      "description": "The health check endpoint should return HTTP 200"
+      "description": "The health check endpoint should return HTTP 200",
+      "solverType": "prediction.v0",
+      "role": "restoration",
+      "spec": {}
     }
   ],
   "runner": "simple",

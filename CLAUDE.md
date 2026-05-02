@@ -150,8 +150,14 @@ cat > ~/.jinn-client/config.json << 'EOF'
 {
   "rpcUrl": "http://127.0.0.1:8545",
   "claudeModel": "claude-haiku-4-5-20251001",
-  "desiredStates": [
-    { "id": "test-1", "description": "The service is healthy and responding." }
+  "tasks": [
+    {
+      "id": "test-1",
+      "description": "The service is healthy and responding.",
+      "solverType": "prediction.v0",
+      "role": "restoration",
+      "spec": {}
+    }
   ]
 }
 EOF
@@ -189,7 +195,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
 | peers            | JINN_PEERS               | []                                |
 | subgraphUrl      | JINN_SUBGRAPH_URL        | (none)                            |
-| desiredStates    | JINN_DESIRED_STATES      | [health-check]                    |
+| tasks            | JINN_TASKS               | []                                |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
@@ -219,8 +225,8 @@ Three layers, top to bottom:
 
 The daemon runs three concurrent loops:
 
-1. **CreatorLoop** — posts each desired state once via `JinnRouter.createRestorationJob()`
-2. **Engine watcher + `RestorationEngine`** — consumes `adapter.watchForRequests()`, drives the restorer state machine (claim → run via registered `RestorerImpl` → package → `mech.deliverToMarketplace()` + `JinnRouter.claimDelivery()`)
+1. **CreatorLoop** — posts each Task once via the deployed `JinnRouter.createRestorationJob()` boundary
+2. **Engine watcher + TaskEngine** — consumes `adapter.watchForRequests()`, resolves the Task's SolverNet, selects a Harness, runs it, packages the Solution, then calls `mech.deliverToMarketplace()` + `JinnRouter.claimDelivery()`
 3. **DeliveryWatcherLoop** — watches for deliveries, calls `JinnRouter.claimDelivery()`, then creates evaluation jobs via `JinnRouter.createEvaluationJob()`
 
 Each JinnRouter call increments activity counters for the Safe multisig. The OLAS staking contract reads these counters at checkpoints to determine reward eligibility.
@@ -282,9 +288,9 @@ yarn install
 yarn test            # Hardhat tests
 ```
 
-## Adding intent kinds
+## Adding SolverTypes
 
-To add a new **in-repo** `spec.kind` (typed spec, `jinn submit-intent --spec-file`, optional auto-generators, and restorer/evaluator pairing), follow [`docs/runbooks/add-intent-kind.md`](docs/runbooks/add-intent-kind.md). Kind parsing dispatches through `client/src/intents/kinds/index.ts` (`SPEC_KINDS`); testnet auto-posting is wired via `getTestnetAutoConfig` + `collectTestnetAutoIntentGenerators` in the same module. Restorer selection is separate — see `client/src/cli/intent-registry-access.ts` and `client/src/restorer/impls/index.ts` (`buildRestorerImpls`).
+To add a new **in-repo** SolverType (typed `spec`, `jinn tasks submit --spec-file`, optional auto-generators, and Harness/evaluator pairing), follow [`docs/runbooks/add-solver-type.md`](docs/runbooks/add-solver-type.md). SolverType definitions live under `client/src/solver-types/`; Task documents live under `client/src/tasks/`; Harness selection is owned by SolverNet config and `client/src/harnesses/impls/index.ts` (`buildHarnesses`).
 
 ## Spec Conventions
 

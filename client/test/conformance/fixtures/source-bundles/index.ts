@@ -236,7 +236,7 @@ export const GOOD_DYNAMIC_BUNDLE: { files: Map<string, string> } = {
 export const GOOD_ARTIFACT_BUNDLE: { files: Map<string, string> } = {
   files: new Map([
     [
-      'src/restorer/engine/packaging.ts',
+      'src/harnesses/engine/packaging.ts',
       `import fs from 'node:fs/promises';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 export async function emitArtifact(path: string, content: Buffer) {
@@ -249,7 +249,7 @@ export async function emitArtifact(path: string, content: Buffer) {
     [
       'src/lib/consumer.ts',
       `// Good: imports the artifact helper, does NOT touch fs + IPFS directly.
-import { emitArtifact } from '../restorer/engine/packaging.js';
+import { emitArtifact } from '../harnesses/engine/packaging.js';
 export async function saveResult(data: Buffer) {
   return emitArtifact('/tmp/output.bin', data);
 }

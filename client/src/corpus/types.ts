@@ -18,8 +18,9 @@ export interface CorpusOptions {
 }
 
 export interface CorpusQuery {
-  kind?: string;
-  intentCid?: string;
+  solverType?: string;
+  artifactType?: string;
+  taskCid?: string;
   participant?: { safeAddress?: string };
   evidenceTier?: 'self-signed' | 'committed' | 'attested';
   generatedAfter?: number;

@@ -12,7 +12,7 @@
 
 import { existsSync, statSync, accessSync, constants } from 'node:fs';
 import { join } from 'node:path';
-import { loadApiWalletState } from '../restorer/impls/claude-mcp-hyperliquid/api-wallet.js';
+import { loadApiWalletState } from '../harnesses/impls/claude-mcp-hyperliquid/api-wallet.js';
 
 export interface DoctorCheckResult {
   name: string;

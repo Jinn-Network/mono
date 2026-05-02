@@ -2,9 +2,9 @@
  * Subgraph GraphQL query for the corpus.
  *
  * v0: query Execution rows; filter by evidenceTier, participant, time window
- * directly on the subgraph; filter by `kind` (intent kind) post-fetch since the
+ * directly on the subgraph; filter by `solverType` post-fetch since the
  * subgraph's Execution.kind is the router-level ENVELOPE/EVALUATION discriminator,
- * not the per-intent-kind string.
+ * not the per-SolverType string.
  *
  * Spec §2.3 step 1, §10 Q6.
  */
@@ -75,7 +75,7 @@ export function buildSubgraphQuery(q: CorpusQuery): BuiltQuery {
     publishedAfter: q.generatedAfter !== undefined ? String(q.generatedAfter) : null,
     publishedBefore: q.generatedBefore !== undefined ? String(q.generatedBefore) : null,
     operatorWallet: q.participant?.safeAddress ?? null,
-    kind: null, // post-fetch filter; spec §10 Q6.
+    solverType: null, // post-fetch filter; spec §10 Q6.
   };
   return { query: QUERY_GQL, variables };
 }

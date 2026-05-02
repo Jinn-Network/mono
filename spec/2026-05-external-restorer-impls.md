@@ -11,6 +11,13 @@
 > `spec/2026-05-executor-trust-boundary.md`
 > Predecessor bead: `jinn-mono-y6w` (closed as merged into jinn-mono-7zz)
 
+> Vocabulary status: this spec predates
+> `spec/2026-05-01-harness-pack-architecture.md`. Read
+> `RestorerImpl` as `Harness`, `RestorationContext` as `HarnessContext`,
+> `RestorationOutput` as `Solution`, and `restorers.externalImpls` as the
+> pre-rename form of `harnesses.externalImpls`. The old terms remain below
+> only to preserve the original decision record.
+
 ## Vocabulary note
 
 The audit (`jinn-mono-j75`) and earlier draft language called this surface

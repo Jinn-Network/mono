@@ -19,20 +19,20 @@ import { tmpdir } from 'node:os';
 import { createPublicClient, decodeEventLog, encodeAbiParameters, getAddress, http, keccak256, numberToHex, pad, parseAbi, toHex, type Address, type Hex, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
-import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
-import { getChainConfig } from '../src/earning/contracts.js';
-import { decodeMarketplaceRequestLogs, getMechDeliveryRate, getTimeoutBounds, submitRestorationJob } from '../src/adapters/mech/contracts.js';
-import { buildRestorationJobPayload, uploadToIpfs, cidToDigestHex } from '../src/adapters/mech/ipfs.js';
-import { createClients } from '../src/adapters/mech/safe.js';
-import { PredictionApyV0BaselineImpl } from '../src/restorer/impls/prediction-apy-v0-baseline/index.js';
-import { PredictionApyV0Evaluator } from '../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
-import { signCanonical } from '../src/restorer/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../src/restorer/impls/evaluation-context.js';
-import type { RestorationJob } from '../src/types/desired-state.js';
-import type { RestorationContext } from '../src/restorer/types.js';
-import type { PredictionApySubmissionManifest } from '../src/types/prediction-apy.js';
-import { JINN_ROUTER_ABI, MECH_ABI, MECH_MARKETPLACE_ABI, NATIVE_PAYMENT_TYPE } from '../src/adapters/mech/types.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { getChainConfig } from '../../src/earning/contracts.js';
+import { decodeMarketplaceRequestLogs, getMechDeliveryRate, getTimeoutBounds, submitTask } from '../../src/adapters/mech/contracts.js';
+import { buildTaskPayload, uploadToIpfs, cidToDigestHex } from '../../src/adapters/mech/ipfs.js';
+import { createClients } from '../../src/adapters/mech/safe.js';
+import { PredictionApyV0BaselineImpl } from '../../src/harnesses/impls/prediction-apy-v0-baseline/index.js';
+import { PredictionApyV0Evaluator } from '../../src/harnesses/impls/prediction-apy-v0-evaluator/index.js';
+import { signCanonical } from '../../src/harnesses/engine/signing.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
+import type { Task } from '../../src/types/task.js';
+import type { HarnessContext } from '../../src/harnesses/types.js';
+import type { PredictionApySubmissionManifest } from '../../src/types/prediction-apy.js';
+import { JINN_ROUTER_ABI, MECH_ABI, MECH_MARKETPLACE_ABI, NATIVE_PAYMENT_TYPE } from '../../src/adapters/mech/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
@@ -118,8 +118,8 @@ async function main(): Promise<void> {
   let adapter!: MechAdapter;
   let restorationRequestId!: string;
   let evalRequestId!: string;
-  let intent!: RestorationJob;
-  let intentCid!: string;
+  let intent!: Task;
+  let taskCid!: string;
   let window!: { startTs: number; endTs: number };
 
   try {
@@ -177,8 +177,8 @@ async function main(): Promise<void> {
       const svc = r2.fleet_state.services.find(s => s.step === 'complete' && s.safe_address && s.mech_address);
       if (!svc) throw new Error('no completed service');
 
-      const { FleetStateStore } = await import('../src/earning/store.js');
-      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
+      const { FleetStateStore } = await import('../../src/earning/store.js');
+      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
       const store = new FleetStateStore(tmpDir);
       const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), PASSWORD);
       agentPk = walletPrivateKeyAtIndex(mnemonic, svc.index) as `0x${string}`;
@@ -195,16 +195,16 @@ async function main(): Promise<void> {
       await adapter.initialize();
     }));
 
-    results.push(await runPhase('Phase 4: Post prediction.apy.v0 restoration intent on-chain', async () => {
+    results.push(await runPhase('Phase 4: Post prediction.apy.v0 restoration Task on-chain', async () => {
       const now = Date.now();
       window = { startTs: now, endTs: now + 3_600_000 };
       intent = {
         id: 'prediction-apy-v0-e2e',
         description: 'APY full loop',
-        type: 'restoration',
+        solverType: 'prediction.apy.v0',
+        role: 'restoration',
         window,
         spec: {
-          kind: 'prediction.apy.v0',
           oracle: {
             venue: 'aave-v3-base-sepolia',
             pool: '0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951',
@@ -220,19 +220,19 @@ async function main(): Promise<void> {
           question: { resolveTs: window.endTs + 900_000 },
         },
         eligibility: { maxSubmissionDelayMs: 3_600_000 },
-      } as unknown as RestorationJob;
+      } as unknown as Task;
 
       // Use the same path production uses for createRestorationJob payload.
-      const payload = buildRestorationJobPayload(intent);
+      const payload = buildTaskPayload(intent);
       const cid = await uploadToIpfs('https://registry.autonolas.tech', payload);
-      intentCid = `f01551220${cidToDigestHex(cid).slice(2)}`;
+      taskCid = `f01551220${cidToDigestHex(cid).slice(2)}`;
       const intentDataHex = cidToDigestHex(cid) as Hex;
       const { walletClient } = createClients(ANVIL_RPC, agentPk, base);
       const [deliveryRate, timeoutBounds] = await Promise.all([
         getMechDeliveryRate(publicClient, mechAddress),
         getTimeoutBounds(publicClient, MARKETPLACE_ADDRESS),
       ]);
-      const reqIds = await submitRestorationJob(
+      const reqIds = await submitTask(
         publicClient,
         walletClient,
         safeAddress,
@@ -246,12 +246,12 @@ async function main(): Promise<void> {
       restorationRequestId = reqIds[0]!;
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
-      // Ensure adapter tracks this restoration for eval creation path, just like postRestorationJob.
+      // Ensure adapter tracks this restoration for eval creation path, just like postTask.
       (adapter as any).pendingEvaluations.set(restorationRequestId, {
-        ...intent,
-        context: { ...(intent.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: intentCid },
+        ...signedTask,
+        context: { ...(intent.context ?? {}), [RESTORATION_TASK_CID_CONTEXT_KEY]: taskCid },
       });
-      (adapter as any).originalStates.set(restorationRequestId, { ...intent, type: 'restoration' });
+      (adapter as any).originalStates.set(restorationRequestId, { ...signedTask, role: 'restoration' });
 
       const tip = await publicClient.getBlockNumber();
       const logs = await publicClient.getLogs({ address: MARKETPLACE_ADDRESS, fromBlock: tip - 5n, toBlock: tip });
@@ -260,7 +260,7 @@ async function main(): Promise<void> {
       console.log(`    restorationRequestId: ${restorationRequestId}`);
     }));
 
-    results.push(await runPhase('Phase 5: Restorer watches request, runs baseline, and delivers', async () => {
+    results.push(await runPhase('Phase 5: Harness watches request, runs baseline, and delivers', async () => {
       const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
       const req = await Promise.race([
         iter.next(),
@@ -279,27 +279,27 @@ async function main(): Promise<void> {
       mkdirSync(workingDir, { recursive: true });
       mkdirSync(implStateDir, { recursive: true });
       const out = await baseline.run({
-        intent,
-        intentCid,
+        task: intent,
+        taskCid,
         implStateDir,
         workingDir,
         log: () => {},
         abort: new AbortController().signal,
         msUntilEndTs: () => Math.max(0, window.endTs - Date.now()),
         _testDeps: { twApyBpsOverWindow: async () => ({ twApyBps: 250, sampleCount: 12 }) },
-      } as unknown as RestorationContext);
+      } as unknown as HarnessContext);
 
       const account = privateKeyToAccount(agentPk);
       const manifestBase = {
         schemaVersion: 'prediction.apy.v0.submission.v1' as const,
         generatedAt: Date.now(),
         intent: {
-          cid: intentCid,
+          cid: taskCid,
           onchainCreationTx: req.value.onchainCreationTx ?? ('0x' + '0'.repeat(64)),
           onchainCreationBlock: req.value.onchainCreationBlock ?? 0,
           requestId: req.value.requestId,
         },
-        restorer: {
+        harness: {
           safeAddress: safeAddress as `0x${string}`,
           agentEoa: account.address,
         },
@@ -348,15 +348,15 @@ async function main(): Promise<void> {
 
     results.push(await runPhase('Phase 7: Watch eval request, run APY evaluator, deliver verdict', async () => {
       const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
-      let evalReq: { requestId: string; restorationJob: RestorationJob; intentCid?: string } | undefined;
+      let evalReq: { requestId: string; task: Task; taskCid?: string } | undefined;
       const deadline = Date.now() + 60_000;
       while (!evalReq && Date.now() < deadline) {
         const next = await Promise.race([
           iter.next(),
-          sleep(3_000).then(() => ({ done: true, value: undefined })),
+          sleep(3_000).then(() => ({ done: true as const, value: undefined })),
         ]);
-        if (!next.done && next.value?.restorationJob?.type === 'evaluation') {
-          evalReq = next.value as { requestId: string; restorationJob: RestorationJob; intentCid?: string };
+        if (!next.done && next.value?.task?.role === 'evaluation') {
+          evalReq = next.value as { requestId: string; task: Task; taskCid?: string };
         }
       }
       if (!evalReq) throw new Error('no evaluation request');
@@ -375,15 +375,15 @@ async function main(): Promise<void> {
         },
       });
       const out = await evaluator.run({
-        intent: evalReq.restorationJob,
-        intentCid: evalReq.intentCid ?? '',
+        task: evalReq.task,
+        taskCid: evalReq.taskCid ?? '',
         implStateDir,
         workingDir,
         log: () => {},
         abort: new AbortController().signal,
         msUntilEndTs: () => 0,
         _testDeps: { twApyBpsOverWindow: async () => ({ twApyBps: 250, sampleCount: 12 }) },
-      } as unknown as RestorationContext);
+      } as unknown as HarnessContext);
       const verdict = String(out.gating['verdict'] ?? 'UNKNOWN');
       if (verdict !== 'PASS') throw new Error(`expected PASS verdict, got ${verdict}`);
 
@@ -441,4 +441,3 @@ main().catch((err) => {
   console.error('[e2e-apy] Fatal:', err);
   process.exit(1);
 });
-

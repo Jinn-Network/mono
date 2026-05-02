@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DeliveryWatcherLoop } from '../../src/daemon/delivery-watcher.js';
 import type { ExecutionAdapter } from '../../src/adapters/adapter.js';
-import type { DeliveredResult, RestorationJob } from '../../src/types/index.js';
+import type { DeliveredResult, Task } from '../../src/types/index.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -9,11 +9,11 @@ import type { DeliveredResult, RestorationJob } from '../../src/types/index.js';
 function makeSignedEnvelopeJson(overrides?: Partial<Record<string, unknown>>): string {
   const base: Record<string, unknown> = {
     schemaVersion: 'jinn.execution.v1',
-    kind: 'portfolio.v0',
+    solverType: 'portfolio.v0',
     role: 'restoration',
     generatedAt: 1700000000000,
-    intent: {
-      cid: 'bafy-intent',
+    task: {
+      cid: 'bafy-task',
       onchainCreationTx: '0x' + 'ab'.repeat(32),
       onchainCreationBlock: 100,
       requestId: '0x' + 'cd'.repeat(32),
@@ -28,6 +28,8 @@ function makeSignedEnvelopeJson(overrides?: Partial<Record<string, unknown>>): s
       implVersion: '1.0.0',
       clientGitSha: 'abc123',
       codeDigest: 'sha256:' + 'ab'.repeat(32),
+      runtimeBundleDigest: 'sha256:' + 'cd'.repeat(32),
+      plugins: [],
       signingKey: { kind: 'agent-eoa', pubkey: '0x2222222222222222222222222222222222222222' },
     },
     evidenceTier: 'self-signed',
@@ -57,10 +59,10 @@ function makeSignedEnvelopeJson(overrides?: Partial<Record<string, unknown>>): s
 }
 
 function makeDelivery(resultData: string, requestId = 'req-001'): DeliveredResult {
-  const job: RestorationJob = { id: requestId, description: 'test', type: 'restoration' };
+  const job: Task = { id: requestId, description: 'test', role: 'restoration' };
   return {
     requestId,
-    restorationJob: job,
+    task: job,
     result: { data: resultData },
     deliveryMechAddress: '0xmech',
   };
@@ -78,7 +80,7 @@ function makeStubAdapter(
   return {
     name: 'stub',
     initialize: vi.fn(),
-    postRestorationJob: vi.fn(),
+    postTask: vi.fn(),
     watchForRequests: async function* () { /* no-op */ },
     claimRequest: vi.fn(),
     submitResult: vi.fn(),
@@ -173,7 +175,7 @@ describe('DeliveryWatcherLoop envelope parsing', () => {
   it('skips and logs error for envelope with invalid shape (missing required fields)', async () => {
     const invalidEnvelope = JSON.stringify({
       schemaVersion: 'jinn.execution.v1',
-      kind: 'portfolio.v0',
+      solverType: 'portfolio.v0',
       role: 'restoration',
       // missing required fields — should fail SignedEnvelopeSchema.parse
     });
@@ -182,8 +184,8 @@ describe('DeliveryWatcherLoop envelope parsing', () => {
     expect(errors.some(e => e.includes('envelope parse/validate failed'))).toBe(true);
   });
 
-  it('skips and logs error for envelope with unknown kind (validatePayload fails)', async () => {
-    const unknownKind = makeSignedEnvelopeJson({ kind: 'unknown.kind.v99' });
+  it('skips and logs error for envelope with unknown solverType (validatePayload fails)', async () => {
+    const unknownKind = makeSignedEnvelopeJson({ solverType: 'unknown.kind.v99' });
     const { threw, errors } = await runAndCollectLogs(unknownKind);
     expect(threw).toBe(false);
     expect(errors.some(e => e.includes('envelope parse/validate failed'))).toBe(true);

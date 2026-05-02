@@ -1,4 +1,4 @@
-import type { RestorationJob, RestorationResult, RequestId } from '../types/index.js';
+import type { Task, TaskResult, RequestId } from '../types/index.js';
 import type { TrajectoryCollector } from '../trajectory/index.js';
 
 export interface RunnerContext {
@@ -36,5 +36,5 @@ export interface RunnerContext {
 }
 
 export interface Runner {
-  run(restorationJob: RestorationJob, context: RunnerContext): Promise<RestorationResult>;
+  run(task: Task, context: RunnerContext): Promise<TaskResult>;
 }

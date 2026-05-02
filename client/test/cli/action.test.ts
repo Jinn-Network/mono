@@ -28,13 +28,13 @@ describe('emitDryRun', () => {
   it('emits a dry-run envelope with plan and exits 0', () => {
     const { ctx, writes, exits } = makeCommandCtx();
     emitDryRun(ctx, {
-      verb: 'submit-intent',
-      description: 'Would post one intent',
+      verb: 'tasks submit',
+      description: 'Would post one task',
       plan: [{ step: 1, tx: 'JinnRouter.createRestorationJob(...)' }],
     });
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
-    expect(parsed.verb).toBe('submit-intent');
+    expect(parsed.verb).toBe('tasks submit');
     expect(parsed.plan).toEqual([{ step: 1, tx: 'JinnRouter.createRestorationJob(...)' }]);
     expect(exits).toEqual([]);
   });
@@ -42,13 +42,13 @@ describe('emitDryRun', () => {
   it('emits human-readable dry-run output when --human is set', () => {
     const { ctx, writes, exits } = makeCommandCtx({ tty: true, argv: ['--human'] });
     emitDryRun(ctx, {
-      verb: 'submit-intent',
-      description: 'Would post one intent',
+      verb: 'tasks submit',
+      description: 'Would post one task',
       plan: [{ step: 1 }],
     });
     const out = writes[writes.length - 1]!;
-    expect(out).toContain('Dry run: submit-intent');
-    expect(out).toContain('Would post one intent');
+    expect(out).toContain('Dry run: tasks submit');
+    expect(out).toContain('Would post one task');
     expect(exits).toEqual([]);
   });
 });

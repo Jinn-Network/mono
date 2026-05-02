@@ -20,7 +20,7 @@ function humanHistory(payload: HistoryV1Response): string {
   const lines = ['TIME      KIND                 SVC  REQUEST      TX'];
   for (const e of payload.events) {
     lines.push(
-      `${e.at.slice(11, 19)}  ${e.kind.padEnd(20)}  ${String(e.serviceIndex).padEnd(3)}  ${(e.intentId ?? '-').slice(0, 10)}  ${(e.txHash ?? '-').slice(0, 10)}`,
+      `${e.at.slice(11, 19)}  ${e.kind.padEnd(20)}  ${String(e.serviceIndex).padEnd(3)}  ${(e.taskId ?? '-').slice(0, 10)}  ${(e.txHash ?? '-').slice(0, 10)}`,
     );
   }
   return lines.join('\n');
@@ -43,11 +43,11 @@ const PRODUCTION_DEPS: HistoryDeps = {
 export function createHistoryCommand(deps: HistoryDeps = PRODUCTION_DEPS): CommandModule {
   return {
     name: 'history',
-    summary: 'Recent protocol activity (intents, claims, deliveries, evaluations, rewards)',
+    summary: 'Recent protocol activity (Tasks, claims, deliveries, evaluations, rewards)',
     helpText: `Usage: jinn history [--since <ISO-8601>] [--limit <N>] [--human]
 
 Returns recent protocol events from the local activity log. Each
-event has a stable \`kind\` enum (intent_posted, request_claimed,
+event has a stable \`kind\` enum (task_posted, request_claimed,
 delivery_submitted, evaluation_submitted, reward_claimed, other).
 
 Examples:

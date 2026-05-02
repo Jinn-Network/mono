@@ -14,10 +14,6 @@ Launch the promoter; commit its mutations. Changes take effect NEXT run.
 - `implStateDir/policy.json` if present (operator policy on what Improve may touch)
 - `implStateDir/` (current durable self)
 
-## Consult slot registry
-
-Before spawning the bundled promoter, check `workingDir/.coordinator/slots.json` (if present) for a `phase-agent-override` entry where `slot.phase === "improve"` AND `slot.agent === "promoter"` AND (`slot.scope` absent OR `intent.spec.kind` ∈ `slot.scope.matchKinds`). If a match exists, spawn the agent at `<entry.packageRoot>/<entry.slot.entry>` with the same inputs as the bundled promoter. Otherwise proceed with the bundled `promoter` agent.
-
 ## Launch the promoter
 
 ```

@@ -1,17 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { createFakeClaudeRunner } from '@test/claude.js';
-import type { DesiredState } from '@/types/desired-state.js';
+import type { Task } from '@/types/task.js';
 
 describe('FakeClaudeRunner', () => {
-  it('returns the scripted result for a desired state', async () => {
+  it('returns the scripted result for a Task', async () => {
     const runner = createFakeClaudeRunner({
       script: (_ds) => ({
         data: 'scripted-data',
         artifacts: ['artifact-1'],
       }),
     });
-    const ds: DesiredState = { id: 'req-1', description: 'x' };
-    const result = await runner.run(ds, {
+    const task: Task = { id: 'req-1', description: 'x' };
+    const result = await runner.run(task, {
       requestId: 'req-1',
       workingDirectory: '/tmp/x',
       timeoutMs: 1000,

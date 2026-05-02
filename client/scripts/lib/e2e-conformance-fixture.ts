@@ -12,24 +12,24 @@ import {
   buildGoodRestorationFixture as buildEnvFixture,
   type RestorationFixture,
 } from '../../test/conformance/fixtures/good-envelope.js';
-import type { SignedIntentV1 } from '../../src/types/intent.js';
+import type { Task } from '../../src/types/task.js';
 import type { SignedEnvelope } from '../../src/types/envelope.js';
 
 export interface E2eConformanceFixture {
   envelopeCid: string;
   envelopeBytes: Uint8Array;
-  intent: SignedIntentV1;
+  task: Task;
   envelope: SignedEnvelope;
   trajectory: unknown;
 }
 
 export async function buildGoodRestorationFixture(): Promise<E2eConformanceFixture> {
   const fx: RestorationFixture = await buildEnvFixture();
-  const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+  const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
   return {
     envelopeCid: fx.envelopeCid,
     envelopeBytes: fx.envelopeBytes,
-    intent: fx.intent,
+    task: fx.task,
     envelope: fx.envelope,
     trajectory: traj,
   };

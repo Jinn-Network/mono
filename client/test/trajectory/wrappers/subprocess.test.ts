@@ -4,7 +4,7 @@ import { tracedSpawn } from '../../../src/trajectory/wrappers/subprocess.js';
 
 describe('tracedSpawn', () => {
   it('runs a command and emits a state_transition span around it', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     const res = await tracedSpawn({
       collector: c,
       cmd: 'sh',
@@ -28,7 +28,7 @@ describe('tracedSpawn', () => {
     // Raw bytes must never land in span events — they may contain tokens,
     // private keys, or JINN_PASSWORD echoes that would be uploaded to IPFS.
     const fakeApiKey = 'sk-ant-api03-supersecret1234567890abcdef';
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     const res = await tracedSpawn({
       collector: c,
       cmd: 'sh',
@@ -51,7 +51,7 @@ describe('tracedSpawn', () => {
   });
 
   it('records stdout chunk length (not raw bytes) in event attributes', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     await tracedSpawn({
       collector: c,
       cmd: 'sh',
@@ -68,7 +68,7 @@ describe('tracedSpawn', () => {
   });
 
   it('reports ERROR on non-zero exit', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     const res = await tracedSpawn({
       collector: c,
       cmd: 'sh',

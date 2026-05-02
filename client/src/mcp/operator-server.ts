@@ -2,7 +2,7 @@
  * Operator-level MCP server for jinn-client.
  *
  * Exposes tools that let an external agent (e.g. Claude Desktop) manage a jinn
- * fleet: read status, bootstrap, submit intents, start/stop the daemon.
+ * fleet: read status, bootstrap, submit Tasks, start/stop the daemon.
  *
  * Entry point: `jinn mcp` command.
  *
@@ -10,7 +10,7 @@
  * Each command already accepts an injectable { writer, exit } context, so we
  * capture stdout into a string buffer and return it as the MCP tool response.
  *
- * Mutating tools (`jinn_init`, `jinn_bootstrap`, `jinn_submit_intent`,
+ * Mutating tools (`jinn_init`, `jinn_bootstrap`, `jinn_tasks_submit`,
  * `jinn_start_daemon`, `jinn_stop_daemon`) require an explicit `confirm: true`
  * parameter in the tool call. Without `confirm: true` the tool returns a
  * structured `mcp_preview` envelope describing what would happen and the exact
@@ -37,11 +37,11 @@ import balanceCommand from '../cli/commands/balance.js';
 import historyCommand from '../cli/commands/history.js';
 import logsCommand from '../cli/commands/logs.js';
 import rewardsCommand from '../cli/commands/rewards.js';
-import intentsCommand from '../cli/commands/intents.js';
+import solverNetsCommand from '../cli/commands/solver-nets.js';
 
 // ── Write (mutating) command imports ────────────────────────────────────────
 import bootstrapCommand from '../cli/commands/bootstrap.js';
-import submitIntentCommand from '../cli/commands/submit-intent.js';
+import tasksCommand from '../cli/commands/tasks.js';
 import defaultStopCommand from '../cli/commands/stop.js';
 import claimRewardsCommand from '../cli/commands/claim-rewards.js';
 import defaultRunCommand from '../cli/commands/run.js';
@@ -307,7 +307,7 @@ export interface OperatorServerDeps {
   stopCommand?: CommandModule;
   runCommand?: CommandModule;
   bootstrapCommand?: CommandModule;
-  submitIntentCommand?: CommandModule;
+  tasksCommand?: CommandModule;
 }
 
 export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
@@ -315,7 +315,7 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
   const stopCommand = deps.stopCommand ?? defaultStopCommand;
   const runCommand = deps.runCommand ?? defaultRunCommand;
   const bootstrapCmd = deps.bootstrapCommand ?? bootstrapCommand;
-  const submitIntentCmd = deps.submitIntentCommand ?? submitIntentCommand;
+  const tasksCmd = deps.tasksCommand ?? tasksCommand;
   const server = new McpServer({
     name: 'jinn-operator',
     version: '0.1.0',
@@ -376,7 +376,7 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
 
   server.tool(
     'jinn_history',
-    'Recent protocol activity: intents, claims, deliveries, evaluations, rewards. Read-only from local DB. Fast (<2s).',
+    'Recent protocol activity: tasks, claims, deliveries, evaluations, rewards. Read-only from local DB. Fast (<2s).',
     {
       limit: z.number().optional().default(50).describe('Max results (default 50)'),
       since: z.string().optional().describe('Only return events after this ISO-8601 timestamp'),
@@ -416,46 +416,45 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
   );
 
   server.tool(
-    'jinn_intents_list',
-    'List all registered intent kinds with their enabled/ready state. Read-only. Fast (<2s).',
+    'jinn_solver_nets_list',
+    'List configured SolverNets with their enabled state. Read-only. Fast (<2s).',
     {},
-    async () => runToolCommand(intentsCommand, ['list', '--json'], process.env),
+    async () => runToolCommand(solverNetsCommand, ['list', '--json'], process.env),
   );
 
   server.tool(
-    'jinn_intents_status',
-    'Detailed status for one intent kind: impl, enabled, ready, nextStep. Read-only. Fast (<2s).',
+    'jinn_solver_nets_show',
+    'Detailed status for one SolverNet. Read-only. Fast (<2s).',
     {
-      kind: z.string().describe('Intent kind identifier, e.g. portfolio.v0 or prediction.v0'),
+      name: z.string().describe('SolverNet name, e.g. prediction'),
     },
-    async ({ kind }) => runToolCommand(intentsCommand, ['status', kind, '--json'], process.env),
+    async ({ name }) => runToolCommand(solverNetsCommand, ['show', name, '--json'], process.env),
   );
 
   server.tool(
-    'jinn_intents_enable',
+    'jinn_solver_nets_enable',
     [
-      'MUTATING: Opt in to restoring a specific intent kind. Idempotent.',
-      'Calls impl.onEnable which may write config. Fast unless impl requires external action.',
-      'Pass extra_args as space-separated "--key=value" pairs for impl-specific options (e.g. "--hl-master=0x...").',
+      'MUTATING: Enable a SolverNet. Idempotent.',
+      'Optionally selects the restoration Harness for that SolverNet.',
     ].join(' '),
     {
-      kind: z.string().describe('Intent kind to enable, e.g. portfolio.v0'),
-      extra_args: z.string().optional().describe('Extra --key=value pairs forwarded to the impl (space-separated)'),
+      name: z.string().describe('SolverNet name, e.g. prediction'),
+      harness: z.string().optional().describe('Optional Harness name to select for restoration Tasks'),
     },
-    async ({ kind, extra_args }) => {
-      const argv = ['enable', kind, '--json'];
-      if (extra_args) argv.push(...extra_args.split(' ').filter(Boolean));
-      return runToolCommand(intentsCommand, argv, process.env);
+    async ({ name, harness }) => {
+      const argv = ['enable', name, '--json'];
+      if (harness) argv.push('--harness', harness);
+      return runToolCommand(solverNetsCommand, argv, process.env);
     },
   );
 
   server.tool(
-    'jinn_intents_disable',
-    'MUTATING: Opt out of restoring a specific intent kind. Writes config. Idempotent. Fast (<1s).',
+    'jinn_solver_nets_disable',
+    'MUTATING: Disable a SolverNet. Writes config. Idempotent. Fast (<1s).',
     {
-      kind: z.string().describe('Intent kind to disable'),
+      name: z.string().describe('SolverNet name'),
     },
-    async ({ kind }) => runToolCommand(intentsCommand, ['disable', kind, '--json'], process.env),
+    async ({ name }) => runToolCommand(solverNetsCommand, ['disable', name, '--json'], process.env),
   );
 
   // ━━ Write (mutating) tools ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -584,38 +583,39 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
   );
 
   server.tool(
-    'jinn_submit_intent',
+    'jinn_tasks_submit',
     [
-      'MUTATING. Post a desired state (restoration job) to the protocol.',
+      'MUTATING. Post a Task to the protocol.',
       'Idempotent by id. Sends an on-chain transaction and pays gas when confirmed.',
       'Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action).',
     ].join(' '),
     {
-      id: z.string().describe('Unique intent identifier'),
-      description: z.string().describe('Human-readable description of the desired state'),
+      id: z.string().describe('Unique Task identifier'),
+      description: z.string().describe('Human-readable Task description'),
+      solver_net: z.string().optional().default('prediction').describe('SolverNet name, default prediction'),
       confirm: z
         .boolean()
         .optional()
         .default(false)
         .describe('Must be true to actually submit on-chain. Default false returns a preview using --dry-run.'),
     },
-    async ({ id, description, confirm }) => {
-      const argv = ['--id', id, '--description', description, '--json'];
+    async ({ id, description, solver_net, confirm }) => {
+      const argv = ['submit', '--id', id, '--description', description, '--solver-net', solver_net, '--json'];
       if (!confirm) {
         argv.push('--dry-run');
         // Run the underlying command in --dry-run so the preview includes the
         // CLI's own plan output, then wrap it in our MCP preview envelope by
         // reusing the dry-run JSON payload as the description body.
-        const result = await runCommandResult(submitIntentCmd, argv, process.env);
+        const result = await runCommandResult(tasksCmd, argv, process.env);
         const envelope = buildPreviewEnvelope({
-          tool: 'jinn_submit_intent',
-          description: `Would post intent '${id}' on-chain using the configured creator Safe.`,
+          tool: 'jinn_tasks_submit',
+          description: `Would post Task '${id}' on-chain using the configured creator Safe.`,
           effects: [
-            'Posts a SignedIntentV1 to IPFS via the configured registry.',
+            'Posts a SignedTaskV1 to IPFS via the configured registry.',
             'Calls JinnRouter.createRestorationJob (gas-paying transaction).',
             'Idempotent by --id from the same creator Safe.',
           ],
-          callerArgs: { id, description },
+          callerArgs: { id, description, solver_net },
         });
         const merged = {
           ...envelope,
@@ -629,7 +629,7 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
         };
       }
       argv.push('--yes');
-      return runToolCommand(submitIntentCmd, argv, process.env);
+      return runToolCommand(tasksCmd, argv, process.env);
     },
   );
 
@@ -676,14 +676,14 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
   server.tool(
     'jinn_update',
     [
-      'MUTATING: Update the client package and refresh installed plugins.',
+      'MUTATING: Update the client package and refresh host integrations.',
       'Step 1: npm update -g @jinn-network/client',
-      'Step 2: jinn plugin install (refreshes skills in all configured AI tools).',
-      'May take 1-2 minutes. Use skip_npm=true to only refresh plugins with the current version.',
+      'Step 2: jinn integrations install (refreshes skills in all configured AI tools).',
+      'May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version.',
     ].join(' '),
     {
       skip_npm: z.boolean().optional().default(false).describe('Skip the npm update step'),
-      skip_plugins: z.boolean().optional().default(false).describe('Skip the plugin re-install step'),
+      skip_plugins: z.boolean().optional().default(false).describe('Skip the integrations refresh step'),
     },
     async ({ skip_npm, skip_plugins }) => {
       const argv = ['--json'];

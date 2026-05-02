@@ -42,7 +42,7 @@ describe('resolveAgentIdForManifest', () => {
         data: {
           executions: [
             {
-              manifestCid: 'bafyrestorerCid123',
+              manifestCid: 'bafyharnessCid123',
               operator: { agentId: '42' },
             },
           ],
@@ -58,7 +58,7 @@ describe('resolveAgentIdForManifest', () => {
 
     expect(resolved).not.toBeNull();
     expect(resolved!.agentId).toBe(42n);
-    expect(resolved!.manifestCid).toBe('bafyrestorerCid123');
+    expect(resolved!.manifestCid).toBe('bafyharnessCid123');
   });
 
   it('lower-cases manifestHash before sending it to the subgraph (Bytes filter)', async () => {

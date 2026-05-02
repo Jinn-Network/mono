@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseRestorationJob } from '../../src/types/desired-state.js';
+import { parseTask } from '../../src/types/task.js';
 import {
-  PortfolioV0IntentSchema,
+  PortfolioV0TaskSchema,
 } from '../../src/types/portfolio.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -9,12 +9,12 @@ import {
 const START_TS = 1_700_000_000_000;
 const END_TS = START_TS + 86_400_000; // exactly 24h later
 
-const portfolioV0Intent = {
-  id: 'intent-1',
+const portfolioV0Task = {
+  id: 'task-1',
   description: 'Increase HL portfolio over 24h with bounded drawdown.',
+  solverType: 'portfolio.v0',
   window: { startTs: START_TS, endTs: END_TS },
   spec: {
-    kind: 'portfolio.v0',
     account: {
       venue: 'hyperliquid-testnet',
       masterAddress: '0xabcdef1234567890abcdef1234567890abcdef12',
@@ -35,9 +35,9 @@ const portfolioV0Intent = {
 
 // ── Legacy backwards compat ───────────────────────────────────────────────────
 
-describe('RestorationJob legacy backwards compat', () => {
+describe('Task legacy backwards compat', () => {
   it('parses {id, description} (minimal legacy)', () => {
-    const result = parseRestorationJob({ id: 'abc', description: 'Check health.' });
+    const result = parseTask({ id: 'abc', description: 'Check health.' });
     expect(result.id).toBe('abc');
     expect(result.description).toBe('Check health.');
     expect(result.context).toBeUndefined();
@@ -47,7 +47,7 @@ describe('RestorationJob legacy backwards compat', () => {
   });
 
   it('parses {id, description, context} (legacy with context)', () => {
-    const result = parseRestorationJob({
+    const result = parseTask({
       id: 'def',
       description: 'API health check.',
       context: { endpoint: 'https://api.example.com/health' },
@@ -57,47 +57,49 @@ describe('RestorationJob legacy backwards compat', () => {
   });
 
   it('assigns a UUID when id is omitted', () => {
-    const result = parseRestorationJob({ description: 'No id provided.' });
+    const result = parseTask({ description: 'No id provided.' });
     expect(typeof result.id).toBe('string');
     expect(result.id.length).toBeGreaterThan(0);
   });
 
   it('rejects a missing description', () => {
-    expect(() => parseRestorationJob({ id: 'x' })).toThrow();
+    expect(() => parseTask({ id: 'x' })).toThrow();
   });
 });
 
-// ── RestorationJob with new optional fields ─────────────────────────────────────
+// ── Task with new optional fields ─────────────────────────────────────
 
-describe('RestorationJob with window / spec / eligibility', () => {
-  it('parses a portfolio.v0 desired state', () => {
-    const result = parseRestorationJob(portfolioV0Intent);
+describe('Task with window / spec / eligibility', () => {
+  it('parses a portfolio.v0 Task', () => {
+    const result = parseTask(portfolioV0Task);
     expect(result.window).toEqual({ startTs: START_TS, endTs: END_TS });
-    expect(result.spec?.kind).toBe('portfolio.v0');
+    expect(result.solverType).toBe('portfolio.v0');
+    expect(Object.prototype.hasOwnProperty.call(result.spec ?? {}, 'kind')).toBe(false);
     expect(result.eligibility).toBeDefined();
   });
 });
 
-// ── portfolio.v0 intent schema ────────────────────────────────────────────────
+// ── portfolio.v0 task schema ────────────────────────────────────────────────
 
-describe('PortfolioV0IntentSchema', () => {
-  it('parses a fully-specified portfolio.v0 intent', () => {
-    const result = PortfolioV0IntentSchema.parse(portfolioV0Intent);
-    expect(result.spec.kind).toBe('portfolio.v0');
+describe('PortfolioV0TaskSchema', () => {
+  it('parses a fully-specified portfolio.v0 task', () => {
+    const result = PortfolioV0TaskSchema.parse(portfolioV0Task);
+    expect(result.solverType).toBe('portfolio.v0');
+    expect(Object.prototype.hasOwnProperty.call(result.spec, 'kind')).toBe(false);
     expect(result.spec.account.venue).toBe('hyperliquid-testnet');
     expect(result.eligibility?.minClosedTrades).toBe(25);
   });
 
   it('applies eligibility defaults when eligibility is omitted', () => {
-    const { eligibility: _, ...withoutEligibility } = portfolioV0Intent;
-    const result = PortfolioV0IntentSchema.parse(withoutEligibility);
+    const { eligibility: _, ...withoutEligibility } = portfolioV0Task;
+    const result = PortfolioV0TaskSchema.parse(withoutEligibility);
     // eligibility defaults to {} which triggers sub-field defaults per spec §4.1
     expect(result.eligibility).toEqual({ minClosedTrades: 20, minTradedNotionalMultiple: 5.0 });
   });
 
   it('parses eligibility with explicit defaults', () => {
-    const result = PortfolioV0IntentSchema.parse({
-      ...portfolioV0Intent,
+    const result = PortfolioV0TaskSchema.parse({
+      ...portfolioV0Task,
       eligibility: { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 },
     });
     expect(result.eligibility?.minClosedTrades).toBe(20);
@@ -106,20 +108,20 @@ describe('PortfolioV0IntentSchema', () => {
 
   it('rejects a non-24h window', () => {
     const bad = {
-      ...portfolioV0Intent,
+      ...portfolioV0Task,
       window: { startTs: START_TS, endTs: START_TS + 3_600_000 }, // 1h, not 24h
     };
-    expect(() => PortfolioV0IntentSchema.parse(bad)).toThrow(/24 h/);
+    expect(() => PortfolioV0TaskSchema.parse(bad)).toThrow(/24 h/);
   });
 
   it('rejects an unknown venue', () => {
     const bad = {
-      ...portfolioV0Intent,
+      ...portfolioV0Task,
       spec: {
-        ...portfolioV0Intent.spec,
-        account: { ...portfolioV0Intent.spec.account, venue: 'unknown-venue' },
+        ...portfolioV0Task.spec,
+        account: { ...portfolioV0Task.spec.account, venue: 'unknown-venue' },
       },
     };
-    expect(() => PortfolioV0IntentSchema.parse(bad)).toThrow();
+    expect(() => PortfolioV0TaskSchema.parse(bad)).toThrow();
   });
 });

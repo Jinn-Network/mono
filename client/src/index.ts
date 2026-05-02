@@ -1,5 +1,5 @@
 // Types
-export { type RestorationJob, type RequestId, type RestorationRequest, type RestorationResult, type DeliveredResult } from './types/index.js';
+export { type Task, type RequestId, type TaskRequest, type TaskResult, type DeliveredResult } from './types/index.js';
 export { TransientError, PermanentError } from './types/index.js';
 
 // Adapters

@@ -18,21 +18,10 @@ You are coordinating the Orient phase. Your only jobs are: decide what topics ne
 
 Choose from these typical categories; add or omit based on the intent:
 
-1. **intent-parse** — what's the goal, kind, window, spec, eligibility? Always include.
-2. **world-state** — for kinds with a venue (portfolio.v0, prediction.v0, etc.), pull current relevant state. Include if the kind has a venue.
-3. **own-history** — list prior runs of this kind by this operator. Include if `implStateDir/runs/index.json` exists or the harness exposes a knowledge-tree query.
-4. **others-history** — recent runs of this kind by other operators. Include only if `implStateDir/policy.json` sets `allowCrossOperatorReads: true` AND the harness exposes the query tool.
-
-## Plug-in topic explorers
-
-In addition to the bundled topic categories above, consult `workingDir/.coordinator/slots.json` (if present). For each entry in `topicExplorers` matching `slot.phase === "orient"` AND (`slot.scope` absent OR `intent.spec.kind` ∈ `slot.scope.matchKinds`):
-
-- Treat it as an additional topic to gather. Topic name is `slot.topic`.
-- Spawn an explorer subagent (same shape as the bundled explorer, but with the explorer-role file at `<entry.packageRoot>/<entry.slot.entry>` instead of the bundled `explorer` role).
-- Inputs to the explorer are unchanged (topic, intent, scope, workingDir, implStateDir, outputPath = `workingDir/.orient/<topic>.json`, msUntilEndTs).
-- Include the topic's results in the collation (`workingDir/.orient/summary.json`'s `topics[]` array).
-
-Topic-name collisions: if a plug-in declares a topic that matches a bundled name (`intent-parse`, `world-state`, `own-history`, `others-history`), the plug-in's explorer replaces the bundled fan-out for that topic. Surface a one-line note in `summary.json.flags`. See spec/2026-04-30-plug-in-surface.md §4.
+1. **intent-parse** — what's the goal, solverType, window, spec, eligibility? Always include.
+2. **world-state** — for solverTypes with a venue (portfolio.v0, prediction.v0, etc.), pull current relevant state. Include if the solverType has a venue.
+3. **own-history** — list prior runs of this solverType by this operator. Include if `implStateDir/runs/index.json` exists or the harness exposes a knowledge-tree query.
+4. **others-history** — recent runs of this solverType by other operators. Include only if `implStateDir/policy.json` sets `allowCrossOperatorReads: true` AND the harness exposes the query tool.
 
 ## Launch explorers
 
@@ -59,7 +48,7 @@ After all explorers return, read each `workingDir/.orient/<topic>.json` and writ
 
 ```json
 {
-  "intent": { "id": "...", "kind": "...", "window": { "startTs": 0, "endTs": 0 } },
+  "intent": { "id": "...", "solverType": "...", "window": { "startTs": 0, "endTs": 0 } },
   "topics": [
     { "topic": "intent-parse", "artifact": "workingDir/.orient/intent-parse.json", "summary": "...", "flags": [] },
     { "topic": "world-state", "artifact": "workingDir/.orient/world-state.json", "summary": "...", "flags": ["stale"] }

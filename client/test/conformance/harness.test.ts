@@ -37,13 +37,13 @@ import { buildGoodTrajectoryFixture } from './fixtures/good-trajectory.js';
 describe('runConformance — pass case', () => {
   it('returns PASS + layer1Passed + layer2=N/A for a good self-signed restoration envelope', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
 
     const report = await runConformance({
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: fx.envelopeBytes,
-        intent: fx.intent,
+        task: fx.task,
         trajectory: traj,
       },
     });
@@ -96,7 +96,7 @@ describe('runConformance — known-bad matrix', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: new TextEncoder().encode(JSON.stringify(bad)),
-        intent: fx.intent,
+        task: fx.task,
       },
     });
     expect(report.overall).toBe('FAIL');
@@ -112,7 +112,7 @@ describe('runConformance — known-bad matrix', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: new TextEncoder().encode(JSON.stringify(bad)),
-        intent: fx.intent,
+        task: fx.task,
       },
     });
     expect(report.overall).toBe('FAIL');
@@ -123,12 +123,12 @@ describe('runConformance — known-bad matrix', () => {
   it('FAIL: generatedAt tampered → envelope.hash-signature fails', async () => {
     const fx = await buildGoodRestorationFixture();
     const bad = { ...fx.envelope, generatedAt: fx.envelope.generatedAt + 1 };
-    const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     const report = await runConformance({
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: new TextEncoder().encode(JSON.stringify(bad)),
-        intent: fx.intent,
+        task: fx.task,
         trajectory: traj,
       },
     });
@@ -151,7 +151,7 @@ describe('runConformance — known-bad matrix', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: new TextEncoder().encode(JSON.stringify(bad)),
-        intent: fx.intent,
+        task: fx.task,
       },
     });
     expect(report.overall).toBe('FAIL');
@@ -161,14 +161,14 @@ describe('runConformance — known-bad matrix', () => {
 
   it('FAIL: hash-chain corrupted → trajectory.hash-chain fails', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     // Corrupt span[2]'s prevSpanHash
     traj.spans[2].attributes['jinn.prevSpanHash'] = '0x' + 'de'.repeat(32);
     const report = await runConformance({
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: fx.envelopeBytes,
-        intent: fx.intent,
+        task: fx.task,
         trajectory: traj,
       },
     });
@@ -180,7 +180,7 @@ describe('runConformance — known-bad matrix', () => {
 
   it('FAIL: span profile violated → trajectory.span-profile fails', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     // Remove required attribute from llm_call span
     const llmSpan = traj.spans.find(
       (s) => s.attributes['jinn.span.kind'] === 'jinn.llm_call',
@@ -190,7 +190,7 @@ describe('runConformance — known-bad matrix', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: fx.envelopeBytes,
-        intent: fx.intent,
+        task: fx.task,
         trajectory: traj,
       },
     });
@@ -202,7 +202,7 @@ describe('runConformance — known-bad matrix', () => {
 
   it('FAIL: artifact type vocabulary missing → artifacts.vocabulary fails', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     // Remove output.portfolio.v0 artifact
     const badArtifacts = fx.envelope.artifacts.filter(
       (a) => !a.artifactType.startsWith('output.'),
@@ -212,7 +212,7 @@ describe('runConformance — known-bad matrix', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: new TextEncoder().encode(JSON.stringify(bad)),
-        intent: fx.intent,
+        task: fx.task,
         trajectory: traj,
       },
     });
@@ -224,7 +224,7 @@ describe('runConformance — known-bad matrix', () => {
 
   it('FAIL: artifact linkage broken → artifacts.linkage fails', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     // Corrupt the emit span's jinn.artifact.sha256 (linkage is sha256-keyed
     // post jinn-mono-vy37.1.2 — artifacts no longer carry IPFS CIDs).
     const emitSpan = traj.spans.find(
@@ -236,7 +236,7 @@ describe('runConformance — known-bad matrix', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: fx.envelopeBytes,
-        intent: fx.intent,
+        task: fx.task,
         trajectory: traj,
       },
     });
@@ -290,7 +290,7 @@ describe('runConformance — known-bad matrix', () => {
 
   it('FAIL: raw credential in trajectory → secret-scrub fails', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     // Inject a Bearer token into a span attribute
     traj.spans[0].attributes['http.request.header.authorization'] =
       'Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig';
@@ -298,7 +298,7 @@ describe('runConformance — known-bad matrix', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: fx.envelopeBytes,
-        intent: fx.intent,
+        task: fx.task,
         trajectory: traj,
       },
     });
@@ -321,7 +321,7 @@ describe('runConformance — Layer 2 (attested tier)', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: new TextEncoder().encode(JSON.stringify(attestedEnvelope)),
-        intent: fx.intent,
+        task: fx.task,
         sourceBundle: {
           files: new Map([['src/index.ts', 'console.log("hello");']]),
         },
@@ -342,7 +342,7 @@ describe('runConformance — Layer 2 (attested tier)', () => {
       envelopeCid: fx.envelopeCid,
       options: {
         envelopeBytes: fx.envelopeBytes,
-        intent: fx.intent,
+        task: fx.task,
       },
     });
     expect(report.layer2Passed).toBe('N/A');

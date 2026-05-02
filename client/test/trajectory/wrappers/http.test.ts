@@ -4,7 +4,7 @@ import { tracedHttpCall } from '../../../src/trajectory/wrappers/http.js';
 
 describe('tracedHttpCall', () => {
   it('emits a jinn.llm_call span for model endpoints', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     await tracedHttpCall({
       collector: c,
       spanKind: 'jinn.llm_call',
@@ -25,7 +25,7 @@ describe('tracedHttpCall', () => {
   });
 
   it('emits a jinn.venue_io span for non-LLM endpoints', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     await tracedHttpCall({
       collector: c,
       spanKind: 'jinn.venue_io',
@@ -40,7 +40,7 @@ describe('tracedHttpCall', () => {
   });
 
   it('records ERROR status when invoke throws, and rethrows', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     await expect(
       tracedHttpCall({
         collector: c,
@@ -56,7 +56,7 @@ describe('tracedHttpCall', () => {
   });
 
   it('scrubs Authorization header before attaching it to the span', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy', runId: 'r' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy', runId: 'r' });
     await tracedHttpCall({
       collector: c,
       spanKind: 'jinn.llm_call',

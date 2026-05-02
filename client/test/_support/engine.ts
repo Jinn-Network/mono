@@ -1,14 +1,14 @@
 import {
-  RestorationEngine,
+  TaskEngine,
   NotImplementedError,
-  type RestorationEngineOptions,
-} from '@/restorer/engine/engine.js';
+  type TaskEngineOptions,
+} from '@/harnesses/engine/engine.js';
 import {
-  IntentPersistence,
-  type PersistedIntent,
-  type PersistedIntentInput,
-} from '@/restorer/engine/persistence.js';
-import { IntentState } from '@/restorer/engine/state.js';
+  TaskRunPersistence,
+  type PersistedTaskRun,
+  type PersistedTaskRunInput,
+} from '@/harnesses/engine/persistence.js';
+import { TaskRunState } from '@/harnesses/engine/state.js';
 import type { Store } from '@/store/store.js';
 
 import { randomBytes } from 'node:crypto';
@@ -21,31 +21,31 @@ function nextId(): string { return `req-${randomBytes(4).toString('hex')}`; }
  * `makeInput(id='req-gate')`) is collapsed into one shape.
  */
 export function makeIntentInput(
-  overrides: Partial<PersistedIntentInput> = {},
-): PersistedIntentInput {
+  overrides: Partial<PersistedTaskRunInput> = {},
+): PersistedTaskRunInput {
   const id = overrides.requestId ?? nextId();
   const now = Date.now();
   return {
     requestId: id,
-    intentCid: `bafycid-${id}`,
+    taskCid: `bafycid-${id}`,
     onchainCreationTx: '0xdeadbeef',
     onchainCreationBlock: 1000,
-    specKind: 'portfolio.v0',
+    solverType: 'portfolio.v0',
     windowStartTs: now + 60_000,
     windowEndTs: now + 60_000 + 86_400_000,
-    desiredState: { id, description: 'test' },
+    task: { id, description: 'test', solverType: 'portfolio.v0', role: 'restoration' },
     ...overrides,
   };
 }
 
 /**
- * A thin subclass of IntentPersistence that overrides `insertDiscovered` to
- * return the newly-inserted PersistedIntent (the base class returns void).
+ * A thin subclass of TaskRunPersistence that overrides `insertDiscovered` to
+ * return the newly-inserted PersistedTaskRun (the base class returns void).
  * This makes test assertions on the inserted row ergonomic without calling
  * `getOrThrow` separately.
  */
-class TestPersistence extends IntentPersistence {
-  insertDiscovered(input: PersistedIntentInput): PersistedIntent {
+class TestPersistence extends TaskRunPersistence {
+  insertDiscovered(input: PersistedTaskRunInput): PersistedTaskRun {
     super.insertDiscovered(input);
     return this.getOrThrow(input.requestId);
   }
@@ -55,23 +55,23 @@ export interface StateMachineSpyOpts {
   store: Store;
   paths?: { workingDirRoot: string; implStateDirRoot: string };
   /** When provided, the real claim() implementation is used (via super.claim()). */
-  claimDeps?: RestorationEngineOptions['claimDeps'];
+  claimDeps?: TaskEngineOptions['claimDeps'];
   /** When provided, wires the impl registry for claim-gate tests. */
-  implRegistry?: RestorationEngineOptions['implRegistry'];
+  implRegistry?: TaskEngineOptions['implRegistry'];
   /**
    * When provided, the real pack() implementation is used (via super.pack()).
    * Also enables the real takePreSnapshot() (which has no external deps).
    */
-  packagingDeps?: RestorationEngineOptions['packagingDeps'];
-  manifestDeps?: RestorationEngineOptions['manifestDeps'];
+  packagingDeps?: TaskEngineOptions['packagingDeps'];
+  manifestDeps?: TaskEngineOptions['manifestDeps'];
   /** When provided, the real deliver() implementation is used (via super.deliver()). */
-  deliveryDeps?: RestorationEngineOptions['deliveryDeps'];
-  onClaim?(intent: PersistedIntent): Promise<void>;
-  onPreSnapshot?(intent: PersistedIntent): Promise<void>;
-  onRunImpl?(intent: PersistedIntent): Promise<void>;
-  onPostSnapshot?(intent: PersistedIntent): Promise<void>;
-  onPack?(intent: PersistedIntent): Promise<void>;
-  onDeliver?(intent: PersistedIntent): Promise<void>;
+  deliveryDeps?: TaskEngineOptions['deliveryDeps'];
+  onClaim?(intent: PersistedTaskRun): Promise<void>;
+  onPreSnapshot?(intent: PersistedTaskRun): Promise<void>;
+  onRunImpl?(intent: PersistedTaskRun): Promise<void>;
+  onPostSnapshot?(intent: PersistedTaskRun): Promise<void>;
+  onPack?(intent: PersistedTaskRun): Promise<void>;
+  onDeliver?(intent: PersistedTaskRun): Promise<void>;
 }
 
 export interface StateMachineSpy {
@@ -80,7 +80,7 @@ export interface StateMachineSpy {
   callsByIntent: Map<string, string[]>;
 }
 
-export class SpyEngine extends RestorationEngine {
+export class SpyEngine extends TaskEngine {
   readonly calls: string[] = [];
   readonly callsByIntent: Map<string, string[]> = new Map();
   private readonly spyOpts: StateMachineSpyOpts;
@@ -90,7 +90,7 @@ export class SpyEngine extends RestorationEngine {
 
   constructor(opts: StateMachineSpyOpts) {
     // We need store.db for TestPersistence, so build opts first then pass to super.
-    // The base class constructs IntentPersistence from opts.store.db; we shadow it.
+    // The base class constructs TaskRunPersistence from opts.store.db; we shadow it.
     super({
       store: opts.store,
       paths: opts.paths ?? { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
@@ -110,14 +110,14 @@ export class SpyEngine extends RestorationEngine {
     this.testPersistence = tp;
   }
 
-  private record(intent: PersistedIntent, name: string): void {
+  private record(intent: PersistedTaskRun, name: string): void {
     this.calls.push(name);
     const list = this.callsByIntent.get(intent.requestId) ?? [];
     list.push(name);
     this.callsByIntent.set(intent.requestId, list);
   }
 
-  override async claim(intent: PersistedIntent): Promise<void> {
+  override async claim(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'claim');
     if (this.spyOpts.onClaim) return this.spyOpts.onClaim(intent);
     // When claimDeps is injected, delegate to the real implementation.
@@ -129,10 +129,10 @@ export class SpyEngine extends RestorationEngine {
    * Exposes the private dataDrivenAdvance method for unit testing the data-driven
    * advance logic in isolation.
    */
-  testDataDrivenAdvance(intent: PersistedIntent): IntentState | null {
-    return (this as unknown as { dataDrivenAdvance(i: PersistedIntent): IntentState | null }).dataDrivenAdvance(intent);
+  testDataDrivenAdvance(intent: PersistedTaskRun): TaskRunState | null {
+    return (this as unknown as { dataDrivenAdvance(i: PersistedTaskRun): TaskRunState | null }).dataDrivenAdvance(intent);
   }
-  override async takePreSnapshot(intent: PersistedIntent): Promise<void> {
+  override async takePreSnapshot(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'takePreSnapshot');
     if (this.spyOpts.onPreSnapshot) return this.spyOpts.onPreSnapshot(intent);
     // takePreSnapshot has no external deps — always delegate to real impl when paths
@@ -142,17 +142,17 @@ export class SpyEngine extends RestorationEngine {
     }
     throw new NotImplementedError('takePreSnapshot');
   }
-  override async runImpl(intent: PersistedIntent): Promise<void> {
+  override async runImpl(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'runImpl');
     if (this.spyOpts.onRunImpl) return this.spyOpts.onRunImpl(intent);
     throw new NotImplementedError('runImpl');
   }
-  override async takePostSnapshot(intent: PersistedIntent): Promise<void> {
+  override async takePostSnapshot(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'takePostSnapshot');
     if (this.spyOpts.onPostSnapshot) return this.spyOpts.onPostSnapshot(intent);
     throw new NotImplementedError('takePostSnapshot');
   }
-  override async pack(intent: PersistedIntent): Promise<void> {
+  override async pack(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'pack');
     if (this.spyOpts.onPack) return this.spyOpts.onPack(intent);
     // When packagingDeps/manifestDeps are injected, delegate to the real implementation.
@@ -161,7 +161,7 @@ export class SpyEngine extends RestorationEngine {
     }
     throw new NotImplementedError('pack');
   }
-  override async deliver(intent: PersistedIntent): Promise<void> {
+  override async deliver(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'deliver');
     if (this.spyOpts.onDeliver) return this.spyOpts.onDeliver(intent);
     // When deliveryDeps are injected, delegate to the real implementation.

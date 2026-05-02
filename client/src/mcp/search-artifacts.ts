@@ -30,7 +30,7 @@ export async function handleSearchArtifacts(
   args: CorpusQuery,
 ): Promise<SearchArtifactsResult> {
   const local = store.searchOwnAndCached({
-    artifactType: args.kind,
+    artifactType: args.artifactType,
     limit: args.limit ?? 50,
   });
   const network = await corpus.query(args);
@@ -53,7 +53,7 @@ export async function handleSearchArtifactsOrLocalFallback(
       '[mcp:search_artifacts] corpus not configured (missing JINN_CORPUS_SUBGRAPH_URL or JINN_CORPUS_IPFS_GATEWAY_URL) — local-only results',
     );
     const local = store.searchOwnAndCached({
-      artifactType: args.kind,
+      artifactType: args.artifactType,
       limit: args.limit ?? 50,
     });
     return {

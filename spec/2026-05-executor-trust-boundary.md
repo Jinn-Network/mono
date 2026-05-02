@@ -12,6 +12,13 @@
 > Audit: `jinn-mono-j75` §7.2.4, §8 decision #3
 > Sibling specs: `spec/2026-05-schema-versioning.md`, `spec/2026-05-registry-discovery.md`, `spec/2026-05-external-restorer-impls.md`
 
+> Vocabulary status: this spec predates
+> `spec/2026-05-01-harness-pack-architecture.md`. Read
+> `RestorerImpl` as `Harness`, `RestorationContext` as `HarnessContext`,
+> `RestorationOutput` as `Solution`, `intentCid` as `taskCid`, and
+> `client/src/restorer/` as `client/src/harnesses/`. The old terms remain
+> below only to preserve the original decision record.
+
 ## Vocabulary note (2026-04-28)
 
 v1.2 retargets "plug-in" → "external impl" throughout, matching the

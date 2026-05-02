@@ -47,11 +47,11 @@ function buildEnvelope(opts: {
 }): SignedEnvelope {
   return {
     schemaVersion: 'jinn.execution.v1',
-    kind: 'prediction.v0',
+    solverType: 'prediction.v0',
     role: 'restoration',
     generatedAt: Math.floor(Date.now() / 1000),
-    intent: {
-      cid: 'bafyIntent',
+    task: {
+      cid: 'bafyTask',
       onchainCreationTx: '0x' + 'a'.repeat(64),
       onchainCreationBlock: 1,
       requestId: '0x' + 'b'.repeat(64),
@@ -63,6 +63,8 @@ function buildEnvelope(opts: {
       implVersion: '0.1.0',
       clientGitSha: 'abc',
       codeDigest: 'sha256:' + 'c'.repeat(64),
+      runtimeBundleDigest: 'sha256:' + 'c'.repeat(64),
+      plugins: [],
       signingKey: { kind: 'agent-eoa', pubkey: '0x' + 'd'.repeat(128) },
     },
     evidenceTier: 'self-signed',

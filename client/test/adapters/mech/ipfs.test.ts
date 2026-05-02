@@ -3,7 +3,7 @@ import {
   buildIpfsFetchCidPathCandidates,
   buildIpfsHexCidCandidatesFromPartialHex,
   normalizeIpfsGatewayBase,
-  fetchSignedIntentFromIpfs,
+  fetchSignedTaskFromIpfs,
   fetchSourceBundleFromIpfs,
 } from '../../../src/adapters/mech/ipfs.js';
 
@@ -41,16 +41,17 @@ describe('ipfs gateway + CID helpers (jinn-node parity)', () => {
   });
 });
 
-// ── fetchSignedIntentFromIpfs ─────────────────────────────────────────────────
+// ── fetchSignedTaskFromIpfs ─────────────────────────────────────────────────
 
-/** Minimal valid SignedIntentV1 fixture. */
-const VALID_SIGNED_INTENT = {
-  schemaVersion: 'intent.v1',
-  id: 'test-intent-id',
-  kind: 'portfolio.v0',
-  description: 'Test intent description',
+/** Minimal valid SignedTaskV1 fixture. */
+const VALID_SIGNED_TASK = {
+  schemaVersion: 'task.v1',
+  id: 'test-task-id',
+  solverType: 'portfolio.v0',
+  role: 'restoration',
+  description: 'Test task description',
   window: { startTs: 1_000_000, endTs: 1_086_400_000 },
-  spec: { kind: 'portfolio.v0' },
+  spec: {},
   eligibility: {},
   creator: {
     safeAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -76,64 +77,73 @@ function makeFetchStub(body: unknown, ok = true) {
   });
 }
 
-describe('fetchSignedIntentFromIpfs', () => {
+describe('fetchSignedTaskFromIpfs', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('parses a valid SignedIntentV1 fetched from IPFS', async () => {
-    vi.stubGlobal('fetch', makeFetchStub(VALID_SIGNED_INTENT));
+  it('parses a valid SignedTaskV1 fetched from IPFS', async () => {
+    vi.stubGlobal('fetch', makeFetchStub(VALID_SIGNED_TASK));
 
-    const result = await fetchSignedIntentFromIpfs(
+    const result = await fetchSignedTaskFromIpfs(
       'https://gateway.autonolas.tech',
       'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
     );
 
-    expect(result.schemaVersion).toBe('intent.v1');
-    expect(result.id).toBe('test-intent-id');
-    expect(result.kind).toBe('portfolio.v0');
+    expect(result.schemaVersion).toBe('task.v1');
+    expect(result.id).toBe('test-task-id');
+    expect(result.solverType).toBe('portfolio.v0');
     expect(result.signature.algo).toBe('secp256k1');
   });
 
   it('throws ZodError when the fetched document lacks a signature field', async () => {
-    const noSig = { ...VALID_SIGNED_INTENT };
+    const noSig = { ...VALID_SIGNED_TASK };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete (noSig as any).signature;
 
     vi.stubGlobal('fetch', makeFetchStub(noSig));
 
     await expect(
-      fetchSignedIntentFromIpfs(
+      fetchSignedTaskFromIpfs(
         'https://gateway.autonolas.tech',
         'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
       ),
     ).rejects.toThrow();
   });
 
-  it('throws ZodError when schemaVersion is not intent.v1', async () => {
-    const wrongVersion = { ...VALID_SIGNED_INTENT, schemaVersion: 'intent.v0' };
+  it('throws ZodError when schemaVersion is not task.v1', async () => {
+    const wrongVersion = { ...VALID_SIGNED_TASK, schemaVersion: 'intent.v1' };
 
     vi.stubGlobal('fetch', makeFetchStub(wrongVersion));
 
     await expect(
-      fetchSignedIntentFromIpfs(
+      fetchSignedTaskFromIpfs(
         'https://gateway.autonolas.tech',
         'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
       ),
     ).rejects.toThrow();
   });
 
-  it('throws when kind and spec.kind do not match', async () => {
-    const mismatch = {
-      ...VALID_SIGNED_INTENT,
-      kind: 'portfolio.v0',
-      spec: { kind: 'something-else' },
-    };
+  it('throws when a retired top-level kind is present', async () => {
+    const legacy = { ...VALID_SIGNED_TASK, kind: 'portfolio.v0' };
 
-    vi.stubGlobal('fetch', makeFetchStub(mismatch));
+    vi.stubGlobal('fetch', makeFetchStub(legacy));
 
     await expect(
-      fetchSignedIntentFromIpfs(
+      fetchSignedTaskFromIpfs(
+        'https://gateway.autonolas.tech',
+        'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('throws when retired spec.kind is present', async () => {
+    const legacy = { ...VALID_SIGNED_TASK, spec: { kind: 'portfolio.v0' } };
+
+    vi.stubGlobal('fetch', makeFetchStub(legacy));
+
+    await expect(
+      fetchSignedTaskFromIpfs(
         'https://gateway.autonolas.tech',
         'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
       ),

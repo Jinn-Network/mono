@@ -11,18 +11,8 @@ Launch the strategist; persist its outputs.
 ## Inputs
 
 - `workingDir/.orient/summary.json` (and per-topic files for context)
-- `implStateDir/strategies/<kind>/` if any prior promoted strategies exist
+- `implStateDir/strategies/<solverType>/` if any prior promoted strategies exist
 - The intent
-
-## Consult slot registry
-
-Before spawning the bundled strategist, check whether an installed Path 1 plug-in declares a `phase-agent-override` for this phase + agent + intent kind. Read `workingDir/.coordinator/slots.json` if present. If absent, no overrides — proceed with the bundled `strategist` agent.
-
-When present, look in `phaseAgentOverrides` for an entry where `slot.phase === "strategize"` AND `slot.agent === "strategist"` AND (`slot.scope` is absent OR `intent.spec.kind` is in `slot.scope.matchKinds`). The first match wins (the registry already enforces last-installed-wins on collisions; see spec/2026-04-30-plug-in-surface.md §8 open question 8).
-
-If a match exists, the agent file to spawn is at `<entry.packageRoot>/<entry.slot.entry>` — substitute that path for the bundled `claude-code-learner:strategist` reference in the next step. The override agent receives the same inputs as the bundled strategist (intent, orientSummaryPath, priorStrategiesPath, outputDir, skillBundleCid, implStateDirShaAtStart, msUntilEndTs).
-
-If no match, proceed with the bundled strategist as before.
 
 ## Launch the strategist
 
@@ -31,7 +21,7 @@ Use the Agent tool to spawn a fresh-context subagent with role `strategist`.
 Pass it inputs:
   intent                 = <copy of intent>
   orientSummaryPath      = workingDir/.orient/summary.json
-  priorStrategiesPath    = implStateDir/strategies/<kind>/   (or null if absent)
+  priorStrategiesPath    = implStateDir/strategies/<solverType>/   (or null if absent)
   workingDir             = <path>
   implStateDir           = <path, read-only>
   outputDir              = workingDir/.strategize/

@@ -96,9 +96,9 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
     for (const ref of refs) {
       previews.push(await fetchOne(ref));
     }
-    // Post-fetch kind filter (subgraph index doesn't expose intent kind; spec §10 Q6).
-    const kindFilter = args.query.kind;
-    const kindFiltered = kindFilter ? previews.filter((p) => p.envelope.kind === kindFilter) : previews;
+    // Post-fetch solverType filter.
+    const kindFilter = args.query.solverType;
+    const kindFiltered = kindFilter ? previews.filter((p) => p.envelope.solverType === kindFilter) : previews;
     const selected = args.select ? args.select(kindFiltered) : kindFiltered;
     const envelopes: Envelope[] = [];
     for (const sel of selected) {

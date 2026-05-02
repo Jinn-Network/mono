@@ -3,7 +3,7 @@
  *
  * Scope: docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md §4.10.
  *
- * `runConformance({ envelopeCid, options })` fetches the envelope + intent +
+ * `runConformance({ envelopeCid, options })` fetches the envelope + task +
  * trajectory + (at attested tier) source bundle from IPFS, then runs every
  * Layer 1 and (conditionally) Layer 2 check, and assembles a ConformanceReport.
  *
@@ -14,10 +14,11 @@
 import { SignedEnvelopeSchema } from '../types/envelope.js';
 import {
   fetchSignedEnvelopeBytesRaw,
-  fetchSignedIntentFromIpfs,
+  fetchFromIpfs,
   fetchTrajectoryFromIpfs,
   fetchSourceBundleFromIpfs,
 } from '../adapters/mech/ipfs.js';
+import { parseTask } from '../types/task.js';
 import { checkEnvelopeSchema } from './checks/envelope-schema.js';
 import { checkPayload } from './checks/payload.js';
 import { checkHashAndSignature } from './checks/hash-signature.js';
@@ -97,7 +98,7 @@ export interface RunConformanceArgs {
  * Steps:
  *  1. Fetch envelope bytes (or use options.envelopeBytes).
  *  2. Parse with SignedEnvelopeSchema.
- *  3. Fetch intent by envelope.intent.cid (or use options.intent).
+ *  3. Fetch task by envelope.task.cid (or use options.task).
  *  4. Fetch trajectory if envelope.trajectory?.cid is set (or use options.trajectory).
  *  5. If role === 'verdict', fetch restoration envelope bytes (or use options.restorationEnvelopeBytes).
  *  6. If evidenceTier === 'attested' and !skipLayer2, fetch source bundle (or use options.sourceBundle).
@@ -152,22 +153,17 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
     ]);
   }
 
-  // ── Step 3: Intent ────────────────────────────────────────────────────────
-  if (options.intent !== undefined) {
-    ctx.intent = options.intent;
+  // ── Step 3: Task ──────────────────────────────────────────────────────────
+  if (options.task !== undefined) {
+    ctx.task = options.task;
   } else {
-    const intentCid = (ctx.envelope as { intent?: { cid?: string } } | undefined)?.intent?.cid;
-    if (intentCid) {
+    const taskCid = (ctx.envelope as { task?: { cid?: string } } | undefined)?.task?.cid;
+    if (taskCid) {
       try {
-        ctx.intent = await fetchSignedIntentFromIpfs(
-          options.ipfsGatewayUrl ?? '',
-          intentCid,
-        );
+        ctx.task = parseTask(await fetchFromIpfs(options.ipfsGatewayUrl ?? '', taskCid));
       } catch {
-        // Leave undefined — checkIntentReference (if wired) captures this.
-        // Note: checkIntentReference isn't in this harness's Layer 1 set because
-        // the intent CID resolution is optional at V1 (many envelopes are tested
-        // with stub CIDs). The harness populates ctx.intent for checks that need it.
+        // Leave undefined — task CID resolution is optional in V1 because many
+        // envelope fixtures use stub CIDs. Checks that need the Task skip/fail.
       }
     }
   }

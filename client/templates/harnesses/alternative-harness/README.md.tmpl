@@ -1,0 +1,44 @@
+# {{packageName}}
+
+Jinn external harness for `{{solverTypeString}}` running the **seven-phase
+learning pipeline** (Orient -> Strategize -> Plan -> Execute -> Debrief
+-> Improve -> Memory) against a non-Claude-Code harness.
+
+This package owns the phase orchestration; the harness is a swappable
+runtime. Tests use a deterministic in-process mock harness; production
+builders swap `createMockHarness` for a real harness (Pi.dev, Codex,
+Gemini CLI, custom).
+
+## Quickstart
+
+```bash
+yarn install
+yarn test
+```
+
+## Plugging in your real harness
+
+Implement the `HarnessAdapter` interface (see `src/harness.ts`):
+
+```ts
+import type { HarnessAdapter } from '{{packageName}}';
+
+export const myHarness: HarnessAdapter = {
+  name: 'my-harness',
+  async promptForJson({ systemPrompt, userPrompt, budgetMs, abort }) {
+    // Spawn / call your harness; parse its JSON response; return.
+  },
+};
+```
+
+Then construct the harness with your factory:
+
+```ts
+import createHarness from '{{packageName}}';
+const impl = createHarness(env, { harnessFactory: () => myHarness });
+```
+
+## Spec
+
+- `spec/2026-04-30-plug-in-surface.md` §3.3.3 (alternative-harness pattern).
+- `docs/superpowers/specs/2026-04-23-default-learning-harness-design.md` §2 (phase pipeline definition).

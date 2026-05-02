@@ -8,7 +8,7 @@ import {
   checkHlApiWallet,
   runPortfolioV0DoctorChecks,
 } from '../../src/api/portfolio-v0-doctor.js';
-import type { ApiWalletState } from '../../src/restorer/impls/claude-mcp-hyperliquid/api-wallet.js';
+import type { ApiWalletState } from '../../src/harnesses/impls/claude-mcp-hyperliquid/api-wallet.js';
 
 let tmpBase: string;
 

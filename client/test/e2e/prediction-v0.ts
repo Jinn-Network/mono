@@ -4,9 +4,9 @@
  * Scenario:
  *   1. Bootstrap an operator on Anvil-forked Base mainnet
  *   2. Deploy MockV3Aggregator (ETH/USD price feed)
- *   3. Post a prediction.v0 intent on-chain
- *   4. Restorer claims + runs PredictionV0BaselineImpl (mocked Chainlink)
- *   5. Sign + submit PredictionSubmissionManifest as result
+ *   3. Post a prediction.v0 Task on-chain
+ *   4. Harness claims + runs PredictionV0BaselineImpl (mocked Chainlink)
+ *   5. Sign + submit jinn.execution.v1 restoration envelope as result
  *   6. DeliveryWatcher claims restoration delivery + creates evaluation job
  *   7. Evaluator runs with mocked oracle → assert verdict PASS
  *   8. Verdict variants: FAIL / REJECTED / INDETERMINATE (direct TypeScript)
@@ -19,7 +19,7 @@
  *   - Evaluator oracle is mocked via _testDeps (no live Chainlink needed)
  *   - Phase 10 verdict variants are pure TypeScript (no on-chain state needed)
  *
- * PIS Phase 1: Three separate Safes for creator / restorer / evaluator.
+ * PIS Phase 1: Three separate Safes for creator / harness / evaluator.
  * Proves cross-evaluation flow with per-Safe counter attribution.
  *
  * Usage: yarn e2e:prediction
@@ -44,7 +44,6 @@ import {
   numberToHex,
   pad,
   parseAbi,
-  stringToHex,
   toHex,
   type Address,
   type Hex,
@@ -53,25 +52,25 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 
-import { decodeMarketplaceRequestLogs } from '../src/adapters/mech/contracts.js';
+import { decodeMarketplaceRequestLogs } from '../../src/adapters/mech/contracts.js';
 import {
   MECH_ABI,
   MECH_MARKETPLACE_ABI,
   JINN_ROUTER_ABI,
   NATIVE_PAYMENT_TYPE,
-} from '../src/adapters/mech/types.js';
-import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
-import { getChainConfig } from '../src/earning/contracts.js';
-import { PredictionV0BaselineImpl } from '../src/restorer/impls/prediction-v0-baseline/index.js';
-import { PredictionV0Evaluator } from '../src/restorer/impls/prediction-v0-evaluator/index.js';
-import type { RestorationContext } from '../src/restorer/types.js';
-import type { RestorationJob } from '../src/types/desired-state.js';
-import type {
-  PredictionV0Intent,
-  PredictionSubmissionManifest,
-} from '../src/types/prediction.js';
-import type { SpanningResult } from '../src/venues/chainlink/client.js';
+} from '../../src/adapters/mech/types.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { getChainConfig } from '../../src/earning/contracts.js';
+import { PredictionV0BaselineImpl } from '../../src/harnesses/impls/prediction-v0-baseline/index.js';
+import { PredictionV0Evaluator } from '../../src/harnesses/impls/prediction-v0-evaluator/index.js';
+import type { HarnessContext } from '../../src/harnesses/types.js';
+import type { Task } from '../../src/types/task.js';
+import type { TaskV1 } from '../../src/types/task-document.js';
+import type { PredictionV0Task } from '../../src/types/prediction.js';
+import type { SignedEnvelope } from '../../src/types/envelope.js';
+import { signCanonical } from '../../src/harnesses/engine/signing.js';
+import type { SpanningResult } from '../../src/venues/chainlink/client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -100,7 +99,7 @@ const RESPONSE_TIMEOUT_HEADROOM = 3600n;
 
 // MockV3Aggregator artifact path
 const MOCK_AGGREGATOR_ARTIFACT = join(
-  __dirname, '..', '..', 'contracts',
+  __dirname, '..', '..', '..', 'contracts',
   'artifacts', 'src', 'testnet', 'MockV3Aggregator.sol', 'MockV3Aggregator.json',
 );
 
@@ -345,6 +344,22 @@ function makeAdapter(agentPk: `0x${string}`, safe: Address, mech: Address): Mech
   });
 }
 
+function noopTrajectory(): HarnessContext['trajectory'] {
+  return { addSpan: () => ({}) } as unknown as HarnessContext['trajectory'];
+}
+
+async function signExecutionEnvelope(
+  unsigned: Omit<SignedEnvelope, 'signature'>,
+  privateKey: `0x${string}`,
+  signer: `0x${string}`,
+): Promise<SignedEnvelope> {
+  const signed = await signCanonical(unsigned, privateKey, signer);
+  return {
+    ...unsigned,
+    signature: { algo: 'secp256k1', signer, hash: signed.hash, sig: signed.sig },
+  };
+}
+
 // ── Counter reader ────────────────────────────────────────────────────────────
 
 async function readCounter(
@@ -372,7 +387,7 @@ process.on('beforeExit', (code) => { if (!exitExpected) console.error(`[e2e-pred
 
 async function main(): Promise<void> {
   console.log('\n=== Prediction.v0 E2E (Anvil fork of Base mainnet + mocked oracle) ===\n');
-  console.log('=== PIS Phase 1: Three Safes — creator / restorer / evaluator ===\n');
+  console.log('=== PIS Phase 1: Three Safes — creator / harness / evaluator ===\n');
 
   let anvil: ChildProcess | null = null;
   let tmpDir: string | null = null;
@@ -380,33 +395,33 @@ async function main(): Promise<void> {
 
   // Shared state across phases
   let creatorAdapter: MechAdapter | undefined;
-  let restorerAdapter: MechAdapter | undefined;
+  let harnessAdapter: MechAdapter | undefined;
   let evaluatorAdapter: MechAdapter | undefined;
   // Delivery-watching adapters for the creator: each watches a different mech's events,
   // but uses the creator's Safe + credentials to call claimDelivery/createEvaluationJob.
   // This is necessary because watchForDeliveries watches `mechContractAddress` for Deliver
-  // events — in cross-role mode, deliveries arrive on the restorer's/evaluator's mechs.
+  // events — in cross-role mode, deliveries arrive on the harness's/evaluator's mechs.
   let creatorRestorationWatcherAdapter: MechAdapter | undefined;
   let creatorEvalWatcherAdapter: MechAdapter | undefined;
   let publicClient!: PublicClient;
 
   // Per-role keys and addresses
   let creatorAgentPk: Hex | undefined;
-  let restorerAgentPk: Hex | undefined;
+  let harnessAgentPk: Hex | undefined;
   let evaluatorAgentPk: Hex | undefined;
   let creatorSafe: Address | undefined;
-  let restorerSafe: Address | undefined;
+  let harnessSafe: Address | undefined;
   let evaluatorSafe: Address | undefined;
   let creatorMech: Address | undefined;
-  let restorerMech: Address | undefined;
+  let harnessMech: Address | undefined;
   let evaluatorMech: Address | undefined;
 
   let mockFeedAddress: Address | undefined;
   let restorationRequestId: string | undefined;
-  let capturedManifest: PredictionSubmissionManifest | undefined;
-  let capturedIntentCid: string | undefined;
+  let capturedManifest: SignedEnvelope | undefined;
+  let capturedTaskCid: string | undefined;
   let capturedWindow: { startTs: number; endTs: number } | undefined;
-  let capturedIntent: PredictionV0Intent | undefined;
+  let capturedIntent: PredictionV0Task | undefined;
   // Block number tracking for getLogs range queries (Anvil limits to 10,000 blocks from fork)
   let phase5StartBlock: bigint | undefined;
   let phase7StartBlock: bigint | undefined;
@@ -461,11 +476,11 @@ async function main(): Promise<void> {
       if (price !== 3600) throw new Error(`Expected $3600, got $${price}`);
     }));
 
-    // ── Phase 3: Bootstrap 3 services (creator / restorer / evaluator) ────────
+    // ── Phase 3: Bootstrap 3 services (creator / harness / evaluator) ────────
     // Uses standard staking mode (stOLAS distributor), same as original single-service e2e.
     // Master funds OLAS deposit into distributor, then bootstrap calls distributor.stake() × 3.
 
-    results.push(await runPhase('Phase 3: Bootstrap 3 services — creator / restorer / evaluator', async () => {
+    results.push(await runPhase('Phase 3: Bootstrap 3 services — creator / harness / evaluator', async () => {
       if (!tmpDir) throw new Error('No temp dir from Phase 1');
 
       // Step 1: first bootstrap pass — generates master wallet, pauses at funding
@@ -532,28 +547,28 @@ async function main(): Promise<void> {
         throw new Error(`Expected 3 complete services, got ${completedServices.length}. Message: ${finalResult.message}`);
       }
 
-      const [creatorSvc, restorerSvc, evaluatorSvc] = completedServices;
+      const [creatorSvc, harnessSvc, evaluatorSvc] = completedServices;
 
       // Derive private keys from HD wallet
-      const { FleetStateStore } = await import('../src/earning/store.js');
-      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
+      const { FleetStateStore } = await import('../../src/earning/store.js');
+      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
       const store = new FleetStateStore(tmpDir);
       const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), PASSWORD);
 
       creatorAgentPk = walletPrivateKeyAtIndex(mnemonic, creatorSvc!.index);
-      restorerAgentPk = walletPrivateKeyAtIndex(mnemonic, restorerSvc!.index);
+      harnessAgentPk = walletPrivateKeyAtIndex(mnemonic, harnessSvc!.index);
       evaluatorAgentPk = walletPrivateKeyAtIndex(mnemonic, evaluatorSvc!.index);
 
       creatorSafe = getAddress(creatorSvc!.safe_address!) as Address;
-      restorerSafe = getAddress(restorerSvc!.safe_address!) as Address;
+      harnessSafe = getAddress(harnessSvc!.safe_address!) as Address;
       evaluatorSafe = getAddress(evaluatorSvc!.safe_address!) as Address;
 
       creatorMech = getAddress(creatorSvc!.mech_address!) as Address;
-      restorerMech = getAddress(restorerSvc!.mech_address!) as Address;
+      harnessMech = getAddress(harnessSvc!.mech_address!) as Address;
       evaluatorMech = getAddress(evaluatorSvc!.mech_address!) as Address;
 
       console.log(`    Creator  Safe: ${creatorSafe}, Mech: ${creatorMech} (index ${creatorSvc!.index})`);
-      console.log(`    Restorer Safe: ${restorerSafe}, Mech: ${restorerMech} (index ${restorerSvc!.index})`);
+      console.log(`    Harness Safe: ${harnessSafe}, Mech: ${harnessMech} (index ${harnessSvc!.index})`);
       console.log(`    Evaluator Safe: ${evaluatorSafe}, Mech: ${evaluatorMech} (index ${evaluatorSvc!.index})`);
     }));
 
@@ -561,23 +576,23 @@ async function main(): Promise<void> {
 
     results.push(await runPhase('Phase 4: Create 3 MechAdapters + stabilize fork', async () => {
       if (!creatorAgentPk || !creatorSafe || !creatorMech) throw new Error('Missing creator credentials from Phase 3');
-      if (!restorerAgentPk || !restorerSafe || !restorerMech) throw new Error('Missing restorer credentials from Phase 3');
+      if (!harnessAgentPk || !harnessSafe || !harnessMech) throw new Error('Missing harness credentials from Phase 3');
       if (!evaluatorAgentPk || !evaluatorSafe || !evaluatorMech) throw new Error('Missing evaluator credentials from Phase 3');
 
       creatorAdapter = makeAdapter(creatorAgentPk as `0x${string}`, creatorSafe, creatorMech);
-      restorerAdapter = makeAdapter(restorerAgentPk as `0x${string}`, restorerSafe, restorerMech);
+      harnessAdapter = makeAdapter(harnessAgentPk as `0x${string}`, harnessSafe, harnessMech);
       evaluatorAdapter = makeAdapter(evaluatorAgentPk as `0x${string}`, evaluatorSafe, evaluatorMech);
       // Watcher adapters: creator's Safe + credentials, but pointed at the mech where the
-      // delivery event will appear (restorer's / evaluator's mech). Used to drive the
+      // delivery event will appear (harness's / evaluator's mech). Used to drive the
       // adapter's watchForDeliveries() iterator so it can observe cross-role deliveries and
       // create the eval job / clean up tracking — without calling claimDelivery (that was
       // already done by the deliverer's own adapter).
-      creatorRestorationWatcherAdapter = makeAdapter(creatorAgentPk as `0x${string}`, creatorSafe, restorerMech);
+      creatorRestorationWatcherAdapter = makeAdapter(creatorAgentPk as `0x${string}`, creatorSafe, harnessMech);
       creatorEvalWatcherAdapter = makeAdapter(creatorAgentPk as `0x${string}`, creatorSafe, evaluatorMech);
 
       await Promise.all([
         creatorAdapter.initialize(),
-        restorerAdapter.initialize(),
+        harnessAdapter.initialize(),
         evaluatorAdapter.initialize(),
         creatorRestorationWatcherAdapter.initialize(),
         creatorEvalWatcherAdapter.initialize(),
@@ -586,7 +601,7 @@ async function main(): Promise<void> {
       // Fund all three Safes with ETH for gas
       await Promise.all([
         jsonRpc(ANVIL_RPC, 'anvil_setBalance', [creatorSafe, '0x56BC75E2D63100000']),
-        jsonRpc(ANVIL_RPC, 'anvil_setBalance', [restorerSafe, '0x56BC75E2D63100000']),
+        jsonRpc(ANVIL_RPC, 'anvil_setBalance', [harnessSafe, '0x56BC75E2D63100000']),
         jsonRpc(ANVIL_RPC, 'anvil_setBalance', [evaluatorSafe, '0x56BC75E2D63100000']),
       ]);
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
@@ -594,18 +609,18 @@ async function main(): Promise<void> {
       // Stabilize marketplace state for all three mech+safe pairs sequentially
       // (each call does storage slot scanning + writes that could interfere if parallel)
       await stabilizeForkedMarketplaceState(publicClient, creatorSafe, creatorMech);
-      await stabilizeForkedMarketplaceState(publicClient, restorerSafe, restorerMech);
+      await stabilizeForkedMarketplaceState(publicClient, harnessSafe, harnessMech);
       await stabilizeForkedMarketplaceState(publicClient, evaluatorSafe, evaluatorMech);
 
       console.log('    3 MechAdapters initialized + marketplace stabilized for all 3 mechs');
     }));
 
-    // ── Phase 5: Post prediction.v0 intent on-chain (creator) ────────────────
+    // ── Phase 5: Post prediction.v0 Task on-chain (creator) ────────────────
     // The creator creates the restoration request specifying RESTORER's mech as priorityMech.
-    // This is the correct cross-role flow: creator funds + directs, restorer delivers.
+    // This is the correct cross-role flow: creator funds + directs, harness delivers.
 
-    results.push(await runPhase('Phase 5: Post prediction.v0 intent on-chain (creator)', async () => {
-      if (!creatorAgentPk || !creatorSafe || !restorerMech || !mockFeedAddress) throw new Error('Missing state from prior phases');
+    results.push(await runPhase('Phase 5: Post prediction.v0 Task on-chain (creator)', async () => {
+      if (!creatorAgentPk || !creatorSafe || !harnessMech || !mockFeedAddress) throw new Error('Missing state from prior phases');
 
       // Capture starting block so later getLogs calls stay within the 10,000-block Anvil fork limit
       phase5StartBlock = await publicClient.getBlockNumber();
@@ -617,12 +632,12 @@ async function main(): Promise<void> {
       const resolveTs = endTs + 900_000;
       capturedWindow = { startTs, endTs };
 
-      const predictionIntent: PredictionV0Intent = {
+      const predictionIntent: PredictionV0Task = {
         id: 'pred-v0-e2e-test',
         description: 'Will ETH be above $3500 at resolveTs?',
+        solverType: 'prediction.v0',
         window: { startTs, endTs },
         spec: {
-          kind: 'prediction.v0',
           oracle: {
             venue: 'chainlink-base',
             feed: mockFeedAddress,
@@ -639,20 +654,37 @@ async function main(): Promise<void> {
       };
       capturedIntent = predictionIntent;
 
-      const { createClients: createClientsLocal } = await import('../src/adapters/mech/safe.js');
-      const { submitRestorationJob, getMechDeliveryRate, getTimeoutBounds } = await import('../src/adapters/mech/contracts.js');
-      const { buildRestorationJobPayload, uploadToIpfs, cidToDigestHex } = await import('../src/adapters/mech/ipfs.js');
+      const { createClients: createClientsLocal } = await import('../../src/adapters/mech/safe.js');
+      const { submitTask, getMechDeliveryRate, getTimeoutBounds } = await import('../../src/adapters/mech/contracts.js');
+      const { uploadToIpfs, cidToDigestHex } = await import('../../src/adapters/mech/ipfs.js');
+      const { signTaskV1 } = await import('../../src/tasks/signing.js');
 
       const { walletClient: creatorWalletClient } = createClientsLocal(ANVIL_RPC, creatorAgentPk as Hex, base);
 
-      // Build intent payload + upload to IPFS
-      const intentPayload = buildRestorationJobPayload(predictionIntent as unknown as import('../src/types/desired-state.js').RestorationJob);
-      const intentCid = await uploadToIpfs('https://registry.autonolas.tech', intentPayload);
-      const intentDataHex = cidToDigestHex(intentCid) as Hex;
+      // Build signed Task document + upload to IPFS.
+      const creatorAccount = privateKeyToAccount(creatorAgentPk as Hex);
+      const taskDocument: TaskV1 = {
+        schemaVersion: 'task.v1',
+        id: predictionIntent.id,
+        solverType: predictionIntent.solverType,
+        role: 'restoration',
+        description: predictionIntent.description,
+        window: predictionIntent.window,
+        spec: predictionIntent.spec,
+        eligibility: predictionIntent.eligibility,
+        creator: {
+          safeAddress: getAddress(creatorSafe as Address),
+          agentEoa: creatorAccount.address,
+        },
+        createdAt: now,
+      };
+      const signedTask = await signTaskV1(taskDocument, creatorAgentPk as Hex);
+      const taskCid = await uploadToIpfs('https://registry.autonolas.tech', signedTask);
+      const taskDataHex = cidToDigestHex(taskCid) as Hex;
 
-      // Get pricing from restorerMech (since it's the priorityMech)
+      // Get pricing from harnessMech (since it's the priorityMech)
       const [deliveryRate, timeoutBounds] = await Promise.all([
-        getMechDeliveryRate(publicClient, restorerMech),
+        getMechDeliveryRate(publicClient, harnessMech),
         getTimeoutBounds(publicClient, MARKETPLACE_ADDRESS),
       ]);
       const maxTimeout = timeoutBounds.max;
@@ -664,47 +696,48 @@ async function main(): Promise<void> {
       // → increments creationCount[creatorSafe]
       const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       let requestIds: string[];
+      let submission: Awaited<ReturnType<typeof submitTask>>;
       try {
-        requestIds = await submitRestorationJob(
+        submission = await submitTask(
           publicClient,
           creatorWalletClient,
           creatorSafe as Address,
           ROUTER_ADDRESS,
-          restorerMech,
-          intentDataHex,
+          harnessMech,
+          taskDataHex,
           deliveryRate,
           maxTimeout,
         );
+        requestIds = submission.requestIds;
       } finally {
         clearInterval(miningInterval);
       }
 
-      if (requestIds.length === 0) throw new Error('No requestId from submitRestorationJob');
+      if (requestIds.length === 0) throw new Error('No requestId from submitTask');
       restorationRequestId = requestIds[0];
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
-      console.log(`    prediction.v0 intent posted by creator (priorityMech=restorerMech), requestId: ${restorationRequestId}`);
+      console.log(`    prediction.v0 Task posted by creator (priorityMech=harnessMech), requestId: ${restorationRequestId}`);
 
-      // Verify MarketplaceRequest event on-chain
-      const currentBlock = await publicClient.getBlockNumber();
-      const logs = await publicClient.getLogs({ address: MARKETPLACE_ADDRESS, fromBlock: currentBlock - 5n, toBlock: currentBlock });
-      const decoded = decodeMarketplaceRequestLogs(logs);
+      // Verify MarketplaceRequest event on-chain from the submission receipt.
+      const receipt = await publicClient.getTransactionReceipt({ hash: submission.txHash });
+      const decoded = decodeMarketplaceRequestLogs(receipt.logs);
       if (!decoded.find(d => d.requestId === restorationRequestId)) throw new Error(`MarketplaceRequest event not found`);
       console.log('    MarketplaceRequest event confirmed on-chain');
     }));
 
-    // ── Phase 6: Restorer claims + runs PredictionV0BaselineImpl ─────────────
+    // ── Phase 6: Harness claims + runs PredictionV0BaselineImpl ─────────────
 
-    results.push(await runPhase('Phase 6: Restorer claims + runs PredictionV0BaselineImpl (mocked Chainlink)', async () => {
-      if (!restorerAdapter || !restorationRequestId || !tmpDir || !restorerAgentPk || !restorerSafe || !capturedWindow || !mockFeedAddress || !capturedIntent) {
+    results.push(await runPhase('Phase 6: Harness claims + runs PredictionV0BaselineImpl (mocked Chainlink)', async () => {
+      if (!harnessAdapter || !restorationRequestId || !tmpDir || !harnessAgentPk || !harnessSafe || !capturedWindow || !mockFeedAddress || !capturedIntent) {
         throw new Error('Missing state from prior phases');
       }
 
       // Mine blocks while waiting for request
       const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
 
-      let reqValue: Awaited<ReturnType<typeof restorerAdapter['watchForRequests'][typeof Symbol.asyncIterator]>> | undefined;
+      let reqValue: Awaited<ReturnType<typeof harnessAdapter['watchForRequests'][typeof Symbol.asyncIterator]>> | undefined;
       try {
-        const iter = restorerAdapter.watchForRequests()[Symbol.asyncIterator]();
+        const iter = harnessAdapter.watchForRequests()[Symbol.asyncIterator]();
         const result = await Promise.race([
           iter.next(),
           sleep(30000).then(() => { throw new Error('watchForRequests timed out'); }),
@@ -714,23 +747,27 @@ async function main(): Promise<void> {
         clearInterval(miningInterval);
       }
 
-      if (!reqValue) throw new Error('No request received by restorer');
-      const req = reqValue as { requestId: string; restorationJob: RestorationJob; intentCid: string; onchainCreationTx?: string; onchainCreationBlock?: number };
+      if (!reqValue) throw new Error('No request received by harness');
+      const req = reqValue as { requestId: string; task: Task; taskCid: string; onchainCreationTx?: string; onchainCreationBlock?: number };
 
-      console.log(`    Restorer claimed request: ${req.requestId}, intentCid: ${req.intentCid}`);
-      capturedIntentCid = req.intentCid;
+      console.log(`    Harness claimed request: ${req.requestId}, taskCid: ${req.taskCid}`);
+      capturedTaskCid = req.taskCid;
 
       // Claim on-chain (MechAdapter.claimRequest is a no-op for AcceptAllPolicy)
-      await restorerAdapter.claimRequest(req.requestId);
+      await harnessAdapter.claimRequest(req.requestId);
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
       // Run PredictionV0BaselineImpl
       const impl = new PredictionV0BaselineImpl({ rpcUrl: ANVIL_RPC });
 
-      const intentForImpl: RestorationJob = {
+      const intentForImpl: Task = {
         ...capturedIntent,
+        solverType: capturedIntent.solverType ?? 'prediction.v0',
         window: capturedWindow,
-      } as unknown as RestorationJob;
+        spec: Object.fromEntries(
+          Object.entries(capturedIntent.spec as Record<string, unknown>).filter(([key]) => key !== 'kind'),
+        ),
+      } as unknown as Task;
 
       const implStateDir = join(tmpDir, 'impl-state', req.requestId);
       const workingDir = join(tmpDir, 'working', req.requestId);
@@ -738,13 +775,14 @@ async function main(): Promise<void> {
       mkdirSync(workingDir, { recursive: true });
 
       const abort = new AbortController();
-      const ctx: RestorationContext = {
-        intent: intentForImpl,
+      const ctx: HarnessContext = {
+        task: intentForImpl,
         implStateDir,
         workingDir,
         log: (e) => console.log(`    [impl] [${e.level}] ${e.msg}${e.data ? ' ' + JSON.stringify(e.data) : ''}`),
         abort: abort.signal,
         msUntilEndTs: () => Math.max(0, capturedWindow!.endTs - Date.now()),
+        trajectory: noopTrajectory(),
       };
 
       const output = await impl.run(ctx);
@@ -753,93 +791,99 @@ async function main(): Promise<void> {
       console.log(`    Impl done. probability=${probability}, modelId=${modelId}`);
       if (probability !== '0.55') throw new Error(`Expected probability 0.55 (price > threshold), got ${probability}`);
 
-      // Build and sign PredictionSubmissionManifest with RESTORER's key + Safe
-      const restorerAccount = privateKeyToAccount(restorerAgentPk as `0x${string}`);
-      const manifestBase: Omit<PredictionSubmissionManifest, 'signature'> = {
-        schemaVersion: 'prediction.v0.submission.v1',
+      // Build and sign the restoration envelope with the Harness key + Safe.
+      const harnessAccount = privateKeyToAccount(harnessAgentPk as `0x${string}`);
+      const unsignedEnvelope: Omit<SignedEnvelope, 'signature'> = {
+        schemaVersion: 'jinn.execution.v1',
+        solverType: 'prediction.v0',
+        role: 'restoration',
         generatedAt: Date.now(),
-        intent: {
-          cid: capturedIntentCid!,
+        task: {
+          cid: capturedTaskCid!,
           onchainCreationTx: (req.onchainCreationTx ?? '0x' + '0'.repeat(64)) as `0x${string}`,
           onchainCreationBlock: req.onchainCreationBlock ?? 0,
           requestId: restorationRequestId as `0x${string}`,
         },
-        restorer: {
-          safeAddress: restorerSafe as `0x${string}`,
-          agentEoa: restorerAccount.address,
+        participant: {
+          safeAddress: harnessSafe as `0x${string}`,
+          agentEoa: harnessAccount.address,
         },
         window: capturedWindow,
-        prediction: {
-          probability,
-          submittedAt,
-          modelId,
+        executor: {
+          implName: impl.name,
+          implVersion: impl.version,
+          clientGitSha: 'e2e',
+          codeDigest: `sha256:${'0'.repeat(64)}`,
+          runtimeBundleDigest: `sha256:${'1'.repeat(64)}`,
+          plugins: [],
+          signingKey: { kind: 'agent-eoa', pubkey: harnessAccount.address },
+        },
+        evidenceTier: 'self-signed',
+        attestation: null,
+        trajectory: null,
+        artifacts: [],
+        payload: output.solutionPayload ?? {
+          prediction: { probability, submittedAt, modelId },
         },
       };
-
-      const canonical = JSON.stringify(manifestBase);
-      const hash = keccak256(stringToHex(canonical));
-      const sig = await restorerAccount.sign({ hash });
-      const manifest: PredictionSubmissionManifest = {
-        ...manifestBase,
-        signature: { algo: 'secp256k1', signer: restorerAccount.address, hash, sig },
-      };
+      const manifest = await signExecutionEnvelope(unsignedEnvelope, harnessAgentPk as `0x${string}`, harnessAccount.address);
       capturedManifest = manifest;
 
-      // Submit result via RESTORER's adapter (deliverToMarketplace on restorer's mech)
+      // Submit result via RESTORER's adapter (deliverToMarketplace on harness's mech)
       const resultData = JSON.stringify(manifest);
 
       const miningInterval2 = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       try {
-        await restorerAdapter.submitResult(req.requestId, { data: resultData });
+        await harnessAdapter.submitResult(req.requestId, { data: resultData });
       } finally {
         clearInterval(miningInterval2);
       }
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
-      console.log(`    PredictionSubmissionManifest signed with restorer key (${restorerAccount.address}) + submitted on-chain`);
+      console.log(`    jinn.execution.v1 restoration envelope signed with harness key (${harnessAccount.address}) + submitted on-chain`);
 
-      // Drive restorerAdapter.watchForDeliveries() — the adapter detects the Deliver event
-      // on restorerMech, sees iDelivered=true (mechAddress === restorerMech === mechContractAddress),
-      // and calls claimDelivery via restorerSafe → increments restorationDeliveryCount[restorerSafe].
-      // iCreatedRestoration=false (restorer didn't post the request) so no eval job is created here.
+      // Drive harnessAdapter.watchForDeliveries() — the adapter detects the Deliver event
+      // on harnessMech, sees iDelivered=true (mechAddress === harnessMech === mechContractAddress),
+      // and calls claimDelivery via harnessSafe → increments restorationDeliveryCount[harnessSafe].
+      // iCreatedRestoration=false (harness didn't post the request) so no eval job is created here.
       const miningInterval3 = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       try {
-        const restorerDeliveryIter = restorerAdapter.watchForDeliveries()[Symbol.asyncIterator]();
+        const harnessDeliveryIter = harnessAdapter.watchForDeliveries()[Symbol.asyncIterator]();
         await Promise.race([
-          restorerDeliveryIter.next(),
-          sleep(30000).then(() => { throw new Error('restorerAdapter.watchForDeliveries() timed out'); }),
+          harnessDeliveryIter.next(),
+          sleep(30000).then(() => { throw new Error('harnessAdapter.watchForDeliveries() timed out'); }),
         ]);
       } finally {
         clearInterval(miningInterval3);
       }
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
-      console.log(`    restorationDeliveryCount[restorerSafe] incremented (restorerAdapter.watchForDeliveries → iDelivered=true)`);
+      console.log(`    restorationDeliveryCount[harnessSafe] incremented (harnessAdapter.watchForDeliveries → iDelivered=true)`);
     }));
 
     // ── Phase 7: Creator observes restoration delivery + creates eval job ────────
-    // Uses creatorRestorationWatcherAdapter (creator's Safe, mechContractAddress=restorerMech)
-    // to drive watchForDeliveries(). The delivery event is on restorerMech.
+    // Uses creatorRestorationWatcherAdapter (creator's Safe, mechContractAddress=harnessMech)
+    // to drive watchForDeliveries(). The delivery event is on harnessMech.
     //
     // With the fixed iDelivered logic (compares mechServiceMultisig from the event against
     // this.config.safeAddress):
-    //   • iDelivered = (restorerSafe === creatorSafe) = false → no claimDelivery attempt
+    //   • iDelivered = (harnessSafe === creatorSafe) = false → no claimDelivery attempt
     //   • iCreatedRestoration=true (injected into pendingEvaluations)
-    //     → tryCreateEvaluationJob → verifyRestorationClaimed passes (restorer claimed in Phase 6)
+    //     → tryCreateEvaluationJob → verifyRestorationClaimed passes (harness claimed in Phase 6)
     //     → createEvaluationJob via creatorSafe → evaluationCreationCount[creatorSafe]++
     // The creator does NOT get restorationDeliveryCount credit — correct per role semantics.
 
     let evalRequestId: string | undefined;
 
     results.push(await runPhase('Phase 7: Creator observes restoration delivery + creates evaluation job (adapter-driven)', async () => {
-      if (!creatorRestorationWatcherAdapter || !creatorSafe || !restorationRequestId || !restorerMech || !evaluatorMech || !capturedManifest || !capturedIntent) {
+      if (!creatorRestorationWatcherAdapter || !creatorSafe || !restorationRequestId || !harnessMech || !evaluatorMech || !capturedManifest || !capturedIntent) {
         throw new Error('Missing state from prior phases');
       }
 
-      // The watcher adapter was initialized with mechContractAddress=restorerMech (Phase 4).
+      // The watcher adapter was initialized with mechContractAddress=harnessMech (Phase 4).
       // Override it to evaluatorMech so tryCreateEvaluationJob directs the eval job to
       // the evaluator's mech (getMechDeliveryRate + submitEvaluationJob use mechContractAddress).
       (creatorRestorationWatcherAdapter as any).config.mechContractAddress = evaluatorMech;
 
-      // Inject the original desired state into pendingEvaluations so iCreatedRestoration=true.
+      // Inject the original Task into pendingEvaluations so iCreatedRestoration=true.
       (creatorRestorationWatcherAdapter as any).pendingEvaluations.set(restorationRequestId, {
         ...capturedIntent,
         id: restorationRequestId,
@@ -847,14 +891,14 @@ async function main(): Promise<void> {
       (creatorRestorationWatcherAdapter as any).originalStates.set(restorationRequestId, {
         ...capturedIntent,
         id: restorationRequestId,
-        type: 'restoration',
+        role: 'restoration',
       });
 
       // Set block cursor to scan from just before Phase 5 so we catch the Deliver event
-      // that was emitted on restorerMech during Phase 6.
+      // that was emitted on harnessMech during Phase 6.
       // BUT: the adapter's getLogs now uses mechContractAddress=evaluatorMech (set above).
-      // We need it to scan restorerMech for the Deliver event. Patch getLogs address
-      // by temporarily setting mechContractAddress to restorerMech during the log scan,
+      // We need it to scan harnessMech for the Deliver event. Patch getLogs address
+      // by temporarily setting mechContractAddress to harnessMech during the log scan,
       // then switching to evaluatorMech for the eval job submission.
       // We do this by wrapping the adapter's publicClient.getLogs.
       const originalGetLogs = (creatorRestorationWatcherAdapter as any).publicClient.getLogs.bind(
@@ -862,10 +906,10 @@ async function main(): Promise<void> {
       );
       let logScanCount = 0;
       (creatorRestorationWatcherAdapter as any).publicClient.getLogs = async (params: Record<string, unknown>) => {
-        // First getLogs call scans for Deliver events — redirect to restorerMech
+        // First getLogs call scans for Deliver events — redirect to harnessMech
         if (logScanCount === 0 && params.address === evaluatorMech) {
           logScanCount++;
-          return originalGetLogs({ ...params, address: restorerMech });
+          return originalGetLogs({ ...params, address: harnessMech });
         }
         return originalGetLogs(params);
       };
@@ -874,8 +918,8 @@ async function main(): Promise<void> {
       const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
       try {
         const watcherIter = creatorRestorationWatcherAdapter.watchForDeliveries()[Symbol.asyncIterator]();
-        // Drive one iteration — the adapter scans restorerMech (via patched getLogs),
-        // finds the Deliver event, sees iDelivered=false (restorerSafe ≠ creatorSafe),
+        // Drive one iteration — the adapter scans harnessMech (via patched getLogs),
+        // finds the Deliver event, sees iDelivered=false (harnessSafe ≠ creatorSafe),
         // iCreatedRestoration=true → calls tryCreateEvaluationJob → submits eval job.
         await Promise.race([
           watcherIter.next(),
@@ -951,22 +995,22 @@ async function main(): Promise<void> {
       // restoration request is also on the marketplace, we skip requests that are
       // not of type 'evaluation' until we find the eval request from Phase 7.
       const miningInterval = setInterval(async () => { try { await jsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /**/ } }, 1000);
-      let evalReqValue: { requestId: string; restorationJob: RestorationJob } | undefined;
+      let evalReqValue: { requestId: string; task: Task } | undefined;
       try {
         const iter = evaluatorAdapter.watchForRequests()[Symbol.asyncIterator]();
         const deadline = Date.now() + 45000;
         while (!evalReqValue && Date.now() < deadline) {
           const result = await Promise.race([
             iter.next(),
-            sleep(deadline - Date.now()).then(() => ({ done: true, value: undefined })),
+            sleep(deadline - Date.now()).then(() => ({ done: true as const, value: undefined })),
           ]);
           if (result.done) break;
           if (result.value) {
-            const req = result.value as { requestId: string; restorationJob: RestorationJob };
-            if (req.restorationJob.type === 'evaluation') {
+            const req = result.value as { requestId: string; task: Task };
+            if (req.task.role === 'evaluation') {
               evalReqValue = req;
             } else {
-              console.log(`    Evaluator skipping non-evaluation request (type: ${req.restorationJob.type ?? 'restoration'})`);
+              console.log(`    Evaluator skipping non-evaluation request (type: ${req.task.role ?? 'restoration'})`);
               // Continue to next iteration to find the eval request
             }
           }
@@ -976,8 +1020,8 @@ async function main(): Promise<void> {
       }
 
       if (!evalReqValue) throw new Error('No eval request received by evaluator (timed out)');
-      const req = evalReqValue as { requestId: string; restorationJob: RestorationJob };
-      console.log(`    Evaluator claimed eval request: ${req.requestId}, type: ${req.restorationJob.type}`);
+      const req = evalReqValue as { requestId: string; task: Task };
+      console.log(`    Evaluator claimed eval request: ${req.requestId}, type: ${req.task.role}`);
 
       // Claim on-chain via evaluator's adapter
       await evaluatorAdapter.claimRequest(req.requestId);
@@ -987,13 +1031,16 @@ async function main(): Promise<void> {
       const capturedWindow2 = capturedWindow;
       const capturedIntent2 = capturedIntent;
 
-      const evalIntent: RestorationJob = {
+      const evalIntent: Task = {
         id: 'pred-v0-e2e-eval',
         description: 'Evaluate prediction.v0 restoration attempt',
-        type: 'evaluation',
+        solverType: capturedIntent2.solverType ?? 'prediction.v0',
+        role: 'evaluation',
         restorationRequestId,
         window: capturedWindow2,
-        spec: capturedIntent2.spec as unknown as Record<string, unknown>,
+        spec: Object.fromEntries(
+          Object.entries(capturedIntent2.spec as Record<string, unknown>).filter(([key]) => key !== 'kind'),
+        ),
         eligibility: capturedIntent2.eligibility as unknown as Record<string, unknown>,
         context: { restorationResult: JSON.stringify(capturedManifest2) },
       };
@@ -1004,17 +1051,18 @@ async function main(): Promise<void> {
       mkdirSync(evalImplStateDir, { recursive: true });
 
       const abort = new AbortController();
-      const evalCtx: RestorationContext = {
-        intent: evalIntent,
+      const evalCtx: HarnessContext = {
+        task: evalIntent,
         implStateDir: evalImplStateDir,
         workingDir: evalWorkingDir,
         log: (e) => console.log(`    [eval] [${e.level}] ${e.msg}${e.data ? ' ' + JSON.stringify(e.data) : ''}`),
         abort: abort.signal,
         msUntilEndTs: () => 0,
+        trajectory: noopTrajectory(),
         _testDeps: {
-          expectedIntentCid: capturedManifest2.intent.cid,
+          expectedTaskCid: capturedManifest2.task.cid,
         },
-      } as unknown as RestorationContext;
+      } as unknown as HarnessContext;
 
       // Run evaluator with EVALUATOR's key + Safe
       const evaluator = new PredictionV0Evaluator({
@@ -1102,14 +1150,14 @@ async function main(): Promise<void> {
       let capturedDeliveryDataHex: string | undefined;
       // Temporarily capture the yield from watchForDeliveries to extract the verdict
       const evalWatcherIter = creatorEvalWatcherAdapter.watchForDeliveries()[Symbol.asyncIterator]();
-      let deliveryResult: import('../src/types/index.js').DeliveredResult | undefined;
+      let deliveryResult: import('../../src/types/index.js').DeliveredResult | undefined;
       try {
         const result = await Promise.race([
           evalWatcherIter.next(),
           sleep(60000).then(() => { throw new Error('creatorEvalWatcherAdapter.watchForDeliveries() timed out'); }),
         ]);
         if (!result.done && result.value) {
-          deliveryResult = result.value as import('../src/types/index.js').DeliveredResult;
+          deliveryResult = result.value as import('../../src/types/index.js').DeliveredResult;
         }
       } finally {
         clearInterval(miningInterval);
@@ -1157,12 +1205,12 @@ async function main(): Promise<void> {
       const evaluatorSafeAddress = evaluatorSafe as `0x${string}`;
 
       const testWindow = { startTs: 0, endTs: 3_600_000 };
-      const testIntent: PredictionV0Intent = {
+      const testIntent: PredictionV0Task = {
         id: 'test-direct',
         description: 'Direct TypeScript verdict test',
+        solverType: 'prediction.v0',
         window: testWindow,
         spec: {
-          kind: 'prediction.v0',
           oracle: { venue: 'chainlink-base', feed: '0x000000000000000000000000000000000000feed', feedDescription: 'ETH / USD' },
           question: { kind: 'threshold', operator: 'GT', threshold: '3500', resolveTs: testWindow.endTs + 900_000 },
         },
@@ -1176,30 +1224,45 @@ async function main(): Promise<void> {
         probability?: string;
         submittedAt?: number;
         corruptSignature?: boolean;
-      } = {}): Promise<PredictionSubmissionManifest> => {
-        const base: Omit<PredictionSubmissionManifest, 'signature'> = {
-          schemaVersion: 'prediction.v0.submission.v1',
+      } = {}): Promise<SignedEnvelope> => {
+        const unsigned: Omit<SignedEnvelope, 'signature'> = {
+          schemaVersion: 'jinn.execution.v1',
+          solverType: 'prediction.v0',
+          role: 'restoration',
           generatedAt: 1000,
-          intent: {
-            cid: 'intent-cid-direct',
+          task: {
+            cid: 'task-cid-direct',
             onchainCreationTx: ('0x' + '0'.repeat(64)) as `0x${string}`,
             onchainCreationBlock: 1,
             requestId: ('0x' + '0'.repeat(64)) as `0x${string}`,
           },
-          restorer: { safeAddress: ('0x' + '0'.repeat(40)) as `0x${string}`, agentEoa: signerAccount.address },
+          participant: { safeAddress: ('0x' + '0'.repeat(40)) as `0x${string}`, agentEoa: signerAccount.address },
           window: testWindow,
-          prediction: {
-            probability: overrides.probability ?? '0.55',
-            submittedAt: overrides.submittedAt ?? 1_000_000,
-            modelId: 'spot-carry.v1',
+          executor: {
+            implName: 'prediction-v0-baseline',
+            implVersion: '1.0.0',
+            clientGitSha: 'e2e',
+            codeDigest: `sha256:${'0'.repeat(64)}`,
+            runtimeBundleDigest: `sha256:${'1'.repeat(64)}`,
+            plugins: [],
+            signingKey: { kind: 'agent-eoa', pubkey: signerAccount.address },
+          },
+          evidenceTier: 'self-signed',
+          attestation: null,
+          trajectory: null,
+          artifacts: [],
+          payload: {
+            prediction: {
+              probability: overrides.probability ?? '0.55',
+              submittedAt: overrides.submittedAt ?? 1_000_000,
+              modelId: 'spot-carry.v1',
+            },
           },
         };
-        const canonical = JSON.stringify(base);
-        const hash = keccak256(stringToHex(canonical));
-        const sig = overrides.corruptSignature
-          ? ('0x' + 'a'.repeat(130)) as `0x${string}`
-          : await signerAccount.sign({ hash });
-        return { ...base, signature: { algo: 'secp256k1', signer: signerAccount.address, hash, sig } };
+        const envelope = await signExecutionEnvelope(unsigned, signerPk, signerAccount.address);
+        return overrides.corruptSignature
+          ? { ...envelope, signature: { ...envelope.signature, sig: ('0x' + 'a'.repeat(130)) as `0x${string}` } }
+          : envelope;
       };
 
       const spanningDeps = (gtPrice: string): SpanningResult => {
@@ -1211,17 +1274,20 @@ async function main(): Promise<void> {
         };
       };
 
-      const makeEvalCtx = (manifest: PredictionSubmissionManifest, deps: SpanningResult | null, tmpBase: string): RestorationContext => {
+      const makeEvalCtx = (manifest: SignedEnvelope, deps: SpanningResult | null, tmpBase: string): HarnessContext => {
         const workingDir = join(tmpBase, Math.random().toString(36).slice(2));
         mkdirSync(workingDir, { recursive: true });
         return {
-          intent: {
+          task: {
             id: 'eval-direct',
             description: 'evaluate',
-            type: 'evaluation',
+            solverType: testIntent.solverType ?? 'prediction.v0',
+            role: 'evaluation',
             restorationRequestId: ('0x' + '0'.repeat(64)) as `0x${string}`,
             window: testWindow,
-            spec: testIntent.spec as unknown as Record<string, unknown>,
+            spec: Object.fromEntries(
+              Object.entries(testIntent.spec as Record<string, unknown>).filter(([key]) => key !== 'kind'),
+            ),
             eligibility: testIntent.eligibility as unknown as Record<string, unknown>,
             context: { restorationResult: JSON.stringify(manifest) },
           },
@@ -1230,13 +1296,14 @@ async function main(): Promise<void> {
           log: () => {},
           abort: new AbortController().signal,
           msUntilEndTs: () => 0,
+          trajectory: noopTrajectory(),
           _testDeps: {
             oraclePriceAtResolveTs: deps
               ? async () => deps
               : async () => { throw new Error('oracle unreachable (test)'); },
-            expectedIntentCid: 'intent-cid-direct',
+            expectedTaskCid: 'task-cid-direct',
           },
-        } as unknown as RestorationContext;
+        } as unknown as HarnessContext;
       };
 
       const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress });
@@ -1271,27 +1338,27 @@ async function main(): Promise<void> {
     // ── Phase 11: Assert JinnRouter counter attribution per Safe ──────────────
 
     results.push(await runPhase('Phase 11: Assert JinnRouter counter attribution per Safe', async () => {
-      if (!creatorSafe || !restorerSafe || !evaluatorSafe) throw new Error('Missing Safe addresses from Phase 3');
+      if (!creatorSafe || !harnessSafe || !evaluatorSafe) throw new Error('Missing Safe addresses from Phase 3');
 
       const counters = {
         creationCount: {
           creator: await readCounter(publicClient, 'creationCount', creatorSafe as `0x${string}`),
-          restorer: await readCounter(publicClient, 'creationCount', restorerSafe as `0x${string}`),
+          harness: await readCounter(publicClient, 'creationCount', harnessSafe as `0x${string}`),
           evaluator: await readCounter(publicClient, 'creationCount', evaluatorSafe as `0x${string}`),
         },
         restorationDeliveryCount: {
           creator: await readCounter(publicClient, 'restorationDeliveryCount', creatorSafe as `0x${string}`),
-          restorer: await readCounter(publicClient, 'restorationDeliveryCount', restorerSafe as `0x${string}`),
+          harness: await readCounter(publicClient, 'restorationDeliveryCount', harnessSafe as `0x${string}`),
           evaluator: await readCounter(publicClient, 'restorationDeliveryCount', evaluatorSafe as `0x${string}`),
         },
         evaluationCreationCount: {
           creator: await readCounter(publicClient, 'evaluationCreationCount', creatorSafe as `0x${string}`),
-          restorer: await readCounter(publicClient, 'evaluationCreationCount', restorerSafe as `0x${string}`),
+          harness: await readCounter(publicClient, 'evaluationCreationCount', harnessSafe as `0x${string}`),
           evaluator: await readCounter(publicClient, 'evaluationCreationCount', evaluatorSafe as `0x${string}`),
         },
         evaluationDeliveryCount: {
           creator: await readCounter(publicClient, 'evaluationDeliveryCount', creatorSafe as `0x${string}`),
-          restorer: await readCounter(publicClient, 'evaluationDeliveryCount', restorerSafe as `0x${string}`),
+          harness: await readCounter(publicClient, 'evaluationDeliveryCount', harnessSafe as `0x${string}`),
           evaluator: await readCounter(publicClient, 'evaluationDeliveryCount', evaluatorSafe as `0x${string}`),
         },
       };
@@ -1305,16 +1372,16 @@ async function main(): Promise<void> {
       }
 
       // Expected attribution (per JinnRouter contract semantics, cross-role 3-Safe flow):
-      // - creationCount:            creator calls createRestorationJob            → creator
-      // - restorationDeliveryCount: RESTORER calls claimDelivery (Phase 6)        → restorer
+      // - creationCount:            creator calls createRestorationJob  → creator
+      // - restorationDeliveryCount: RESTORER calls claimDelivery (Phase 6)        → harness
       // - evaluationCreationCount:  creator calls createEvaluationJob (Phase 7)   → creator
       // - evaluationDeliveryCount:  EVALUATOR calls claimDelivery (Phase 8)       → evaluator
       // This proves counter attribution is per-Safe and role-separated.
       const expected = {
-        creationCount:            { creator: 1n, restorer: 0n, evaluator: 0n },
-        restorationDeliveryCount: { creator: 0n, restorer: 1n, evaluator: 0n },
-        evaluationCreationCount:  { creator: 1n, restorer: 0n, evaluator: 0n },
-        evaluationDeliveryCount:  { creator: 0n, restorer: 0n, evaluator: 1n },
+        creationCount:            { creator: 1n, harness: 0n, evaluator: 0n },
+        restorationDeliveryCount: { creator: 0n, harness: 1n, evaluator: 0n },
+        evaluationCreationCount:  { creator: 1n, harness: 0n, evaluator: 0n },
+        evaluationDeliveryCount:  { creator: 0n, harness: 0n, evaluator: 1n },
       };
 
       for (const [counter, byRole] of Object.entries(expected)) {
@@ -1330,7 +1397,7 @@ async function main(): Promise<void> {
 
   } finally {
     if (creatorAdapter) { try { creatorAdapter.stop(); } catch { /**/ } }
-    if (restorerAdapter) { try { restorerAdapter.stop(); } catch { /**/ } }
+    if (harnessAdapter) { try { harnessAdapter.stop(); } catch { /**/ } }
     if (evaluatorAdapter) { try { evaluatorAdapter.stop(); } catch { /**/ } }
     if (creatorRestorationWatcherAdapter) { try { creatorRestorationWatcherAdapter.stop(); } catch { /**/ } }
     if (creatorEvalWatcherAdapter) { try { creatorEvalWatcherAdapter.stop(); } catch { /**/ } }

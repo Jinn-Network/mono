@@ -144,7 +144,7 @@ budget. Override them with `JINN_TESTNET_ACCEPTANCE_MIN_EOA_GAS_WEI` and
 larger runway.
 
 Docker acceptance gates on `prediction.v0` cycles produced by the testnet
-auto-intent generator (Chainlink Base Sepolia ETH/USD threshold predictions).
+auto-task generator (Chainlink Base Sepolia ETH/USD threshold predictions).
 Each cycle requires both a successful `restoration-result` artifact and a
 successful `evaluation-verdict` artifact for the same on-chain `request_id`.
 The default cycle target is one (smoke test, not soak); bump via
@@ -156,16 +156,15 @@ so one full restoration → delivery → evaluation round-trip lands inside the
 20-min timeout. Default operator setup uses `600000` / `300000` (10-min window
 + 5-min resolve gap), unchanged.
 
-`prediction.v0` intents post through `JinnRouterV2`, not the shared
+`prediction.v0` Tasks post through `JinnRouterV2`, not the shared
 `ClaimRegistry` — so the gate does not race third-party operators on the
 legacy registry surface.
 
-The acceptance config sets `restorers.wrapWith: null` to disable the
-`claude-code-learner` universal wrapper for the gate. The gate's job is to
-verify the protocol loop end-to-end via the base prediction.v0 impls
-(`prediction-v0-baseline` + `prediction-v0-evaluator`); the wrapper layer is
-separately validated and out of gate scope. Default operator setup keeps the
-wrapper enabled.
+The acceptance config sets the Prediction SolverNet harness to
+`prediction-v0-baseline` for deterministic gate behavior. The gate's job is to
+verify the protocol loop end-to-end via the base prediction.v0 Harnesses
+(`prediction-v0-baseline` + `prediction-v0-evaluator`); the default operator
+setup routes restoration Tasks through `claude-code-learner`.
 
 Then authenticate Claude for Docker (on your host machine, one-time):
 
@@ -209,7 +208,7 @@ The harness fails unless all of these are true:
 - `jinn doctor` and `jinn bootstrap` succeed through the acceptance compose environment
 - at least one service is `complete`
 - the daemon starts and emits a `daemon_started` record
-- both run-scoped desired states produce a successful `restoration-result` artifact and a successful `evaluation-verdict` artifact during the run window
+- both run-scoped Tasks produce a successful `restoration-result` artifact and a successful `evaluation-verdict` artifact during the run window
 - `jinn status`, `jinn fleet`, `jinn rewards`, and `jinn history` remain coherent after the run
 - `jinn claim-rewards --yes` is exercised after the run
 - when pending rewards are visible, the claim submits at least one transaction

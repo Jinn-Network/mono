@@ -25,14 +25,6 @@ If the operator's policy enables cross-operator reads or fresh-world-state probe
 
 Same Agent-tool spawn pattern as Orient. Outputs land under `workingDir/.debrief/<topic>.json`.
 
-## Plug-in topic explorers
-
-In addition to the topics above, consult `workingDir/.coordinator/slots.json` (if present). For each entry in `topicExplorers` matching `slot.phase === "debrief"` AND (`slot.scope` absent OR `intent.spec.kind` ∈ `slot.scope.matchKinds`), treat it as an additional topic to gather. Topic name is `slot.topic`; explorer agent is at `<entry.packageRoot>/<entry.slot.entry>`. Inputs match the bundled explorer (topic, intent, scope, workingDir, implStateDir, outputPath = `workingDir/.debrief/<topic>.json`, msUntilEndTs). Topic-name collisions: a plug-in's explorer replaces the bundled fan-out for that topic; surface a one-line note in the analyst's input bundle.
-
-## Consult slot registry
-
-Before spawning the bundled analyst, check `workingDir/.coordinator/slots.json` (if present) for a `phase-agent-override` entry where `slot.phase === "debrief"` AND `slot.agent === "analyst"` AND (`slot.scope` absent OR `intent.spec.kind` ∈ `slot.scope.matchKinds`). If a match exists, spawn the agent at `<entry.packageRoot>/<entry.slot.entry>` with the same inputs as the bundled analyst. Otherwise proceed with the bundled `analyst` agent.
-
 ## Launch the analyst
 
 ```

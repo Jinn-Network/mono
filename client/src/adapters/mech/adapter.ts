@@ -1,32 +1,30 @@
-import { ZodError } from 'zod';
-import type { Address, Hex, PublicClient, WalletClient } from 'viem';
+import { getAddress, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
 import { keccak256 } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
 import type { ExecutionAdapter } from '../adapter.js';
 import type {
-  RestorationJob,
+  Task,
   RequestId,
-  RestorationRequest,
-  RestorationResult,
+  TaskRequest,
+  TaskResult,
   DeliveredResult,
 } from '../../types/index.js';
-import { TransientError, PermanentError, parseRestorationJob } from '../../types/index.js';
+import { TransientError, PermanentError, parseTask } from '../../types/index.js';
 import { createClients } from './safe.js';
 import {
-  buildRestorationJobPayload,
   buildResultPayload,
   uploadToIpfs,
   cidToDigestHex,
   fetchFromIpfs,
-  fetchSignedIntentFromIpfs,
+  fetchSignedTaskFromIpfs,
   fetchSignedEnvelopeFromIpfs,
   digestHexToGatewayUrl,
-  parseRestorationJobFromPayload,
 } from './ipfs.js';
-import { canonicalJson } from '../../restorer/engine/canonical-json.js';
+import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 import { SignedEnvelopeSchema } from '../../types/envelope.js';
 import {
-  submitRestorationJob,
+  submitTask,
   submitEvaluationJob,
   claimDelivery,
   getMechDeliveryRate,
@@ -34,7 +32,7 @@ import {
   decodeMarketplaceRequestLogs,
   decodeDeliverLogs,
   callDeliverToMarketplace,
-  scanRestorationJobs,
+  scanTasks,
   scanEvaluationJobs,
   scanLatestRequestDataByRid,
   scanLatestDeliveryDataByRid,
@@ -45,7 +43,9 @@ import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../restorer/impls/evaluation-context.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../harnesses/impls/evaluation-context.js';
+import { signTaskV1 } from '../../tasks/signing.js';
+import type { SignedTaskV1, TaskV1 } from '../../types/task-document.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -56,7 +56,7 @@ export class MechAdapter implements ExecutionAdapter {
   private stopped = false;
   private requestBlockCursor = 0n;
   private deliveryBlockCursor = 0n;
-  private pendingEvaluations = new Map<string, import('../../types/index.js').RestorationJob>();
+  private pendingEvaluations = new Map<string, import('../../types/index.js').Task>();
   private pendingEvaluationClaims = new Set<string>();
   // Restoration requests where claimDelivery succeeded but evaluation creation failed.
   // Swept on each poll cycle so they don't require a new Deliver event.
@@ -69,9 +69,9 @@ export class MechAdapter implements ExecutionAdapter {
   private pendingEvaluationResultCids = new Map<string, string>();
   // RIDs with no delivery found in backfill window; avoids repeated 500k-block rescans.
   private backfillMissRids = new Set<string>();
-  // Original desired states keyed by request ID (restoration and evaluation)
-  // so we can yield accurate restorationJob in DeliveredResult
-  private originalStates = new Map<string, RestorationJob>();
+  // Original Tasks keyed by request ID (restoration and evaluation)
+  // so we can yield accurate Task in DeliveredResult
+  private originalStates = new Map<string, Task>();
   private store?: Store;
   private claimPolicy: ClaimPolicy;
 
@@ -122,7 +122,7 @@ export class MechAdapter implements ExecutionAdapter {
     console.error(`[mech] Recovering pending state from block ${fromBlock} to ${currentBlock}`);
 
     // Scan for restoration jobs this creator posted
-    const restorations = await scanRestorationJobs(
+    const restorations = await scanTasks(
       this.publicClient,
       this.config.routerAddress,
       this.config.safeAddress,
@@ -214,7 +214,7 @@ export class MechAdapter implements ExecutionAdapter {
         const digest = d.startsWith('0x') ? d.slice(2) : d;
         this.pendingEvaluations.set(requestId, {
           ...pe,
-          context: { ...pe.context, [RESTORATION_INTENT_CID_CONTEXT_KEY]: `f01551220${digest}` },
+          context: { ...pe.context, [RESTORATION_TASK_CID_CONTEXT_KEY]: `f01551220${digest}` },
         });
       }
 
@@ -246,26 +246,26 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  async postRestorationJob(state: RestorationJob): Promise<RequestId> {
-    const restorationState: RestorationJob = {
+  async postTask(state: Task): Promise<RequestId> {
+    const restorationState: Task = {
       ...state,
-      type: state.type ?? 'restoration',
+      role: state.role ?? 'restoration',
       attemptId: state.attemptId,
       attemptNumber: state.attemptNumber,
     };
-    // When a pre-built SignedIntentV1 is attached, upload it directly so the
-    // on-chain CID points to the canonical signed intent document rather than
-    // the legacy RestorationJobPayload shape.
-    const ipfsDoc: unknown = state.intent ?? buildRestorationJobPayload(restorationState);
+    const signedTask = state.signedTask ?? await this.signTaskDocument(restorationState);
+    // Upload the canonical signed Task document so watchers can verify and
+    // parse the same task.v1 shape the creator signed.
+    const ipfsDoc: unknown = signedTask;
     const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, ipfsDoc);
     const restorationDataHex = cidToDigestHex(restorationCid);
     const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
-    const restorationIntentCid = `f01551220${digestNo0x}`;
+    const restorationTaskCid = `f01551220${digestNo0x}`;
 
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
 
-    const restorationJob = await submitRestorationJob(
+    const taskSubmission = await submitTask(
       this.publicClient,
       this.walletClient,
       this.config.safeAddress,
@@ -276,13 +276,13 @@ export class MechAdapter implements ExecutionAdapter {
       maxTimeout,
       this.config.evictionRecovery,
     );
-    const restorationRequestIds = restorationJob.requestIds;
+    const restorationRequestIds = taskSubmission.requestIds;
 
     if (restorationRequestIds.length === 0) {
       throw new PermanentError(
         'No request IDs returned from router ' +
-        `(tx=${restorationJob.txHash}, router=${this.config.routerAddress}, safe=${this.config.safeAddress}, ` +
-        `mech=${this.config.mechContractAddress}, receiptLogs=${restorationJob.receiptLogCount}, chainId=${this.config.chainId})`,
+        `(tx=${taskSubmission.txHash}, router=${this.config.routerAddress}, safe=${this.config.safeAddress}, ` +
+        `mech=${this.config.mechContractAddress}, receiptLogs=${taskSubmission.receiptLogCount}, chainId=${this.config.chainId})`,
       );
     }
 
@@ -290,18 +290,47 @@ export class MechAdapter implements ExecutionAdapter {
 
     // Store for evaluation creation after delivery is claimed. The evaluation
     // job’s IPFS CID is different from the restoration intended-state CID; evaluators
-    // need the latter to verify submission.intent.cid (see context.restorationIntentCid).
-    const stateForEval: RestorationJob = {
+    // need the latter to verify submission.signedTask.cid (see context.restorationTaskCid).
+    const stateForEval: Task = {
       ...state,
-      context: { ...(state.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: restorationIntentCid },
+      signedTask,
+      context: { ...(state.context ?? {}), [RESTORATION_TASK_CID_CONTEXT_KEY]: restorationTaskCid },
     };
     this.pendingEvaluations.set(restorationRequestId, stateForEval);
-    this.originalStates.set(restorationRequestId, { ...stateForEval, type: 'restoration' });
+    this.originalStates.set(restorationRequestId, { ...stateForEval, role: 'restoration' });
 
     return restorationRequestId;
   }
 
-  async *watchForRequests(): AsyncIterable<RestorationRequest> {
+  private async signTaskDocument(state: Task): Promise<SignedTaskV1> {
+    const now = Date.now();
+    const account = privateKeyToAccount(this.config.agentEoaPrivateKey);
+    const extras: Record<string, unknown> = {};
+    if (state.context) extras['context'] = state.context;
+    if (state.attemptId) extras['attemptId'] = state.attemptId;
+    if (state.attemptNumber !== undefined) extras['attemptNumber'] = state.attemptNumber;
+    if (state.restorationRequestId) extras['restorationRequestId'] = state.restorationRequestId;
+
+    const taskDoc = {
+      schemaVersion: 'task.v1',
+      id: state.id,
+      solverType: state.solverType ?? 'legacy',
+      role: state.role ?? 'restoration',
+      description: state.description,
+      window: state.window ?? { startTs: now, endTs: now + 86_400_000 },
+      spec: state.spec ?? {},
+      eligibility: state.eligibility ?? {},
+      creator: {
+        safeAddress: getAddress(this.config.safeAddress),
+        agentEoa: account.address,
+      },
+      createdAt: now,
+      ...extras,
+    } as TaskV1;
+    return signTaskV1(taskDoc, this.config.agentEoaPrivateKey);
+  }
+
+  async *watchForRequests(): AsyncIterable<TaskRequest> {
     while (!this.stopped) {
       try {
         const currentBlock = await this.publicClient.getBlockNumber();
@@ -325,27 +354,14 @@ export class MechAdapter implements ExecutionAdapter {
               // cid-version=1 (Kubo default for files). This is confirmed by the existing
               // IPFS_GATEWAY_PREFIX constant (f01551220) which has worked in production.
               // If the gateway ever switches to dag-pb (0x70) the prefix would be f01701220.
-              const intentCid = `f01551220${digest}`;
-              // Try to parse as a typed SignedIntentV1 first (Plan B envelope).
-              // Fall back to the legacy loose payload shape for older on-chain data.
-              let restorationJob: RestorationJob;
-              try {
-                const signed = await fetchSignedIntentFromIpfs(this.config.ipfsGatewayUrl, intentCid);
-                restorationJob = parseRestorationJob({ intent: signed });
-              } catch (err) {
-                if (!(err instanceof ZodError)) throw err;
-                // Fallback: pre-envelope legacy payload. Will be removed in Plan C (one-shot cutover).
-                console.debug(
-                  `[adapters/mech] intent.v1 parse failed for CID ${intentCid}; falling back to legacy payload parser`,
-                );
-                const payload = (await fetchFromIpfs(this.config.ipfsGatewayUrl, intentCid)) as Record<string, unknown>;
-                restorationJob = parseRestorationJobFromPayload(payload);
-              }
+              const taskCid = `f01551220${digest}`;
+              const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+              const task = parseTask({ signedTask: signed });
 
               yield {
                 requestId,
-                restorationJob,
-                intentCid,
+                task,
+                taskCid,
                 onchainCreationTx: transactionHash,
                 onchainCreationBlock: blockNumber,
               };
@@ -375,7 +391,7 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  async submitResult(requestId: RequestId, result: RestorationResult): Promise<void> {
+  async submitResult(requestId: RequestId, result: TaskResult): Promise<void> {
     const payload = buildResultPayload(requestId, result);
     const cid = await uploadToIpfs(this.config.ipfsRegistryUrl, payload);
     const deliveryDigest = cidToDigestHex(cid);
@@ -390,6 +406,70 @@ export class MechAdapter implements ExecutionAdapter {
       [deliveryDigest],
       this.config.evictionRecovery,
     );
+  }
+
+  private async evidenceHashForDelivery(requestId: string, deliveryDataHex: string): Promise<Hex | undefined> {
+    if (this.config.routerClaimDeliveryVariant !== 'v2') return undefined;
+
+    const deliveryDigest = deliveryDataHex.startsWith('0x')
+      ? deliveryDataHex.slice(2)
+      : deliveryDataHex;
+    const envelopeCid = `f01551220${deliveryDigest}`;
+    const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
+      this.config.ipfsGatewayUrl,
+      envelopeCid,
+    );
+    const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
+    // Strip signature to recompute the hash over the unsigned body.
+    const { signature, ...unsignedBody } = parsed;
+    const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
+    const recomputed = keccak256(jcsBytes);
+    if (recomputed !== signature.hash) {
+      throw new Error(
+        `recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
+      );
+    }
+    return recomputed as Hex;
+  }
+
+  private async ensureDeliveryClaimed(
+    requestId: string,
+    deliveryDataHex: string,
+  ): Promise<'claimed' | 'already-claimed' | 'skipped' | 'retry'> {
+    let evidenceHash: Hex | undefined;
+    try {
+      evidenceHash = await this.evidenceHashForDelivery(requestId, deliveryDataHex);
+    } catch (err) {
+      console.error(
+        `[mech] evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
+        err,
+      );
+      return 'retry';
+    }
+
+    try {
+      await claimDelivery(
+        this.publicClient,
+        this.walletClient,
+        this.config.safeAddress,
+        this.config.routerAddress,
+        requestId as Hex,
+        { variant: this.config.routerClaimDeliveryVariant, evidenceHash },
+        this.config.evictionRecovery,
+      );
+      return 'claimed';
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('RequestNotFound')) {
+        console.error(`[mech] claimDelivery skipped (not a router request): ${requestId}`);
+        return 'skipped';
+      }
+      if (/already.*claimed|alreadyClaimed/i.test(message)) {
+        return 'already-claimed';
+      }
+      console.error(`[mech] claimDelivery failed for ${requestId}:`, err);
+      return 'retry';
+    }
   }
 
   async *watchForDeliveries(): AsyncIterable<DeliveredResult> {
@@ -417,75 +497,26 @@ export class MechAdapter implements ExecutionAdapter {
             const iCreatedEvaluation = this.pendingEvaluationClaims.has(requestId);
             if (!iDelivered && !iCreatedRestoration && !iCreatedEvaluation) continue;
 
-            // (a) Creator-side claim path: we created the restoration, so the
+            // (a) Deliverer-side claim path: if this Safe delivered the request,
+            //     claim it first so router counters credit the deliverer.
+            let deliveryClaimStatus: Awaited<ReturnType<MechAdapter['ensureDeliveryClaimed']>> | undefined;
+            if (iDelivered) {
+              deliveryClaimStatus = await this.ensureDeliveryClaimed(requestId, deliveryDataHex);
+              if (deliveryClaimStatus === 'retry') continue;
+            }
+
+            // (b) Creator-side claim path: we created the restoration, so the
             //     router needs `restorationDeliveryClaimed` flipped before
             //     `createEvaluationJob` can fire. Production engine deliveries
             //     usually claim atomically; this call is idempotent and also
             //     covers legacy/test adapter deliveries that only wrote to the
             //     marketplace.
-            //
-            //     For V2 claims we may not have a local store entry, so derive
-            //     evidenceHash from the delivered envelope on IPFS. If derivation
-            //     fails, skip and retry on a later poll.
-            if (iCreatedRestoration) {
-              try {
-                const variant = this.config.routerClaimDeliveryVariant;
-                let evidenceHash: `0x${string}` | undefined;
-                if (variant === 'v2') {
-                  try {
-                    const deliveryDigest = deliveryDataHex.startsWith('0x')
-                      ? deliveryDataHex.slice(2)
-                      : deliveryDataHex;
-                    const envelopeCid = `f01551220${deliveryDigest}`;
-                    const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
-                      this.config.ipfsGatewayUrl,
-                      envelopeCid,
-                    );
-                    const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
-                    // Strip signature to recompute the hash over the unsigned body.
-                    const { signature, ...unsignedBody } = parsed;
-                    const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
-                    const recomputed = keccak256(jcsBytes);
-                    if (recomputed !== signature.hash) {
-                      console.error(
-                        `[mech] claimDelivery skipped for ${requestId}: recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
-                      );
-                      continue;
-                    }
-                    evidenceHash = recomputed as `0x${string}`;
-                  } catch (deriveErr) {
-                    console.error(
-                      `[mech] evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
-                      deriveErr,
-                    );
-                    continue;
-                  }
-                }
-                await claimDelivery(
-                  this.publicClient,
-                  this.walletClient,
-                  this.config.safeAddress,
-                  this.config.routerAddress,
-                  requestId as `0x${string}`,
-                  { variant, evidenceHash },
-                  this.config.evictionRecovery,
-                );
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                if (message.includes('RequestNotFound')) {
-                  console.error(`[mech] claimDelivery skipped (not a router request): ${requestId}`);
-                  // fall through — creator actions below don't depend on our claim specifically
-                } else if (/already.*claimed|alreadyClaimed/i.test(message)) {
-                  // Idempotent: someone else raced us, fine.
-                } else {
-                  console.error(`[mech] claimDelivery failed for ${requestId}:`, err);
-                  // Don't continue — may retry next poll via unchanged tracking
-                  continue;
-                }
-              }
+            if (iCreatedRestoration && deliveryClaimStatus !== 'claimed' && deliveryClaimStatus !== 'already-claimed') {
+              const creatorClaimStatus = await this.ensureDeliveryClaimed(requestId, deliveryDataHex);
+              if (creatorClaimStatus === 'retry') continue;
             }
 
-            // (b) If I created the restoration, post the eval job once the claim is on-chain.
+            // (c) If I created the restoration, post the eval job once the claim is on-chain.
             //     The deliverer (someone else, or us if we also delivered) must have claimed first.
             //     tryCreateEvaluationJob calls verifyRestorationClaimed() which polls for the claim.
             if (iCreatedRestoration) {
@@ -503,30 +534,30 @@ export class MechAdapter implements ExecutionAdapter {
               await this.tryCreateEvaluationJob(requestId, restorationResultData, restorationEnvelopeCid);
             }
 
-            // (c) If I created the evaluation, clean up tracking once delivered.
+            // (d) If I created the evaluation, clean up tracking once delivered.
             if (iCreatedEvaluation) {
               this.pendingEvaluationClaims.delete(requestId);
             }
 
-            // (d) Yield the delivery result.
+            // (e) Yield the delivery result.
             try {
               const deliveryDigest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
               const resultPayload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${deliveryDigest}`) as Record<string, unknown>;
 
-              const restorationResult: RestorationResult = {
+              const restorationResult: TaskResult = {
                 data: (resultPayload.data as string) ?? JSON.stringify(resultPayload),
                 artifacts: resultPayload.artifacts as string[] | undefined,
               };
 
-              // Use the original desired state — not the result payload
-              const restorationJob = this.originalStates.get(requestId) ?? {
+              // Use the original Task, not the result payload.
+              const task = this.originalStates.get(requestId) ?? {
                 id: requestId,
                 description: '',
               };
 
               yield {
                 requestId,
-                restorationJob,
+                task,
                 result: restorationResult,
                 deliveryMechAddress: mechAddress,
               };
@@ -541,7 +572,7 @@ export class MechAdapter implements ExecutionAdapter {
 
         // After new Deliver events are processed (and `pendingEvaluationResults` may be warm),
         // retry evaluation creation. Doing this *before* deliver processing can upload an
-        // evaluation desired state without `restorationResult` in context.
+        // evaluation Task without `restorationResult` in context.
         for (const rid of [...this.claimedButNotEvaluated]) {
           await this.tryCreateEvaluationJob(rid);
         }
@@ -629,9 +660,9 @@ export class MechAdapter implements ExecutionAdapter {
     }
     const cachedEnvelopeCid = restorationEnvelopeCid ?? this.pendingEvaluationResultCids.get(requestId);
     try {
-      const evaluationState: RestorationJob = {
+      const evaluationState: Task = {
         ...originalState,
-        type: 'evaluation',
+        role: 'evaluation',
         restorationRequestId: requestId,
         context: {
           ...originalState.context,
@@ -639,7 +670,7 @@ export class MechAdapter implements ExecutionAdapter {
           ...(cachedEnvelopeCid ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: cachedEnvelopeCid } : {}),
         },
       };
-      const evaluationPayload = buildRestorationJobPayload(evaluationState);
+      const evaluationPayload = await this.signTaskDocument(evaluationState);
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
       const evaluationDataHex = cidToDigestHex(evaluationCid);
 
@@ -675,7 +706,7 @@ export class MechAdapter implements ExecutionAdapter {
         // Copy original state to evaluation request ID so delivery can use it
         const origState = this.originalStates.get(requestId);
         if (origState) {
-          this.originalStates.set(evalRequestIds[0], { ...origState, type: 'evaluation' });
+          this.originalStates.set(evalRequestIds[0], { ...origState, role: 'evaluation' });
         }
       }
 

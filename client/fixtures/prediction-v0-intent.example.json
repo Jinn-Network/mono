@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "prediction.v0 intent template. The submit-intent CLI resolves two sentinels:",
+    "prediction.v0 Task template. The tasks submit CLI resolves two sentinels:",
     "  * window.startTs = 0       → Date.now() at post time; endTs + resolveTs follow",
     "  * threshold = \"current\"  → current Chainlink price at post time",
     "",
@@ -8,9 +8,9 @@
     "one hour from now, at resolveTs (endTs + 15min)?' Swap the operator to LT for a",
     "downside question, or use 'current+0.5%' / 'current-1%' for biased thresholds."
   ],
+  "solverType": "prediction.v0",
   "window": { "startTs": 0, "endTs": 0 },
   "spec": {
-    "kind": "prediction.v0",
     "oracle": {
       "venue": "chainlink-base-sepolia",
       "feed": "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1",

@@ -2,13 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { runCorpusQuery, buildSubgraphQuery } from '../../src/corpus/query.js';
 
 describe('buildSubgraphQuery', () => {
-  it('builds a query with kind filter', () => {
-    const { query, variables } = buildSubgraphQuery({ kind: 'prediction.v0', limit: 10 });
+  it('builds a query with solverType filter', () => {
+    const { query, variables } = buildSubgraphQuery({ solverType: 'prediction.v0', limit: 10 });
     expect(query).toContain('executions(');
     expect(variables.first).toBe(10);
-    // kind isn't directly indexed (Execution.kind is ENVELOPE/EVALUATION/OTHER per spec §10 Q6),
+    // solverType isn't directly indexed (Execution.kind is ENVELOPE/EVALUATION/OTHER per spec §10 Q6),
     // so build a server-side filter on metadataKey or post-fetch filter — for v0, post-fetch.
-    expect(variables.kind ?? null).toBeNull();
+    expect(variables.solverType ?? null).toBeNull();
   });
 
   it('translates evidenceTier into Execution.tier filter', () => {

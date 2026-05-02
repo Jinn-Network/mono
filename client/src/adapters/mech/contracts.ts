@@ -161,7 +161,7 @@ export async function withEvictionRecovery<T>(
   }
 }
 
-export async function submitRestorationJob(
+export async function submitTask(
   publicClient: PublicClient,
   walletClient: WalletClient,
   safeAddress: Address,
@@ -492,7 +492,7 @@ export async function pollDeliverEvents(
 
 // ── Router event scanning (for crash recovery) ──────────────────────────────
 
-export interface RestorationJobRecord {
+export interface TaskRecord {
   requestId: string;
   creator: string;
 }
@@ -503,14 +503,14 @@ export interface EvaluationJobRecord {
   creator: string;
 }
 
-export async function scanRestorationJobs(
+export async function scanTasks(
   publicClient: PublicClient,
   routerAddress: Address,
   creator: Address,
   fromBlock: bigint,
   toBlock: bigint,
-): Promise<RestorationJobRecord[]> {
-  const results: RestorationJobRecord[] = [];
+): Promise<TaskRecord[]> {
+  const results: TaskRecord[] = [];
   const chunkSize = 9999n;
 
   for (let start = fromBlock; start <= toBlock; start += chunkSize + 1n) {

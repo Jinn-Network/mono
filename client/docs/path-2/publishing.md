@@ -5,7 +5,7 @@ Path 2 distribution combines two surfaces:
 - **The npm tarball** — your built code, pinned by sha256 + IPFS CID in the manifest.
 - **The signed manifest** — `jinn.manifest.json`, pinned to IPFS, ed25519-signed by your maintainer key.
 
-The daemon resolves the package by CID + hash from the manifest; operators trust the maintainer's public key once and install impls via `jinn impls add ipfs://<manifest-cid>`. The canonical trust contract is `spec/2026-05-executor-trust-boundary.md` §5.
+The daemon resolves the package by CID + hash from the manifest; operators trust the maintainer's public key once and install Harnesses via `jinn harnesses add <package-path>`. The canonical trust contract is `spec/2026-05-executor-trust-boundary.md` §5.
 
 The scaffolded `.github/workflows/publish.yml` automates the full flow; this doc walks the steps so you can reproduce them locally and so you understand what CI is doing.
 
@@ -24,10 +24,14 @@ writeFileSync('jinn-signer.key', Buffer.from(privateKey).toString('base64'));
 console.log('public key (base64):', Buffer.from(publicKey).toString('base64'));
 ```
 
-Distribute the **public key** with your README and any recruit-facing docs. Operators run:
+Distribute the **public key** with your README and any recruit-facing docs. Operators add it to `trustedImplSigners[]` in their config:
 
-```bash
-jinn impls trust ed25519:<base64-pubkey> --label <your-name>
+```json
+{
+  "trustedImplSigners": [
+    { "alg": "ed25519", "publicKey": "<base64-pubkey>", "label": "<your-name>" }
+  ]
+}
 ```
 
 once per maintainer; thereafter every manifest you sign with the matching private key is trusted.
@@ -67,7 +71,7 @@ Start from the scaffold:
   "name": "@yourname/your-package",
   "version": "0.1.0",
   "description": "...",
-  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "supportedSolverTypes": ["prediction.v0>=1.0.0"],
   "entry": "./dist/index.js",
   "package": { "cid": "...", "hash": "sha256:..." },
   "capabilities": {
@@ -78,13 +82,13 @@ Start from the scaffold:
 }
 ```
 
-Fill in `package.cid`, `package.hash`, your `supportedKinds`, your `capabilities` allow-list, and `signature.publicKey` (the base64 from step 1). Leave `signature.sig` empty for the sign step.
+Fill in `package.cid`, `package.hash`, your `supportedSolverTypes`, your `capabilities` allow-list, and `signature.publicKey` (the base64 from step 1). Leave `signature.sig` empty for the sign step.
 
 The capability allow-list is a **ceiling**: the daemon enforces it at runtime. Declare the minimum you need; broader allow-lists earn operator suspicion and slower install decisions.
 
 ## 4. Sign the manifest
 
-The signing algorithm matches `client/src/restorer/manifest/` (the Phase A.2 verifier):
+The signing algorithm matches `client/src/harnesses/manifest/` (the Phase A.2 verifier):
 
 1. Strip the `signature` field from the manifest.
 2. Canonicalise: sorted keys, no whitespace, UTF-8 bytes.
@@ -93,7 +97,7 @@ The signing algorithm matches `client/src/restorer/manifest/` (the Phase A.2 ver
 
 ```ts
 import { sign } from '@noble/ed25519';
-import { canonicalize } from './canonical.js';   // from packages/restorer-sdk
+import { canonicalize } from './canonical.js';   // from packages/harness-sdk
 
 const manifest = JSON.parse(readFileSync('jinn.manifest.json', 'utf8'));
 const { signature, ...payload } = manifest;
@@ -175,26 +179,20 @@ jobs:
         with:
           body: |
             Manifest CID: `${{ steps.pin-manifest.outputs.cid }}`
-            Operators install via:
+            Operators install the package via:
             ```
-            jinn impls add ipfs://${{ steps.pin-manifest.outputs.cid }}
+            jinn harnesses add ./node_modules/@yourname/your-package
             ```
 ```
 
-The release notes carry the manifest CID, which operators paste into `jinn impls add`.
+The release notes carry the manifest CID and package version so operators can fetch the matching package and run `jinn harnesses add <package-path>`.
 
 ## 8. Operator-side install
 
-Once the maintainer's public key is trusted (one-time):
+Once the maintainer's public key is trusted (one-time), every release installs as:
 
 ```bash
-jinn impls trust ed25519:<base64-pubkey> --label <your-name>
-```
-
-every release installs as:
-
-```bash
-jinn impls add ipfs://<manifest-cid>
+jinn harnesses add ./node_modules/@yourname/your-package
 ```
 
 The daemon:
@@ -204,8 +202,8 @@ The daemon:
 3. Refuses to load on signature mismatch (untrusted key, tampered manifest).
 4. Fetches the package tarball by `package.cid`, verifies `package.hash`, refuses on mismatch.
 5. Validates `capabilities` against the daemon's policy ceiling.
-6. Appends to `~/.jinn-client/config.json` under `restorers.externalImpls`.
+6. Appends to `~/.jinn-client/config.json` under `harnesses.externalImpls`.
 
-`jinn impls list` shows installed impls; `jinn impls show <name>` shows the verified manifest; `jinn impls remove <name>` uninstalls; `jinn impls revoke <name>` immediately stops loading on the next boot.
+`jinn harnesses list` shows installed Harnesses; `jinn harnesses show <name>` shows the verified manifest when supported by the local CLI; `jinn harnesses remove <name>` uninstalls.
 
-For the canonical install + verify + revoke flow, see `spec/2026-05-executor-trust-boundary.md` §5.
+For the canonical install + verify flow, see `spec/2026-05-executor-trust-boundary.md` §5.

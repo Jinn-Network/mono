@@ -13,7 +13,7 @@
  */
 
 import { keccak256, toBytes, recoverAddress, type Hex } from 'viem';
-import { canonicalJson } from '../../restorer/engine/canonical-json.js';
+import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 import type { CheckResult, ConformanceContext } from '../types.js';
 
 /**

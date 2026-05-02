@@ -3,7 +3,7 @@ import { existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import type { RestorationJob, RestorationResult } from '../types/index.js';
+import type { Task, TaskResult } from '../types/index.js';
 import type { Runner, RunnerContext } from './runner.js';
 import { Store } from '../store/store.js';
 import { tracedSpawn } from '../trajectory/index.js';
@@ -44,8 +44,8 @@ export class ClaudeRunner implements Runner {
     this.mcpLauncher = resolveJinnMcpLauncher(config.mcpServerPath);
   }
 
-  async run(restorationJob: RestorationJob, context: RunnerContext): Promise<RestorationResult> {
-    const prompt = buildPrompt(restorationJob);
+  async run(task: Task, context: RunnerContext): Promise<TaskResult> {
+    const prompt = buildPrompt(task);
 
     // Write MCP config to temp dir
     const tmpDir = mkdtempSync(join(tmpdir(), 'jinn-runner-'));
@@ -57,14 +57,14 @@ export class ClaudeRunner implements Runner {
           command: this.mcpLauncher.command,
           args: this.mcpLauncher.args,
           env: {
-            DESIRED_STATE_ID: restorationJob.id,
-            DESIRED_STATE_DESCRIPTION: restorationJob.description,
-            DESIRED_STATE_CONTEXT: restorationJob.context ? JSON.stringify(restorationJob.context) : '',
-            DESIRED_STATE_TYPE: restorationJob.type ?? '',
-            RESTORATION_REQUEST_ID: restorationJob.restorationRequestId ?? '',
+            DESIRED_STATE_ID: task.id,
+            DESIRED_STATE_DESCRIPTION: task.description,
+            DESIRED_STATE_CONTEXT: task.context ? JSON.stringify(task.context) : '',
+            DESIRED_STATE_ROLE: task.role ?? '',
+            RESTORATION_REQUEST_ID: task.restorationRequestId ?? '',
             REQUEST_ID: context.requestId,
-            RESTORATION_DELIVERY_DATA: restorationJob.type === 'evaluation' && restorationJob.context?.restorationResult
-              ? JSON.stringify(restorationJob.context.restorationResult)
+            RESTORATION_DELIVERY_DATA: task.role === 'evaluation' && task.context?.restorationResult
+              ? JSON.stringify(task.context.restorationResult)
               : '',
             STORE_PATH: context.storePath ?? '',
             DAEMON_API_URL: context.daemonApiUrl ?? '',
@@ -110,7 +110,7 @@ export class ClaudeRunner implements Runner {
       if (context.storePath) {
         const store = new Store(context.storePath);
         try {
-          const isEvaluation = restorationJob.type === 'evaluation';
+          const isEvaluation = task.role === 'evaluation';
           const tag = isEvaluation ? 'evaluation-verdict' : 'restoration-result';
           const artifact = store.getArtifactByRequestId(context.requestId, tag);
           if (artifact) {
@@ -128,34 +128,34 @@ export class ClaudeRunner implements Runner {
   }
 }
 
-export function buildPrompt(restorationJob: RestorationJob): string {
+export function buildPrompt(task: Task): string {
   let contextSection = '';
-  if (restorationJob.context && Object.keys(restorationJob.context).length > 0) {
-    contextSection = `\n## Context\n${JSON.stringify(restorationJob.context, null, 2)}\n`;
+  if (task.context && Object.keys(task.context).length > 0) {
+    contextSection = `\n## Context\n${JSON.stringify(task.context, null, 2)}\n`;
   }
 
-  const isEvaluation = restorationJob.type === 'evaluation';
+  const isEvaluation = task.role === 'evaluation';
 
   const instructions = isEvaluation
     ? `## Instructions
-1. Use get_desired_state to understand what was requested
+1. Use get_task to understand what was requested
 2. Use get_restoration_delivery to fetch the restoration result
-3. Evaluate whether the restoration achieved the desired state
+3. Evaluate whether the solution satisfied the Task
 4. Use submit_restoration_result to report your verdict
 5. Use report_progress to log progress along the way
 6. Optionally use publish_artifact to record any insights`
     : `## Instructions
-1. Use get_desired_state to understand what needs to be restored
+1. Use get_task to understand what needs to be restored
 2. Take the necessary actions to restore it
 3. Use submit_restoration_result to report what you did
 4. Use report_progress to log progress along the way
 5. Optionally use publish_artifact to record any insights`;
 
-  return `You are ${isEvaluation ? 'evaluating a restoration' : 'restoring a desired state'}.
+  return `You are ${isEvaluation ? 'evaluating a solution' : 'solving a Task'}.
 
-## Desired State
-ID: ${restorationJob.id}
-Description: ${restorationJob.description}
+## Task
+ID: ${task.id}
+Description: ${task.description}
 ${contextSection}
 ${instructions}
 

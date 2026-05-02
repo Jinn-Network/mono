@@ -1,8 +1,8 @@
 import type {
-  RestorationJob,
+  Task,
   RequestId,
-  RestorationRequest,
-  RestorationResult,
+  TaskRequest,
+  TaskResult,
   DeliveredResult,
 } from '../types/index.js';
 
@@ -12,20 +12,20 @@ export interface ExecutionAdapter {
   initialize(): Promise<void>;
 
   // Creator
-  postRestorationJob(state: RestorationJob): Promise<RequestId>;
+  postTask(state: Task): Promise<RequestId>;
 
   /**
-   * Optional: returns the IPFS CID of the most recently posted intent payload.
-   * Populated by adapters that upload to IPFS as part of `postDesiredState`
+   * Optional: returns the IPFS CID of the most recently posted Task payload.
+   * Populated by adapters that upload to IPFS as part of `postTask`
    * (e.g. MechAdapter). Used by the posting service for ERC-8004 registration.
    * Returns undefined for adapters that do not upload (e.g. LocalAdapter).
    */
-  getLastPostedIntentCid?(): string | undefined;
+  getLastPostedTaskCid?(): string | undefined;
 
-  // Restorer
-  watchForRequests(): AsyncIterable<RestorationRequest>;
+  // Harness
+  watchForRequests(): AsyncIterable<TaskRequest>;
   claimRequest(requestId: RequestId): Promise<void>;
-  submitResult(requestId: RequestId, result: RestorationResult): Promise<void>;
+  submitResult(requestId: RequestId, result: TaskResult): Promise<void>;
 
   // Deliveries
   watchForDeliveries(): AsyncIterable<DeliveredResult>;

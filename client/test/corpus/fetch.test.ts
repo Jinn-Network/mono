@@ -3,13 +3,13 @@ import { fetchManifest } from '../../src/corpus/fetch.js';
 
 const sampleEnvelope = {
   schemaVersion: 'jinn.execution.v1',
-  kind: 'prediction.v0',
+  solverType: 'prediction.v0',
   role: 'restoration',
   generatedAt: 1745978400,
-  intent: { cid: 'bafyIntent', onchainCreationTx: '0x' + 'a'.repeat(64), onchainCreationBlock: 1, requestId: '0x' + 'b'.repeat(64) },
+  task: { cid: 'bafyIntent', onchainCreationTx: '0x' + 'a'.repeat(64), onchainCreationBlock: 1, requestId: '0x' + 'b'.repeat(64) },
   participant: { safeAddress: '0x' + '1'.repeat(40), agentEoa: '0x' + '2'.repeat(40) },
   window: { startTs: 0, endTs: 1000 },
-  executor: { implName: 'test', implVersion: '0.1.0', clientGitSha: 'abc', codeDigest: 'sha256:' + 'c'.repeat(64), signingKey: { kind: 'agent-eoa', pubkey: '0x' + 'd'.repeat(128) } },
+  executor: { implName: 'test', implVersion: '0.1.0', clientGitSha: 'abc', codeDigest: 'sha256:' + 'c'.repeat(64), runtimeBundleDigest: 'sha256:' + 'd'.repeat(64), plugins: [], signingKey: { kind: 'agent-eoa', pubkey: '0x' + 'd'.repeat(128) } },
   evidenceTier: 'self-signed',
   attestation: null,
   trajectory: null,
@@ -30,7 +30,7 @@ describe('fetchManifest', () => {
     const fetchFromIpfsMock = vi.fn(async () => sampleEnvelope);
     const preview = await fetchManifest(ref, 'https://gateway.example.com', fetchFromIpfsMock);
     expect(preview.ref).toEqual(ref);
-    expect(preview.envelope.kind).toBe('prediction.v0');
+    expect(preview.envelope.solverType).toBe('prediction.v0');
   });
 
   it('throws ManifestFetchError on parse failure', async () => {

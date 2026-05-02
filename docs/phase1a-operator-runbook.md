@@ -257,7 +257,7 @@ npx jinn run
 
 The client will:
 1. Bootstrap through all 11 steps (including mech deployment via the factory)
-2. Start the daemon with three loops: creator, restorer, delivery-watcher
+2. Start the daemon with three loops: creator, solver, delivery-watcher
 3. Post desired states through the JinnRouter
 4. Watch for requests, run Claude for restoration, deliver results
 5. Claim deliveries, create evaluation jobs
@@ -266,7 +266,7 @@ The client will:
 When healthy, daemon progress is visible through:
 - `jinn status --human` (rollup health + fleet summary)
 - `jinn logs --follow --human` (live lifecycle stream with timestamps)
-- Dashboard at `http://127.0.0.1:7331/` (in-flight intents, verdicts, earnings, fleet, and next actions)
+- Dashboard at `http://127.0.0.1:7331/` (in-flight Tasks, verdicts, earnings, fleet, and next actions)
 
 ### New env var
 

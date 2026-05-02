@@ -17,8 +17,8 @@ describe('update command', () => {
     vi.clearAllMocks();
   });
 
-  it('reports plugin refresh errors even when plugin install does not set an exit code', async () => {
-    const pluginRunMock = vi.fn(async (ctx: CommandContext) => {
+  it('reports integration refresh errors even when integrations install does not set an exit code', async () => {
+    const integrationsRunMock = vi.fn(async (ctx: CommandContext) => {
       ctx.writer.write(JSON.stringify({
         results: [
           {
@@ -30,7 +30,7 @@ describe('update command', () => {
       }));
     });
 
-    const cmd = createUpdateCommand({ pluginRun: pluginRunMock });
+    const cmd = createUpdateCommand({ integrationsRun: integrationsRunMock });
     const { envelopes, exits } = await runCommand(cmd, { argv: ['--json', '--skip-npm'] });
 
     const payload = envelopes[envelopes.length - 1] as {
@@ -40,11 +40,11 @@ describe('update command', () => {
     expect(payload.ok).toBe(false);
     expect(payload.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        step: 'plugin-install',
+        step: 'integrations-install',
         status: 'error',
       }),
     ]));
-    expect(payload.steps.find((step) => step.step === 'plugin-install')?.detail)
+    expect(payload.steps.find((step) => step.step === 'integrations-install')?.detail)
       .toContain('claude-code');
     expect(exits).toEqual([]);
   });

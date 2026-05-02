@@ -1,8 +1,8 @@
 import type { Runner, RunnerContext } from '@/runner/runner.js';
-import type { DesiredState, RestorationResult } from '@/types/index.js';
+import type { Task, TaskResult } from '@/types/index.js';
 
 export interface FakeClaudeOpts {
-  script?: (desiredState: DesiredState, context: RunnerContext) => RestorationResult;
+  script?: (task: Task, context: RunnerContext) => TaskResult;
 }
 
 /**
@@ -11,11 +11,11 @@ export interface FakeClaudeOpts {
  */
 export function createFakeClaudeRunner(opts: FakeClaudeOpts = {}): Runner {
   return {
-    async run(desiredState, context) {
-      if (opts.script) return opts.script(desiredState, context);
+    async run(task, context) {
+      if (opts.script) return opts.script(task, context);
       return {
         data: 'fake-claude-default',
-      } satisfies RestorationResult;
+      } satisfies TaskResult;
     },
   };
 }

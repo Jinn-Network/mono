@@ -62,7 +62,7 @@ export function resolveCliPassword(
   argv?: string[],
   env: NodeJS.ProcessEnv = process.env,
 ): { ok: true; password: string } | { ok: false; message: string } {
-  // 1. --password-fd wins (explicit scripted intent).
+  // 1. --password-fd wins (explicit scripted task).
   const merged = mergeArgv(argv);
   const fd = parsePasswordFdFromArgv(merged);
   if (fd !== undefined) {

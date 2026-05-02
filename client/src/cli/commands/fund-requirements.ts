@@ -25,7 +25,7 @@ interface FundRequirementRow {
   haveWei: string;
   needWei: string;
   reason: string;
-  blocks: 'bootstrap' | 'run' | 'submit-intent' | 'claim-rewards';
+  blocks: 'bootstrap' | 'run' | 'tasks-submit' | 'claim-rewards';
   details: { tokenAddress: string | null; tokenSymbol: string };
 }
 

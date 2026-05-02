@@ -18,7 +18,7 @@ services:
       # the CLI will accept via this env var — no keychain / libsecret / login
       # flow needed. Keeps the daemon runnable in a headless container.
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      JINN_DISABLE_AUTO_INTENTS: ${JINN_DISABLE_AUTO_INTENTS:-1}
+      JINN_DISABLE_AUTO_TASKS: ${JINN_DISABLE_AUTO_TASKS:-1}
       NO_COLOR: ${NO_COLOR:-1}
     volumes:
       - jinn-acceptance-data:/data

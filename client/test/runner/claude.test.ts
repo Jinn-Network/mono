@@ -11,7 +11,7 @@ vi.mock('../../src/trajectory/index.js', () => ({
 }));
 
 describe('Claude runner', () => {
-  it('builds a prompt from a desired state', () => {
+  it('builds a prompt from a Task', () => {
     const prompt = buildPrompt({
       id: 'ds-1',
       description: 'The API should return 200 on /health',
@@ -19,7 +19,7 @@ describe('Claude runner', () => {
     });
 
     expect(prompt).toContain('The API should return 200 on /health');
-    expect(prompt).toContain('desired state');
+    expect(prompt).toContain('Task');
   });
 });
 
@@ -33,7 +33,7 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     const { tracedSpawn } = await import('../../src/trajectory/index.js');
     const { ClaudeRunner } = await import('../../src/runner/claude.js');
 
-    const collector = new TrajectoryCollector({ intentCid: 'bafy', runId: 'runner-test-1' });
+    const collector = new TrajectoryCollector({ taskCid: 'bafy', runId: 'runner-test-1' });
     const runner = new ClaudeRunner({ claudePath: 'claude', model: 'test-model' });
 
     // Minimal job
@@ -51,7 +51,7 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     };
 
     // tracedSpawn returns exitCode 0 → runner should succeed
-    await runner.run(job as unknown as import('../../src/types/desired-state.js').RestorationJob, context);
+    await runner.run(job as unknown as import('../../src/types/task.js').Task, context);
 
     expect(tracedSpawn).toHaveBeenCalledOnce();
     const call = (tracedSpawn as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -77,7 +77,7 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     });
 
     const { ClaudeRunner } = await import('../../src/runner/claude.js');
-    const collector = new TrajectoryCollector({ intentCid: 'bafy', runId: 'corpus-propagate' });
+    const collector = new TrajectoryCollector({ taskCid: 'bafy', runId: 'corpus-propagate' });
     const runner = new ClaudeRunner({ claudePath: 'claude', model: 'test-model' });
     const corpusEnv = {
       subgraphUrl: 'https://sg.example/gql',
@@ -87,7 +87,7 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
       {
         id: 'job-corpus',
         description: 'Test',
-      } as unknown as import('../../src/types/desired-state.js').RestorationJob,
+      } as unknown as import('../../src/types/task.js').Task,
       {
         requestId: 'req-corpus' as unknown as import('../../src/types/index.js').RequestId,
         workingDirectory: '/tmp/test',
@@ -128,7 +128,7 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
 
     // Will reject because the binary doesn't exist, but tracedSpawn should NOT be called.
     await expect(
-      runner.run(job as unknown as import('../../src/types/desired-state.js').RestorationJob, context),
+      runner.run(job as unknown as import('../../src/types/task.js').Task, context),
     ).rejects.toThrow();
 
     expect(tracedSpawn).not.toHaveBeenCalled();

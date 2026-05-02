@@ -3,10 +3,9 @@
  * absolute-path escapes when joining attacker-influenced relative
  * paths into a daemon-owned base directory.
  *
- * Both Path 1 (plug-ins) and Path 2 (external impls) honour the
- * convention that manifest entries are package-relative paths; this
- * helper enforces that contract at runtime as belt-and-suspenders for
- * the schema regex.
+ * Manifest-bearing packages honour the convention that manifest entries are
+ * package-relative paths; this helper enforces that contract at runtime as
+ * belt-and-suspenders for the schema regex.
  */
 
 import { isAbsolute, relative, resolve } from 'node:path';

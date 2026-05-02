@@ -7,7 +7,7 @@
  *   span[2] — jinn.artifact.emit (links to span[1])
  *
  * Each span carries the required jinn.prevSpanHash set according to the
- * hash-chain rules: span[0].prevSpanHash = computeGenesisHash(intentCid),
+ * hash-chain rules: span[0].prevSpanHash = computeGenesisHash(taskCid),
  * span[n].prevSpanHash = computePrevSpanHash(span[n-1]).
  *
  * The trajectory fixture is intentionally NOT signed — conformance checks
@@ -26,8 +26,8 @@ export const FIXTURE_ARTIFACT_CID = 'bafy-test-artifact-emit-001';
 export const FIXTURE_ARTIFACT_SHA256 = 'c'.repeat(64);
 export const FIXTURE_EMIT_SPAN_ID = 'eeee000000000001';
 
-export function buildGoodTrajectoryFixture(intentCid: string): JinnTrajectoryV1 {
-  const genesis = computeGenesisHash(intentCid);
+export function buildGoodTrajectoryFixture(taskCid: string): JinnTrajectoryV1 {
+  const genesis = computeGenesisHash(taskCid);
 
   // span[0] — jinn.phase
   const span0: Span = {

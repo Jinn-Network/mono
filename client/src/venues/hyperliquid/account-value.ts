@@ -3,7 +3,7 @@
  *
  * Returns a single equity figure that sums perps margin + spot USDC. This
  * matches HL's `portfolio` endpoint `accountValueHistory` (which also
- * reports the unified view), so restorer-claimed equity and evaluator-
+ * reports the unified view), so harness-claimed equity and evaluator-
  * rederived grid points compare cleanly.
  *
  * Non-USDC spot tokens are NOT valued in v0 — their midprice lookup and

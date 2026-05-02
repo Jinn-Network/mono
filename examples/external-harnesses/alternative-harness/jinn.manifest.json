@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "@jinn-examples/alternative-harness",
+  "version": "0.1.0",
+  "description": "Path 2 worked example — alternative-harness harness for prediction.v0.",
+  "supportedSolverTypes": ["prediction.v0>=1.0.0"],
+  "entry": "./dist/index.js",
+  "package": {
+    "cid": "bafybeiplaceholderplaceholderplaceholderplaceholderplaceholder",
+    "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "capabilities": {
+    "rpc": [
+      { "chainId": 84532, "methods": ["eth_call", "eth_blockNumber"] }
+    ]
+  },
+  "signature": {
+    "alg": "ed25519",
+    "publicKey": "PLACEHOLDER",
+    "sig": "PLACEHOLDER"
+  },
+  "license": "MIT"
+}

@@ -1,5 +1,5 @@
 /**
- * prediction.v0 — typed intent spec.
+ * prediction.v0 — typed task spec.
  *
  * §4 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
  *
@@ -8,7 +8,7 @@
  * PredictionV0RestorationPayloadSchema / PredictionV0VerdictPayloadSchema instead.
  */
 import { z } from 'zod';
-import { WindowSchema } from './desired-state.js';
+import { WindowSchema } from './task.js';
 
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, 'must be a 0x-prefixed hex string');
 
@@ -28,10 +28,9 @@ const RangeQuestionSchema = z.object({
   resolveTs: z.number().int(),
 });
 
-// ── Spec + eligibility + intent ────────────────────────────────────────────────
+// ── Spec + eligibility + task ────────────────────────────────────────────────
 
 export const PredictionV0SpecSchema = z.object({
-  kind: z.literal('prediction.v0'),
   oracle: z.object({
     venue: z.enum(['chainlink-base-sepolia', 'chainlink-base']),
     feed: HexStringSchema,
@@ -48,10 +47,11 @@ export const PredictionV0EligibilitySchema = z.object({
 
 export type PredictionV0Eligibility = z.infer<typeof PredictionV0EligibilitySchema>;
 
-export const PredictionV0IntentSchema = z
+export const PredictionV0TaskSchema = z
   .object({
     id: z.string(),
     description: z.string().min(1),
+    solverType: z.literal('prediction.v0').optional(),
     window: WindowSchema,
     spec: PredictionV0SpecSchema,
     eligibility: PredictionV0EligibilitySchema.default({}),
@@ -77,4 +77,4 @@ export const PredictionV0IntentSchema = z
     path: ['spec', 'question', 'resolveTs'],
   });
 
-export type PredictionV0Intent = z.infer<typeof PredictionV0IntentSchema>;
+export type PredictionV0Task = z.infer<typeof PredictionV0TaskSchema>;

@@ -1,19 +1,20 @@
 import type { Hex } from 'viem';
-import type { RestorationJob, RestorationResult } from '../../types/index.js';
-import { parseSignedIntentV1, type SignedIntentV1 } from '../../types/intent.js';
+import type { Task, TaskResult } from '../../types/index.js';
+import { parseSignedTaskV1, type SignedTaskV1 } from '../../types/task-document.js';
 import { IPFS_GATEWAY_PREFIX } from './types.js';
-import { canonicalJson } from '../../restorer/engine/canonical-json.js';
+import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 
-export interface RestorationJobPayload {
-  desiredStateId: string;
+export interface TaskPayload {
+  taskId: string;
   description: string;
   context?: Record<string, unknown>;
-  type?: 'restoration' | 'evaluation';
+  role?: 'restoration' | 'evaluation';
   attemptId?: string;
   attemptNumber?: number;
   restorationRequestId?: string;
-  // portfolio.v0 additions — optional on both read and write for backward compat
-  spec?: { kind: string } & Record<string, unknown>;
+  solverType?: string;
+  // typed solver payload; dispatcher is top-level `solverType`.
+  spec?: Record<string, unknown>;
   window?: { startTs: number; endTs: number };
   eligibility?: Record<string, unknown>;
 }
@@ -24,12 +25,13 @@ export interface RestorationResultPayload {
   artifacts?: string[];
 }
 
-export function buildRestorationJobPayload(state: RestorationJob): RestorationJobPayload {
+export function buildTaskPayload(state: Task): TaskPayload {
   return {
-    desiredStateId: state.id,
+    taskId: state.id,
     description: state.description,
     context: state.context,
-    type: state.type,
+    solverType: state.solverType,
+    role: state.role,
     attemptId: state.attemptId,
     attemptNumber: state.attemptNumber,
     restorationRequestId: state.restorationRequestId,
@@ -39,8 +41,8 @@ export function buildRestorationJobPayload(state: RestorationJob): RestorationJo
   };
 }
 
-export function parseRestorationJobFromPayload(payload: Record<string, unknown>): RestorationJob {
-  const spec = payload.spec as RestorationJob['spec'] | undefined;
+export function parseTaskFromPayload(payload: Record<string, unknown>): Task {
+  const spec = payload.spec as Task['spec'] | undefined;
   const rawWindow = payload.window as { startTs?: unknown; endTs?: unknown } | undefined;
   const window =
     rawWindow && typeof rawWindow.startTs === 'number' && typeof rawWindow.endTs === 'number'
@@ -49,10 +51,11 @@ export function parseRestorationJobFromPayload(payload: Record<string, unknown>)
   const eligibility = payload.eligibility as Record<string, unknown> | undefined;
 
   return {
-    id: (payload.desiredStateId as string) ?? '',
+    id: (payload.taskId as string) ?? '',
     description: (payload.description as string) ?? '',
     context: payload.context as Record<string, unknown> | undefined,
-    type: payload.type as 'restoration' | 'evaluation' | undefined,
+    solverType: payload.solverType as string | undefined,
+    role: payload.role as 'restoration' | 'evaluation' | undefined,
     attemptId: payload.attemptId as string | undefined,
     attemptNumber: payload.attemptNumber as number | undefined,
     restorationRequestId: payload.restorationRequestId as string | undefined,
@@ -62,7 +65,7 @@ export function parseRestorationJobFromPayload(payload: Record<string, unknown>)
   };
 }
 
-export function buildResultPayload(requestId: string, result: RestorationResult): RestorationResultPayload {
+export function buildResultPayload(requestId: string, result: TaskResult): RestorationResultPayload {
   return {
     requestId,
     data: result.data,
@@ -235,18 +238,18 @@ export async function fetchFromIpfs(gatewayUrl: string, cid: string): Promise<un
 }
 
 /**
- * Fetch an intent CID from IPFS and parse it through `parseSignedIntentV1`.
+ * Fetch a Task CID from IPFS and parse it through `parseSignedTaskV1`.
  *
- * Use this whenever you have an intent CID and want a typed `SignedIntentV1`
+ * Use this whenever you have a Task CID and want a typed `SignedTaskV1`
  * document. Throws `ZodError` if the fetched bytes don't conform to the
- * `intent.v1` schema.
+ * `task.v1` schema.
  */
-export async function fetchSignedIntentFromIpfs(
+export async function fetchSignedTaskFromIpfs(
   gatewayUrl: string,
   cid: string,
-): Promise<SignedIntentV1> {
+): Promise<SignedTaskV1> {
   const raw = await fetchFromIpfs(gatewayUrl, cid);
-  return parseSignedIntentV1(raw);
+  return parseSignedTaskV1(raw);
 }
 
 /**

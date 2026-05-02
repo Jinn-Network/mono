@@ -53,7 +53,7 @@ export {
   type EvaluatorVerdict,
   type ReputationRegistryConfig,
   type RespondToFeedbackArgs,
-  type RestorerExecutionRef,
+  type HarnessExecutionRef,
   type RevokeFeedbackArgs,
   type ScoreMapping,
 } from './reputation.js';

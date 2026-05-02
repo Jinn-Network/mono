@@ -15,10 +15,6 @@ Walk the plan and drive it. Workers are spawned by you (the coordinator session 
 - `workingDir/.orient/summary.json` — grounding
 - The intent + window + remaining time budget
 
-## Consult slot registry
-
-Before spawning the bundled `step-worker`, check `workingDir/.coordinator/slots.json` (if present) for a `phase-agent-override` entry where `slot.phase === "execute"` AND `slot.agent === "step-worker"` AND (`slot.scope` absent OR `intent.spec.kind` ∈ `slot.scope.matchKinds`). If a match exists, each step-worker spawn in the loop below uses the override agent at `<entry.packageRoot>/<entry.slot.entry>` instead of the bundled `step-worker`. Inputs are unchanged. See spec/2026-04-30-plug-in-surface.md §4 for slot routing rules.
-
 ## Walk the plan
 
 For each step in order, respecting `concurrency` markings:

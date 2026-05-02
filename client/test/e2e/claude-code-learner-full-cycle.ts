@@ -202,14 +202,15 @@ async function runCycle(params: CycleParams): Promise<CycleResult> {
   const endTs = startedAt + 600_000; // 10-minute window per cycle
 
   const intent = {
-    id: params.intentId,
-    description: params.intentDescription,
+    id: params.signedTaskId,
+    description: params.signedTaskDescription,
+    solverType: 'smoke-test',
     window: { startTs, endTs },
-    spec: { kind: 'smoke-test', fieldNames: ['foo', 'bar', 'baz'], fieldValue: params.fieldValue },
+    spec: { fieldNames: ['foo', 'bar', 'baz'], fieldValue: params.fieldValue },
   };
 
   const prompt = [
-    'You are running a Jinn restoration intent. Use the Skill tool to invoke',
+    'You are running a Jinn restoration Task. Use the Skill tool to invoke',
     "'claude-code-learner:coordinator' and run the FULL seven-phase pipeline",
     '(Orient → Strategize → Plan → Execute → Debrief → Improve → Memory consolidation).',
     '',

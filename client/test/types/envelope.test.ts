@@ -24,10 +24,10 @@ describe('EvidenceTierSchema', () => {
 describe('UnsignedEnvelopeSchema', () => {
   const baseEnv: UnsignedEnvelope = {
     schemaVersion: 'jinn.execution.v1',
-    kind: 'portfolio.v0',
+    solverType: 'portfolio.v0',
     role: 'restoration',
     generatedAt: 1700000000000,
-    intent: {
+    task: {
       cid: 'bafy...',
       onchainCreationTx: '0x' + 'ab'.repeat(32),
       onchainCreationBlock: 100,
@@ -43,6 +43,8 @@ describe('UnsignedEnvelopeSchema', () => {
       implVersion: '1.0.0',
       clientGitSha: 'abcdef1',
       codeDigest: 'sha256:' + 'ab'.repeat(32),
+      runtimeBundleDigest: 'sha256:' + 'bc'.repeat(32),
+      plugins: [],
       signingKey: {
         kind: 'agent-eoa',
         pubkey: '0x2222222222222222222222222222222222222222',
@@ -115,10 +117,10 @@ describe('UnsignedEnvelopeSchema', () => {
 describe('SignedEnvelopeSchema', () => {
   const baseSigned = {
     schemaVersion: 'jinn.execution.v1' as const,
-    kind: 'portfolio.v0',
+    solverType: 'portfolio.v0',
     role: 'restoration' as const,
     generatedAt: 1700000000000,
-    intent: {
+    task: {
       cid: 'bafy',
       onchainCreationTx: '0x' + 'ab'.repeat(32),
       onchainCreationBlock: 1,
@@ -134,6 +136,8 @@ describe('SignedEnvelopeSchema', () => {
       implVersion: '1',
       clientGitSha: 'a',
       codeDigest: 'sha256:' + 'ab'.repeat(32),
+      runtimeBundleDigest: 'sha256:' + 'bc'.repeat(32),
+      plugins: [],
       signingKey: { kind: 'agent-eoa' as const, pubkey: '0x22' },
     },
     evidenceTier: 'self-signed' as const,

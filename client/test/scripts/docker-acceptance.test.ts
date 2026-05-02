@@ -65,7 +65,7 @@ describe('docker acceptance helpers', () => {
     expect(composeEnv.JINN_ACCEPTANCE_IMAGE).toBe('jinn-client:test');
     expect(composeEnv.JINN_PASSWORD).toBe('secret');
     expect(composeEnv.JINN_RPC_URL).toBe('https://public.example');
-    expect(composeEnv.JINN_DISABLE_AUTO_INTENTS).toBe('0');
+    expect(composeEnv.JINN_DISABLE_AUTO_TASKS).toBe('0');
     expect(composeEnv.JINN_PREDICTION_V0_WINDOW_MS).toBe('120000');
     expect(composeEnv.JINN_PREDICTION_V0_RESOLVE_GAP_MS).toBe('60000');
     expect(composeEnv.JINN_ACCEPTANCE_CONFIG_FILE).toBe(dockerAcceptanceConfigPath(clientRoot));
@@ -100,10 +100,10 @@ describe('docker acceptance helpers', () => {
 });
 
 describe('artifact cycle summaries', () => {
-  it('counts successful cycles per desired state from append-only artifacts', () => {
+  it('counts successful cycles per Task from append-only artifacts', () => {
     const summary = summarizeArtifactRows([
       {
-        desired_state_id: 'one',
+        task_id: 'one',
         request_id: 'req-1',
         title: 'restoration one',
         tags: '["restoration-result"]',
@@ -111,7 +111,7 @@ describe('artifact cycle summaries', () => {
         created_at: '2026-04-16T10:00:00.000Z',
       },
       {
-        desired_state_id: 'one',
+        task_id: 'one',
         request_id: 'req-1',
         title: 'evaluation one',
         tags: '["evaluation-verdict"]',
@@ -119,7 +119,7 @@ describe('artifact cycle summaries', () => {
         created_at: '2026-04-16T10:05:00.000Z',
       },
       {
-        desired_state_id: 'two',
+        task_id: 'two',
         request_id: 'req-2',
         title: 'restoration two',
         tags: '["restoration-result"]',
@@ -127,7 +127,7 @@ describe('artifact cycle summaries', () => {
         created_at: '2026-04-16T10:10:00.000Z',
       },
       {
-        desired_state_id: 'two',
+        task_id: 'two',
         request_id: 'req-2',
         title: 'evaluation two',
         tags: '["evaluation-verdict"]',
@@ -137,40 +137,40 @@ describe('artifact cycle summaries', () => {
     ], ['one', 'two']);
 
     expect(summary.completedCycles).toBe(1);
-    expect(summary.byRestorationJob.one.successfulRestorations).toBe(1);
-    expect(summary.byRestorationJob.one.successfulEvaluations).toBe(1);
-    expect(summary.byRestorationJob.two.successfulRestorations).toBe(1);
-    expect(summary.byRestorationJob.two.successfulEvaluations).toBe(0);
+    expect(summary.byTask.one.successfulRestorations).toBe(1);
+    expect(summary.byTask.one.successfulEvaluations).toBe(1);
+    expect(summary.byTask.two.successfulRestorations).toBe(1);
+    expect(summary.byTask.two.successfulEvaluations).toBe(0);
   });
 });
 
 describe('summarizeRunWindowArtifacts', () => {
   const runStartAt = '2026-04-30T10:00:00.000Z';
 
-  it('counts a cycle complete only when both restoration and evaluation succeed for the same desired_state_id', () => {
+  it('counts a cycle complete only when both restoration and evaluation succeed for the same task_id', () => {
     // Real shape: SQLite stores `created_at` as `YYYY-MM-DD HH:MM:SS`
     // (CURRENT_TIMESTAMP default), not ISO 8601. Restoration and evaluation
     // phases each get their own on-chain request_id; they share the
     // prediction.v0 auto-gen bucket id (`pred-v0-auto-<bucket>`) as
-    // desired_state_id.
+    // task_id.
     const summary = summarizeRunWindowArtifacts(
       [
         {
-          desired_state_id: 'pred-v0-auto-1714464000000',
+          task_id: 'pred-v0-auto-1714464000000',
           request_id: '0xrestreq1',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
           created_at: '2026-04-30 10:03:00',
         },
         {
-          desired_state_id: 'pred-v0-auto-1714464000000',
+          task_id: 'pred-v0-auto-1714464000000',
           request_id: '0xevalreq1',
           tags: '["evaluation-verdict"]',
           outcome: 'SUCCESS',
           created_at: '2026-04-30 10:06:00',
         },
         {
-          desired_state_id: 'pred-v0-auto-1714464120000',
+          task_id: 'pred-v0-auto-1714464120000',
           request_id: '0xrestreq2',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
@@ -181,13 +181,13 @@ describe('summarizeRunWindowArtifacts', () => {
     );
 
     expect(summary.completedCycles).toBe(1);
-    expect(summary.byDesiredStateId).toHaveLength(2);
-    const cycle1 = summary.byDesiredStateId.find((e) => e.desiredStateId === 'pred-v0-auto-1714464000000');
+    expect(summary.byTaskId).toHaveLength(2);
+    const cycle1 = summary.byTaskId.find((e) => e.taskId === 'pred-v0-auto-1714464000000');
     expect(cycle1?.restorationOk).toBe(true);
     expect(cycle1?.evaluationOk).toBe(true);
     expect(cycle1?.restorationRequestId).toBe('0xrestreq1');
     expect(cycle1?.evaluationRequestId).toBe('0xevalreq1');
-    const cycle2 = summary.byDesiredStateId.find((e) => e.desiredStateId === 'pred-v0-auto-1714464120000');
+    const cycle2 = summary.byTaskId.find((e) => e.taskId === 'pred-v0-auto-1714464120000');
     expect(cycle2?.restorationOk).toBe(true);
     expect(cycle2?.evaluationOk).toBe(false);
   });
@@ -196,14 +196,14 @@ describe('summarizeRunWindowArtifacts', () => {
     const summary = summarizeRunWindowArtifacts(
       [
         {
-          desired_state_id: 'pred-v0-auto-old',
+          task_id: 'pred-v0-auto-old',
           request_id: '0xstaleR',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
           created_at: '2026-04-30 09:30:00',
         },
         {
-          desired_state_id: 'pred-v0-auto-old',
+          task_id: 'pred-v0-auto-old',
           request_id: '0xstaleE',
           tags: '["evaluation-verdict"]',
           outcome: 'SUCCESS',
@@ -214,13 +214,13 @@ describe('summarizeRunWindowArtifacts', () => {
     );
 
     expect(summary.completedCycles).toBe(0);
-    expect(summary.byDesiredStateId).toHaveLength(0);
+    expect(summary.byTaskId).toHaveLength(0);
   });
 
   it('returns zero cycles for an empty row set', () => {
     const summary = summarizeRunWindowArtifacts([], runStartAt);
     expect(summary.completedCycles).toBe(0);
-    expect(summary.byDesiredStateId).toEqual([]);
+    expect(summary.byTaskId).toEqual([]);
   });
 
   it('does not silently exclude rows due to timezone interpretation mismatch', () => {
@@ -232,7 +232,7 @@ describe('summarizeRunWindowArtifacts', () => {
     const summary = summarizeRunWindowArtifacts(
       [
         {
-          desired_state_id: 'pred-v0-auto-1777545600000',
+          task_id: 'pred-v0-auto-1777545600000',
           request_id: '0xrestreq',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
@@ -240,7 +240,7 @@ describe('summarizeRunWindowArtifacts', () => {
           created_at: '2026-04-30 10:00:30',
         },
         {
-          desired_state_id: 'pred-v0-auto-1777545600000',
+          task_id: 'pred-v0-auto-1777545600000',
           request_id: '0xevalreq',
           tags: '["evaluation-verdict"]',
           outcome: 'SUCCESS',

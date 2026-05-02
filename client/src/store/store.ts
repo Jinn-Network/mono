@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { RESTORATION_INTENTS_SCHEMA } from '../restorer/engine/persistence.js';
+import { TASK_RUNS_SCHEMA } from '../harnesses/engine/persistence.js';
 
 export interface ActivityEventInput {
   ts: string | null;
@@ -9,7 +9,7 @@ export interface ActivityEventInput {
   requestId?: string | null;
   serviceIndex?: number | null;
   txHash?: string | null;
-  specKind?: string | null;
+  solverType?: string | null;
   outcome?: string | null;
   detail?: string | null;
 }
@@ -21,7 +21,7 @@ export interface ActivityEventRow {
   requestId: string | null;
   serviceIndex: number | null;
   txHash: string | null;
-  specKind: string | null;
+  solverType: string | null;
   outcome: string | null;
   detail: string | null;
 }
@@ -99,14 +99,14 @@ export interface NetworkArtifactRow {
   peerCatalogId: string | null;
 }
 
-export type IntentPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
+export type TaskPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
 
-export interface IntentPostRecord {
+export interface TaskPostRecord {
   creatorSafeAddress: string;
   sourceKey: string;
-  policyType: IntentPostingPolicyType;
+  policyType: TaskPostingPolicyType;
   scopeKey: string;
-  desiredStateId: string;
+  taskId: string;
   requestId: string;
   firstPostedAt: string;
   lastPostedAt: string;
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS config (
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
-  desired_state_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
   request_id TEXT NOT NULL,
   title TEXT NOT NULL,
   content TEXT,
@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_artifacts_desired_state ON artifacts (desired_state_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_outcome ON artifacts (outcome);
 CREATE INDEX IF NOT EXISTS idx_artifacts_remote ON artifacts (remote);
 
@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS activity_events (
   request_id TEXT,
   service_index INTEGER,
   tx_hash TEXT,
-  spec_kind TEXT,
+  solver_type TEXT,
   outcome TEXT,
   detail TEXT
 );
@@ -182,19 +182,19 @@ CREATE TABLE IF NOT EXISTS balance_cache (
   error TEXT
 );
 
-CREATE TABLE IF NOT EXISTS intent_posts (
+CREATE TABLE IF NOT EXISTS task_posts (
   creator_safe_address TEXT NOT NULL,
   source_key TEXT NOT NULL,
   policy_type TEXT NOT NULL CHECK (policy_type IN ('once_per_safe', 'once_per_bucket', 'interval')),
   scope_key TEXT NOT NULL DEFAULT '',
-  desired_state_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
   request_id TEXT NOT NULL,
   first_posted_at TEXT NOT NULL,
   last_posted_at TEXT NOT NULL,
   post_count INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
 );
-CREATE INDEX IF NOT EXISTS idx_intent_posts_desired_state ON intent_posts (desired_state_id);
+CREATE INDEX IF NOT EXISTS idx_task_posts_task ON task_posts (task_id);
 
 CREATE TABLE IF NOT EXISTS served_artifacts (
   sha256 TEXT PRIMARY KEY,
@@ -228,7 +228,7 @@ CREATE INDEX IF NOT EXISTS idx_network_artifacts_envelope ON network_artifacts (
 CREATE INDEX IF NOT EXISTS idx_network_artifacts_artifact_type ON network_artifacts (artifact_type);
 CREATE INDEX IF NOT EXISTS idx_network_artifacts_last_used ON network_artifacts (last_used_at DESC);
 
-CREATE TABLE IF NOT EXISTS intent_post_locks (
+CREATE TABLE IF NOT EXISTS task_post_locks (
   creator_safe_address TEXT NOT NULL,
   source_key TEXT NOT NULL,
   policy_type TEXT NOT NULL CHECK (policy_type IN ('once_per_safe', 'once_per_bucket', 'interval')),
@@ -253,7 +253,7 @@ export class Store {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
-    this.db.exec(RESTORATION_INTENTS_SCHEMA);
+    this.db.exec(TASK_RUNS_SCHEMA);
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
     this.backfillActivityEvents();
@@ -318,16 +318,16 @@ export class Store {
     this.db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
   }
 
-  getIntentPostRecord(args: {
+  getTaskPostRecord(args: {
     creatorSafeAddress: string;
     sourceKey: string;
-    policyType: IntentPostingPolicyType;
+    policyType: TaskPostingPolicyType;
     scopeKey: string;
-  }): IntentPostRecord | null {
+  }): TaskPostRecord | null {
     const row = this.db.prepare(
-      `SELECT creator_safe_address, source_key, policy_type, scope_key, desired_state_id, request_id,
+      `SELECT creator_safe_address, source_key, policy_type, scope_key, task_id, request_id,
               first_posted_at, last_posted_at, post_count
-       FROM intent_posts
+       FROM task_posts
        WHERE creator_safe_address = @creatorSafeAddress
          AND source_key = @sourceKey
          AND policy_type = @policyType
@@ -335,9 +335,9 @@ export class Store {
     ).get(args) as {
       creator_safe_address: string;
       source_key: string;
-      policy_type: IntentPostingPolicyType;
+      policy_type: TaskPostingPolicyType;
       scope_key: string;
-      desired_state_id: string;
+      task_id: string;
       request_id: string;
       first_posted_at: string;
       last_posted_at: string;
@@ -349,7 +349,7 @@ export class Store {
       sourceKey: row.source_key,
       policyType: row.policy_type,
       scopeKey: row.scope_key,
-      desiredStateId: row.desired_state_id,
+      taskId: row.task_id,
       requestId: row.request_id,
       firstPostedAt: row.first_posted_at,
       lastPostedAt: row.last_posted_at,
@@ -357,16 +357,16 @@ export class Store {
     };
   }
 
-  upsertIntentPostRecord(record: IntentPostRecord): void {
+  upsertTaskPostRecord(record: TaskPostRecord): void {
     this.db.prepare(
-      `INSERT INTO intent_posts
-         (creator_safe_address, source_key, policy_type, scope_key, desired_state_id, request_id,
+      `INSERT INTO task_posts
+         (creator_safe_address, source_key, policy_type, scope_key, task_id, request_id,
           first_posted_at, last_posted_at, post_count)
        VALUES
-         (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @desiredStateId, @requestId,
+         (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @taskId, @requestId,
           @firstPostedAt, @lastPostedAt, @postCount)
        ON CONFLICT(creator_safe_address, source_key, policy_type, scope_key) DO UPDATE SET
-         desired_state_id = excluded.desired_state_id,
+         task_id = excluded.task_id,
          request_id = excluded.request_id,
          first_posted_at = excluded.first_posted_at,
          last_posted_at = excluded.last_posted_at,
@@ -374,10 +374,10 @@ export class Store {
     ).run(record);
   }
 
-  acquireIntentPostLock(args: {
+  acquireTaskPostLock(args: {
     creatorSafeAddress: string;
     sourceKey: string;
-    policyType: IntentPostingPolicyType;
+    policyType: TaskPostingPolicyType;
     scopeKey: string;
     ownerToken: string;
     lockedAt: string;
@@ -386,7 +386,7 @@ export class Store {
     const tx = this.db.transaction((params: typeof args) => {
       const existing = this.db.prepare(
         `SELECT owner_token, locked_at
-         FROM intent_post_locks
+         FROM task_post_locks
          WHERE creator_safe_address = @creatorSafeAddress
            AND source_key = @sourceKey
            AND policy_type = @policyType
@@ -395,7 +395,7 @@ export class Store {
 
       if (!existing) {
         this.db.prepare(
-          `INSERT INTO intent_post_locks
+          `INSERT INTO task_post_locks
              (creator_safe_address, source_key, policy_type, scope_key, owner_token, locked_at)
            VALUES
              (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @ownerToken, @lockedAt)`,
@@ -413,7 +413,7 @@ export class Store {
       }
 
       this.db.prepare(
-        `UPDATE intent_post_locks
+        `UPDATE task_post_locks
          SET owner_token = @ownerToken, locked_at = @lockedAt
          WHERE creator_safe_address = @creatorSafeAddress
            AND source_key = @sourceKey
@@ -426,15 +426,15 @@ export class Store {
     return tx(args);
   }
 
-  releaseIntentPostLock(args: {
+  releaseTaskPostLock(args: {
     creatorSafeAddress: string;
     sourceKey: string;
-    policyType: IntentPostingPolicyType;
+    policyType: TaskPostingPolicyType;
     scopeKey: string;
     ownerToken: string;
   }): void {
     this.db.prepare(
-      `DELETE FROM intent_post_locks
+      `DELETE FROM task_post_locks
        WHERE creator_safe_address = @creatorSafeAddress
          AND source_key = @sourceKey
          AND policy_type = @policyType
@@ -467,15 +467,15 @@ export class Store {
 
   recordActivityEvent(event: ActivityEventInput): void {
     this.db.prepare(
-      `INSERT INTO activity_events (ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail)
-       VALUES (@ts, @kind, @requestId, @serviceIndex, @txHash, @specKind, @outcome, @detail)`,
+      `INSERT INTO activity_events (ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail)
+       VALUES (@ts, @kind, @requestId, @serviceIndex, @txHash, @solverType, @outcome, @detail)`,
     ).run({
       ts: event.ts ?? null,
       kind: event.kind,
       requestId: event.requestId ?? null,
       serviceIndex: event.serviceIndex ?? null,
       txHash: event.txHash ?? null,
-      specKind: event.specKind ?? null,
+      solverType: event.solverType ?? null,
       outcome: event.outcome ?? null,
       detail: event.detail ?? null,
     });
@@ -498,7 +498,7 @@ export class Store {
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.db.prepare(
-      `SELECT id, ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
        FROM activity_events
        ${where}
        ORDER BY id DESC
@@ -510,7 +510,7 @@ export class Store {
       request_id: string | null;
       service_index: number | null;
       tx_hash: string | null;
-      spec_kind: string | null;
+      solver_type: string | null;
       outcome: string | null;
       detail: string | null;
     }>;
@@ -521,7 +521,7 @@ export class Store {
       requestId: r.request_id,
       serviceIndex: r.service_index,
       txHash: r.tx_hash,
-      specKind: r.spec_kind,
+      solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
     }));
@@ -532,7 +532,7 @@ export class Store {
     const effectiveLimit = Math.max(0, Math.min(limit, 1000));
     const rows = this.db
       .prepare(
-        `SELECT id, ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail
+        `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
          FROM activity_events
          WHERE id > @afterId
          ORDER BY id ASC
@@ -545,7 +545,7 @@ export class Store {
         request_id: string | null;
         service_index: number | null;
         tx_hash: string | null;
-        spec_kind: string | null;
+        solver_type: string | null;
         outcome: string | null;
         detail: string | null;
       }>;
@@ -556,7 +556,7 @@ export class Store {
       requestId: r.request_id,
       serviceIndex: r.service_index,
       txHash: r.tx_hash,
-      specKind: r.spec_kind,
+      solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
     }));
@@ -699,9 +699,9 @@ export class Store {
     tx();
   }
 
-  getIntentEvidenceHash(requestId: string): string | null {
+  getTaskEvidenceHash(requestId: string): string | null {
     const row = this.db.prepare(
-      'SELECT evidence_hash FROM restoration_intents WHERE request_id = ?',
+      'SELECT evidence_hash FROM task_runs WHERE request_id = ?',
     ).get(requestId) as { evidence_hash: string | null } | undefined;
     return row?.evidence_hash ?? null;
   }
@@ -717,7 +717,7 @@ export class Store {
 
   insertArtifact(artifact: {
     id: string;
-    desiredStateId: string;
+    taskId: string;
     requestId: string;
     title: string;
     content: string;
@@ -725,8 +725,8 @@ export class Store {
     outcome: 'SUCCESS' | 'FAILURE' | 'UNKNOWN';
   }): void {
     this.db.prepare(`
-      INSERT OR REPLACE INTO artifacts (id, desired_state_id, request_id, title, content, tags, outcome)
-      VALUES (@id, @desiredStateId, @requestId, @title, @content, @tags, @outcome)
+      INSERT OR REPLACE INTO artifacts (id, task_id, request_id, title, content, tags, outcome)
+      VALUES (@id, @taskId, @requestId, @title, @content, @tags, @outcome)
     `).run({
       ...artifact,
       tags: JSON.stringify(artifact.tags),
@@ -737,11 +737,11 @@ export class Store {
     tags?: string[];
     outcome?: string;
     requestId?: string;
-    desiredStateId?: string;
+    taskId?: string;
     after?: string;   // ISO timestamp — only return artifacts created after this time
     before?: string;  // ISO timestamp — only return artifacts created before this time
     limit?: number;
-  }): Array<{ id: string; title: string; content: string; tags: string[]; outcome: string; request_id: string; desired_state_id: string; created_at: string }> {
+  }): Array<{ id: string; title: string; content: string; tags: string[]; outcome: string; request_id: string; task_id: string; created_at: string }> {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
@@ -755,9 +755,9 @@ export class Store {
       params['requestId'] = query.requestId;
     }
 
-    if (query.desiredStateId) {
-      conditions.push('desired_state_id = @desiredStateId');
-      params['desiredStateId'] = query.desiredStateId;
+    if (query.taskId) {
+      conditions.push('task_id = @taskId');
+      params['taskId'] = query.taskId;
     }
 
     if (query.after) {
@@ -781,8 +781,8 @@ export class Store {
     const limit = query.limit ?? 50;
 
     const rows = this.db.prepare(
-      `SELECT id, title, content, tags, outcome, request_id, desired_state_id, created_at FROM artifacts ${where} ORDER BY created_at DESC LIMIT ${limit}`
-    ).all(params) as Array<{ id: string; title: string; content: string; tags: string; outcome: string; request_id: string; desired_state_id: string; created_at: string }>;
+      `SELECT id, title, content, tags, outcome, request_id, task_id, created_at FROM artifacts ${where} ORDER BY created_at DESC LIMIT ${limit}`
+    ).all(params) as Array<{ id: string; title: string; content: string; tags: string; outcome: string; request_id: string; task_id: string; created_at: string }>;
 
     return rows.map(row => ({
       ...row,
@@ -792,7 +792,7 @@ export class Store {
 
   insertRemoteArtifact(artifact: {
     id: string;
-    desiredStateId: string;
+    taskId: string;
     requestId: string;
     title: string;
     tags: string[];
@@ -802,8 +802,8 @@ export class Store {
     price?: string;
   }): void {
     this.db.prepare(`
-      INSERT OR REPLACE INTO artifacts (id, desired_state_id, request_id, title, tags, outcome, remote, owner_address, endpoint, price)
-      VALUES (@id, @desiredStateId, @requestId, @title, @tags, @outcome, 1, @ownerAddress, @endpoint, @price)
+      INSERT OR REPLACE INTO artifacts (id, task_id, request_id, title, tags, outcome, remote, owner_address, endpoint, price)
+      VALUES (@id, @taskId, @requestId, @title, @tags, @outcome, 1, @ownerAddress, @endpoint, @price)
     `).run({
       ...artifact,
       tags: JSON.stringify(artifact.tags),

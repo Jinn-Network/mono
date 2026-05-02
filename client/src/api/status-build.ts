@@ -34,7 +34,7 @@ export interface GatheredStatusRaw {
     requestId: string | null;
     serviceIndex: number | null;
     txHash: string | null;
-    specKind: string | null;
+    solverType: string | null;
     outcome: string | null;
   }>;
   lastRewardClaimTickAt: string | null;

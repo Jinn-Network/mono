@@ -27,7 +27,7 @@ describe('search_artifacts (corpus-backed)', () => {
         },
       ]),
     } as never;
-    const out = await handleSearchArtifacts(corpus, store, { kind: 'output.prediction.v0', limit: 10 });
+    const out = await handleSearchArtifacts(corpus, store, { artifactType: 'output.prediction.v0', limit: 10 });
     expect(out.local).toHaveLength(1);
     expect(out.local[0]?.source).toBe('served');
     expect(out.local[0]?.sha256).toBe('a'.repeat(64));
@@ -47,14 +47,14 @@ describe('search_artifacts (corpus-backed)', () => {
       fetchedAt: '2026-04-30T00:00:00.000Z',
     });
     const corpus = { query: vi.fn(async () => []) } as never;
-    const out = await handleSearchArtifacts(corpus, store, { kind: 'output.prediction.v0', limit: 10 });
+    const out = await handleSearchArtifacts(corpus, store, { artifactType: 'output.prediction.v0', limit: 10 });
     expect(out.local).toHaveLength(1);
     expect(out.local[0]?.source).toBe('network');
     expect(out.network).toHaveLength(0);
     store.close();
   });
 
-  it('filters local results by artifact type when kind specified', async () => {
+  it('filters local results by artifact type when artifactType is specified', async () => {
     const store = new Store(':memory:');
     store.saveServedArtifact({
       sha256: 'a'.repeat(64),
@@ -71,7 +71,7 @@ describe('search_artifacts (corpus-backed)', () => {
       createdAt: '2026-04-30T00:00:00.000Z',
     });
     const corpus = { query: vi.fn(async () => []) } as never;
-    const out = await handleSearchArtifacts(corpus, store, { kind: 'output.prediction.v0', limit: 10 });
+    const out = await handleSearchArtifacts(corpus, store, { artifactType: 'output.prediction.v0', limit: 10 });
     expect(out.local).toHaveLength(1);
     expect(out.local[0]?.artifactType).toBe('output.prediction.v0');
     store.close();
@@ -91,7 +91,7 @@ describe('search_artifacts (corpus=null fallback)', () => {
         createdAt: '2026-04-30T00:00:00.000Z',
       });
       const out = await handleSearchArtifactsOrLocalFallback(null, store, {
-        kind: 'output.prediction.v0',
+        artifactType: 'output.prediction.v0',
         limit: 10,
       });
       expect(out.local).toHaveLength(1);
@@ -124,7 +124,7 @@ describe('search_artifacts (corpus=null fallback)', () => {
         ]),
       } as never;
       const out = await handleSearchArtifactsOrLocalFallback(corpus, store, {
-        kind: 'output.prediction.v0',
+        artifactType: 'output.prediction.v0',
         limit: 10,
       });
       expect(out.network).toHaveLength(1);

@@ -4,7 +4,7 @@
  * Single source of truth for the three deployed registries Jinn touches:
  *
  *   - IdentityRegistry  — minted operator agent NFTs + per-execution `setMetadata`.
- *   - ReputationRegistry — evaluator → restorer feedback (DR §4.3).
+ *   - ReputationRegistry — evaluator → harness feedback (DR §4.3).
  *   - ValidationRegistry — Phase 1b challenge mechanism (DR §4.4).
  *
  * Cross-checked against `subgraph/networks.json` and the canonical

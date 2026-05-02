@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { ReputationRegistryClient } from '../../src/erc8004/reputation.js';
 
 const RESTORER_AGENT_ID = 1234n;
-const MANIFEST_CID = 'bafyrestorer123';
+const MANIFEST_CID = 'bafyharness123';
 const EVIDENCE_HASH =
   '0xfeedfacedeadbeef00000000000000000000000000000000000000000000beef' as `0x${string}`;
 
@@ -52,17 +52,17 @@ describe('submitEvaluatorFeedback', () => {
     const outcome = await submitEvaluatorFeedback({
       registry,
       ref: {
-        restorerAgentId: RESTORER_AGENT_ID,
-        restorerManifestCid: MANIFEST_CID,
-        restorerEvidenceHash: EVIDENCE_HASH,
+        harnessAgentId: RESTORER_AGENT_ID,
+        harnessManifestCid: MANIFEST_CID,
+        harnessEvidenceHash: EVIDENCE_HASH,
       },
-      verdict: { verdict: 'PASS', kind: 'portfolio.v0' },
+      verdict: { verdict: 'PASS', solverType: 'portfolio.v0' },
     });
 
     expect(outcome).toEqual({ kind: 'submitted', txHash: '0xtx-hash' });
     expect(registry.giveFeedback).toHaveBeenCalledOnce();
     expect(registry.giveFeedback).toHaveBeenCalledWith({
-      restorerAgentId: RESTORER_AGENT_ID,
+      harnessAgentId: RESTORER_AGENT_ID,
       score: 100,
       scoreDecimals: 2,
       manifestRef: `manifest:${MANIFEST_CID}`,
@@ -77,11 +77,11 @@ describe('submitEvaluatorFeedback', () => {
     const outcome = await submitEvaluatorFeedback({
       registry,
       ref: {
-        restorerAgentId: RESTORER_AGENT_ID,
-        restorerManifestCid: MANIFEST_CID,
-        restorerEvidenceHash: EVIDENCE_HASH,
+        harnessAgentId: RESTORER_AGENT_ID,
+        harnessManifestCid: MANIFEST_CID,
+        harnessEvidenceHash: EVIDENCE_HASH,
       },
-      verdict: { verdict: 'FAIL', kind: 'portfolio.v0' },
+      verdict: { verdict: 'FAIL', solverType: 'portfolio.v0' },
     });
     expect(outcome.kind).toBe('submitted');
     expect(registry.giveFeedback).toHaveBeenCalledWith(
@@ -95,9 +95,9 @@ describe('submitEvaluatorFeedback', () => {
     const outcome = await submitEvaluatorFeedback({
       registry,
       ref: {
-        restorerAgentId: RESTORER_AGENT_ID,
-        restorerManifestCid: MANIFEST_CID,
-        restorerEvidenceHash: EVIDENCE_HASH,
+        harnessAgentId: RESTORER_AGENT_ID,
+        harnessManifestCid: MANIFEST_CID,
+        harnessEvidenceHash: EVIDENCE_HASH,
       },
       verdict: { verdict: 'REJECTED' },
     });
@@ -111,9 +111,9 @@ describe('submitEvaluatorFeedback', () => {
     const outcome = await submitEvaluatorFeedback({
       registry,
       ref: {
-        restorerAgentId: RESTORER_AGENT_ID,
-        restorerManifestCid: MANIFEST_CID,
-        restorerEvidenceHash: EVIDENCE_HASH,
+        harnessAgentId: RESTORER_AGENT_ID,
+        harnessManifestCid: MANIFEST_CID,
+        harnessEvidenceHash: EVIDENCE_HASH,
       },
       verdict: { verdict: 'INDETERMINATE' },
     });
@@ -129,9 +129,9 @@ describe('submitEvaluatorFeedback', () => {
     const outcome = await submitEvaluatorFeedback({
       registry,
       ref: {
-        restorerAgentId: RESTORER_AGENT_ID,
-        restorerManifestCid: MANIFEST_CID,
-        restorerEvidenceHash: EVIDENCE_HASH,
+        harnessAgentId: RESTORER_AGENT_ID,
+        harnessManifestCid: MANIFEST_CID,
+        harnessEvidenceHash: EVIDENCE_HASH,
       },
       verdict: { verdict: 'PASS' },
       log: () => {},
@@ -147,9 +147,9 @@ describe('submitEvaluatorFeedback', () => {
     const outcome = await submitEvaluatorFeedback({
       registry,
       ref: {
-        restorerAgentId: RESTORER_AGENT_ID,
-        restorerManifestCid: MANIFEST_CID,
-        restorerEvidenceHash: EVIDENCE_HASH,
+        harnessAgentId: RESTORER_AGENT_ID,
+        harnessManifestCid: MANIFEST_CID,
+        harnessEvidenceHash: EVIDENCE_HASH,
       },
       verdict: { verdict: 'PASS' },
       log: () => {},
@@ -165,9 +165,9 @@ describe('submitEvaluatorFeedback', () => {
     const outcome = await submitEvaluatorFeedback({
       registry,
       ref: {
-        restorerAgentId: RESTORER_AGENT_ID,
-        restorerManifestCid: MANIFEST_CID,
-        restorerEvidenceHash: EVIDENCE_HASH,
+        harnessAgentId: RESTORER_AGENT_ID,
+        harnessManifestCid: MANIFEST_CID,
+        harnessEvidenceHash: EVIDENCE_HASH,
       },
       verdict: { verdict: 'PASS' },
       log: () => {},
@@ -184,11 +184,11 @@ describe('submitEvaluatorFeedback', () => {
     await submitEvaluatorFeedback({
       registry,
       ref: {
-        restorerAgentId: RESTORER_AGENT_ID,
-        restorerManifestCid: MANIFEST_CID,
-        restorerEvidenceHash: EVIDENCE_HASH,
+        harnessAgentId: RESTORER_AGENT_ID,
+        harnessManifestCid: MANIFEST_CID,
+        harnessEvidenceHash: EVIDENCE_HASH,
       },
-      verdict: { verdict: 'PASS', kind: 'portfolio.v0', tag2: 'eval-impl@1.0.0' },
+      verdict: { verdict: 'PASS', solverType: 'portfolio.v0', tag2: 'eval-impl@1.0.0' },
     });
     expect(registry.giveFeedback).toHaveBeenCalledWith(
       expect.objectContaining({ tag1: 'portfolio.v0', tag2: 'eval-impl@1.0.0' }),

@@ -3,7 +3,7 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { keccak256, toBytes } from 'viem';
 import { TrajectoryCollector } from '../../src/trajectory/collector.js';
 import { emitTrajectory } from '../../src/trajectory/emit.js';
-import { canonicalJson } from '../../src/restorer/engine/canonical-json.js';
+import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import { JinnTrajectoryV1Schema } from '../../src/trajectory/schema.js';
 
 vi.mock('../../src/adapters/mech/ipfs.js', () => ({
@@ -16,7 +16,7 @@ vi.mock('../../src/adapters/mech/ipfs.js', () => ({
 
 describe('emitTrajectory', () => {
   it('returns a CID and sha256 of the signed blob, and the signed blob schema-validates', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-1' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-1' });
     c.addSpan({
       name: 'phase.design',
       kind: 'INTERNAL',
@@ -47,7 +47,7 @@ describe('emitTrajectory', () => {
   });
 
   it('signs keccak256(JCS(trajectory without signature))', async () => {
-    const c = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-2' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-2' });
     c.addSpan({
       name: 'x',
       kind: 'INTERNAL',

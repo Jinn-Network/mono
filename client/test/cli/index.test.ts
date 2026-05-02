@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli/index.js';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 function captureIo() {
   const writes: string[] = [];
@@ -12,6 +13,24 @@ function captureIo() {
     writes,
     exits,
   };
+}
+
+async function withTempFleetEnv<T>(fn: () => Promise<T>): Promise<T> {
+  const prevDbPath = process.env.JINN_DB_PATH;
+  const prevEarningDir = process.env.JINN_EARNING_DIR;
+  const root = mkdtempSync(`${tmpdir()}/jinn-cli-fleet-`);
+  process.env.JINN_DB_PATH = join(root, 'jinn.db');
+  process.env.JINN_EARNING_DIR = join(root, 'earning');
+
+  try {
+    return await fn();
+  } finally {
+    if (prevDbPath === undefined) delete process.env.JINN_DB_PATH;
+    else process.env.JINN_DB_PATH = prevDbPath;
+    if (prevEarningDir === undefined) delete process.env.JINN_EARNING_DIR;
+    else process.env.JINN_EARNING_DIR = prevEarningDir;
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 describe('runCli', () => {
@@ -110,14 +129,16 @@ describe('runCli', () => {
   });
 
   it('keeps fleet introspection for fleet --human', async () => {
-    const io = captureIo();
-    await runCli(['fleet', '--human'], {
-      writer: io.writer,
-      exit: io.exit,
-      stdoutIsTty: true,
+    await withTempFleetEnv(async () => {
+      const io = captureIo();
+      await runCli(['fleet', '--human'], {
+        writer: io.writer,
+        exit: io.exit,
+        stdoutIsTty: true,
+      });
+      expect(io.exits).toEqual([]);
+      expect(io.writes.join('')).not.toContain('Unknown fleet subverb');
     });
-    expect(io.exits).toEqual([]);
-    expect(io.writes.join('')).not.toContain('Unknown fleet subverb');
   });
 
   it('keeps fleet introspection for fleet --human on a fresh home directory', async () => {
@@ -128,14 +149,16 @@ describe('runCli', () => {
     process.env.XDG_CONFIG_HOME = home;
 
     try {
-      const io = captureIo();
-      await runCli(['fleet', '--human'], {
-        writer: io.writer,
-        exit: io.exit,
-        stdoutIsTty: true,
+      await withTempFleetEnv(async () => {
+        const io = captureIo();
+        await runCli(['fleet', '--human'], {
+          writer: io.writer,
+          exit: io.exit,
+          stdoutIsTty: true,
+        });
+        expect(io.exits).toEqual([]);
+        expect(io.writes.join('')).not.toContain('"code":"fatal"');
       });
-      expect(io.exits).toEqual([]);
-      expect(io.writes.join('')).not.toContain('"code":"fatal"');
     } finally {
       if (prevHome === undefined) delete process.env.HOME;
       else process.env.HOME = prevHome;

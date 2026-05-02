@@ -243,9 +243,9 @@ function queryDockerArtifactRows(composeEnvPath, runStartAt, evidenceBase) {
     const db = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {
       const rows = db.prepare(
-        \`SELECT desired_state_id, request_id, title, tags, outcome, created_at
+        \`SELECT task_id, request_id, title, tags, outcome, created_at
             FROM artifacts
-           WHERE desired_state_id LIKE 'pred-v0-auto-%'
+           WHERE task_id LIKE 'pred-v0-auto-%'
              AND created_at >= ?
            ORDER BY created_at ASC\`,
       ).all(since);
@@ -500,7 +500,7 @@ async function main() {
       historyCounts: countHistoryKinds(baselineHistory),
       runStartAt,
       cycleSubstrate: 'prediction.v0',
-      artifactProgress: baselineArtifacts.byDesiredStateId,
+      artifactProgress: baselineArtifacts.byTaskId,
       pendingRewardsWei: sumPendingRewards(baselineRewards).toString(),
       status: baselineStatus,
     });
@@ -549,7 +549,7 @@ async function main() {
         at: new Date().toISOString(),
         runStartAt,
         completedCycles: artifactProgress.completedCycles,
-        artifactProgress: artifactProgress.byDesiredStateId,
+        artifactProgress: artifactProgress.byTaskId,
         blocking: status.exit?.blocking ?? false,
         daemonShutdownState: status.daemon?.shutdownState ?? null,
       };
@@ -617,7 +617,7 @@ async function main() {
       runStartAt,
       cycleSubstrate: 'prediction.v0',
       observedCompletedCycles: observed.artifactProgress.completedCycles,
-      observedArtifactProgress: observed.artifactProgress.byDesiredStateId,
+      observedArtifactProgress: observed.artifactProgress.byTaskId,
       pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
       rewardClaimMode,
       claim,

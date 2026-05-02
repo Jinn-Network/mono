@@ -27,12 +27,12 @@
  *      call `setAgentWallet` (`jinn-mono-aev`), or write reputation/validation
  *      registries (`jinn-mono-2ff` / `jinn-mono-9jg`).
  *
- *   2. `resolveAgentIdForManifest` — evaluator-side lookup of the restorer's
+ *   2. `resolveAgentIdForManifest` — evaluator-side lookup of the harness's
  *      `agentId` from a manifest's `evidenceHash`. Per DR §4.3, the evaluator
- *      must call `ReputationRegistry.giveFeedback(restorerAgentId, ...)` keyed
- *      on the restorer's ERC-8004 agent NFT id — but the on-chain `claimDelivery`
+ *      must call `ReputationRegistry.giveFeedback(harnessAgentId, ...)` keyed
+ *      on the harness's ERC-8004 agent NFT id — but the on-chain `claimDelivery`
  *      payload only carries the `requestId` and `evidenceHash`, not the
- *      restorer's agentId.
+ *      harness's agentId.
  *
  *      Resolution paths:
  *
@@ -41,7 +41,7 @@
  *            operator. This is the recommended path: O(1) and aligned with the
  *            rest of the discovery surface.
  *        (c) On-chain `IdentityRegistry.Registered` event scan filtered by the
- *            restorer's Safe address — cheaper than a global scan, but still O(n)
+ *            harness's Safe address — cheaper than a global scan, but still O(n)
  *            in registered-events. Documented as a fallback only.
  *
  *      This module implements (b). The fallback is intentionally **not** wired in
@@ -304,7 +304,7 @@ export class IdentityPublisher {
 /**
  * Inputs for `resolveAgentIdForManifest`.
  *
- * `manifestHash` is the keccak256 of the restorer's signed manifest — i.e.
+ * `manifestHash` is the keccak256 of the harness's signed manifest — i.e.
  * the `evidenceHash` JinnRouter records on `claimDelivery`. The subgraph
  * indexes this as `Execution.manifestHash` (see `subgraph/schema.graphql`
  * § Execution).
@@ -370,7 +370,7 @@ export interface ResolvedAgent {
  *   - `subgraphUrl` is undefined (no on-chain fallback wired yet — see
  *     module-level comment).
  *   - The subgraph has no `Execution` indexed for this `manifestHash` (the
- *     restorer hasn't published an envelope yet, or the subgraph is behind
+ *     harness hasn't published an envelope yet, or the subgraph is behind
  *     head).
  *   - The query fails or returns malformed data. This is intentional: a
  *     transient subgraph failure must NOT block the evaluator's
@@ -387,7 +387,7 @@ export async function resolveAgentIdForManifest(
 
   if (!subgraphUrl) {
     // Caller has no subgraph configured. The on-chain fallback (scan
-    // IdentityRegistry.Registered events for the restorer's Safe) is
+    // IdentityRegistry.Registered events for the harness's Safe) is
     // documented at module level but not wired yet — return null cleanly
     // so the feedback hook becomes a no-op.
     return null;

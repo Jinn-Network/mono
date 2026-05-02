@@ -3,10 +3,23 @@
   "claudeModel": "claude-haiku-4-5-20251001",
   "pollIntervalMs": 5000,
   "apiPort": 7331,
-  "desiredStates": [
+  "tasks": [
     {
       "id": "health-check",
-      "description": "The service is running and participating in the Jinn protocol loop."
+      "description": "The service is running and participating in the Jinn protocol loop.",
+      "solverType": "prediction.v0",
+      "role": "restoration",
+      "spec": {}
     }
-  ]
+  ],
+  "solverNets": {
+    "prediction": {
+      "enabled": true,
+      "solverType": "prediction.v0",
+      "canonicalPlugin": "bundled:jinn-prediction-plugin",
+      "harness": "claude-code-learner",
+      "plugins": [],
+      "taskGenerator": { "enabled": true }
+    }
+  }
 }

@@ -58,6 +58,11 @@ interface McpConfig {
   mcpServers: Record<string, McpServerDef>;
 }
 
+interface SearchArtifactsResult {
+  local?: unknown[];
+  network?: unknown[];
+}
+
 const fullConfigPath = resolve(mcpConfigPath);
 const config = JSON.parse(readFileSync(fullConfigPath, 'utf-8')) as McpConfig;
 
@@ -100,19 +105,19 @@ async function callTool(name: string, toolArgs: Record<string, unknown>): Promis
     .join('\n');
 }
 
-// ── Get desired state ────────────────────────────────────────────────────────
+// ── Get Task ────────────────────────────────────────────────────────
 
-const stateJson = await callTool('get_desired_state', {});
+const stateJson = await callTool('get_task', {});
 const state = JSON.parse(stateJson) as {
   id: string;
   description: string;
   requestId: string;
-  type?: string;
+  role?: string;
   restorationRequestId?: string;
 };
 
-const isEvaluation = state.type === 'evaluation';
-process.stderr.write(`[mock-agent] Request type: ${state.type || 'restoration'}\n`);
+const isEvaluation = state.role === 'evaluation';
+process.stderr.write(`[mock-agent] Request role: ${state.role || 'restoration'}\n`);
 
 // ── Simulate failure if requested ────────────────────────────────────────────
 
@@ -122,7 +127,7 @@ if (process.env['MOCK_AGENT_FAIL'] === '1') {
   process.exit(1);
 }
 
-// ── Execute based on type ────────────────────────────────────────────────────
+// ── Execute based on role ────────────────────────────────────────────────────
 
 if (isEvaluation) {
   // ── Evaluation flow ──────────────────────────────────────────────────────
@@ -148,20 +153,21 @@ if (isEvaluation) {
 
   // Search for restoration results via artifacts (proves search-based discovery works)
   const searchJson = await callTool('search_artifacts', { tags: ['restoration-result'], limit: 5 });
-  const searchResults = JSON.parse(searchJson) as { results: Array<{ content?: string }> };
-  process.stderr.write(`[mock-agent] Found ${searchResults.results.length} restoration-result artifact(s) via search\n`);
+  const searchResults = JSON.parse(searchJson) as SearchArtifactsResult;
+  const restorationResultCount = (searchResults.local?.length ?? 0) + (searchResults.network?.length ?? 0);
+  process.stderr.write(`[mock-agent] Found ${restorationResultCount} restoration-result artifact(s) via search\n`);
 
   // Verify search results are consistent with delivery data
-  if (hasDelivery && searchResults.results.length > 0) {
+  if (hasDelivery && restorationResultCount > 0) {
     process.stderr.write('[mock-agent] Search-based discovery confirmed: delivery data and artifact search both have results\n');
-  } else if (hasDelivery && searchResults.results.length === 0) {
+  } else if (hasDelivery && restorationResultCount === 0) {
     process.stderr.write('[mock-agent] WARNING: delivery data exists but search found no restoration-result artifacts\n');
   }
 
   const verdict = {
     protocol: 'jinn-client/v1',
     type: 'evaluation-verdict',
-    desiredStateId: state.id,
+    taskId: state.id,
     restorationRequestId: state.restorationRequestId,
     requestId: state.requestId,
     success: hasDelivery,
@@ -187,11 +193,15 @@ if (isEvaluation) {
 
   // Check for prior knowledge before attempting restoration
   const priorJson = await callTool('search_artifacts', { tags: ['restoration'], limit: 5 });
-  const prior = JSON.parse(priorJson) as { results: unknown[] };
-  process.stderr.write(`[mock-agent] Found ${prior.results.length} prior artifacts\n`);
+  const prior = JSON.parse(priorJson) as SearchArtifactsResult;
+  const priorCount = (prior.local?.length ?? 0) + (prior.network?.length ?? 0);
+  process.stderr.write(`[mock-agent] Found ${priorCount} prior artifacts\n`);
 
   // Try acquiring a remote artifact (proves the tool is wired)
-  const acquireJson = await callTool('acquire_artifact', { id: 'nonexistent-remote-artifact' });
+  const acquireJson = await callTool('acquire_artifact', {
+    sha256: '0'.repeat(64),
+    access: { endpoint: 'http://127.0.0.1:9/nonexistent-remote-artifact', priceUsdc: '0' },
+  });
   const acquireResult = JSON.parse(acquireJson) as { error?: string };
   process.stderr.write(`[mock-agent] acquire_artifact: ${acquireResult.error ?? 'unexpected success'}\n`);
 
@@ -202,7 +212,7 @@ if (isEvaluation) {
   const result = {
     protocol: 'jinn-client/v1',
     type: 'restoration-result',
-    desiredStateId: state.id,
+    taskId: state.id,
     requestId: state.requestId,
     description: state.description,
     success: true,

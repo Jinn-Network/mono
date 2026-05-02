@@ -1,28 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { withTempStore } from '@test/store.js';
-import { IntentPersistence } from '../../src/restorer/engine/persistence.js';
+import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { gatherPortfolioV0Status } from '../../src/api/portfolio-v0-build.js';
 
 function seedIntent(
-  persistence: IntentPersistence,
+  persistence: TaskRunPersistence,
   requestId: string,
   windowStartTs = Date.now(),
   windowEndTs = Date.now() + 3600_000,
 ) {
   persistence.insertDiscovered({
     requestId,
-    intentCid: `bafytest${requestId}`,
+    taskCid: `bafytest${requestId}`,
     onchainCreationTx: `0xtx${requestId}`,
     onchainCreationBlock: 1,
-    specKind: 'portfolio.v0',
+    solverType: 'portfolio.v0',
     windowStartTs,
     windowEndTs,
-    restorationJob: { id: requestId, description: 'test' },
+    task: { id: requestId, description: 'test' },
   });
 }
 
 describe('gatherPortfolioV0Status', () => {
-  it('returns empty lists when no intents exist', async () => {
+  it('returns empty lists when no tasks exist', async () => {
     await withTempStore(async (store) => {
       const result = gatherPortfolioV0Status(store);
       expect(result.inFlight).toEqual([]);
@@ -31,9 +31,9 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
-  it('lists in-flight intents in DISCOVERED state', async () => {
+  it('lists in-flight tasks in DISCOVERED state', async () => {
     await withTempStore(async (store) => {
-      const persistence = new IntentPersistence(store.db);
+      const persistence = new TaskRunPersistence(store.db);
       seedIntent(persistence, 'req-1');
       seedIntent(persistence, 'req-2');
 
@@ -46,9 +46,9 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
-  it('moves intent to recentVerdicts once FAILED', async () => {
+  it('moves task to recentVerdicts once FAILED', async () => {
     await withTempStore(async (store) => {
-      const persistence = new IntentPersistence(store.db);
+      const persistence = new TaskRunPersistence(store.db);
       seedIntent(persistence, 'req-fail');
       persistence.markFailed('req-fail', 'test failure reason');
 
@@ -61,13 +61,13 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
-  it('includes specKind and implName in in-flight summaries', async () => {
+  it('includes solverType and implName in in-flight summaries', async () => {
     await withTempStore(async (store) => {
-      const persistence = new IntentPersistence(store.db);
+      const persistence = new TaskRunPersistence(store.db);
       seedIntent(persistence, 'req-spec');
 
       const result = gatherPortfolioV0Status(store);
-      expect(result.inFlight[0].specKind).toBe('portfolio.v0');
+      expect(result.inFlight[0].solverType).toBe('portfolio.v0');
       expect(result.inFlight[0].implName).toBeNull(); // not yet assigned
     });
   });
@@ -76,7 +76,7 @@ describe('gatherPortfolioV0Status', () => {
     await withTempStore(async (store) => {
       store.insertArtifact({
         id: 'snap-1',
-        desiredStateId: 'ds-1',
+        taskId: 'ds-1',
         requestId: 'req-snap',
         title: 'System Snapshot 1',
         content: '{"equity":100}',
@@ -85,7 +85,7 @@ describe('gatherPortfolioV0Status', () => {
       });
       store.insertArtifact({
         id: 'not-a-snap',
-        desiredStateId: 'ds-2',
+        taskId: 'ds-2',
         requestId: 'req-other',
         title: 'Not a snapshot',
         content: 'stuff',

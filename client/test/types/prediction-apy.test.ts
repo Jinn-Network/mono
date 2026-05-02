@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { PredictionApyV0IntentSchema } from '../../src/types/prediction-apy.js';
+import { PredictionApyV0TaskSchema } from '../../src/types/prediction-apy.js';
 
-describe('PredictionApyV0IntentSchema', () => {
+describe('PredictionApyV0TaskSchema', () => {
   it('accepts fast-profile values', () => {
-    const parsed = PredictionApyV0IntentSchema.parse({
+    const parsed = PredictionApyV0TaskSchema.parse({
       id: 'apy-1',
       description: 'Aave APY prediction',
       window: { startTs: 1_700_000_000_000, endTs: 1_700_000_600_000 },
@@ -33,7 +33,7 @@ describe('PredictionApyV0IntentSchema', () => {
 
   it('rejects TWA sample spacing under 1 second', () => {
     expect(() =>
-      PredictionApyV0IntentSchema.parse({
+      PredictionApyV0TaskSchema.parse({
         id: 'x',
         description: 'd',
         window: { startTs: 0, endTs: 3_600_000 },

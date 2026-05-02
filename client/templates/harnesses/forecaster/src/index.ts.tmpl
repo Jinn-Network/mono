@@ -1,0 +1,33 @@
+import type {
+  Harness,
+  ExternalHarnessEnv,
+  HarnessContext,
+  Solution,
+} from '@jinn-network/harness-sdk';
+
+export default function createHarness(env: ExternalHarnessEnv): Harness {
+  return {
+    name: env.implName,
+    version: env.implVersion,
+    supports({ solverType, role }) {
+      return solverType === '{{solverTypeString}}' && role !== 'evaluation';
+    },
+    async isReady() {
+      return env.stub
+        ? { ready: false, reason: 'stub mode' }
+        : { ready: true };
+    },
+    async run(ctx: HarnessContext): Promise<Solution> {
+      env.log({
+        level: 'info',
+        msg: 'forecaster.run',
+        data: { taskId: ctx.task.id },
+      });
+      // TODO: call your existing forecasting pipeline here.
+      return {
+        venueRef: { name: '{{packageName}}' },
+        gating: { probability: 0.5 },
+      };
+    },
+  };
+}

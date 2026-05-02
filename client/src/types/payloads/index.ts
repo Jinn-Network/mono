@@ -14,16 +14,16 @@ import {
 import type { Role } from '../envelope.js';
 
 /**
- * Passthrough payload schema for legacy / untyped intents.
+ * Passthrough payload schema for legacy / untyped tasks.
  * Accepts any object — no structural validation.
  */
 const LegacyPassthroughSchema = z.record(z.unknown());
 
 /**
- * Registry mapping (kind, role) → payload schema.
- * Update when adding a new kind.
+ * Registry mapping (solverType, role) → payload schema.
+ * Update when adding a new solverType.
  */
-export const KIND_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
+export const SOLVER_TYPE_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
   'portfolio.v0': {
     restoration: PortfolioV0RestorationPayloadSchema,
     verdict: PortfolioV0VerdictPayloadSchema,
@@ -36,7 +36,7 @@ export const KIND_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
     restoration: PredictionApyV0RestorationPayloadSchema,
     verdict: PredictionApyV0VerdictPayloadSchema,
   },
-  // Passthrough kind for legacy / untyped intents (no spec.kind).
+  // Passthrough SolverType for legacy / untyped tasks.
   // Produced by the legacy-claude impl; no structural validation on payload.
   'legacy.v0': {
     restoration: LegacyPassthroughSchema,
@@ -44,11 +44,11 @@ export const KIND_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
   },
 };
 
-export function validatePayload(kind: string, role: Role, payload: unknown): void {
-  const bucket = KIND_PAYLOADS[kind];
-  if (!bucket) throw new Error(`Unknown kind: ${kind}`);
+export function validatePayload(solverType: string, role: Role, payload: unknown): void {
+  const bucket = SOLVER_TYPE_PAYLOADS[solverType];
+  if (!bucket) throw new Error(`Unknown solverType: ${solverType}`);
   const schema = bucket[role];
-  if (!schema) throw new Error(`No payload schema for (${kind}, ${role})`);
+  if (!schema) throw new Error(`No payload schema for (${solverType}, ${role})`);
   schema.parse(payload);
 }
 

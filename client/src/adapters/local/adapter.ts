@@ -1,21 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { ExecutionAdapter } from '../adapter.js';
 import type {
-  RestorationJob,
+  Task,
   RequestId,
-  RestorationRequest,
-  RestorationResult,
+  TaskRequest,
+  TaskResult,
   DeliveredResult,
 } from '../../types/index.js';
 
 export class LocalAdapter implements ExecutionAdapter {
   readonly name = 'local';
 
-  private requests = new Map<RequestId, RestorationRequest>();
-  private pendingRequests: RestorationRequest[] = [];
-  private deferredEvalRequests: RestorationRequest[] = [];
+  private requests = new Map<RequestId, TaskRequest>();
+  private pendingRequests: TaskRequest[] = [];
+  private deferredEvalRequests: TaskRequest[] = [];
   private pendingDeliveries: DeliveredResult[] = [];
-  private requestWaiters: Array<(req: RestorationRequest) => void> = [];
+  private requestWaiters: Array<(req: TaskRequest) => void> = [];
   private deliveryWaiters: Array<(del: DeliveredResult) => void> = [];
   private deliveredRequestIds = new Set<RequestId>();
   private stopped = false;
@@ -24,17 +24,17 @@ export class LocalAdapter implements ExecutionAdapter {
     // No-op for local
   }
 
-  async postRestorationJob(state: RestorationJob): Promise<RequestId> {
+  async postTask(state: Task): Promise<RequestId> {
     const requestId = randomUUID();
 
     // Create restoration request
-    const restorationState: RestorationJob = {
+    const restorationState: Task = {
       ...state,
-      type: state.type ?? 'restoration',
+      role: state.role ?? 'restoration',
     };
-    const request: RestorationRequest = {
+    const request: TaskRequest = {
       requestId,
-      restorationJob: restorationState,
+      task: restorationState,
     };
     this.requests.set(requestId, request);
 
@@ -46,14 +46,14 @@ export class LocalAdapter implements ExecutionAdapter {
 
     // Create linked evaluation request
     const evalRequestId = randomUUID();
-    const evaluationState: RestorationJob = {
+    const evaluationState: Task = {
       ...state,
-      type: 'evaluation',
+      role: 'evaluation',
       restorationRequestId: requestId,
     };
-    const evalRequest: RestorationRequest = {
+    const evalRequest: TaskRequest = {
       requestId: evalRequestId,
-      restorationJob: evaluationState,
+      task: evaluationState,
     };
     this.requests.set(evalRequestId, evalRequest);
     // Evaluation requests are deferred — only yielded after restoration is delivered
@@ -62,12 +62,12 @@ export class LocalAdapter implements ExecutionAdapter {
     return requestId;
   }
 
-  async *watchForRequests(): AsyncIterable<RestorationRequest> {
+  async *watchForRequests(): AsyncIterable<TaskRequest> {
     while (!this.stopped) {
       // Check if any deferred evaluation requests are now ready
-      const stillDeferred: RestorationRequest[] = [];
+      const stillDeferred: TaskRequest[] = [];
       for (const evalReq of this.deferredEvalRequests) {
-        const restorationId = evalReq.restorationJob.restorationRequestId;
+        const restorationId = evalReq.task.restorationRequestId;
         if (restorationId && this.deliveredRequestIds.has(restorationId)) {
           // Restoration delivered — yield evaluation request
           if (this.requestWaiters.length > 0) {
@@ -84,7 +84,7 @@ export class LocalAdapter implements ExecutionAdapter {
       if (this.pendingRequests.length > 0) {
         yield this.pendingRequests.shift()!;
       } else {
-        const req = await new Promise<RestorationRequest>((resolve) => {
+        const req = await new Promise<TaskRequest>((resolve) => {
           this.requestWaiters.push(resolve);
         });
         if (!this.stopped) yield req;
@@ -96,7 +96,7 @@ export class LocalAdapter implements ExecutionAdapter {
     // Always succeeds in local mode
   }
 
-  async submitResult(requestId: RequestId, result: RestorationResult): Promise<void> {
+  async submitResult(requestId: RequestId, result: TaskResult): Promise<void> {
     const request = this.requests.get(requestId);
     if (!request) throw new Error(`Unknown request: ${requestId}`);
 
@@ -104,7 +104,7 @@ export class LocalAdapter implements ExecutionAdapter {
 
     const delivery: DeliveredResult = {
       requestId,
-      restorationJob: request.restorationJob,
+      task: request.task,
       result,
       deliveryMechAddress: 'local',
     };
@@ -116,9 +116,9 @@ export class LocalAdapter implements ExecutionAdapter {
     }
 
     // Check if any deferred evaluation requests are now ready
-    const stillDeferred: RestorationRequest[] = [];
+    const stillDeferred: TaskRequest[] = [];
     for (const evalReq of this.deferredEvalRequests) {
-      const restorationId = evalReq.restorationJob.restorationRequestId;
+      const restorationId = evalReq.task.restorationRequestId;
       if (restorationId && this.deliveredRequestIds.has(restorationId)) {
         if (this.requestWaiters.length > 0) {
           this.requestWaiters.shift()!(evalReq);
@@ -149,10 +149,10 @@ export class LocalAdapter implements ExecutionAdapter {
     this.stopped = true;
     // Resolve any pending waiters so loops can exit
     for (const waiter of this.requestWaiters) {
-      waiter({ requestId: '', restorationJob: { id: '', description: '' } });
+      waiter({ requestId: '', task: { id: '', description: '' } });
     }
     for (const waiter of this.deliveryWaiters) {
-      waiter({ requestId: '', restorationJob: { id: '', description: '' }, result: { data: '' }, deliveryMechAddress: '' });
+      waiter({ requestId: '', task: { id: '', description: '' }, result: { data: '' }, deliveryMechAddress: '' });
     }
     this.requestWaiters = [];
     this.deliveryWaiters = [];

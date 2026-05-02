@@ -116,7 +116,7 @@ export function createRunCommand(deps: RunDeps = PRODUCTION_DEPS): CommandModule
     helpText: `Usage: jinn run [--human] [--config <path>] [--password-fd <fd>] [--no-ui]
                 [--no-daemon] [--funding-timeout <duration>] [--json-progress]
 
-Long-running. Starts the creator, restorer, and delivery-watcher
+Long-running. Starts the creator, harness, and delivery-watcher
 loops and runs until the process receives SIGINT or SIGTERM. Before
 starting, advances the fleet state machine if needed; exits 10 with
 a funding_required envelope if funding is missing.

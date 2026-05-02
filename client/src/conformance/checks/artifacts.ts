@@ -19,7 +19,7 @@ import type { CheckResult, ConformanceContext } from '../types.js';
  * Layer: 1
  *
  * Required artifact types per scope §3.1 K9:
- *   - `output.<kind>` — always required for restoration role
+ *   - `output.<solverType>` — always required for restoration role
  *   - `system_snapshot` — always required for restoration role
  *   - `trajectory` — required when envelope.trajectory is non-null
  *
@@ -41,8 +41,8 @@ export function checkArtifactVocabulary(ctx: ConformanceContext): CheckResult {
   const types = new Set(env.artifacts.map((a: Artifact) => a.artifactType));
   const missing: string[] = [];
 
-  // output.<kind> is always required for restoration
-  const outputType = `output.${env.kind}`;
+  // output.<solverType> is always required for restoration
+  const outputType = `output.${env.solverType}`;
   if (!types.has(outputType)) missing.push(outputType);
 
   // system_snapshot required for restoration

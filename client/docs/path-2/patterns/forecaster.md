@@ -1,17 +1,17 @@
 # Pattern: forecaster
 
-**Example package:** [`examples/external-restorer-impls/polymarket-forecaster`](../../../../examples/external-restorer-impls/polymarket-forecaster)
-**In-repo anchor:** [`client/src/restorer/impls/prediction-v0-baseline/`](../../../../client/src/restorer/impls/prediction-v0-baseline)
+**Example package:** [`examples/external-harnesses/polymarket-forecaster`](../../../../examples/external-harnesses/polymarket-forecaster)
+**In-repo anchor:** [`client/src/harnesses/impls/prediction-v0-baseline/`](../../../../client/src/harnesses/impls/prediction-v0-baseline)
 
 ## Recruit shape
 
-You're a Polymarket / Kalshi / Manifold bot operator. You have a working forecasting pipeline — a function that takes a market and returns a probability — and you want it dispatched against Jinn `prediction.v0` intents. The forecaster pattern wraps your pipeline as a `RestorerImpl` whose `run()` calls into your existing code.
+You're a Polymarket / Kalshi / Manifold bot operator. You have a working forecasting pipeline — a function that takes a market and returns a probability — and you want it dispatched against Jinn `prediction.v0` Tasks. The forecaster pattern wraps your pipeline as a `Harness` whose `run()` calls into your existing code.
 
-This is by far the most common Phase A.2 recruit shape: a working monolith that wants Jinn intents pointed at it.
+This is by far the most common Phase A.2 recruit shape: a working monolith that wants Jinn Tasks pointed at it.
 
 ## What the pattern does
 
-A `forecaster` impl claims `prediction.v0` restoration intents (`type !== 'evaluation'`), reads the intent's market reference, calls your forecasting pipeline, and returns a `RestorationOutput` with the probability in `restorationPayload`.
+A `forecaster` Harness claims `prediction.v0` restoration Tasks (`role !== 'evaluation'`), reads the Task's market reference, calls your forecasting pipeline, and returns a `Solution` with the probability in `solutionPayload`.
 
 The in-repo `prediction-v0-baseline` is the working reference implementation; reading it alongside this walkthrough gives you the full picture of what an in-production forecaster looks like.
 
@@ -22,7 +22,7 @@ The in-repo `prediction-v0-baseline` is the working reference implementation; re
   "schemaVersion": "1.0.0",
   "name": "@jinn-examples/polymarket-forecaster",
   "version": "0.1.0",
-  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "supportedSolverTypes": ["prediction.v0>=1.0.0"],
   "entry": "./dist/index.js",
   "package": {
     "cid": "bafybei...",
@@ -46,33 +46,33 @@ The `capabilities.rpc` allow-list is narrow: the forecaster only reads chain sta
 
 ```ts
 import type {
-  RestorerImpl,
-  RestorationContext,
-  RestorationOutput,
-  ExternalRestorerEnv,
-} from '@jinn-network/restorer-sdk';
+  Harness,
+  HarnessContext,
+  Solution,
+  ExternalHarnessEnv,
+} from '@jinn-network/harness-sdk';
 
-export default function createRestorer(env: ExternalRestorerEnv): RestorerImpl {
+export default function createHarness(env: ExternalHarnessEnv): Harness {
   return {
     name: env.implName,
     version: env.implVersion,
-    supports({ kind, type }) {
-      return kind === 'prediction.v0' && type !== 'evaluation';
+    supports({ solverType, role }) {
+      return solverType === 'prediction.v0' && role !== 'evaluation';
     },
     async isReady() {
       return env.stub
         ? { ready: false, reason: 'stub mode' }
         : { ready: true };
     },
-    async run(ctx: RestorationContext): Promise<RestorationOutput> {
-      const market = await fetchMarketState(ctx.intent, ctx.rpc);
+    async run(ctx: HarnessContext): Promise<Solution> {
+      const market = await fetchMarketState(ctx.task, ctx.rpc);
       const probability = await computeForecast(market);
       return {
         venueRef: { name: 'polymarket' },
         gating: { probability, marketId: market.id },
-        restorationPayload: {
+        solutionPayload: {
           probability,
-          horizonTs: ctx.intent.window?.endTs,
+          horizonTs: ctx.task.window?.endTs,
         },
       };
     },
@@ -80,15 +80,15 @@ export default function createRestorer(env: ExternalRestorerEnv): RestorerImpl {
 }
 ```
 
-The `supports()` check filters out evaluation intents (those go to evaluator impls). `isReady()` returns stub-mode for CLI introspection so `jinn impls show` can display the impl without hitting the live API. `run()` fetches market state via `ctx.rpc` (the manifest-allowed RPC handle), computes the forecast, returns the output.
+The `supports()` check filters out evaluation Tasks (those go to evaluator Harnesses). `isReady()` returns stub-mode for CLI introspection so `jinn harnesses show` can display the Harness without hitting the live API. `run()` fetches market state via `ctx.rpc` (the manifest-allowed RPC handle), computes the forecast, returns the output.
 
 ## Test → publish
 
 ```bash
-cd examples/external-restorer-impls/polymarket-forecaster
+cd examples/external-harnesses/polymarket-forecaster
 yarn install
 yarn test                                      # unit tests, mocked context
-yarn vitest run test/e2e-anvil.test.ts         # spawns Anvil fork, full attempt against synthetic intent
+yarn vitest run test/e2e-anvil.test.ts         # spawns Anvil fork, full attempt against a synthetic Task
 yarn build                                     # tsc → dist/
 ```
 

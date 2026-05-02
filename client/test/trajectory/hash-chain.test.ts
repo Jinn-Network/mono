@@ -1,21 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { keccak256, toBytes } from 'viem';
 import { computePrevSpanHash, computeGenesisHash } from '../../src/trajectory/hash-chain.js';
-import { canonicalJson } from '../../src/restorer/engine/canonical-json.js';
+import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import type { Span } from '../../src/trajectory/schema.js';
 
 describe('computeGenesisHash', () => {
-  it('returns keccak256(JCS({runStart: intentCid}))', () => {
-    const intentCid = 'bafy-intent';
-    const expected = keccak256(toBytes(canonicalJson({ runStart: intentCid })));
-    expect(computeGenesisHash(intentCid)).toBe(expected);
+  it('returns keccak256(JCS({runStart: taskCid}))', () => {
+    const taskCid = 'bafy-task';
+    const expected = keccak256(toBytes(canonicalJson({ runStart: taskCid })));
+    expect(computeGenesisHash(taskCid)).toBe(expected);
   });
 
-  it('is stable for the same intent CID', () => {
+  it('is stable for the same Task CID', () => {
     expect(computeGenesisHash('bafy-x')).toBe(computeGenesisHash('bafy-x'));
   });
 
-  it('differs for different intent CIDs', () => {
+  it('differs for different Task CIDs', () => {
     expect(computeGenesisHash('bafy-x')).not.toBe(computeGenesisHash('bafy-y'));
   });
 });

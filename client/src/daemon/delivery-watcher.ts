@@ -42,9 +42,9 @@ export class DeliveryWatcherLoop {
             if (maybeEnvelope['schemaVersion'] === 'jinn.execution.v1') {
               try {
                 const envelope = SignedEnvelopeSchema.parse(maybeEnvelope);
-                validatePayload(envelope.kind, envelope.role, envelope.payload);
+                validatePayload(envelope.solverType, envelope.role, envelope.payload);
                 console.error(
-                  `[delivery-watcher] envelope ok kind=${envelope.kind} role=${envelope.role} ` +
+                  `[delivery-watcher] envelope ok solverType=${envelope.solverType} role=${envelope.role} ` +
                   `tier=${envelope.evidenceTier} requestId=${delivery.requestId.slice(0, 10)}...`,
                 );
               } catch (err) {
@@ -59,14 +59,14 @@ export class DeliveryWatcherLoop {
 
           // The adapter handles claim + evaluation creation internally.
           // We just drive the iteration and log for observability.
-          const type = delivery.restorationJob.type ?? 'unknown';
-          console.error(`[delivery-watcher] Processed ${type} delivery: ${delivery.requestId.slice(0, 10)}...`);
+          const role = delivery.task.role ?? 'unknown';
+          console.error(`[delivery-watcher] Processed ${role} delivery: ${delivery.requestId.slice(0, 10)}...`);
           if (this.store) {
             emitEvent(this.store, {
-              kind: type === 'evaluation' ? 'evaluation_submitted' : 'delivery_submitted',
+              kind: role === 'evaluation' ? 'evaluation_submitted' : 'delivery_submitted',
               requestId: delivery.requestId,
               outcome: 'ok',
-              detail: `Processed ${type} delivery`,
+              detail: `Processed ${role} delivery`,
             }, 'delivery-watcher');
           }
         }

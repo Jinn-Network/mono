@@ -1,17 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { KIND_PAYLOADS, validatePayload } from '../../../src/types/payloads/index.js';
+import { SOLVER_TYPE_PAYLOADS, validatePayload } from '../../../src/types/payloads/index.js';
 
-describe('KIND_PAYLOADS registry', () => {
-  it('has all three kinds', () => {
-    expect(KIND_PAYLOADS['portfolio.v0']).toBeDefined();
-    expect(KIND_PAYLOADS['prediction.v0']).toBeDefined();
-    expect(KIND_PAYLOADS['prediction.apy.v0']).toBeDefined();
+describe('SOLVER_TYPE_PAYLOADS registry', () => {
+  it('has all three solver types', () => {
+    expect(SOLVER_TYPE_PAYLOADS['portfolio.v0']).toBeDefined();
+    expect(SOLVER_TYPE_PAYLOADS['prediction.v0']).toBeDefined();
+    expect(SOLVER_TYPE_PAYLOADS['prediction.apy.v0']).toBeDefined();
   });
 
-  it('each kind has restoration + verdict schemas', () => {
-    for (const kind of ['portfolio.v0', 'prediction.v0', 'prediction.apy.v0']) {
-      expect(KIND_PAYLOADS[kind].restoration).toBeDefined();
-      expect(KIND_PAYLOADS[kind].verdict).toBeDefined();
+  it('each solver type has restoration + verdict schemas', () => {
+    for (const solverType of ['portfolio.v0', 'prediction.v0', 'prediction.apy.v0']) {
+      expect(SOLVER_TYPE_PAYLOADS[solverType].restoration).toBeDefined();
+      expect(SOLVER_TYPE_PAYLOADS[solverType].verdict).toBeDefined();
     }
   });
 });
@@ -29,14 +29,14 @@ describe('validatePayload', () => {
     },
   };
 
-  it('accepts a valid (kind, role) pair', () => {
+  it('accepts a valid (solverType, role) pair', () => {
     expect(() =>
       validatePayload('portfolio.v0', 'restoration', validPortfolioRestoration),
     ).not.toThrow();
   });
 
-  it('throws for unknown kind', () => {
-    expect(() => validatePayload('bogus.v0', 'restoration', {})).toThrow(/Unknown kind/);
+  it('throws for unknown solverType', () => {
+    expect(() => validatePayload('bogus.v0', 'restoration', {})).toThrow(/Unknown solverType/);
   });
 
   it('throws for unknown role', () => {

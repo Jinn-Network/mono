@@ -23,7 +23,7 @@ function hex(bytes: number): string {
 }
 
 export interface CollectorInit {
-  intentCid: string;
+  taskCid: string;
   runId: string;
   /** Override for tests. Defaults to randomBytes(16). */
   traceId?: string;
@@ -43,7 +43,7 @@ export interface SpanInput {
 
 export class TrajectoryCollector {
   readonly runId: string;
-  readonly intentCid: string;
+  readonly taskCid: string;
   private readonly traceId: string;
   private readonly spans: Span[] = [];
   private readonly redactionEntries: RedactionManifest['spans'] = [];
@@ -52,9 +52,9 @@ export class TrajectoryCollector {
 
   constructor(init: CollectorInit) {
     this.runId = init.runId;
-    this.intentCid = init.intentCid;
+    this.taskCid = init.taskCid;
     this.traceId = init.traceId ?? hex(16);
-    this.lastSpanHash = computeGenesisHash(init.intentCid);
+    this.lastSpanHash = computeGenesisHash(init.taskCid);
   }
 
   /** Append a span; returns the finalized span (with assigned ids + chain hash). */

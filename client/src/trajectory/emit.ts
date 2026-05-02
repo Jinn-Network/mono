@@ -10,8 +10,8 @@
 
 import { createHash } from 'node:crypto';
 import { keccak256, toBytes, type Hex } from 'viem';
-import { signCanonical } from '../restorer/engine/signing.js';
-import { canonicalJson } from '../restorer/engine/canonical-json.js';
+import { signCanonical } from '../harnesses/engine/signing.js';
+import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import type { TrajectoryCollector } from './collector.js';
 import type { JinnTrajectoryV1 } from './schema.js';

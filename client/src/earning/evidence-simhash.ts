@@ -17,7 +17,7 @@ import { keccak256, toHex, type Hex } from 'viem';
 /** Structured evidence checkpoint captured during restoration. */
 export interface EvidenceCheckpointV1 {
   version: 1;
-  /** keccak256 of the desired state description text. */
+  /** keccak256 of the Task description text. */
   desiredStateHash: string;
   /** Tool calls made during restoration. */
   toolCalls: {

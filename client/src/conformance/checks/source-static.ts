@@ -312,7 +312,7 @@ export function checkDynamicCode(ctx: ConformanceContext): CheckResult {
 //
 const ARTIFACT_HELPER_ALLOWLIST = [
   'src/trajectory/artifacts.ts',
-  'src/restorer/engine/packaging.ts',
+  'src/harnesses/engine/packaging.ts',
 ];
 
 /**

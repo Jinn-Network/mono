@@ -2,10 +2,10 @@
  * MCP server for jinn-client — exposes tools to agent subprocesses.
  *
  * Spawned by ClaudeRunner as a subprocess via StdioServerTransport.
- * Receives context via env vars:
- *   DESIRED_STATE_ID          — ID of the current desired state
- *   DESIRED_STATE_DESCRIPTION — Human-readable description
- *   DESIRED_STATE_CONTEXT     — JSON context (optional)
+ * Receives Task context via env vars:
+ *   DESIRED_STATE_ID          — Task ID
+ *   DESIRED_STATE_DESCRIPTION — Human-readable task description
+ *   DESIRED_STATE_CONTEXT     — JSON task context (optional)
  *   REQUEST_ID                — On-chain request ID
  *   RESTORATION_DELIVERY_DATA — JSON delivery data (evaluation requests only)
  *
@@ -26,14 +26,14 @@ const server = new McpServer({
   version: '0.1.0',
 });
 
-// Read desired state from env vars (passed by ClaudeRunner)
-const restorationJob = {
+// Read task from env vars (passed by ClaudeRunner)
+const task = {
   id: process.env['DESIRED_STATE_ID'] ?? '',
   description: process.env['DESIRED_STATE_DESCRIPTION'] ?? '',
   context: process.env['DESIRED_STATE_CONTEXT']
     ? JSON.parse(process.env['DESIRED_STATE_CONTEXT']) as Record<string, unknown>
     : undefined,
-  type: process.env['DESIRED_STATE_TYPE'] ?? '',
+  role: process.env['DESIRED_STATE_ROLE'] ?? '',
   restorationRequestId: process.env['RESTORATION_REQUEST_ID'] ?? '',
 };
 
@@ -77,23 +77,23 @@ const corpus = buildCorpusQuery();
 // ── Tools ────────────────────────────────────────────────────────────────────
 
 server.tool(
-  'get_desired_state',
-  // NOTE: Returns the RUNTIME shape (RestorationJob fields + attempt/request metadata),
-  // NOT the signed wire format (SignedIntentV1). The signed intent, if present, was
+  'get_task',
+  // NOTE: Returns the RUNTIME shape (Task fields + attempt/request metadata),
+  // NOT the signed wire format (SignedTaskV1). The signed Task, if present, was
   // uploaded to IPFS at job creation time and is referenced by the on-chain CID.
   // Claude receives this runtime shape to understand what objective to pursue —
-  // it does not need to verify or re-sign the intent envelope.
-  'Get the current desired state that needs to be restored. Returns runtime job context: id, description, type (restoration|evaluation), restorationRequestId, requestId, and optional context bag. This is the RUNTIME shape — not the signed intent.v1 wire format.',
+  // it does not need to verify or re-sign the task envelope.
+  'Get the current Task. Returns runtime Task context: id, description, role (restoration|evaluation), restorationRequestId, requestId, and optional context bag. This is the RUNTIME shape — not the signed task.v1 wire format.',
   {},
   async () => ({
     content: [{
       type: 'text' as const,
       text: JSON.stringify({
-        id: restorationJob.id,
-        description: restorationJob.description,
-        context: restorationJob.context,
-        type: restorationJob.type || undefined,
-        restorationRequestId: restorationJob.restorationRequestId || undefined,
+        id: task.id,
+        description: task.description,
+        context: task.context,
+        role: task.role || undefined,
+        restorationRequestId: task.restorationRequestId || undefined,
         requestId,
       }),
     }],
@@ -121,13 +121,13 @@ server.tool(
     data: z.string().optional().describe('Result data or artifact content'),
   },
   async ({ success, description, data }) => {
-    const isEvaluation = restorationJob.type === 'evaluation';
+    const isEvaluation = task.role === 'evaluation';
     const resultTag = isEvaluation ? 'evaluation-verdict' : 'restoration-result';
     const id = randomUUID();
 
     const artifact = {
       id,
-      desiredStateId: restorationJob.id,
+      taskId: task.id,
       requestId,
       title: `${resultTag}: ${description.slice(0, 80)}`,
       content: data ?? description,
@@ -186,7 +186,7 @@ server.tool(
       content: [{
         type: 'text' as const,
         text: JSON.stringify({
-          restorationRequestId: restorationJob.restorationRequestId,
+          restorationRequestId: task.restorationRequestId,
           deliveryData: JSON.parse(raw),
         }),
       }],
@@ -208,7 +208,7 @@ server.tool(
     if (store) {
       store.insertArtifact({
         id,
-        desiredStateId: restorationJob.id,
+        taskId: task.id,
         requestId,
         title,
         content,
@@ -227,8 +227,9 @@ server.tool(
   'search_artifacts',
   'Search the corpus for relevant past trajectories and artifacts. Returns local fast-path hits (own served + cached network) plus subgraph-indexed network manifests with their full envelopes.',
   {
-    kind: z.string().optional().describe('Intent kind (e.g. "output.prediction.v0")'),
-    intentCid: z.string().optional().describe('Filter to a specific intent CID'),
+    solverType: z.string().optional().describe('SolverType filter, e.g. "prediction.v0"'),
+    artifactType: z.string().optional().describe('Artifact type filter, e.g. "output.prediction.v0"'),
+    taskCid: z.string().optional().describe('Filter to a specific task CID'),
     evidenceTier: z.enum(['self-signed', 'committed', 'attested']).optional(),
     generatedAfter: z.number().int().optional().describe('Unix seconds — only manifests published after this time'),
     generatedBefore: z.number().int().optional().describe('Unix seconds — only manifests published before this time'),

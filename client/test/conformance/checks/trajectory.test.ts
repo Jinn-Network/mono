@@ -10,17 +10,17 @@ import type { ConformanceContext } from '../../../src/conformance/types.js';
 
 // Helpers to build a minimal context
 function trajCtx(
-  intentCid: string,
+  taskCid: string,
   trajectoryOverride?: unknown,
   envelopeOverride?: unknown,
 ): Pick<ConformanceContext, 'trajectory' | 'envelope' | 'envelopeCid' | 'options'> {
   const traj =
     trajectoryOverride === undefined
-      ? buildGoodTrajectoryFixture(intentCid)
+      ? buildGoodTrajectoryFixture(taskCid)
       : trajectoryOverride;
   const env = envelopeOverride ?? {
     trajectory: { cid: 'bafy-traj', sha256: 'a'.repeat(64) },
-    intent: { cid: intentCid },
+    task: { cid: taskCid },
   };
   return {
     trajectory: traj as unknown,
@@ -36,7 +36,7 @@ function trajCtx(
 
 describe('checkTrajectorySchema', () => {
   it('passes on a schema-valid trajectory', () => {
-    const ctx = trajCtx('bafy-intent');
+    const ctx = trajCtx('bafy-task');
     const result = checkTrajectorySchema(ctx as ConformanceContext);
     expect(result.passed).toBe(true);
     expect(result.id).toBe('trajectory.schema');
@@ -45,16 +45,16 @@ describe('checkTrajectorySchema', () => {
 
   it('fails when spans is missing', () => {
     const bad = { schemaVersion: 'jinn.trajectory.v1' };
-    const ctx = trajCtx('bafy-intent', bad);
+    const ctx = trajCtx('bafy-task', bad);
     const result = checkTrajectorySchema(ctx as ConformanceContext);
     expect(result.passed).toBe(false);
     expect(result.detail).toBeTruthy();
   });
 
   it('fails when schemaVersion is wrong', () => {
-    const traj = buildGoodTrajectoryFixture('bafy-intent');
+    const traj = buildGoodTrajectoryFixture('bafy-task');
     const bad = { ...traj, schemaVersion: 'jinn.trajectory.v2' };
-    const ctx = trajCtx('bafy-intent', bad);
+    const ctx = trajCtx('bafy-task', bad);
     const result = checkTrajectorySchema(ctx as ConformanceContext);
     expect(result.passed).toBe(false);
   });
@@ -78,7 +78,7 @@ describe('checkTrajectorySchema', () => {
 
 describe('checkHashChainIntegrity', () => {
   it('passes when every span.jinn.prevSpanHash matches keccak256(JCS(prev span))', () => {
-    const ctx = trajCtx('bafy-intent');
+    const ctx = trajCtx('bafy-task');
     const result = checkHashChainIntegrity(ctx as ConformanceContext);
     expect(result.passed).toBe(true);
     expect(result.id).toBe('trajectory.hash-chain');
@@ -87,7 +87,7 @@ describe('checkHashChainIntegrity', () => {
   it('skips when trajectory is absent', () => {
     const ctx: ConformanceContext = {
       trajectory: null as unknown,
-      envelope: { trajectory: null, intent: { cid: 'bafy-intent' } } as any,
+      envelope: { trajectory: null, task: { cid: 'bafy-task' } } as any,
       envelopeCid: 'bafy-test',
       options: {},
     };
@@ -97,27 +97,27 @@ describe('checkHashChainIntegrity', () => {
   });
 
   it('fails when a later span has wrong prevSpanHash', () => {
-    const traj = buildGoodTrajectoryFixture('bafy-intent');
+    const traj = buildGoodTrajectoryFixture('bafy-task');
     // Corrupt span[2]'s prevSpanHash
     traj.spans[2].attributes['jinn.prevSpanHash'] = '0x' + 'de'.repeat(32);
-    const ctx = trajCtx('bafy-intent', traj);
+    const ctx = trajCtx('bafy-task', traj);
     const result = checkHashChainIntegrity(ctx as ConformanceContext);
     expect(result.passed).toBe(false);
     expect(result.detail).toMatch(/span\[2\]/);
   });
 
-  it("fails when first span's prevSpanHash doesn't match genesis(envelope.intent.cid)", () => {
-    const traj = buildGoodTrajectoryFixture('bafy-intent');
+  it("fails when first span's prevSpanHash doesn't match genesis(envelope.task.cid)", () => {
+    const traj = buildGoodTrajectoryFixture('bafy-task');
     traj.spans[0].attributes['jinn.prevSpanHash'] = '0x' + 'ab'.repeat(32);
-    const ctx = trajCtx('bafy-intent', traj);
+    const ctx = trajCtx('bafy-task', traj);
     const result = checkHashChainIntegrity(ctx as ConformanceContext);
     expect(result.passed).toBe(false);
     // Should mention span[0] and/or genesis
     expect(result.detail).toMatch(/genesis|span\[0\]/);
   });
 
-  it('fails when envelope.intent.cid is missing', () => {
-    const traj = buildGoodTrajectoryFixture('bafy-intent');
+  it('fails when envelope.task.cid is missing', () => {
+    const traj = buildGoodTrajectoryFixture('bafy-task');
     const ctx: ConformanceContext = {
       trajectory: traj as unknown,
       envelope: { trajectory: { cid: 'bafy-traj', sha256: 'a'.repeat(64) } } as any,
@@ -126,7 +126,7 @@ describe('checkHashChainIntegrity', () => {
     };
     const result = checkHashChainIntegrity(ctx);
     expect(result.passed).toBe(false);
-    expect(result.detail).toMatch(/intent\.cid/);
+    expect(result.detail).toMatch(/task\.cid/);
   });
 });
 
@@ -136,7 +136,7 @@ describe('checkHashChainIntegrity', () => {
 
 describe('checkSpanProfile', () => {
   it('passes when every span has its kind-required attributes', () => {
-    const ctx = trajCtx('bafy-intent');
+    const ctx = trajCtx('bafy-task');
     const result = checkSpanProfile(ctx as ConformanceContext);
     expect(result.passed).toBe(true);
     expect(result.id).toBe('trajectory.span-profile');
@@ -155,20 +155,20 @@ describe('checkSpanProfile', () => {
   });
 
   it("fails when a jinn.llm_call span is missing 'gen_ai.system'", () => {
-    const traj = buildGoodTrajectoryFixture('bafy-intent');
+    const traj = buildGoodTrajectoryFixture('bafy-task');
     const llmSpan = traj.spans.find((s) => s.attributes['jinn.span.kind'] === 'jinn.llm_call');
     expect(llmSpan).toBeDefined();
     delete (llmSpan!.attributes as Record<string, unknown>)['gen_ai.system'];
-    const ctx = trajCtx('bafy-intent', traj);
+    const ctx = trajCtx('bafy-task', traj);
     const result = checkSpanProfile(ctx as ConformanceContext);
     expect(result.passed).toBe(false);
     expect(result.detail).toMatch(/gen_ai\.system/);
   });
 
   it('fails when a span has an unknown jinn.span.kind', () => {
-    const traj = buildGoodTrajectoryFixture('bafy-intent');
+    const traj = buildGoodTrajectoryFixture('bafy-task');
     traj.spans[0].attributes['jinn.span.kind'] = 'jinn.unknown_kind';
-    const ctx = trajCtx('bafy-intent', traj);
+    const ctx = trajCtx('bafy-task', traj);
     const result = checkSpanProfile(ctx as ConformanceContext);
     expect(result.passed).toBe(false);
     expect(result.detail).toMatch(/unknown/i);

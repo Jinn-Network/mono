@@ -36,7 +36,7 @@ export interface SafeTransactionParams {
 }
 
 // Per-Safe transaction lock to prevent nonce races when concurrent
-// loops (creator + restorer) share the same Safe
+// loops (creator + harness) share the same Safe
 const safeLocks = new Map<string, Promise<void>>();
 
 export async function executeSafeTransaction(

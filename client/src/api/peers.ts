@@ -89,7 +89,7 @@ export class PeerSync {
 
       this.store.insertRemoteArtifact({
         id: artifact.id,
-        desiredStateId: '',
+        taskId: '',
         requestId: '',
         title: artifact.title,
         tags: artifact.tags,

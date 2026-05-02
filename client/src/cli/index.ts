@@ -16,6 +16,7 @@ import { ConfigLoadError } from '../config.js';
 import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
 import initCommand from './commands/init.js';
+import quickstartCommand from './commands/quickstart.js';
 import authCommand from './commands/auth.js';
 import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
@@ -28,25 +29,26 @@ import historyCommand from './commands/history.js';
 import rewardsCommand from './commands/rewards.js';
 import logsCommand from './commands/logs.js';
 import fleetManageCommand from './commands/fleet-scale.js';
-import submitIntentCommand from './commands/submit-intent.js';
 import claimRewardsCommand from './commands/claim-rewards.js';
 import withdrawCommand from './commands/withdraw.js';
 import keysCommand from './commands/keys-backup.js';
-import pluginCommand from './commands/plugin-install.js';
 import updateCommand from './commands/update.js';
-import intentsCommand from './commands/intents.js';
 import mcpCommand from './commands/mcp.js';
 import migrateAgentIdCommand from './commands/migrate-agent-id.js';
 import conformanceCommand from './commands/conformance.js';
 import createCommand from './commands/create.js';
-import implsCommand from './commands/impls.js';
-import plugInsCommand from './commands/plug-ins.js';
 import uiCommand from './commands/ui.js';
+import tasksCommand from './commands/tasks.js';
+import solverNetsCommand from './commands/solver-nets.js';
+import harnessesCommand from './commands/harnesses.js';
+import solverPluginsCommand from './commands/solver-plugins.js';
+import integrationsCommand from './commands/integrations.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
   doctorCommand,
   initCommand,
+  quickstartCommand,
   authCommand,
   bootstrapCommand,
   fundRequirementsCommand,
@@ -59,20 +61,20 @@ const COMMANDS: CommandModule[] = [
   rewardsCommand,
   logsCommand,
   fleetManageCommand,
-  submitIntentCommand,
   claimRewardsCommand,
   withdrawCommand,
   keysCommand,
-  pluginCommand,
   updateCommand,
-  intentsCommand,
   mcpCommand,
   migrateAgentIdCommand,
   conformanceCommand,
   createCommand,
-  implsCommand,
-  plugInsCommand,
   uiCommand,
+  tasksCommand,
+  solverNetsCommand,
+  harnessesCommand,
+  solverPluginsCommand,
+  integrationsCommand,
 ];
 
 /**
