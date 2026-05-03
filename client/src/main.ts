@@ -25,7 +25,7 @@ import { homedir } from 'node:os';
 import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadConfig, getConfigPathFromArgs } from './config.js';
+import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
 import { ensureUiToken } from './api/ui-token.js';
@@ -646,6 +646,8 @@ export async function main(): Promise<DaemonStartupInfo | void> {
         testnetMechDeploymentPath: config.testnetMechDeploymentPath,
         testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
         engine: config.engine,
+        config,
+        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
       },
     });
   } catch (error) {
@@ -1238,6 +1240,8 @@ export async function main(): Promise<DaemonStartupInfo | void> {
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
       engine: config.engine,
+      config,
+      configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
     },
     rewardClaim:
       config.rewardClaimIntervalMs > 0

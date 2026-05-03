@@ -66,6 +66,63 @@ interface StatusV1 {
     }>;
     recentVerdicts?: Array<{ state: 'COMPLETE' | 'FAILED'; deliveryTxHash?: string | null }>;
   };
+  predictionV1?: {
+    operator?: {
+      ok: boolean;
+      solverNet?: {
+        name?: string;
+        enabled?: boolean;
+        solverType?: string;
+        harness?: string;
+        taskGeneratorEnabled?: boolean;
+      };
+      canonicalPlugin?: {
+        name?: string;
+        version?: string;
+        source?: string | null;
+      };
+      harness?: {
+        name: string;
+        version: string;
+        readiness?: {
+          ready: boolean;
+          reason?: string;
+        };
+      };
+      diagnostics?: Array<{
+        code: string;
+        severity: 'error' | 'warning' | 'info';
+        message: string;
+        configField?: string;
+      }>;
+      nextAction?: {
+        description: string;
+        cli?: string;
+      };
+    } | null;
+    operatorError?: string;
+    totals?: {
+      observedTasks?: number;
+      activeTaskRuns?: number;
+      solutions?: number;
+      verdicts?: number;
+      failed?: number;
+    };
+    latest?: {
+      taskAt?: number | null;
+      solutionAt?: number | null;
+      verdictAt?: number | null;
+    };
+    recentTasks?: Array<{
+      requestId: string;
+      taskId?: string | null;
+      state: string;
+      taskRole?: 'restoration' | 'evaluation' | null;
+      implName?: string | null;
+      stateUpdatedAt: number;
+      failureReason?: string | null;
+    }>;
+  };
 }
 
 const truncAddr = (s?: string): string =>
@@ -97,6 +154,13 @@ const formatOperatorStep = (step?: string): string => {
     default:
       return formatStep(step);
   }
+};
+
+const formatTimestamp = (ts?: number | null): string => {
+  if (ts === null || ts === undefined) return '—';
+  const ms = Math.abs(ts) >= 10_000_000_000 ? ts : ts * 1000;
+  const date = new Date(ms);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
 };
 
 const sumWei = (values: Array<string | undefined>): string => {
@@ -142,6 +206,7 @@ export function Operating(): JSX.Element {
             masterAddress={status?.masterGas?.address ?? undefined}
             chain={status?.fleet?.chain}
           />
+          <PredictionPanel status={status} />
           <Actions status={status} onRefresh={() => { void refetch(); }} />
           <FleetWalletDetails status={status} />
           <Activity />
@@ -232,6 +297,157 @@ function Header({
         </div>
       </div>
     </header>
+  );
+}
+
+function PredictionPanel({ status }: { status?: StatusV1 }): JSX.Element {
+  const prediction = status?.predictionV1;
+  const operator = prediction?.operator;
+  const diagnostics = operator?.diagnostics ?? [];
+  const blockers = diagnostics.filter((diagnostic) => diagnostic.severity === 'error');
+  const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === 'warning');
+  const ready = operator?.ok === true && !prediction?.operatorError;
+  const statusLabel = prediction
+    ? ready
+      ? 'Ready'
+      : 'Needs attention'
+    : 'Loading';
+  const statusColor = ready
+    ? 'var(--vow-green)'
+    : prediction
+      ? 'var(--wane)'
+      : 'var(--fg-dim)';
+  const pluginLabel = operator?.canonicalPlugin?.name
+    ? `${operator.canonicalPlugin.name}@${operator.canonicalPlugin.version ?? 'unknown'}`
+    : operator?.canonicalPlugin?.source ?? '—';
+  const harnessLabel = operator?.harness
+    ? `${operator.harness.name}@${operator.harness.version}`
+    : operator?.solverNet?.harness ?? '—';
+  const recentTasks = prediction?.recentTasks ?? [];
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <span className="j-label">Prediction SolverNet</span>
+        <span className="j-mono text-[10px]" style={{ color: statusColor }}>
+          {statusLabel}
+        </span>
+      </div>
+      <div className="j-card-bare overflow-hidden" style={{ background: 'var(--bg-elevated)' }}>
+        <div
+          className="px-5 py-4 grid grid-cols-2 md:grid-cols-5 gap-4"
+          style={{ borderBottom: '1px solid var(--border)' }}
+        >
+          <PredictionStat label="tasks" value={prediction?.totals?.observedTasks ?? 0} />
+          <PredictionStat label="active" value={prediction?.totals?.activeTaskRuns ?? 0} />
+          <PredictionStat label="solutions" value={prediction?.totals?.solutions ?? 0} />
+          <PredictionStat label="verdicts" value={prediction?.totals?.verdicts ?? 0} />
+          <PredictionStat label="failed" value={prediction?.totals?.failed ?? 0} tone="warn" />
+        </div>
+        <div
+          className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4"
+          style={{ borderBottom: '1px solid var(--border)' }}
+        >
+          <PredictionDetail label="solver net" value={operator?.solverNet?.name ?? 'prediction'} />
+          <PredictionDetail label="harness" value={harnessLabel} />
+          <PredictionDetail label="plugin" value={pluginLabel} />
+          <PredictionDetail label="task generator" value={operator?.solverNet?.taskGeneratorEnabled ? 'enabled' : 'disabled'} />
+          <PredictionDetail label="latest solution" value={formatTimestamp(prediction?.latest?.solutionAt)} />
+          <PredictionDetail label="latest verdict" value={formatTimestamp(prediction?.latest?.verdictAt)} />
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-3">
+          {prediction?.operatorError && (
+            <span className="j-mono text-xs" style={{ color: 'var(--break-red)' }}>
+              {prediction.operatorError}
+            </span>
+          )}
+          {blockers.length > 0 || warnings.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {[...blockers, ...warnings].slice(0, 3).map((diagnostic) => (
+                <div key={diagnostic.code} className="grid grid-cols-[88px_1fr] gap-3">
+                  <span
+                    className="j-label"
+                    style={{ color: diagnostic.severity === 'error' ? 'var(--break-red)' : 'var(--wane)' }}
+                  >
+                    {diagnostic.severity}
+                  </span>
+                  <span className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
+                    {diagnostic.message}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
+              {operator?.nextAction?.description ?? 'No Prediction task runs recorded yet.'}
+            </span>
+          )}
+          {operator?.nextAction?.cli && (
+            <span className="j-mono text-[11px]" style={{ color: 'var(--accent-sky)' }}>
+              {operator.nextAction.cli}
+            </span>
+          )}
+          {recentTasks.length > 0 && (
+            <div className="flex flex-col gap-2 pt-1">
+              {recentTasks.slice(0, 3).map((task) => (
+                <div
+                  key={task.requestId}
+                  className="grid grid-cols-[88px_1fr_auto] gap-3 items-baseline"
+                  style={{ color: 'var(--fg-muted)' }}
+                >
+                  <span className="j-label">{task.taskRole === 'evaluation' ? 'verdict' : 'solution'}</span>
+                  <span className="j-mono text-xs truncate">{task.taskId ?? task.requestId}</span>
+                  <span className="j-mono text-[10px]">{task.state.toLowerCase()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PredictionStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: 'default' | 'warn';
+}): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="j-label">{label}</span>
+      <span
+        className="j-display tabular-nums"
+        style={{
+          fontSize: '28px',
+          lineHeight: 1,
+          color: tone === 'warn' && value > 0 ? 'var(--wane)' : 'var(--fg)',
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function PredictionDetail({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <span className="j-label">{label}</span>
+      <span className="j-mono text-xs truncate" style={{ color: 'var(--fg)' }} title={value}>
+        {value}
+      </span>
+    </div>
   );
 }
 

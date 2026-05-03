@@ -8,6 +8,7 @@ import { createPublicClient, http, type PublicClient } from 'viem';
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
 import { base, baseSepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
+import type { JinnConfig } from '../config.js';
 import { FleetStateStore } from '../earning/store.js';
 import { getChainConfig } from '../earning/contracts.js';
 import { JINN_STAKING_ABI } from '../earning/jinn-rewards.js';
@@ -25,7 +26,12 @@ import {
   gatherPortfolioV0Status,
   DEFAULT_ENGINE_WORKING_DIR_ROOT,
 } from './portfolio-v0-build.js';
+import { gatherPredictionV1Status, type PredictionV1Status } from './prediction-v1-build.js';
 import type { BalanceCacheEntry } from '../store/store.js';
+import {
+  buildPredictionOperatorStatus,
+  type PredictionOperatorStatus,
+} from '../solver-nets/prediction-operator-ux.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -38,6 +44,7 @@ const ERC20_BALANCE_OF_ABI = [
 ] as const;
 
 const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
 
 export interface StatusGatherConfig {
   earningDir: string;
@@ -52,10 +59,101 @@ export interface StatusGatherConfig {
   testnetStolasDeploymentPath?: string;
   /** Engine paths — used for portfolio.v0 Claude outcome scan, etc. */
   engine?: { workingDirRoot: string; implStateDirRoot: string };
+  /** Full config enables SolverNet/plugin/Harness diagnostics in /v1/status. */
+  config?: JinnConfig;
+  configPath?: string;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
   return network === 'testnet' ? 'base-sepolia' : 'base';
+}
+
+function predictionOperatorCacheKey(configPath: string, name: string): string {
+  return `${configPath}\0${name}`;
+}
+
+async function getCachedPredictionOperatorStatus(
+  config: JinnConfig,
+  configPath: string,
+  name: string,
+): Promise<PredictionOperatorStatus> {
+  let byKey = predictionOperatorStatusCache.get(config);
+  if (!byKey) {
+    byKey = new Map();
+    predictionOperatorStatusCache.set(config, byKey);
+  }
+
+  const key = predictionOperatorCacheKey(configPath, name);
+  let cached = byKey.get(key);
+  if (!cached) {
+    cached = buildPredictionOperatorStatus({ config, configPath, name })
+      .catch((error) => predictionOperatorUnavailable(config, configPath, name, errorMessage(error)));
+    byKey.set(key, cached);
+  }
+  return cached;
+}
+
+function predictionOperatorUnavailable(
+  config: JinnConfig,
+  configPath: string,
+  name: string,
+  message: string,
+): PredictionOperatorStatus {
+  const net = config.solverNets[name];
+  const diagnostic = {
+    code: 'prediction_operator_status_unavailable',
+    severity: 'error' as const,
+    message,
+    nextAction: {
+      description: 'Inspect Prediction SolverNet configuration and restart the daemon after fixing it.',
+      cli: `jinn solver-nets show ${name}`,
+    },
+  };
+
+  return {
+    kind: 'prediction.v1.operatorStatus',
+    ok: false,
+    configPath,
+    solverNet: {
+      name,
+      enabled: net?.enabled ?? false,
+      solverType: net?.solverType ?? 'prediction.v1',
+      harness: net?.harness,
+      taskGeneratorEnabled: net?.taskGenerator.enabled ?? false,
+    },
+    extraPlugins: [],
+    diagnostics: [diagnostic],
+    nextAction: diagnostic.nextAction,
+  };
+}
+
+function predictionV1Unavailable(
+  operator: PredictionOperatorStatus | null,
+  operatorError: string,
+): PredictionV1Status {
+  return {
+    operator,
+    operatorError,
+    totals: {
+      observedTasks: 0,
+      activeTaskRuns: 0,
+      solutions: 0,
+      verdicts: 0,
+      failed: 0,
+    },
+    latest: {
+      taskAt: null,
+      solutionAt: null,
+      verdictAt: null,
+    },
+    recentTasks: [],
+    recentSolutions: [],
+    recentVerdicts: [],
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function sumPendingStakingRewards(
@@ -275,6 +373,36 @@ export async function gatherGatheredStatusRaw(
     portfolioV0 = undefined;
   }
 
+  let predictionOperator: PredictionOperatorStatus | null = null;
+  let predictionOperatorError: string | undefined;
+  if (status?.config) {
+    try {
+      predictionOperator = await getCachedPredictionOperatorStatus(
+        status.config,
+        status.configPath ?? '<default>',
+        'prediction',
+      );
+    } catch (error) {
+      predictionOperatorError = errorMessage(error);
+    }
+  }
+
+  let predictionV1: PredictionV1Status | undefined;
+  try {
+    predictionV1 = gatherPredictionV1Status(store, {
+      operator: predictionOperator,
+      operatorError: predictionOperatorError,
+    });
+  } catch (error) {
+    const lifecycleError = errorMessage(error);
+    predictionV1 = predictionV1Unavailable(
+      predictionOperator,
+      predictionOperatorError
+        ? `${predictionOperatorError}; prediction lifecycle unavailable: ${lifecycleError}`
+        : `Prediction lifecycle unavailable: ${lifecycleError}`,
+    );
+  }
+
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
     daemonStartedAt,
@@ -290,6 +418,7 @@ export async function gatherGatheredStatusRaw(
     pollIntervalMs: status?.pollIntervalMs ?? 5000,
     masterDailyEstimateWei: daily.toString(),
     portfolioV0,
+    predictionV1,
     serviceBalances: {},
     pendingByService: {},
     claimedByService: store.getClaimedRewardsByService(),

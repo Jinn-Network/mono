@@ -3,6 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import solverNetsCommand from '@/cli/commands/solver-nets.js';
+import { loadConfig, type JinnConfig } from '@/config.js';
+import type { Harness, RuntimePlugin } from '@/harnesses/types.js';
+import {
+  buildPredictionOperatorStatus,
+  runPredictionSample,
+  type PredictionOperatorDiagnostic,
+} from '@/solver-nets/prediction-operator-ux.js';
 import { makeCommandCtx } from '@test/cli.js';
 
 function tempConfig(values: Record<string, unknown> = {}): string {
@@ -35,6 +42,81 @@ async function runSolverNets(argv: string[]): Promise<{ envelope: Record<string,
     envelope: JSON.parse(made.writes.join('')) as Record<string, any>,
     exits: made.exits,
   };
+}
+
+const predictionPlugin: RuntimePlugin = {
+  role: 'canonical',
+  name: '@jinn-network/prediction-plugin',
+  version: '0.2.0',
+  supports: ['prediction.v1'],
+  root: '/test/prediction-plugin',
+  manifestPath: '/test/prediction-plugin/plugin.json',
+  sha256: '0'.repeat(64),
+};
+
+function stubHarness(
+  overrides: Partial<Harness> & Pick<Harness, 'name'>,
+): Harness {
+  return {
+    name: overrides.name,
+    version: overrides.version ?? '1.0.0',
+    supports: overrides.supports ?? (() => true),
+    isReady: overrides.isReady,
+    async run() {
+      throw new Error('stub Harness should not run in operator status tests');
+    },
+  };
+}
+
+function loadPredictionTestConfig(
+  overrides: Record<string, unknown> = {},
+  mutate?: (config: JinnConfig) => void,
+): { config: JinnConfig; configPath: string } {
+  const configPath = tempConfig(predictionConfig(overrides));
+  const config = loadConfig(configPath);
+  mutate?.(config);
+  return { config, configPath };
+}
+
+const operatorStatusDeps = {
+  loadSolverNets: async () => ({
+    get: (name: string) => name === 'prediction'
+      ? {
+          name: 'prediction',
+          enabled: true,
+          solverType: 'prediction.v1',
+          canonicalPlugin: predictionPlugin,
+          plugins: [],
+          taskGenerator: { enabled: true },
+        }
+      : undefined,
+  }),
+  loadExternalImpl: async () => ({ kind: 'error', reason: 'not configured' }),
+  buildHarnesses: () => [
+    stubHarness({ name: 'claude-code-learner' }),
+    stubHarness({ name: 'prediction-v1-baseline' }),
+  ],
+} satisfies Partial<Parameters<typeof buildPredictionOperatorStatus>[0]>;
+
+function expectDiagnosticContract(
+  diagnostic: PredictionOperatorDiagnostic,
+  expected: { code: string; severity: PredictionOperatorDiagnostic['severity']; configField?: string },
+): void {
+  expect(diagnostic).toEqual(expect.objectContaining({
+    code: expected.code,
+    severity: expected.severity,
+    message: expect.any(String),
+    nextAction: expect.objectContaining({
+      description: expect.any(String),
+    }),
+  }));
+  expect(diagnostic.message.length).toBeGreaterThan(0);
+  expect(diagnostic.nextAction?.description.length).toBeGreaterThan(0);
+  if (expected.configField) {
+    expect(diagnostic.configField).toBe(expected.configField);
+  } else {
+    expect(diagnostic).not.toHaveProperty('configField');
+  }
 }
 
 describe('solver-nets command', () => {
@@ -198,5 +280,202 @@ describe('solver-nets command', () => {
         }),
       ]),
     );
+  });
+
+  it.each([
+    {
+      label: 'disabled SolverNet',
+      fatalForSolvingNow: true,
+      warningForGeneratorOrDashboardCompleteness: false,
+      expectedOk: false,
+      expected: {
+        code: 'prediction_solvernet_disabled',
+        severity: 'error' as const,
+        configField: 'solverNets.prediction.enabled',
+      },
+      config: () => loadPredictionTestConfig({ enabled: false }),
+    },
+    {
+      label: 'invalid canonical plugin',
+      fatalForSolvingNow: true,
+      warningForGeneratorOrDashboardCompleteness: false,
+      expectedOk: false,
+      expected: {
+        code: 'prediction_plugin_unavailable',
+        severity: 'error' as const,
+        configField: 'solverNets.prediction.canonicalPlugin',
+      },
+      deps: {
+        loadSolverNets: async () => {
+          throw new Error('Cannot resolve SolverPlugin npm:@jinn-network/missing-prediction-plugin');
+        },
+      },
+      config: () => loadPredictionTestConfig({
+        canonicalPlugin: 'npm:@jinn-network/missing-prediction-plugin',
+      }),
+    },
+    {
+      label: 'missing canonical plugin',
+      fatalForSolvingNow: true,
+      warningForGeneratorOrDashboardCompleteness: false,
+      expectedOk: false,
+      expected: {
+        code: 'prediction_plugin_unavailable',
+        severity: 'error' as const,
+        configField: 'solverNets.prediction.canonicalPlugin',
+      },
+      deps: {
+        loadSolverNets: async () => {
+          throw new Error('Prediction SolverNet canonicalPlugin is missing');
+        },
+      },
+      config: () => loadPredictionTestConfig({}, (config) => {
+        config.solverNets.prediction.canonicalPlugin = undefined as unknown as string;
+      }),
+    },
+    {
+      label: 'unsupported canonical plugin solverType mismatch',
+      fatalForSolvingNow: true,
+      warningForGeneratorOrDashboardCompleteness: false,
+      expectedOk: false,
+      expected: {
+        code: 'prediction_plugin_unavailable',
+        severity: 'error' as const,
+        configField: 'solverNets.prediction.canonicalPlugin',
+      },
+      deps: {
+        loadSolverNets: async () => {
+          throw new Error('SolverNet prediction solverType mismatch: config=prediction.v1 plugin supports=portfolio.v0');
+        },
+      },
+      config: () => loadPredictionTestConfig({
+        canonicalPlugin: 'bundled:portfolio-v0-plugin',
+      }),
+    },
+    {
+      label: 'SolverNet solverType mismatch',
+      fatalForSolvingNow: true,
+      warningForGeneratorOrDashboardCompleteness: false,
+      expectedOk: false,
+      expected: {
+        code: 'prediction_solver_type_mismatch',
+        severity: 'error' as const,
+        configField: 'solverNets.prediction.solverType',
+      },
+      config: () => loadPredictionTestConfig({ solverType: 'portfolio.v0' }),
+    },
+    {
+      label: 'missing Harness selection',
+      fatalForSolvingNow: true,
+      warningForGeneratorOrDashboardCompleteness: false,
+      expectedOk: false,
+      expected: {
+        code: 'prediction_harness_missing',
+        severity: 'error' as const,
+        configField: 'solverNets.prediction.harness',
+      },
+      config: () => loadPredictionTestConfig({}, (config) => {
+        config.solverNets.prediction.harness = undefined as unknown as string;
+      }),
+    },
+    {
+      label: 'unknown Harness selection',
+      fatalForSolvingNow: true,
+      warningForGeneratorOrDashboardCompleteness: false,
+      expectedOk: false,
+      expected: {
+        code: 'prediction_harness_unknown',
+        severity: 'error' as const,
+        configField: 'solverNets.prediction.harness',
+      },
+      config: () => loadPredictionTestConfig({ harness: 'not-installed-prediction-harness' }),
+    },
+    {
+      label: 'unsupported Harness selection',
+      fatalForSolvingNow: true,
+      warningForGeneratorOrDashboardCompleteness: false,
+      expectedOk: false,
+      expected: {
+        code: 'prediction_harness_unsupported',
+        severity: 'error' as const,
+        configField: 'solverNets.prediction.harness',
+      },
+      deps: {
+        buildHarnesses: () => [
+          stubHarness({
+            name: 'prediction-v1-evaluator-only',
+            supports: () => false,
+          }),
+        ],
+      },
+      config: () => loadPredictionTestConfig({ harness: 'prediction-v1-evaluator-only' }),
+    },
+    {
+      label: 'non-ready Harness selection',
+      fatalForSolvingNow: false,
+      warningForGeneratorOrDashboardCompleteness: true,
+      expectedOk: true,
+      expected: {
+        code: 'prediction_harness_not_ready',
+        severity: 'warning' as const,
+        configField: 'solverNets.prediction.harness',
+      },
+      deps: {
+        buildHarnesses: () => [
+          stubHarness({
+            name: 'prediction-v1-needs-daemon',
+            isReady: async () => ({
+              ready: false,
+              reason: 'requires live daemon',
+              nextStep: { description: 'Start the daemon.', cli: 'jinn run' },
+            }),
+          }),
+        ],
+      },
+      config: () => loadPredictionTestConfig({ harness: 'prediction-v1-needs-daemon' }),
+    },
+    {
+      label: 'disabled task generator',
+      fatalForSolvingNow: false,
+      warningForGeneratorOrDashboardCompleteness: true,
+      expectedOk: true,
+      expected: {
+        code: 'prediction_task_generator_disabled',
+        severity: 'warning' as const,
+        configField: 'solverNets.prediction.taskGenerator.enabled',
+      },
+      config: () => loadPredictionTestConfig({ taskGenerator: { enabled: false } }),
+    },
+  ])(
+    'documents Prediction operator diagnostic matrix row: $label',
+    async ({ config: load, deps, expected, expectedOk, fatalForSolvingNow, warningForGeneratorOrDashboardCompleteness }) => {
+      expect(typeof fatalForSolvingNow).toBe('boolean');
+      expect(typeof warningForGeneratorOrDashboardCompleteness).toBe('boolean');
+
+      const { config, configPath } = load();
+      const status = await buildPredictionOperatorStatus({
+        config,
+        configPath,
+        ...operatorStatusDeps,
+        ...deps,
+      });
+      const diagnostic = status.diagnostics.find((candidate) => candidate.code === expected.code);
+
+      expect(status.ok).toBe(expectedOk);
+      expect(diagnostic).toBeDefined();
+      expectDiagnosticContract(diagnostic!, expected);
+    },
+  );
+
+  it('reports insufficient sample task windows with a complete non-config diagnostic', async () => {
+    const sample = await runPredictionSample({ closedWindow: true });
+    const diagnostic = sample.diagnostics.find((candidate) => candidate.code === 'prediction_sample_cannot_attempt');
+
+    expect(sample.ok).toBe(false);
+    expect(sample.solution).toBeUndefined();
+    expectDiagnosticContract(diagnostic!, {
+      code: 'prediction_sample_cannot_attempt',
+      severity: 'error',
+    });
   });
 });

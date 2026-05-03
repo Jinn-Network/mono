@@ -151,4 +151,41 @@ describe('assembleStatusV1', () => {
     expect(j.rewards.claimedStakingRewardsWei).toBe('800');
     expect(j.rewards.totalStakingRewardsWei).toBe('1000');
   });
+
+  it('passes prediction.v1 status through when present', () => {
+    const raw: GatheredStatusRaw = {
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+      predictionV1: {
+        operator: null,
+        totals: {
+          observedTasks: 1,
+          activeTaskRuns: 0,
+          solutions: 1,
+          verdicts: 0,
+          failed: 0,
+        },
+        latest: {
+          taskAt: 100,
+          solutionAt: 100,
+          verdictAt: null,
+        },
+        recentTasks: [],
+        recentSolutions: [],
+        recentVerdicts: [],
+      },
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.predictionV1?.totals.solutions).toBe(1);
+    expect(j.predictionV1?.latest.solutionAt).toBe(100);
+  });
 });
