@@ -1162,7 +1162,14 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     agentEoa: agentEoaAddress,
     safeAddress,
     agentPrivateKey,
+    predictionV1LauncherEnabled: config.predictionV1LauncherEnabled,
     predictionV1WindowMs: config.predictionV1WindowMs,
+    predictionV1CadenceMs: config.predictionV1CadenceMs,
+    predictionV1MaxNewRoundsPerPoll: config.predictionV1MaxNewRoundsPerPoll,
+    predictionV1MaxNewRoundsPerDay: config.predictionV1MaxNewRoundsPerDay,
+    predictionV1MaxOpenRounds: config.predictionV1MaxOpenRounds,
+    predictionV1AllowlistConditionIds: config.predictionV1AllowlistConditionIds,
+    predictionV1BlocklistConditionIds: config.predictionV1BlocklistConditionIds,
     predictionV1ResolveGapMs: config.predictionV1ResolveGapMs,
   });
   for (const line of autoTaskLogLines) {

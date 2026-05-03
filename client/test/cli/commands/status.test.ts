@@ -1,8 +1,57 @@
 import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
 import { createStatusCommand } from '@/cli/commands/status.js';
 import { assembleStatusRollupV1 } from '@/api/status-rollup-build.js';
 import { runCommand } from '@test/cli.js';
+
+function writeFleetState(earningDir: string, services: unknown[]): void {
+  mkdirSync(earningDir, { recursive: true });
+  writeFileSync(
+    join(earningDir, 'earning_state.json'),
+    JSON.stringify({
+      master_address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      chain: 'base-sepolia',
+      staking_mode: 'standard',
+      services,
+      updated_at: '2026-05-03T00:00:00.000Z',
+    }),
+    'utf8',
+  );
+}
+
+function service(index: number, safe: string, mech: string): unknown {
+  return {
+    index,
+    agent_address: `0x${String(index).repeat(40)}`,
+    safe_address: safe,
+    service_id: 100 + index,
+    mech_address: mech,
+    staking_address: '0x5555555555555555555555555555555555555555',
+    step: 'complete',
+    error: null,
+    agent_id: String(index),
+    agent_uri: null,
+    identity_registry_address: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+    agent_registered_tx: null,
+    safe_bound_to_agent: false,
+  };
+}
+
+function realReadinessDeps(earningDir: string) {
+  const { resolveTaskNativeReadiness: _unused, ...deps } = fakeDeps;
+  return {
+    ...deps,
+    loadConfig: () => ({
+      network: 'testnet' as const,
+      earningDir,
+      dbPath: '/tmp/x',
+      runtimeMode: undefined,
+    } as any),
+  };
+}
 
 const mockRaw: GatheredStatusRaw = {
   shutdownState: 'running',
@@ -51,6 +100,26 @@ const mockRaw: GatheredStatusRaw = {
 const fakeDeps = {
   gatherIntrospectionRaw: async () => mockRaw as GatheredStatusRaw,
   assembleStatusRollupV1,
+  loadConfig: () => ({
+    network: 'testnet' as const,
+    earningDir: '/tmp/earning',
+    dbPath: '/tmp/x',
+    runtimeMode: undefined,
+  } as any),
+  getConfigPathFromArgs: () => undefined,
+  resolveTaskNativeReadiness: () => ({
+    ok: true,
+    solverReady: true,
+    evaluatorReady: true,
+    detail: 'fake Task-native deployment ready',
+    source: '/tmp/deployment-task-coordinator-router-v3-baseSepolia-fast.json',
+    contracts: {
+      taskCoordinator: '0x1111111111111111111111111111111111111111',
+      jinnRouterV3: '0x2222222222222222222222222222222222222222',
+      taskActivityCheckerV3: '0x3333333333333333333333333333333333333333',
+    },
+    routerClaimDeliveryVersion: 'v3' as const,
+  }),
 };
 
 describe('status command', () => {
@@ -67,6 +136,7 @@ describe('status command', () => {
       earnings: { pendingTotal: string; asset: string };
       exit: { blocking: boolean; hint: string };
       paths: { earningDir: string; dbPath: string };
+      taskNative: { solverReady: boolean; evaluatorReady: boolean; contracts: Record<string, string> };
     };
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.daemon.state).toBe('running');
@@ -85,6 +155,9 @@ describe('status command', () => {
       earningDir: '/tmp/earning',
       dbPath: '/tmp/x',
     });
+    expect(parsed.taskNative.solverReady).toBe(true);
+    expect(parsed.taskNative.evaluatorReady).toBe(true);
+    expect(parsed.taskNative.contracts.jinnRouterV3).toBe('0x2222222222222222222222222222222222222222');
   });
 
   it('rejects unknown flags with invalid_invocation', async () => {
@@ -100,8 +173,112 @@ describe('status command', () => {
     const { raw, exits } = await runCommand(cmd, { argv: ['--human'], tty: true });
     const out = raw.join('');
     expect(out).toContain('daemon=running');
+    expect(out).toContain('task-native: solver=ready evaluator=ready');
     expect(out).not.toMatch(/^\{/);
     expect(exits).toEqual([]);
+  });
+
+  it('reports Task-native solver and evaluator ready from bundled config plus distinct local services', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-task-native-'));
+    try {
+      writeFleetState(earningDir, [
+        service(
+          1,
+          '0x1111111111111111111111111111111111111111',
+          '0x2222222222222222222222222222222222222222',
+        ),
+        service(
+          2,
+          '0x3333333333333333333333333333333333333333',
+          '0x4444444444444444444444444444444444444444',
+        ),
+      ]);
+      const cmd = createStatusCommand(realReadinessDeps(earningDir));
+      const { envelopes } = await runCommand(cmd);
+      const payload = envelopes[0] as {
+        taskNative: {
+          ok: boolean;
+          solverReady: boolean;
+          evaluatorReady: boolean;
+          contracts: Record<string, string>;
+          operatorState?: { taskNativeServices: number; activeSafe?: string; evaluatorSafe?: string };
+        };
+      };
+      expect(payload.taskNative.ok).toBe(true);
+      expect(payload.taskNative.solverReady).toBe(true);
+      expect(payload.taskNative.evaluatorReady).toBe(true);
+      expect(payload.taskNative.contracts.taskCoordinator).toMatch(/^0x[0-9a-fA-F]{40}$/);
+      expect(payload.taskNative.contracts.jinnRouterV3).toMatch(/^0x[0-9a-fA-F]{40}$/);
+      expect(payload.taskNative.contracts.taskActivityCheckerV3).toMatch(/^0x[0-9a-fA-F]{40}$/);
+      expect(payload.taskNative.operatorState?.taskNativeServices).toBe(2);
+      expect(payload.taskNative.operatorState?.activeSafe).toBe('0x1111111111111111111111111111111111111111');
+      expect(payload.taskNative.operatorState?.evaluatorSafe).toBe('0x3333333333333333333333333333333333333333');
+    } finally {
+      rmSync(earningDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports solver-only when self-evaluation is disallowed and no distinct evaluator service exists', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-task-native-'));
+    try {
+      writeFleetState(earningDir, [
+        service(
+          1,
+          '0x1111111111111111111111111111111111111111',
+          '0x2222222222222222222222222222222222222222',
+        ),
+      ]);
+      const cmd = createStatusCommand(realReadinessDeps(earningDir));
+      const { envelopes, raw } = await runCommand(cmd, { argv: ['--human'], tty: true });
+      expect(envelopes).toEqual([]);
+      const out = raw.join('');
+      expect(out).toContain('task-native: solver=ready evaluator=not-ready');
+      expect(out).toContain('self-evaluation is disabled');
+
+      const jsonCmd = createStatusCommand(realReadinessDeps(earningDir));
+      const jsonResult = await runCommand(jsonCmd);
+      const payload = jsonResult.envelopes[0] as {
+        taskNative: { ok: boolean; solverReady: boolean; evaluatorReady: boolean; detail: string };
+      };
+      expect(payload.taskNative.ok).toBe(true);
+      expect(payload.taskNative.solverReady).toBe(true);
+      expect(payload.taskNative.evaluatorReady).toBe(false);
+      expect(payload.taskNative.detail).toContain('no distinct evaluator Safe/Mech is configured');
+    } finally {
+      rmSync(earningDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports missing Task-native artifact without chain readback', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-task-native-'));
+    const prevArtifact = process.env['JINN_TESTNET_TASK_COORDINATOR_ROUTER_V3_DEPLOYMENT'];
+    process.env['JINN_TESTNET_TASK_COORDINATOR_ROUTER_V3_DEPLOYMENT'] = join(earningDir, 'missing-task-native.json');
+    try {
+      writeFleetState(earningDir, [
+        service(
+          1,
+          '0x1111111111111111111111111111111111111111',
+          '0x2222222222222222222222222222222222222222',
+        ),
+      ]);
+      const cmd = createStatusCommand(realReadinessDeps(earningDir));
+      const { envelopes } = await runCommand(cmd);
+      const payload = envelopes[0] as {
+        taskNative: { ok: boolean; solverReady: boolean; evaluatorReady: boolean; detail: string; contracts: Record<string, string> };
+      };
+      expect(payload.taskNative.ok).toBe(false);
+      expect(payload.taskNative.solverReady).toBe(false);
+      expect(payload.taskNative.evaluatorReady).toBe(false);
+      expect(payload.taskNative.detail).toContain('Task-native deployment artifact is not bundled');
+      expect(payload.taskNative.contracts).toEqual({});
+    } finally {
+      if (prevArtifact === undefined) {
+        delete process.env['JINN_TESTNET_TASK_COORDINATOR_ROUTER_V3_DEPLOYMENT'];
+      } else {
+        process.env['JINN_TESTNET_TASK_COORDINATOR_ROUTER_V3_DEPLOYMENT'] = prevArtifact;
+      }
+      rmSync(earningDir, { recursive: true, force: true });
+    }
   });
 
   // ── --detail flag (audit U4) ─────────────────────────────────────────────

@@ -117,6 +117,10 @@ export class FleetStateStore {
     return this.earningDir;
   }
 
+  hasStateFile(): boolean {
+    return existsSync(this.statePath);
+  }
+
   // ── Mnemonic keystore ──────────────────────────────────────────────────
 
   hasMnemonicKeystore(): boolean {

@@ -6,7 +6,7 @@
  */
 
 import type { Store } from '../store/store.js';
-import type { SignedEnvelope } from '../types/envelope.js';
+import type { EvidenceTier, Role, SignedEnvelope } from '../types/envelope.js';
 
 export interface CorpusOptions {
   subgraphUrl: string;
@@ -23,6 +23,47 @@ export interface CorpusQuery {
   taskCid?: string;
   participant?: { safeAddress?: string };
   evidenceTier?: 'self-signed' | 'committed' | 'attested';
+  generatedAfter?: number;
+  generatedBefore?: number;
+  limit?: number;
+}
+
+export type EnvelopeProjectionMetadataValue = string | number | boolean;
+export type EnvelopeProjectionMetadata = Record<string, EnvelopeProjectionMetadataValue>;
+
+export interface EnvelopeProjection {
+  envelopeId: string;
+  envelopeCid: string | null;
+  envelopeSha256: string | null;
+  signatureHash: string;
+  solverType: string;
+  role: Role;
+  taskCid: string | null;
+  taskId: string | null;
+  requestId: string | null;
+  generatedAt: number;
+  evidenceTier: EvidenceTier;
+  participantSafeAddress: string | null;
+  participantAgentEoa: string | null;
+  executorImplName: string | null;
+  executorImplVersion: string | null;
+  executorRuntimeBundleDigest: string | null;
+  executorPlugins: string[];
+  solutionEnvelopeCid: string | null;
+  solutionEnvelopeSha256: string | null;
+  solutionEnvelopeRef: string | null;
+  metadata: EnvelopeProjectionMetadata;
+}
+
+export interface EnvelopeProjectionQuery {
+  solverType?: string;
+  role?: Role;
+  taskCid?: string;
+  taskId?: string;
+  requestId?: string;
+  participant?: { safeAddress?: string; agentEoa?: string };
+  solutionEnvelopeRef?: string;
+  metadata?: EnvelopeProjectionMetadata;
   generatedAfter?: number;
   generatedBefore?: number;
   limit?: number;

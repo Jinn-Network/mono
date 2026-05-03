@@ -1,6 +1,42 @@
 import { describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createDoctorCommand } from '@/cli/commands/doctor.js';
 import { runCommand } from '@test/cli.js';
+
+function writeFleetState(earningDir: string, services: unknown[]): void {
+  mkdirSync(earningDir, { recursive: true });
+  writeFileSync(
+    join(earningDir, 'earning_state.json'),
+    JSON.stringify({
+      master_address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      chain: 'base-sepolia',
+      staking_mode: 'standard',
+      services,
+      updated_at: '2026-05-03T00:00:00.000Z',
+    }),
+    'utf8',
+  );
+}
+
+function service(index: number, safe: string, mech: string): unknown {
+  return {
+    index,
+    agent_address: `0x${String(index).repeat(40)}`,
+    safe_address: safe,
+    service_id: 100 + index,
+    mech_address: mech,
+    staking_address: '0x5555555555555555555555555555555555555555',
+    step: 'complete',
+    error: null,
+    agent_id: String(index),
+    agent_uri: null,
+    identity_registry_address: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+    agent_registered_tx: null,
+    safe_bound_to_agent: false,
+  };
+}
 
 const fakeDeps = {
   loadConfig: () => ({
@@ -31,6 +67,19 @@ const fakeDeps = {
     authenticated: true,
     context: 'bare' as const,
     detail: 'fake claude auth',
+  }),
+  resolveTaskNativeReadiness: () => ({
+    ok: true,
+    solverReady: true,
+    evaluatorReady: true,
+    detail: 'fake Task-native deployment ready; solver-ready=true evaluator-ready=true',
+    source: '/tmp/deployment-task-coordinator-router-v3-baseSepolia-fast.json',
+    contracts: {
+      taskCoordinator: '0x1111111111111111111111111111111111111111',
+      jinnRouterV3: '0x2222222222222222222222222222222222222222',
+      taskActivityCheckerV3: '0x3333333333333333333333333333333333333333',
+    },
+    routerClaimDeliveryVersion: 'v3' as const,
   }),
 } as const;
 
@@ -88,6 +137,76 @@ describe('doctor command (DI integration)', () => {
     expect(typeof env.config!.earningDir).toBe('string');
     expect(typeof env.config!.dbPath).toBe('string');
     expect(env.config!.envOverrides).toBeDefined();
+  });
+
+  it('reports Task-native solver and evaluator readiness from local deployment config', async () => {
+    const cmd = createDoctorCommand(fakeDeps);
+    const { envelopes } = await runCommand(cmd);
+    const env = envelopes[0] as {
+      checks: Array<{
+        name: string;
+        ok: boolean;
+        taskNative?: {
+          solverReady: boolean;
+          evaluatorReady: boolean;
+          contracts: Record<string, string>;
+          routerClaimDeliveryVersion?: string;
+        };
+      }>;
+    };
+    const check = env.checks.find((c) => c.name === 'task_native_deployment');
+    expect(check).toBeDefined();
+    expect(check?.ok).toBe(true);
+    expect(check?.taskNative?.solverReady).toBe(true);
+    expect(check?.taskNative?.evaluatorReady).toBe(true);
+    expect(check?.taskNative?.contracts.jinnRouterV3).toBe('0x2222222222222222222222222222222222222222');
+    expect(check?.taskNative?.routerClaimDeliveryVersion).toBe('v3');
+  });
+
+  it('flags stale legacy router claim config in the real Task-native readiness check', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-doctor-task-native-'));
+    const prevClaimVersion = process.env['JINN_ROUTER_CLAIM_DELIVERY_VERSION'];
+    process.env['JINN_ROUTER_CLAIM_DELIVERY_VERSION'] = 'v2';
+    try {
+      writeFleetState(earningDir, [
+        service(
+          1,
+          '0x1111111111111111111111111111111111111111',
+          '0x2222222222222222222222222222222222222222',
+        ),
+      ]);
+      const { resolveTaskNativeReadiness: _unused, ...deps } = fakeDeps;
+      const cmd = createDoctorCommand({
+        ...deps,
+        loadConfig: () => ({
+          network: 'testnet' as const,
+          rpcUrl: 'http://fake',
+          apiPort: 7331,
+          claudePath: 'claude',
+          tasks: [],
+          engine: { implStateDirRoot: '/tmp/fake-impl-state', workingDirRoot: '/tmp/fake-work' },
+          earningDir,
+          dbPath: '/tmp/fake.db',
+          runtimeMode: undefined,
+        } as any),
+      });
+      const { envelopes } = await runCommand(cmd);
+      const env = envelopes[0] as {
+        checks: Array<{ name: string; ok: boolean; detail: string; taskNative?: { solverReady: boolean; evaluatorReady: boolean } }>;
+      };
+      const check = env.checks.find((c) => c.name === 'task_native_deployment');
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toContain('router claim variant is v2, expected v3');
+      expect(check?.taskNative?.solverReady).toBe(false);
+      expect(check?.taskNative?.evaluatorReady).toBe(false);
+    } finally {
+      if (prevClaimVersion === undefined) {
+        delete process.env['JINN_ROUTER_CLAIM_DELIVERY_VERSION'];
+      } else {
+        process.env['JINN_ROUTER_CLAIM_DELIVERY_VERSION'] = prevClaimVersion;
+      }
+      rmSync(earningDir, { recursive: true, force: true });
+    }
   });
 
   it('does not include JINN_PASSWORD in config.envOverrides even when set in ctx.env', async () => {

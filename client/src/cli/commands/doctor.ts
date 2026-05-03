@@ -28,6 +28,10 @@ import {
   rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
 } from '../../preflight/rpc-network.js';
 import { SOLVER_TYPES } from '../../solver-types/index.js';
+import {
+  resolveTaskNativeReadiness as defaultResolveTaskNativeReadiness,
+  type TaskNativeReadiness,
+} from '../task-native-readiness.js';
 
 export interface DoctorDeps extends BaseCommandDeps {
   checkClaudeBinary: typeof defaultCheckClaudeBinary;
@@ -40,6 +44,8 @@ export interface DoctorDeps extends BaseCommandDeps {
   detectAuthContext: typeof defaultDetectAuthContext;
   /** Probes claude auth status via subprocess; tests inject a fake to avoid spawning claude. */
   probeClaudeAuth: typeof defaultProbeClaudeAuth;
+  /** Local-only Task-native deployment/config readiness check. */
+  resolveTaskNativeReadiness?: (config: JinnConfig) => TaskNativeReadiness;
 }
 
 const PRODUCTION_DEPS: DoctorDeps = {
@@ -67,6 +73,18 @@ interface CheckResult {
     network: 'mainnet' | 'testnet';
     expectedChainId: number;
     actualChainId: number;
+  };
+  taskNative?: {
+    solverReady: boolean;
+    evaluatorReady: boolean;
+    source: string | null;
+    contracts: {
+      taskCoordinator?: string;
+      jinnRouterV3?: string;
+      taskActivityCheckerV3?: string;
+    };
+    routerClaimDeliveryVersion?: 'v1' | 'v2' | 'v3';
+    operatorState?: TaskNativeReadiness['operatorState'];
   };
 }
 
@@ -129,6 +147,25 @@ async function checkDeploymentLoaded(config: JinnConfig): Promise<CheckResult> {
       remedy: 'Verify deployment-related settings in your configuration file.',
     };
   }
+}
+
+function taskNativeCheckForDoctor(readiness: TaskNativeReadiness): CheckResult {
+  return {
+    name: 'task_native_deployment',
+    ok: readiness.ok,
+    detail: readiness.detail,
+    ...(readiness.remedy ? { remedy: readiness.remedy } : {}),
+    taskNative: {
+      solverReady: readiness.solverReady,
+      evaluatorReady: readiness.evaluatorReady,
+      source: readiness.source,
+      contracts: readiness.contracts,
+      ...(readiness.routerClaimDeliveryVersion
+        ? { routerClaimDeliveryVersion: readiness.routerClaimDeliveryVersion }
+        : {}),
+      ...(readiness.operatorState ? { operatorState: readiness.operatorState } : {}),
+    },
+  };
 }
 
 function claudeBinaryCheckForDoctor(claudePath: string, result: ClaudeBinaryCheckResult): CheckResult {
@@ -295,6 +332,7 @@ configuration:
   - claude_auth                 Claude CLI authenticated
   - keystore_present            mnemonic keystore in configured earning directory (optional)
   - deployment_loaded           testnet/mainnet contract addresses resolved
+  - task_native_deployment      TaskCoordinator/JinnRouterV3/TaskActivityCheckerV3 local readiness
   - portfolio_impl_state_dir    HL impl state directory present and readable
   - hl_api_wallet               HL API wallet generated and approved by operator
 
@@ -340,6 +378,7 @@ Examples:
       checks.push(checkKeystorePresent(config.earningDir));
       checks.push(await checkRpcNetworkForDoctor(config));
       checks.push(await checkDeploymentLoaded(config));
+      checks.push(taskNativeCheckForDoctor((deps.resolveTaskNativeReadiness ?? defaultResolveTaskNativeReadiness)(config)));
       checks.push(checkDaemonRuntimeReady());
 
       const distributorCheck = await deps.checkDistributorReachable(config);

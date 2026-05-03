@@ -20,6 +20,12 @@ import {
   RESTORATION_TASK_CID_CONTEXT_KEY,
 } from '../evaluation-context.js';
 import {
+  checkManifestSignature,
+  checkTaskRef,
+  checkTaskRefMissingExpected,
+  recomputeTopLevelSignatureHash,
+} from '../prediction-v0-evaluator/checks/integrity.js';
+import {
   getResolution,
   type ResolutionSnapshot,
 } from '../../../venues/polymarket/client.js';
@@ -58,6 +64,9 @@ export class PredictionV1Evaluator implements Harness {
     if (typeof task.context?.['restorationResult'] !== 'string') {
       return { ok: false, reason: 'context.restorationResult required' };
     }
+    if (typeof task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] !== 'string') {
+      return { ok: false, reason: `context.${RESTORATION_TASK_CID_CONTEXT_KEY} required` };
+    }
     return { ok: true };
   }
 
@@ -89,15 +98,12 @@ export class PredictionV1Evaluator implements Harness {
       } else {
         checks.push({ name: 'solution.envelope', status: 'PASS' });
       }
+      checks.push(await checkManifestSignature(recomputeTopLevelSignatureHash(rawEnvelope), envelope.signature));
       const expectedTaskCid = ctx.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] as string | undefined;
-      if (expectedTaskCid && envelope.task.cid !== expectedTaskCid) {
-        checks.push({
-          name: 'task.identity',
-          status: 'FAIL',
-          detail: { expectedTaskCid, actualTaskCid: envelope.task.cid },
-        });
+      if (expectedTaskCid) {
+        checks.push(checkTaskRef(envelope.task.cid, expectedTaskCid));
       } else {
-        checks.push({ name: 'task.identity', status: expectedTaskCid ? 'PASS' : 'SKIP' });
+        checks.push(checkTaskRefMissingExpected());
       }
       solution = PredictionV1RestorationPayloadSchema.parse(envelope.payload);
       checks.push({ name: 'solution.schema', status: 'PASS' });
@@ -123,10 +129,7 @@ export class PredictionV1Evaluator implements Harness {
     }
 
     const resolution = await this.readResolution(ids.marketId, ids.conditionId, task.spec.source.url);
-    const verdict = deriveVerdict(checks, resolution);
-    const scores = verdict === 'SCORED' && solution && resolution.outcome
-      ? scoreBrier(solution.probabilityYes, task.spec.consensusSnapshot.probabilityYes, resolution.outcome)
-      : undefined;
+    checks.push(checkResolutionIdentity(resolution, ids));
     if (resolution.status === 'resolved') {
       checks.push({ name: 'market.resolution', status: 'PASS' });
     } else if (resolution.status === 'unresolved') {
@@ -134,6 +137,10 @@ export class PredictionV1Evaluator implements Harness {
     } else {
       checks.push({ name: 'market.resolution', status: 'FAIL', detail: resolution.status });
     }
+    const verdict = deriveVerdict(checks, resolution);
+    const scores = verdict === 'SCORED' && solution && resolution.outcome
+      ? scoreBrier(solution.probabilityYes, task.spec.consensusSnapshot.probabilityYes, resolution.outcome)
+      : undefined;
 
     const payload: Record<string, unknown> = {
       verdict,
@@ -206,10 +213,32 @@ export class PredictionV1Evaluator implements Harness {
 }
 
 function deriveVerdict(checks: Check[], resolution: ResolutionSnapshot): 'SCORED' | 'REJECTED' | 'INVALID' | 'INDETERMINATE' {
-  if (checks.some((check) => check.status === 'FAIL')) return 'REJECTED';
+  if (checks.some((check) => check.status === 'FAIL' && check.name !== 'market.resolution')) return 'REJECTED';
+  if (checks.some((check) => check.status === 'INDETERMINATE')) return 'INDETERMINATE';
   if (resolution.status === 'resolved' && resolution.outcome) return 'SCORED';
   if (resolution.status === 'unresolved') return 'INDETERMINATE';
   return 'INVALID';
+}
+
+function checkResolutionIdentity(
+  resolution: ResolutionSnapshot,
+  ids: { marketId: string; conditionId: string },
+): Check {
+  const marketMatches = resolution.marketId === ids.marketId;
+  const conditionMatches = resolution.conditionId.toLowerCase() === ids.conditionId.toLowerCase();
+  if (marketMatches && conditionMatches) {
+    return { name: 'market.identity', status: 'PASS' };
+  }
+  return {
+    name: 'market.identity',
+    status: 'FAIL',
+    detail: {
+      expectedMarketId: ids.marketId,
+      actualMarketId: resolution.marketId,
+      expectedConditionId: ids.conditionId,
+      actualConditionId: resolution.conditionId,
+    },
+  };
 }
 
 function scoreBrier(

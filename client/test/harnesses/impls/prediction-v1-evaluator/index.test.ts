@@ -7,6 +7,7 @@ import {
   makePredictionV1Task,
   makeSignedSolutionEnvelope,
 } from '../prediction-v1-test-helpers.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 
 describe('PredictionV1Evaluator', () => {
   it('scores valid YES resolutions with Brier loss against consensus', async () => {
@@ -53,7 +54,7 @@ describe('PredictionV1Evaluator', () => {
     expect(payload.solutionEnvelope.cid).toBe('bafy-solution-envelope');
   });
 
-  it('rejects malformed probabilities without scoring', async () => {
+  it('rejects invalid parseable probabilities without scoring', async () => {
     const task = makePredictionV1Task();
     const envelope = await makeSignedSolutionEnvelope(task, {
       probabilityYes: '1.2',
@@ -79,25 +80,108 @@ describe('PredictionV1Evaluator', () => {
 
     expect(payload.verdict).toBe('REJECTED');
     expect(payload.scores).toBeUndefined();
-    expect(payload.checks.some((check) => check.status === 'FAIL')).toBe(true);
+    expect(out.gating).not.toHaveProperty('solverBrier');
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      name: 'solution.schema',
+      status: 'FAIL',
+    }));
   });
 
-  it('marks invalid and unresolved markets as non-scored verdicts', async () => {
+  it('rejects forged solution envelopes before scoring', async () => {
     const task = makePredictionV1Task();
     const envelope = await makeSignedSolutionEnvelope(task);
+    const tamperedEnvelope = {
+      ...envelope,
+      payload: {
+        ...envelope.payload,
+        probabilityYes: '0.0100',
+      },
+    };
 
-    const invalid = await new PredictionV1Evaluator({
+    const out = await new PredictionV1Evaluator({
       _testDeps: {
         getResolution: async () => ({
           venue: 'polymarket',
           marketId: 'mkt-1',
           conditionId: '0xabc',
-          status: 'invalid',
+          status: 'resolved',
+          outcome: 'YES',
+          sourceUrl: 'https://polymarket.com/event/test-market',
+        }),
+      },
+    }).run(makeHarnessCtx({ task: makeEvalTask(task, tamperedEnvelope as typeof envelope) }));
+    const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);
+
+    expect(payload.verdict).toBe('REJECTED');
+    expect(payload.scores).toBeUndefined();
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      name: 'integrity.manifest_signature',
+      status: 'FAIL',
+    }));
+  });
+
+  it('does not score when restoration task CID context is missing', async () => {
+    const task = makePredictionV1Task();
+    const envelope = await makeSignedSolutionEnvelope(task);
+    const evalTask = makeEvalTask(task, envelope);
+    delete evalTask.context![RESTORATION_TASK_CID_CONTEXT_KEY];
+    const evaluator = new PredictionV1Evaluator({
+      _testDeps: {
+        getResolution: async () => ({
+          venue: 'polymarket',
+          marketId: 'mkt-1',
+          conditionId: '0xabc',
+          status: 'resolved',
+          outcome: 'YES',
+          sourceUrl: 'https://polymarket.com/event/test-market',
+        }),
+      },
+    });
+
+    await expect(evaluator.canAttempt(evalTask)).resolves.toEqual({
+      ok: false,
+      reason: 'context.restorationTaskCid required',
+    });
+    const out = await evaluator.run(makeHarnessCtx({ task: evalTask }));
+    const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);
+
+    expect(payload.verdict).toBe('INDETERMINATE');
+    expect(payload.scores).toBeUndefined();
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      name: 'integrity.signedTask_ref',
+      status: 'INDETERMINATE',
+    }));
+  });
+
+  it('rejects resolution snapshots that do not match task market identifiers', async () => {
+    const task = makePredictionV1Task();
+    const envelope = await makeSignedSolutionEnvelope(task);
+
+    const out = await new PredictionV1Evaluator({
+      _testDeps: {
+        getResolution: async () => ({
+          venue: 'polymarket',
+          marketId: 'mkt-1',
+          conditionId: '0xother',
+          status: 'resolved',
+          outcome: 'YES',
           sourceUrl: 'https://polymarket.com/event/test-market',
         }),
       },
     }).run(makeHarnessCtx({ task: makeEvalTask(task, envelope) }));
-    expect(PredictionV1VerdictPayloadSchema.parse(invalid.verdictPayload).verdict).toBe('INVALID');
+    const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);
+
+    expect(payload.verdict).toBe('REJECTED');
+    expect(payload.scores).toBeUndefined();
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      name: 'market.identity',
+      status: 'FAIL',
+    }));
+  });
+
+  it('marks unresolved markets INDETERMINATE without scores', async () => {
+    const task = makePredictionV1Task();
+    const envelope = await makeSignedSolutionEnvelope(task);
 
     const unresolved = await new PredictionV1Evaluator({
       _testDeps: {
@@ -110,6 +194,44 @@ describe('PredictionV1Evaluator', () => {
         }),
       },
     }).run(makeHarnessCtx({ task: makeEvalTask(task, envelope) }));
-    expect(PredictionV1VerdictPayloadSchema.parse(unresolved.verdictPayload).verdict).toBe('INDETERMINATE');
+    const payload = PredictionV1VerdictPayloadSchema.parse(unresolved.verdictPayload);
+
+    expect(payload.verdict).toBe('INDETERMINATE');
+    expect(payload.scores).toBeUndefined();
+    expect(unresolved.gating).not.toHaveProperty('solverBrier');
+    expect(payload.checks).toContainEqual({
+      name: 'market.resolution',
+      status: 'INDETERMINATE',
+    });
   });
+
+  it.each(['invalid', 'cancelled', 'ambiguous'] as const)(
+    'marks %s market resolutions INVALID without scores and records a failed check',
+    async (status) => {
+      const task = makePredictionV1Task();
+      const envelope = await makeSignedSolutionEnvelope(task);
+
+      const out = await new PredictionV1Evaluator({
+        _testDeps: {
+          getResolution: async () => ({
+            venue: 'polymarket',
+            marketId: 'mkt-1',
+            conditionId: '0xabc',
+            status,
+            sourceUrl: 'https://polymarket.com/event/test-market',
+          }),
+        },
+      }).run(makeHarnessCtx({ task: makeEvalTask(task, envelope) }));
+      const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);
+
+      expect(payload.verdict).toBe('INVALID');
+      expect(payload.scores).toBeUndefined();
+      expect(out.gating).not.toHaveProperty('solverBrier');
+      expect(payload.checks).toContainEqual({
+        name: 'market.resolution',
+        status: 'FAIL',
+        detail: status,
+      });
+    },
+  );
 });

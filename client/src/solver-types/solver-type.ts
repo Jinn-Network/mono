@@ -33,14 +33,27 @@ export interface TestnetAutoContext {
   /** Agent EOA private key — threaded into auto-gen configs so generators can sign SignedTaskV1. */
   agentPrivateKey?: `0x${string}`;
   /**
-   * Override the prediction.v1 auto-generator submission window (ms). Used by the
-   * docker acceptance gate to keep the protocol loop tight (gate sets 120000).
-   * Default 600000 (10 min) when unset.
+   * Explicit opt-in for the launcher-owned Polymarket prediction.v1 generator.
+   * Ordinary operator daemons leave this unset/false and do not create rounds.
+   */
+  predictionV1LauncherEnabled?: boolean;
+  /**
+   * Override the prediction.v1 Polymarket submission window (ms).
+   * The generator default applies when unset.
    */
   predictionV1WindowMs?: number;
+  /** Launcher-owned Polymarket generator cadence (ms). */
+  predictionV1CadenceMs?: number;
+  /** Launcher-owned Polymarket generator safety caps. */
+  predictionV1MaxNewRoundsPerPoll?: number;
+  predictionV1MaxNewRoundsPerDay?: number;
+  predictionV1MaxOpenRounds?: number;
+  /** Launcher-owned Polymarket manual conditionId controls. */
+  predictionV1AllowlistConditionIds?: string[];
+  predictionV1BlocklistConditionIds?: string[];
   /**
-   * Override the prediction.v1 auto-generator gap from window end → resolveTs (ms).
-   * Default 300000 (5 min) when unset; gate sets 60000.
+   * Legacy Chainlink prediction.v1 gap from window end → resolveTs (ms).
+   * Retained for direct legacy generator tests; unused by Polymarket prediction.v1.
    */
   predictionV1ResolveGapMs?: number;
 }

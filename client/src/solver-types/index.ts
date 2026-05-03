@@ -4,7 +4,7 @@
 
 import type { TaskGenerator } from '../tasks/sources.js';
 import { portfolioV0 } from './portfolio-v0.js';
-import { predictionV1 } from './prediction-v0.js';
+import { predictionV1 } from './prediction-v1.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
 import { learnerLoopTest } from './learner-loop-test.js';
 import type { SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
@@ -45,8 +45,19 @@ export function collectTestnetAutoTaskGenerators(opts: {
   safeAddress?: `0x${string}`;
   /** Agent EOA private key — passed to generator configs that sign tasks. */
   agentPrivateKey?: `0x${string}`;
+  /** Explicit launcher opt-in for Polymarket prediction.v1 Task generation. */
+  predictionV1LauncherEnabled?: boolean;
   /** Override prediction.v1 submission window (ms). */
   predictionV1WindowMs?: number;
+  /** Override prediction.v1 Polymarket generator cadence (ms). */
+  predictionV1CadenceMs?: number;
+  /** Override prediction.v1 Polymarket generator safety caps. */
+  predictionV1MaxNewRoundsPerPoll?: number;
+  predictionV1MaxNewRoundsPerDay?: number;
+  predictionV1MaxOpenRounds?: number;
+  /** Override prediction.v1 Polymarket manual conditionId controls. */
+  predictionV1AllowlistConditionIds?: string[];
+  predictionV1BlocklistConditionIds?: string[];
   /** Override prediction.v1 window→resolveTs gap (ms). */
   predictionV1ResolveGapMs?: number;
 }): { generators: Array<{ solverType: string; generator: TaskGenerator }>; logLines: string[] } {
@@ -62,7 +73,14 @@ export function collectTestnetAutoTaskGenerators(opts: {
     agentEoa: opts.agentEoa,
     safeAddress: opts.safeAddress,
     agentPrivateKey: opts.agentPrivateKey,
+    predictionV1LauncherEnabled: opts.predictionV1LauncherEnabled,
     predictionV1WindowMs: opts.predictionV1WindowMs,
+    predictionV1CadenceMs: opts.predictionV1CadenceMs,
+    predictionV1MaxNewRoundsPerPoll: opts.predictionV1MaxNewRoundsPerPoll,
+    predictionV1MaxNewRoundsPerDay: opts.predictionV1MaxNewRoundsPerDay,
+    predictionV1MaxOpenRounds: opts.predictionV1MaxOpenRounds,
+    predictionV1AllowlistConditionIds: opts.predictionV1AllowlistConditionIds,
+    predictionV1BlocklistConditionIds: opts.predictionV1BlocklistConditionIds,
     predictionV1ResolveGapMs: opts.predictionV1ResolveGapMs,
   };
   for (const kind of knownSolverTypes()) {

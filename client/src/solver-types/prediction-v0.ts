@@ -7,7 +7,7 @@ import { makePredictionV1Generator, type PredictionV1AutoConfig } from './predic
 import type { SolverTypeDefinition } from './solver-type.js';
 import { PREDICTION_V1_KIND } from './constants.js';
 
-export const predictionV1: SolverTypeDefinition<PredictionV1AutoConfig> = {
+export const legacyChainlinkPredictionV1: SolverTypeDefinition<PredictionV1AutoConfig> = {
   solverType: PREDICTION_V1_KIND,
   async parseSpec(raw, deps) {
     if (predictionV1TemplateNeedsReadCurrent(raw) && !deps?.readCurrent) {

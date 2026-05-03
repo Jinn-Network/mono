@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,14 +42,14 @@ import { TaskEngine } from '../../src/harnesses/engine/engine.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../src/harnesses/engine/state.js';
-import { PredictionV1Evaluator } from '../../src/harnesses/impls/prediction-v0-evaluator/index.js';
+import { PredictionV1Evaluator } from '../../src/harnesses/impls/prediction-v1-evaluator/index.js';
 import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY, RESTORATION_TASK_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
 import type { Harness, Solution } from '../../src/harnesses/types.js';
 import { Store } from '../../src/store/store.js';
 import { TaskPostingService } from '../../src/tasks/posting-service.js';
 import { SignedEnvelopeSchema, type SignedEnvelope } from '../../src/types/envelope.js';
-import { PredictionV1TaskSchema } from '../../src/types/index.js';
-import type { Task, TaskRequest } from '../../src/types/index.js';
+import type { DeliveredResult, Task, TaskRequest } from '../../src/types/index.js';
+import { PredictionV1TaskSchema } from '../../src/types/prediction-v1.js';
 import { validatePayload } from '../../src/types/payloads/index.js';
 import { TrajectoryCollector } from '../../src/trajectory/index.js';
 import { allocateAnvilPort } from '../_support/chain/port-allocator.js';
@@ -416,31 +416,55 @@ export function makePredictionV1Task(now = Date.now()): Task {
     startTs: now - 1_000,
     endTs: now + 60_000,
   };
+  const sampledAt = new Date(now - 10_000).toISOString();
+  const expectedResolutionTime = new Date(now + 120_000).toISOString();
   const core = {
     id: 'prediction-v1-e2e',
-    description: 'Will ETH/USD be above 3000 at the test resolution timestamp?',
+    description: 'Will the test prediction market resolve YES?',
     solverType: 'prediction.v1' as const,
     window,
     spec: {
-      oracle: {
-        venue: 'chainlink-base-sepolia' as const,
-        feed: '0x0000000000000000000000000000000000000001',
-        feedDescription: 'ETH / USD',
-      },
       question: {
-        kind: 'threshold' as const,
-        operator: 'GT' as const,
-        threshold: '3000',
-        resolveTs: window.endTs + 60_000,
+        kind: 'binary' as const,
+        text: 'Will the test prediction market resolve YES?',
+        yesLabel: 'YES' as const,
+        noLabel: 'NO' as const,
+      },
+      source: {
+        type: 'prediction-market' as const,
+        venue: 'polymarket' as const,
+        url: 'https://polymarket.com/event/jinn-task-first-e2e',
+        identifiers: {
+          marketId: 'jinn-task-first-e2e',
+          conditionId: '0xcondition-task-first-e2e',
+          yesTokenId: 'yes-token-task-first-e2e',
+          noTokenId: 'no-token-task-first-e2e',
+        },
+      },
+      resolution: {
+        expectedResolutionTime,
+        rulesText: 'Test fixture resolves YES.',
+        rulesUrl: 'https://example.com/jinn-task-first-e2e-rules',
+      },
+      consensusSnapshot: {
+        sampledAt,
+        probabilityYes: '0.68',
+        method: 'best-bid-ask-midpoint' as const,
+        bestBidYes: '0.67',
+        bestAskYes: '0.69',
+        spread: '0.02',
+        source: 'polymarket-clob' as const,
+      },
+      eligibilitySnapshot: {
+        sampledAt,
+        timeToResolutionHours: 24,
+        liquidityUsd: '10000',
+        volume24hUsd: '5000',
+        orderbookAgeSeconds: 10,
+        selectionReason: 'deterministic Task-first e2e fixture',
       },
     },
-    eligibility: {
-      maxSubmissionDelayMs: 60_000,
-    },
-  };
-  PredictionV1TaskSchema.parse(core);
-  return {
-    ...core,
+    eligibility: {},
     claimPolicy: {
       mode: 'parallel',
       maxClaims: 25,
@@ -451,57 +475,73 @@ export function makePredictionV1Task(now = Date.now()): Task {
       submissionDeadlineTs: Math.floor((now + 10 * 60_000) / 1000),
     },
   };
+  PredictionV1TaskSchema.parse(core);
+  return core;
 }
 
-export function makePredictionV1SolutionPayload(now = Date.now()): Record<string, unknown> {
+export function makePredictionV1SolutionPayload(
+  now = Date.now(),
+  overrides: Partial<{
+    probabilityYes: string;
+    submittedAt: string;
+    format: string;
+    modelId: string;
+    confidence: string;
+    methodology: string;
+  }> = {},
+): Record<string, unknown> {
   const payload = {
-    prediction: {
-      probability: '0.72',
-      submittedAt: now,
-      modelId: 'task-first-e2e-baseline',
-    },
-    rationale: [
-      { ts: now, note: 'Task-first e2e smoke payload.' },
-    ],
+    probabilityYes: '0.72',
+    submittedAt: new Date(now).toISOString(),
+    format: 'decimal',
+    modelId: 'task-first-e2e-baseline',
+    confidence: 'medium',
+    methodology: 'Deterministic Task-first e2e smoke payload.',
+    ...overrides,
   };
   validatePayload('prediction.v1', 'restoration', payload);
   return payload;
 }
 
 export function makePredictionV1VerdictPayload(now = Date.now()): Record<string, unknown> {
+  const sampledAt = new Date(now - 10_000).toISOString();
   const payload = {
-    restorationEnvelope: {
+    verdict: 'SCORED',
+    outcome: 'YES',
+    resolvedAt: new Date(now).toISOString(),
+    resolutionSource: {
+      venue: 'polymarket',
+      url: 'https://polymarket.com/event/jinn-task-first-e2e',
+      marketId: 'jinn-task-first-e2e',
+      conditionId: '0xcondition-task-first-e2e',
+    },
+    task: {
+      cid: 'local-1',
+      id: 'prediction-v1-e2e',
+    },
+    solutionEnvelope: {
       cid: 'bafy-restoration-envelope',
       sha256: 'a'.repeat(64),
     },
-    verificationOfRestoration: {
-      claimedTier: 'committed',
-      sdkVersion: 'task-first-e2e',
-      timestamp: now,
-      checks: [
-        { name: 'schema', passed: true, detail: 'prediction.v1 restoration payload parsed' },
-      ],
-      overall: 'valid',
-    },
-    verdict: 'PASS',
-    score: '0.0784',
-    scoreBasis: 'brier.v1',
-    scoreVersion: 'task-first-e2e',
-    oracleReading: {
-      feed: '0x0000000000000000000000000000000000000001',
-      roundId: '1',
-      answer: '3200',
-      updatedAt: now,
-    },
     claimed: {
-      probability: '0.72',
-      submittedAt: now,
+      probabilityYes: '0.72',
+      submittedAt: new Date(now - 1_000).toISOString(),
       modelId: 'task-first-e2e-baseline',
-      submissionManifestCid: 'bafy-restoration-envelope',
     },
-    groundTruth: 'YES',
+    benchmark: {
+      probabilityYes: '0.68',
+      sampledAt,
+      method: 'best-bid-ask-midpoint',
+    },
+    scores: {
+      scoreBasis: 'brier-loss.v1',
+      solverBrier: '0.0784',
+      consensusBrier: '0.1024',
+      brierSpread: '0.024',
+    },
     checks: [
-      { name: 'brier', status: 'PASS', detail: 'score=(1-0.72)^2' },
+      { name: 'solution.envelope', status: 'PASS' },
+      { name: 'solution.schema', status: 'PASS' },
     ],
   };
   validatePayload('prediction.v1', 'verdict', payload);
@@ -521,10 +561,57 @@ function predictionHarness(): Harness {
   };
 }
 
+function makeResolvedPolymarketSnapshot(task: Task) {
+  const parsed = PredictionV1TaskSchema.parse(task);
+  return {
+    venue: 'polymarket' as const,
+    marketId: parsed.spec.source.identifiers.marketId,
+    conditionId: parsed.spec.source.identifiers.conditionId,
+    status: 'resolved' as const,
+    outcome: 'YES' as const,
+    resolvedAt: parsed.spec.resolution.expectedResolutionTime,
+    sourceUrl: parsed.spec.source.url,
+  };
+}
+
+function verdictScoreSummary(payload: Record<string, unknown>): string {
+  const scores = payload['scores'];
+  if (scores && typeof scores === 'object' && !Array.isArray(scores)) {
+    const record = scores as Record<string, unknown>;
+    return String(record['solverBrier'] ?? record['brierSpread'] ?? '');
+  }
+  return String(payload['score'] ?? '');
+}
+
+export interface LocalTaskFirstAttemptResult {
+  sharedTaskId: string;
+  sharedTaskCid: string;
+  conditionId: string;
+  solverSafeAddress: Address;
+  request: TaskRequest;
+  solutionPayload: Record<string, unknown>;
+  solutionEnvelope: SignedEnvelope;
+  solutionDelivery: DeliveredResult;
+  verdictRequest: TaskRequest;
+  verdictPayload: Record<string, unknown>;
+  verdictDelivery: DeliveredResult;
+  verdict: string;
+  score: string;
+}
+
 export interface LocalTaskFirstResult {
   postedTaskId: string;
+  postedTaskCid: string;
+  conditionId: string;
+  consensusSnapshot: Record<string, unknown>;
+  attempts: LocalTaskFirstAttemptResult[];
   request: TaskRequest;
+  solutionDelivery: DeliveredResult;
+  verdictRequest: TaskRequest;
+  verdictDelivery: DeliveredResult;
   secondRequest: TaskRequest;
+  verdict: string;
+  score: string;
 }
 
 export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult> {
@@ -533,7 +620,9 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
   const adapter = new LocalAdapter();
   await adapter.initialize();
   try {
-    const task = makePredictionV1Task();
+    const now = Date.now();
+    const task = makePredictionV1Task(now);
+    const predictionTask = PredictionV1TaskSchema.parse(task);
     const posting = new TaskPostingService(adapter, store);
     const posted = await posting.postCandidate(
       {
@@ -550,11 +639,6 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
     assert(announcement.taskId === posted.taskId, 'watchForTasks yielded the wrong taskId');
     assert(announcement.task.solverType === 'prediction.v1', 'announcement solverType mismatch');
 
-    const request = await adapter.claimTask(announcement.taskId);
-    assert(request.taskId === posted.taskId, 'claimTask did not preserve taskId');
-    assert(request.attemptIndex === 0, 'first claim did not produce attemptIndex=0');
-    assert(request.requestId.length > 0, 'claimTask did not return requestId');
-
     const engine = new TaskEngine({
       store,
       paths: {
@@ -565,48 +649,175 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
         findFor: (ctx) => predictionHarness().supports(ctx) ? predictionHarness() : undefined,
       },
     });
-    await engine.observe({
-      requestId: request.requestId,
-      taskId: request.taskId,
-      attemptIndex: request.attemptIndex,
-      taskCid: request.taskCid ?? posted.taskCid,
-      onchainCreationTx: request.onchainCreationTx ?? '0x' + '00'.repeat(32),
-      onchainCreationBlock: request.onchainCreationBlock ?? 1,
-      solverType: announcement.task.solverType,
-      taskRole: 'restoration',
-      windowStartTs: announcement.task.window?.startTs ?? Date.now() - 1_000,
-      windowEndTs: announcement.task.window?.endTs ?? Date.now() + 60_000,
-      task: announcement.task,
-    });
-    await engine.process(request.requestId);
-    await engine.process(request.requestId);
-    await engine.process(request.requestId);
-
     const persistence = new TaskRunPersistence(store.db);
-    const row = persistence.getByRequestId(request.requestId);
-    assert(row?.state === TaskRunState.POST_SNAPSHOT, `engine did not run harness; state=${row?.state}`);
-    assert(row.taskId === posted.taskId, 'engine row missing task_id grouping field');
-    assert(row.attemptIndex === 0, 'engine row missing attempt_index grouping field');
-    assert(row.taskCid === posted.taskCid, 'engine row missing task_cid grouping field');
-    assert(row.solverType === 'prediction.v1', 'engine row missing solver_type grouping field');
+    const evaluatorSafe = privateKeyToAccount(ANVIL_PRIVATE_KEYS[3]).address as Address;
+    const evaluatorHarness = new PredictionV1Evaluator({
+      _testDeps: {
+        getResolution: async () => makeResolvedPolymarketSnapshot(announcement.task),
+      },
+    });
+    const runAttempt = async (
+      attemptIndex: number,
+      privateKey: Hex,
+      probabilityYes: string,
+    ): Promise<LocalTaskFirstAttemptResult> => {
+      const request = await adapter.claimTask(announcement.taskId);
+      assert(request.taskId === posted.taskId, 'claimTask did not preserve taskId');
+      assert(request.attemptIndex === attemptIndex, `claimTask did not produce attemptIndex=${attemptIndex}`);
+      assert(request.requestId.length > 0, 'claimTask did not return requestId');
 
-    await adapter.submitResult(request.requestId, {
-      data: JSON.stringify({
+      await engine.observe({
+        requestId: request.requestId,
+        taskId: request.taskId,
+        attemptIndex: request.attemptIndex,
+        taskCid: request.taskCid ?? posted.taskCid,
+        onchainCreationTx: request.onchainCreationTx ?? '0x' + '00'.repeat(32),
+        onchainCreationBlock: request.onchainCreationBlock ?? 1,
+        solverType: announcement.task.solverType,
+        taskRole: 'restoration',
+        windowStartTs: announcement.task.window?.startTs ?? Date.now() - 1_000,
+        windowEndTs: announcement.task.window?.endTs ?? Date.now() + 60_000,
+        task: announcement.task,
+      });
+      await engine.process(request.requestId);
+      await engine.process(request.requestId);
+      await engine.process(request.requestId);
+
+      const row = persistence.getByRequestId(request.requestId);
+      assert(row?.state === TaskRunState.POST_SNAPSHOT, `engine did not run harness; state=${row?.state}`);
+      assert(row.taskId === posted.taskId, 'engine row missing task_id grouping field');
+      assert(row.attemptIndex === attemptIndex, 'engine row missing attempt_index grouping field');
+      assert(row.taskCid === posted.taskCid, 'engine row missing task_cid grouping field');
+      assert(row.solverType === 'prediction.v1', 'engine row missing solver_type grouping field');
+
+      const taskCid = request.taskCid ?? posted.taskCid;
+      const solverSafeAddress = privateKeyToAccount(privateKey).address as Address;
+      const solutionPayload = makePredictionV1SolutionPayload(now + 1_000 + attemptIndex, {
+        probabilityYes,
+        modelId: `task-first-e2e-baseline-${attemptIndex + 1}`,
+      });
+      const solutionEnvelope = await signedExecutionEnvelope({
         solverType: 'prediction.v1',
         role: 'restoration',
-        payload: makePredictionV1SolutionPayload(),
-      }),
-    });
-    const delivery = await takeOne(adapter.watchForDeliveries(), 'watchForDeliveries');
-    assert(delivery.requestId === request.requestId, 'delivery requestId mismatch');
-    assert(delivery.task.solverType === 'prediction.v1', 'delivery task solverType mismatch');
+        taskCid,
+        requestId: keccak256(toBytes(request.requestId)),
+        onchainCreationTx: request.onchainCreationTx ?? '0x' + '00'.repeat(32),
+        onchainCreationBlock: request.onchainCreationBlock ?? 1,
+        safeAddress: solverSafeAddress,
+        privateKey,
+        window: announcement.task.window!,
+        payload: solutionPayload,
+      });
+      await adapter.submitResult(request.requestId, {
+        data: JSON.stringify(solutionEnvelope),
+      });
+      const solutionDelivery = await takeOne(adapter.watchForDeliveries(), 'watchForDeliveries');
+      assert(solutionDelivery.requestId === request.requestId, 'delivery requestId mismatch');
+      assert(solutionDelivery.task.solverType === 'prediction.v1', 'delivery task solverType mismatch');
 
-    const secondRequest = await adapter.claimTask(announcement.taskId);
-    assert(secondRequest.taskId === posted.taskId, 'second claim did not preserve taskId');
-    assert(secondRequest.attemptIndex === 1, 'second claim did not produce attemptIndex=1');
-    assert(secondRequest.requestId !== request.requestId, 'second claim reused requestId');
+      const evaluationTask: Task = {
+        ...announcement.task,
+        id: `${announcement.task.id}:evaluation:${request.attemptIndex}`,
+        role: 'evaluation',
+        restorationRequestId: request.requestId,
+        attemptId: request.requestId,
+        attemptNumber: request.attemptIndex,
+        context: {
+          ...(announcement.task.context ?? {}),
+          restorationResult: JSON.stringify(solutionEnvelope),
+          [RESTORATION_TASK_CID_CONTEXT_KEY]: taskCid,
+          [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: `bafy-restoration-local-${attemptIndex}`,
+        },
+      };
+      const verdictPosted = await adapter.postTask(evaluationTask);
+      const verdictAnnouncement = await takeOne(adapter.watchForTasks(), 'watchForEvaluationTasks');
+      assert(verdictAnnouncement.task.role === 'evaluation', 'evaluation announcement did not preserve role');
+      assert(
+        verdictAnnouncement.task.restorationRequestId === request.requestId,
+        'evaluation task did not link restoration request',
+      );
+      const verdictRequest = await adapter.claimTask(verdictAnnouncement.taskId);
+      assert(verdictRequest.task.role === 'evaluation', 'verdict request did not preserve evaluation role');
+      assert(
+        verdictRequest.task.restorationRequestId === request.requestId,
+        'verdict request did not preserve restorationRequestId',
+      );
 
-    return { postedTaskId: posted.taskId, request, secondRequest };
+      const verdictWorkDir = join(tmp, `verdict-work-${attemptIndex}`);
+      await mkdir(verdictWorkDir, { recursive: true });
+      const verdictSolution = await evaluatorHarness.run({
+        task: verdictAnnouncement.task,
+        taskCid: verdictPosted.taskCid,
+        workingDir: verdictWorkDir,
+        implStateDir: join(tmp, `verdict-state-${attemptIndex}`),
+        log: () => {},
+        abort: new AbortController().signal,
+        msUntilEndTs: () => 0,
+        trajectory: new TrajectoryCollector({ taskCid, runId: verdictRequest.requestId }),
+      });
+      assert(verdictSolution.verdictPayload, 'local evaluator did not return a verdictPayload');
+      validatePayload('prediction.v1', 'verdict', verdictSolution.verdictPayload);
+      const verdictEnvelope = await signedExecutionEnvelope({
+        solverType: 'prediction.v1',
+        role: 'verdict',
+        taskCid,
+        requestId: keccak256(toBytes(verdictRequest.requestId)),
+        onchainCreationTx: verdictRequest.onchainCreationTx ?? '0x' + '00'.repeat(32),
+        onchainCreationBlock: verdictRequest.onchainCreationBlock ?? 1,
+        safeAddress: evaluatorSafe,
+        privateKey: ANVIL_PRIVATE_KEYS[3],
+        window: announcement.task.window!,
+        payload: verdictSolution.verdictPayload,
+      });
+      await adapter.submitResult(verdictRequest.requestId, {
+        data: JSON.stringify(verdictEnvelope),
+      });
+      const verdictDelivery = await takeOne(adapter.watchForDeliveries(), 'watchForVerdictDeliveries');
+      assert(verdictDelivery.requestId === verdictRequest.requestId, 'verdict delivery requestId mismatch');
+      assert(verdictDelivery.task.role === 'evaluation', 'verdict delivery task role mismatch');
+
+      return {
+        sharedTaskId: posted.taskId,
+        sharedTaskCid: posted.taskCid,
+        conditionId: predictionTask.spec.source.identifiers.conditionId,
+        solverSafeAddress,
+        request,
+        solutionPayload,
+        solutionEnvelope,
+        solutionDelivery,
+        verdictRequest,
+        verdictPayload: verdictSolution.verdictPayload,
+        verdictDelivery,
+        verdict: String(verdictSolution.verdictPayload['verdict']),
+        score: verdictScoreSummary(verdictSolution.verdictPayload),
+      };
+    };
+
+    const attempts = [
+      await runAttempt(0, ANVIL_PRIVATE_KEYS[1], '0.72'),
+      await runAttempt(1, ANVIL_PRIVATE_KEYS[2], '0.61'),
+    ];
+
+    assert(attempts[0]!.request.requestId !== attempts[1]!.request.requestId, 'second claim reused requestId');
+    assert(
+      attempts[0]!.solverSafeAddress !== attempts[1]!.solverSafeAddress,
+      'two solver attempts used the same solver identity',
+    );
+
+    return {
+      postedTaskId: posted.taskId,
+      postedTaskCid: posted.taskCid,
+      conditionId: predictionTask.spec.source.identifiers.conditionId,
+      consensusSnapshot: predictionTask.spec.consensusSnapshot,
+      attempts,
+      request: attempts[0]!.request,
+      solutionDelivery: attempts[0]!.solutionDelivery,
+      verdictRequest: attempts[0]!.verdictRequest,
+      verdictDelivery: attempts[0]!.verdictDelivery,
+      secondRequest: attempts[1]!.request,
+      verdict: attempts[0]!.verdict,
+      score: attempts[0]!.score,
+    };
   } finally {
     await adapter.stop();
     store.close();
@@ -935,7 +1146,7 @@ async function signedExecutionEnvelope(params: {
     },
     window: params.window,
     executor: {
-      implName: params.role === 'verdict' ? 'prediction-v0-evaluator' : 'prediction-v1-e2e-harness',
+      implName: params.role === 'verdict' ? 'prediction-v1-evaluator' : 'prediction-v1-e2e-harness',
       implVersion: '1.0.0',
       clientGitSha: 'dev-e2e',
       codeDigest: `sha256:${'11'.repeat(32)}`,
@@ -1683,29 +1894,8 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     const verdictRequestId = verdictClaim.requestId as Hex;
 
     const evaluatorHarness = new PredictionV1Evaluator({
-      evaluatorPk: evaluatorOperator.agentPrivateKey,
-      evaluatorSafeAddress: evaluatorOperator.safeAddress,
       _testDeps: {
-        expectedTaskCid: taskCid,
-        oraclePriceAtResolveTs: async () => ({
-          round: {
-            roundId: 1n,
-            answer: 3200n,
-            startedAt: predictionTask.window.endTs - 10_000,
-            updatedAt: predictionTask.spec.question.resolveTs - 1_000,
-            answeredInRound: 1n,
-            decimals: 0,
-          },
-          nextRound: {
-            roundId: 2n,
-            answer: 3210n,
-            startedAt: predictionTask.spec.question.resolveTs + 1_000,
-            updatedAt: predictionTask.spec.question.resolveTs + 1_000,
-            answeredInRound: 2n,
-            decimals: 0,
-          },
-          spanning: true,
-        }),
+        getResolution: async () => makeResolvedPolymarketSnapshot(task),
       },
     });
     const evaluationTmp = await mkdtemp(join(tmpdir(), 'jinn-prediction-fork-eval-e2e-'));
@@ -1865,7 +2055,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
         { operator: operator.safeAddress, attemptIndex: claim.attemptIndex, requestId },
       ],
       verdict: String(verdictPayload['verdict']),
-      score: String(verdictPayload['score']),
+      score: verdictScoreSummary(verdictPayload),
       submittedCount,
       refundedUnusedBudget,
     };
@@ -2040,29 +2230,8 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
     assert(verdictIndex === 0, `first verdict index was ${verdictIndex}`);
 
     const evaluatorHarness = new PredictionV1Evaluator({
-      evaluatorPk: ANVIL_PRIVATE_KEYS[3],
-      evaluatorSafeAddress: evaluator.address,
       _testDeps: {
-        expectedTaskCid: taskCid,
-        oraclePriceAtResolveTs: async () => ({
-          round: {
-            roundId: 1n,
-            answer: 3200n,
-            startedAt: predictionTask.window.endTs - 10_000,
-            updatedAt: predictionTask.spec.question.resolveTs - 1_000,
-            answeredInRound: 1n,
-            decimals: 0,
-          },
-          nextRound: {
-            roundId: 2n,
-            answer: 3210n,
-            startedAt: predictionTask.spec.question.resolveTs + 1_000,
-            updatedAt: predictionTask.spec.question.resolveTs + 1_000,
-            answeredInRound: 2n,
-            decimals: 0,
-          },
-          spanning: true,
-        }),
+        getResolution: async () => makeResolvedPolymarketSnapshot(task),
       },
     });
     const evaluationTmp = await mkdtemp(join(tmpdir(), 'jinn-prediction-eval-e2e-'));
@@ -2221,7 +2390,7 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
         { operator: operatorB.address, attemptIndex: attemptIndexB, requestId: requestIdB },
       ],
       verdict: String(verdictPayload['verdict']),
-      score: String(verdictPayload['score']),
+      score: verdictScoreSummary(verdictPayload),
       submittedCount,
       refundedUnusedBudget,
     };

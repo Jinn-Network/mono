@@ -6,17 +6,28 @@ import { gatherIntrospectionRaw as defaultGatherIntrospectionRaw } from '../intr
 import { assembleStatusRollupV1 as defaultAssembleStatusRollupV1 } from '../../api/status-rollup-build.js';
 import type { StatusRollupV1Response, StatusDetailV1 } from '../../api/status-rollup-build.js';
 import { loadConfig, getConfigPathFromArgs, buildConfigProvenance, type ConfigProvenance } from '../../config.js';
+import type { JinnConfig } from '../../config.js';
+import {
+  resolveTaskNativeReadiness,
+  type TaskNativeReadiness,
+} from '../task-native-readiness.js';
 
 export interface StatusDeps {
   gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
   assembleStatusRollupV1: typeof defaultAssembleStatusRollupV1;
   loadConfig?: typeof loadConfig;
   getConfigPathFromArgs?: typeof getConfigPathFromArgs;
+  resolveTaskNativeReadiness?: (config: JinnConfig) => TaskNativeReadiness;
 }
 
 const PRODUCTION_DEPS: StatusDeps = {
   gatherIntrospectionRaw: defaultGatherIntrospectionRaw,
   assembleStatusRollupV1: defaultAssembleStatusRollupV1,
+};
+
+type StatusPayload = StatusRollupV1Response & {
+  config?: ConfigProvenance;
+  taskNative?: TaskNativeReadiness;
 };
 
 function humanDetail(d: StatusDetailV1): string {
@@ -49,13 +60,16 @@ function humanDetail(d: StatusDetailV1): string {
   return lines.join('\n');
 }
 
-function humanStatus(v: StatusRollupV1Response): string {
+function humanStatus(v: StatusPayload): string {
   const health = v.exit.blocking ? `degraded: ${v.exit.hint ?? 'attention needed'}` : 'healthy';
   const parts = [
     `daemon=${v.daemon.state} network=${v.daemon.network} chain=${v.rpc.chainId} block=${v.rpc.blockNumber}`,
     `health=${health}`,
     `fleet: ${v.fleet.size} services, ${v.fleet.complete} complete, ${v.fleet.needsAttention} need attention`,
     `pending: ${v.earnings.pendingTotal} reward-wei`,
+    v.taskNative
+      ? `task-native: solver=${v.taskNative.solverReady ? 'ready' : 'not-ready'} evaluator=${v.taskNative.evaluatorReady ? 'ready' : 'not-ready'} (${v.taskNative.detail})`
+      : '',
     v.exit.blocking && v.exit.hint ? `hint: ${v.exit.hint}` : '',
   ].filter(Boolean);
   if (v.detail) {
@@ -114,9 +128,11 @@ Examples:
         (deps.getConfigPathFromArgs ?? getConfigPathFromArgs)(ctx.argv ?? []) ??
         getConfigPathFromArgs(process.argv.slice(2));
       let configProvenance: ConfigProvenance | undefined;
+      let taskNative: TaskNativeReadiness | undefined;
       try {
         const cfg = (deps.loadConfig ?? loadConfig)(configPath);
         configProvenance = buildConfigProvenance(configPath, cfg, ctx.env);
+        taskNative = (deps.resolveTaskNativeReadiness ?? resolveTaskNativeReadiness)(cfg);
       } catch {
         /* non-fatal — status works even without a valid config file */
       }
@@ -125,12 +141,14 @@ Examples:
       const rollup = deps.assembleStatusRollupV1(raw, {
         includeDetail: Boolean(parsed.values.detail),
       });
-      const payload = configProvenance !== undefined
-        ? { ...rollup, config: configProvenance }
-        : rollup;
+      const payload: StatusPayload = {
+        ...rollup,
+        ...(configProvenance !== undefined ? { config: configProvenance } : {}),
+        ...(taskNative !== undefined ? { taskNative } : {}),
+      };
       emitResult(
         payload,
-        (v) => humanStatus(v as StatusRollupV1Response),
+        (v) => humanStatus(v as StatusPayload),
         {
           json: Boolean(parsed.values.json),
           human: Boolean(parsed.values.human),

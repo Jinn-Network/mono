@@ -17,7 +17,9 @@
     },
     "skills": [
       "skills/base-rate-forecasting/SKILL.md",
-      "skills/calibration/SKILL.md"
+      "skills/calibration/SKILL.md",
+      "skills/common-biases/SKILL.md",
+      "skills/polymarket-task-handling/SKILL.md"
     ]
   }
 }

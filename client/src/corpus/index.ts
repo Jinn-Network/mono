@@ -32,6 +32,10 @@ export type {
 export { CorpusQueryError, ManifestFetchError, AcquireError, HashMismatchError } from './types.js';
 export { noopRouteResolver } from './route-resolver.js';
 export { getCachedArtifact, hasCachedArtifact } from './cache.js';
+export {
+  queryScoreablePredictionBrierVerdicts,
+  type ScoreablePredictionBrierVerdictQuery,
+} from './prediction-scoreable-verdicts.js';
 
 interface InternalDeps {
   fetch?: typeof globalThis.fetch;

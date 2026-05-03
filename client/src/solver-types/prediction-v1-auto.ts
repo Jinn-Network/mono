@@ -7,6 +7,7 @@ import type { Task } from '../types/task.js';
 import type { TaskV1, SignedTaskV1 } from '../types/task-document.js';
 import { signTaskV1 } from '../tasks/signing.js';
 import {
+  getResolution,
   getOrderbook,
   listMarketCandidates,
   type MarketCandidate,
@@ -21,6 +22,7 @@ export interface PredictionV1AutoConfig extends PolymarketClientConfig {
   minVolume24hUsd?: string;
   maxYesSpread?: string;
   maxOrderbookAgeSeconds?: number;
+  cadenceMs?: number;
   maxNewRoundsPerPoll?: number;
   maxNewRoundsPerDay?: number;
   maxOpenRounds?: number;
@@ -28,6 +30,7 @@ export interface PredictionV1AutoConfig extends PolymarketClientConfig {
   agentEoa?: `0x${string}`;
   safeAddress?: `0x${string}`;
   agentPrivateKey?: `0x${string}`;
+  allowlistConditionIds?: string[];
   blocklistConditionIds?: string[];
 }
 
@@ -45,6 +48,7 @@ const DEFAULTS = {
   minVolume24hUsd: '2500',
   maxYesSpread: '0.10',
   maxOrderbookAgeSeconds: 60,
+  cadenceMs: 6 * 60 * 60 * 1000,
   maxNewRoundsPerPoll: 25,
   maxNewRoundsPerDay: 100,
   maxOpenRounds: 250,
@@ -54,10 +58,18 @@ const DEFAULTS = {
 export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}) {
   const postedAtByCondition = new Map<string, number>();
   const postedCountByDay = new Map<string, number>();
-  const blocklist = new Set(config.blocklistConditionIds ?? []);
+  const allowlist = conditionIdSet(config.allowlistConditionIds);
+  const blocklist = conditionIdSet(config.blocklistConditionIds);
+  let lastPollStartedAt = 0;
 
   return async (): Promise<Task[] | null> => {
     const now = Date.now();
+    const cadenceMs = config.cadenceMs ?? DEFAULTS.cadenceMs;
+    if (cadenceMs > 0 && lastPollStartedAt > 0 && now - lastPollStartedAt < cadenceMs) {
+      return null;
+    }
+    lastPollStartedAt = now;
+
     pruneOpenRounds(postedAtByCondition, now);
     const dayKey = new Date(now).toISOString().slice(0, 10);
     const todayCount = postedCountByDay.get(dayKey) ?? 0;
@@ -74,14 +86,19 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}) {
     }
 
     const eligible: EligibleMarket[] = [];
-    for (const market of candidates) {
+    for (const market of prioritizeAllowlisted(candidates, allowlist)) {
       if (eligible.length >= pollLimit * 3) break;
-      if (postedAtByCondition.has(market.conditionId) || blocklist.has(market.conditionId)) continue;
+      const conditionId = normalizeConditionId(market.conditionId);
+      if (postedAtByCondition.has(conditionId) || blocklist.has(conditionId)) continue;
       const checked = await checkMarketEligibility(market, config, now);
       if (checked) eligible.push(checked);
     }
 
     eligible.sort((a, b) => {
+      const allowDelta =
+        Number(allowlist.has(normalizeConditionId(b.market.conditionId))) -
+        Number(allowlist.has(normalizeConditionId(a.market.conditionId)));
+      if (allowDelta !== 0) return allowDelta;
       const liquidityDelta = Number(b.market.liquidityUsd) - Number(a.market.liquidityUsd);
       if (Number.isFinite(liquidityDelta) && liquidityDelta !== 0) return liquidityDelta;
       const spreadDelta = Number(a.orderbook.spread) - Number(b.orderbook.spread);
@@ -93,7 +110,7 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}) {
     const tasks: Task[] = [];
     for (const entry of selected) {
       const task = await buildTask(entry, config, now);
-      postedAtByCondition.set(entry.market.conditionId, Date.parse(entry.market.endTime));
+      postedAtByCondition.set(normalizeConditionId(entry.market.conditionId), Date.parse(entry.market.endTime));
       tasks.push(task);
     }
     if (tasks.length > 0) {
@@ -108,7 +125,6 @@ async function checkMarketEligibility(
   config: PredictionV1AutoConfig,
   now: number,
 ): Promise<EligibleMarket | null> {
-  if (!market.active || market.closed || market.archived) return null;
   if (!market.rulesText.trim()) return null;
   if (Number(market.liquidityUsd) < Number(config.minLiquidityUsd ?? DEFAULTS.minLiquidityUsd)) return null;
   if (Number(market.volume24hUsd) < Number(config.minVolume24hUsd ?? DEFAULTS.minVolume24hUsd)) return null;
@@ -118,6 +134,20 @@ async function checkMarketEligibility(
   const timeToResolutionHours = (resolutionMs - now) / 3_600_000;
   if (timeToResolutionHours < (config.minTimeToResolutionHours ?? DEFAULTS.minTimeToResolutionHours)) return null;
   if (timeToResolutionHours > (config.maxTimeToResolutionHours ?? DEFAULTS.maxTimeToResolutionHours)) return null;
+
+  let resolutionStatus: string;
+  try {
+    const resolution = await getResolution({
+      ...config,
+      marketId: market.marketId,
+      sourceUrl: market.url,
+    });
+    resolutionStatus = resolution.status;
+  } catch {
+    return null;
+  }
+  if (resolutionStatus !== 'unresolved') return null;
+  if (!market.active || market.closed || market.archived) return null;
 
   let orderbook: OrderbookSnapshot;
   try {
@@ -204,6 +234,11 @@ async function buildTask(
     minVolume24hUsd: config.minVolume24hUsd ?? DEFAULTS.minVolume24hUsd,
     maxYesSpread: config.maxYesSpread ?? DEFAULTS.maxYesSpread,
     maxOrderbookAgeSeconds: config.maxOrderbookAgeSeconds ?? DEFAULTS.maxOrderbookAgeSeconds,
+    generatorCadenceMs: config.cadenceMs ?? DEFAULTS.cadenceMs,
+    maxNewRoundsPerPoll: config.maxNewRoundsPerPoll ?? DEFAULTS.maxNewRoundsPerPoll,
+    maxNewRoundsPerDay: config.maxNewRoundsPerDay ?? DEFAULTS.maxNewRoundsPerDay,
+    maxOpenRounds: config.maxOpenRounds ?? DEFAULTS.maxOpenRounds,
+    manualAllowlistHit: conditionIdSet(config.allowlistConditionIds).has(normalizeConditionId(market.conditionId)),
   };
   const baseTask: Task = {
     id,
@@ -246,4 +281,26 @@ function pruneOpenRounds(postedAtByCondition: Map<string, number>, now: number):
       postedAtByCondition.delete(conditionId);
     }
   }
+}
+
+function normalizeConditionId(conditionId: string): string {
+  return conditionId.trim().toLowerCase();
+}
+
+function conditionIdSet(values?: string[]): Set<string> {
+  return new Set(
+    (values ?? [])
+      .map((value) => normalizeConditionId(value))
+      .filter(Boolean),
+  );
+}
+
+function prioritizeAllowlisted(markets: MarketCandidate[], allowlist: Set<string>): MarketCandidate[] {
+  if (allowlist.size === 0) return markets;
+  return [...markets].sort((a, b) => {
+    const allowDelta =
+      Number(allowlist.has(normalizeConditionId(b.conditionId))) -
+      Number(allowlist.has(normalizeConditionId(a.conditionId)));
+    return allowDelta;
+  });
 }

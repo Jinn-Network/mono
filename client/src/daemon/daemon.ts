@@ -428,7 +428,7 @@ export class Daemon {
 
       const solverType = taskAnnouncement.task.solverType ?? undefined;
       const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
-      const accept = await engine.canAcceptTask({ solverType, taskRole });
+      const accept = await engine.canAcceptTask({ solverType, taskRole, task: taskAnnouncement.task });
       if (!accept.ok) {
         console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
         continue;

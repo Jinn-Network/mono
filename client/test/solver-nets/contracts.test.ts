@@ -56,4 +56,23 @@ describe('SolverNet contracts', () => {
       }),
     ).rejects.toThrow(/no registered SolverNetContract/);
   });
+
+  it('reports a clear error when the canonical prediction plugin is not available', async () => {
+    await expect(
+      loadSolverNets({
+        solverNets: {
+          prediction: {
+            enabled: true,
+            solverType: 'prediction.v1',
+            canonicalPlugin: 'npm:@jinn-network/definitely-missing-prediction-canonical-plugin',
+            harness: 'prediction-v1-baseline',
+            plugins: [],
+            taskGenerator: { enabled: true },
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      /SolverPlugin source npm:@jinn-network\/definitely-missing-prediction-canonical-plugin is not vendored/,
+    );
+  });
 });

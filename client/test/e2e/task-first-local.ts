@@ -26,7 +26,9 @@ async function main(): Promise<void> {
   results.push(await runPhase('Client Task-first lifecycle', async () => {
     const result = await runLocalTaskFirstLifecycle();
     process.stdout.write(
-      `taskId=${result.postedTaskId} requestIds=${result.request.requestId},${result.secondRequest.requestId}\n`,
+      `taskId=${result.postedTaskId} taskCid=${result.postedTaskCid} ` +
+      `attempts=${result.attempts.map((a) => `${a.request.attemptIndex}:${a.request.requestId}`).join(',')} ` +
+      `verdicts=${result.attempts.map((a) => `${a.verdictRequest.requestId}:${a.verdict}:${a.score}`).join(',')}\n`,
     );
   }));
 

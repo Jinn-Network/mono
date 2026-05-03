@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { describe, expect, it } from 'vitest';
 import {
   loadSolverPluginManifest,
@@ -10,8 +12,18 @@ import { SOLVER_NET_CONTRACTS } from '../../src/solver-nets/contracts.js';
 
 const pluginRoot = fileURLToPath(new URL('../../plugins/jinn-prediction-plugin/', import.meta.url));
 
+interface PredictionMcpServerModule {
+  listToolDeclarations(): Array<{ name: string }>;
+  getMarket(args: unknown, config: unknown): Promise<Record<string, unknown>>;
+  getOrderbook(args: unknown, config: unknown): Promise<Record<string, unknown>>;
+}
+
 function readJson(rel: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(pluginRoot, rel), 'utf-8')) as Record<string, unknown>;
+}
+
+async function readMcpServerModule(): Promise<PredictionMcpServerModule> {
+  return import(pathToFileURL(join(pluginRoot, 'mcp/polymarket-server.mjs')).href) as Promise<PredictionMcpServerModule>;
 }
 
 function sampleTask() {
@@ -153,6 +165,99 @@ describe('jinn prediction reference pack manifests', () => {
     expect(skills).toEqual([
       'skills/base-rate-forecasting/SKILL.md',
       'skills/calibration/SKILL.md',
+      'skills/common-biases/SKILL.md',
+      'skills/polymarket-task-handling/SKILL.md',
+    ]);
+  });
+
+  it('declares only read-only task-scoped Polymarket MCP tools', async () => {
+    const mcp = await readMcpServerModule();
+    const declarations = mcp.listToolDeclarations();
+    const names = declarations.map((tool: { name: string }) => tool.name);
+
+    expect(names).toEqual(['polymarket_get_market', 'polymarket_get_orderbook']);
+    expect(names.join(' ')).not.toMatch(/submit|trade|order_place|sign|wallet|post|search/i);
+    expect(JSON.stringify(declarations)).toContain('Read-only CLOB market data only');
+    expect(JSON.stringify(declarations)).toContain('current prediction task');
+  });
+
+  it('serves the Polymarket tool list from the stdio MCP entrypoint', async () => {
+    const client = new Client({ name: 'prediction-plugin-test', version: '1.0.0' });
+    const transport = new StdioClientTransport({
+      command: 'node',
+      args: [join(pluginRoot, 'mcp/polymarket-server.mjs')],
+      cwd: pluginRoot,
+    });
+
+    try {
+      await client.connect(transport);
+      const tools = await client.listTools();
+      expect(tools.tools.map((tool) => tool.name)).toEqual([
+        'polymarket_get_market',
+        'polymarket_get_orderbook',
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('reads exact Polymarket market and orderbook identifiers without network search', async () => {
+    const mcp = await readMcpServerModule();
+    const requested: string[] = [];
+    const fetchImpl = async (url: string | URL) => {
+      const href = String(url);
+      requested.push(href);
+      if (href === 'https://gamma.test/markets/mkt-1') {
+        return new Response(JSON.stringify({
+          id: 'mkt-1',
+          conditionId: '0xabc',
+          slug: 'test-market',
+          question: 'Will test pass?',
+          description: 'A test market.',
+          outcomes: '["YES","NO"]',
+          clobTokenIds: '["yes-token","no-token"]',
+          endDate: '2026-05-04T00:00:00.000Z',
+          active: true,
+          closed: false,
+          archived: false,
+          liquidity: 12000,
+          volume24hr: 2600,
+        }), { status: 200 });
+      }
+      if (href === 'https://clob.test/book?token_id=yes-token') {
+        return new Response(JSON.stringify({
+          timestamp: 1777852800,
+          bids: [{ price: '0.60' }, { price: '0.58' }],
+          asks: [{ price: '0.64' }, { price: '0.66' }],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: 'unexpected url' }), { status: 404 });
+    };
+
+    const market = await mcp.getMarket(
+      { marketId: 'mkt-1', conditionId: '0xabc' },
+      { gammaBaseUrl: 'https://gamma.test', fetchImpl },
+    );
+    const orderbook = await mcp.getOrderbook(
+      { marketId: 'mkt-1', conditionId: '0xabc', yesTokenId: 'yes-token' },
+      { clobBaseUrl: 'https://clob.test', fetchImpl },
+    );
+
+    expect(market.marketId).toBe('mkt-1');
+    expect(market.conditionId).toBe('0xabc');
+    expect(market.tokenIds).toEqual({ yes: 'yes-token', no: 'no-token' });
+    expect(orderbook).toMatchObject({
+      marketId: 'mkt-1',
+      conditionId: '0xabc',
+      bestBidYes: '0.6000',
+      bestAskYes: '0.6400',
+      midpointYes: '0.6200',
+      spread: '0.0400',
+      source: 'polymarket-clob',
+    });
+    expect(requested).toEqual([
+      'https://gamma.test/markets/mkt-1',
+      'https://clob.test/book?token_id=yes-token',
     ]);
   });
 

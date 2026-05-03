@@ -8,8 +8,8 @@ import type { Harness } from '../types.js';
 import { LegacyClaudeImpl } from './legacy-claude/index.js';
 import { ClaudeMcpHyperliquidImpl } from './claude-mcp-hyperliquid/index.js';
 import { PortfolioV0Evaluator } from './portfolio-v0-evaluator/index.js';
-import { PredictionV1BaselineImpl } from './prediction-v0-baseline/index.js';
-import { PredictionV1Evaluator } from './prediction-v0-evaluator/index.js';
+import { PredictionV1BaselineImpl } from './prediction-v1-baseline/index.js';
+import { PredictionV1Evaluator } from './prediction-v1-evaluator/index.js';
 import { ClaudeMcpPredictionImpl } from './claude-mcp-prediction/index.js';
 import { PredictionApyV0BaselineImpl } from './prediction-apy-v0-baseline/index.js';
 import { ClaudeMcpPredictionApyImpl } from './claude-mcp-prediction-apy/index.js';
@@ -130,7 +130,6 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   );
   out.push(
     new PredictionV1BaselineImpl({
-      rpcUrl: env.rpcUrl,
       stub: isStub,
     }),
   );
@@ -144,12 +143,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   );
   out.push(
     isStub
-      ? new PredictionV1Evaluator({ stub: true, rpcUrl: env.rpcUrl })
-      : new PredictionV1Evaluator({
-          evaluatorPk: env.pk!,
-          evaluatorSafeAddress: env.safe!,
-          rpcUrl: env.rpcUrl,
-        }),
+      ? new PredictionV1Evaluator({ stub: true })
+      : new PredictionV1Evaluator(),
   );
   out.push(
     new PredictionApyV0BaselineImpl({

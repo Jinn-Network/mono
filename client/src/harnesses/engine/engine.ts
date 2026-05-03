@@ -41,8 +41,10 @@ import type {
 } from '../../erc8004/index.js';
 import { submitEvaluatorFeedback } from '../../erc8004/index.js';
 import type { Role } from '../../types/envelope.js';
+import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 import { buildInfo } from '../../build-info.js';
+import { getSolverNetContract, validateTask } from '@jinn-network/sdk/solvernets';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -249,8 +251,9 @@ export class TaskEngine {
   async canAcceptTask(input: {
     solverType?: string;
     taskRole?: 'restoration' | 'evaluation';
+    task?: Task;
   }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const reason = await this.runnableFailureReason(input.solverType, input.taskRole ?? 'restoration');
+    const reason = await this.runnableFailureReason(input.solverType, input.taskRole ?? 'restoration', input.task);
     return reason ? { ok: false, reason } : { ok: true };
   }
 
@@ -442,7 +445,11 @@ export class TaskEngine {
    * the operator has an enabled, ready Harness and advances DISCOVERED → CLAIMED.
    */
   protected async claim(task: PersistedTaskRun): Promise<void> {
-    const reason = await this.runnableFailureReason(task.solverType ?? undefined, task.taskRole ?? 'restoration');
+    const reason = await this.runnableFailureReason(
+      task.solverType ?? undefined,
+      task.taskRole ?? 'restoration',
+      task.task as Task | undefined,
+    );
     if (reason) {
       this.persistence.markFailed(task.requestId, reason);
       console.log(`[harness-engine] ${task.requestId}: skipping claimed task — ${reason}`);
@@ -473,12 +480,19 @@ export class TaskEngine {
   private async runnableFailureReason(
     solverType: string | undefined,
     role: 'restoration' | 'evaluation',
+    task?: Task,
   ): Promise<string | null> {
     const solverNet = this.solverNetRegistry && solverType
       ? this.solverNetRegistry.forSolverType(solverType)
       : undefined;
     if (this.solverNetRegistry && solverType && !solverNet) {
       return `no enabled SolverNet for solverType '${solverType}'; run \`jinn solver-nets enable <name>\``;
+    }
+    if (solverType && task && getSolverNetContract(solverType)) {
+      const validation = validateTask(solverType, task);
+      if (!validation.ok) {
+        return validation.error.message;
+      }
     }
     if (!this.implRegistry || !solverType) return null;
 
@@ -488,6 +502,14 @@ export class TaskEngine {
         ? `jinn solver-nets set-harness ${solverNet.name} <harness>`
         : 'jinn solver-nets set-harness <name> <harness>';
       return `no Harness registered or enabled for solverType '${solverType}'; run \`${setHarnessHint}\``;
+    }
+    if (task) {
+      if (impl.canAttempt) {
+        const attempt = await impl.canAttempt(task);
+        if (!attempt.ok) {
+          return `impl '${impl.name}' cannot attempt task: ${attempt.reason}`;
+        }
+      }
     }
     if (impl.isReady) {
       const status = await impl.isReady({ solverType, role });

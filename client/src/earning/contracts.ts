@@ -29,6 +29,7 @@ export const DEFAULT_TESTNET_ARTIFACTS = {
   token: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1a-token-baseSepolia-fast.json'),
   l2: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1a-l2-baseSepolia-fast.json'),
   mech: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),
+  taskCoordinatorRouterV3: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-task-coordinator-router-v3-baseSepolia-fast.json'),
   stolas: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
   faucet: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-testnet-faucet-baseSepolia-fast.json'),
   /** v0 MVI L1 stack (JINN, Timelock, Governor, Distributor, Messenger) on Sepolia. */
@@ -313,6 +314,9 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     overrides.testnetMechDeploymentPath
     ?? process.env['JINN_TESTNET_MECH_DEPLOYMENT']
     ?? DEFAULT_TESTNET_ARTIFACTS.mech;
+  const taskCoordinatorRouterV3ArtifactPath =
+    process.env['JINN_TESTNET_TASK_COORDINATOR_ROUTER_V3_DEPLOYMENT']
+    ?? DEFAULT_TESTNET_ARTIFACTS.taskCoordinatorRouterV3;
 
   const resolved: ChainConfig = { ...BASE_SEPOLIA_CONFIG };
 
@@ -376,6 +380,22 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     if (stakingToken) {
       resolved.stakingContract = stakingToken;
     }
+  }
+
+  if (taskCoordinatorRouterV3ArtifactPath) {
+    const taskArtifact = loadArtifact(taskCoordinatorRouterV3ArtifactPath);
+    const jinnRouterV3 = taskArtifact.contracts?.jinnRouterV3;
+    const mechMarketplace = taskArtifact.contracts?.mechMarketplace;
+    if (!jinnRouterV3) {
+      throw new Error(
+        `TaskCoordinator/JinnRouterV3 artifact ${path.resolve(taskCoordinatorRouterV3ArtifactPath)} is missing contracts.jinnRouterV3`,
+      );
+    }
+    resolved.jinnRouter = jinnRouterV3;
+    if (mechMarketplace) {
+      resolved.mechMarketplace = mechMarketplace;
+    }
+    resolved.routerClaimDeliveryVersion = 'v3';
   }
 
   const stolasArtifactPath =

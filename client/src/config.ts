@@ -279,6 +279,43 @@ export const JinnConfigSchema = z.object({
   predictionV1ResolveGapMs: z.number().int().positive().optional(),
 
   /**
+   * Enables launcher-owned Polymarket prediction.v1 Task generation.
+   * Default false: ordinary operator daemons do not create Polymarket rounds.
+   * Env: JINN_PREDICTION_V1_LAUNCHER_ENABLED
+   */
+  predictionV1LauncherEnabled: z.boolean().default(false),
+
+  /**
+   * prediction.v1 Polymarket generator cadence (ms). Default 21600000 (6h).
+   * Set to 0 only for launcher/test loops that intentionally poll every tick.
+   * Env: JINN_PREDICTION_V1_CADENCE_MS
+   */
+  predictionV1CadenceMs: z.number().int().nonnegative().optional(),
+
+  /**
+   * prediction.v1 Polymarket generator safety caps.
+   * Defaults live in the generator: per-poll 25, per-day 100, open 250.
+   * Env:
+   *   JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL
+   *   JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY
+   *   JINN_PREDICTION_V1_MAX_OPEN_ROUNDS
+   */
+  predictionV1MaxNewRoundsPerPoll: z.number().int().nonnegative().optional(),
+  predictionV1MaxNewRoundsPerDay: z.number().int().nonnegative().optional(),
+  predictionV1MaxOpenRounds: z.number().int().nonnegative().optional(),
+
+  /**
+   * Manual prediction.v1 Polymarket conditionId controls.
+   * Allowlist prioritizes consideration but never bypasses eligibility checks;
+   * blocklist always wins.
+   * Env:
+   *   JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS
+   *   JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS
+   */
+  predictionV1AllowlistConditionIds: z.array(z.string()).optional(),
+  predictionV1BlocklistConditionIds: z.array(z.string()).optional(),
+
+  /**
    * Operator-controlled Harness inventory.
    */
   harnesses: z
@@ -718,6 +755,38 @@ export function loadConfig(configPath?: string): JinnConfig {
     const parsed = Number(env['JINN_PREDICTION_V1_RESOLVE_GAP_MS'].trim());
     if (Number.isFinite(parsed) && parsed > 0) merged.predictionV1ResolveGapMs = parsed;
   }
+  if (env['JINN_PREDICTION_V1_LAUNCHER_ENABLED'] !== undefined) {
+    const v = env['JINN_PREDICTION_V1_LAUNCHER_ENABLED'].trim().toLowerCase();
+    merged.predictionV1LauncherEnabled = v === '1' || v === 'true' || v === 'yes';
+  }
+  if (env['JINN_PREDICTION_V1_CADENCE_MS']) {
+    const parsed = Number(env['JINN_PREDICTION_V1_CADENCE_MS'].trim());
+    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1CadenceMs = parsed;
+  }
+  if (env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL']) {
+    const parsed = Number(env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL'].trim());
+    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxNewRoundsPerPoll = parsed;
+  }
+  if (env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY']) {
+    const parsed = Number(env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY'].trim());
+    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxNewRoundsPerDay = parsed;
+  }
+  if (env['JINN_PREDICTION_V1_MAX_OPEN_ROUNDS']) {
+    const parsed = Number(env['JINN_PREDICTION_V1_MAX_OPEN_ROUNDS'].trim());
+    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxOpenRounds = parsed;
+  }
+  if (env['JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS'] !== undefined) {
+    merged.predictionV1AllowlistConditionIds = env['JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS']
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  if (env['JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS'] !== undefined) {
+    merged.predictionV1BlocklistConditionIds = env['JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS']
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
 
   if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
   if (env['JINN_VALIDATION_REGISTRY_ADDRESS']) merged.validationRegistryAddress = env['JINN_VALIDATION_REGISTRY_ADDRESS'];
@@ -907,6 +976,13 @@ const TRACKED_ENV_VARS = [
   'JINN_MIN_SAFE_ETH_WEI',
   'JINN_PREDICTION_V1_WINDOW_MS',
   'JINN_PREDICTION_V1_RESOLVE_GAP_MS',
+  'JINN_PREDICTION_V1_LAUNCHER_ENABLED',
+  'JINN_PREDICTION_V1_CADENCE_MS',
+  'JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL',
+  'JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY',
+  'JINN_PREDICTION_V1_MAX_OPEN_ROUNDS',
+  'JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS',
+  'JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS',
   'JINN_IDENTITY_REGISTRY_ADDRESS',
   'JINN_VALIDATION_REGISTRY_ADDRESS',
   'JINN_REPUTATION_ENABLED',

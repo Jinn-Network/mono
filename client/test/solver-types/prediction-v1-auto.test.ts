@@ -39,9 +39,16 @@ function book(bid: string, ask: string, timestamp = NOW) {
 }
 
 function fetchFixture(markets: unknown[], books: Record<string, unknown>) {
+  const marketById = new Map(
+    markets.map((row) => [String((row as Record<string, unknown>)['id'] ?? ''), row]),
+  );
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     if (url.pathname === '/markets') return jsonResponse(markets);
+    if (url.pathname.startsWith('/markets/')) {
+      const id = decodeURIComponent(url.pathname.slice('/markets/'.length));
+      return jsonResponse(marketById.get(id) ?? {});
+    }
     if (url.pathname === '/book') {
       const token = url.searchParams.get('token_id') ?? '';
       return jsonResponse(books[token] ?? { bids: [], asks: [] });
@@ -71,7 +78,7 @@ describe('prediction.v1 auto-generator', () => {
       },
     );
 
-    const generator = makePredictionV1Generator({ fetchImpl, maxNewRoundsPerPoll: 25 });
+    const generator = makePredictionV1Generator({ fetchImpl, cadenceMs: 0, maxNewRoundsPerPoll: 25 });
     const tasks = await generator();
 
     expect(tasks).toHaveLength(1);
@@ -116,7 +123,7 @@ describe('prediction.v1 auto-generator', () => {
       },
     );
 
-    const generator = makePredictionV1Generator({ fetchImpl, maxNewRoundsPerPoll: 1 });
+    const generator = makePredictionV1Generator({ fetchImpl, cadenceMs: 0, maxNewRoundsPerPoll: 1 });
     const first = await generator();
     const second = await generator();
 
@@ -134,11 +141,125 @@ describe('prediction.v1 auto-generator', () => {
       { 'yes-abc': book('0.60', '0.64') },
     );
 
-    const generator = makePredictionV1Generator({ fetchImpl });
+    const generator = makePredictionV1Generator({ fetchImpl, cadenceMs: 0 });
     await generator();
 
     const calls = (fetchImpl as any).mock.calls.map((call: unknown[]) => String(call[0]));
     expect(calls.every((url: string) => url.includes('/markets') || url.includes('/book'))).toBe(true);
     expect(calls.some((url: string) => /order|trade|auth|wallet|sign/i.test(url))).toBe(false);
+  });
+
+  it('honors generator cadence independently from daemon poll frequency', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const fetchImpl = fetchFixture(
+      [market('abc', 'yes-abc')],
+      { 'yes-abc': book('0.60', '0.64') },
+    );
+
+    const generator = makePredictionV1Generator({ fetchImpl, cadenceMs: 6 * 60 * 60 * 1000 });
+    const first = await generator();
+    const second = await generator();
+
+    expect(first).toHaveLength(1);
+    expect(second).toBeNull();
+    expect((fetchImpl as any).mock.calls).toHaveLength(3);
+
+    vi.setSystemTime(NOW + 6 * 60 * 60 * 1000 + 1);
+    await generator();
+
+    expect((fetchImpl as any).mock.calls.filter((call: unknown[]) => String(call[0]).includes('/markets'))).toHaveLength(3);
+  });
+
+  it('prioritizes valid allowlisted markets when per-poll caps bind', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const fetchImpl = fetchFixture(
+      [
+        market('liquid', 'yes-liquid', { liquidity: '90000' }),
+        market('manual', 'yes-manual', { liquidity: '12000' }),
+      ],
+      {
+        'yes-liquid': book('0.60', '0.64'),
+        'yes-manual': book('0.51', '0.55'),
+      },
+    );
+
+    const generator = makePredictionV1Generator({
+      fetchImpl,
+      cadenceMs: 0,
+      maxNewRoundsPerPoll: 1,
+      allowlistConditionIds: ['0xmanual'],
+    });
+    const tasks = await generator();
+
+    expect(tasks).toHaveLength(1);
+    expect(tasks![0].spec?.source).toMatchObject({ identifiers: { conditionId: '0xmanual' } });
+    expect(tasks![0].eligibility).toMatchObject({ manualAllowlistHit: true });
+  });
+
+  it('keeps blocklist above allowlist and does not let allowlist bypass validation', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const fetchImpl = fetchFixture(
+      [
+        market('blocked', 'yes-blocked', { liquidity: '99000' }),
+        market('ambiguous-schema', 'yes-ambiguous', { outcomes: '["Yes","Maybe"]' }),
+        market('too-soon', 'yes-too-soon', { endDateIso: new Date(NOW + 2 * 3_600_000).toISOString() }),
+        market('stale', 'yes-stale'),
+        market('valid', 'yes-valid'),
+      ],
+      {
+        'yes-blocked': book('0.60', '0.64'),
+        'yes-too-soon': book('0.60', '0.64'),
+        'yes-stale': book('0.50', '0.54', NOW - 120_000),
+        'yes-valid': book('0.51', '0.55'),
+      },
+    );
+
+    const generator = makePredictionV1Generator({
+      fetchImpl,
+      cadenceMs: 0,
+      maxNewRoundsPerPoll: 1,
+      allowlistConditionIds: ['0xblocked', '0xambiguous-schema', '0xtoo-soon', '0xstale'],
+      blocklistConditionIds: ['0xblocked'],
+    });
+    const tasks = await generator();
+
+    expect(tasks).toHaveLength(1);
+    expect(tasks![0].spec?.source).toMatchObject({ identifiers: { conditionId: '0xvalid' } });
+    const calledUrls = (fetchImpl as any).mock.calls.map((call: unknown[]) => String(call[0]));
+    expect(calledUrls.some((url: string) => url.includes('yes-blocked'))).toBe(false);
+    expect(calledUrls.some((url: string) => url.includes('yes-too-soon'))).toBe(false);
+    expect(calledUrls.some((url: string) => url.includes('yes-stale'))).toBe(true);
+  });
+
+  it('skips invalid, cancelled, and ambiguous Polymarket statuses', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const fetchImpl = fetchFixture(
+      [
+        market('invalid', 'yes-invalid', { resolutionStatus: 'invalid' }),
+        market('cancelled', 'yes-cancelled', { resolutionStatus: 'cancelled' }),
+        market('ambiguous', 'yes-ambiguous', { closed: true }),
+        market('valid', 'yes-valid'),
+      ],
+      {
+        'yes-invalid': book('0.60', '0.64'),
+        'yes-cancelled': book('0.60', '0.64'),
+        'yes-ambiguous': book('0.60', '0.64'),
+        'yes-valid': book('0.51', '0.55'),
+      },
+    );
+
+    const generator = makePredictionV1Generator({ fetchImpl, cadenceMs: 0 });
+    const tasks = await generator();
+
+    expect(tasks).toHaveLength(1);
+    expect(tasks![0].spec?.source).toMatchObject({ identifiers: { conditionId: '0xvalid' } });
+    const calledUrls = (fetchImpl as any).mock.calls.map((call: unknown[]) => String(call[0]));
+    expect(calledUrls.some((url: string) => url.includes('yes-invalid'))).toBe(false);
+    expect(calledUrls.some((url: string) => url.includes('yes-cancelled'))).toBe(false);
+    expect(calledUrls.some((url: string) => url.includes('yes-ambiguous'))).toBe(false);
   });
 });

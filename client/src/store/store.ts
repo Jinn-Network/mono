@@ -1,6 +1,11 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type {
+  EnvelopeProjection,
+  EnvelopeProjectionMetadataValue,
+  EnvelopeProjectionQuery,
+} from '../corpus/types.js';
 import { TASK_RUNS_SCHEMA } from '../harnesses/engine/persistence.js';
 
 export interface ActivityEventInput {
@@ -232,6 +237,48 @@ CREATE INDEX IF NOT EXISTS idx_network_artifacts_envelope ON network_artifacts (
 CREATE INDEX IF NOT EXISTS idx_network_artifacts_artifact_type ON network_artifacts (artifact_type);
 CREATE INDEX IF NOT EXISTS idx_network_artifacts_last_used ON network_artifacts (last_used_at DESC);
 
+CREATE TABLE IF NOT EXISTS envelope_projections (
+  envelope_id TEXT PRIMARY KEY,
+  envelope_cid TEXT,
+  envelope_sha256 TEXT,
+  signature_hash TEXT NOT NULL,
+  solver_type TEXT NOT NULL,
+  role TEXT NOT NULL,
+  task_cid TEXT,
+  task_id TEXT,
+  request_id TEXT,
+  generated_at INTEGER NOT NULL,
+  evidence_tier TEXT NOT NULL,
+  participant_safe_address TEXT,
+  participant_agent_eoa TEXT,
+  executor_impl_name TEXT,
+  executor_impl_version TEXT,
+  executor_runtime_bundle_digest TEXT,
+  executor_plugins_json TEXT NOT NULL DEFAULT '[]',
+  solution_envelope_cid TEXT,
+  solution_envelope_sha256 TEXT,
+  solution_envelope_ref TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_envelope_projections_solver_role ON envelope_projections (solver_type, role);
+CREATE INDEX IF NOT EXISTS idx_envelope_projections_task_cid ON envelope_projections (task_cid);
+CREATE INDEX IF NOT EXISTS idx_envelope_projections_task_id ON envelope_projections (task_id);
+CREATE INDEX IF NOT EXISTS idx_envelope_projections_request ON envelope_projections (request_id);
+CREATE INDEX IF NOT EXISTS idx_envelope_projections_solution_ref ON envelope_projections (solution_envelope_ref);
+CREATE INDEX IF NOT EXISTS idx_envelope_projections_generated ON envelope_projections (generated_at DESC);
+
+CREATE TABLE IF NOT EXISTS envelope_projection_metadata (
+  envelope_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value_text TEXT NOT NULL,
+  value_type TEXT NOT NULL CHECK (value_type IN ('string', 'number', 'boolean')),
+  PRIMARY KEY (envelope_id, key),
+  FOREIGN KEY (envelope_id) REFERENCES envelope_projections(envelope_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_envelope_projection_metadata_key_value
+  ON envelope_projection_metadata (key, value_text);
+
 CREATE TABLE IF NOT EXISTS task_post_locks (
   creator_safe_address TEXT NOT NULL,
   source_key TEXT NOT NULL,
@@ -262,6 +309,7 @@ export class Store {
     this.ensureNetworkArtifactsPeerCatalogId();
     this.ensureTaskPostsTaskCoordinatorColumns();
     this.backfillActivityEvents();
+    this.recordLegacyRestorationIntentsIgnored();
   }
 
   /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */
@@ -284,6 +332,61 @@ export class Store {
     }
     if (!names.has('task_cid')) {
       this.db.exec(`ALTER TABLE task_posts ADD COLUMN task_cid TEXT`);
+    }
+  }
+
+  /**
+   * Task-native startup ignores the retired request-first `restoration_intents`
+   * table. Keep a one-time local marker when old in-flight rows are present so
+   * operators can see why they were not resumed without blocking Store startup.
+   */
+  private recordLegacyRestorationIntentsIgnored(): void {
+    const table = this.db.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'restoration_intents'`,
+    ).get() as { name: string } | undefined;
+    if (!table) return;
+
+    const cols = this.db.prepare(`PRAGMA table_info(restoration_intents)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('state')) return;
+
+    try {
+      const row = this.db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM restoration_intents
+         WHERE state NOT IN ('COMPLETE', 'FAILED')`,
+      ).get() as { count: number } | undefined;
+      const count = row?.count ?? 0;
+      if (count <= 0) return;
+
+      const detail =
+        `Ignored ${count} legacy request-first restoration_intents row${count === 1 ? '' : 's'}; ` +
+        'Task-native recovery does not resume ClaimRegistry/request-first jobs.';
+      const ts = new Date().toISOString();
+      const marker = {
+        schemaVersion: 1,
+        ignoredAt: ts,
+        table: 'restoration_intents',
+        inFlightRows: count,
+        reason: 'legacy_request_first_task_native_update',
+      };
+
+      const tx = this.db.transaction(() => {
+        this.db.prepare(
+          `INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)`,
+        ).run('legacy_restoration_intents_ignored_v1', JSON.stringify(marker));
+        this.db.prepare(
+          `INSERT INTO activity_events (ts, kind, outcome, detail)
+           SELECT @ts, 'legacy_ignored', 'ignored', @detail
+           WHERE NOT EXISTS (
+             SELECT 1 FROM activity_events
+             WHERE kind = 'legacy_ignored' AND detail = @detail
+           )`,
+        ).run({ ts, detail });
+      });
+      tx();
+    } catch {
+      // Legacy schemas varied. Never let stale request-first state block Store startup.
     }
   }
 
@@ -1077,7 +1180,246 @@ export class Store {
     ];
   }
 
+  saveEnvelopeProjection(projection: EnvelopeProjection): void {
+    const tx = this.db.transaction((p: EnvelopeProjection) => {
+      this.db.prepare(
+        `INSERT INTO envelope_projections
+           (envelope_id, envelope_cid, envelope_sha256, signature_hash, solver_type, role,
+            task_cid, task_id, request_id, generated_at, evidence_tier,
+            participant_safe_address, participant_agent_eoa,
+            executor_impl_name, executor_impl_version, executor_runtime_bundle_digest,
+            executor_plugins_json, solution_envelope_cid, solution_envelope_sha256,
+            solution_envelope_ref, metadata_json)
+         VALUES
+           (@envelopeId, @envelopeCid, @envelopeSha256, @signatureHash, @solverType, @role,
+            @taskCid, @taskId, @requestId, @generatedAt, @evidenceTier,
+            @participantSafeAddress, @participantAgentEoa,
+            @executorImplName, @executorImplVersion, @executorRuntimeBundleDigest,
+            @executorPluginsJson, @solutionEnvelopeCid, @solutionEnvelopeSha256,
+            @solutionEnvelopeRef, @metadataJson)
+         ON CONFLICT(envelope_id) DO UPDATE SET
+           envelope_cid = excluded.envelope_cid,
+           envelope_sha256 = excluded.envelope_sha256,
+           signature_hash = excluded.signature_hash,
+           solver_type = excluded.solver_type,
+           role = excluded.role,
+           task_cid = excluded.task_cid,
+           task_id = excluded.task_id,
+           request_id = excluded.request_id,
+           generated_at = excluded.generated_at,
+           evidence_tier = excluded.evidence_tier,
+           participant_safe_address = excluded.participant_safe_address,
+           participant_agent_eoa = excluded.participant_agent_eoa,
+           executor_impl_name = excluded.executor_impl_name,
+           executor_impl_version = excluded.executor_impl_version,
+           executor_runtime_bundle_digest = excluded.executor_runtime_bundle_digest,
+           executor_plugins_json = excluded.executor_plugins_json,
+           solution_envelope_cid = excluded.solution_envelope_cid,
+           solution_envelope_sha256 = excluded.solution_envelope_sha256,
+           solution_envelope_ref = excluded.solution_envelope_ref,
+           metadata_json = excluded.metadata_json`,
+      ).run({
+        envelopeId: p.envelopeId,
+        envelopeCid: p.envelopeCid,
+        envelopeSha256: p.envelopeSha256,
+        signatureHash: p.signatureHash,
+        solverType: p.solverType,
+        role: p.role,
+        taskCid: p.taskCid,
+        taskId: p.taskId,
+        requestId: p.requestId,
+        generatedAt: p.generatedAt,
+        evidenceTier: p.evidenceTier,
+        participantSafeAddress: p.participantSafeAddress,
+        participantAgentEoa: p.participantAgentEoa,
+        executorImplName: p.executorImplName,
+        executorImplVersion: p.executorImplVersion,
+        executorRuntimeBundleDigest: p.executorRuntimeBundleDigest,
+        executorPluginsJson: JSON.stringify(p.executorPlugins),
+        solutionEnvelopeCid: p.solutionEnvelopeCid,
+        solutionEnvelopeSha256: p.solutionEnvelopeSha256,
+        solutionEnvelopeRef: p.solutionEnvelopeRef,
+        metadataJson: JSON.stringify(p.metadata),
+      });
+
+      this.db.prepare(`DELETE FROM envelope_projection_metadata WHERE envelope_id = ?`).run(p.envelopeId);
+      const insertMetadata = this.db.prepare(
+        `INSERT INTO envelope_projection_metadata (envelope_id, key, value_text, value_type)
+         VALUES (@envelopeId, @key, @valueText, @valueType)`,
+      );
+      for (const [key, value] of Object.entries(p.metadata)) {
+        insertMetadata.run({
+          envelopeId: p.envelopeId,
+          key,
+          valueText: metadataValueText(value),
+          valueType: typeof value,
+        });
+      }
+    });
+    tx(projection);
+  }
+
+  queryEnvelopeProjections(query: EnvelopeProjectionQuery = {}): EnvelopeProjection[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (query.solverType) {
+      conditions.push('solver_type = @solverType');
+      params['solverType'] = query.solverType;
+    }
+    if (query.role) {
+      conditions.push('role = @role');
+      params['role'] = query.role;
+    }
+    if (query.taskCid) {
+      conditions.push('task_cid = @taskCid');
+      params['taskCid'] = query.taskCid;
+    }
+    if (query.taskId) {
+      conditions.push('task_id = @taskId');
+      params['taskId'] = query.taskId;
+    }
+    if (query.requestId) {
+      conditions.push('request_id = @requestId');
+      params['requestId'] = query.requestId;
+    }
+    if (query.participant?.safeAddress) {
+      conditions.push('participant_safe_address = @participantSafeAddress');
+      params['participantSafeAddress'] = query.participant.safeAddress;
+    }
+    if (query.participant?.agentEoa) {
+      conditions.push('participant_agent_eoa = @participantAgentEoa');
+      params['participantAgentEoa'] = query.participant.agentEoa;
+    }
+    if (query.solutionEnvelopeRef) {
+      conditions.push('solution_envelope_ref = @solutionEnvelopeRef');
+      params['solutionEnvelopeRef'] = query.solutionEnvelopeRef;
+    }
+    if (query.generatedAfter !== undefined) {
+      conditions.push('generated_at >= @generatedAfter');
+      params['generatedAfter'] = query.generatedAfter;
+    }
+    if (query.generatedBefore !== undefined) {
+      conditions.push('generated_at <= @generatedBefore');
+      params['generatedBefore'] = query.generatedBefore;
+    }
+
+    let metadataIndex = 0;
+    for (const [key, value] of Object.entries(query.metadata ?? {})) {
+      const keyParam = `metadataKey${metadataIndex}`;
+      const valueParam = `metadataValue${metadataIndex}`;
+      conditions.push(
+        `EXISTS (
+          SELECT 1 FROM envelope_projection_metadata m${metadataIndex}
+          WHERE m${metadataIndex}.envelope_id = envelope_projections.envelope_id
+            AND m${metadataIndex}.key = @${keyParam}
+            AND m${metadataIndex}.value_text = @${valueParam}
+        )`,
+      );
+      params[keyParam] = key;
+      params[valueParam] = metadataValueText(value);
+      metadataIndex += 1;
+    }
+
+    const limit = Math.max(0, Math.min(query.limit ?? 100, 1000));
+    params['limit'] = limit;
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = this.db.prepare(
+      `SELECT envelope_id, envelope_cid, envelope_sha256, signature_hash, solver_type, role,
+              task_cid, task_id, request_id, generated_at, evidence_tier,
+              participant_safe_address, participant_agent_eoa,
+              executor_impl_name, executor_impl_version, executor_runtime_bundle_digest,
+              executor_plugins_json, solution_envelope_cid, solution_envelope_sha256,
+              solution_envelope_ref, metadata_json
+       FROM envelope_projections
+       ${where}
+       ORDER BY generated_at DESC, envelope_id ASC
+       LIMIT @limit`,
+    ).all(params) as EnvelopeProjectionRow[];
+
+    return rows.map(rowToEnvelopeProjection);
+  }
+
   close(): void {
     this.db.close();
+  }
+}
+
+interface EnvelopeProjectionRow {
+  envelope_id: string;
+  envelope_cid: string | null;
+  envelope_sha256: string | null;
+  signature_hash: string;
+  solver_type: string;
+  role: 'restoration' | 'verdict';
+  task_cid: string | null;
+  task_id: string | null;
+  request_id: string | null;
+  generated_at: number;
+  evidence_tier: 'self-signed' | 'committed' | 'attested';
+  participant_safe_address: string | null;
+  participant_agent_eoa: string | null;
+  executor_impl_name: string | null;
+  executor_impl_version: string | null;
+  executor_runtime_bundle_digest: string | null;
+  executor_plugins_json: string;
+  solution_envelope_cid: string | null;
+  solution_envelope_sha256: string | null;
+  solution_envelope_ref: string | null;
+  metadata_json: string;
+}
+
+function rowToEnvelopeProjection(row: EnvelopeProjectionRow): EnvelopeProjection {
+  return {
+    envelopeId: row.envelope_id,
+    envelopeCid: row.envelope_cid,
+    envelopeSha256: row.envelope_sha256,
+    signatureHash: row.signature_hash,
+    solverType: row.solver_type,
+    role: row.role,
+    taskCid: row.task_cid,
+    taskId: row.task_id,
+    requestId: row.request_id,
+    generatedAt: row.generated_at,
+    evidenceTier: row.evidence_tier,
+    participantSafeAddress: row.participant_safe_address,
+    participantAgentEoa: row.participant_agent_eoa,
+    executorImplName: row.executor_impl_name,
+    executorImplVersion: row.executor_impl_version,
+    executorRuntimeBundleDigest: row.executor_runtime_bundle_digest,
+    executorPlugins: parseStringArray(row.executor_plugins_json),
+    solutionEnvelopeCid: row.solution_envelope_cid,
+    solutionEnvelopeSha256: row.solution_envelope_sha256,
+    solutionEnvelopeRef: row.solution_envelope_ref,
+    metadata: parseMetadata(row.metadata_json),
+  };
+}
+
+function metadataValueText(value: EnvelopeProjectionMetadataValue): string {
+  return String(value);
+}
+
+function parseStringArray(json: string): string[] {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseMetadata(json: string): Record<string, EnvelopeProjectionMetadataValue> {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, EnvelopeProjectionMetadataValue> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        out[key] = value;
+      }
+    }
+    return out;
+  } catch {
+    return {};
   }
 }

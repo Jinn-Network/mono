@@ -11,6 +11,14 @@ describe('getChainConfig', () => {
     expect('claimRegistry' in cfg).toBe(false);
   });
 
+  it('resolves Base Sepolia runtime to bundled Task-native router metadata', () => {
+    const cfg = getChainConfig('base-sepolia');
+
+    expect(cfg.jinnRouter).toBe('0xdC9BCcEB7aca21Ad4Ca2Fc5B4d7aea6b4F6CedD9');
+    expect(cfg.mechMarketplace).toBe('0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7');
+    expect(cfg.routerClaimDeliveryVersion).toBe('v3');
+  });
+
   it('does not expose legacy claim coordination on Base mainnet clean-break config', () => {
     const cfg = getChainConfig('base');
 
