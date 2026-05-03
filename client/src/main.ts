@@ -58,7 +58,11 @@ import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
-import { HarnessRegistry } from './harnesses/engine/registry.js';
+import {
+  DEFAULT_DISABLED_HARNESSES,
+  DEFAULT_HARNESS,
+  HarnessRegistry,
+} from './harnesses/engine/registry.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import type { Harness } from './harnesses/types.js';
@@ -939,9 +943,6 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     );
   }
 
-  // Default-disable Harnesses with external dependencies the operator must opt into.
-  const DEFAULT_DISABLED_HARNESSES = ['claude-mcp-hyperliquid'];
-  const DEFAULT_HARNESS = 'claude-code-learner';
   const implRegistry = new HarnessRegistry({
     solverTypeHarnesses: solverNetRegistry.harnessSelections(),
     default: config.harnesses?.default ?? DEFAULT_HARNESS,

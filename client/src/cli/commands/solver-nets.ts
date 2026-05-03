@@ -6,6 +6,10 @@ import type { CommandContext, CommandModule } from '../command.js';
 import { loadConfig } from '../../config.js';
 import { buildHarnesses } from '../../harnesses/impls/index.js';
 import { loadSolverNets } from '../../solver-nets/registry.js';
+import {
+  buildPredictionOperatorStatus,
+  runPredictionSample,
+} from '../../solver-nets/prediction-operator-ux.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -105,7 +109,8 @@ const command: CommandModule = {
   jinn solver-nets set-harness <name> <harness> [--config <path>]
   jinn solver-nets add-plugin <name> <source> [--config <path>]
   jinn solver-nets remove-plugin <name> <source-or-name> [--config <path>]
-  jinn solver-nets doctor <name> [--config <path>]`,
+  jinn solver-nets doctor <name> [--config <path>]
+  jinn solver-nets sample <name> [--closed-window]`,
 
   async run(ctx) {
     const [subverb, ...rest] = ctx.argv;
@@ -118,6 +123,7 @@ const command: CommandModule = {
       options: {
         config: { type: 'string' },
         harness: { type: 'string' },
+        'closed-window': { type: 'boolean' },
       },
     });
     const [name, arg2] = parsed.positionals;
@@ -155,8 +161,31 @@ const command: CommandModule = {
       return;
     }
 
-    if (subverb === 'show' || subverb === 'doctor') {
+    if (subverb === 'show') {
       writeJson(ctx, { verb: `solver-nets ${subverb}`, configPath, name, solverNet: net });
+      return;
+    }
+
+    if (subverb === 'doctor') {
+      if (net.solverType === 'prediction.v1') {
+        const loaded = loadConfig(configPath);
+        const status = await buildPredictionOperatorStatus({ config: loaded, configPath, name });
+        writeJson(ctx, { verb: 'solver-nets doctor', ...status });
+        return;
+      }
+      writeJson(ctx, { verb: 'solver-nets doctor', configPath, name, solverNet: net });
+      return;
+    }
+
+    if (subverb === 'sample') {
+      if (net.solverType !== 'prediction.v1') {
+        fail(ctx, `solver-nets sample only supports prediction.v1 SolverNets; ${name} is ${net.solverType}`);
+        return;
+      }
+      const sample = await runPredictionSample({
+        closedWindow: Boolean(parsed.values['closed-window']),
+      });
+      writeJson(ctx, { verb: 'solver-nets sample', configPath, name, ...sample });
       return;
     }
 

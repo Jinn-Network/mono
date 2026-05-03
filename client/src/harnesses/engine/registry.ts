@@ -15,6 +15,10 @@
 import type { Harness } from '../types.js';
 import type { ImplRegistry } from './engine.js';
 
+// Harness dispatch defaults shared by the daemon and operator diagnostics.
+export const DEFAULT_HARNESS = 'claude-code-learner';
+export const DEFAULT_DISABLED_HARNESSES = ['claude-mcp-hyperliquid'] as const;
+
 // ── Operator config schema ─────────────────────────────────────────────────────
 
 export interface HarnessDispatchConfig {
