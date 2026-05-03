@@ -40,6 +40,15 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
     const startTs = Math.floor(now / windowDurationMs) * windowDurationMs;
     const endTs = startTs + windowDurationMs;
     const resolveTs = endTs + resolveGapMs;
+    const claimPolicy = {
+      mode: 'parallel' as const,
+      maxClaims: 25,
+      maxClaimsPerOperator: 1,
+      claimWindowStartTs: startTs,
+      claimWindowEndTs: endTs,
+      submissionDeadlineTs: endTs,
+      claimLeaseTtlSeconds: Math.max(60, Math.floor((endTs - startTs) / 1000)),
+    };
     try {
       const resolved = await resolvePredictionApyV0Template({
         id: `pred-apy-v0-auto-${startTs}`,
@@ -77,6 +86,7 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
           window: resolved.window,
           spec: resolved.spec as TaskV1['spec'],
           eligibility: resolved.eligibility ?? {},
+          claimPolicy,
           creator: {
             safeAddress: config.safeAddress,
             agentEoa: config.agentEoa,
@@ -87,6 +97,7 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
         const task: Task = {
           ...(resolved as unknown as Task),
           solverType: 'prediction.apy.v0',
+          claimPolicy,
           spec: Object.fromEntries(
             Object.entries((resolved.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),
           ),
@@ -98,6 +109,7 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
       return {
         ...(resolved as unknown as Task),
         solverType: 'prediction.apy.v0',
+        claimPolicy,
         spec: Object.fromEntries(
           Object.entries((resolved.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),
         ),

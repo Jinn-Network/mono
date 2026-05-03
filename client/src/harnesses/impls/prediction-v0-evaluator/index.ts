@@ -1,5 +1,5 @@
 /**
- * prediction-v0-evaluator — deterministic verifier for prediction.v0.
+ * prediction-v0-evaluator — deterministic verifier for prediction.v1.
  *
  * §6 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
  *
@@ -20,7 +20,7 @@ import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/task.js';
 import {
-  PredictionV0TaskSchema,
+  PredictionV1TaskSchema,
 } from '../../../types/prediction.js';
 import { SignedEnvelopeSchema } from '../../../types/envelope.js';
 import { PredictionV0RestorationPayloadSchema, type PredictionV0RestorationPayload } from '../../../types/payloads/prediction-v0.js';
@@ -50,7 +50,7 @@ function nowNanos(): string {
   return `${BigInt(Date.now()) * 1_000_000n}`;
 }
 
-export interface PredictionV0EvaluatorConfig {
+export interface PredictionV1EvaluatorConfig {
   /** Set by {@link buildHarnesses} for CLI registries (no real signer). */
   stub?: boolean;
   /** Evaluator's private key — used to sign the verdict manifest. */
@@ -66,14 +66,14 @@ export interface PredictionV0EvaluatorConfig {
 }
 
 
-export class PredictionV0Evaluator implements Harness {
+export class PredictionV1Evaluator implements Harness {
   readonly name = 'prediction-v0-evaluator';
   readonly version = '1.0.0';
 
-  constructor(private readonly config: PredictionV0EvaluatorConfig) {}
+  constructor(private readonly config: PredictionV1EvaluatorConfig) {}
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    return ctx.solverType === 'prediction.v0' && ctx.role === 'evaluation';
+    return ctx.solverType === 'prediction.v1' && ctx.role === 'evaluation';
   }
 
   async isReady(): Promise<ReadyStatus> {
@@ -82,7 +82,7 @@ export class PredictionV0Evaluator implements Harness {
   }
 
   async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (task.solverType !== 'prediction.v0') return { ok: false, reason: 'solverType is not prediction.v0' };
+    if (task.solverType !== 'prediction.v1') return { ok: false, reason: 'solverType is not prediction.v1' };
     if (task.role !== 'evaluation') return { ok: false, reason: 'role is not evaluation' };
     if (!task.restorationRequestId) return { ok: false, reason: 'restorationRequestId is required' };
     if (typeof task.context?.['restorationResult'] !== 'string') {
@@ -104,16 +104,16 @@ export class PredictionV0Evaluator implements Harness {
     const expectedRef = resolveExpectedRestorationTaskCid(task, testDeps);
 
     // 1. Parse task — same spec the harness ran under
-    const predictionTask = PredictionV0TaskSchema.parse(task);
+    const predictionTask = PredictionV1TaskSchema.parse(task);
     const { feed, venue } = predictionTask.spec.oracle;
 
     // 2. Parse harness's SignedEnvelope from inlined context
     const manifestJson = task.context!['restorationResult'] as string;
     const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
     const envelope = SignedEnvelopeSchema.parse(rawPayload);
-    if (envelope.solverType !== 'prediction.v0' || envelope.role !== 'restoration') {
+    if (envelope.solverType !== 'prediction.v1' || envelope.role !== 'restoration') {
       throw new Error(
-        `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.v0/restoration`,
+        `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.v1/restoration`,
       );
     }
     const payload: PredictionV0RestorationPayload = PredictionV0RestorationPayloadSchema.parse(envelope.payload);
@@ -300,7 +300,7 @@ export class PredictionV0Evaluator implements Harness {
     log({ level: 'info', msg: 'prediction-v0-evaluator: verdict', data: { verdict, score, groundTruth } });
 
     // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
-    // Assembles the PredictionV0VerdictPayload from the already-computed fields.
+    // Assembles the PredictionV1VerdictPayload from the already-computed fields.
     //
     // restorationEnvelope: CID threaded from the daemon via context, sha256
     // computed as sha256(JCS(restorationEnvelope)) — matching the upload pipeline
@@ -394,4 +394,4 @@ function deriveVerdict(checks: Check[]): Verdict {
   return 'PASS';
 }
 
-export default PredictionV0Evaluator;
+export default PredictionV1Evaluator;

@@ -1,5 +1,5 @@
 import type { ExecutionAdapter } from '../adapters/adapter.js';
-import type { Task, RequestId } from '../types/index.js';
+import type { Task } from '../types/index.js';
 import type { Store } from '../store/store.js';
 import { PermanentError, TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
@@ -10,7 +10,7 @@ import type { TaskSource } from '../tasks/sources.js';
 export interface ActiveAttempt {
   task: Task;
   attemptNumber: number;
-  restorationRequestId: string;
+  taskId: string;
   status: 'pending' | 'resolved';
 }
 
@@ -40,7 +40,7 @@ export class CreatorLoop {
     });
   }
 
-  async tick(): Promise<RequestId | null> {
+  async tick(): Promise<string | null> {
     const now = Date.now();
     const candidates = [];
     for (const source of this.taskSources) {
@@ -69,14 +69,14 @@ export class CreatorLoop {
         });
         if (postResult.idempotent) continue;
 
-        const requestId = postResult.requestId;
+        const taskId = postResult.taskId;
         this.attempts.set(state.id, {
           task: state,
           attemptNumber: postResult.attemptNumber,
-          restorationRequestId: requestId,
+          taskId,
           status: 'pending',
         });
-        return requestId;
+        return taskId;
       } catch (err) {
         if (err instanceof TransientError) continue;
         if (err instanceof PermanentError) {

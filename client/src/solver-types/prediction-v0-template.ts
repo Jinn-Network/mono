@@ -1,8 +1,8 @@
 /**
- * Sentinel resolution for prediction.v0 Task templates.
+ * Sentinel resolution for prediction.v1 Task templates.
  *
  * Two sentinels are supported in template JSON (e.g.,
- * `client/fixtures/prediction-v0-task.example.json`):
+ * `client/fixtures/prediction-v1-task.example.json`):
  *
  *   1. window.startTs = 0 → rewritten as Date.now() at call time; the rest of
  *      the window (endTs) and resolveTs are computed relative to that.
@@ -26,10 +26,10 @@
  */
 
 import {
-  PredictionV0TaskSchema,
-  type PredictionV0Task,
+  PredictionV1TaskSchema,
+  type PredictionV1Task,
 } from '../types/prediction.js';
-import { PREDICTION_V0_KIND } from './constants.js';
+import { PREDICTION_V1_KIND } from './constants.js';
 
 // ── Sentinel parsers ──────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ export interface TemplateReaderDeps {
   /**
    * Read the current price of the Chainlink feed referenced in the template.
    * Required only when the template uses a `current[±…]` threshold sentinel
-   * (see {@link predictionV0TemplateNeedsReadCurrent}).
+   * (see {@link predictionV1TemplateNeedsReadCurrent}).
    */
   readCurrent?: (args: {
     feed: `0x${string}`;
@@ -104,10 +104,10 @@ export const DEFAULT_WINDOW_DURATION_MS = 600_000;
 export const DEFAULT_RESOLVE_GAP_MS = 300_000;
 
 /**
- * True if {@link resolvePredictionV0Template} will call `readCurrent` for this
+ * True if {@link resolvePredictionV1Template} will call `readCurrent` for this
  * template (Chainlink). `window.startTs === 0` does not need `readCurrent`.
  */
-export function predictionV0TemplateNeedsReadCurrent(template: unknown): boolean {
+export function predictionV1TemplateNeedsReadCurrent(template: unknown): boolean {
   if (typeof template !== 'object' || template === null) return false;
   const t = template as Record<string, unknown>;
   const spec = t['spec'] as
@@ -116,28 +116,28 @@ export function predictionV0TemplateNeedsReadCurrent(template: unknown): boolean
         question?: { kind?: string; threshold?: unknown };
       }
     | undefined;
-  if (spec?.kind !== PREDICTION_V0_KIND) return false;
-  if (spec.question?.kind === 'threshold' && typeof spec.question.threshold === 'string') {
+  if ((t['solverType'] ?? PREDICTION_V1_KIND) !== PREDICTION_V1_KIND) return false;
+  if (spec?.question?.kind === 'threshold' && typeof spec.question.threshold === 'string') {
     return isCurrentSentinel(spec.question.threshold);
   }
   return false;
 }
 
 /**
- * Resolve all supported sentinels in a raw prediction.v0 template + return a
- * parsed, validated PredictionV0Task.
+ * Resolve all supported sentinels in a raw prediction.v1 template + return a
+ * parsed, validated PredictionV1Task.
  *
- * The template must be the JSON shape of a PredictionV0Task with optional
+ * The template must be the JSON shape of a PredictionV1Task with optional
  * sentinel values. Callers that build the template from multiple sources
  * (CLI --spec-file + --id + --description) should merge their bits BEFORE
  * calling this helper.
  */
-export async function resolvePredictionV0Template(
+export async function resolvePredictionV1Template(
   template: unknown,
   deps: TemplateReaderDeps,
-): Promise<PredictionV0Task> {
+): Promise<PredictionV1Task> {
   if (typeof template !== 'object' || template === null) {
-    throw new Error('resolvePredictionV0Template: template must be an object');
+    throw new Error('resolvePredictionV1Template: template must be an object');
   }
   // Shallow clone so we don't mutate caller's input.
   const stub = JSON.parse(JSON.stringify(template)) as Record<string, unknown>;
@@ -159,14 +159,13 @@ export async function resolvePredictionV0Template(
   // ── (2) spec.question.threshold sentinel → absolute price ──────────────────
   const spec = stub['spec'] as
     | {
-        kind?: string;
         oracle?: { feed?: `0x${string}`; venue?: 'chainlink-base' | 'chainlink-base-sepolia' };
         question?: { kind?: string; threshold?: string };
       }
     | undefined;
 
   if (
-    spec?.kind === PREDICTION_V0_KIND &&
+    spec &&
     spec.question?.kind === 'threshold' &&
     typeof spec.question.threshold === 'string'
   ) {
@@ -174,7 +173,7 @@ export async function resolvePredictionV0Template(
     if (isCurrentSentinel(t)) {
       if (!deps.readCurrent) {
         throw new Error(
-          'resolvePredictionV0Template: readCurrent is required when spec.question.threshold uses a current[±…] sentinel',
+          'resolvePredictionV1Template: readCurrent is required when spec.question.threshold uses a current[±…] sentinel',
         );
       }
       if (!spec.oracle?.feed || !spec.oracle.venue) {
@@ -200,5 +199,5 @@ export async function resolvePredictionV0Template(
   }
 
   // Final Zod parse — all refinements (window span, resolveTs offset) enforced.
-  return PredictionV0TaskSchema.parse(stub);
+  return PredictionV1TaskSchema.parse(stub);
 }

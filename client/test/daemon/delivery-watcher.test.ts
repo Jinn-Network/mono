@@ -80,9 +80,14 @@ function makeStubAdapter(
   return {
     name: 'stub',
     initialize: vi.fn(),
-    postTask: vi.fn(),
-    watchForRequests: async function* () { /* no-op */ },
-    claimRequest: vi.fn(),
+    postTask: vi.fn().mockResolvedValue({ taskId: 'task-1', taskCid: 'local-task-1' }),
+    watchForTasks: async function* () { /* no-op */ },
+    claimTask: vi.fn().mockResolvedValue({
+      requestId: 'req-001',
+      taskId: 'task-1',
+      attemptIndex: 0,
+      task: { id: 'task-1', description: 'test' },
+    }),
     submitResult: vi.fn(),
     watchForDeliveries: async function* () {
       for (const d of deliveries) yield d;

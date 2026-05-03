@@ -1,4 +1,3 @@
-import type { ClaimPolicy } from './claim-policy.js';
 import type { Address, WalletClient } from 'viem';
 
 export interface EvictionRecoveryConfig {
@@ -18,14 +17,12 @@ export interface MechAdapterConfig {
   ipfsRegistryUrl: string;  // Upload endpoint (e.g., https://registry.autonolas.tech)
   ipfsGatewayUrl: string;   // Read endpoint (e.g., https://gateway.autonolas.tech)
   pollIntervalMs: number;
-  /** Optional delivery backfill horizon for late evaluation creation retries. */
+  /** Optional cap for delivery-log scans; omit for full-history recovery. */
   mechDeliverBackfillLookbackBlocks?: bigint;
   chainId: number;
-  /** Base mainnet V1 vs Phase 1b V2 `claimDelivery` — align with `ChainConfig.routerClaimDeliveryVersion`. */
-  routerClaimDeliveryVariant: 'v1' | 'v2';
+  /** Base mainnet V1, Phase 1b V2, or Task-native V3 delivery claim ABI. */
+  routerClaimDeliveryVariant: 'v1' | 'v2' | 'v3';
   evictionRecovery?: EvictionRecoveryConfig;
-  claimPolicy?: ClaimPolicy;
-  claimRegistryAddress?: `0x${string}`;
 }
 
 export const MECH_MARKETPLACE_ABI = [
@@ -117,6 +114,13 @@ export const MECH_ABI = [
     outputs: [{ name: 'deliveredRequests', type: 'bool[]' }],
   },
   {
+    name: 'isOperator',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'operator', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
     name: 'getOperator',
     type: 'function',
     stateMutability: 'view',
@@ -176,100 +180,167 @@ export const JINN_ROUTER_CLAIM_DELIVERY_V2_ABI = [
 
 export const JINN_ROUTER_ABI = [
   {
-    name: 'createRestorationJob',
+    name: 'taskCoordinator',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'createTask',
     type: 'function',
     stateMutability: 'payable',
     inputs: [
-      { name: 'requestData', type: 'bytes' },
-      { name: 'priorityMech', type: 'address' },
-      { name: 'maxDeliveryRate', type: 'uint256' },
+      { name: 'taskCidDigest', type: 'bytes32' },
+      { name: 'solverTypeDigest', type: 'bytes32' },
+      {
+        name: 'policy',
+        type: 'tuple',
+        components: [
+          { name: 'claimWindowStart', type: 'uint64' },
+          { name: 'claimWindowEnd', type: 'uint64' },
+          { name: 'submissionDeadline', type: 'uint64' },
+          { name: 'claimLeaseTtlSeconds', type: 'uint32' },
+          { name: 'maxClaims', type: 'uint16' },
+          { name: 'maxClaimsPerOperator', type: 'uint16' },
+          { name: 'policyHook', type: 'address' },
+          {
+            name: 'evaluationPolicy',
+            type: 'tuple',
+            components: [
+              { name: 'requiredVerdicts', type: 'uint16' },
+              { name: 'passThreshold', type: 'uint16' },
+              { name: 'evaluationDeadline', type: 'uint64' },
+              { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
+              { name: 'disallowSolverSelfEvaluation', type: 'bool' },
+            ],
+          },
+        ],
+      },
+      { name: 'solutionMaxDeliveryRate', type: 'uint256' },
+      { name: 'verdictMaxDeliveryRate', type: 'uint256' },
       { name: 'responseTimeout', type: 'uint256' },
-      { name: 'paymentType', type: 'bytes32' },
-      { name: 'paymentData', type: 'bytes' },
     ],
-    outputs: [{ name: 'requestId', type: 'bytes32' }],
+    outputs: [{ name: 'taskId', type: 'uint256' }],
   },
   {
-    name: 'createEvaluationJob',
-    type: 'function',
-    stateMutability: 'payable',
-    inputs: [
-      { name: 'restorationRequestId', type: 'bytes32' },
-      { name: 'requestData', type: 'bytes' },
-      { name: 'evaluationMech', type: 'address' },
-      { name: 'maxDeliveryRate', type: 'uint256' },
-      { name: 'responseTimeout', type: 'uint256' },
-      { name: 'paymentType', type: 'bytes32' },
-      { name: 'paymentData', type: 'bytes' },
-    ],
-    outputs: [{ name: 'requestId', type: 'bytes32' }],
-  },
-  {
-    name: 'claimDelivery',
+    name: 'claimTask',
     type: 'function',
     stateMutability: 'nonpayable',
-    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    inputs: [
+      { name: 'taskId', type: 'uint256' },
+      { name: 'priorityMech', type: 'address' },
+    ],
+    outputs: [
+      { name: 'attemptIndex', type: 'uint32' },
+      { name: 'requestId', type: 'bytes32' },
+    ],
+  },
+  {
+    name: 'TaskCreated',
+    type: 'event',
+    inputs: [
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'solverTypeDigest', type: 'bytes32', indexed: true },
+      { name: 'taskCidDigest', type: 'bytes32', indexed: false },
+      { name: 'maxClaims', type: 'uint16', indexed: false },
+      { name: 'requiredVerdicts', type: 'uint16', indexed: false },
+      { name: 'solutionBudget', type: 'uint256', indexed: false },
+      { name: 'verdictBudget', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'TaskAttemptCreated',
+    type: 'event',
+    inputs: [
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'attemptIndex', type: 'uint32', indexed: true },
+      { name: 'requestId', type: 'bytes32', indexed: true },
+      { name: 'operator', type: 'address', indexed: false },
+      { name: 'priorityMech', type: 'address', indexed: false },
+      { name: 'deliveryRate', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'claimEvaluation',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'taskId', type: 'uint256' },
+      { name: 'attemptIndex', type: 'uint32' },
+      { name: 'evaluatorMech', type: 'address' },
+      { name: 'evaluationTaskCidDigest', type: 'bytes32' },
+    ],
+    outputs: [
+      { name: 'verdictIndex', type: 'uint32' },
+      { name: 'verdictRequestId', type: 'bytes32' },
+    ],
+  },
+  {
+    name: 'EvaluationAttemptCreated',
+    type: 'event',
+    inputs: [
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'attemptIndex', type: 'uint32', indexed: true },
+      { name: 'verdictIndex', type: 'uint32', indexed: true },
+      { name: 'requestId', type: 'bytes32', indexed: false },
+      { name: 'evaluator', type: 'address', indexed: false },
+      { name: 'priorityMech', type: 'address', indexed: false },
+      { name: 'deliveryRate', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'claimSolutionDelivery',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'requestId', type: 'bytes32' },
+      { name: 'solutionDigest', type: 'bytes32' },
+    ],
     outputs: [],
   },
   {
-    name: 'RestorationJobCreated',
+    name: 'claimVerdictDelivery',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'verdictRequestId', type: 'bytes32' },
+      { name: 'verdictDigest', type: 'bytes32' },
+      { name: 'verdictCode', type: 'uint8' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'SolutionDeliveryClaimed',
     type: 'event',
     inputs: [
-      { name: 'creator', type: 'address', indexed: true },
+      { name: 'operator', type: 'address', indexed: true },
       { name: 'requestId', type: 'bytes32', indexed: true },
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'attemptIndex', type: 'uint32', indexed: false },
     ],
   },
   {
-    name: 'EvaluationJobCreated',
+    name: 'VerdictDeliveryClaimed',
     type: 'event',
     inputs: [
-      { name: 'creator', type: 'address', indexed: true },
+      { name: 'evaluator', type: 'address', indexed: true },
       { name: 'requestId', type: 'bytes32', indexed: true },
-      { name: 'restorationRequestId', type: 'bytes32', indexed: true },
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'attemptIndex', type: 'uint32', indexed: false },
+      { name: 'verdictIndex', type: 'uint32', indexed: false },
+      { name: 'verdictCode', type: 'uint8', indexed: false },
     ],
   },
   {
-    name: 'DeliveryClaimed',
-    type: 'event',
-    inputs: [
-      { name: 'claimer', type: 'address', indexed: true },
-      { name: 'requestId', type: 'bytes32', indexed: true },
-      { name: 'jobType', type: 'uint8', indexed: false },
-    ],
-  },
-  {
-    name: 'creationCount',
+    name: 'claimed',
     type: 'function',
     stateMutability: 'view',
-    inputs: [{ name: 'multisig', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    name: 'restorationDeliveryCount',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'multisig', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    name: 'evaluationCreationCount',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'multisig', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    name: 'evaluationDeliveryCount',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'multisig', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
+    inputs: [{ name: 'requestId', type: 'bytes32' }],
+    outputs: [{ name: '', type: 'bool' }],
   },
 ] as const;
-
-// CLAIM_REGISTRY_ABI was removed from here — canonical definition lives in
-// client/src/adapters/claim-registry/abi.ts (single source of truth).
-// Consumers in this directory import from '../claim-registry/abi.js'.
 
 export const SAFE_ABI = [
   {

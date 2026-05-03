@@ -22,13 +22,13 @@ contract MockMessenger is IClaimMessenger {
     ///         that.
     struct Fixture {
         uint256 serviceId;
-        uint256 verifiedCreations;
-        uint256 noveltyWeightedRestorationDeliveries;
-        uint256 evaluationDeliveryCount;
+        uint256 taskCreationWeight;
+        uint256 solutionDeliveryWeight;
+        uint256 verdictDeliveryWeight;
         address multisig;
     }
 
-    /// @notice Fixtures keyed by `JinnClaimEmitter.ClaimTicket.claimId`.
+    /// @notice Fixtures keyed by `TaskClaimEmitter.ClaimTicket.claimId`.
     mapping(uint256 => Fixture) public fixtures;
 
     event FixtureSet(uint256 indexed claimId, uint256 indexed serviceId, address indexed multisig);
@@ -68,9 +68,9 @@ contract MockMessenger is IClaimMessenger {
         override
         returns (
             uint256 serviceId,
-            uint256 verifiedCreations,
-            uint256 noveltyWeightedRestorationDeliveries,
-            uint256 evaluationDeliveryCount,
+            uint256 taskCreationWeight,
+            uint256 solutionDeliveryWeight,
+            uint256 verdictDeliveryWeight,
             address multisig
         )
     {
@@ -79,9 +79,9 @@ contract MockMessenger is IClaimMessenger {
         require(f.multisig != address(0), "MockMessenger: no fixture");
         return (
             f.serviceId,
-            f.verifiedCreations,
-            f.noveltyWeightedRestorationDeliveries,
-            f.evaluationDeliveryCount,
+            f.taskCreationWeight,
+            f.solutionDeliveryWeight,
+            f.verdictDeliveryWeight,
             f.multisig
         );
     }

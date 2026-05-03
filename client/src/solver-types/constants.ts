@@ -3,4 +3,4 @@
  * Keeps `prediction-v0-template.ts` aligned with the manifest without import cycles.
  */
 
-export const PREDICTION_V0_KIND = 'prediction.v0' as const;
+export const PREDICTION_V1_KIND = 'prediction.v1' as const;

@@ -64,7 +64,6 @@ export async function gatherIntrospectionRaw(opts?: {
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
   };
   const local = await gatherGatheredStatusRaw(store, status);
   return tryMergeStatusFromHttp(config, local);

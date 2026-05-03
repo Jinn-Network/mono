@@ -1,13 +1,13 @@
 /**
- * Harness engine — mech delivery + JinnRouter.claimDelivery.
+ * Harness engine — mech delivery + JinnRouter delivery settlement.
  *
  * §6.1 DELIVERING phase.
  *
  * Steps:
  *   1. Encode manifest CID as bytes32 digest (cidToDigestHex).
  *   2. Call mech.deliverToMarketplace(requestId, deliveryDigest) via the Safe.
- *   3. Call JinnRouter.claimDelivery(requestId, evidenceHash) where evidenceHash
- *      is the keccak256 hash of the signed manifest (from manifest assembly).
+ *   3. Call the configured router delivery settlement method. V3 settles
+ *      Solution requests through `claimSolutionDelivery(requestId, evidenceHash)`.
  */
 
 import type { Hex, PublicClient, WalletClient, Address } from 'viem';
@@ -28,8 +28,8 @@ export interface DeliveryDeps {
   safeAddress: Address;
   mechContractAddress: Address;
   routerAddress: Address;
-  /** v1 or v2 claimDelivery encoding — matches chain config */
-  claimDeliveryVariant: 'v1' | 'v2';
+  /** Router delivery settlement encoding — matches chain config. */
+  claimDeliveryVariant: 'v1' | 'v2' | 'v3';
   evictionRecovery?: EvictionRecoveryConfig;
 }
 
@@ -46,6 +46,11 @@ export type OnDeliveryTxLanded = (deliveryTxHash: Hex) => void | Promise<void>;
 export interface DeliveryResult {
   deliveryTxHash: Hex;
   claimTxHash: Hex;
+}
+
+export interface DeliveryClaimOptions {
+  kind?: 'solution' | 'verdict';
+  verdictCode?: number;
 }
 
 /**
@@ -74,6 +79,7 @@ export async function deliverAndClaim(
   deps: DeliveryDeps,
   preExistingDeliveryTxHash?: Hex,
   onDeliveryTxLanded?: OnDeliveryTxLanded,
+  claimOptions: DeliveryClaimOptions = {},
 ): Promise<DeliveryResult> {
   let deliveryTxHash: Hex;
 
@@ -106,7 +112,7 @@ export async function deliverAndClaim(
     }
   }
 
-  // 3. claimDelivery on JinnRouter
+  // 3. claim delivery on JinnRouter
   console.log(`[harness-engine] claimDelivery requestId=${requestId}`);
   const claimTxHash = await claimDelivery(
     deps.publicClient,
@@ -116,7 +122,11 @@ export async function deliverAndClaim(
     requestId,
     {
       variant: deps.claimDeliveryVariant,
-      evidenceHash: deps.claimDeliveryVariant === 'v2' ? evidenceHash : undefined,
+      kind: claimOptions.kind ?? 'solution',
+      evidenceHash: deps.claimDeliveryVariant === 'v2' || deps.claimDeliveryVariant === 'v3'
+        ? evidenceHash
+        : undefined,
+      verdictCode: claimOptions.verdictCode,
     },
     deps.evictionRecovery,
   );

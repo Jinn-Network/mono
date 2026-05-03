@@ -146,8 +146,7 @@ describe('jinn-mono-egi: full Task round-trip', () => {
       task: ds,
     });
 
-    // Drive to RUNNING via process() (DISCOVERED → CLAIMED requires claimDeps;
-    // shortcut by direct transitions then process()).
+    // Drive to RUNNING via process() (shortcut by direct transitions, then process()).
     persistence.transition('egi-1', TaskRunState.CLAIMED);
     persistence.transition('egi-1', TaskRunState.WAITING);
     await engine.process('egi-1'); // advances WAITING → PRE_SNAPSHOT → RUNNING (re-dispatched)

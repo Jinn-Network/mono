@@ -1,5 +1,5 @@
 /**
- * claude-mcp-prediction — Harness for prediction.v0 that spawns a single
+ * claude-mcp-prediction — Harness for prediction.v1 that spawns a single
  * Claude Code session with two MCP tools (read_chainlink_price +
  * submit_prediction) and harvests the model's probability + rationale.
  *
@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/task.js';
-import { PredictionV0TaskSchema } from '../../../types/prediction.js';
+import { PredictionV1TaskSchema } from '../../../types/prediction.js';
 
 import { buildSessionPrompt } from './prompt.js';
 import { spawnSession } from './session-orchestrator.js';
@@ -34,7 +34,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
   constructor(private readonly config: ClaudeMcpPredictionConfig = {}) {}
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    return ctx.solverType === 'prediction.v0' && ctx.role !== 'evaluation';
+    return ctx.solverType === 'prediction.v1' && ctx.role !== 'evaluation';
   }
 
   async isReady(): Promise<ReadyStatus> {
@@ -45,8 +45,8 @@ export class ClaudeMcpPredictionImpl implements Harness {
   async canAttempt(
     task: Task,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const parsed = PredictionV0TaskSchema.safeParse(task);
-    if (!parsed.success) return { ok: false, reason: `Invalid prediction.v0 task: ${parsed.error.message}` };
+    const parsed = PredictionV1TaskSchema.safeParse(task);
+    if (!parsed.success) return { ok: false, reason: `Invalid prediction.v1 task: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) return { ok: false, reason: 'window already closed' };
     return { ok: true };
   }
@@ -56,7 +56,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
       throw new Error('claude-mcp-prediction: stub registry cannot run (requires live daemon)');
     }
     const { task: task, workingDir, log } = ctx;
-    const parsed = PredictionV0TaskSchema.parse(task);
+    const parsed = PredictionV1TaskSchema.parse(task);
     const testDeps = this.config._testDeps;
 
     // Shared submission state. The wrapper-subprocess writes to a JSONL file
@@ -168,7 +168,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   private _finalize(
-    task: import('../../../types/prediction.js').PredictionV0Task,
+    task: import('../../../types/prediction.js').PredictionV1Task,
     sessionId: string,
     transcriptPath: string,
     submission: SubmissionState,

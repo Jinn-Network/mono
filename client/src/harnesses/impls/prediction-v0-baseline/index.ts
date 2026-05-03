@@ -1,5 +1,5 @@
 /**
- * prediction-v0-baseline — reference Harness for prediction.v0.
+ * prediction-v0-baseline — reference Harness for prediction.v1.
  *
  * §5 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
  */
@@ -18,7 +18,7 @@ import type {
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { PublicClient } from 'viem';
-import { PredictionV0TaskSchema } from '../../../types/prediction.js';
+import { PredictionV1TaskSchema } from '../../../types/prediction.js';
 import {
   readChainlinkLatest,
   scaleToDecimal,
@@ -26,7 +26,7 @@ import {
 } from '../../../venues/chainlink/client.js';
 import { spotCarryPredict } from './strategy.js';
 
-export interface PredictionV0BaselineConfig {
+export interface PredictionV1BaselineConfig {
   rpcUrl?: string;
   /** CLI registries that cannot execute tasks without the daemon. */
   stub?: boolean;
@@ -35,26 +35,26 @@ export interface PredictionV0BaselineConfig {
   };
 }
 
-export class PredictionV0BaselineImpl implements Harness {
+export class PredictionV1BaselineImpl implements Harness {
   readonly name = 'prediction-v0-baseline';
   readonly version = '1.0.0';
 
-  constructor(private readonly config: PredictionV0BaselineConfig = {}) {}
+  constructor(private readonly config: PredictionV1BaselineConfig = {}) {}
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    return ctx.solverType === 'prediction.v0' && ctx.role !== 'evaluation';
+    return ctx.solverType === 'prediction.v1' && ctx.role !== 'evaluation';
   }
 
   async isReady(): Promise<ReadyStatus> {
     if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    // Zero external deps — prediction.v0 runs against on-chain oracles only.
+    // Zero external deps — prediction.v1 runs against on-chain oracles only.
     return { ready: true };
   }
 
   enableMetadata(): HarnessEnableMetadata {
     return {
       description:
-        'prediction.v0 — submit probability predictions against on-chain price feeds. No external credentials required.',
+        'prediction.v1 — submit probability predictions against on-chain price feeds. No external credentials required.',
     };
   }
 
@@ -65,8 +65,8 @@ export class PredictionV0BaselineImpl implements Harness {
   async canAttempt(task: import('../../../types/task.js').Task):
     Promise<{ ok: true } | { ok: false; reason: string }>
   {
-    const parsed = PredictionV0TaskSchema.safeParse(task);
-    if (!parsed.success) return { ok: false, reason: `Invalid prediction.v0 task: ${parsed.error.message}` };
+    const parsed = PredictionV1TaskSchema.safeParse(task);
+    if (!parsed.success) return { ok: false, reason: `Invalid prediction.v1 task: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) {
       return { ok: false, reason: 'window already closed' };
     }
@@ -78,7 +78,7 @@ export class PredictionV0BaselineImpl implements Harness {
       throw new Error('prediction-v0-baseline: stub registry cannot run (requires live daemon)');
     }
     const { task: task, workingDir, log } = ctx;
-    const parsed = PredictionV0TaskSchema.parse(task);
+    const parsed = PredictionV1TaskSchema.parse(task);
     const { feed, venue } = parsed.spec.oracle;
 
     log({ level: 'info', msg: 'prediction-v0-baseline: starting', data: { feed, venue } });
@@ -143,4 +143,4 @@ export class PredictionV0BaselineImpl implements Harness {
   }
 }
 
-export default PredictionV0BaselineImpl;
+export default PredictionV1BaselineImpl;

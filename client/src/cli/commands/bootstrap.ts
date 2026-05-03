@@ -58,7 +58,6 @@ const PRODUCTION_DEPS: BootstrapDeps = {
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
     minEoaGasWei: config.minEoaGasWei,
     minSafeEthWei: config.minSafeEthWei,

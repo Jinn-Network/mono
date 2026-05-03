@@ -6,6 +6,13 @@ import {
   parseSignedTaskV1,
 } from '../../src/types/task-document.js';
 
+const DEFAULT_CLAIM_POLICY = {
+  mode: 'parallel' as const,
+  maxClaims: 25,
+  maxClaimsPerOperator: 1,
+  claimLeaseTtlSeconds: 600,
+};
+
 describe('TaskV1Schema', () => {
   const valid = {
     schemaVersion: 'task.v1',
@@ -16,6 +23,7 @@ describe('TaskV1Schema', () => {
     window: { startTs: 1000, endTs: 87400000 },
     spec: { account: { venue: 'hyperliquid-testnet', masterAddress: '0xabc' } },
     eligibility: { minClosedTrades: 20 },
+    claimPolicy: DEFAULT_CLAIM_POLICY,
     creator: {
       safeAddress: '0x1111111111111111111111111111111111111111',
       agentEoa: '0x2222222222222222222222222222222222222222',
@@ -64,6 +72,7 @@ describe('SignedTaskV1Schema', () => {
     window: { startTs: 1000, endTs: 87400000 },
     spec: { account: { venue: 'hyperliquid-testnet', masterAddress: '0xabc' } },
     eligibility: {},
+    claimPolicy: DEFAULT_CLAIM_POLICY,
     creator: {
       safeAddress: '0x1111111111111111111111111111111111111111',
       agentEoa: '0x2222222222222222222222222222222222222222',
@@ -107,6 +116,7 @@ describe('parseTaskV1', () => {
       window: { startTs: 1, endTs: 2 },
       spec: {},
       eligibility: {},
+      claimPolicy: DEFAULT_CLAIM_POLICY,
       creator: { safeAddress: '0xaaa', agentEoa: '0xbbb' },
       createdAt: 1,
     };

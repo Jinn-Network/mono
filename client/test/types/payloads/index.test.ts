@@ -2,15 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { SOLVER_TYPE_PAYLOADS, validatePayload } from '../../../src/types/payloads/index.js';
 
 describe('SOLVER_TYPE_PAYLOADS registry', () => {
-  it('has all in-repo typed solver types', () => {
+  it('has all three solver types', () => {
     expect(SOLVER_TYPE_PAYLOADS['portfolio.v0']).toBeDefined();
-    expect(SOLVER_TYPE_PAYLOADS['prediction.v0']).toBeDefined();
     expect(SOLVER_TYPE_PAYLOADS['prediction.v1']).toBeDefined();
     expect(SOLVER_TYPE_PAYLOADS['prediction.apy.v0']).toBeDefined();
   });
 
   it('each solver type has restoration + verdict schemas', () => {
-    for (const solverType of ['portfolio.v0', 'prediction.v0', 'prediction.v1', 'prediction.apy.v0']) {
+    for (const solverType of ['portfolio.v0', 'prediction.v1', 'prediction.apy.v0']) {
       expect(SOLVER_TYPE_PAYLOADS[solverType].restoration).toBeDefined();
       expect(SOLVER_TYPE_PAYLOADS[solverType].verdict).toBeDefined();
     }

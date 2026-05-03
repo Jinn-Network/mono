@@ -52,6 +52,10 @@ const config: HardhatUserConfig = {
     hardhat: {
       chainId: 8453,
     },
+    localhost: {
+      url: process.env.LOCAL_RPC_URL || "http://127.0.0.1:8545",
+      chainId: process.env.LOCAL_CHAIN_ID ? Number(process.env.LOCAL_CHAIN_ID) : 31337,
+    },
     sepolia: {
       url: process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
       chainId: 11155111,

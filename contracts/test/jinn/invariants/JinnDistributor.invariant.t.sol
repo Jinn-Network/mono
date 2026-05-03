@@ -27,7 +27,7 @@ import {Test} from "forge-std/Test.sol";
 ///                weighted snapshot mint zero JINN on the second.
 ///
 ///           5. weight/ratio change is forward-only:
-///                Lowering wCreation, wRestorationDelivery, etc. never
+///                Lowering wTaskCreation, wSolutionDelivery, etc. never
 ///                burns supply nor decreases per-service accumulators.
 ///
 ///         These will be authored under a follow-up to bd

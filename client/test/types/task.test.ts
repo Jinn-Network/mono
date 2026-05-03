@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { parseTask } from '../../src/types/task.js';
 
+const DEFAULT_CLAIM_POLICY = {
+  mode: 'parallel' as const,
+  maxClaims: 25,
+  maxClaimsPerOperator: 1,
+  claimLeaseTtlSeconds: 600,
+};
+
 describe('Task', () => {
   it('parses a valid Task', () => {
     const input = {
@@ -29,6 +36,7 @@ describe('parseTask signedTask hydration', () => {
       window: { startTs: 1, endTs: 86400001 },
       spec: {},
       eligibility: {},
+      claimPolicy: DEFAULT_CLAIM_POLICY,
       creator: { safeAddress: '0xaaa', agentEoa: '0xbbb' },
       createdAt: 1,
       signature: {
@@ -57,6 +65,7 @@ describe('parseTask signedTask hydration', () => {
       window: { startTs: 1, endTs: 86400001 },
       spec: {},
       eligibility: {},
+      claimPolicy: DEFAULT_CLAIM_POLICY,
       creator: { safeAddress: '0xaaa', agentEoa: '0xbbb' },
       createdAt: 1,
       signature: {

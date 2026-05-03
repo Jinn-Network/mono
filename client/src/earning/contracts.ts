@@ -31,10 +31,9 @@ export const DEFAULT_TESTNET_ARTIFACTS = {
   mech: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-phase1b-mech-baseSepolia-fast.json'),
   stolas: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-stolas-l2-baseSepolia-fast.json'),
   faucet: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-testnet-faucet-baseSepolia-fast.json'),
-  claimRegistry: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-claim-registry-baseSepolia.json'),
   /** v0 MVI L1 stack (JINN, Timelock, Governor, Distributor, Messenger) on Sepolia. */
   jinnMviL1: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-mvi-l1-sepolia.json'),
-  /** v0 MVI L2 emitter (JinnClaimEmitter) on Base Sepolia. */
+  /** v0 MVI L2 emitter (TaskClaimEmitter) on Base Sepolia. */
   jinnMviL2: path.join(BUNDLED_DEPLOYMENTS_DIR, 'deployment-jinn-mvi-l2-baseSepolia.json'),
 } as const;
 
@@ -138,7 +137,6 @@ export interface ChainConfig {
   eoaTopupTrigger: bigint;
   safeTopupTrigger: bigint;
   jinnRouter?: string;
-  claimRegistry?: string;
   distributorAddress?: string;
   /**
    * ERC-8004 IdentityRegistry contract — operator agent NFT mint target.
@@ -152,10 +150,11 @@ export interface ChainConfig {
    */
   jinnFaucet?: string;
   /**
-   * JinnRouter claimDelivery ABI: V1 single arg (Base mainnet), V2 + evidenceHash (testnet / Phase 1b).
-   * Override with JINN_ROUTER_CLAIM_DELIVERY_VERSION=v1|v2.
+   * JinnRouter delivery claim ABI: V1 single arg (Base mainnet), V2 + evidenceHash
+   * (Phase 1b), or Task-native V3 split Solution/Verdict delivery claims.
+   * Override with JINN_ROUTER_CLAIM_DELIVERY_VERSION=v1|v2|v3.
    */
-  routerClaimDeliveryVersion: 'v1' | 'v2';
+  routerClaimDeliveryVersion: 'v1' | 'v2' | 'v3';
 }
 
 export interface ChainGasOverrides {
@@ -189,7 +188,6 @@ interface ChainConfigOverrides {
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
   testnetFaucetDeploymentPath?: string;
-  testnetClaimRegistryDeploymentPath?: string;
 }
 
 interface DeploymentArtifact {
@@ -289,8 +287,8 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   eoaTopupTrigger: 1_000_000_000_000_000n,  // 0.001 ETH
   safeTopupTrigger: 500_000_000_000_000n,   // 0.0005 ETH
 
-  /** Phase 1b routers use V2 claimDelivery(bytes32,bytes32). */
-  routerClaimDeliveryVersion: 'v2',
+  /** Clean-break TaskCoordinator/JinnRouterV3 uses split Task-native delivery claims. */
+  routerClaimDeliveryVersion: 'v3',
 };
 
 function loadArtifact(filePath: string): DeploymentArtifact {
@@ -406,24 +404,12 @@ function resolveBaseSepoliaConfig(overrides: ChainConfigOverrides = {}): ChainCo
     }
   }
 
-  const claimRegistryArtifactPath =
-    overrides.testnetClaimRegistryDeploymentPath
-    ?? process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT']
-    ?? DEFAULT_TESTNET_ARTIFACTS.claimRegistry;
-  if (claimRegistryArtifactPath && existsSync(path.resolve(claimRegistryArtifactPath))) {
-    const claimRegistryArtifact = loadArtifact(claimRegistryArtifactPath);
-    const claimRegistry = claimRegistryArtifact.contracts?.claimRegistry;
-    if (claimRegistry) {
-      resolved.claimRegistry = claimRegistry;
-    }
-  }
-
   return resolved;
 }
 
 function applyRouterClaimDeliveryEnvOverride(config: ChainConfig): ChainConfig {
   const raw = process.env['JINN_ROUTER_CLAIM_DELIVERY_VERSION']?.trim().toLowerCase();
-  if (raw === 'v1' || raw === 'v2') {
+  if (raw === 'v1' || raw === 'v2' || raw === 'v3') {
     return { ...config, routerClaimDeliveryVersion: raw };
   }
   return config;
@@ -819,7 +805,7 @@ export const STOLAS_STAKING_SLOTS_ABI = [
  *
  * Two artifacts: an L1 stack (deployed by deploy-jinn-mvi-l1.ts) carrying
  * JINN + Timelock + Governor + Distributor + Messenger; and an L2 emitter
- * (separate deploy script) carrying just the JinnClaimEmitter address.
+ * (separate deploy script) carrying just the TaskClaimEmitter address.
  *
  * The daemon's cross-chain claim loop reads `distributor` + `messenger` for
  * the L1 submission step and `claimEmitter` for the L2 emit step.
@@ -851,7 +837,7 @@ interface JinnMviL2Artifact {
   network?: string;
   chainId?: number;
   contracts?: {
-    JinnClaimEmitter?: string;
+    TaskClaimEmitter?: string;
   };
 }
 
@@ -897,7 +883,7 @@ export function loadJinnMviConfig(args: {
       throw new Error(`Jinn MVI L2 artifact not found: ${resolved}`);
     }
     const artifact = JSON.parse(readFileSync(resolved, 'utf8')) as JinnMviL2Artifact;
-    out.claimEmitter = artifact.contracts?.JinnClaimEmitter;
+    out.claimEmitter = artifact.contracts?.TaskClaimEmitter;
   }
 
   // Direct overrides take precedence.
@@ -910,7 +896,7 @@ export function loadJinnMviConfig(args: {
 }
 
 // ---------------------------------------------------------------------------
-// JinnClaimEmitter / IClaimMessenger / JinnDistributor ABI fragments
+// TaskClaimEmitter / IClaimMessenger / JinnDistributor ABI fragments
 // ---------------------------------------------------------------------------
 
 export const JINN_CLAIM_EMITTER_ABI = [
@@ -920,9 +906,9 @@ export const JINN_CLAIM_EMITTER_ABI = [
     inputs: [
       { name: 'claimId', type: 'uint256', indexed: true },
       { name: 'serviceId', type: 'uint256', indexed: true },
-      { name: 'verifiedCreations', type: 'uint256', indexed: false },
-      { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256', indexed: false },
-      { name: 'evaluationDeliveryCount', type: 'uint256', indexed: false },
+      { name: 'taskCreationWeight', type: 'uint256', indexed: false },
+      { name: 'solutionDeliveryWeight', type: 'uint256', indexed: false },
+      { name: 'verdictDeliveryWeight', type: 'uint256', indexed: false },
       { name: 'multisig', type: 'address', indexed: true },
       { name: 'claimer', type: 'address', indexed: false },
     ],
@@ -977,9 +963,9 @@ export const CLAIM_MESSENGER_ABI = [
     name: 'verifyClaim',
     outputs: [
       { name: 'serviceId', type: 'uint256' },
-      { name: 'verifiedCreations', type: 'uint256' },
-      { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
-      { name: 'evaluationDeliveryCount', type: 'uint256' },
+      { name: 'taskCreationWeight', type: 'uint256' },
+      { name: 'solutionDeliveryWeight', type: 'uint256' },
+      { name: 'verdictDeliveryWeight', type: 'uint256' },
       { name: 'multisig', type: 'address' },
     ],
     stateMutability: 'view',
@@ -1000,9 +986,9 @@ export const MOCK_MESSENGER_ABI = [
         type: 'tuple',
         components: [
           { name: 'serviceId', type: 'uint256' },
-          { name: 'verifiedCreations', type: 'uint256' },
-          { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
-          { name: 'evaluationDeliveryCount', type: 'uint256' },
+          { name: 'taskCreationWeight', type: 'uint256' },
+          { name: 'solutionDeliveryWeight', type: 'uint256' },
+          { name: 'verdictDeliveryWeight', type: 'uint256' },
           { name: 'multisig', type: 'address' },
         ],
       },
@@ -1017,9 +1003,9 @@ export const MOCK_MESSENGER_ABI = [
     name: 'fixtures',
     outputs: [
       { name: 'serviceId', type: 'uint256' },
-      { name: 'verifiedCreations', type: 'uint256' },
-      { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
-      { name: 'evaluationDeliveryCount', type: 'uint256' },
+      { name: 'taskCreationWeight', type: 'uint256' },
+      { name: 'solutionDeliveryWeight', type: 'uint256' },
+      { name: 'verdictDeliveryWeight', type: 'uint256' },
       { name: 'multisig', type: 'address' },
     ],
     stateMutability: 'view',

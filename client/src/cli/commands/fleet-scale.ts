@@ -44,7 +44,6 @@ const PRODUCTION_DEPS: FleetScaleDeps = {
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
     masterEthDailyEstimateWei: (config as any).masterEthDailyEstimateWei,
     minEoaGasWei: config.minEoaGasWei,

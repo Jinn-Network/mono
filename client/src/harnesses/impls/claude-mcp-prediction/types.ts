@@ -1,6 +1,6 @@
 /**
  * Types for claude-mcp-prediction — a Harness that spawns Claude with
- * two MCP tools to decide a prediction.v0 probability.
+ * two MCP tools to decide a prediction.v1 probability.
  */
 
 import type { PublicClient } from 'viem';

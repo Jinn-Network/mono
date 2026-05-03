@@ -45,7 +45,7 @@ export class ClaudeCodeLearnerImpl implements Harness {
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,
-      pluginRoots: [...(ctx.runtimePluginRoots ?? [])],
+      pluginRoots: [...(ctx.solverPluginRoots ?? [])],
       windowStartTs: window.startTs,
       windowEndTs: window.endTs,
       msUntilEndTs: ctx.msUntilEndTs(),

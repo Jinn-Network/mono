@@ -1,27 +1,27 @@
 import { privateKeyToAccount } from 'viem/accounts';
-import type { PredictionV0Task } from '../../../../src/types/prediction.js';
+import type { PredictionV1Task } from '../../../../src/types/prediction.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { SignedEnvelope } from '../../../../src/types/envelope.js';
 import { signCanonical } from '../../../../src/harnesses/engine/signing.js';
 import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 
-export function makeValidTask(overrides: Partial<PredictionV0Task> = {}): PredictionV0Task {
+export function makeValidTask(overrides: Partial<PredictionV1Task> = {}): PredictionV1Task {
   return {
     id: 'test-1',
     description: 'ETH > 3500',
     window: { startTs: 0, endTs: 3_600_000 },
     spec: {
-      kind: 'prediction.v0',
+      kind: 'prediction.v1',
       oracle: { venue: 'chainlink-base-sepolia', feed: '0x000000000000000000000000000000000000feed', feedDescription: 'ETH / USD' },
       question: { kind: 'threshold', operator: 'GT', threshold: '3500', resolveTs: 4_500_000 },
     },
     eligibility: { maxSubmissionDelayMs: 60_000 },
     ...overrides,
-  } as PredictionV0Task;
+  } as PredictionV1Task;
 }
 
 /**
- * Build a signed jinn.execution.v1 envelope for prediction.v0/restoration.
+ * Build a signed jinn.execution.v1 envelope for prediction.v1/restoration.
  * Replaces the old makeSignedManifest that produced a PredictionSubmissionManifest.
  */
 export async function makeSignedManifest(overrides: {
@@ -35,7 +35,7 @@ export async function makeSignedManifest(overrides: {
   const account = privateKeyToAccount(pk);
   const unsigned = {
     schemaVersion: 'jinn.execution.v1' as const,
-    solverType: 'prediction.v0',
+    solverType: 'prediction.v1',
     role: 'restoration' as const,
     generatedAt: 1000,
 task: {
@@ -80,14 +80,14 @@ task: {
 
 export function makeEvalTask(
   envelope: SignedEnvelope | Record<string, unknown>,
-  task: PredictionV0Task,
+  task: PredictionV1Task,
   options?: { omitRestorationTaskCid?: boolean; restorationEnvelopeCid?: string },
 ): Task {
   const e = envelope as { task: { cid: string } };
   return {
     id: 'eval',
     description: 'evaluate',
-    solverType: 'prediction.v0',
+    solverType: 'prediction.v1',
     role: 'evaluation',
     restorationRequestId: ('0x' + '0'.repeat(64)) as `0x${string}`,
     window: task.window,

@@ -379,7 +379,6 @@ export interface RunLegacyAgentIdMigrationOptions {
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
-  testnetClaimRegistryDeploymentPath?: string;
 }
 
 export async function runLegacyAgentIdMigration(
@@ -391,7 +390,6 @@ export async function runLegacyAgentIdMigration(
     testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: options.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: options.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: options.testnetClaimRegistryDeploymentPath,
   });
   config.rpcUrl = options.rpcUrl;
   const mnemonic = await decryptMnemonic(

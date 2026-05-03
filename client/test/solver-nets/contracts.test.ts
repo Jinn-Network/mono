@@ -8,9 +8,9 @@ describe('SolverNet contracts', () => {
     const contract = SOLVER_NET_CONTRACTS['prediction.v1'];
     expect(contract?.solverType).toBe('prediction.v1');
     expect(contract?.claimPolicyDefaults).toMatchObject({
-      kind: 'parallel',
+      mode: 'parallel',
       maxClaims: 25,
-      maxClaimsPerSolver: 1,
+      maxClaimsPerOperator: 1,
     });
     expect(contract?.credentialRequirements.creator[0]?.id).toBe('polymarket.public.market-data.read');
     expect(contract?.credentialRequirements.solver).toEqual([]);

@@ -13,7 +13,6 @@ describe('loadConfig RPC override handling', () => {
   const originalJinnL2ProofRpcUrl = process.env['JINN_L2_PROOF_RPC_URL'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
-  const originalTestnetClaimRegistryDeployment = process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'];
 
   afterEach(async () => {
     if (originalBaseRpcUrl === undefined) {
@@ -56,12 +55,6 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
     } else {
       process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = originalTestnetTokenDeployment;
-    }
-
-    if (originalTestnetClaimRegistryDeployment === undefined) {
-      delete process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'];
-    } else {
-      process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'] = originalTestnetClaimRegistryDeployment;
     }
 
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -145,9 +138,8 @@ describe('loadConfig RPC override handling', () => {
     expect(config.rpcUrl).toBe('https://universal.env.example');
   });
 
-  it('defaults stakingMode to standard', async () => {
-    const configPath = await writeConfigFile({});
-    const config = loadConfig(configPath);
+  it('defaults stakingMode to standard', () => {
+    const config = loadConfig();
     expect(config.stakingMode).toBe('standard');
   });
 
@@ -163,17 +155,15 @@ describe('loadConfig RPC override handling', () => {
     expect(config.rpcUrl).toBe('https://sepolia.base.org');
   });
 
-  it('accepts self-bond stakingMode from env', async () => {
-    const configPath = await writeConfigFile({});
+  it('accepts self-bond stakingMode from env', () => {
     process.env['JINN_STAKING_MODE'] = 'self-bond';
-    const config = loadConfig(configPath);
+    const config = loadConfig();
     expect(config.stakingMode).toBe('self-bond');
     delete process.env['JINN_STAKING_MODE'];
   });
 
-  it('defaults targetServices to 1', async () => {
-    const configPath = await writeConfigFile({});
-    const config = loadConfig(configPath);
+  it('defaults targetServices to 1', () => {
+    const config = loadConfig();
     expect(config.targetServices).toBe(1);
   });
 
@@ -182,36 +172,6 @@ describe('loadConfig RPC override handling', () => {
       const config = loadConfig(configPath);
       expect(config.tasks).toEqual([]);
     });
-  });
-
-  it('defaults prediction SolverNet to contract-owned prediction.v1 with optional runtime plugin pack', async () => {
-    const configPath = await writeConfigFile({});
-    const config = loadConfig(configPath);
-    expect(config.solverNets.prediction).toMatchObject({
-      enabled: true,
-      solverType: 'prediction.v1',
-      harness: 'prediction-v1-baseline',
-      plugins: ['bundled:jinn-prediction-plugin'],
-      taskGenerator: { enabled: true },
-    });
-    expect(config.solverNets.prediction).not.toHaveProperty('canonicalPlugin');
-  });
-
-  it('rejects removed canonicalPlugin SolverNet config', async () => {
-    const configPath = await writeConfigFile({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
-          canonicalPlugin: 'bundled:jinn-prediction-plugin',
-          harness: 'prediction-v1-baseline',
-          plugins: [],
-          taskGenerator: { enabled: true },
-        },
-      },
-    });
-
-    expect(() => loadConfig(configPath)).toThrow(/canonicalPlugin is no longer supported/);
   });
 
   it('preserves portfolio.v0 Task fields (window, spec, eligibility) through config parsing', async () => {
@@ -346,12 +306,10 @@ describe('loadConfig RPC override handling', () => {
       network: 'testnet',
       testnetL2DeploymentPath: '/tmp/from-file-l2.json',
       testnetL2TokenDeploymentPath: '/tmp/from-file-token.json',
-      testnetClaimRegistryDeploymentPath: '/tmp/from-file-claim-registry.json',
     });
 
     process.env['JINN_TESTNET_L2_DEPLOYMENT'] = '/tmp/from-env-l2.json';
     process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = '/tmp/from-env-token.json';
-    process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'] = '/tmp/from-env-claim-registry.json';
     delete process.env['BASE_RPC_URL'];
     delete process.env['BASE_SEPOLIA_RPC_URL'];
     delete process.env['JINN_RPC_URL'];
@@ -361,18 +319,15 @@ describe('loadConfig RPC override handling', () => {
 
     expect(config.testnetL2DeploymentPath).toBe('/tmp/from-env-l2.json');
     expect(config.testnetL2TokenDeploymentPath).toBe('/tmp/from-env-token.json');
-    expect(config.testnetClaimRegistryDeploymentPath).toBe('/tmp/from-env-claim-registry.json');
   });
 
-  it('identityRegistryAddress is undefined by default', async () => {
-    const configPath = await writeConfigFile({});
-    const config = loadConfig(configPath);
+  it('identityRegistryAddress is undefined by default', () => {
+    const config = loadConfig();
     expect(config.identityRegistryAddress).toBeUndefined();
   });
 
-  it('validationRegistryAddress is undefined by default', async () => {
-    const configPath = await writeConfigFile({});
-    const config = loadConfig(configPath);
+  it('validationRegistryAddress is undefined by default', () => {
+    const config = loadConfig();
     expect(config.validationRegistryAddress).toBeUndefined();
   });
 
@@ -392,39 +347,35 @@ describe('loadConfig RPC override handling', () => {
     expect(config.validationRegistryAddress).toBe('0xabcdef1234567890abcdef1234567890abcdef12');
   });
 
-  it('reads identityRegistryAddress from env var', async () => {
-    const configPath = await writeConfigFile({});
+  it('reads identityRegistryAddress from env var', () => {
     process.env['JINN_IDENTITY_REGISTRY_ADDRESS'] = '0xaabbccdd00000000000000000000000000000001';
     try {
-      const config = loadConfig(configPath);
+      const config = loadConfig();
       expect(config.identityRegistryAddress).toBe('0xaabbccdd00000000000000000000000000000001');
     } finally {
       delete process.env['JINN_IDENTITY_REGISTRY_ADDRESS'];
     }
   });
 
-  it('reads validationRegistryAddress from env var', async () => {
-    const configPath = await writeConfigFile({});
+  it('reads validationRegistryAddress from env var', () => {
     process.env['JINN_VALIDATION_REGISTRY_ADDRESS'] = '0xaabbccdd00000000000000000000000000000002';
     try {
-      const config = loadConfig(configPath);
+      const config = loadConfig();
       expect(config.validationRegistryAddress).toBe('0xaabbccdd00000000000000000000000000000002');
     } finally {
       delete process.env['JINN_VALIDATION_REGISTRY_ADDRESS'];
     }
   });
 
-  it('reputationEnabled defaults to false', async () => {
-    const configPath = await writeConfigFile({});
-    const config = loadConfig(configPath);
+  it('reputationEnabled defaults to false', () => {
+    const config = loadConfig();
     expect(config.reputationEnabled).toBe(false);
   });
 
-  it('accepts reputationEnabled=true from env var', async () => {
-    const configPath = await writeConfigFile({});
+  it('accepts reputationEnabled=true from env var', () => {
     process.env['JINN_REPUTATION_ENABLED'] = '1';
     try {
-      const config = loadConfig(configPath);
+      const config = loadConfig();
       expect(config.reputationEnabled).toBe(true);
     } finally {
       delete process.env['JINN_REPUTATION_ENABLED'];
@@ -455,9 +406,8 @@ describe('buildConfigProvenance', () => {
     expect(prov.configPath).toBe(configPath);
   });
 
-  it('returns configLoaded=false and configPath=null when no config file exists', async () => {
-    const configPath = await writeConfigFile({});
-    const config = loadConfig(configPath);
+  it('returns configLoaded=false and configPath=null when no config file exists', () => {
+    const config = loadConfig();
     const nonExistentPath = path.join(os.tmpdir(), 'jinn-no-such-config-' + Date.now() + '.json');
     const prov = buildConfigProvenance(nonExistentPath, config, {});
     expect(prov.configLoaded).toBe(false);

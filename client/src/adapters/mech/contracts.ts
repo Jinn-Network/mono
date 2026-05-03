@@ -18,7 +18,6 @@ import {
 } from './types.js';
 import { STAKING_ABI, STOLAS_DISTRIBUTOR_ABI } from '../../earning/contracts.js';
 import { isUnauthorizedAccountError } from '../../errors/unauthorized-account.js';
-import { CLAIM_REGISTRY_ABI } from '../claim-registry/abi.js';
 import { executeSafeTransaction } from './safe.js';
 import {
   flattenErrorMessage,
@@ -30,6 +29,55 @@ import {
 
 const EVICTED_STAKING_STATE = 2;
 const restakeLocks = new Map<string, Promise<void>>();
+
+const TASK_COORDINATOR_ABI = [
+  {
+    name: 'getTask',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'taskId', type: 'uint256' }],
+    outputs: [
+      {
+        name: 'record',
+        type: 'tuple',
+        components: [
+          { name: 'creator', type: 'address' },
+          { name: 'taskCidDigest', type: 'bytes32' },
+          { name: 'solverTypeDigest', type: 'bytes32' },
+          { name: 'status', type: 'uint8' },
+          {
+            name: 'policy',
+            type: 'tuple',
+            components: [
+              { name: 'claimWindowStart', type: 'uint64' },
+              { name: 'claimWindowEnd', type: 'uint64' },
+              { name: 'submissionDeadline', type: 'uint64' },
+              { name: 'claimLeaseTtlSeconds', type: 'uint32' },
+              { name: 'maxClaims', type: 'uint16' },
+              { name: 'maxClaimsPerOperator', type: 'uint16' },
+              { name: 'policyHook', type: 'address' },
+              {
+                name: 'evaluationPolicy',
+                type: 'tuple',
+                components: [
+                  { name: 'requiredVerdicts', type: 'uint16' },
+                  { name: 'passThreshold', type: 'uint16' },
+                  { name: 'evaluationDeadline', type: 'uint64' },
+                  { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
+                  { name: 'disallowSolverSelfEvaluation', type: 'bool' },
+                ],
+              },
+            ],
+          },
+          { name: 'claimCount', type: 'uint32' },
+          { name: 'submittedCount', type: 'uint32' },
+          { name: 'finalizedAttemptCount', type: 'uint32' },
+          { name: 'taskCreationCredited', type: 'bool' },
+        ],
+      },
+    ],
+  },
+] as const;
 
 async function withRestakeLock(key: string, fn: () => Promise<void>): Promise<void> {
   const pending = restakeLocks.get(key) ?? Promise.resolve();
@@ -166,26 +214,38 @@ export async function submitTask(
   walletClient: WalletClient,
   safeAddress: Address,
   routerAddress: Address,
-  mechAddress: Address,
-  requestDataHex: Hex,
-  priceWei: bigint,
+  taskCidDigest: Hex,
+  solverTypeDigest: Hex,
+  policy: RouterTaskPolicy,
+  solutionMaxDeliveryRateWei: bigint,
+  verdictMaxDeliveryRateWei: bigint,
   responseTimeout: bigint,
   evictionRecovery?: EvictionRecoveryConfig,
-): Promise<{ requestIds: string[]; txHash: Hex; receiptLogCount: number }> {
+): Promise<{ taskId: string; txHash: Hex; receiptLogCount: number; blockNumber?: number }> {
   const calldata = encodeFunctionData({
     abi: JINN_ROUTER_ABI,
-    functionName: 'createRestorationJob',
-    args: [requestDataHex, mechAddress, priceWei, responseTimeout, NATIVE_PAYMENT_TYPE, '0x' as Hex],
+    functionName: 'createTask',
+    args: [
+      taskCidDigest,
+      solverTypeDigest,
+      policy,
+      solutionMaxDeliveryRateWei,
+      verdictMaxDeliveryRateWei,
+      responseTimeout,
+    ],
   });
+  const taskBudget =
+    solutionMaxDeliveryRateWei * BigInt(policy.maxClaims) +
+    verdictMaxDeliveryRateWei * BigInt(policy.maxClaims) * BigInt(policy.evaluationPolicy.requiredVerdicts || 1);
 
   const txHash = await withEvictionRecovery(
     publicClient,
     evictionRecovery,
-    'createRestorationJob',
+    'createTask',
     () => executeSafeTransaction(publicClient, walletClient, {
       safeAddress,
       to: routerAddress,
-      value: priceWei,
+      value: taskBudget,
       data: calldata,
     }),
   );
@@ -196,7 +256,8 @@ export async function submitTask(
     },
   });
 
-  const requestIds: string[] = [];
+  let taskId: string | undefined;
+  let blockNumber: number | undefined;
   for (const log of receipt.logs) {
     try {
       const decoded = decodeEventLog({
@@ -204,55 +265,74 @@ export async function submitTask(
         data: log.data,
         topics: log.topics,
       });
-      if (decoded.eventName === 'RestorationJobCreated') {
-        const args = decoded.args as { requestId: Hex };
-        requestIds.push(String(args.requestId));
+      if (decoded.eventName === 'TaskCreated') {
+        const args = decoded.args as { taskId: bigint };
+        taskId = String(args.taskId);
+        blockNumber = log.blockNumber != null ? Number(log.blockNumber) : undefined;
       }
     } catch {
       // Not our event
     }
   }
 
-  return { requestIds, txHash, receiptLogCount: receipt.logs.length };
+  if (!taskId) {
+    throw new Error(`No TaskCreated event returned from router tx=${txHash}`);
+  }
+
+  return { taskId, txHash, receiptLogCount: receipt.logs.length, blockNumber };
 }
 
-export async function submitEvaluationJob(
+export interface RouterTaskPolicy {
+  claimWindowStart: bigint;
+  claimWindowEnd: bigint;
+  submissionDeadline: bigint;
+  claimLeaseTtlSeconds: number;
+  maxClaims: number;
+  maxClaimsPerOperator: number;
+  policyHook: Address;
+  evaluationPolicy: {
+    requiredVerdicts: number;
+    passThreshold: number;
+    evaluationDeadline: bigint;
+    maxVerdictsPerEvaluator: number;
+    disallowSolverSelfEvaluation: boolean;
+  };
+}
+
+export async function claimTask(
   publicClient: PublicClient,
   walletClient: WalletClient,
   safeAddress: Address,
   routerAddress: Address,
-  restorationRequestId: Hex,
-  mechAddress: Address,
-  requestDataHex: Hex,
-  priceWei: bigint,
-  responseTimeout: bigint,
+  taskId: string | bigint,
+  priorityMech: Address,
   evictionRecovery?: EvictionRecoveryConfig,
-): Promise<string[]> {
+): Promise<{ taskId: string; attemptIndex: number; requestId: string; txHash: Hex; blockNumber?: number }> {
+  const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
   const calldata = encodeFunctionData({
     abi: JINN_ROUTER_ABI,
-    functionName: 'createEvaluationJob',
-    args: [restorationRequestId, requestDataHex, mechAddress, priceWei, responseTimeout, NATIVE_PAYMENT_TYPE, '0x' as Hex],
+    functionName: 'claimTask',
+    args: [taskIdBigInt, priorityMech],
   });
 
   const txHash = await withEvictionRecovery(
     publicClient,
     evictionRecovery,
-    'createEvaluationJob',
+    'claimTask',
     () => executeSafeTransaction(publicClient, walletClient, {
       safeAddress,
       to: routerAddress,
-      value: priceWei,
+      value: 0n,
       data: calldata,
     }),
   );
 
   const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
     onRetry: ({ attempt, message }) => {
-      console.error(`[router] wait evaluation receipt retry ${attempt}: ${message}`);
+      console.error(`[router] wait claim task receipt retry ${attempt}: ${message}`);
     },
   });
 
-  const requestIds: string[] = [];
   for (const log of receipt.logs) {
     try {
       const decoded = decodeEventLog({
@@ -260,16 +340,22 @@ export async function submitEvaluationJob(
         data: log.data,
         topics: log.topics,
       });
-      if (decoded.eventName === 'EvaluationJobCreated') {
-        const args = decoded.args as { requestId: Hex };
-        requestIds.push(String(args.requestId));
+      if (decoded.eventName === 'TaskAttemptCreated') {
+        const args = decoded.args as { taskId: bigint; attemptIndex: number; requestId: Hex };
+        return {
+          taskId: String(args.taskId),
+          attemptIndex: Number(args.attemptIndex),
+          requestId: String(args.requestId),
+          txHash,
+          blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
+        };
       }
     } catch {
       // Not our event
     }
   }
 
-  return requestIds;
+  throw new Error(`No TaskAttemptCreated event returned from router tx=${txHash}`);
 }
 
 const CLAIM_RETRY_ATTEMPTS = 6;
@@ -287,9 +373,13 @@ const JINN_ROUTER_CLAIMED_ABI = [
 ] as const;
 
 export interface ClaimDeliveryOptions {
-  variant: 'v1' | 'v2';
-  /** V2 only; ignored for V1. */
+  variant: 'v1' | 'v2' | 'v3';
+  /** V2/V3 only; ignored for V1. */
   evidenceHash?: Hex;
+  /** V3 only. Defaults to solution for Task-native V3. */
+  kind?: 'solution' | 'verdict';
+  /** V3 verdict only. 1=PASS, 2=FAIL, 3=INVALID, 4=UNRESOLVED. */
+  verdictCode?: number;
 }
 
 async function isDeliveryAlreadyClaimed(
@@ -319,14 +409,22 @@ export async function claimDelivery(
     return '0x' as Hex;
   }
 
-  if (options.variant === 'v2' && !options.evidenceHash) {
+  if ((options.variant === 'v2' || options.variant === 'v3') && !options.evidenceHash) {
     throw new Error(
-      `claimDelivery(v2): evidenceHash is required for V2 claim — refusing to write ZERO_EVIDENCE for requestId ${requestId}`,
+      `claimDelivery(${options.variant}): evidenceHash is required — refusing to write ZERO_EVIDENCE for requestId ${requestId}`,
     );
   }
 
   const calldata =
-    options.variant === 'v2'
+    options.variant === 'v3'
+      ? encodeFunctionData({
+          abi: JINN_ROUTER_ABI,
+          functionName: options.kind === 'verdict' ? 'claimVerdictDelivery' : 'claimSolutionDelivery',
+          args: options.kind === 'verdict'
+            ? [requestId, options.evidenceHash!, options.verdictCode ?? 1]
+            : [requestId, options.evidenceHash!],
+        })
+      : options.variant === 'v2'
       ? encodeFunctionData({
           abi: JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
           functionName: 'claimDelivery',
@@ -390,61 +488,113 @@ export async function claimDelivery(
   throw new Error(`claimDelivery failed after ${CLAIM_RETRY_ATTEMPTS} attempts for ${requestId}`);
 }
 
-// ── ClaimRegistry helpers ──────────────────────────────────────────────────
-
-export async function claimJob(
+export async function claimEvaluation(
   publicClient: PublicClient,
   walletClient: WalletClient,
   safeAddress: Address,
-  claimRegistryAddress: Address,
-  requestId: Hex,
-): Promise<string> {
-  const data = encodeFunctionData({
-    abi: CLAIM_REGISTRY_ABI,
-    functionName: 'claimJob',
-    args: [requestId],
+  routerAddress: Address,
+  taskId: string | bigint,
+  attemptIndex: number,
+  evaluatorMech: Address,
+  evaluationTaskCidDigest: Hex,
+  evictionRecovery?: EvictionRecoveryConfig,
+): Promise<{ taskId: string; attemptIndex: number; verdictIndex: number; requestId: string; txHash: Hex; blockNumber?: number }> {
+  const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
+  const calldata = encodeFunctionData({
+    abi: JINN_ROUTER_ABI,
+    functionName: 'claimEvaluation',
+    args: [taskIdBigInt, attemptIndex, evaluatorMech, evaluationTaskCidDigest],
   });
 
-  try {
-    const txHash = await executeSafeTransaction(
-      publicClient, walletClient,
-      { safeAddress, to: claimRegistryAddress, value: 0n, data },
-    );
-    await waitForTransactionReceiptWithRetry(publicClient, txHash as Hex, {
-      onRetry: ({ attempt, message }) => {
-        console.error(`[claim-registry] wait receipt retry ${attempt}: ${message}`);
-      },
-    });
-    return txHash;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('JobAlreadyClaimed')) {
-      return ''; // Already claimed by someone else
+  const txHash = await withEvictionRecovery(
+    publicClient,
+    evictionRecovery,
+    'claimEvaluation',
+    () => executeSafeTransaction(publicClient, walletClient, {
+      safeAddress,
+      to: routerAddress,
+      value: 0n,
+      data: calldata,
+    }),
+  );
+
+  const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
+    onRetry: ({ attempt, message }) => {
+      console.error(`[router] wait claim evaluation receipt retry ${attempt}: ${message}`);
+    },
+  });
+
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: JINN_ROUTER_ABI,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'EvaluationAttemptCreated') {
+        const args = decoded.args as {
+          taskId: bigint;
+          attemptIndex: number;
+          verdictIndex: number;
+          requestId: Hex;
+        };
+        return {
+          taskId: String(args.taskId),
+          attemptIndex: Number(args.attemptIndex),
+          verdictIndex: Number(args.verdictIndex),
+          requestId: String(args.requestId),
+          txHash,
+          blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
+        };
+      }
+    } catch {
+      // Not our event
     }
-    if (message.includes('IneligibleToClaim')) {
-      return ''; // Not eligible
-    }
-    if (message.includes('GS013') || message.includes('execution reverted')) {
-      // Safe execution failed (inner call reverted) — treat as claim failure
-      return '';
-    }
-    throw err;
   }
+
+  throw new Error(`No EvaluationAttemptCreated event returned from router tx=${txHash}`);
 }
 
-export async function getJobClaim(
+export async function getTaskCidDigest(
   publicClient: PublicClient,
-  claimRegistryAddress: Address,
-  requestId: Hex,
-): Promise<{ claimer: Address; expiresAt: bigint }> {
-  const result = await publicClient.readContract({
-    address: claimRegistryAddress,
-    abi: CLAIM_REGISTRY_ABI,
-    functionName: 'getJobClaim',
-    args: [requestId],
-  }) as [Address, bigint];
+  routerAddress: Address,
+  taskId: string | bigint,
+): Promise<Hex> {
+  const coordinatorAddress = await publicClient.readContract({
+    address: routerAddress,
+    abi: JINN_ROUTER_ABI,
+    functionName: 'taskCoordinator',
+  }) as Address;
+  const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
+  const task = await publicClient.readContract({
+    address: coordinatorAddress,
+    abi: TASK_COORDINATOR_ABI,
+    functionName: 'getTask',
+    args: [taskIdBigInt],
+  }) as { taskCidDigest: Hex } | readonly unknown[];
 
-  return { claimer: result[0], expiresAt: result[1] };
+  if (Array.isArray(task)) {
+    return task[1] as Hex;
+  }
+  return (task as { taskCidDigest: Hex }).taskCidDigest;
+}
+
+export async function getMarketplaceRequestDeliveryMech(
+  publicClient: PublicClient,
+  marketplaceAddress: Address,
+  requestId: string,
+): Promise<Address> {
+  const info = await publicClient.readContract({
+    address: marketplaceAddress,
+    abi: MECH_MARKETPLACE_ABI,
+    functionName: 'mapRequestIdInfos',
+    args: [requestId as Hex],
+  }) as { deliveryMech: Address } | readonly unknown[];
+
+  if (Array.isArray(info)) {
+    return info[1] as Address;
+  }
+  return (info as { deliveryMech: Address }).deliveryMech;
 }
 
 export async function getMechDeliveryRate(
@@ -493,14 +643,11 @@ export async function pollDeliverEvents(
 // ── Router event scanning (for crash recovery) ──────────────────────────────
 
 export interface TaskRecord {
-  requestId: string;
+  taskId: string;
+  taskCidDigest: string;
   creator: string;
-}
-
-export interface EvaluationJobRecord {
-  requestId: string;
-  restorationRequestId: string;
-  creator: string;
+  transactionHash?: `0x${string}`;
+  blockNumber?: number;
 }
 
 export async function scanTasks(
@@ -528,51 +675,15 @@ export async function scanTasks(
           data: log.data,
           topics: log.topics,
         });
-        if (decoded.eventName === 'RestorationJobCreated') {
-          const args = decoded.args as { creator: Address; requestId: Hex };
-          if (args.creator.toLowerCase() === creator.toLowerCase()) {
-            results.push({ requestId: String(args.requestId), creator: String(args.creator) });
-          }
-        }
-      } catch {}
-    }
-  }
-
-  return results;
-}
-
-export async function scanEvaluationJobs(
-  publicClient: PublicClient,
-  routerAddress: Address,
-  creator: Address,
-  fromBlock: bigint,
-  toBlock: bigint,
-): Promise<EvaluationJobRecord[]> {
-  const results: EvaluationJobRecord[] = [];
-  const chunkSize = 9999n;
-
-  for (let start = fromBlock; start <= toBlock; start += chunkSize + 1n) {
-    const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
-    const logs = await publicClient.getLogs({
-      address: routerAddress,
-      fromBlock: start,
-      toBlock: end,
-    });
-
-    for (const log of logs) {
-      try {
-        const decoded = decodeEventLog({
-          abi: JINN_ROUTER_ABI,
-          data: log.data,
-          topics: log.topics,
-        });
-        if (decoded.eventName === 'EvaluationJobCreated') {
-          const args = decoded.args as { creator: Address; requestId: Hex; restorationRequestId: Hex };
+        if (decoded.eventName === 'TaskCreated') {
+          const args = decoded.args as { creator: Address; taskId: bigint; taskCidDigest: Hex };
           if (args.creator.toLowerCase() === creator.toLowerCase()) {
             results.push({
-              requestId: String(args.requestId),
-              restorationRequestId: String(args.restorationRequestId),
+              taskId: String(args.taskId),
+              taskCidDigest: String(args.taskCidDigest),
               creator: String(args.creator),
+              transactionHash: log.transactionHash ?? undefined,
+              blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
             });
           }
         }
@@ -591,6 +702,81 @@ export interface DecodedMarketplaceRequest {
   priorityMech: string;
   transactionHash?: `0x${string}`;
   blockNumber?: number;
+}
+
+export interface DecodedTaskCreated {
+  taskId: string;
+  taskCidDigest: string;
+  creator: string;
+  transactionHash?: `0x${string}`;
+  blockNumber?: number;
+}
+
+export interface DecodedSolutionDeliveryClaimed {
+  taskId: string;
+  attemptIndex: number;
+  requestId: string;
+  operator: string;
+  transactionHash?: `0x${string}`;
+  blockNumber?: number;
+}
+
+export function decodeTaskCreatedLogs(logs: Log[]): DecodedTaskCreated[] {
+  const results: DecodedTaskCreated[] = [];
+  for (const log of logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: JINN_ROUTER_ABI,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'TaskCreated') {
+        const args = decoded.args as { creator: Address; taskId: bigint; taskCidDigest: Hex };
+        results.push({
+          taskId: String(args.taskId),
+          taskCidDigest: String(args.taskCidDigest),
+          creator: String(args.creator),
+          transactionHash: log.transactionHash ?? undefined,
+          blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
+        });
+      }
+    } catch {
+      // Not a TaskCreated event — skip
+    }
+  }
+  return results;
+}
+
+export function decodeSolutionDeliveryClaimedLogs(logs: Log[]): DecodedSolutionDeliveryClaimed[] {
+  const results: DecodedSolutionDeliveryClaimed[] = [];
+  for (const log of logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: JINN_ROUTER_ABI,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'SolutionDeliveryClaimed') {
+        const args = decoded.args as {
+          operator: Address;
+          requestId: Hex;
+          taskId: bigint;
+          attemptIndex: number;
+        };
+        results.push({
+          taskId: String(args.taskId),
+          attemptIndex: Number(args.attemptIndex),
+          requestId: String(args.requestId),
+          operator: String(args.operator),
+          transactionHash: log.transactionHash ?? undefined,
+          blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
+        });
+      }
+    } catch {
+      // Not a SolutionDeliveryClaimed event — skip
+    }
+  }
+  return results;
 }
 
 export function decodeMarketplaceRequestLogs(logs: Log[]): DecodedMarketplaceRequest[] {

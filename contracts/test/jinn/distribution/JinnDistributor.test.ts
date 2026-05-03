@@ -57,9 +57,9 @@ async function deployFixture() {
     await messenger.getAddress(),
     RATIO_OPERATOR,
     RATIO_DAO,
-    1n, // wCreation
-    1n, // wRestorationDelivery
-    1n, // wEvaluationDelivery
+    1n, // wTaskCreation
+    1n, // wSolutionDelivery
+    1n, // wVerdictDelivery
   );
   await distributor.waitForDeployment();
 
@@ -94,9 +94,9 @@ describe("JinnDistributor (Phase A3)", function () {
       expect(await distributor.messenger()).to.equal(await messenger.getAddress());
       expect(await distributor.operatorRatio()).to.equal(RATIO_OPERATOR);
       expect(await distributor.daoRatio()).to.equal(RATIO_DAO);
-      expect(await distributor.wCreation()).to.equal(1n);
-      expect(await distributor.wRestorationDelivery()).to.equal(1n);
-      expect(await distributor.wEvaluationDelivery()).to.equal(1n);
+      expect(await distributor.wTaskCreation()).to.equal(1n);
+      expect(await distributor.wSolutionDelivery()).to.equal(1n);
+      expect(await distributor.wVerdictDelivery()).to.equal(1n);
 
       expect(await jinn.totalSupply()).to.equal(0n);
     });
@@ -170,9 +170,9 @@ describe("JinnDistributor (Phase A3)", function () {
 
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
 
@@ -215,9 +215,9 @@ describe("JinnDistributor (Phase A3)", function () {
 
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
 
@@ -247,9 +247,9 @@ describe("JinnDistributor (Phase A3)", function () {
       // Snapshot A: weighted=35.
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -259,9 +259,9 @@ describe("JinnDistributor (Phase A3)", function () {
       // Snapshot B: weighted=100.
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 30n,
-        noveltyWeightedRestorationDeliveries: 50n,
-        evaluationDeliveryCount: 20n,
+        taskCreationWeight: 30n,
+        solutionDeliveryWeight: 50n,
+        verdictDeliveryWeight: 20n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -294,9 +294,9 @@ describe("JinnDistributor (Phase A3)", function () {
       // High snapshot first.
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 30n,
-        noveltyWeightedRestorationDeliveries: 50n,
-        evaluationDeliveryCount: 20n,
+        taskCreationWeight: 30n,
+        solutionDeliveryWeight: 50n,
+        verdictDeliveryWeight: 20n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -307,9 +307,9 @@ describe("JinnDistributor (Phase A3)", function () {
       // Now a lower snapshot for the same service.
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -332,16 +332,16 @@ describe("JinnDistributor (Phase A3)", function () {
       // First claim at default weights (1,1,1).
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
       const supplyAfterFirst = await jinn.totalSupply();
       const opAcc1 = await distributor.totalClaimedOperator(SERVICE_ID);
 
-      // Zero out wCreation. Same fixture: weighted drops from 35 → 25.
+      // Zero out wTaskCreation. Same fixture: weighted drops from 35 → 25.
       // entitledOperator(B) = 25 * 0.75e18 / 1e18 = 18 < 26 → owed=0.
       await expect(
         distributor.connect(deployer).setWeights(0n, 1n, 1n),
@@ -353,16 +353,16 @@ describe("JinnDistributor (Phase A3)", function () {
       expect(await jinn.totalSupply()).to.equal(supplyAfterFirst);
       expect(await distributor.totalClaimedOperator(SERVICE_ID)).to.equal(opAcc1);
 
-      // Bump restoration so the weighted snapshot exceeds the high-water mark.
+      // Bump solution so the weighted snapshot exceeds the high-water mark.
       // Need weighted >= ceil(opAcc1 * 1e18 / RATIO_OPERATOR).
       // opAcc1 = 26. minimum weighted to advance = ceil(26 / 0.75) = 35.
-      // With wCreation=0, weighted = 1*restoration + 1*evalDelivery.
-      // Set restoration=100, evalDelivery=5 → weighted=105.
+      // With wTaskCreation=0, weighted = 1*solution + 1*verdict.
+      // Set solution=100, verdict=5 → weighted=105.
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n, // ignored, wCreation=0
-        noveltyWeightedRestorationDeliveries: 100n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n, // ignored, wTaskCreation=0
+        solutionDeliveryWeight: 100n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
 
@@ -387,9 +387,9 @@ describe("JinnDistributor (Phase A3)", function () {
 
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -438,9 +438,9 @@ describe("JinnDistributor (Phase A3)", function () {
       // Original messenger: snapshot A (weighted=35).
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -452,9 +452,9 @@ describe("JinnDistributor (Phase A3)", function () {
       await messenger2.waitForDeployment();
       await messenger2.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 30n,
-        noveltyWeightedRestorationDeliveries: 50n,
-        evaluationDeliveryCount: 20n,
+        taskCreationWeight: 30n,
+        solutionDeliveryWeight: 50n,
+        verdictDeliveryWeight: 20n,
         multisig: alice.address,
       });
 
@@ -486,9 +486,9 @@ describe("JinnDistributor (Phase A3)", function () {
       // Start on a high snapshot via the original messenger.
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 30n,
-        noveltyWeightedRestorationDeliveries: 50n,
-        evaluationDeliveryCount: 20n,
+        taskCreationWeight: 30n,
+        solutionDeliveryWeight: 50n,
+        verdictDeliveryWeight: 20n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -501,9 +501,9 @@ describe("JinnDistributor (Phase A3)", function () {
       const messenger2 = await MockMessenger.deploy(deployer.address);
       await messenger2.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
       await distributor.connect(deployer).setMessenger(await messenger2.getAddress());
@@ -578,9 +578,9 @@ describe("JinnDistributor (Phase A3)", function () {
       await distributor.connect(timelock).setMessenger(await messenger.getAddress());
       await distributor.connect(timelock).setRatios(RATIO_OPERATOR, RATIO_DAO);
       await distributor.connect(timelock).setWeights(2n, 3n, 4n);
-      expect(await distributor.wCreation()).to.equal(2n);
-      expect(await distributor.wRestorationDelivery()).to.equal(3n);
-      expect(await distributor.wEvaluationDelivery()).to.equal(4n);
+      expect(await distributor.wTaskCreation()).to.equal(2n);
+      expect(await distributor.wSolutionDelivery()).to.equal(3n);
+      expect(await distributor.wVerdictDelivery()).to.equal(4n);
 
       // alice still can't.
       await expect(
@@ -606,9 +606,9 @@ describe("JinnDistributor (Phase A3)", function () {
       await messenger.waitForDeployment();
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
 
@@ -697,9 +697,9 @@ describe("JinnDistributor (Phase A3)", function () {
 
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
 
@@ -716,9 +716,9 @@ describe("JinnDistributor (Phase A3)", function () {
 
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -727,9 +727,9 @@ describe("JinnDistributor (Phase A3)", function () {
       // leave the binding unchanged.
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 30n,
-        noveltyWeightedRestorationDeliveries: 50n,
-        evaluationDeliveryCount: 20n,
+        taskCreationWeight: 30n,
+        solutionDeliveryWeight: 50n,
+        verdictDeliveryWeight: 20n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -747,9 +747,9 @@ describe("JinnDistributor (Phase A3)", function () {
 
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: alice.address,
       });
       await distributor.claim(encodeProof(SERVICE_ID));
@@ -758,9 +758,9 @@ describe("JinnDistributor (Phase A3)", function () {
       // messenger now reports `multisig=bob` for the same serviceId.
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 30n,
-        noveltyWeightedRestorationDeliveries: 50n,
-        evaluationDeliveryCount: 20n,
+        taskCreationWeight: 30n,
+        solutionDeliveryWeight: 50n,
+        verdictDeliveryWeight: 20n,
         multisig: bob.address,
       });
 
@@ -848,9 +848,9 @@ describe("JinnDistributor (Phase A3)", function () {
       const { distributor, deployer } = await loadFixture(deployFixture);
       const max = await distributor.MAX_WEIGHT();
       await distributor.connect(deployer).setWeights(max, max, max);
-      expect(await distributor.wCreation()).to.equal(max);
-      expect(await distributor.wRestorationDelivery()).to.equal(max);
-      expect(await distributor.wEvaluationDelivery()).to.equal(max);
+      expect(await distributor.wTaskCreation()).to.equal(max);
+      expect(await distributor.wSolutionDelivery()).to.equal(max);
+      expect(await distributor.wVerdictDelivery()).to.equal(max);
     });
 
     it("setMessenger reverts when target has no deployed bytecode (EOA)", async function () {
@@ -880,9 +880,9 @@ describe("JinnDistributor (Phase A3)", function () {
 
       await messenger.setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 100n,
-        noveltyWeightedRestorationDeliveries: 200n,
-        evaluationDeliveryCount: 50n,
+        taskCreationWeight: 100n,
+        solutionDeliveryWeight: 200n,
+        verdictDeliveryWeight: 50n,
         multisig: alice.address,
       });
 

@@ -4,7 +4,7 @@ import { canonicalJson } from '../../../../src/harnesses/engine/canonical-json.j
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PredictionV0Evaluator } from '../../../../src/harnesses/impls/prediction-v0-evaluator/index.js';
+import { PredictionV1Evaluator } from '../../../../src/harnesses/impls/prediction-v0-evaluator/index.js';
 import { makeValidTask, makeSignedManifest, makeEvalTask } from './test-helpers.js';
 import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
@@ -34,14 +34,14 @@ function spanningDeps(priceAtResolve: string) {
   };
 }
 
-describe('PredictionV0Evaluator — verdict pipeline', () => {
+describe('PredictionV1Evaluator — verdict pipeline', () => {
   const evaluatorPk = ('0x' + 'e'.repeat(64)) as `0x${string}`;
 
   it('PASS with correct prediction (p=0.55, oracle > threshold)', async () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task);
-    const evaluator = new PredictionV0Evaluator({
+    const evaluator = new PredictionV1Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
@@ -55,7 +55,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task);
-    const evaluator = new PredictionV0Evaluator({
+    const evaluator = new PredictionV1Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
@@ -70,7 +70,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ submittedAt: task.window.endTs + 1, taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task);
-    const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
+    const evaluator = new PredictionV1Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('REJECTED');
     expect(out.gating.score).toBe('0');
@@ -80,7 +80,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ corruptSignature: true, taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task);
-    const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
+    const evaluator = new PredictionV1Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('FAIL');
     expect(out.gating.score).toBe('0');
@@ -90,7 +90,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task, { omitRestorationTaskCid: true });
-    const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
+    const evaluator = new PredictionV1Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('INDETERMINATE');
   });
@@ -99,7 +99,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task);
-    const evaluator = new PredictionV0Evaluator({
+    const evaluator = new PredictionV1Evaluator({
       evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
@@ -132,7 +132,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const evalTask = makeEvalTask(manifest, task, {
       restorationEnvelopeCid: 'f01551220abcdef1234',
     });
-    const evaluator = new PredictionV0Evaluator({
+    const evaluator = new PredictionV1Evaluator({
       evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
@@ -149,7 +149,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task);
     // makeEvalTask sets restorationRequestId to 0x00...00 (not empty)
-    const evaluator = new PredictionV0Evaluator({
+    const evaluator = new PredictionV1Evaluator({
       evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
@@ -164,7 +164,7 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task);
-    const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
+    const evaluator = new PredictionV1Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalTask, {
       oraclePriceAtResolveTs: async () => ({
         round: { roundId: 1n, answer: 350_000_000_000n, startedAt: 0, updatedAt: 0, answeredInRound: 1n, decimals: 8 },

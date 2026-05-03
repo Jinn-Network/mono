@@ -7,7 +7,7 @@ This index links the recruit-facing docs.
 | Doc | What it covers |
 |---|---|
 | **[Quickstart](./quickstart.md)** | 60-second walkthrough — scaffold, edit, test, sign, publish, install. |
-| **[SDK reference](./sdk-reference.md)** | Field-by-field reference for the public Harness types in `@jinn-network/sdk/harness`. |
+| **[SDK reference](./sdk-reference.md)** | Field-by-field reference for the public types in `@jinn-network/sdk/harness`. |
 | **[Publishing](./publishing.md)** | Manifest signing, tarball pinning, IPFS publish, sample CI config. |
 | **[Patterns](./patterns/README.md)** | Three pattern walkthroughs (forecaster, evaluator, alternative-harness), anchored on packages under `examples/external-harnesses/`. |
 
@@ -29,10 +29,12 @@ Path 2 trust is **explicit, per-Harness, signed**. The trust contract is canonic
 
 ## Stability commitment
 
-`@jinn-network/sdk/harness` is the Harness contract surface. The package follows strict semver:
+`@jinn-network/sdk/harness` is the contract surface. The package follows strict semver:
 
 - **Major bumps** for breaking changes to a re-exported type, a function signature, or an enumerated value.
 - **Minor bumps** are additive only — a new field on `ExternalHarnessEnv`, a new optional method on `Harness`, a new capability handle on `HarnessContext` ships as a minor; pre-existing Harnesses keep loading.
+- **12-week deprecation window.** From the day a major lands on npm, the prior major remains supported for 12 weeks. During the window, the daemon accepts manifests declaring either major; after the window, only the new major loads.
+
 See [`./sdk-reference.md`](./sdk-reference.md) for the full surface and the canonical source under `packages/sdk/src/`.
 
 ## Distribution

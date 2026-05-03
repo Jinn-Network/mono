@@ -50,7 +50,6 @@ export interface StatusGatherConfig {
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
-  testnetClaimRegistryDeploymentPath?: string;
   /** Engine paths — used for portfolio.v0 Claude outcome scan, etc. */
   engine?: { workingDirRoot: string; implStateDirRoot: string };
 }
@@ -310,7 +309,6 @@ export async function gatherGatheredStatusRaw(
     testnetL2TokenDeploymentPath: status.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: status.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: status.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: status.testnetClaimRegistryDeploymentPath,
   });
 
   const raw: GatheredStatusRaw = {

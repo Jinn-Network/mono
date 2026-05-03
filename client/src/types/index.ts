@@ -1,6 +1,8 @@
 export {
   type Task,
   type RequestId,
+  type PostedTask,
+  type TaskAnnouncement,
   type TaskRequest,
   type TaskResult,
   type DeliveredResult,
@@ -23,12 +25,12 @@ export {
 export { TransientError, PermanentError } from './errors.js';
 
 export {
-  PredictionV0SpecSchema,
-  PredictionV0EligibilitySchema,
-  PredictionV0TaskSchema,
-  type PredictionV0Spec,
-  type PredictionV0Eligibility,
-  type PredictionV0Task,
+  PredictionV1SpecSchema,
+  PredictionV1EligibilitySchema,
+  PredictionV1TaskSchema,
+  type PredictionV1Spec,
+  type PredictionV1Eligibility,
+  type PredictionV1Task,
 } from './prediction.js';
 
 export {

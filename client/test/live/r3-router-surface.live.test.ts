@@ -9,36 +9,26 @@ const describeLive = process.env['JINN_LIVE_RPC_TESTS'] === '1'
   ? describe
   : describe.skip;
 
-const routerAbi = parseAbi([
-  'function evaluationDeliveryCount(address multisig) view returns (uint256)',
+const taskActivityCheckerAbi = parseAbi([
+  'function taskCreationWeight(address multisig) view returns (uint256)',
+  'function solutionDeliveryWeight(address multisig) view returns (uint256)',
+  'function verdictDeliveryWeight(address multisig) view returns (uint256)',
 ]);
 
-const JINN_ROUTER_PROXY_SLOT =
-  '0x7ff8b2d5fad2fe8fb4c75b11d9b640a3b52819959b6fe5f04434cf6cdafd7222';
-
-function decodeAddressFromStorage(value: `0x${string}` | undefined): `0x${string}` {
-  if (!value || value === '0x') return zeroAddress;
-  return getAddress(`0x${value.slice(-40)}`);
-}
-
 describeLive('live R-3 router surface', () => {
-  it('Base Sepolia router proxy and implementation expose evaluationDeliveryCount(address)', async () => {
+  it('Base Sepolia V3 activity checker exposes Task-native weight getters', async () => {
     try {
       const artifact = JSON.parse(readFileSync(
-        resolve(process.cwd(), '../contracts/deployment-phase1b-router-checker-baseSepolia-fast.json'),
+        resolve(process.cwd(), '../contracts/deployment-task-coordinator-router-v3-baseSepolia-fast.json'),
         'utf8',
       )) as {
         contracts: {
-          jinnRouterV2Impl: string;
-          jinnRouterProxy: string;
+          activityChecker: string;
         };
       };
       const rpcUrl = process.env['BASE_SEPOLIA_RPC_URL'] ?? 'https://sepolia.base.org';
-      const routerImpl = getAddress(
-        process.env['JINN_R3_ROUTER_IMPL'] ?? artifact.contracts.jinnRouterV2Impl,
-      );
-      const routerProxy = getAddress(
-        process.env['JINN_R3_ROUTER_PROXY'] ?? artifact.contracts.jinnRouterProxy,
+      const activityChecker = getAddress(
+        process.env['JINN_R3_ACTIVITY_CHECKER'] ?? artifact.contracts.activityChecker,
       );
       const sampleMultisig = process.env['JINN_R3_MULTISIG']
         ? getAddress(process.env['JINN_R3_MULTISIG'])
@@ -49,34 +39,34 @@ describeLive('live R-3 router surface', () => {
         transport: http(rpcUrl),
       });
 
-      const [implCode, proxyCode, proxyImplSlot, implCounter, proxyCounter] =
+      const [checkerCode, taskCreation, solutionDelivery, verdictDelivery] =
         await Promise.all([
-          client.getBytecode({ address: routerImpl }),
-          client.getBytecode({ address: routerProxy }),
-          client.getStorageAt({ address: routerProxy, slot: JINN_ROUTER_PROXY_SLOT }),
+          client.getBytecode({ address: activityChecker }),
           client.readContract({
-            address: routerImpl,
-            abi: routerAbi,
-            functionName: 'evaluationDeliveryCount',
+            address: activityChecker,
+            abi: taskActivityCheckerAbi,
+            functionName: 'taskCreationWeight',
             args: [sampleMultisig],
           }),
           client.readContract({
-            address: routerProxy,
-            abi: routerAbi,
-            functionName: 'evaluationDeliveryCount',
+            address: activityChecker,
+            abi: taskActivityCheckerAbi,
+            functionName: 'solutionDeliveryWeight',
+            args: [sampleMultisig],
+          }),
+          client.readContract({
+            address: activityChecker,
+            abi: taskActivityCheckerAbi,
+            functionName: 'verdictDeliveryWeight',
             args: [sampleMultisig],
           }),
         ]);
 
-      expect(implCode).toBeDefined();
-      expect(implCode).not.toBe('0x');
-      expect(proxyCode).toBeDefined();
-      expect(proxyCode).not.toBe('0x');
-      expect(decodeAddressFromStorage(proxyImplSlot).toLowerCase()).toBe(
-        routerImpl.toLowerCase(),
-      );
-      expect(typeof implCounter).toBe('bigint');
-      expect(typeof proxyCounter).toBe('bigint');
+      expect(checkerCode).toBeDefined();
+      expect(checkerCode).not.toBe('0x');
+      expect(typeof taskCreation).toBe('bigint');
+      expect(typeof solutionDelivery).toBe('bigint');
+      expect(typeof verdictDelivery).toBe('bigint');
     } catch (error) {
       throw new Error(redactRpcUrls(error));
     }

@@ -4,9 +4,9 @@
  * Orchestrates the two-tx flow that turns on-chain protocol work on L2 into
  * JINN mints on L1:
  *
- *   1. Step A — emit on Base. Call `JinnClaimEmitter.emitClaim(serviceId)`
+ *   1. Step A — emit on Base. Call `TaskClaimEmitter.emitClaim(serviceId)`
  *      on Base / Base Sepolia. The event records the three counters
- *      (`verifiedCreations`, `noveltyWeightedCounts`, `evaluationDeliveryCount`)
+ *      (`taskCreationWeight`, `solutionDeliveryWeight`, `verdictDeliveryWeight`)
  *      atomically at one block.
  *   2. Step B — wait for finality. In `canonical` mode, wait for the
  *      OP dispute game to resolve and portal finality to elapse, then build
@@ -76,7 +76,7 @@ export interface JinnClaimLoopConfig {
   /** Per-service state. We tick each service with a stake. */
   store: FleetStateStore;
   chain: 'base' | 'base-sepolia';
-  /** L2 JinnClaimEmitter address. Required. */
+  /** L2 TaskClaimEmitter address. Required. */
   claimEmitterAddress: Address;
   /** L1 JinnDistributor address. Required. */
   distributorAddress: Address;
@@ -223,7 +223,7 @@ export class JinnClaimLoop {
     }
   }
 
-  /** Step A — `JinnClaimEmitter.emitClaim(serviceId)` on L2. */
+  /** Step A — `TaskClaimEmitter.emitClaim(serviceId)` on L2. */
   async emitOnL2(serviceId: bigint): Promise<Hex> {
     const account = this.config.l2Wallet.account;
     if (!account) throw new Error('L2 wallet has no account configured');

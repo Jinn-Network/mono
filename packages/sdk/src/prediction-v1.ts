@@ -12,13 +12,15 @@ export const DecimalProbabilitySchema = z
 export const IsoDateTimeSchema = z.string().datetime({ offset: true });
 
 export const PredictionV1ClaimPolicySchema = z.object({
-  kind: z.literal('parallel'),
+  mode: z.enum(['exclusive', 'parallel']).default('exclusive'),
   maxClaims: z.number().int().positive(),
-  maxClaimsPerSolver: z.number().int().positive(),
-  claimWindow: z.literal('task-window'),
-  selection: z.literal('all-valid-solutions-scored'),
-  economics: z.literal('testnet-flat'),
-});
+  maxClaimsPerOperator: z.number().int().positive().default(1),
+  claimWindowStartTs: z.number().int().optional(),
+  claimWindowEndTs: z.number().int().optional(),
+  submissionDeadlineTs: z.number().int().optional(),
+  claimLeaseTtlSeconds: z.number().int().positive().default(30 * 60),
+  policyHook: z.string().regex(/^0x[0-9a-fA-F]*$/).optional(),
+}).passthrough();
 
 export const PredictionV1SpecSchema = z.object({
   question: z.object({

@@ -72,19 +72,18 @@ contract JinnDistributor is Ownable2Step {
     ///         sum constraint.
     uint256 public daoRatio;
 
-    /// @notice Per-channel weight applied to verified-creation counts.
+    /// @notice Per-channel weight applied to Task creation activity.
     /// @dev    Independent of the other channel weights; updated
     ///         together via {setWeights}.
-    uint256 public wCreation;
+    uint256 public wTaskCreation;
 
-    /// @notice Per-channel weight applied to novelty-weighted
-    ///         restoration deliveries.
-    uint256 public wRestorationDelivery;
+    /// @notice Per-channel weight applied to Solution deliveries.
+    uint256 public wSolutionDelivery;
 
-    /// @notice Per-channel weight applied to evaluation deliveries.
-    /// @dev    Note there is no `wEvaluationCreation` — eval creations
+    /// @notice Per-channel weight applied to Verdict deliveries.
+    /// @dev    Note there is no evaluator-claim weight — eval claims
     ///         are a protocol mechanical step and do not earn JINN.
-    uint256 public wEvaluationDelivery;
+    uint256 public wVerdictDelivery;
 
     // -------------------------------------------------------------------------
     // Bounds on governance-mutable parameters
@@ -160,9 +159,9 @@ contract JinnDistributor is Ownable2Step {
 
     /// @notice Emitted when the owner updates per-channel weights.
     event WeightsUpdated(
-        uint256 wCreation,
-        uint256 wRestorationDelivery,
-        uint256 wEvaluationDelivery
+        uint256 wTaskCreation,
+        uint256 wSolutionDelivery,
+        uint256 wVerdictDelivery
     );
 
     // -------------------------------------------------------------------------
@@ -204,9 +203,9 @@ contract JinnDistributor is Ownable2Step {
         address _initialMessenger,
         uint256 _operatorRatio,
         uint256 _daoRatio,
-        uint256 _wCreation,
-        uint256 _wRestorationDelivery,
-        uint256 _wEvaluationDelivery
+        uint256 _wTaskCreation,
+        uint256 _wSolutionDelivery,
+        uint256 _wVerdictDelivery
     ) Ownable(initialOwner) {
         if (_jinn == address(0)) revert ZeroAddress();
         if (_daoTreasury == address(0)) revert ZeroAddress();
@@ -217,9 +216,9 @@ contract JinnDistributor is Ownable2Step {
         messenger = IClaimMessenger(_initialMessenger);
         operatorRatio = _operatorRatio;
         daoRatio = _daoRatio;
-        wCreation = _wCreation;
-        wRestorationDelivery = _wRestorationDelivery;
-        wEvaluationDelivery = _wEvaluationDelivery;
+        wTaskCreation = _wTaskCreation;
+        wSolutionDelivery = _wSolutionDelivery;
+        wVerdictDelivery = _wVerdictDelivery;
     }
 
     // -------------------------------------------------------------------------
@@ -238,9 +237,9 @@ contract JinnDistributor is Ownable2Step {
     function claim(bytes calldata proof) external {
         (
             uint256 serviceId,
-            uint256 vCreations,
-            uint256 vRestoration,
-            uint256 evalDelivery,
+            uint256 taskCreation,
+            uint256 solutionDelivery,
+            uint256 verdictDelivery,
             address multisig
         ) = messenger.verifyClaim(proof);
 
@@ -262,9 +261,9 @@ contract JinnDistributor is Ownable2Step {
         }
 
         // Snapshot weighted by current per-channel weights.
-        uint256 weighted = wCreation * vCreations
-            + wRestorationDelivery * vRestoration
-            + wEvaluationDelivery * evalDelivery;
+        uint256 weighted = wTaskCreation * taskCreation
+            + wSolutionDelivery * solutionDelivery
+            + wVerdictDelivery * verdictDelivery;
 
         uint256 entitledOperator = (weighted * operatorRatio) / 1e18;
         uint256 entitledDao      = (weighted * daoRatio)      / 1e18;
@@ -361,20 +360,20 @@ contract JinnDistributor is Ownable2Step {
     ///         reason {setRatios} caps each side: bound the largest
     ///         possible per-claim mint.
     function setWeights(
-        uint256 _wCreation,
-        uint256 _wRestorationDelivery,
-        uint256 _wEvaluationDelivery
+        uint256 _wTaskCreation,
+        uint256 _wSolutionDelivery,
+        uint256 _wVerdictDelivery
     ) external onlyOwner {
         if (
-            _wCreation > MAX_WEIGHT
-                || _wRestorationDelivery > MAX_WEIGHT
-                || _wEvaluationDelivery > MAX_WEIGHT
+            _wTaskCreation > MAX_WEIGHT
+                || _wSolutionDelivery > MAX_WEIGHT
+                || _wVerdictDelivery > MAX_WEIGHT
         ) {
             revert WeightOutOfBounds();
         }
-        wCreation = _wCreation;
-        wRestorationDelivery = _wRestorationDelivery;
-        wEvaluationDelivery = _wEvaluationDelivery;
-        emit WeightsUpdated(_wCreation, _wRestorationDelivery, _wEvaluationDelivery);
+        wTaskCreation = _wTaskCreation;
+        wSolutionDelivery = _wSolutionDelivery;
+        wVerdictDelivery = _wVerdictDelivery;
+        emit WeightsUpdated(_wTaskCreation, _wSolutionDelivery, _wVerdictDelivery);
     }
 }

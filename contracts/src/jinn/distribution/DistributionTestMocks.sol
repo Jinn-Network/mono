@@ -23,9 +23,9 @@ contract ZeroMultisigMessenger is IClaimMessenger {
         override
         returns (
             uint256 serviceId,
-            uint256 verifiedCreations,
-            uint256 noveltyWeightedRestorationDeliveries,
-            uint256 evaluationDeliveryCount,
+            uint256 taskCreationWeight,
+            uint256 solutionDeliveryWeight,
+            uint256 verdictDeliveryWeight,
             address multisig
         )
     {

@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { WindowSchema, type Window } from './window.js';
-import { SignedTaskV1Schema, type SignedTaskV1 } from './task-document.js';
+import { SignedTaskV1Schema, TaskClaimPolicySchema, type SignedTaskV1, type TaskClaimPolicy } from './task-document.js';
 
 export type RequestId = string;
 
@@ -22,20 +22,20 @@ export const TaskSchema = z.object({
   role: z.enum(['restoration', 'evaluation']).optional(),
   attemptId: z.string().optional(),
   attemptNumber: z.number().int().optional(),
-  taskId: z.string().optional(),
   restorationRequestId: z.string().optional(),
 
   // §3 — optional lifecycle window
   window: WindowSchema.optional(),
-
-  // TaskCoordinator claim semantics; solverType-specific specs may require it.
-  claimPolicy: z.record(z.unknown()).optional(),
 
   // §3 — typed task payload; dispatcher is top-level `solverType`.
   spec: z.record(z.unknown()).optional(),
 
   // §3 — pre-claim and post-hoc qualifying rules; shape governed by solverType
   eligibility: z.record(z.unknown()).optional(),
+
+  // TaskCoordinator claim policy. Required on signed task.v1 documents, optional
+  // on loose runtime Tasks so tests/configured tasks can use creator defaults.
+  claimPolicy: TaskClaimPolicySchema.optional(),
 
   signedTask: SignedTaskV1Schema.optional(),
 });
@@ -48,14 +48,13 @@ export interface Task {
   role?: 'restoration' | 'evaluation';
   attemptId?: string;
   attemptNumber?: number;
-  taskId?: string;
   restorationRequestId?: string;
 
   // §3 extensions (all optional for backwards compat)
   window?: Window;
-  claimPolicy?: Record<string, unknown>;
   spec?: Record<string, unknown>;
   eligibility?: Record<string, unknown>;
+  claimPolicy?: TaskClaimPolicy;
 
   signedTask?: SignedTaskV1;
 }
@@ -79,6 +78,7 @@ export function parseTask(input: unknown): Task {
   }
   const solverType = parsed.solverType ?? signedTask?.solverType;
   const spec = parsedSpec ?? signedTask?.spec;
+  const claimPolicy = parsed.claimPolicy ?? signedTask?.claimPolicy;
   return {
     id: parsed.id ?? signedTask?.id ?? randomUUID(),
     description,
@@ -87,31 +87,41 @@ export function parseTask(input: unknown): Task {
     role: parsed.role ?? signedTask?.role,
     attemptId: parsed.attemptId ?? signedRuntime?.attemptId,
     attemptNumber: parsed.attemptNumber ?? signedRuntime?.attemptNumber,
-    taskId: parsed.taskId,
     restorationRequestId: parsed.restorationRequestId ?? signedRuntime?.restorationRequestId,
     window: parsed.window ?? signedTask?.window,
-    claimPolicy: parsed.claimPolicy ?? signedTask?.claimPolicy,
     spec,
     eligibility: parsed.eligibility ?? signedTask?.eligibility,
+    claimPolicy,
     signedTask,
   };
 }
 
+export interface PostedTask {
+  taskId: string;
+  taskCid: string;
+  txHash?: `0x${string}`;
+  blockNumber?: number;
+}
+
+export interface TaskAnnouncement {
+  taskId: string;
+  task: Task;
+  taskCid?: string;
+  onchainCreationTx?: `0x${string}`;
+  onchainCreationBlock?: number;
+}
+
 export interface TaskRequest {
   requestId: RequestId;
+  taskId?: string;
+  attemptIndex?: number;
   task: Task;
   payment?: string;
   timeout?: number;
 
-  // TaskCoordinator provenance. Optional until the v3 adapter lands.
-  taskId?: string;
-  attemptIndex?: number;
-  /** True when the adapter already performed TaskCoordinator claimTask(). */
-  alreadyClaimed?: boolean;
-
-  // On-chain provenance from the RestorationJobCreated / MarketplaceRequest event
+  // On-chain provenance from the TaskCreated / TaskAttemptCreated event path
   taskCid?: string;                 // IPFS CID of the Task payload
-  onchainCreationTx?: `0x${string}`; // tx hash of JinnRouter.createRestorationJob
+  onchainCreationTx?: `0x${string}`; // tx hash of JinnRouterV3.createTask / claimTask
   onchainCreationBlock?: number;      // block number containing the tx
 }
 

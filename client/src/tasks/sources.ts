@@ -57,7 +57,9 @@ export class GeneratedTaskSource implements TaskSource {
     if (!generated) return [];
     const tasks = Array.isArray(generated) ? generated : [generated];
     return tasks.map((task) => {
-      const bucketKey = taskDedupBucketKey(task);
+      const bucketKey = task.window
+        ? `${task.window.startTs}:${task.window.endTs}`
+        : task.id;
       return {
         task,
         sourceKey: this.sourceKey,
@@ -70,45 +72,4 @@ export class GeneratedTaskSource implements TaskSource {
       };
     });
   }
-}
-
-function taskDedupBucketKey(task: Task): string {
-  const source = task.spec?.['source'];
-  const question = task.spec?.['question'];
-  if (source && typeof source === 'object' && !Array.isArray(source)) {
-    const venue = (source as Record<string, unknown>)['venue'];
-    const identifiers = (source as Record<string, unknown>)['identifiers'];
-    if (typeof venue === 'string' && identifiers && typeof identifiers === 'object' && !Array.isArray(identifiers)) {
-      const conditionId = (identifiers as Record<string, unknown>)['conditionId'];
-      if (typeof conditionId === 'string' && conditionId.length > 0) {
-        return `${venue}:${conditionId}`;
-      }
-    }
-    if (typeof venue === 'string') {
-      const url = (source as Record<string, unknown>)['url'];
-      const questionText =
-        question && typeof question === 'object' && !Array.isArray(question)
-          ? (question as Record<string, unknown>)['text']
-          : undefined;
-      const fallback = typeof url === 'string' && url.trim()
-        ? url.trim()
-        : typeof questionText === 'string'
-          ? questionText.trim()
-          : '';
-      const normalized = fallback ? normaliseDedupKey(fallback) : '';
-      if (normalized) return `${venue}:${normalized}`;
-    }
-  }
-  return task.window
-    ? `${task.window.startTs}:${task.window.endTs}`
-    : task.id;
-}
-
-function normaliseDedupKey(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/https?:\/\/(www\.)?/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 160);
 }

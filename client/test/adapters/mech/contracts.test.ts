@@ -1,24 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { encodeFunctionData, decodeFunctionData } from 'viem';
+import { decodeEventLog, decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData } from 'viem';
 import {
   JINN_ROUTER_ABI,
   JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
-  NATIVE_PAYMENT_TYPE,
 } from '../../../src/adapters/mech/types.js';
 
 describe('JinnRouter contract encoding', () => {
-  it('encodes createRestorationJob calldata', () => {
+  const taskCidDigest = ('0x' + '11'.repeat(32)) as `0x${string}`;
+  const solverTypeDigest = ('0x' + '22'.repeat(32)) as `0x${string}`;
+  const policy = {
+    claimWindowStart: 1n,
+    claimWindowEnd: 2n,
+    submissionDeadline: 3n,
+    claimLeaseTtlSeconds: 300,
+    maxClaims: 25,
+    maxClaimsPerOperator: 1,
+    policyHook: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+    evaluationPolicy: {
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      evaluationDeadline: 4n,
+      maxVerdictsPerEvaluator: 1,
+      disallowSolverSelfEvaluation: true,
+    },
+  };
+
+  it('encodes createTask calldata', () => {
     const calldata = encodeFunctionData({
       abi: JINN_ROUTER_ABI,
-      functionName: 'createRestorationJob',
-      args: [
-        '0xabcd' as `0x${string}`,
-        '0x1234567890123456789012345678901234567890' as `0x${string}`,
-        1000000n,
-        300n,
-        NATIVE_PAYMENT_TYPE,
-        '0x' as `0x${string}`,
-      ],
+      functionName: 'createTask',
+      args: [taskCidDigest, solverTypeDigest, policy, 1000000n, 1000000n, 300n],
     });
     expect(calldata).toMatch(/^0x/);
 
@@ -26,47 +37,63 @@ describe('JinnRouter contract encoding', () => {
       abi: JINN_ROUTER_ABI,
       data: calldata,
     });
-    expect(decoded.functionName).toBe('createRestorationJob');
+    expect(decoded.functionName).toBe('createTask');
+    expect((decoded.args as unknown[])[0]).toBe(taskCidDigest);
+    expect((decoded.args as unknown[])[1]).toBe(solverTypeDigest);
   });
 
-  it('encodes createEvaluationJob calldata with restorationRequestId', () => {
-    const restorationRequestId = ('0x' + 'aa'.repeat(32)) as `0x${string}`;
+  it('encodes claimTask calldata', () => {
+    const priorityMech = '0x1234567890123456789012345678901234567890' as `0x${string}`;
     const calldata = encodeFunctionData({
       abi: JINN_ROUTER_ABI,
-      functionName: 'createEvaluationJob',
-      args: [
-        restorationRequestId,
-        '0xabcd' as `0x${string}`,
-        '0x1234567890123456789012345678901234567890' as `0x${string}`,
-        1000000n,
-        300n,
-        NATIVE_PAYMENT_TYPE,
-        '0x' as `0x${string}`,
-      ],
+      functionName: 'claimTask',
+      args: [1n, priorityMech],
     });
 
     const decoded = decodeFunctionData({
       abi: JINN_ROUTER_ABI,
       data: calldata,
     });
-    expect(decoded.functionName).toBe('createEvaluationJob');
-    expect((decoded.args as unknown[])[0]).toBe(restorationRequestId);
+    expect(decoded.functionName).toBe('claimTask');
+    expect((decoded.args as unknown[])[0]).toBe(1n);
+    expect((decoded.args as unknown[])[1]).toBe(priorityMech);
   });
 
-  it('encodes claimDelivery calldata', () => {
+  it('encodes claimSolutionDelivery calldata', () => {
     const requestId = ('0x' + 'bb'.repeat(32)) as `0x${string}`;
+    const evidenceHash = ('0x' + 'cc'.repeat(32)) as `0x${string}`;
     const calldata = encodeFunctionData({
       abi: JINN_ROUTER_ABI,
-      functionName: 'claimDelivery',
-      args: [requestId],
+      functionName: 'claimSolutionDelivery',
+      args: [requestId, evidenceHash],
     });
 
     const decoded = decodeFunctionData({
       abi: JINN_ROUTER_ABI,
       data: calldata,
     });
-    expect(decoded.functionName).toBe('claimDelivery');
+    expect(decoded.functionName).toBe('claimSolutionDelivery');
     expect((decoded.args as unknown[])[0]).toBe(requestId);
+    expect((decoded.args as unknown[])[1]).toBe(evidenceHash);
+  });
+
+  it('encodes claimVerdictDelivery calldata', () => {
+    const requestId = ('0x' + 'bb'.repeat(32)) as `0x${string}`;
+    const evidenceHash = ('0x' + 'cc'.repeat(32)) as `0x${string}`;
+    const calldata = encodeFunctionData({
+      abi: JINN_ROUTER_ABI,
+      functionName: 'claimVerdictDelivery',
+      args: [requestId, evidenceHash, 1],
+    });
+
+    const decoded = decodeFunctionData({
+      abi: JINN_ROUTER_ABI,
+      data: calldata,
+    });
+    expect(decoded.functionName).toBe('claimVerdictDelivery');
+    expect((decoded.args as unknown[])[0]).toBe(requestId);
+    expect((decoded.args as unknown[])[1]).toBe(evidenceHash);
+    expect((decoded.args as unknown[])[2]).toBe(1);
   });
 
   it('encodes V2 claimDelivery calldata with evidence hash', () => {
@@ -85,5 +112,79 @@ describe('JinnRouter contract encoding', () => {
     expect(decoded.functionName).toBe('claimDelivery');
     expect((decoded.args as unknown[])[0]).toBe(requestId);
     expect((decoded.args as unknown[])[1]).toBe(evidenceHash);
+  });
+
+  it('decodes TaskCreated events', () => {
+    const topics = encodeEventTopics({
+      abi: JINN_ROUTER_ABI,
+      eventName: 'TaskCreated',
+      args: {
+        creator: '0x1234567890123456789012345678901234567890',
+        taskId: 1n,
+        solverTypeDigest,
+      },
+    });
+    const data = encodeAbiParameters(
+      [
+        { name: 'taskCidDigest', type: 'bytes32' },
+        { name: 'maxClaims', type: 'uint16' },
+        { name: 'requiredVerdicts', type: 'uint16' },
+        { name: 'solutionBudget', type: 'uint256' },
+        { name: 'verdictBudget', type: 'uint256' },
+      ],
+      [taskCidDigest, policy.maxClaims, policy.evaluationPolicy.requiredVerdicts, 25_000_000n, 25_000_000n],
+    );
+
+    const decoded = decodeEventLog({
+      abi: JINN_ROUTER_ABI,
+      eventName: 'TaskCreated',
+      topics,
+      data: data as `0x${string}`,
+    });
+
+    expect(decoded.eventName).toBe('TaskCreated');
+    expect(decoded.args.taskId).toBe(1n);
+    expect(decoded.args.taskCidDigest).toBe(taskCidDigest);
+    expect(decoded.args.maxClaims).toBe(policy.maxClaims);
+    expect(decoded.args.requiredVerdicts).toBe(policy.evaluationPolicy.requiredVerdicts);
+    expect(decoded.args.solutionBudget).toBe(25_000_000n);
+    expect(decoded.args.verdictBudget).toBe(25_000_000n);
+  });
+
+  it('decodes TaskAttemptCreated events', () => {
+    const requestId = ('0x' + '33'.repeat(32)) as `0x${string}`;
+    const topics = encodeEventTopics({
+      abi: JINN_ROUTER_ABI,
+      eventName: 'TaskAttemptCreated',
+      args: {
+        taskId: 1n,
+        attemptIndex: 0,
+        requestId,
+      },
+    });
+    const data = encodeAbiParameters(
+      [
+        { name: 'operator', type: 'address' },
+        { name: 'priorityMech', type: 'address' },
+        { name: 'deliveryRate', type: 'uint256' },
+      ],
+      [
+        '0x1234567890123456789012345678901234567890',
+        '0x3333333333333333333333333333333333333333',
+        1_000_000n,
+      ],
+    );
+
+    const decoded = decodeEventLog({
+      abi: JINN_ROUTER_ABI,
+      eventName: 'TaskAttemptCreated',
+      topics,
+      data,
+    });
+
+    expect(decoded.eventName).toBe('TaskAttemptCreated');
+    expect(decoded.args.taskId).toBe(1n);
+    expect(decoded.args.attemptIndex).toBe(0);
+    expect(decoded.args.requestId).toBe(requestId);
   });
 });

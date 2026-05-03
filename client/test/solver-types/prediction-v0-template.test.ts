@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  resolvePredictionV0Template,
+  resolvePredictionV1Template,
   isCurrentSentinel,
-  predictionV0TemplateNeedsReadCurrent,
+  predictionV1TemplateNeedsReadCurrent,
 } from '../../src/solver-types/prediction-v0-template.js';
 
 const validTemplate = () => ({
@@ -10,7 +10,7 @@ const validTemplate = () => ({
   description: 'ETH direction test',
   window: { startTs: 0, endTs: 0 },
   spec: {
-    kind: 'prediction.v0',
+    kind: 'prediction.v1',
     oracle: {
       venue: 'chainlink-base-sepolia',
       feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1',
@@ -46,15 +46,15 @@ describe('isCurrentSentinel', () => {
   });
 });
 
-describe('resolvePredictionV0Template', () => {
+describe('resolvePredictionV1Template', () => {
   it('rejects current[±…] threshold without readCurrent', async () => {
     const t = validTemplate();
-    await expect(resolvePredictionV0Template(t, {})).rejects.toThrow(/readCurrent is required/);
+    await expect(resolvePredictionV1Template(t, {})).rejects.toThrow(/readCurrent is required/);
   });
 
-  it('predictionV0TemplateNeedsReadCurrent is true for current sentinel, false for literal threshold', () => {
+  it('predictionV1TemplateNeedsReadCurrent is true for current sentinel, false for literal threshold', () => {
     const base = validTemplate();
-    expect(predictionV0TemplateNeedsReadCurrent(base)).toBe(true);
+    expect(predictionV1TemplateNeedsReadCurrent(base)).toBe(true);
     const literal = {
       ...base,
       spec: {
@@ -62,13 +62,13 @@ describe('resolvePredictionV0Template', () => {
         question: { ...base.spec.question, threshold: '3500' },
       },
     };
-    expect(predictionV0TemplateNeedsReadCurrent(literal)).toBe(false);
+    expect(predictionV1TemplateNeedsReadCurrent(literal)).toBe(false);
   });
 
   it('fills startTs=0 with now-relative values and maintains refinements', async () => {
     const before = Date.now();
     const readCurrent = vi.fn(async () => '2300');
-    const resolved = await resolvePredictionV0Template(validTemplate(), { readCurrent });
+    const resolved = await resolvePredictionV1Template(validTemplate(), { readCurrent });
     const after = Date.now();
     expect(resolved.window.startTs).toBeGreaterThanOrEqual(before);
     expect(resolved.window.startTs).toBeLessThanOrEqual(after);
@@ -80,7 +80,7 @@ describe('resolvePredictionV0Template', () => {
 
   it('respects custom windowDurationMs + resolveGapMs overrides (mainnet-style)', async () => {
     const readCurrent = vi.fn(async () => '2300');
-    const resolved = await resolvePredictionV0Template(validTemplate(), {
+    const resolved = await resolvePredictionV1Template(validTemplate(), {
       readCurrent,
       windowDurationMs: 3_600_000,
       resolveGapMs: 900_000,
@@ -92,7 +92,7 @@ describe('resolvePredictionV0Template', () => {
 
   it('resolves "current" threshold via readCurrent', async () => {
     const readCurrent = vi.fn(async () => '2306.35');
-    const resolved = await resolvePredictionV0Template(validTemplate(), { readCurrent });
+    const resolved = await resolvePredictionV1Template(validTemplate(), { readCurrent });
     if (resolved.spec.question.kind !== 'threshold') throw new Error('wrong kind');
     expect(resolved.spec.question.threshold).toBe('2306.35');
     expect(readCurrent).toHaveBeenCalledWith({
@@ -104,7 +104,7 @@ describe('resolvePredictionV0Template', () => {
   it('resolves "current+0.5%" as current × 1.005', async () => {
     const t = validTemplate();
     t.spec.question.threshold = 'current+0.5%';
-    const resolved = await resolvePredictionV0Template(t, { readCurrent: async () => '2000' });
+    const resolved = await resolvePredictionV1Template(t, { readCurrent: async () => '2000' });
     if (resolved.spec.question.kind !== 'threshold') throw new Error('wrong kind');
     expect(resolved.spec.question.threshold).toBe('2010');
   });
@@ -112,7 +112,7 @@ describe('resolvePredictionV0Template', () => {
   it('resolves "current-2%" as current × 0.98', async () => {
     const t = validTemplate();
     t.spec.question.threshold = 'current-2%';
-    const resolved = await resolvePredictionV0Template(t, { readCurrent: async () => '2000' });
+    const resolved = await resolvePredictionV1Template(t, { readCurrent: async () => '2000' });
     if (resolved.spec.question.kind !== 'threshold') throw new Error('wrong kind');
     expect(resolved.spec.question.threshold).toBe('1960');
   });
@@ -120,7 +120,7 @@ describe('resolvePredictionV0Template', () => {
   it('resolves "current+100" as current + 100 (absolute delta)', async () => {
     const t = validTemplate();
     t.spec.question.threshold = 'current+100';
-    const resolved = await resolvePredictionV0Template(t, { readCurrent: async () => '2306.35' });
+    const resolved = await resolvePredictionV1Template(t, { readCurrent: async () => '2306.35' });
     if (resolved.spec.question.kind !== 'threshold') throw new Error('wrong kind');
     expect(resolved.spec.question.threshold).toBe('2406.35');
   });
@@ -128,7 +128,7 @@ describe('resolvePredictionV0Template', () => {
   it('resolves "current-50" as current - 50', async () => {
     const t = validTemplate();
     t.spec.question.threshold = 'current-50';
-    const resolved = await resolvePredictionV0Template(t, { readCurrent: async () => '2306.35' });
+    const resolved = await resolvePredictionV1Template(t, { readCurrent: async () => '2306.35' });
     if (resolved.spec.question.kind !== 'threshold') throw new Error('wrong kind');
     expect(resolved.spec.question.threshold).toBe('2256.35');
   });
@@ -137,7 +137,7 @@ describe('resolvePredictionV0Template', () => {
     const t = validTemplate();
     t.spec.question.threshold = '3000';
     const readCurrent = vi.fn(async () => '2300');
-    const resolved = await resolvePredictionV0Template(t, { readCurrent });
+    const resolved = await resolvePredictionV1Template(t, { readCurrent });
     if (resolved.spec.question.kind !== 'threshold') throw new Error('wrong kind');
     expect(resolved.spec.question.threshold).toBe('3000');
     expect(readCurrent).not.toHaveBeenCalled();
@@ -148,18 +148,18 @@ describe('resolvePredictionV0Template', () => {
     t.spec.question.threshold = 'current*2';
     // This doesn't match isCurrentSentinel so it's treated as an absolute string,
     // which fails Zod regex validation later. That's the expected failure path.
-    await expect(resolvePredictionV0Template(t, { readCurrent: async () => '2000' })).rejects.toThrow();
+    await expect(resolvePredictionV1Template(t, { readCurrent: async () => '2000' })).rejects.toThrow();
   });
 
   it('propagates readCurrent errors', async () => {
     const readCurrent = vi.fn(async () => { throw new Error('RPC down'); });
-    await expect(resolvePredictionV0Template(validTemplate(), { readCurrent })).rejects.toThrow(/RPC down/);
+    await expect(resolvePredictionV1Template(validTemplate(), { readCurrent })).rejects.toThrow(/RPC down/);
   });
 
   it('does not mutate the input template', async () => {
     const t = validTemplate();
     const snapshot = JSON.parse(JSON.stringify(t));
-    await resolvePredictionV0Template(t, { readCurrent: async () => '2000' });
+    await resolvePredictionV1Template(t, { readCurrent: async () => '2000' });
     expect(t).toEqual(snapshot);
   });
 });

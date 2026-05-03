@@ -86,7 +86,7 @@ describe('claimDelivery', () => {
         REQUEST_ID,
         { variant: 'v2' },
       ),
-    ).rejects.toThrow('evidenceHash is required for V2 claim');
+    ).rejects.toThrow('claimDelivery(v2): evidenceHash is required');
 
     expect(executeSafeTransaction).not.toHaveBeenCalled();
   });

@@ -17,7 +17,7 @@ import type {
   ExternalHarnessEnv,
   HarnessContext,
   Solution,
-} from '@jinn-network/sdk/harness';
+} from '@jinn-network/sdk';
 import type { HarnessAdapter } from './harness.js';
 import { runCoordinator } from './coordinator.js';
 import { createMockHarness } from './mock-harness.js';

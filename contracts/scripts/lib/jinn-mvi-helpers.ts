@@ -191,12 +191,12 @@ export interface JinnDistributorInitialConfig {
   operatorRatio: bigint;
   /** DAO-share multiplier, 1e18 fixed point. Default 0.25e18 (25%). */
   daoRatio: bigint;
-  /** Per-channel weight on verified creations. Default 1. */
-  wCreation: bigint;
-  /** Per-channel weight on novelty-weighted restoration deliveries. Default 1. */
-  wRestorationDelivery: bigint;
-  /** Per-channel weight on evaluation deliveries. Default 1. */
-  wEvaluationDelivery: bigint;
+  /** Per-channel weight on finalized Task creation. Default 1. */
+  wTaskCreation: bigint;
+  /** Per-channel weight on Solution deliveries. Default 1. */
+  wSolutionDelivery: bigint;
+  /** Per-channel weight on Verdict deliveries. Default 1. */
+  wVerdictDelivery: bigint;
 }
 
 /**
@@ -207,9 +207,9 @@ export interface JinnDistributorInitialConfig {
 export const LOCKED_DISTRIBUTOR_INITIAL_CONFIG: JinnDistributorInitialConfig = {
   operatorRatio: (10n ** 18n * 75n) / 100n, // 0.75e18
   daoRatio: (10n ** 18n * 25n) / 100n, // 0.25e18
-  wCreation: 1n,
-  wRestorationDelivery: 1n,
-  wEvaluationDelivery: 1n,
+  wTaskCreation: 1n,
+  wSolutionDelivery: 1n,
+  wVerdictDelivery: 1n,
 };
 
 // ---------------------------------------------------------------------------

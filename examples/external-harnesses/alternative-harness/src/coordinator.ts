@@ -1,7 +1,7 @@
 import type {
   HarnessContext,
   Solution,
-} from '@jinn-network/sdk/harness';
+} from '@jinn-network/sdk';
 import type { HarnessAdapter } from './harness.js';
 import { runOrient } from './phases/orient.js';
 import { runStrategize } from './phases/strategize.js';

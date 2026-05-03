@@ -13,12 +13,6 @@ import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput }
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
 import {
-  executeTwoLayerClaim,
-  releaseClaimedNotStarted,
-  type MarketplaceClaimer,
-} from './claim.js';
-import type { ClaimRegistryClient } from '../../adapters/claim-registry/client.js';
-import {
   provisionWorkingDir,
   provisionImplStateDir,
   walkArtifacts,
@@ -82,6 +76,7 @@ export interface SolverNetRegistryLike {
     name: string;
     solverType: string;
     harness: string;
+    canonicalPlugin: RuntimePlugin;
     plugins: RuntimePlugin[];
   } | undefined;
 }
@@ -93,15 +88,6 @@ export interface TaskEngineOptions {
   paths: {
     workingDirRoot: string;
     implStateDirRoot: string;
-  };
-  /**
-   * Injected claim dependencies. When provided, engine.claim() is functional.
-   * When absent, claim() falls back to NotImplementedError (useful for tests
-   * that don't exercise the claim path).
-   */
-  claimDeps?: {
-    registryClient: ClaimRegistryClient;
-    marketplaceClaimer: MarketplaceClaimer;
   };
   /**
    * Packaging dependencies. When provided, pack() is functional.
@@ -200,7 +186,6 @@ export interface RecoveryReport {
 export class TaskEngine {
   protected readonly persistence: TaskRunPersistence;
   protected readonly paths: TaskEngineOptions['paths'];
-  protected readonly claimDeps: TaskEngineOptions['claimDeps'];
   protected readonly packagingDeps: TaskEngineOptions['packagingDeps'];
   protected readonly envelopeDeps: TaskEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
@@ -237,7 +222,6 @@ export class TaskEngine {
     this.persistence = new TaskRunPersistence(opts.store.db);
     this.store = opts.store;
     this.paths = opts.paths;
-    this.claimDeps = opts.claimDeps;
     this.packagingDeps = opts.packagingDeps;
     this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
@@ -260,6 +244,14 @@ export class TaskEngine {
       this.persistence.insertDiscovered(input);
       console.log(`[harness-engine] observed task ${input.requestId} solverType=${input.solverType ?? 'null'}`);
     }
+  }
+
+  async canAcceptTask(input: {
+    solverType?: string;
+    taskRole?: 'restoration' | 'evaluation';
+  }): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const reason = await this.runnableFailureReason(input.solverType, input.taskRole ?? 'restoration');
+    return reason ? { ok: false, reason } : { ok: true };
   }
 
   /**
@@ -443,86 +435,22 @@ export class TaskEngine {
   // filled in by subsequent tasks.
 
   /**
-   * Two-layer claim: ClaimRegistry + Marketplace.
+   * TaskCoordinator clean-break claim transition.
    *
-   * Idempotent on resume: checks ClaimRegistry for a pre-existing claim before
-   * sending any on-chain transaction.
-   *
-   * Advances state DISCOVERED → CLAIMED on success.
-   * Marks FAILED if either layer cannot be claimed.
-   *
-   * Requires claimDeps to be injected via constructor options. Falls back to
-   * NotImplementedError if claimDeps is absent (development / test mode).
+   * The on-chain Task claim happens before observe(), producing the internal
+   * Mech requestId stored in this row. The engine's CLAIM step now only verifies
+   * the operator has an enabled, ready Harness and advances DISCOVERED → CLAIMED.
    */
   protected async claim(task: PersistedTaskRun): Promise<void> {
-    if (!this.claimDeps) {
-      throw new NotImplementedError('claim');
-    }
-
-    // ── Pre-claim impl gate ─────────────────────────────────────────────────
-    // Refuse to claim tasks whose impl is either unregistered (operator has
-    // opted out via config.harnesses.disabled[]) or not ready (external deps
-    // missing — e.g. HL api-wallet not approved for portfolio.v0). Marking
-    // FAILED is terminal so we don't re-attempt; another operator can still
-    // claim from the marketplace.
-    //
-    // Only fires when an implRegistry is wired in (production); tests that
-    // inject claimDeps without a registry intentionally exercise the raw
-    // claim path and are not gated.
-    const solverNet = this.solverNetRegistry && task.solverType
-      ? this.solverNetRegistry.forSolverType(task.solverType)
-      : undefined;
-    if (this.solverNetRegistry && task.solverType && !solverNet) {
-      const reason = `no enabled SolverNet for solverType '${task.solverType}'; run \`jinn solver-nets enable <name>\``;
+    const reason = await this.runnableFailureReason(task.solverType ?? undefined, task.taskRole ?? 'restoration');
+    if (reason) {
       this.persistence.markFailed(task.requestId, reason);
-      console.log(`[harness-engine] ${task.requestId}: skipping claim — ${reason}`);
+      console.log(`[harness-engine] ${task.requestId}: skipping claimed task — ${reason}`);
       throw new Error(reason);
     }
-    if (this.implRegistry && task.solverType) {
-      if (!solverNet) {
-        // Unit tests can wire only implRegistry to exercise the Harness gate.
-      }
-      const impl = this.implRegistry.findFor({
-        solverType: task.solverType,
-        role: task.taskRole ?? 'restoration',
-      });
-      if (!impl) {
-        const setHarnessHint = solverNet
-          ? `jinn solver-nets set-harness ${solverNet.name} <harness>`
-          : 'jinn solver-nets set-harness <name> <harness>';
-        const reason = `no Harness registered or enabled for solverType '${task.solverType}'; run \`${setHarnessHint}\``;
-        this.persistence.markFailed(task.requestId, reason);
-        console.log(`[harness-engine] ${task.requestId}: skipping claim — ${reason}`);
-        throw new Error(reason);
-      }
-      if (impl.isReady) {
-        const status = await impl.isReady({
-          solverType: task.solverType,
-          role: task.taskRole ?? 'restoration',
-        });
-        if (!status.ready) {
-          const reason = `impl '${impl.name}' not ready: ${status.reason ?? 'unknown'}${status.nextStep?.cli ? ` — run \`${status.nextStep.cli}\`` : ''}`;
-          this.persistence.markFailed(task.requestId, reason);
-          console.log(`[harness-engine] ${task.requestId}: skipping claim — ${reason}`);
-          throw new Error(reason);
-        }
-      }
-    }
 
-    const { registryClient, marketplaceClaimer } = this.claimDeps;
-
-    await executeTwoLayerClaim(
-      {
-        requestId: task.requestId,
-        windowStartTs: task.windowStartTs,
-      },
-      registryClient,
-      marketplaceClaimer,
-    );
-
-    // Both layers succeeded. The event path and tick loop can race on the same
-    // DISCOVERED row; if another caller already advanced it, treat this claim as
-    // idempotent and do not rewind or fail the task.
+    // The event path and tick loop can race on the same DISCOVERED row; if
+    // another caller already advanced it, treat this as idempotent.
     const current = this.persistence.getByRequestId(task.requestId);
     if (!current) {
       throw new Error(`claim: task not found after claim: ${task.requestId}`);
@@ -536,49 +464,38 @@ export class TaskEngine {
     }
   }
 
-  /**
-   * Release ClaimRegistry claims for all CLAIMED tasks whose work window has
-   * not yet started. Called on graceful engine shutdown.
-   *
-   * Returns the list of requestIds that were successfully released.
-   */
   async releaseClaimedNotStarted(): Promise<string[]> {
-    if (!this.claimDeps) {
-      return []; // No registry client — nothing to release
+    // TaskCoordinator claims are made before observe(), so there is no
+    // recoverable "claimed but not started" engine row to release here.
+    return [];
+  }
+
+  private async runnableFailureReason(
+    solverType: string | undefined,
+    role: 'restoration' | 'evaluation',
+  ): Promise<string | null> {
+    const solverNet = this.solverNetRegistry && solverType
+      ? this.solverNetRegistry.forSolverType(solverType)
+      : undefined;
+    if (this.solverNetRegistry && solverType && !solverNet) {
+      return `no enabled SolverNet for solverType '${solverType}'; run \`jinn solver-nets enable <name>\``;
     }
+    if (!this.implRegistry || !solverType) return null;
 
-    const claimed = this.persistence.getByState(TaskRunState.CLAIMED);
-    const released: string[] = [];
-
-    for (const task of claimed) {
-      if (Date.now() < task.windowStartTs) {
-        try {
-          const ok = await releaseClaimedNotStarted(
-            {
-              requestId: task.requestId,
-              windowStartTs: task.windowStartTs,
-            },
-            this.claimDeps.registryClient,
-          );
-          if (ok) {
-            released.push(task.requestId);
-          }
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          console.error(
-            `[harness-engine] releaseClaimedNotStarted failed for ${task.requestId}: ${reason}`,
-          );
-        }
+    const impl = this.implRegistry.findFor({ solverType, role });
+    if (!impl) {
+      const setHarnessHint = solverNet
+        ? `jinn solver-nets set-harness ${solverNet.name} <harness>`
+        : 'jinn solver-nets set-harness <name> <harness>';
+      return `no Harness registered or enabled for solverType '${solverType}'; run \`${setHarnessHint}\``;
+    }
+    if (impl.isReady) {
+      const status = await impl.isReady({ solverType, role });
+      if (!status.ready) {
+        return `impl '${impl.name}' not ready: ${status.reason ?? 'unknown'}${status.nextStep?.cli ? ` — run \`${status.nextStep.cli}\`` : ''}`;
       }
     }
-
-    if (released.length > 0) {
-      console.log(
-        `[harness-engine] released ${released.length} pre-window claim(s) on shutdown: ${released.join(', ')}`,
-      );
-    }
-
-    return released;
+    return null;
   }
 
   /**
@@ -647,7 +564,9 @@ export class TaskEngine {
     if (!impl) {
       throw new NotImplementedError('runImpl');
     }
-    const runtimePlugins: RuntimePlugin[] = solverNet ? solverNet.plugins : [];
+    const runtimePlugins: RuntimePlugin[] = solverNet
+      ? [solverNet.canonicalPlugin, ...solverNet.plugins]
+      : [];
     this.runtimePluginsByRequest.set(task.requestId, runtimePlugins);
 
     const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
@@ -681,7 +600,7 @@ export class TaskEngine {
         taskCid: task.taskCid,
         solverNet: solverNet ? { name: solverNet.name, solverType: solverNet.solverType } : undefined,
         runtimePlugins,
-        runtimePluginRoots: runtimePlugins.map((plugin) => plugin.root),
+        solverPluginRoots: runtimePlugins.map((plugin) => plugin.root),
         implStateDir,
         workingDir,
         log: (event: { level: string; msg: string; data?: unknown }) => {
@@ -906,7 +825,7 @@ export class TaskEngine {
       }
     } else if (implOutput?.solutionPayload) {
       // ── Non-portfolio restoration envelope payload ────────────────────────────
-      // Impls for kinds with a non-portfolio payload schema (e.g. prediction.v0)
+      // Impls for kinds with a non-portfolio payload schema (e.g. prediction.v1)
       // declare their own fully-formed payload. Engine passes it through directly
       // so validatePayload() can check it against the per-kind schema.
       envelopePayload = implOutput.solutionPayload;
@@ -967,7 +886,9 @@ export class TaskEngine {
     // so the envelope should be declared 'committed'. For V1 or unknown flows,
     // 'self-signed' is accurate (no on-chain hash commitment).
     const evidenceTier: import('../../types/envelope.js').EvidenceTier =
-      this.deliveryDeps?.claimDeliveryVariant === 'v2' ? 'committed' : 'self-signed';
+      this.deliveryDeps?.claimDeliveryVariant === 'v2' || this.deliveryDeps?.claimDeliveryVariant === 'v3'
+        ? 'committed'
+        : 'self-signed';
     const runtimePlugins: RuntimePlugin[] =
       this.runtimePluginsByRequest.get(task.requestId)
       ?? (task.runtimePluginsJson ? JSON.parse(task.runtimePluginsJson) as RuntimePlugin[] : []);
@@ -1092,7 +1013,7 @@ export class TaskEngine {
     // Guard: v2 claimDelivery requires an evidenceHash — a zero fallback would
     // silently brick staking rewards, so we fail loudly instead.
     const evidenceHash = task.evidenceHash as `0x${string}` | null | undefined;
-    if (!evidenceHash && this.deliveryDeps.claimDeliveryVariant === 'v2') {
+    if (!evidenceHash && (this.deliveryDeps.claimDeliveryVariant === 'v2' || this.deliveryDeps.claimDeliveryVariant === 'v3')) {
       throw new MissingEvidenceHashError(task.requestId);
     }
 
@@ -1111,6 +1032,10 @@ export class TaskEngine {
       async (txHash) => {
         persistence.setDeliveryTxHash(requestId, txHash);
       },
+      {
+        kind: task.taskRole === 'evaluation' ? 'verdict' : 'solution',
+        verdictCode: task.taskRole === 'evaluation' ? this.verdictCodeForTask(task) : undefined,
+      },
     );
 
     this.persistence.transition(requestId, TaskRunState.COMPLETE, {
@@ -1121,7 +1046,7 @@ export class TaskEngine {
     // Emit a SQLite artifact row so consumers (release acceptance gate, search
     // API) see this cycle alongside legacy-claude / MCP-emitted rows. The
     // legacy claude path writes via the MCP `submit_restoration_result` tool;
-    // deterministic impls (prediction-v0-baseline, prediction-v0-evaluator,
+    // deterministic impls (prediction.v1 baseline/evaluator,
     // …) don't go through MCP, so the engine emits on their behalf here.
     // Idempotent: skips when a row for this requestId+tag already exists
     // (legacy path may have already inserted).
@@ -1250,6 +1175,26 @@ export class TaskEngine {
     });
   }
 
+  private verdictCodeForTask(task: PersistedTaskRun): number {
+    const gating = task.gatingClaim as { verdict?: unknown } | null;
+    const raw = gating?.verdict;
+    switch (raw) {
+      case 'PASS':
+      case 'SCORED':
+        return 1;
+      case 'FAIL':
+      case 'REJECTED':
+        return 2;
+      case 'INVALID':
+        return 3;
+      case 'INDETERMINATE':
+      case 'UNRESOLVED':
+        return 4;
+      default:
+        return 1;
+    }
+  }
+
   private async _maybePostEvaluatorFeedback(task: PersistedTaskRun): Promise<void> {
     if (!this.reputationFeedback) return;
 
@@ -1272,8 +1217,7 @@ export class TaskEngine {
 
     // Pull the parent harness's manifest evidence from the inlined eval
     // payload. The evaluator impl receives the harness's signed manifest
-    // JSON via `task.context.restorationResult` (see
-    // `MechAdapter.tryCreateEvaluationJob`). Its `signature.hash` is
+    // JSON via `task.context.restorationResult`. Its `signature.hash` is
     // exactly what the harness committed via `claimDelivery(evidenceHash)`.
     const parent = this._extractHarnessManifestRef(task);
     if (!parent) {
@@ -1342,8 +1286,7 @@ export class TaskEngine {
    * from the persisted evaluation task.
    *
    * The evaluator's `task.context.restorationResult` holds the harness's
-   * full signed manifest JSON inlined as a string (per
-   * `MechAdapter.tryCreateEvaluationJob`). We parse it and pull the
+   * full signed manifest JSON inlined as a string. We parse it and pull the
    * `signature.hash`, which is exactly the on-chain `evidenceHash`.
    *
    * The CID is not always inlined — the manifest carries its own

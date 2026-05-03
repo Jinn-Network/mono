@@ -25,6 +25,19 @@ const CreatorSchema = z.object({
   agentEoa: HexStringSchema,
 });
 
+export const TaskClaimPolicySchema = z.object({
+  mode: z.enum(['exclusive', 'parallel']).default('exclusive'),
+  maxClaims: z.number().int().positive(),
+  maxClaimsPerOperator: z.number().int().positive().default(1),
+  claimWindowStartTs: z.number().int().optional(),
+  claimWindowEndTs: z.number().int().optional(),
+  submissionDeadlineTs: z.number().int().optional(),
+  claimLeaseTtlSeconds: z.number().int().positive().default(30 * 60),
+  policyHook: HexStringSchema.optional(),
+}).passthrough();
+
+export type TaskClaimPolicy = z.infer<typeof TaskClaimPolicySchema>;
+
 const NoLegacyKindSchema = z.record(z.unknown()).superRefine((spec, ctx) => {
   if (Object.prototype.hasOwnProperty.call(spec, 'kind')) {
     ctx.addIssue({
@@ -42,9 +55,9 @@ const TaskV1Fields = {
   role: z.enum(['restoration', 'evaluation']).default('restoration'),
   description: z.string().min(1),
   window: WindowSchema,
-  claimPolicy: z.record(z.unknown()).optional(),
   spec: NoLegacyKindSchema,
   eligibility: z.record(z.unknown()),
+  claimPolicy: TaskClaimPolicySchema,
   creator: CreatorSchema,
   createdAt: z.number().int(),
 };

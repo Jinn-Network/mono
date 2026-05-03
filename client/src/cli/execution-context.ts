@@ -74,7 +74,6 @@ async function buildCliSignerContext(
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
   });
 
   const fleetStore = new FleetStateStore(config.earningDir);
@@ -173,7 +172,7 @@ export async function createCliExecutionContext(
       ipfsGatewayUrl: config.ipfsGatewayUrl,
       pollIntervalMs: config.pollIntervalMs,
       chainId: config.network === 'testnet' ? 84532 : 8453,
-      routerClaimDeliveryVariant: chainConfig.routerClaimDeliveryVersion as 'v1' | 'v2',
+      routerClaimDeliveryVariant: chainConfig.routerClaimDeliveryVersion,
     },
     jinnStore,
   );

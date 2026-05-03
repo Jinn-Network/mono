@@ -7,6 +7,13 @@ import {
   fetchSourceBundleFromIpfs,
 } from '../../../src/adapters/mech/ipfs.js';
 
+const DEFAULT_CLAIM_POLICY = {
+  mode: 'parallel' as const,
+  maxClaims: 25,
+  maxClaimsPerOperator: 1,
+  claimLeaseTtlSeconds: 600,
+};
+
 describe('ipfs gateway + CID helpers (jinn-node parity)', () => {
   it('normalizeIpfsGatewayBase handles origin-only, /ipfs suffix, and trailing slashes', () => {
     expect(normalizeIpfsGatewayBase('https://gateway.autonolas.tech')).toBe(
@@ -53,6 +60,7 @@ const VALID_SIGNED_TASK = {
   window: { startTs: 1_000_000, endTs: 1_086_400_000 },
   spec: {},
   eligibility: {},
+  claimPolicy: DEFAULT_CLAIM_POLICY,
   creator: {
     safeAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     agentEoa: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',

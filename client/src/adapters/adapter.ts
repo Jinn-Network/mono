@@ -1,19 +1,13 @@
 import type {
   Task,
   RequestId,
+  PostedTask,
+  TaskAnnouncement,
   TaskRequest,
   TaskResult,
   DeliveredResult,
 } from '../types/index.js';
-
-export interface TaskPostReceipt {
-  /** TaskCoordinator task id when posting through the Task-first lifecycle. */
-  taskId?: string;
-  /** Legacy/restoration marketplace request id, present only on request-first adapters. */
-  requestId?: RequestId;
-  taskCid?: string;
-  txHash?: `0x${string}`;
-}
+import type { Hex } from 'viem';
 
 export interface ExecutionAdapter {
   readonly name: string;
@@ -21,7 +15,7 @@ export interface ExecutionAdapter {
   initialize(): Promise<void>;
 
   // Creator
-  postTask(state: Task): Promise<RequestId | TaskPostReceipt>;
+  postTask(state: Task): Promise<PostedTask>;
 
   /**
    * Optional: returns the IPFS CID of the most recently posted Task payload.
@@ -32,27 +26,27 @@ export interface ExecutionAdapter {
   getLastPostedTaskCid?(): string | undefined;
 
   // Harness
-  watchForRequests(): AsyncIterable<TaskRequest>;
-  claimRequest(requestId: RequestId): Promise<void>;
+  watchForTasks(): AsyncIterable<TaskAnnouncement>;
+  claimTask(taskId: string): Promise<TaskRequest>;
   submitResult(requestId: RequestId, result: TaskResult): Promise<void>;
+  claimEvaluation?(
+    taskId: string,
+    attemptIndex: number,
+    evaluationTaskCidDigest: Hex,
+  ): Promise<{
+    taskId: string;
+    attemptIndex: number;
+    verdictIndex: number;
+    requestId: string;
+    txHash: Hex;
+    blockNumber?: number;
+  }>;
+  submitSolutionDelivery?(requestId: RequestId, solutionDigest: Hex): Promise<void>;
+  submitVerdictDelivery?(requestId: RequestId, verdictDigest: Hex, verdictCode?: number): Promise<void>;
 
   // Deliveries
   watchForDeliveries(): AsyncIterable<DeliveredResult>;
 
   // Lifecycle
   stop(): Promise<void>;
-}
-
-export interface TaskFirstExecutionAdapter extends ExecutionAdapter {
-  watchForTasks(): AsyncIterable<Task>;
-  claimTask(taskId: string): Promise<TaskRequest & {
-    taskId: string;
-    attemptIndex: number;
-    alreadyClaimed: true;
-  }>;
-}
-
-export function isTaskFirstExecutionAdapter(adapter: ExecutionAdapter): adapter is TaskFirstExecutionAdapter {
-  const candidate = adapter as Partial<TaskFirstExecutionAdapter>;
-  return typeof candidate.watchForTasks === 'function' && typeof candidate.claimTask === 'function';
 }

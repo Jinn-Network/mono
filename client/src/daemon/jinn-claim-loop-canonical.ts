@@ -16,14 +16,14 @@
  *          bytes[] storageProof,
  *          uint256 claimId,
  *          uint256 serviceId,
- *          uint256 verifiedCreations,
- *          uint256 noveltyWeightedRestorationDeliveries,
- *          uint256 evaluationDeliveryCount,
+ *          uint256 taskCreationWeight,
+ *          uint256 solutionDeliveryWeight,
+ *          uint256 verdictDeliveryWeight,
  *          address multisig
  *        )
  *
  * The proof uses an account proof + storage proof for
- * `JinnClaimEmitter.claimSnapshotHashes[claimId]` against the finalized L2
+ * `TaskClaimEmitter.claimSnapshotHashes[claimId]` against the finalized L2
  * state root. Events are discovery only; L1 canonical verification proves the
  * stored snapshot hash.
  *
@@ -78,16 +78,16 @@ export interface CanonicalProofClients {
   optimismPortal: Address;
   /** L1 DisputeGameFactory address. */
   disputeGameFactory: Address;
-  /** L2 JinnClaimEmitter address that emitted ClaimTicket. */
+  /** L2 TaskClaimEmitter address that emitted ClaimTicket. */
   claimEmitter: Address;
 }
 
 export interface CanonicalClaimSnapshot {
   claimId: bigint;
   serviceId: bigint;
-  verifiedCreations: bigint;
-  noveltyWeightedRestorationDeliveries: bigint;
-  evaluationDeliveryCount: bigint;
+  taskCreationWeight: bigint;
+  solutionDeliveryWeight: bigint;
+  verdictDeliveryWeight: bigint;
   multisig: Address;
   claimer: Address;
 }
@@ -145,9 +145,9 @@ const CANONICAL_PROOF_ABI = [
   { name: 'storageProof', type: 'bytes[]' },
   { name: 'claimId', type: 'uint256' },
   { name: 'serviceId', type: 'uint256' },
-  { name: 'verifiedCreations', type: 'uint256' },
-  { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
-  { name: 'evaluationDeliveryCount', type: 'uint256' },
+  { name: 'taskCreationWeight', type: 'uint256' },
+  { name: 'solutionDeliveryWeight', type: 'uint256' },
+  { name: 'verdictDeliveryWeight', type: 'uint256' },
   { name: 'multisig', type: 'address' },
 ] as const;
 
@@ -206,9 +206,9 @@ export async function buildCanonicalProof(
     storageProof,
     snapshot.claimId,
     snapshot.serviceId,
-    snapshot.verifiedCreations,
-    snapshot.noveltyWeightedRestorationDeliveries,
-    snapshot.evaluationDeliveryCount,
+    snapshot.taskCreationWeight,
+    snapshot.solutionDeliveryWeight,
+    snapshot.verdictDeliveryWeight,
     snapshot.multisig,
   ]);
 
@@ -255,9 +255,9 @@ export function decodeClaimTicketFromReceipt(
   return {
     claimId: args.claimId,
     serviceId: args.serviceId,
-    verifiedCreations: args.verifiedCreations,
-    noveltyWeightedRestorationDeliveries: args.noveltyWeightedRestorationDeliveries,
-    evaluationDeliveryCount: args.evaluationDeliveryCount,
+    taskCreationWeight: args.taskCreationWeight,
+    solutionDeliveryWeight: args.solutionDeliveryWeight,
+    verdictDeliveryWeight: args.verdictDeliveryWeight,
     multisig: getAddress(args.multisig),
     claimer: getAddress(args.claimer),
   };
@@ -418,16 +418,16 @@ export async function verifyCanonicalClaimCanary(
   proof: Hex,
 ): Promise<{
   serviceId: bigint;
-  verifiedCreations: bigint;
-  noveltyWeightedRestorationDeliveries: bigint;
-  evaluationDeliveryCount: bigint;
+  taskCreationWeight: bigint;
+  solutionDeliveryWeight: bigint;
+  verdictDeliveryWeight: bigint;
   multisig: Address;
 }> {
   const [
     serviceId,
-    verifiedCreations,
-    noveltyWeightedRestorationDeliveries,
-    evaluationDeliveryCount,
+    taskCreationWeight,
+    solutionDeliveryWeight,
+    verdictDeliveryWeight,
     multisig,
   ] = await l1Client.readContract({
     address: messenger,
@@ -437,9 +437,9 @@ export async function verifyCanonicalClaimCanary(
   });
   return {
     serviceId,
-    verifiedCreations,
-    noveltyWeightedRestorationDeliveries,
-    evaluationDeliveryCount,
+    taskCreationWeight,
+    solutionDeliveryWeight,
+    verdictDeliveryWeight,
     multisig,
   };
 }

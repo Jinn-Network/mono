@@ -4,19 +4,17 @@
 
 import type { TaskGenerator } from '../tasks/sources.js';
 import { portfolioV0 } from './portfolio-v0.js';
-import { predictionV0 } from './prediction-v0.js';
-import { predictionV1 } from './prediction-v1.js';
+import { predictionV1 } from './prediction-v0.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
 import { learnerLoopTest } from './learner-loop-test.js';
 import type { SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
 
 export type { ParsedSpecOverlay, ParseDeps, SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
-export { PREDICTION_V0_KIND } from './constants.js';
+export { PREDICTION_V1_KIND } from './constants.js';
 
 /** Insertion order is stable for error messages and tests. */
 export const SOLVER_TYPES: Record<string, SolverTypeDefinition<any>> = {
   'portfolio.v0': portfolioV0,
-  'prediction.v0': predictionV0,
   'prediction.v1': predictionV1,
   'prediction.apy.v0': predictionApyV0,
   'learner-loop-test': learnerLoopTest,
@@ -47,10 +45,10 @@ export function collectTestnetAutoTaskGenerators(opts: {
   safeAddress?: `0x${string}`;
   /** Agent EOA private key — passed to generator configs that sign tasks. */
   agentPrivateKey?: `0x${string}`;
-  /** Override prediction.v0 submission window (ms). */
-  predictionV0WindowMs?: number;
-  /** Override prediction.v0 window→resolveTs gap (ms). */
-  predictionV0ResolveGapMs?: number;
+  /** Override prediction.v1 submission window (ms). */
+  predictionV1WindowMs?: number;
+  /** Override prediction.v1 window→resolveTs gap (ms). */
+  predictionV1ResolveGapMs?: number;
 }): { generators: Array<{ solverType: string; generator: TaskGenerator }>; logLines: string[] } {
   const generators: Array<{ solverType: string; generator: TaskGenerator }> = [];
   const logLines: string[] = [];
@@ -64,8 +62,8 @@ export function collectTestnetAutoTaskGenerators(opts: {
     agentEoa: opts.agentEoa,
     safeAddress: opts.safeAddress,
     agentPrivateKey: opts.agentPrivateKey,
-    predictionV0WindowMs: opts.predictionV0WindowMs,
-    predictionV0ResolveGapMs: opts.predictionV0ResolveGapMs,
+    predictionV1WindowMs: opts.predictionV1WindowMs,
+    predictionV1ResolveGapMs: opts.predictionV1ResolveGapMs,
   };
   for (const kind of knownSolverTypes()) {
     const entry = SOLVER_TYPES[kind] as SolverTypeDefinition;

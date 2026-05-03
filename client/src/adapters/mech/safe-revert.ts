@@ -29,12 +29,6 @@ export class SafeInnerRevertError extends Error {
 }
 
 const KNOWN_INNER_ERRORS: Record<string, { name: string; params: string }> = {
-  // ClaimRegistry
-  '0xc8c9814b': { name: 'JobAlreadyClaimed', params: 'bytes32 requestId, address claimer' },
-  '0x4684a763': { name: 'IneligibleToClaim', params: 'address provider, bytes32 requestId' },
-  '0x76a168fd': { name: 'ClaimNotExpired', params: 'bytes32 requestId' },
-  '0x75ba6595': { name: 'NotClaimOwner', params: 'address sender, bytes32 requestId' },
-  '0x178fd52c': { name: 'NoClaimExists', params: 'bytes32 requestId' },
   // JinnRouterV2
   '0x1a387062': { name: 'RequestNotFound', params: 'bytes32 requestId' },
   '0xa6f3b939': { name: 'DeliveryAlreadyClaimed', params: 'bytes32 requestId' },

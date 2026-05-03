@@ -3,7 +3,7 @@ import createHarness from '../src/index.js';
 import type {
   ExternalHarnessEnv,
   HarnessContext,
-} from '@jinn-network/sdk/harness';
+} from '@jinn-network/sdk';
 
 const env: ExternalHarnessEnv = {
   implName: '@jinn-examples/polymarket-forecaster',

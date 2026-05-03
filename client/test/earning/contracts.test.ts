@@ -5,16 +5,16 @@ import {
 } from '../../src/earning/contracts.js';
 
 describe('getChainConfig', () => {
-  it('bundles the Base Sepolia ClaimRegistry as a zero-config default', () => {
+  it('does not expose legacy claim coordination on Base Sepolia clean-break config', () => {
     const cfg = getChainConfig('base-sepolia');
 
-    expect(cfg.claimRegistry).toBe('0xd229A2C20333B747675090Ce38B8a1Fb2dafe6AC');
+    expect('claimRegistry' in cfg).toBe(false);
   });
 
-  it('does not invent a Base mainnet ClaimRegistry default', () => {
+  it('does not expose legacy claim coordination on Base mainnet clean-break config', () => {
     const cfg = getChainConfig('base');
 
-    expect(cfg.claimRegistry).toBeUndefined();
+    expect('claimRegistry' in cfg).toBe(false);
   });
 
   // ── ERC-8004 IdentityRegistry (jinn-mono-j07) ────────────────────────────

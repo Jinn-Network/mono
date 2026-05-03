@@ -15,13 +15,13 @@ export interface TaskSessionInputs {
   taskId: string;
   /** IPFS CID of the full Task payload (if known) for provenance */
   taskCid?: string;
-  /** SolverType (e.g. 'portfolio.v0', 'prediction.v0') */
+  /** SolverType (e.g. 'portfolio.v0', 'prediction.v1') */
   solverType?: string;
   /** Operator-private impl-state directory; passed to the plugin via env IMPL_STATE_DIR */
   implStateDir: string;
   /** Ephemeral workingDir for this attempt */
   workingDir: string;
-  /** Additional runtime plugin pack roots to pass through host plugin loading. */
+  /** Additional SolverPlugin package roots to pass through host plugin loading. */
   pluginRoots?: string[];
   /** Window timestamps (ms since epoch) */
   windowStartTs: number;
@@ -100,6 +100,6 @@ export interface ClaudeCodeLearnerConfig {
    * the impl directory via `plugin-path.ts`. Tests may override.
    */
   pluginRoot?: string;
-  /** Runtime plugin pack roots loaded by the daemon. */
-  runtimePluginRoots?: string[];
+  /** SolverPlugin roots loaded by the daemon. */
+  solverPluginRoots?: string[];
 }

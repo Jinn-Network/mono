@@ -7,7 +7,7 @@
  * `setFixture` is `onlyOwner`.
  *
  * Flow:
- *   1. Read the latest ClaimTicket event from the JinnClaimEmitter on L2.
+ *   1. Read the latest ClaimTicket event from the TaskClaimEmitter on L2.
  *   2. Plant the matching fixture on the L1 MockMessenger via `setFixture`.
  *   3. Submit `JinnDistributor.claim(abi.encode(claimId))`.
  *
@@ -36,9 +36,9 @@ import {
 export interface MockClaimSnapshot {
   claimId: bigint;
   serviceId: bigint;
-  verifiedCreations: bigint;
-  noveltyWeightedRestorationDeliveries: bigint;
-  evaluationDeliveryCount: bigint;
+  taskCreationWeight: bigint;
+  solutionDeliveryWeight: bigint;
+  verdictDeliveryWeight: bigint;
   multisig: Address;
   claimer: Address;
   /** L2 transaction hash of the emitClaim. */
@@ -89,9 +89,9 @@ export async function fetchLatestClaimTicket(
   const args = decoded.args as unknown as {
     claimId: bigint;
     serviceId: bigint;
-    verifiedCreations: bigint;
-    noveltyWeightedRestorationDeliveries: bigint;
-    evaluationDeliveryCount: bigint;
+    taskCreationWeight: bigint;
+    solutionDeliveryWeight: bigint;
+    verdictDeliveryWeight: bigint;
     multisig: Address;
     claimer: Address;
   };
@@ -99,9 +99,9 @@ export async function fetchLatestClaimTicket(
   return {
     claimId: args.claimId,
     serviceId: args.serviceId,
-    verifiedCreations: args.verifiedCreations,
-    noveltyWeightedRestorationDeliveries: args.noveltyWeightedRestorationDeliveries,
-    evaluationDeliveryCount: args.evaluationDeliveryCount,
+    taskCreationWeight: args.taskCreationWeight,
+    solutionDeliveryWeight: args.solutionDeliveryWeight,
+    verdictDeliveryWeight: args.verdictDeliveryWeight,
     multisig: args.multisig,
     claimer: args.claimer,
     emitTxHash: latest.transactionHash ?? ('0x' as Hex),
@@ -131,9 +131,9 @@ export async function plantMockFixture(
       snapshot.claimId,
       {
         serviceId: snapshot.serviceId,
-        verifiedCreations: snapshot.verifiedCreations,
-        noveltyWeightedRestorationDeliveries: snapshot.noveltyWeightedRestorationDeliveries,
-        evaluationDeliveryCount: snapshot.evaluationDeliveryCount,
+        taskCreationWeight: snapshot.taskCreationWeight,
+        solutionDeliveryWeight: snapshot.solutionDeliveryWeight,
+        verdictDeliveryWeight: snapshot.verdictDeliveryWeight,
         multisig: snapshot.multisig,
       },
     ],

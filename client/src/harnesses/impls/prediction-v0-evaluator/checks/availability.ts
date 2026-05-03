@@ -1,5 +1,5 @@
 /**
- * Availability checks for prediction.v0.
+ * Availability checks for prediction.v1.
  *
  * §6.7 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
  */

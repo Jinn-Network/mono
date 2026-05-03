@@ -128,7 +128,6 @@ export function createMigrateAgentIdCommand(
         testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
         testnetMechDeploymentPath: config.testnetMechDeploymentPath,
         testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
       });
     } catch (err) {
       const cause = err instanceof Error ? err.message : String(err);

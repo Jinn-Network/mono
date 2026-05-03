@@ -612,7 +612,7 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
           description: `Would post Task '${id}' on-chain using the configured creator Safe.`,
           effects: [
             'Posts a SignedTaskV1 to IPFS via the configured registry.',
-            'Calls JinnRouter.createRestorationJob (gas-paying transaction).',
+            'Calls JinnRouterV3.createTask (gas-paying transaction).',
             'Idempotent by --id from the same creator Safe.',
           ],
           callerArgs: { id, description, solver_net },

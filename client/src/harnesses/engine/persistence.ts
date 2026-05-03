@@ -10,7 +10,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { assertValidTransition, TaskRunState, TERMINAL_STATES, type TaskRunState as TaskRunStateType } from './state.js';
+import { assertValidTransition, TERMINAL_STATES, type TaskRunState } from './state.js';
 import type { Task } from '../../types/task.js';
 
 // ── Concurrency error ─────────────────────────────────────────────────────────
@@ -24,10 +24,10 @@ import type { Task } from '../../types/task.js';
  */
 export class ConcurrentTransitionError extends Error {
   readonly requestId: string;
-  readonly expectedState: TaskRunStateType;
+  readonly expectedState: TaskRunState;
   readonly attemptedNewState: string;
 
-  constructor(requestId: string, expectedState: TaskRunStateType, attemptedNewState: string) {
+  constructor(requestId: string, expectedState: TaskRunState, attemptedNewState: string) {
     super(
       `ConcurrentTransitionError: ${requestId} expected state=${expectedState} but DB row has changed (attempted=${attemptedNewState})`,
     );
@@ -117,8 +117,6 @@ export interface PersistedTaskRunInput {
   solverType?: string;
   /** 'restoration' (default) or 'evaluation'. Captured from Task.type at observe() time. */
   taskRole?: 'restoration' | 'evaluation';
-  /** Initial row state. Task-first adapters can start at CLAIMED after claimTask(). */
-  initialState?: typeof TaskRunState.DISCOVERED | typeof TaskRunState.CLAIMED;
   windowStartTs: number;
   windowEndTs: number;
   /**
@@ -143,7 +141,7 @@ export interface PersistedTaskRun {
   taskRole: 'restoration' | 'evaluation' | null;
   implName: string | null;
 
-  state: TaskRunStateType;
+  state: TaskRunState;
   stateUpdatedAt: number;
 
   workingDir: string | null;
@@ -308,15 +306,15 @@ function parseJson<T>(raw: string | null): T | null {
 function rowToTaskRun(row: RawRow): PersistedTaskRun {
   return {
     requestId: row.request_id,
-    taskId: row.task_id ?? null,
-    attemptIndex: row.attempt_index ?? null,
+    taskId: row.task_id,
+    attemptIndex: row.attempt_index,
     taskCid: row.task_cid,
     onchainCreationTx: row.onchain_creation_tx,
     onchainCreationBlock: row.onchain_creation_block,
     solverType: row.solver_type,
     taskRole: (row.task_role ?? null) as 'restoration' | 'evaluation' | null,
     implName: row.impl_name,
-    state: row.state as TaskRunStateType,
+    state: row.state as TaskRunState,
     stateUpdatedAt: row.state_updated_at,
     workingDir: row.working_dir,
     implStateDir: row.impl_state_dir,
@@ -368,19 +366,18 @@ export class TaskRunPersistence {
         task_payload
       ) VALUES (
         @requestId, @taskId, @attemptIndex, @taskCid, @onchainCreationTx, @onchainCreationBlock,
-        @solverType, @taskRole, @initialState, @now, @windowStartTs, @windowEndTs,
+        @solverType, @taskRole, 'DISCOVERED', @now, @windowStartTs, @windowEndTs,
         @taskPayload
       )
     `).run({
       requestId: input.requestId,
-      taskId: input.taskId ?? input.task.id,
-      attemptIndex: input.attemptIndex ?? input.task.attemptNumber ?? null,
+      taskId: input.taskId ?? null,
+      attemptIndex: input.attemptIndex ?? null,
       taskCid: input.taskCid,
       onchainCreationTx: input.onchainCreationTx,
       onchainCreationBlock: input.onchainCreationBlock,
       solverType: input.solverType ?? null,
       taskRole: input.taskRole ?? null,
-      initialState: input.initialState ?? TaskRunState.DISCOVERED,
       now: Date.now(),
       windowStartTs: input.windowStartTs,
       windowEndTs: input.windowEndTs,
@@ -392,7 +389,7 @@ export class TaskRunPersistence {
    * Transition an task to a new state. Validates the transition and writes
    * the new state + optional patch fields atomically (persist-before-invoke).
    */
-  transition(requestId: string, toState: TaskRunStateType, patch: TaskRunPatch = {}): void {
+  transition(requestId: string, toState: TaskRunState, patch: TaskRunPatch = {}): void {
     const existing = this.getByRequestId(requestId);
     if (!existing) {
       throw new Error(`Task run not found: ${requestId}`);
@@ -516,7 +513,7 @@ export class TaskRunPersistence {
   }
 
   /** Fetch all tasks in a given state. */
-  getByState(state: TaskRunStateType): PersistedTaskRun[] {
+  getByState(state: TaskRunState): PersistedTaskRun[] {
     const rows = this.db.prepare(
       'SELECT * FROM task_runs WHERE state = ? ORDER BY window_start_ts ASC',
     ).all(state) as RawRow[];

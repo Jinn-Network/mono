@@ -103,7 +103,7 @@ function mockL2Client(opts: { emitTxHash?: `0x${string}`; emitBlock?: bigint } =
         address: CLAIM_EMITTER,
         // decodeEventLog reads args from data + topics; we shortcut with a
         // synthetic decoded payload via the abi.
-        data: '0x' + (3n).toString(16).padStart(64, '0')      // verifiedCreations = 3
+        data: '0x' + (3n).toString(16).padStart(64, '0')      // taskCreationWeight = 3
               + (5n).toString(16).padStart(64, '0')           // novelty
               + (2n).toString(16).padStart(64, '0')           // eval
               + MASTER.slice(2).padStart(64, '0'),            // claimer

@@ -16,8 +16,9 @@
     "prediction": {
       "enabled": true,
       "solverType": "prediction.v1",
-      "harness": "prediction-v1-baseline",
-      "plugins": ["bundled:jinn-prediction-plugin"],
+      "canonicalPlugin": "bundled:jinn-prediction-plugin",
+      "harness": "claude-code-learner",
+      "plugins": [],
       "taskGenerator": { "enabled": true }
     }
   }

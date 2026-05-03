@@ -149,13 +149,11 @@ async function buildTask(
   const sampledStamp = orderbook.sampledAt.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const id = `prediction-v1-polymarket-${shortCondition}-${sampledStamp}`;
   const claimPolicy = {
-    kind: 'parallel',
+    mode: 'parallel',
     maxClaims: 25,
-    maxClaimsPerSolver: 1,
-    claimWindow: 'task-window',
-    selection: 'all-valid-solutions-scored',
-    economics: 'testnet-flat',
-  };
+    maxClaimsPerOperator: 1,
+    claimLeaseTtlSeconds: 30 * 60,
+  } as const;
   const spec = {
     question: {
       kind: 'binary',

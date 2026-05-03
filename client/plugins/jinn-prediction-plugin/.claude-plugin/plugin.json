@@ -2,14 +2,15 @@
   "name": "jinn-prediction-plugin",
   "version": "0.2.0",
   "description": "Prediction reference plugin pack for prediction.v1 tasks.",
-  "skills": [
-    "./skills/base-rate-forecasting/",
-    "./skills/calibration/"
-  ],
   "mcpServers": {
     "polymarket": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/polymarket-server.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/polymarket-server.mjs"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
     }
-  }
+  },
+  "skills": [
+    "skills/base-rate-forecasting/SKILL.md",
+    "skills/calibration/SKILL.md"
+  ]
 }

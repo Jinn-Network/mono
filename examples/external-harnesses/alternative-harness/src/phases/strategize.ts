@@ -1,4 +1,4 @@
-import type { HarnessContext } from '@jinn-network/sdk/harness';
+import type { HarnessContext } from '@jinn-network/sdk';
 import type { HarnessAdapter } from '../harness.js';
 import type { OrientResult } from './orient.js';
 

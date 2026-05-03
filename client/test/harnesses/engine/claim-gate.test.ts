@@ -8,8 +8,6 @@ import { TaskEngine } from '../../../src/harnesses/engine/engine.js';
 import type { PersistedTaskRun, PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { Harness, Solution, ReadyStatus } from '../../../src/harnesses/types.js';
-import type { ClaimRegistryClient } from '../../../src/adapters/claim-registry/client.js';
-import type { MarketplaceClaimer } from '../../../src/harnesses/engine/claim.js';
 
 function stubImpl(
   overrides: Partial<Harness> & {
@@ -23,18 +21,6 @@ function stubImpl(
     run: async (): Promise<Solution> => ({ venueRef: { name: 'stub' }, gating: {} }),
     ...overrides,
   };
-}
-
-function makeClaimDeps() {
-  const registryClient: ClaimRegistryClient = {
-    weAlreadyClaimed: async () => false,
-    claimJob: async () => ({ claimed: true, txHash: '0xabc' as `0x${string}` }),
-    releaseClaim: async () => ({ released: true }),
-  } as unknown as ClaimRegistryClient;
-  const marketplaceClaimer: MarketplaceClaimer = {
-    claimRequest: async () => {},
-  } as unknown as MarketplaceClaimer;
-  return { registryClient, marketplaceClaimer };
 }
 
 function makeInput(id = 'req-gate'): PersistedTaskRunInput {
@@ -78,7 +64,6 @@ describe('TaskEngine.claim — impl gate', () => {
     const engine = new TestEngine({
       store,
       paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
-      claimDeps: makeClaimDeps(),
       implRegistry: { findFor: () => undefined },
     });
     const input = makeInput();
@@ -105,7 +90,6 @@ describe('TaskEngine.claim — impl gate', () => {
     const engine = new TestEngine({
       store,
       paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
-      claimDeps: makeClaimDeps(),
       implRegistry: { findFor: () => notReadyImpl },
     });
     const input = makeInput();
@@ -124,7 +108,6 @@ describe('TaskEngine.claim — impl gate', () => {
     const engine = new TestEngine({
       store,
       paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
-      claimDeps: makeClaimDeps(),
       implRegistry: { findFor: () => readyImpl },
     });
     const input = makeInput();
@@ -140,7 +123,6 @@ describe('TaskEngine.claim — impl gate', () => {
     const engine = new TestEngine({
       store,
       paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
-      claimDeps: makeClaimDeps(),
       // No implRegistry — gate must no-op so raw claim path works.
     });
     const input = makeInput();

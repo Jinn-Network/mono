@@ -8,8 +8,7 @@ import {
 } from '../../../src/harnesses/engine/engine.js';
 import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
-import type { ClaimRegistryClient } from '../../../src/adapters/claim-registry/client.js';
-import type { MarketplaceClaimer } from '../../../src/harnesses/engine/claim.js';
+import type { Harness, ReadyStatus, Solution } from '../../../src/harnesses/types.js';
 
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
@@ -38,6 +37,7 @@ function makeInput(overrides: Partial<PersistedTaskRunInput> = {}): PersistedTas
 /** Subclass that exposes overrideable stubs and records which transitions were called. */
 class TestEngine extends TaskEngine {
   calls: string[] = [];
+  delegateClaimToSuper = false;
   claimFn?: (intent: PersistedTaskRun) => Promise<void>;
   preSnapshotFn?: (intent: PersistedTaskRun) => Promise<void>;
   runImplFn?: (intent: PersistedTaskRun) => Promise<void>;
@@ -48,8 +48,7 @@ class TestEngine extends TaskEngine {
   override async claim(intent: PersistedTaskRun): Promise<void> {
     this.calls.push('claim');
     if (this.claimFn) return this.claimFn(intent);
-    // If claimDeps is injected, delegate to the real implementation.
-    if (this.claimDeps) return super.claim(intent);
+    if (this.delegateClaimToSuper) return super.claim(intent);
     throw new NotImplementedError('claim');
   }
   override async takePreSnapshot(intent: PersistedTaskRun): Promise<void> {
@@ -558,172 +557,76 @@ describe('TaskEngine', () => {
 
   // ── claim() integration ───────────────────────────────────────────────────
 
-  describe('claim() with injected claimDeps', () => {
-    /** Builds a mock ClaimRegistryClient. */
-    function makeRegistryClient(opts: {
-      weAlreadyClaimed?: boolean;
-      claimResult?: { txHash: string; claimed: boolean };
-      releaseResult?: boolean;
-    } = {}): ClaimRegistryClient {
+  describe('claim() clean-break gate', () => {
+    function stubImpl(
+      overrides: Partial<Harness> & {
+        isReady?: (ctx?: { solverType: string; role?: 'restoration' | 'evaluation' }) => Promise<ReadyStatus>;
+      } = {},
+    ): Harness {
       return {
-        weAlreadyClaimed: vi.fn().mockResolvedValue(opts.weAlreadyClaimed ?? false),
-        claimJob: vi.fn().mockResolvedValue(
-          opts.claimResult ?? { txHash: '0xabc', claimed: true }
-        ),
-        releaseClaim: vi.fn().mockResolvedValue(opts.releaseResult ?? true),
-        getJobClaim: vi.fn().mockResolvedValue({ claimer: '0x0', expiresAt: 0n, isActive: false }),
-        expireClaim: vi.fn().mockResolvedValue(true),
-      } as unknown as ClaimRegistryClient;
+        name: 'stub-impl',
+        version: '1.0.0',
+        supports: () => true,
+        run: async (): Promise<Solution> => ({ venueRef: { name: 'stub' }, gating: {} }),
+        ...overrides,
+      };
     }
 
-    function makeMarketplaceClaimer(failWith?: Error): MarketplaceClaimer {
-      if (failWith) {
-        return { claimRequest: vi.fn().mockRejectedValue(failWith) };
-      }
-      return { claimRequest: vi.fn().mockResolvedValue(undefined) };
-    }
-
-    it('advances DISCOVERED → CLAIMED when both layers succeed', async () => {
-      const registryClient = makeRegistryClient();
-      const marketplace = makeMarketplaceClaimer();
-      const opts: TaskEngineOptions = {
-        ...makeOpts(store),
-        claimDeps: { registryClient, marketplaceClaimer: marketplace },
-      };
-      const eng = new TestEngine(opts);
-
-      await eng.observe(makeInput());
-      await eng.process('req-001');
-
-      const intent = eng.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(TaskRunState.CLAIMED);
-      expect(registryClient.claimJob).toHaveBeenCalledOnce();
-      expect(marketplace.claimRequest).toHaveBeenCalledOnce();
-    });
-
-    it('marks FAILED when ClaimRegistry claim fails', async () => {
-      const registryClient = makeRegistryClient({
-        claimResult: { txHash: '', claimed: false },
-      });
-      const marketplace = makeMarketplaceClaimer();
-      const opts: TaskEngineOptions = {
-        ...makeOpts(store),
-        claimDeps: { registryClient, marketplaceClaimer: marketplace },
-      };
-      const eng = new TestEngine(opts);
-
-      await eng.observe(makeInput());
-      await expect(eng.process('req-001')).rejects.toThrow(/ClaimRegistry claim failed/);
-
-      const intent = eng.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(TaskRunState.FAILED);
-      expect(marketplace.claimRequest).not.toHaveBeenCalled();
-    });
-
-    it('marks FAILED when marketplace claim fails', async () => {
-      const registryClient = makeRegistryClient();
-      const marketplace = makeMarketplaceClaimer(new Error('Claim policy rejected'));
-      const opts: TaskEngineOptions = {
-        ...makeOpts(store),
-        claimDeps: { registryClient, marketplaceClaimer: marketplace },
-      };
-      const eng = new TestEngine(opts);
-
-      await eng.observe(makeInput());
-      await expect(eng.process('req-001')).rejects.toThrow('Claim policy rejected');
-
-      const intent = eng.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(TaskRunState.FAILED);
-      // ClaimRegistry claim should have been released
-      expect(registryClient.releaseClaim).toHaveBeenCalledOnce();
-    });
-
-    it('is idempotent on resume: skips claimJob when weAlreadyClaimed=true', async () => {
-      const registryClient = makeRegistryClient({ weAlreadyClaimed: true });
-      const marketplace = makeMarketplaceClaimer();
-      const opts: TaskEngineOptions = {
-        ...makeOpts(store),
-        claimDeps: { registryClient, marketplaceClaimer: marketplace },
-      };
-      const eng = new TestEngine(opts);
-
-      await eng.observe(makeInput());
-      await eng.process('req-001');
-
-      expect(registryClient.claimJob).not.toHaveBeenCalled();
-      expect(marketplace.claimRequest).toHaveBeenCalledOnce();
-      const intent = eng.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(TaskRunState.CLAIMED);
-    });
-
-    it('falls back to NotImplementedError when claimDeps is absent', async () => {
-      // Engine without claimDeps — original stub behaviour
+    it('advances DISCOVERED → CLAIMED after the adapter has already claimed the Task', async () => {
       const eng = new TestEngine(makeOpts(store));
+      eng.delegateClaimToSuper = true;
+
       await eng.observe(makeInput());
-      await expect(eng.process('req-001')).rejects.toThrow(NotImplementedError);
+      await eng.process('req-001');
+
+      const intent = eng.testPersistence.getByRequestId('req-001');
+      expect(intent!.state).toBe(TaskRunState.CLAIMED);
+    });
+
+    it('marks FAILED when no Harness is registered for the solverType', async () => {
+      const eng = new TestEngine({
+        ...makeOpts(store),
+        implRegistry: { findFor: () => undefined },
+      });
+      eng.delegateClaimToSuper = true;
+
+      await eng.observe(makeInput());
+      await expect(eng.process('req-001')).rejects.toThrow(/no Harness registered or enabled/);
+
+      const intent = eng.testPersistence.getByRequestId('req-001');
+      expect(intent!.state).toBe(TaskRunState.FAILED);
+      expect(intent!.failureReason).toMatch(/jinn solver-nets set-harness <name> <harness>/);
+    });
+
+    it('marks FAILED when the selected Harness is not ready', async () => {
+      const eng = new TestEngine({
+        ...makeOpts(store),
+        implRegistry: {
+          findFor: () => stubImpl({
+            isReady: async () => ({
+              ready: false,
+              reason: 'wallet not approved',
+              nextStep: { description: 'approve wallet', cli: 'jinn solver-nets enable portfolio' },
+            }),
+          }),
+        },
+      });
+      eng.delegateClaimToSuper = true;
+
+      await eng.observe(makeInput());
+      await expect(eng.process('req-001')).rejects.toThrow(/not ready/);
+
+      const intent = eng.testPersistence.getByRequestId('req-001');
+      expect(intent!.state).toBe(TaskRunState.FAILED);
+      expect(intent!.failureReason).toMatch(/wallet not approved/);
+      expect(intent!.failureReason).toMatch(/jinn solver-nets enable portfolio/);
     });
   });
 
   // ── releaseClaimedNotStarted ──────────────────────────────────────────────
 
   describe('releaseClaimedNotStarted()', () => {
-    function makeRegistryClient(releaseResult = true): ClaimRegistryClient {
-      return {
-        weAlreadyClaimed: vi.fn().mockResolvedValue(true),
-        claimJob: vi.fn().mockResolvedValue({ txHash: '0xabc', claimed: true }),
-        releaseClaim: vi.fn().mockResolvedValue(releaseResult),
-        getJobClaim: vi.fn().mockResolvedValue({
-          claimer: '0xaaaa',
-          expiresAt: BigInt(Math.floor(Date.now() / 1000) + 3600),
-          isActive: true,
-        }),
-        expireClaim: vi.fn().mockResolvedValue(true),
-      } as unknown as ClaimRegistryClient;
-    }
-
-    it('releases CLAIMED intents whose window has not started', async () => {
-      const registryClient = makeRegistryClient();
-      const opts: TaskEngineOptions = {
-        ...makeOpts(store),
-        claimDeps: {
-          registryClient,
-          marketplaceClaimer: { claimRequest: vi.fn().mockResolvedValue(undefined) },
-        },
-      };
-      const eng = new TestEngine(opts);
-
-      // Insert a CLAIMED intent with future windowStartTs
-      const futureStart = Date.now() + 60_000;
-      await eng.observe(makeInput({ windowStartTs: futureStart, windowEndTs: futureStart + 86_400_000 }));
-      eng.testPersistence.transition('req-001', TaskRunState.CLAIMED);
-
-      const released = await eng.releaseClaimedNotStarted();
-      expect(released).toContain('req-001');
-      expect(registryClient.releaseClaim).toHaveBeenCalledOnce();
-    });
-
-    it('does not release CLAIMED intents whose window has already started', async () => {
-      const registryClient = makeRegistryClient();
-      const opts: TaskEngineOptions = {
-        ...makeOpts(store),
-        claimDeps: {
-          registryClient,
-          marketplaceClaimer: { claimRequest: vi.fn().mockResolvedValue(undefined) },
-        },
-      };
-      const eng = new TestEngine(opts);
-
-      // Insert a CLAIMED intent with PAST windowStartTs (window started)
-      const pastStart = Date.now() - 1_000;
-      await eng.observe(makeInput({ windowStartTs: pastStart, windowEndTs: pastStart + 86_400_000 }));
-      eng.testPersistence.transition('req-001', TaskRunState.CLAIMED);
-
-      const released = await eng.releaseClaimedNotStarted();
-      expect(released).toHaveLength(0);
-      expect(registryClient.releaseClaim).not.toHaveBeenCalled();
-    });
-
-    it('returns empty array when claimDeps is absent', async () => {
+    it('returns empty array; TaskCoordinator v1 does not release claimed attempts', async () => {
       const eng = new TestEngine(makeOpts(store));
       const released = await eng.releaseClaimedNotStarted();
       expect(released).toEqual([]);

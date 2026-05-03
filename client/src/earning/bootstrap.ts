@@ -111,7 +111,6 @@ export interface FleetBootstrapperOptions {
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
-  testnetClaimRegistryDeploymentPath?: string;
   /** Verbose errors (default: JINN_DEBUG env or false). */
   debug?: boolean;
   /** Estimated master gas per day (wei) for runway warnings. */
@@ -171,7 +170,6 @@ export class FleetBootstrapper {
       testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: options.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: options.testnetStolasDeploymentPath,
-      testnetClaimRegistryDeploymentPath: options.testnetClaimRegistryDeploymentPath,
     }), {
       minEoaGasWei: options.minEoaGasWei ?? this.env['JINN_MIN_EOA_GAS_WEI'],
       minSafeEthWei: options.minSafeEthWei ?? this.env['JINN_MIN_SAFE_ETH_WEI'],

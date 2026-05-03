@@ -123,14 +123,14 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
       expect(await distributor.daoRatio()).to.equal(
         LOCKED_DISTRIBUTOR_INITIAL_CONFIG.daoRatio,
       );
-      expect(await distributor.wCreation()).to.equal(
-        LOCKED_DISTRIBUTOR_INITIAL_CONFIG.wCreation,
+      expect(await distributor.wTaskCreation()).to.equal(
+        LOCKED_DISTRIBUTOR_INITIAL_CONFIG.wTaskCreation,
       );
-      expect(await distributor.wRestorationDelivery()).to.equal(
-        LOCKED_DISTRIBUTOR_INITIAL_CONFIG.wRestorationDelivery,
+      expect(await distributor.wSolutionDelivery()).to.equal(
+        LOCKED_DISTRIBUTOR_INITIAL_CONFIG.wSolutionDelivery,
       );
-      expect(await distributor.wEvaluationDelivery()).to.equal(
-        LOCKED_DISTRIBUTOR_INITIAL_CONFIG.wEvaluationDelivery,
+      expect(await distributor.wVerdictDelivery()).to.equal(
+        LOCKED_DISTRIBUTOR_INITIAL_CONFIG.wVerdictDelivery,
       );
     });
 
@@ -189,9 +189,9 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
       const SERVICE_ID = 7n;
       await messenger.connect(deployer).setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: operatorMultisig.address,
       });
 
@@ -249,9 +249,9 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
       const SERVICE_ID = 99n;
       await messenger.connect(deployer).setFixture(SERVICE_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 10n,
-        noveltyWeightedRestorationDeliveries: 20n,
-        evaluationDeliveryCount: 5n,
+        taskCreationWeight: 10n,
+        solutionDeliveryWeight: 20n,
+        verdictDeliveryWeight: 5n,
         multisig: operatorMultisig.address,
       });
 
@@ -362,17 +362,17 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
       // Daemon key can plant fixtures. The deployer no longer can.
       await messenger.connect(daemonKey).setFixture(99n, {
         serviceId: 99n,
-        verifiedCreations: 1n,
-        noveltyWeightedRestorationDeliveries: 1n,
-        evaluationDeliveryCount: 1n,
+        taskCreationWeight: 1n,
+        solutionDeliveryWeight: 1n,
+        verdictDeliveryWeight: 1n,
         multisig: deployer.address,
       });
       await expect(
         messenger.connect(deployer).setFixture(99n, {
           serviceId: 99n,
-          verifiedCreations: 1n,
-          noveltyWeightedRestorationDeliveries: 1n,
-          evaluationDeliveryCount: 1n,
+          taskCreationWeight: 1n,
+          solutionDeliveryWeight: 1n,
+          verdictDeliveryWeight: 1n,
           multisig: deployer.address,
         }),
       ).to.be.revertedWith("MockMessenger: not owner");

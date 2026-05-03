@@ -227,8 +227,8 @@ server.tool(
   'search_artifacts',
   'Search the corpus for relevant past trajectories and artifacts. Returns local fast-path hits (own served + cached network) plus subgraph-indexed network manifests with their full envelopes.',
   {
-    solverType: z.string().optional().describe('SolverType filter, e.g. "prediction.v0"'),
-    artifactType: z.string().optional().describe('Artifact type filter, e.g. "output.prediction.v0"'),
+    solverType: z.string().optional().describe('SolverType filter, e.g. "prediction.v1"'),
+    artifactType: z.string().optional().describe('Artifact type filter, e.g. "output.prediction.v1"'),
     taskCid: z.string().optional().describe('Filter to a specific task CID'),
     evidenceTier: z.enum(['self-signed', 'committed', 'attested']).optional(),
     generatedAfter: z.number().int().optional().describe('Unix seconds — only manifests published after this time'),

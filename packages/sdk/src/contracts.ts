@@ -36,12 +36,10 @@ export interface SolverNetAggregationFunction {
 }
 
 export interface SolverNetClaimPolicyDefaults {
-  kind: string;
+  mode: 'exclusive' | 'parallel';
   maxClaims: number;
-  maxClaimsPerSolver: number;
-  claimWindow: string;
-  selection: string;
-  economics: string;
+  maxClaimsPerOperator: number;
+  claimLeaseTtlSeconds: number;
 }
 
 export interface SolverNetContract {
@@ -70,12 +68,10 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     verdict: PredictionV1VerdictPayloadSchema,
   },
   claimPolicyDefaults: {
-    kind: 'parallel',
+    mode: 'parallel',
     maxClaims: 25,
-    maxClaimsPerSolver: 1,
-    claimWindow: 'task-window',
-    selection: 'all-valid-solutions-scored',
-    economics: 'testnet-flat',
+    maxClaimsPerOperator: 1,
+    claimLeaseTtlSeconds: 30 * 60,
   },
   credentialRequirements: {
     creator: [

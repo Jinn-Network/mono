@@ -5,10 +5,10 @@
  *   - chainId gate (Hardhat + Base Sepolia allowed by default; others
  *     require JINN_MVI_ALLOW_CHAIN).
  *   - Happy-path deploy on Hardhat with mock wiring; reads back
- *     emitter.checker / .router / .serviceRegistry and asserts they
+ *     emitter.checker / .serviceRegistry and asserts they
  *     match the constructor args.
  *   - Storage-slot assembly gate fires inside the constructor; we
- *     deploy the real `JinnClaimEmitter` so the gate runs.
+ *     deploy the real `TaskClaimEmitter` so the gate runs.
  */
 
 import { expect } from "chai";
@@ -61,41 +61,35 @@ describe("Jinn MVI L2 emitter deploy script", function () {
   });
 
   describe("happy-path deploy", function () {
-    it("deploys JinnClaimEmitter and round-trips immutable wiring", async function () {
+    it("deploys TaskClaimEmitter and round-trips immutable wiring", async function () {
       const [deployer] = await ethers.getSigners();
 
-      // Spin up the V2 mocks the emitter expects. Real-world wiring
-      // would point at the V2 router proxy + checker addresses from
-      // the phase1b deploy artifact; the mocks share the same
+      // Spin up the Task-native mocks the emitter expects. Real-world
+      // wiring points at the V3 activity checker from the TaskCoordinator
+      // deploy artifact; the mocks share the same
       // interface so we exercise the assembly slot gate end-to-end.
-      const Checker = await ethers.getContractFactory("MockCheckerV2");
+      const Checker = await ethers.getContractFactory("MockTaskActivityCheckerSnapshot");
       const checker = await Checker.deploy();
       await checker.waitForDeployment();
-      const Router = await ethers.getContractFactory("MockRouterV2");
-      const router = await Router.deploy();
-      await router.waitForDeployment();
       const Registry = await ethers.getContractFactory("MockServiceRegistryForEmitter");
       const registry = await Registry.deploy();
       await registry.waitForDeployment();
 
       const wiring = {
         checker: await checker.getAddress(),
-        router: await router.getAddress(),
         registry: await registry.getAddress(),
       };
       const result = await deployJinnMviL2(deployer, wiring);
 
       expect(result.emitter).to.match(/^0x[0-9a-fA-F]{40}$/);
       expect(result.wiring.checker).to.equal(wiring.checker);
-      expect(result.wiring.router).to.equal(wiring.router);
       expect(result.wiring.registry).to.equal(wiring.registry);
 
       const emitter = await ethers.getContractAt(
-        "src/jinn/cross-chain/JinnClaimEmitter.sol:JinnClaimEmitter",
+        "src/jinn/cross-chain/TaskClaimEmitter.sol:TaskClaimEmitter",
         result.emitter,
       );
       expect(await emitter.checker()).to.equal(wiring.checker);
-      expect(await emitter.router()).to.equal(wiring.router);
       expect(await emitter.serviceRegistry()).to.equal(wiring.registry);
 
       // The emitter is immediately usable: emit a claim through the
@@ -103,9 +97,9 @@ describe("Jinn MVI L2 emitter deploy script", function () {
       // the deploy.
       const operatorMultisig = ethers.Wallet.createRandom().address;
       await registry.setMultisig(7n, operatorMultisig);
-      await checker.setVerifiedCreations(operatorMultisig, 11n);
-      await checker.setNoveltyWeightedCounts(operatorMultisig, 22n);
-      await router.setEvaluationDeliveryCount(operatorMultisig, 3n);
+      await checker.setTaskCreationWeight(operatorMultisig, 11n);
+      await checker.setSolutionDeliveryWeight(operatorMultisig, 22n);
+      await checker.setVerdictDeliveryWeight(operatorMultisig, 3n);
       await emitter.emitClaim(7n);
       expect(await emitter.nextClaimId()).to.equal(1n);
     });

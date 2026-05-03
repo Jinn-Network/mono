@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
-import type { Task, TaskRequest } from '../../src/types/index.js';
+import type { Task, TaskAnnouncement } from '../../src/types/index.js';
 
 describe('LocalAdapter', () => {
   let adapter: LocalAdapter;
@@ -10,30 +10,34 @@ describe('LocalAdapter', () => {
     await adapter.initialize();
   });
 
-  it('posts a Task and makes restoration request available immediately', async () => {
+  it('posts a Task and makes it available for claim', async () => {
     const task: Task = { id: 'task-1', description: 'Test task' };
-    const requestId = await adapter.postTask(task);
-    expect(requestId).toBeDefined();
+    const posted = await adapter.postTask(task);
+    expect(posted.taskId).toBeDefined();
 
-    const requests: TaskRequest[] = [];
-    for await (const req of adapter.watchForRequests()) {
-      requests.push(req);
+    const tasks: TaskAnnouncement[] = [];
+    for await (const available of adapter.watchForTasks()) {
+      tasks.push(available);
       break; // take one — should be the restoration request
     }
-    expect(requests).toHaveLength(1);
-    expect(requests[0].task.role).toBe('restoration');
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].task.role).toBe('restoration');
   });
 
-  it('claim always succeeds', async () => {
+  it('claim creates an internal request', async () => {
     const task: Task = { id: 'task-1', description: 'Test task' };
-    const requestId = await adapter.postTask(task);
-    await expect(adapter.claimRequest(requestId)).resolves.toBeUndefined();
+    const posted = await adapter.postTask(task);
+    await expect(adapter.claimTask(posted.taskId)).resolves.toMatchObject({
+      taskId: posted.taskId,
+      attemptIndex: 0,
+    });
   });
 
   it('submit makes result available as delivery', async () => {
     const task: Task = { id: 'task-1', description: 'Test task' };
-    const requestId = await adapter.postTask(task);
-    await adapter.claimRequest(requestId);
+    const posted = await adapter.postTask(task);
+    const request = await adapter.claimTask(posted.taskId);
+    const requestId = request.requestId;
     await adapter.submitResult(requestId, { data: 'restored' });
 
     const deliveries: unknown[] = [];
@@ -44,52 +48,4 @@ describe('LocalAdapter', () => {
     expect(deliveries).toHaveLength(1);
   });
 
-  it('creates both restoration and evaluation requests when posting', async () => {
-    const task: Task = { id: 'task-1', description: 'Test task' };
-    const restorationRequestId = await adapter.postTask(task);
-
-    // First request yielded should be the restoration request
-    const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
-    const { value: restorationReq } = await iter.next();
-    expect(restorationReq.task.role).toBe('restoration');
-    expect(restorationReq.requestId).toBe(restorationRequestId);
-
-    // Deliver the restoration so the evaluation request becomes available
-    await adapter.submitResult(restorationRequestId, { data: 'done' });
-
-    // Now the evaluation request should be yielded
-    const { value: evalReq } = await iter.next();
-    expect(evalReq.task.role).toBe('evaluation');
-    expect(evalReq.task.restorationRequestId).toBe(restorationRequestId);
-
-    await adapter.stop();
-  });
-
-  it('evaluation request is only yielded after restoration is delivered', async () => {
-    const task: Task = { id: 'task-1', description: 'Test task' };
-    const restorationRequestId = await adapter.postTask(task);
-
-    const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
-
-    // Get the restoration request
-    const { value: restorationReq } = await iter.next();
-    expect(restorationReq.task.role).toBe('restoration');
-
-    // Before delivery, evaluation request should not be available
-    // We check by racing with a short timeout
-    const raceResult = await Promise.race([
-      iter.next().then(() => 'got-request'),
-      new Promise<string>(r => setTimeout(() => r('timeout'), 50)),
-    ]);
-    expect(raceResult).toBe('timeout');
-
-    // Now deliver the restoration
-    await adapter.submitResult(restorationRequestId, { data: 'done' });
-
-    // The evaluation request should now be yielded (the pending iter.next() resolves)
-    // Give it a moment for the deferred check to run
-    await new Promise(r => setTimeout(r, 10));
-
-    await adapter.stop();
-  });
 });

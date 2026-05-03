@@ -54,8 +54,6 @@ class TestPersistence extends TaskRunPersistence {
 export interface StateMachineSpyOpts {
   store: Store;
   paths?: { workingDirRoot: string; implStateDirRoot: string };
-  /** When provided, the real claim() implementation is used (via super.claim()). */
-  claimDeps?: TaskEngineOptions['claimDeps'];
   /** When provided, wires the impl registry for claim-gate tests. */
   implRegistry?: TaskEngineOptions['implRegistry'];
   /**
@@ -63,9 +61,11 @@ export interface StateMachineSpyOpts {
    * Also enables the real takePreSnapshot() (which has no external deps).
    */
   packagingDeps?: TaskEngineOptions['packagingDeps'];
-  manifestDeps?: TaskEngineOptions['manifestDeps'];
+  envelopeDeps?: TaskEngineOptions['envelopeDeps'];
   /** When provided, the real deliver() implementation is used (via super.deliver()). */
   deliveryDeps?: TaskEngineOptions['deliveryDeps'];
+  /** When true, the real TaskCoordinator clean-break claim transition is used. */
+  useRealClaim?: boolean;
   onClaim?(intent: PersistedTaskRun): Promise<void>;
   onPreSnapshot?(intent: PersistedTaskRun): Promise<void>;
   onRunImpl?(intent: PersistedTaskRun): Promise<void>;
@@ -94,10 +94,9 @@ export class SpyEngine extends TaskEngine {
     super({
       store: opts.store,
       paths: opts.paths ?? { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
-      claimDeps: opts.claimDeps,
       implRegistry: opts.implRegistry,
       packagingDeps: opts.packagingDeps,
-      manifestDeps: opts.manifestDeps,
+      envelopeDeps: opts.envelopeDeps,
       deliveryDeps: opts.deliveryDeps,
     });
     this.spyOpts = opts;
@@ -120,8 +119,7 @@ export class SpyEngine extends TaskEngine {
   override async claim(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'claim');
     if (this.spyOpts.onClaim) return this.spyOpts.onClaim(intent);
-    // When claimDeps is injected, delegate to the real implementation.
-    if (this.claimDeps) return super.claim(intent);
+    if (this.spyOpts.useRealClaim) return super.claim(intent);
     throw new NotImplementedError('claim');
   }
 
@@ -137,7 +135,7 @@ export class SpyEngine extends TaskEngine {
     if (this.spyOpts.onPreSnapshot) return this.spyOpts.onPreSnapshot(intent);
     // takePreSnapshot has no external deps — always delegate to real impl when paths
     // are configured (i.e. when packaging-style opts are injected).
-    if (this.spyOpts.packagingDeps !== undefined || this.spyOpts.manifestDeps !== undefined || this.spyOpts.deliveryDeps !== undefined) {
+    if (this.spyOpts.packagingDeps !== undefined || this.spyOpts.envelopeDeps !== undefined || this.spyOpts.deliveryDeps !== undefined) {
       return super.takePreSnapshot(intent);
     }
     throw new NotImplementedError('takePreSnapshot');
@@ -155,8 +153,7 @@ export class SpyEngine extends TaskEngine {
   override async pack(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'pack');
     if (this.spyOpts.onPack) return this.spyOpts.onPack(intent);
-    // When packagingDeps/manifestDeps are injected, delegate to the real implementation.
-    if (this.spyOpts.packagingDeps !== undefined || this.spyOpts.manifestDeps !== undefined) {
+    if (this.spyOpts.packagingDeps !== undefined || this.spyOpts.envelopeDeps !== undefined) {
       return super.pack(intent);
     }
     throw new NotImplementedError('pack');

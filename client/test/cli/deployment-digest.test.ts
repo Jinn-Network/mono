@@ -19,7 +19,6 @@ function loadTestnetConfig() {
   delete process.env.JINN_TESTNET_TOKEN_DEPLOYMENT;
   delete process.env.JINN_TESTNET_MECH_DEPLOYMENT;
   delete process.env.JINN_TESTNET_STOLAS_DEPLOYMENT;
-  delete process.env.JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT;
   try {
     return loadConfig(configPath);
   } finally {
@@ -38,7 +37,7 @@ describe('computeDeploymentDigest', () => {
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
     const names = artifacts.map((a) => a.name).sort();
     expect(names).toEqual(
-      ['testnetL2', 'testnetL2Token', 'testnetMech', 'testnetStolas', 'testnetClaimRegistry'].sort(),
+      ['testnetL2', 'testnetL2Token', 'testnetMech', 'testnetStolas'].sort(),
     );
     for (const a of artifacts) {
       expect(a.path).toMatch(/deployments\//);
@@ -55,7 +54,6 @@ describe('computeDeploymentDigest', () => {
       testnetL2TokenDeploymentPath: undefined,
       testnetMechDeploymentPath: undefined,
       testnetStolasDeploymentPath: undefined,
-      testnetClaimRegistryDeploymentPath: undefined,
     };
     const { digest, artifacts } = computeDeploymentDigest(noPaths);
     expect(digest).toBe('unknown');

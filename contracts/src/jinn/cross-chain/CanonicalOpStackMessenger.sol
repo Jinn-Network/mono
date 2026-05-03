@@ -33,7 +33,7 @@ interface IOptimismPortal2 {
 
 /// @title CanonicalOpStackMessenger
 /// @notice Implements `IClaimMessenger` against canonical OP-Stack output
-///         roots. The proof validates a `JinnClaimEmitter.claimSnapshotHashes`
+///         roots. The proof validates a `TaskClaimEmitter.claimSnapshotHashes`
 ///         storage slot against the finalized L2 state root, then returns
 ///         the tuple committed by that snapshot hash.
 contract CanonicalOpStackMessenger is IClaimMessenger {
@@ -47,7 +47,7 @@ contract CanonicalOpStackMessenger is IClaimMessenger {
     ///         finalize the L2 output root being proven.
     address public immutable disputeGameFactory;
 
-    /// @notice Address of the deployed `JinnClaimEmitter` on Base /
+    /// @notice Address of the deployed `TaskClaimEmitter` on Base /
     ///         Base Sepolia. The account proof must be for this address.
     address public immutable expectedEmitter;
 
@@ -56,7 +56,7 @@ contract CanonicalOpStackMessenger is IClaimMessenger {
     bytes32 public immutable claimTicketTopic;
 
     /// @notice Solidity storage slot of `claimSnapshotHashes`.
-    ///         JinnClaimEmitter has `nextClaimId` at slot 0 and this
+    ///         TaskClaimEmitter has `nextClaimId` at slot 0 and this
     ///         mapping at slot 1; immutables do not occupy storage slots.
     uint256 public constant CLAIM_SNAPSHOT_HASHES_SLOT = 1;
 
@@ -68,9 +68,9 @@ contract CanonicalOpStackMessenger is IClaimMessenger {
         bytes[] storageProof;
         uint256 claimId;
         uint256 serviceId;
-        uint256 verifiedCreations;
-        uint256 noveltyWeightedRestorationDeliveries;
-        uint256 evaluationDeliveryCount;
+        uint256 taskCreationWeight;
+        uint256 solutionDeliveryWeight;
+        uint256 verdictDeliveryWeight;
         address multisig;
     }
 
@@ -119,9 +119,9 @@ contract CanonicalOpStackMessenger is IClaimMessenger {
         override
         returns (
             uint256 serviceId,
-            uint256 verifiedCreations,
-            uint256 noveltyWeightedRestorationDeliveries,
-            uint256 evaluationDeliveryCount,
+            uint256 taskCreationWeight,
+            uint256 solutionDeliveryWeight,
+            uint256 verdictDeliveryWeight,
             address multisig
         )
     {
@@ -135,9 +135,9 @@ contract CanonicalOpStackMessenger is IClaimMessenger {
             abi.encode(
                 p.claimId,
                 p.serviceId,
-                p.verifiedCreations,
-                p.noveltyWeightedRestorationDeliveries,
-                p.evaluationDeliveryCount,
+                p.taskCreationWeight,
+                p.solutionDeliveryWeight,
+                p.verdictDeliveryWeight,
                 p.multisig
             )
         );
@@ -147,9 +147,9 @@ contract CanonicalOpStackMessenger is IClaimMessenger {
 
         return (
             p.serviceId,
-            p.verifiedCreations,
-            p.noveltyWeightedRestorationDeliveries,
-            p.evaluationDeliveryCount,
+            p.taskCreationWeight,
+            p.solutionDeliveryWeight,
+            p.verdictDeliveryWeight,
             p.multisig
         );
     }

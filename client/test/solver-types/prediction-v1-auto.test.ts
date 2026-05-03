@@ -78,9 +78,9 @@ describe('prediction.v1 auto-generator', () => {
     const task = PredictionV1TaskSchema.parse(tasks![0]);
     expect(task.solverType).toBe('prediction.v1');
     expect(task.claimPolicy).toMatchObject({
-      kind: 'parallel',
+      mode: 'parallel',
       maxClaims: 25,
-      maxClaimsPerSolver: 1,
+      maxClaimsPerOperator: 1,
     });
     expect(task.spec.source.identifiers).toMatchObject({
       marketId: 'abc',

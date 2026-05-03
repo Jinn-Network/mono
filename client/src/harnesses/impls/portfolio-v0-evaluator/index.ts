@@ -300,7 +300,7 @@ export class PortfolioV0Evaluator implements Harness {
     const { task: task, log } = ctx;
 
     // ── Step 1: Parse harness's SignedEnvelope from inlined context ─────────
-    // The envelope JSON is inlined by MechAdapter.tryCreateEvaluationJob at context.restorationResult.
+    // The envelope JSON is inlined at context.restorationResult.
     // Falls back to an error — crash recovery path not yet implemented.
     let targetEnvelope: SignedEnvelope;
     let targetPayload: PortfolioV0RestorationPayload;

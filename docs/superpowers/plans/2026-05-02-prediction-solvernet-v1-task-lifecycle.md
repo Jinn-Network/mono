@@ -1,8 +1,8 @@
 # Prediction SolverNet v1 Task lifecycle
 
-**Date:** 2026-05-02
-**Status:** Decision and implementation handoff
-**Primary bead:** `jinn-mono-l2zl.1`
+**Date:** 2026-05-02  
+**Status:** Decision and implementation handoff  
+**Primary bead:** `jinn-mono-l2zl.1`  
 **Related beads:** `jinn-mono-l2zl`, `jinn-mono-kod`, `jinn-mono-twut`, `jinn-mono-xp33`, `jinn-mono-l2zl.2`, `jinn-mono-l2zl.3`, `jinn-mono-l2zl.4`
 
 ## 1. Purpose
@@ -17,8 +17,7 @@ The design treats earlier `prediction.v0` Chainlink-threshold work as legacy pre
 
 - **SolverType:** `prediction.v1`.
 - **SolverNet name:** Prediction.
-- **SolverNet contract:** in-repo `prediction.v1` contract registry entry defining schemas, credential requirements, evaluation function, aggregation function, and claim defaults.
-- **Reference plugin pack:** optional `@jinn-network/prediction-plugin`, declaring `jinn.supports: ["prediction.v1"]` and helper tools/skills only.
+- **Canonical plugin:** `@jinn-network/prediction-plugin`, declaring `jinn.solverType: "prediction.v1"`.
 - **v1 launch scope:** binary externally resolved prediction-market questions.
 - **First enabled venue:** Polymarket.
 - **Future venue posture:** the SolverType is not venue-specific. Later Kalshi, Manifold, or other adapters can be added if they fit the `prediction.v1` contract.
@@ -27,7 +26,6 @@ The design treats earlier `prediction.v0` Chainlink-threshold work as legacy pre
 - **Scoring:** Brier loss, lower is better. Spread is `solverBrier - consensusBrier`; negative means the Solver beat the posted-time market consensus.
 - **1-to-many requirement:** `prediction.v1` requires one shared Task claimable by many Solvers. Replicated sibling Tasks are rejected for testnet campaign launch.
 - **Data plane:** no Prediction-specific source of truth. Forecasts and Verdicts are envelopes in the corpus. Agent learning and dashboard projections consume corpus/indexed envelope metadata.
-- **External data policy:** protocol does not constrain solver-side external data use. The Task must contain enough information to produce a valid Solution, but solvers may use their own Harnesses, plugins, memories, tools, and data subscriptions.
 
 ## 3. Lifecycle
 
@@ -451,14 +449,14 @@ interface ResolutionSnapshot {
 }
 ```
 
-### 10.5 Optional solver-facing MCP tools
+### 10.5 Solver-facing MCP tools
 
-The reference plugin pack may expose task-scoped tools:
+The canonical plugin should expose task-scoped tools first:
 
 - `polymarket_get_market`
 - `polymarket_get_orderbook`
 
-Broad search tools are deferred in the bundled reference pack. Solvers receive the Task market context and do not need Polymarket reads to submit a valid Solution, though independent solvers may bring their own data access.
+Broad search tools are deferred. Solvers should receive the Task market context and may inspect the orderbook; they do not need posting authority or unrestricted market discovery in v1.
 
 The current `client/plugins/jinn-prediction-plugin/mcp/polymarket-server.mjs` should be treated as placeholder substrate to replace or complete.
 
@@ -538,12 +536,12 @@ Deliver the parallel 1-to-many claim policy needed by §4.
 
 ### `jinn-mono-l2zl.2`
 
-Implement the optional `@jinn-network/prediction-plugin` reference pack for `prediction.v1`:
+Implement `@jinn-network/prediction-plugin` for `prediction.v1`:
 
+- JSON Schemas for Task `spec`, Solution payload, and Verdict payload.
 - Polymarket MCP server with task-scoped market/orderbook tools.
 - Forecasting and Polymarket-specific skills.
-- Manifest declares `jinn.supports: ["prediction.v1"]`.
-- Canonical Task/Solution/Verdict schemas live in the repo-native SolverNet contract registry, not the plugin.
+- Manifest declares `jinn.solverType: "prediction.v1"`.
 
 ### `jinn-mono-l2zl.3`
 

@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,12 +50,9 @@ function localPathFromSource(source: string): string {
   return isAbsolute(raw) ? raw : resolve(process.cwd(), raw);
 }
 
-function materializeLocal(root: string, vendorRoot: string, name: string, opts: { replace?: boolean } = {}): string {
+function materializeLocal(root: string, vendorRoot: string, name: string): string {
   const target = join(vendorRoot, name);
   mkdirSync(vendorRoot, { recursive: true, mode: 0o700 });
-  if (opts.replace && existsSync(target)) {
-    rmSync(target, { recursive: true, force: true });
-  }
   if (!existsSync(target)) {
     cpSync(root, target, { recursive: true, dereference: true });
   }
@@ -73,7 +70,7 @@ export async function resolveSolverPlugin(
   let root: string;
   if (kind === 'bundled') {
     const bundledName = source.slice('bundled:'.length);
-    root = materializeLocal(join(bundledRoot(opts.bundledRoot), bundledName), vendorRoot, bundledName, { replace: true });
+    root = materializeLocal(join(bundledRoot(opts.bundledRoot), bundledName), vendorRoot, bundledName);
   } else if (kind === 'local') {
     const localRoot = localPathFromSource(source);
     root = materializeLocal(localRoot, vendorRoot, entryName(entry, basename(localRoot)));
@@ -89,7 +86,8 @@ export async function resolveSolverPlugin(
   return {
     name: entryName(entry, manifest.name),
     version: manifest.version,
-    supports: manifest.jinn?.supports ?? [],
+    supports: manifest.jinn.supports,
+    solverType: manifest.jinn.supports[0],
     source,
     sourceKind: kind,
     root,

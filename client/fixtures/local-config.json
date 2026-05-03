@@ -4,7 +4,7 @@
     {
       "id": "example-1",
       "description": "The health check endpoint should return HTTP 200",
-      "solverType": "prediction.v0",
+      "solverType": "prediction.v1",
       "role": "restoration",
       "spec": {}
     }

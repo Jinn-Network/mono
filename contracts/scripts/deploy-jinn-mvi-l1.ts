@@ -41,7 +41,7 @@
  *   JINN_MVI_MESSENGER_MODE         "canonical" | "mock"; default follows timing profile
  *   JINN_MVI_OPTIMISM_PORTAL        canonical mode: L1 OptimismPortal2 address
  *   JINN_MVI_DISPUTE_GAME_FACTORY   canonical mode: DisputeGameFactory address
- *   JINN_MVI_CLAIM_EMITTER          canonical mode: deployed JinnClaimEmitter (L2)
+ *   JINN_MVI_CLAIM_EMITTER          canonical mode: deployed TaskClaimEmitter (L2)
  *   JINN_MVI_CLAIM_TICKET_TOPIC     canonical mode: optional, defaults to keccak256
  *                                   of the ClaimTicket signature
  *   JINN_MVI_ALLOW_CHAIN            opt in to a non-whitelisted chainId (e.g. mainnet)
@@ -260,9 +260,9 @@ export async function deployJinnMviL1(
     messenger.address,
     distributorConfig.operatorRatio,
     distributorConfig.daoRatio,
-    distributorConfig.wCreation,
-    distributorConfig.wRestorationDelivery,
-    distributorConfig.wEvaluationDelivery,
+    distributorConfig.wTaskCreation,
+    distributorConfig.wSolutionDelivery,
+    distributorConfig.wVerdictDelivery,
   );
   await distributor.waitForDeployment();
   const distributorAddress = await distributor.getAddress();
@@ -543,9 +543,9 @@ async function main() {
   console.log(`Distributor initial:`);
   console.log(`  operatorRatio:        ${distributorConfig.operatorRatio.toString()}`);
   console.log(`  daoRatio:             ${distributorConfig.daoRatio.toString()}`);
-  console.log(`  wCreation:            ${distributorConfig.wCreation.toString()}`);
-  console.log(`  wRestorationDelivery: ${distributorConfig.wRestorationDelivery.toString()}`);
-  console.log(`  wEvaluationDelivery:  ${distributorConfig.wEvaluationDelivery.toString()}`);
+  console.log(`  wTaskCreation:            ${distributorConfig.wTaskCreation.toString()}`);
+  console.log(`  wSolutionDelivery: ${distributorConfig.wSolutionDelivery.toString()}`);
+  console.log(`  wVerdictDelivery:  ${distributorConfig.wVerdictDelivery.toString()}`);
   console.log();
 
   console.log(`Renounce admin: ${renounceAdmin}`);
@@ -630,9 +630,9 @@ async function main() {
     distributor: {
       operatorRatio: deployment.distributorConfig.operatorRatio.toString(),
       daoRatio: deployment.distributorConfig.daoRatio.toString(),
-      wCreation: deployment.distributorConfig.wCreation.toString(),
-      wRestorationDelivery: deployment.distributorConfig.wRestorationDelivery.toString(),
-      wEvaluationDelivery: deployment.distributorConfig.wEvaluationDelivery.toString(),
+      wTaskCreation: deployment.distributorConfig.wTaskCreation.toString(),
+      wSolutionDelivery: deployment.distributorConfig.wSolutionDelivery.toString(),
+      wVerdictDelivery: deployment.distributorConfig.wVerdictDelivery.toString(),
     },
     messenger: {
       mode: deployment.messengerMode,

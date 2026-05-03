@@ -67,9 +67,9 @@ describe('canonical claim proof helpers', () => {
     expect(snapshot).toMatchObject({
       claimId: 101n,
       serviceId: 7n,
-      verifiedCreations: 3n,
-      noveltyWeightedRestorationDeliveries: 5n,
-      evaluationDeliveryCount: 2n,
+      taskCreationWeight: 3n,
+      solutionDeliveryWeight: 5n,
+      verdictDeliveryWeight: 2n,
       multisig: MULTISIG,
       claimer: CLAIMER,
     });
@@ -181,9 +181,9 @@ describe('canonical claim proof helpers', () => {
     }));
     expect(result).toMatchObject({
       serviceId: 7n,
-      verifiedCreations: 3n,
-      noveltyWeightedRestorationDeliveries: 5n,
-      evaluationDeliveryCount: 2n,
+      taskCreationWeight: 3n,
+      solutionDeliveryWeight: 5n,
+      verdictDeliveryWeight: 2n,
       multisig: MULTISIG,
     });
   });

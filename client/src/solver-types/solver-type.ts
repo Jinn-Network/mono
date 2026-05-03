@@ -33,16 +33,16 @@ export interface TestnetAutoContext {
   /** Agent EOA private key — threaded into auto-gen configs so generators can sign SignedTaskV1. */
   agentPrivateKey?: `0x${string}`;
   /**
-   * Override the prediction.v0 auto-generator submission window (ms). Used by the
+   * Override the prediction.v1 auto-generator submission window (ms). Used by the
    * docker acceptance gate to keep the protocol loop tight (gate sets 120000).
    * Default 600000 (10 min) when unset.
    */
-  predictionV0WindowMs?: number;
+  predictionV1WindowMs?: number;
   /**
-   * Override the prediction.v0 auto-generator gap from window end → resolveTs (ms).
+   * Override the prediction.v1 auto-generator gap from window end → resolveTs (ms).
    * Default 300000 (5 min) when unset; gate sets 60000.
    */
-  predictionV0ResolveGapMs?: number;
+  predictionV1ResolveGapMs?: number;
 }
 
 export interface SolverTypeDefinition<GenConfig = unknown> {

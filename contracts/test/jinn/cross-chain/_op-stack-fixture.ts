@@ -14,9 +14,9 @@ export const CLAIM_SNAPSHOT_HASHES_SLOT = 1n;
 export interface ClaimSnapshotFields {
   claimId: bigint;
   serviceId: bigint;
-  verifiedCreations: bigint;
-  novelty: bigint;
-  evalDelivery: bigint;
+  taskCreationWeight: bigint;
+  solutionDeliveryWeight: bigint;
+  verdictDeliveryWeight: bigint;
   multisig: string;
 }
 
@@ -30,7 +30,7 @@ export interface OutputRootArtifacts {
 }
 
 export const OP_STACK_PROOF_TUPLE =
-  '(bytes32 disputeGameId, bytes outputRootProof, bytes[] accountProof, bytes[] storageProof, uint256 claimId, uint256 serviceId, uint256 verifiedCreations, uint256 noveltyWeightedRestorationDeliveries, uint256 evaluationDeliveryCount, address multisig)';
+  '(bytes32 disputeGameId, bytes outputRootProof, bytes[] accountProof, bytes[] storageProof, uint256 claimId, uint256 serviceId, uint256 taskCreationWeight, uint256 solutionDeliveryWeight, uint256 verdictDeliveryWeight, address multisig)';
 
 function leafPathForHashedKey(hashedKey: string): string {
   return `0x20${hashedKey.slice(2)}`;
@@ -54,9 +54,9 @@ export function snapshotHash(fields: ClaimSnapshotFields): string {
       [
         fields.claimId,
         fields.serviceId,
-        fields.verifiedCreations,
-        fields.novelty,
-        fields.evalDelivery,
+        fields.taskCreationWeight,
+        fields.solutionDeliveryWeight,
+        fields.verdictDeliveryWeight,
         fields.multisig,
       ],
     ),
@@ -200,9 +200,9 @@ export function encodeProof(args: {
         storageProof: args.storageProof,
         claimId: args.fields.claimId,
         serviceId: args.fields.serviceId,
-        verifiedCreations: args.fields.verifiedCreations,
-        noveltyWeightedRestorationDeliveries: args.fields.novelty,
-        evaluationDeliveryCount: args.fields.evalDelivery,
+        taskCreationWeight: args.fields.taskCreationWeight,
+        solutionDeliveryWeight: args.fields.solutionDeliveryWeight,
+        verdictDeliveryWeight: args.fields.verdictDeliveryWeight,
         multisig: args.fields.multisig,
       },
     ],

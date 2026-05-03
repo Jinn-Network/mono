@@ -7,6 +7,7 @@ import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 export interface SolverNetConfig {
   enabled: boolean;
   solverType: string;
+  canonicalPlugin: SolverPluginEntry;
   harness: string;
   plugins: SolverPluginEntry[];
   taskGenerator: { enabled: boolean };
@@ -18,32 +19,26 @@ export interface LoadedSolverNet {
   solverType: string;
   contract: SolverNetContract;
   harness: string;
+  canonicalPlugin: RuntimePlugin;
   plugins: RuntimePlugin[];
   taskGenerator: { enabled: boolean };
 }
 
-function runtimePluginFrom(plugin: Awaited<ReturnType<typeof resolveSolverPlugin>>): RuntimePlugin {
+function runtimePluginFrom(
+  plugin: Awaited<ReturnType<typeof resolveSolverPlugin>>,
+  role: RuntimePlugin['role'],
+): RuntimePlugin {
   return {
     name: plugin.name,
     version: plugin.version,
+    solverType: plugin.solverType,
     supports: plugin.supports,
     root: plugin.root,
     manifestPath: plugin.manifestPath,
     sha256: plugin.sha256,
     ...(plugin.cid ? { cid: plugin.cid } : {}),
+    role,
   };
-}
-
-function assertPluginSupportsSolverNet(
-  netName: string,
-  solverType: string,
-  plugin: Awaited<ReturnType<typeof resolveSolverPlugin>>,
-): void {
-  if (plugin.supports.length > 0 && !plugin.supports.includes(solverType)) {
-    throw new Error(
-      `SolverNet ${netName} plugin ${plugin.name} does not support ${solverType}; supports=${plugin.supports.join(',')}`,
-    );
-  }
 }
 
 export class SolverNetRegistry {
@@ -82,13 +77,24 @@ export async function loadSolverNets(
     if (!net.enabled) continue;
     const contract = getSolverNetContract(net.solverType);
     if (!contract) {
-      throw new Error(`SolverNet ${name} has no registered SolverNetContract for solverType ${net.solverType}`);
+      throw new Error(`SolverNet ${name} has no registered SolverNetContract for ${net.solverType}`);
+    }
+    const canonicalEntry = net.canonicalPlugin ?? contract.referencePlugins[0];
+    const canonical = await resolveSolverPlugin(canonicalEntry);
+    if (!canonical.supports.includes(net.solverType)) {
+      throw new Error(
+        `SolverNet ${name} solverType mismatch: config=${net.solverType} plugin supports=${canonical.supports.join(',')}`,
+      );
     }
     const extras = [];
     for (const entry of net.plugins) {
       const plugin = await resolveSolverPlugin(entry);
-      assertPluginSupportsSolverNet(name, net.solverType, plugin);
-      extras.push(runtimePluginFrom(plugin));
+      if (!plugin.supports.includes(net.solverType)) {
+        throw new Error(
+          `SolverNet ${name} extra plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin supports=${plugin.supports.join(',')}`,
+        );
+      }
+      extras.push(runtimePluginFrom(plugin, 'extra'));
     }
     registry.register({
       name,
@@ -96,6 +102,7 @@ export async function loadSolverNets(
       solverType: net.solverType,
       contract,
       harness: net.harness,
+      canonicalPlugin: runtimePluginFrom(canonical, 'canonical'),
       plugins: extras,
       taskGenerator: net.taskGenerator,
     });

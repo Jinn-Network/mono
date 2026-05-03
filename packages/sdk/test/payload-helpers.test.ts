@@ -17,12 +17,10 @@ const baseTask = {
   role: 'restoration',
   window: { startTs: Date.parse('2026-05-02T00:00:00.000Z'), endTs: Date.parse('2026-05-02T01:00:00.000Z') },
   claimPolicy: {
-    kind: 'parallel',
+    mode: 'parallel',
     maxClaims: 25,
-    maxClaimsPerSolver: 1,
-    claimWindow: 'task-window',
-    selection: 'all-valid-solutions-scored',
-    economics: 'testnet-flat',
+    maxClaimsPerOperator: 1,
+    claimLeaseTtlSeconds: 30 * 60,
   },
   spec: {
     question: {

@@ -8,11 +8,9 @@ import type { Harness } from '../types.js';
 import { LegacyClaudeImpl } from './legacy-claude/index.js';
 import { ClaudeMcpHyperliquidImpl } from './claude-mcp-hyperliquid/index.js';
 import { PortfolioV0Evaluator } from './portfolio-v0-evaluator/index.js';
-import { PredictionV0BaselineImpl } from './prediction-v0-baseline/index.js';
-import { PredictionV0Evaluator } from './prediction-v0-evaluator/index.js';
+import { PredictionV1BaselineImpl } from './prediction-v0-baseline/index.js';
+import { PredictionV1Evaluator } from './prediction-v0-evaluator/index.js';
 import { ClaudeMcpPredictionImpl } from './claude-mcp-prediction/index.js';
-import { PredictionV1BaselineImpl } from './prediction-v1-baseline/index.js';
-import { PredictionV1Evaluator } from './prediction-v1-evaluator/index.js';
 import { PredictionApyV0BaselineImpl } from './prediction-apy-v0-baseline/index.js';
 import { ClaudeMcpPredictionApyImpl } from './claude-mcp-prediction-apy/index.js';
 import { PredictionApyV0Evaluator } from './prediction-apy-v0-evaluator/index.js';
@@ -79,7 +77,7 @@ export interface HarnessEnv {
    * impl that has external deps.
    */
   disabledNames?: readonly string[];
-  /** Resolved runtime plugin pack roots passed to plugin-aware Harnesses. */
+  /** Resolved SolverPlugin package roots passed to plugin-aware Harnesses. */
 }
 
 /**
@@ -131,7 +129,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
       : new PortfolioV0Evaluator(),
   );
   out.push(
-    new PredictionV0BaselineImpl({
+    new PredictionV1BaselineImpl({
       rpcUrl: env.rpcUrl,
       stub: isStub,
     }),
@@ -146,22 +144,12 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   );
   out.push(
     isStub
-      ? new PredictionV0Evaluator({ stub: true, rpcUrl: env.rpcUrl })
-      : new PredictionV0Evaluator({
+      ? new PredictionV1Evaluator({ stub: true, rpcUrl: env.rpcUrl })
+      : new PredictionV1Evaluator({
           evaluatorPk: env.pk!,
           evaluatorSafeAddress: env.safe!,
           rpcUrl: env.rpcUrl,
         }),
-  );
-  out.push(
-    new PredictionV1BaselineImpl({
-      stub: isStub,
-    }),
-  );
-  out.push(
-    isStub
-      ? new PredictionV1Evaluator({ stub: true })
-      : new PredictionV1Evaluator(),
   );
   out.push(
     new PredictionApyV0BaselineImpl({

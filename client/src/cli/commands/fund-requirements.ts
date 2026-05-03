@@ -153,7 +153,6 @@ export function createFundRequirementsCommand(deps: FundRequirementsDeps = PRODU
         testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
         testnetMechDeploymentPath: config.testnetMechDeploymentPath,
         testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
         minEoaGasWei: config.minEoaGasWei,
         minSafeEthWei: config.minSafeEthWei,
         password: passwordValue,

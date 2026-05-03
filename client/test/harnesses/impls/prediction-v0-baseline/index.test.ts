@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PredictionV0BaselineImpl } from '../../../../src/harnesses/impls/prediction-v0-baseline/index.js';
+import { PredictionV1BaselineImpl } from '../../../../src/harnesses/impls/prediction-v0-baseline/index.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 
 function makeCtx(overrides: Partial<HarnessContext> = {}): HarnessContext {
@@ -11,7 +11,7 @@ function makeCtx(overrides: Partial<HarnessContext> = {}): HarnessContext {
     task: {
       id: 'test-1',
       description: 'ETH > 3500 at T',
-      solverType: 'prediction.v0',
+      solverType: 'prediction.v1',
       role: 'restoration',
       window: { startTs: 0, endTs: 3_600_000 },
       spec: {
@@ -42,16 +42,16 @@ function stubDeps(price: string) {
   };
 }
 
-describe('PredictionV0BaselineImpl', () => {
-  it('supports only prediction.v0 restorations', () => {
-    const impl = new PredictionV0BaselineImpl({ _testDeps: stubDeps('3600') });
-    expect(impl.supports({ solverType: 'prediction.v0', role: 'restoration' })).toBe(true);
-    expect(impl.supports({ solverType: 'prediction.v0', role: 'evaluation' })).toBe(false);
+describe('PredictionV1BaselineImpl', () => {
+  it('supports only prediction.v1 restorations', () => {
+    const impl = new PredictionV1BaselineImpl({ _testDeps: stubDeps('3600') });
+    expect(impl.supports({ solverType: 'prediction.v1', role: 'restoration' })).toBe(true);
+    expect(impl.supports({ solverType: 'prediction.v1', role: 'evaluation' })).toBe(false);
     expect(impl.supports({ solverType: 'portfolio.v0', role: 'restoration' })).toBe(false);
   });
 
   it('writes prediction.json with probability 0.55 when current price > threshold (GT)', async () => {
-    const impl = new PredictionV0BaselineImpl({ _testDeps: stubDeps('3600') });
+    const impl = new PredictionV1BaselineImpl({ _testDeps: stubDeps('3600') });
     const ctx = makeCtx();
     const out = await impl.run(ctx);
     expect(out.gating.probability).toBe('0.55');
@@ -64,14 +64,14 @@ describe('PredictionV0BaselineImpl', () => {
   });
 
   it('returns oracleSnapshot in informational', async () => {
-    const impl = new PredictionV0BaselineImpl({ _testDeps: stubDeps('3400') });
+    const impl = new PredictionV1BaselineImpl({ _testDeps: stubDeps('3400') });
     const out = await impl.run(makeCtx());
     expect(out.informational?.oracleSnapshot).toMatchObject({ feed: expect.any(String), answer: expect.any(String) });
   });
 
   it('populates solutionPayload matching PredictionV0RestorationPayloadSchema', async () => {
     const { PredictionV0RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-v0.js');
-    const impl = new PredictionV0BaselineImpl({ _testDeps: stubDeps('3600') });
+    const impl = new PredictionV1BaselineImpl({ _testDeps: stubDeps('3600') });
     const out = await impl.run(makeCtx());
     expect(out.solutionPayload).toBeDefined();
     const parsed = PredictionV0RestorationPayloadSchema.safeParse(out.solutionPayload);

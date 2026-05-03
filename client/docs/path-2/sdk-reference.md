@@ -1,6 +1,6 @@
 # Path 2 SDK reference (`@jinn-network/sdk/harness`)
 
-Field-by-field reference for the public surface external Harness authors target. The canonical source is `packages/sdk/src/harness.ts`; this doc is a derivation. If this doc and the source disagree, the source wins.
+Field-by-field reference for the public surface external Harness authors target. The canonical source is `packages/sdk/src/`; this doc is a derivation. If this doc and the source disagree, the source wins.
 
 ## Stability commitment
 
@@ -8,11 +8,14 @@ Per `spec/2026-04-30-plug-in-surface.md` §3.1 and `spec/2026-05-external-harnes
 
 - The SDK follows strict semver. Breaking changes to a re-exported type, a function signature, or an enumerated value MUST land as a major bump.
 - Minor bumps are additive only. A new field on `ExternalHarnessEnv`, a new optional method on `Harness`, a new capability handle on `HarnessContext` ships as a minor; pre-existing Harnesses keep loading unchanged.
+- **12-week deprecation window.** From the day a major lands on npm, the prior major remains supported for 12 weeks. During the window, the daemon accepts manifests declaring either major; after the window, only the new major loads.
+- Deprecations announced in `packages/sdk/CHANGELOG.md`, in a `console.warn` line in the daemon's load path, and in the maintainer revocation-list metadata.
+
 External Harness authors depend on `@jinn-network/sdk/harness`, **not** on `@jinn-network/client` directly.
 
 ## `Harness`
 
-The interface every harness (and evaluator) implements. Source: `packages/sdk/src/harness.ts`.
+The interface every harness (and evaluator) implements. Source: `packages/sdk/src/index.ts`.
 
 ```ts
 export interface Harness {
@@ -55,7 +58,7 @@ export default function createHarness(env: ExternalHarnessEnv): Harness {
 
 ## `HarnessContext`
 
-Passed to `run()` for every attempt. Source: `packages/sdk/src/harness.ts`.
+Passed to `run()` for every attempt. Source: `packages/sdk/src/index.ts`.
 
 ```ts
 export interface HarnessContext {
@@ -63,7 +66,7 @@ export interface HarnessContext {
   taskCid?: string;
   solverNet?: { name: string; solverType: string };
   runtimePlugins?: RuntimePlugin[];
-  runtimePluginRoots?: string[];
+  solverPluginRoots?: string[];
   implStateDir: string;
   workingDir: string;
   log: (event: { level: 'info' | 'warn' | 'error'; msg: string; data?: unknown }) => void;
@@ -80,8 +83,8 @@ export interface HarnessContext {
 | `task` | `Task` | The Task to solve: id, description, spec, eligibility, window. |
 | `taskCid` | string \| undefined | The Task's CID on the corpus, if available. |
 | `solverNet` | object \| undefined | The SolverNet selected for this run. |
-| `runtimePlugins` | array \| undefined | Optional runtime plugin packs selected for this run. |
-| `runtimePluginRoots` | string[] \| undefined | Runtime plugin pack roots passed to the Harness for this run. |
+| `runtimePlugins` | array \| undefined | Canonical and extra SolverPlugins selected for this run. |
+| `solverPluginRoots` | string[] \| undefined | Plugin roots passed to the Harness for this run. |
 | `implStateDir` | string | Per-impl persistent state directory. Persists across attempts; safe to write learning artefacts, calibration histories, cached features. |
 | `workingDir` | string | Per-attempt working directory. Wiped between attempts; use for transient artefacts. |
 | `log` | function | Structured logger; routes to the daemon's log surface. Always prefer `ctx.log` over `console.log`. |
@@ -146,23 +149,6 @@ When to use which payload field:
 - **The portfolio-shape fields** (`preSnapshot`, `postSnapshot`, `fills`) — used by the `portfolio.v0` solverType. New solverTypes use `solutionPayload` / `verdictPayload`.
 
 `gating` is the on-chain claim shape; `informational` is pass-through metadata; `rationale` is the human-readable reasoning trail surfaced in the corpus.
-
-For SolverTypes with typed payload contracts, prefer the SDK helpers over
-hand-rolled objects:
-
-```ts
-import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
-import {
-  buildSolutionOutput,
-  validateSolutionPayload,
-} from '@jinn-network/sdk/solvernets/prediction-v1';
-```
-
-- `getSolverNetContract(solverType)` returns the public SolverNet contract definition exposed to Harness authors.
-- `validateTask`, `validateSolutionPayload`, and `validateVerdictPayload` perform local preflight validation.
-- `buildSolutionOutput` and `buildVerdictOutput` validate the typed payload and place it into `solutionPayload` or `verdictPayload`.
-
-These helpers are ergonomic preflight. The daemon still performs final runtime validation, envelope assembly, signing, storage, and submission.
 
 ## `ScopedSigner`
 
@@ -244,4 +230,4 @@ Throw `SkippableError` from `run()` when you cannot solve a Task for a structura
 
 ## Generated from source
 
-This doc tracks `packages/sdk/src/harness.ts`. When you add a new public type to the SDK, edit the source first; this doc follows. If you find a discrepancy, treat the source as authoritative and file a doc patch.
+This doc tracks `packages/sdk/src/`. When you add a new public type to the SDK, edit the source first; this doc follows. If you find a discrepancy, treat the source as authoritative and file a doc patch.

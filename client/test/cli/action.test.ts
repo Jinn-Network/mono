@@ -30,12 +30,12 @@ describe('emitDryRun', () => {
     emitDryRun(ctx, {
       verb: 'tasks submit',
       description: 'Would post one task',
-      plan: [{ step: 1, tx: 'JinnRouter.createRestorationJob(...)' }],
+      plan: [{ step: 1, tx: 'JinnRouterV3.createTask(...)' }],
     });
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
     expect(parsed.verb).toBe('tasks submit');
-    expect(parsed.plan).toEqual([{ step: 1, tx: 'JinnRouter.createRestorationJob(...)' }]);
+    expect(parsed.plan).toEqual([{ step: 1, tx: 'JinnRouterV3.createTask(...)' }]);
     expect(exits).toEqual([]);
   });
 

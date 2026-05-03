@@ -1,20 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { getAddress } from 'viem';
-import type { ExecutionAdapter, TaskPostReceipt } from '../adapters/adapter.js';
+import type { ExecutionAdapter } from '../adapters/adapter.js';
 import { emitEvent } from '../observability/emit-event.js';
 import type { Store } from '../store/store.js';
 import type { TaskPostRecord, TaskPostingPolicyType } from '../store/store.js';
-import { TransientError, type Task, type RequestId } from '../types/index.js';
+import { TransientError, type Task } from '../types/index.js';
 import type { TaskCandidate, TaskPostingPolicy } from './sources.js';
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
 const POST_LOCK_STALE_AFTER_MS = 60_000;
 
 export interface TaskPostResult {
-  requestId: RequestId;
-  taskCoordinatorTaskId?: string;
-  taskCid?: string;
+  taskId: string;
+  taskCid: string;
   txHash?: `0x${string}`;
+  blockNumber?: number;
   task: Task;
   attemptNumber: number;
   attemptId: string;
@@ -114,16 +114,12 @@ export class TaskPostingService {
         attemptId,
         attemptNumber,
       };
-      const postReceipt = normalizePostReceipt(await this.adapter.postTask(task));
-      const requestId = postReceipt.requestId ?? postReceipt.taskId;
-      if (!requestId) {
-        throw new Error(`Task post adapter did not return requestId or taskId for ${candidate.task.id}`);
-      }
+      const posted = await this.adapter.postTask(task);
 
-      this.store.recordOwnActivity(requestId, 'created');
+      this.store.recordOwnActivity(posted.taskId, 'created');
       emitEvent(this.store, {
         kind: 'task_posted',
-        requestId,
+        requestId: posted.taskId,
         solverType: candidate.task.solverType,
         outcome: 'ok',
         detail: `Posted task ${candidate.task.id} via ${candidate.sourceKey}`,
@@ -137,16 +133,18 @@ export class TaskPostingService {
         policyType,
         scopeKey,
         taskId: candidate.task.id,
-        requestId,
+        requestId: posted.taskId,
+        protocolTaskId: posted.taskId,
+        taskCid: posted.taskCid,
         firstPostedAt: lockedExisting?.firstPostedAt ?? nowIso,
         lastPostedAt: nowIso,
         postCount: attemptNumber,
       });
       return {
-        requestId,
-        taskCoordinatorTaskId: postReceipt.taskId,
-        taskCid: postReceipt.taskCid,
-        txHash: postReceipt.txHash,
+        taskId: posted.taskId,
+        taskCid: posted.taskCid,
+        txHash: posted.txHash,
+        blockNumber: posted.blockNumber,
         task,
         attemptNumber,
         attemptId,
@@ -172,7 +170,8 @@ export class TaskPostingService {
     const attemptNumber = Math.max(1, record.postCount);
     const attemptId = `${candidate.task.id}/${attemptNumber}`;
     return {
-      requestId: record.requestId,
+      taskId: record.protocolTaskId ?? record.requestId,
+      taskCid: record.taskCid ?? '',
       task: {
         ...candidate.task,
         role: 'restoration',
@@ -185,8 +184,4 @@ export class TaskPostingService {
       source,
     };
   }
-}
-
-function normalizePostReceipt(result: RequestId | TaskPostReceipt): TaskPostReceipt {
-  return typeof result === 'string' ? { requestId: result } : result;
 }

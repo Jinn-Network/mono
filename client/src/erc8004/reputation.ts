@@ -478,8 +478,8 @@ export class ReputationRegistryClient {
   /**
    * Send a write tx, routing through the Safe when configured.
    *
-   * Mirrors `ClaimRegistryClient` and `mech/contracts.ts`: production calls
-   * route through the Safe so `msg.sender` is the operator's canonical
+   * Mirrors `mech/contracts.ts`: production calls route through the Safe so
+   * `msg.sender` is the operator's canonical
    * identity (matching the OLAS staking + 8004 IdentityRegistry agent NFT
    * binding). Tests and one-off scripts can omit `safeAddress` and write
    * directly from the EOA.

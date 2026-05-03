@@ -33,7 +33,6 @@ export interface FundingPlanOptions {
   testnetL2TokenDeploymentPath?: string;
   testnetMechDeploymentPath?: string;
   testnetStolasDeploymentPath?: string;
-  testnetClaimRegistryDeploymentPath?: string;
   minEoaGasWei?: string;
   minSafeEthWei?: string;
   /** Optional password — without it we cannot derive the master address from a keystore. */
@@ -136,7 +135,6 @@ export async function planFleetFunding(
     testnetL2TokenDeploymentPath: options.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: options.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: options.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: options.testnetClaimRegistryDeploymentPath,
   }), {
     minEoaGasWei: options.minEoaGasWei,
     minSafeEthWei: options.minSafeEthWei,

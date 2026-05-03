@@ -1,7 +1,7 @@
 /**
  * Tests for CanonicalOpStackMessenger.
  *
- * The messenger proves a stored JinnClaimEmitter snapshot hash against the
+ * The messenger proves a stored TaskClaimEmitter snapshot hash against the
  * finalized OP output state root. These fixtures intentionally cover both
  * legacy CANNON-style gameType=0 and Base Sepolia/Azul gameType=621 without
  * relying on either game's implementation-specific selectors.
@@ -39,9 +39,9 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
 
   const CLAIM_ID = 1n;
   const SERVICE_ID = 1234n;
-  const VERIFIED_CREATIONS = 17n;
-  const NOVELTY = 31n;
-  const EVAL_DELIVERY = 9n;
+  const TASK_CREATION_WEIGHT = 17n;
+  const SOLUTION_WEIGHT = 31n;
+  const VERDICT_WEIGHT = 9n;
   const AIRGAP = 60n;
   const DISPUTE_GAME_INDEX = 42n;
 
@@ -84,9 +84,9 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
     const fields: ClaimSnapshotFields = {
       claimId: opts.fields?.claimId ?? CLAIM_ID,
       serviceId: opts.fields?.serviceId ?? SERVICE_ID,
-      verifiedCreations: opts.fields?.verifiedCreations ?? VERIFIED_CREATIONS,
-      novelty: opts.fields?.novelty ?? NOVELTY,
-      evalDelivery: opts.fields?.evalDelivery ?? EVAL_DELIVERY,
+      taskCreationWeight: opts.fields?.taskCreationWeight ?? TASK_CREATION_WEIGHT,
+      solutionDeliveryWeight: opts.fields?.solutionDeliveryWeight ?? SOLUTION_WEIGHT,
+      verdictDeliveryWeight: opts.fields?.verdictDeliveryWeight ?? VERDICT_WEIGHT,
       multisig: opts.fields?.multisig ?? multisig.address,
     };
     const artifacts = buildOutputRootArtifacts(emitter.address, fields);
@@ -147,9 +147,9 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       const { proofBytes } = await setupHappyPath({ gameType: GAME_TYPE_AZUL });
       const result = await messenger.verifyClaim(proofBytes);
       expect(result.serviceId).to.equal(SERVICE_ID);
-      expect(result.verifiedCreations).to.equal(VERIFIED_CREATIONS);
-      expect(result.noveltyWeightedRestorationDeliveries).to.equal(NOVELTY);
-      expect(result.evaluationDeliveryCount).to.equal(EVAL_DELIVERY);
+      expect(result.taskCreationWeight).to.equal(TASK_CREATION_WEIGHT);
+      expect(result.solutionDeliveryWeight).to.equal(SOLUTION_WEIGHT);
+      expect(result.verdictDeliveryWeight).to.equal(VERDICT_WEIGHT);
       expect(result.multisig).to.equal(multisig.address);
     });
 
@@ -285,9 +285,9 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       const fields: ClaimSnapshotFields = {
         claimId: CLAIM_ID,
         serviceId: SERVICE_ID,
-        verifiedCreations: VERIFIED_CREATIONS,
-        novelty: NOVELTY,
-        evalDelivery: EVAL_DELIVERY,
+        taskCreationWeight: TASK_CREATION_WEIGHT,
+        solutionDeliveryWeight: SOLUTION_WEIGHT,
+        verdictDeliveryWeight: VERDICT_WEIGHT,
         multisig: multisig.address,
       };
       const artifacts = buildOutputRootArtifacts(otherEmitter.address, fields);
@@ -363,9 +363,9 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       const fields: ClaimSnapshotFields = {
         claimId: CLAIM_ID,
         serviceId: SERVICE_ID,
-        verifiedCreations: VERIFIED_CREATIONS,
-        novelty: NOVELTY,
-        evalDelivery: EVAL_DELIVERY,
+        taskCreationWeight: TASK_CREATION_WEIGHT,
+        solutionDeliveryWeight: SOLUTION_WEIGHT,
+        verdictDeliveryWeight: VERDICT_WEIGHT,
         multisig: multisig.address,
       };
       // Force the high byte to 0x00 by zeroing the leftmost byte of
@@ -439,9 +439,9 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       const fields: ClaimSnapshotFields = {
         claimId: CLAIM_ID,
         serviceId: SERVICE_ID,
-        verifiedCreations: VERIFIED_CREATIONS,
-        novelty: NOVELTY,
-        evalDelivery: EVAL_DELIVERY,
+        taskCreationWeight: TASK_CREATION_WEIGHT,
+        solutionDeliveryWeight: SOLUTION_WEIGHT,
+        verdictDeliveryWeight: VERDICT_WEIGHT,
         multisig: multisig.address,
       };
 

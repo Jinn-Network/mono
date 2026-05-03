@@ -38,7 +38,7 @@ describe('deliverAndClaim', () => {
     vi.clearAllMocks();
   });
 
-  function makeDeps(variant: 'v1' | 'v2' = 'v2') {
+  function makeDeps(variant: 'v1' | 'v2' | 'v3' = 'v2') {
     return {
       publicClient: mockPublicClient,
       walletClient: mockWalletClient,
@@ -81,6 +81,30 @@ describe('deliverAndClaim', () => {
     expect(claimDelivery).toHaveBeenCalledOnce();
     const call = vi.mocked(claimDelivery).mock.calls[0]!;
     expect(call[5]).toMatchObject({ variant: 'v2', evidenceHash: '0xevidence' });
+  });
+
+  it('passes verdict settlement options for V3 evaluation deliveries', async () => {
+    const { deliverAndClaim } = await import('../../../src/harnesses/engine/delivery.js');
+    const { claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
+
+    await deliverAndClaim(
+      '0xreq001' as `0x${string}`,
+      'bafymanifest123',
+      '0xevidence' as `0x${string}`,
+      makeDeps('v3'),
+      undefined,
+      undefined,
+      { kind: 'verdict', verdictCode: 2 },
+    );
+
+    expect(claimDelivery).toHaveBeenCalledOnce();
+    const call = vi.mocked(claimDelivery).mock.calls[0]!;
+    expect(call[5]).toMatchObject({
+      variant: 'v3',
+      kind: 'verdict',
+      evidenceHash: '0xevidence',
+      verdictCode: 2,
+    });
   });
 
   it('calls claimDelivery with variant v1 (no evidenceHash)', async () => {

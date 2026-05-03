@@ -102,7 +102,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 
   const specFilePath = parsed.values['spec-file'] as string | undefined;
-  let specOverlay: { solverType?: string; window?: any; claimPolicy?: any; spec?: any; eligibility?: any } | undefined;
+  let specOverlay: { solverType?: string; window?: any; spec?: any; eligibility?: any } | undefined;
   if (specFilePath) {
     let raw: Record<string, unknown>;
     try {
@@ -112,7 +112,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         {
           code: 'invalid_invocation',
           message: `Could not read spec file: ${err instanceof Error ? err.message : String(err)}`,
-          exampleCli: 'jinn tasks submit --id my-1 --description "..." --spec-file fixtures/prediction-v0-task.example.json --dry-run',
+          exampleCli: 'jinn tasks submit --id my-1 --description "..." --spec-file fixtures/prediction-v1-task.example.json --dry-run',
           details: { field: 'spec-file' },
         },
         { writer: ctx.writer, exit: ctx.exit },
@@ -132,7 +132,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
           code: 'invalid_invocation',
           message: unknownSolverTypeMessage(solverTypeStr),
           exampleCli:
-            'jinn tasks submit --id my-1 --description "..." --spec-file fixtures/prediction-v0-task.example.json --dry-run',
+            'jinn tasks submit --id my-1 --description "..." --spec-file fixtures/prediction-v1-task.example.json --dry-run',
           details: { field: 'spec-file', expected: 'solverType must be a registered SolverType' },
         },
         { writer: ctx.writer, exit: ctx.exit },
@@ -164,17 +164,16 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       specOverlay = {
         solverType: solverTypeStr,
         window: parsedOverlay.window,
-        claimPolicy: parsedOverlay.claimPolicy,
         spec: parsedOverlay.spec,
         eligibility: parsedOverlay.eligibility,
       };
     } catch (err) {
       const exampleCli =
         solverTypeStr === 'prediction.apy.v0'
-          ? 'jinn tasks submit --id my-apy-1 --description "..." --spec-file fixtures/prediction-apy-v0-task.example.json --dry-run'
+          ? 'jinn tasks submit --id my-apy-1 --description "..." --spec-file fixtures/prediction-apy-v0-intent.example.json --dry-run'
           : solverTypeStr === 'portfolio.v0'
             ? 'jinn tasks submit --id pf-1 --description "..." --spec-file <portfolio-fixture.json> --dry-run'
-            : 'jinn tasks submit --id my-1 --description "..." --spec-file fixtures/prediction-v0-task.example.json --dry-run';
+            : 'jinn tasks submit --id my-1 --description "..." --spec-file fixtures/prediction-v1-task.example.json --dry-run';
       emitEnvelope(
         {
           code: 'invalid_invocation',
@@ -249,9 +248,17 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       role: 'restoration',
       description,
       window: taskWindow,
-      ...(overlay.claimPolicy ? { claimPolicy: overlay.claimPolicy } : {}),
       spec: ((overlay.spec as Record<string, unknown> | undefined) ?? {}) as TaskV1['spec'],
       eligibility: overlay.eligibility ?? {},
+      claimPolicy: {
+        mode: 'exclusive',
+        maxClaims: 1,
+        maxClaimsPerOperator: 1,
+        claimWindowStartTs: taskWindow.startTs,
+        claimWindowEndTs: taskWindow.endTs,
+        submissionDeadlineTs: taskWindow.endTs,
+        claimLeaseTtlSeconds: Math.max(60, Math.floor((taskWindow.endTs - taskWindow.startTs) / 1000)),
+      },
       creator: {
         safeAddress: getAddress(safe),
         agentEoa: agentEoaAddress,
@@ -284,17 +291,17 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         verb: 'tasks submit',
         id,
         creatorMultisig: getAddress(safe),
-        requestId: postResult.requestId,
+        taskId: postResult.taskId,
         status: postResult.idempotent ? 'already_submitted' : 'submitted',
         attemptId: postResult.attemptId,
         attemptNumber: postResult.attemptNumber,
         idempotent: postResult.idempotent,
       },
       (v) => {
-        const value = v as { id: string; requestId: string; creatorMultisig: string };
+        const value = v as { id: string; taskId: string; creatorMultisig: string };
         return postResult.idempotent
-          ? `Task already submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`
-          : `Task submitted.\nID: ${value.id}\nRequest: ${value.requestId}\nSafe: ${value.creatorMultisig}`;
+          ? `Task already submitted.\nID: ${value.id}\nTask: ${value.taskId}\nSafe: ${value.creatorMultisig}`
+          : `Task submitted.\nID: ${value.id}\nTask: ${value.taskId}\nSafe: ${value.creatorMultisig}`;
       },
       {
         json: Boolean(parsed.values.json),
@@ -408,7 +415,7 @@ transaction.
 
 Options:
   --spec-file <path>  Path to a JSON file containing typed task fields (window, spec, eligibility).
-                      Supports registered SolverTypes: portfolio.v0, prediction.v0, prediction.apy.v0.
+                      Supports registered SolverTypes: portfolio.v0, prediction.v1, prediction.apy.v0.
 
                       Sentinels resolved at post time:
                         window.startTs: 0              → Date.now(); endTs + resolveTs follow
@@ -421,8 +428,8 @@ Options:
                       override the default public RPC.
 
 Examples:
-  jinn tasks submit --id eth-up --description "ETH direction" --solver-net prediction --spec-file fixtures/prediction-v0-task.example.json --yes
-  jinn tasks submit --id usdc-apy --description "Aave APY" --solver-type prediction.apy.v0 --spec-file fixtures/prediction-apy-v0-task.example.json --yes
+  jinn tasks submit --id eth-up --description "ETH direction" --solver-net prediction --spec-file fixtures/prediction-v1-task.example.json --yes
+  jinn tasks submit --id usdc-apy --description "Aave APY" --solver-type prediction.apy.v0 --spec-file fixtures/prediction-apy-v0-intent.example.json --yes
 `,
   run,
 };

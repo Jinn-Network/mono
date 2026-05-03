@@ -171,7 +171,7 @@ Subcommands:
 Harness options:
   --pattern=<pattern>     Template pattern (default: forecaster)
                           Supported: forecaster, evaluator, alternative-harness
-  --solver-type=<value>   SolverType the Harness handles (default: prediction.v0)
+  --solver-type=<value>   SolverType the Harness handles (default: prediction.v1)
   --network=<network>     Default network (default: base-sepolia)
                           One of: base-mainnet, base-sepolia, sepolia, ethereum-mainnet
 
@@ -216,7 +216,7 @@ async function run(ctx: CommandContext): Promise<void> {
           type: 'string' as const,
           default: 'forecaster',
         },
-        'solver-type': { type: 'string' as const, default: 'prediction.v0' },
+        'solver-type': { type: 'string' as const, default: 'prediction.v1' },
         network: { type: 'string' as const, default: 'base-sepolia' },
         'out-dir': { type: 'string' as const },
       },
@@ -245,7 +245,7 @@ async function run(ctx: CommandContext): Promise<void> {
       target: 'harness',
       pattern,
       packageName,
-      solverTypeString: String(flags['solver-type'] ?? 'prediction.v0'),
+      solverTypeString: String(flags['solver-type'] ?? 'prediction.v1'),
       network: String(flags.network ?? 'base-sepolia'),
       outDir,
     });

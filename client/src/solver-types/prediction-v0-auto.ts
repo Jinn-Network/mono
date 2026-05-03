@@ -1,5 +1,5 @@
 /**
- * Auto-generator for prediction.v0 tasks.
+ * Auto-generator for prediction.v1 tasks.
  *
  * Produces a fresh Task per hour bucket: reads current Chainlink
  * price, builds a template with the configured threshold sentinel
@@ -18,12 +18,12 @@ import { base, baseSepolia } from 'viem/chains';
 import { readChainlinkLatest, scaleToDecimal } from '../venues/chainlink/client.js';
 import type { Task } from '../types/task.js';
 import type { TaskV1, SignedTaskV1 } from '../types/task-document.js';
-import { resolvePredictionV0Template } from './prediction-v0-template.js';
+import { resolvePredictionV1Template } from './prediction-v0-template.js';
 import { signTaskV1 } from '../tasks/signing.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-export interface PredictionV0AutoConfig {
+export interface PredictionV1AutoConfig {
   /** Chainlink AggregatorV3 proxy address. Defaults to Base Sepolia ETH/USD. */
   feed: `0x${string}`;
   /** Human-readable feed description embedded in the generated task. */
@@ -65,7 +65,7 @@ export interface PredictionV0AutoConfig {
   agentPrivateKey?: `0x${string}`;
 }
 
-export type PredictionV0Generator = () => Promise<Task | null>;
+export type PredictionV1Generator = () => Promise<Task | null>;
 
 // ── Generator factory ──────────────────────────────────────────────────────────
 
@@ -74,7 +74,7 @@ export type PredictionV0Generator = () => Promise<Task | null>;
  * Task for the current hour bucket, or null if Chainlink is
  * unreachable (caller skips this tick).
  */
-export function makePredictionV0Generator(config: PredictionV0AutoConfig): PredictionV0Generator {
+export function makePredictionV1Generator(config: PredictionV1AutoConfig): PredictionV1Generator {
   const threshold = config.thresholdSentinel ?? 'current+0.5%';
   const operator = config.operator ?? 'GT';
   const windowDurationMs = config.windowDurationMs ?? 600_000;   // 10 min default (fast-test)
@@ -101,11 +101,11 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
     const resolveTs = endTs + resolveGapMs;
 
     const template = {
-      id: `pred-v0-auto-${startTs}`,
-      description: `Auto-generated prediction.v0 task — ${config.feedDescription} ${operator} ${threshold} at ${new Date(resolveTs).toISOString()}`,
+      id: `pred-v1-auto-${startTs}`,
+      solverType: 'prediction.v1',
+      description: `Auto-generated prediction.v1 task — ${config.feedDescription} ${operator} ${threshold} at ${new Date(resolveTs).toISOString()}`,
       window: { startTs, endTs },
       spec: {
-        kind: 'prediction.v0',
         oracle: {
           venue: config.venue,
           feed: config.feed,
@@ -119,10 +119,19 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
         },
       },
       eligibility: { maxSubmissionDelayMs: 60_000 },
+      claimPolicy: {
+        mode: 'parallel' as const,
+        maxClaims: 25,
+        maxClaimsPerOperator: 1,
+        claimWindowStartTs: startTs,
+        claimWindowEndTs: endTs,
+        submissionDeadlineTs: endTs,
+        claimLeaseTtlSeconds: Math.max(60, Math.floor((endTs - startTs) / 1000)),
+      },
     };
 
     try {
-      const resolved = await resolvePredictionV0Template(template, {
+      const resolved = await resolvePredictionV1Template(template, {
         readCurrent: async ({ feed }) => {
           const reading = await readChainlinkLatest(feed, getPublicClient());
           return scaleToDecimal(reading.answer, reading.decimals);
@@ -136,12 +145,13 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
         const taskDoc: TaskV1 = {
           schemaVersion: 'task.v1',
           id: resolved.id ?? randomUUID(),
-          solverType: 'prediction.v0',
+          solverType: 'prediction.v1',
           role: 'restoration',
           description: resolved.description,
           window: resolved.window,
           spec: resolved.spec as TaskV1['spec'],
           eligibility: resolved.eligibility ?? {},
+          claimPolicy: template.claimPolicy,
           creator: {
             safeAddress: config.safeAddress,
             agentEoa: config.agentEoa,
@@ -151,7 +161,8 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
         const signed: SignedTaskV1 = await signTaskV1(taskDoc, config.agentPrivateKey);
         const task: Task = {
           ...(resolved as unknown as Task),
-          solverType: 'prediction.v0',
+          solverType: 'prediction.v1',
+          claimPolicy: template.claimPolicy,
           spec: Object.fromEntries(
             Object.entries((resolved.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),
           ),
@@ -162,7 +173,8 @@ export function makePredictionV0Generator(config: PredictionV0AutoConfig): Predi
       // No signing credentials — return the resolved shape without a signed task.
       return {
         ...(resolved as unknown as Task),
-        solverType: 'prediction.v0',
+        solverType: 'prediction.v1',
+        claimPolicy: template.claimPolicy,
         spec: Object.fromEntries(
           Object.entries((resolved.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),
         ),

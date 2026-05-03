@@ -38,9 +38,9 @@ describe('MockMessenger', function () {
   it('verifyClaim returns the fixture for a known claimId', async function () {
     await messenger.setFixture(CLAIM_ID, {
       serviceId: SERVICE_ID,
-      verifiedCreations: 10n,
-      noveltyWeightedRestorationDeliveries: 20n,
-      evaluationDeliveryCount: 5n,
+      taskCreationWeight: 10n,
+      solutionDeliveryWeight: 20n,
+      verdictDeliveryWeight: 5n,
       multisig: multisig.address,
     });
 
@@ -48,32 +48,32 @@ describe('MockMessenger', function () {
     const result = await messenger.verifyClaim(proof);
 
     expect(result.serviceId).to.equal(SERVICE_ID);
-    expect(result.verifiedCreations).to.equal(10n);
-    expect(result.noveltyWeightedRestorationDeliveries).to.equal(20n);
-    expect(result.evaluationDeliveryCount).to.equal(5n);
+    expect(result.taskCreationWeight).to.equal(10n);
+    expect(result.solutionDeliveryWeight).to.equal(20n);
+    expect(result.verdictDeliveryWeight).to.equal(5n);
     expect(result.multisig).to.equal(multisig.address);
   });
 
   it('supports multiple claims for one serviceId', async function () {
     await messenger.setFixture(CLAIM_ID, {
       serviceId: SERVICE_ID,
-      verifiedCreations: 10n,
-      noveltyWeightedRestorationDeliveries: 20n,
-      evaluationDeliveryCount: 5n,
+      taskCreationWeight: 10n,
+      solutionDeliveryWeight: 20n,
+      verdictDeliveryWeight: 5n,
       multisig: multisig.address,
     });
     await messenger.setFixture(CLAIM_ID_2, {
       serviceId: SERVICE_ID,
-      verifiedCreations: 11n,
-      noveltyWeightedRestorationDeliveries: 21n,
-      evaluationDeliveryCount: 6n,
+      taskCreationWeight: 11n,
+      solutionDeliveryWeight: 21n,
+      verdictDeliveryWeight: 6n,
       multisig: multisig.address,
     });
 
     const proof = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [CLAIM_ID_2]);
     const result = await messenger.verifyClaim(proof);
     expect(result.serviceId).to.equal(SERVICE_ID);
-    expect(result.verifiedCreations).to.equal(11n);
+    expect(result.taskCreationWeight).to.equal(11n);
   });
 
   it('reverts when no fixture has been set for the claimId', async function () {
@@ -87,9 +87,9 @@ describe('MockMessenger', function () {
     await expect(
       messenger.connect(other).setFixture(CLAIM_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 1n,
-        noveltyWeightedRestorationDeliveries: 1n,
-        evaluationDeliveryCount: 1n,
+        taskCreationWeight: 1n,
+        solutionDeliveryWeight: 1n,
+        verdictDeliveryWeight: 1n,
         multisig: multisig.address,
       }),
     ).to.be.revertedWith('MockMessenger: not owner');
@@ -99,9 +99,9 @@ describe('MockMessenger', function () {
     await expect(
       messenger.setFixture(CLAIM_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 1n,
-        noveltyWeightedRestorationDeliveries: 1n,
-        evaluationDeliveryCount: 1n,
+        taskCreationWeight: 1n,
+        solutionDeliveryWeight: 1n,
+        verdictDeliveryWeight: 1n,
         multisig: ethers.ZeroAddress,
       }),
     ).to.be.revertedWith('MockMessenger: multisig=0');
@@ -111,9 +111,9 @@ describe('MockMessenger', function () {
     await expect(
       messenger.setFixture(CLAIM_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 1n,
-        noveltyWeightedRestorationDeliveries: 1n,
-        evaluationDeliveryCount: 1n,
+        taskCreationWeight: 1n,
+        solutionDeliveryWeight: 1n,
+        verdictDeliveryWeight: 1n,
         multisig: multisig.address,
       }),
     )
@@ -131,9 +131,9 @@ describe('MockMessenger', function () {
     await expect(
       messenger.setFixture(CLAIM_ID, {
         serviceId: SERVICE_ID,
-        verifiedCreations: 1n,
-        noveltyWeightedRestorationDeliveries: 1n,
-        evaluationDeliveryCount: 1n,
+        taskCreationWeight: 1n,
+        solutionDeliveryWeight: 1n,
+        verdictDeliveryWeight: 1n,
         multisig: multisig.address,
       }),
     ).to.be.revertedWith('MockMessenger: not owner');
@@ -141,14 +141,14 @@ describe('MockMessenger', function () {
     // New owner can.
     await messenger.connect(other).setFixture(CLAIM_ID, {
       serviceId: SERVICE_ID,
-      verifiedCreations: 99n,
-      noveltyWeightedRestorationDeliveries: 88n,
-      evaluationDeliveryCount: 77n,
+      taskCreationWeight: 99n,
+      solutionDeliveryWeight: 88n,
+      verdictDeliveryWeight: 77n,
       multisig: multisig.address,
     });
     const proof = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [CLAIM_ID]);
     const result = await messenger.verifyClaim(proof);
-    expect(result.verifiedCreations).to.equal(99n);
+    expect(result.taskCreationWeight).to.equal(99n);
   });
 
   it('transferOwnership rejects non-owner and zero address', async function () {

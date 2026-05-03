@@ -1,11 +1,11 @@
 /**
- * prediction.v0 — typed task spec.
+ * prediction.v1 — typed task spec.
  *
  * §4 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
  *
- * Legacy manifest schemas (prediction.v0.submission.v1, prediction.v0.verdict.v1)
+ * Legacy manifest schemas (prediction.v1.submission.v1, prediction.v1.verdict.v1)
  * have been removed per scope §3.4. Use jinn.execution.v1 SignedEnvelope with
- * PredictionV0RestorationPayloadSchema / PredictionV0VerdictPayloadSchema instead.
+ * PredictionV1RestorationPayloadSchema / PredictionV1VerdictPayloadSchema instead.
  */
 import { z } from 'zod';
 import { WindowSchema } from './task.js';
@@ -30,7 +30,7 @@ const RangeQuestionSchema = z.object({
 
 // ── Spec + eligibility + task ────────────────────────────────────────────────
 
-export const PredictionV0SpecSchema = z.object({
+export const PredictionV1SpecSchema = z.object({
   oracle: z.object({
     venue: z.enum(['chainlink-base-sepolia', 'chainlink-base']),
     feed: HexStringSchema,
@@ -39,22 +39,22 @@ export const PredictionV0SpecSchema = z.object({
   question: z.discriminatedUnion('kind', [ThresholdQuestionSchema, RangeQuestionSchema]),
 });
 
-export type PredictionV0Spec = z.infer<typeof PredictionV0SpecSchema>;
+export type PredictionV1Spec = z.infer<typeof PredictionV1SpecSchema>;
 
-export const PredictionV0EligibilitySchema = z.object({
+export const PredictionV1EligibilitySchema = z.object({
   maxSubmissionDelayMs: z.number().int().default(60_000),
 });
 
-export type PredictionV0Eligibility = z.infer<typeof PredictionV0EligibilitySchema>;
+export type PredictionV1Eligibility = z.infer<typeof PredictionV1EligibilitySchema>;
 
-export const PredictionV0TaskSchema = z
+export const PredictionV1TaskSchema = z
   .object({
     id: z.string(),
     description: z.string().min(1),
-    solverType: z.literal('prediction.v0').optional(),
+    solverType: z.literal('prediction.v1').optional(),
     window: WindowSchema,
-    spec: PredictionV0SpecSchema,
-    eligibility: PredictionV0EligibilitySchema.default({}),
+    spec: PredictionV1SpecSchema,
+    eligibility: PredictionV1EligibilitySchema.default({}),
   })
   .refine(d => d.window.endTs > d.window.startTs, {
     message: 'window.endTs must be > window.startTs',
@@ -77,4 +77,11 @@ export const PredictionV0TaskSchema = z
     path: ['spec', 'question', 'resolveTs'],
   });
 
-export type PredictionV0Task = z.infer<typeof PredictionV0TaskSchema>;
+export type PredictionV1Task = z.infer<typeof PredictionV1TaskSchema>;
+
+export const PredictionV0SpecSchema = PredictionV1SpecSchema;
+export const PredictionV0EligibilitySchema = PredictionV1EligibilitySchema;
+export const PredictionV0TaskSchema = PredictionV1TaskSchema;
+export type PredictionV0Spec = PredictionV1Spec;
+export type PredictionV0Eligibility = PredictionV1Eligibility;
+export type PredictionV0Task = PredictionV1Task;

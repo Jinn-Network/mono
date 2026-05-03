@@ -42,7 +42,7 @@ describe('ERC-8128 Auth', () => {
 
   it('should sign and verify a POST request with body', async () => {
     const nonceStore = new InMemoryNonceStore();
-    const body = JSON.stringify({ action: 'claimRequest', requestId: '0x1234' });
+    const body = JSON.stringify({ action: 'claimTask', taskId: '1' });
 
     const signed = await signRequestWithErc8128({
       signer,

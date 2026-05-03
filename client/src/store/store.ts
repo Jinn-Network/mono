@@ -107,6 +107,8 @@ export interface TaskPostRecord {
   policyType: TaskPostingPolicyType;
   scopeKey: string;
   taskId: string;
+  protocolTaskId?: string | null;
+  taskCid?: string | null;
   requestId: string;
   firstPostedAt: string;
   lastPostedAt: string;
@@ -127,6 +129,8 @@ CREATE TABLE IF NOT EXISTS config (
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
   task_id TEXT NOT NULL,
+  protocol_task_id TEXT,
+  task_cid TEXT,
   request_id TEXT NOT NULL,
   title TEXT NOT NULL,
   content TEXT,
@@ -256,6 +260,7 @@ export class Store {
     this.db.exec(TASK_RUNS_SCHEMA);
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
+    this.ensureTaskPostsTaskCoordinatorColumns();
     this.backfillActivityEvents();
   }
 
@@ -268,6 +273,18 @@ export class Store {
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_network_artifacts_peer_catalog ON network_artifacts (peer_catalog_id)`,
     );
+  }
+
+  /** Fresh v1 state is Task-first; older local DBs get additive columns only. */
+  private ensureTaskPostsTaskCoordinatorColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(task_posts)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('protocol_task_id')) {
+      this.db.exec(`ALTER TABLE task_posts ADD COLUMN protocol_task_id TEXT`);
+    }
+    if (!names.has('task_cid')) {
+      this.db.exec(`ALTER TABLE task_posts ADD COLUMN task_cid TEXT`);
+    }
   }
 
   /** Idempotent: older DBs before idx_reward_claims_tx may lack the unique index. */
@@ -325,7 +342,8 @@ export class Store {
     scopeKey: string;
   }): TaskPostRecord | null {
     const row = this.db.prepare(
-      `SELECT creator_safe_address, source_key, policy_type, scope_key, task_id, request_id,
+      `SELECT creator_safe_address, source_key, policy_type, scope_key, task_id,
+              protocol_task_id, task_cid, request_id,
               first_posted_at, last_posted_at, post_count
        FROM task_posts
        WHERE creator_safe_address = @creatorSafeAddress
@@ -338,6 +356,8 @@ export class Store {
       policy_type: TaskPostingPolicyType;
       scope_key: string;
       task_id: string;
+      protocol_task_id: string | null;
+      task_cid: string | null;
       request_id: string;
       first_posted_at: string;
       last_posted_at: string;
@@ -350,6 +370,8 @@ export class Store {
       policyType: row.policy_type,
       scopeKey: row.scope_key,
       taskId: row.task_id,
+      protocolTaskId: row.protocol_task_id,
+      taskCid: row.task_cid,
       requestId: row.request_id,
       firstPostedAt: row.first_posted_at,
       lastPostedAt: row.last_posted_at,
@@ -358,20 +380,27 @@ export class Store {
   }
 
   upsertTaskPostRecord(record: TaskPostRecord): void {
+    const params = {
+      ...record,
+      protocolTaskId: record.protocolTaskId ?? null,
+      taskCid: record.taskCid ?? null,
+    };
     this.db.prepare(
       `INSERT INTO task_posts
-         (creator_safe_address, source_key, policy_type, scope_key, task_id, request_id,
+         (creator_safe_address, source_key, policy_type, scope_key, task_id, protocol_task_id, task_cid, request_id,
           first_posted_at, last_posted_at, post_count)
        VALUES
-         (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @taskId, @requestId,
+         (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @taskId, @protocolTaskId, @taskCid, @requestId,
           @firstPostedAt, @lastPostedAt, @postCount)
        ON CONFLICT(creator_safe_address, source_key, policy_type, scope_key) DO UPDATE SET
          task_id = excluded.task_id,
+         protocol_task_id = excluded.protocol_task_id,
+         task_cid = excluded.task_cid,
          request_id = excluded.request_id,
          first_posted_at = excluded.first_posted_at,
          last_posted_at = excluded.last_posted_at,
          post_count = excluded.post_count`,
-    ).run(record);
+    ).run(params);
   }
 
   acquireTaskPostLock(args: {

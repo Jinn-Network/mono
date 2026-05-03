@@ -10,7 +10,7 @@ function makeTask() {
     description: 'ETH > 3000 at T',
     window: { startTs: 0, endTs: 3_600_000 },
     spec: {
-      kind: 'prediction.v0',
+      kind: 'prediction.v1',
       oracle: {
         venue: 'chainlink-base-sepolia',
         feed: '0x000000000000000000000000000000000000feed',
@@ -39,11 +39,11 @@ task: makeTask(),
 }
 
 describe('ClaudeMcpPredictionImpl (mocked session)', () => {
-  it('supports prediction.v0 restoration only', () => {
+  it('supports prediction.v1 restoration only', () => {
     const impl = new ClaudeMcpPredictionImpl();
-    expect(impl.supports({ solverType: 'prediction.v0', role: 'restoration' })).toBe(true);
-    expect(impl.supports({ solverType: 'prediction.v0' })).toBe(true);
-    expect(impl.supports({ solverType: 'prediction.v0', role: 'evaluation' })).toBe(false);
+    expect(impl.supports({ solverType: 'prediction.v1', role: 'restoration' })).toBe(true);
+    expect(impl.supports({ solverType: 'prediction.v1' })).toBe(true);
+    expect(impl.supports({ solverType: 'prediction.v1', role: 'evaluation' })).toBe(false);
     expect(impl.supports({ solverType: 'portfolio.v0', role: 'restoration' })).toBe(false);
     expect(impl.supports({ solverType: '', role: 'restoration' })).toBe(false);
   });

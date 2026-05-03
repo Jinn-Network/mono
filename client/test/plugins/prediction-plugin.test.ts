@@ -25,12 +25,10 @@ function sampleTask() {
       endTs: Date.parse('2026-05-02T06:00:00.000Z'),
     },
     claimPolicy: {
-      kind: 'parallel',
+      mode: 'parallel',
       maxClaims: 25,
-      maxClaimsPerSolver: 1,
-      claimWindow: 'task-window',
-      selection: 'all-valid-solutions-scored',
-      economics: 'testnet-flat',
+      maxClaimsPerOperator: 1,
+      claimLeaseTtlSeconds: 30 * 60,
     },
     spec: {
       question: { kind: 'binary', text: 'Will test pass?', yesLabel: 'YES', noLabel: 'NO' },

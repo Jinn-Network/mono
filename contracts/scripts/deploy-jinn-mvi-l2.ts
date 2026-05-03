@@ -1,11 +1,11 @@
 /**
  * deploy-jinn-mvi-l2.ts — Phase A6 of the Jinn v0 MVI.
  *
- * Deploys the L2 measurement-side `JinnClaimEmitter` on Base / Base
- * Sepolia. The emitter snapshots three monotonic counters (verified
- * creations + novelty-weighted restoration deliveries from the V2
- * checker, evaluation delivery count from the V2 JinnRouter) plus the
- * service multisig from the OLAS ServiceRegistry, and writes the
+ * Deploys the L2 measurement-side `TaskClaimEmitter` on Base / Base
+ * Sepolia. The emitter snapshots three Task-native monotonic weights
+ * (Task creation, Solution delivery, Verdict delivery) from the V3
+ * activity checker plus the service multisig from the OLAS
+ * ServiceRegistry, and writes the
  * snapshot hash into a fixed mapping slot. The L1 messenger
  * (CanonicalOpStackMessenger or β2 OP Succinct variant) recovers
  * those values via a canonical OP-Stack storage proof and feeds the
@@ -17,10 +17,9 @@
  *
  * ## Wiring sources
  *
- *   - V2 router + checker addresses come from
- *     `deployment-phase1b-router-checker-{network}{-fast?}.json` (the
- *     phase1b deploy artifact). Override individually with
- *     `JINN_MVI_L2_ROUTER` and `JINN_MVI_L2_CHECKER` if needed.
+ *   - V3 activity checker address comes from
+ *     `deployment-task-coordinator-router-v3-{network}{-fast?}.json`.
+ *     Override with `JINN_MVI_L2_CHECKER` if needed.
  *   - The OLAS ServiceRegistry address is chain-pinned (Base Sepolia
  *     default) and overridable via `JINN_MVI_L2_REGISTRY`.
  *
@@ -29,22 +28,21 @@
  * Writes `deployment-jinn-mvi-l2-{network}{-fast?}.json` matching the
  * shape consumed by the daemon — see `client/src/earning/contracts.ts`
  * `JinnMviL2Artifact`. The relevant field is
- * `contracts.JinnClaimEmitter`.
+ * `contracts.TaskClaimEmitter`.
  *
  * Usage:
  *   npx hardhat run scripts/deploy-jinn-mvi-l2.ts --network hardhat
  *   npx hardhat run scripts/deploy-jinn-mvi-l2.ts --network base-sepolia
  *
  * Env vars:
- *   JINN_MVI_L2_CHECKER             override RestorationActivityCheckerV2 address
- *   JINN_MVI_L2_ROUTER              override JinnRouterV2 (proxy) address
+ *   JINN_MVI_L2_CHECKER             override TaskActivityCheckerV3 address
  *   JINN_MVI_L2_REGISTRY            override OLAS ServiceRegistry address
- *   JINN_MVI_L2_ARTIFACT_PATH       path to the phase1b deploy artifact
+ *   JINN_MVI_L2_ARTIFACT_PATH       path to the V3 TaskCoordinator deploy artifact
  *                                   (default: alongside this script's
  *                                   working directory)
  *   JINN_MVI_ALLOW_CHAIN            opt in to a non-whitelisted chainId
  *   PHASE1A_TIMING_PROFILE          "canonical" | "fast-test" — selects the
- *                                   phase1b artifact suffix
+ *                                   V3 artifact suffix
  */
 
 import { ethers } from "hardhat";
@@ -69,13 +67,11 @@ const OLAS_SERVICE_REGISTRY_BASE_SEPOLIA =
 interface Phase1bArtifact {
   contracts?: {
     activityChecker?: string;
-    jinnRouterProxy?: string;
   };
 }
 
 interface JinnMviL2Wiring {
   checker: string;
-  router: string;
   registry: string;
 }
 
@@ -101,36 +97,34 @@ function readPhase1bArtifact(artifactPath: string): Phase1bArtifact {
 }
 
 /**
- * Resolve the V2 checker + router addresses, preferring explicit env
- * overrides, then falling back to the phase1b deploy artifact.
+ * Resolve the Task-native checker address, preferring explicit env
+ * overrides, then falling back to the V3 deploy artifact.
  */
-function resolveCheckerRouter(args: {
+function resolveChecker(args: {
   artifactPath?: string;
   env?: Record<string, string | undefined>;
-}): { checker: string; router: string } {
+}): { checker: string } {
   const env = args.env ?? process.env;
   const checker = env.JINN_MVI_L2_CHECKER;
-  const router = env.JINN_MVI_L2_ROUTER;
-  if (checker && router) {
-    return { checker, router };
+  if (checker) {
+    return { checker };
   }
   if (!args.artifactPath) {
     throw new Error(
-      "Phase1b artifact path not provided and JINN_MVI_L2_CHECKER / " +
-        "JINN_MVI_L2_ROUTER not set. Pass JINN_MVI_L2_ARTIFACT_PATH or both " +
-        "addresses explicitly.",
+      "TaskCoordinator/JinnRouterV3 artifact path not provided and " +
+        "JINN_MVI_L2_CHECKER not set. Pass JINN_MVI_L2_ARTIFACT_PATH or the " +
+        "checker address explicitly.",
     );
   }
   const artifact = readPhase1bArtifact(args.artifactPath);
   const fromArtifactChecker = checker ?? artifact.contracts?.activityChecker;
-  const fromArtifactRouter = router ?? artifact.contracts?.jinnRouterProxy;
-  if (!fromArtifactChecker || !fromArtifactRouter) {
+  if (!fromArtifactChecker) {
     throw new Error(
       `Phase1b artifact at ${args.artifactPath} is missing ` +
-        `contracts.activityChecker or contracts.jinnRouterProxy.`,
+        `contracts.activityChecker.`,
     );
   }
-  return { checker: fromArtifactChecker, router: fromArtifactRouter };
+  return { checker: fromArtifactChecker };
 }
 
 /**
@@ -159,16 +153,16 @@ function getJinnMviL2ArtifactName(networkName: string, fastSuffix: boolean): str
   return `deployment-jinn-mvi-l2-${networkName}${suffix}.json`;
 }
 
-function getPhase1bArtifactPath(networkName: string, fastSuffix: boolean): string {
+function getTaskV3ArtifactPath(networkName: string, fastSuffix: boolean): string {
   const suffix = fastSuffix ? "-fast" : "";
   return path.resolve(
     process.cwd(),
-    `deployment-phase1b-router-checker-${networkName}${suffix}.json`,
+    `deployment-task-coordinator-router-v3-${networkName}${suffix}.json`,
   );
 }
 
 /**
- * Deploy `JinnClaimEmitter(checker, router, registry)`. Reads back
+ * Deploy `TaskClaimEmitter(checker, registry)`. Reads back
  * the immutable wiring from chain and asserts that each field lands
  * on the value passed to the constructor. The constructor itself
  * already gates the storage-slot invariant.
@@ -178,12 +172,11 @@ export async function deployJinnMviL2(
   wiring: JinnMviL2Wiring,
 ): Promise<JinnMviL2DeployResult> {
   const Emitter = await ethers.getContractFactory(
-    "src/jinn/cross-chain/JinnClaimEmitter.sol:JinnClaimEmitter",
+    "src/jinn/cross-chain/TaskClaimEmitter.sol:TaskClaimEmitter",
     signer,
   );
   const emitter = await Emitter.deploy(
     wiring.checker,
-    wiring.router,
     wiring.registry,
   );
   const tx = emitter.deploymentTransaction();
@@ -195,16 +188,10 @@ export async function deployJinnMviL2(
   // unlikely case where the wrong factory is deployed (wrong artifact)
   // and gives the operator a single point of confidence.
   const checkerOnChain: string = await emitter.checker();
-  const routerOnChain: string = await emitter.router();
   const registryOnChain: string = await emitter.serviceRegistry();
   if (checkerOnChain.toLowerCase() !== wiring.checker.toLowerCase()) {
     throw new Error(
       `[deployJinnMviL2] checker mismatch: expected ${wiring.checker}, got ${checkerOnChain}`,
-    );
-  }
-  if (routerOnChain.toLowerCase() !== wiring.router.toLowerCase()) {
-    throw new Error(
-      `[deployJinnMviL2] router mismatch: expected ${wiring.router}, got ${routerOnChain}`,
     );
   }
   if (registryOnChain.toLowerCase() !== wiring.registry.toLowerCase()) {
@@ -237,49 +224,43 @@ async function main() {
   const fastSuffix = (process.env.PHASE1A_TIMING_PROFILE ?? "canonical") === "fast-test";
 
   // Resolve wiring. On Hardhat tests we tolerate fully-mocked wiring
-  // because both the phase1b artifact and the ServiceRegistry are
+  // because both the V3 artifact and the ServiceRegistry are
   // unlikely to exist locally.
   let wiring: JinnMviL2Wiring;
   if (chainId === CHAIN_ID_HARDHAT) {
     const env = process.env;
-    if (env.JINN_MVI_L2_CHECKER && env.JINN_MVI_L2_ROUTER && env.JINN_MVI_L2_REGISTRY) {
+    if (env.JINN_MVI_L2_CHECKER && env.JINN_MVI_L2_REGISTRY) {
       wiring = {
         checker: env.JINN_MVI_L2_CHECKER,
-        router: env.JINN_MVI_L2_ROUTER,
         registry: env.JINN_MVI_L2_REGISTRY,
       };
     } else {
       // Spin up local mocks so `npx hardhat run` works with no env.
       console.log(
-        "Hardhat network detected — deploying mock checker/router/registry stubs.",
+        "Hardhat network detected — deploying mock checker/registry stubs.",
       );
-      const Checker = await ethers.getContractFactory("MockCheckerV2");
+      const Checker = await ethers.getContractFactory("MockTaskActivityCheckerSnapshot");
       const checker = await Checker.deploy();
       await checker.waitForDeployment();
-      const Router = await ethers.getContractFactory("MockRouterV2");
-      const router = await Router.deploy();
-      await router.waitForDeployment();
       const Registry = await ethers.getContractFactory("MockServiceRegistryForEmitter");
       const registry = await Registry.deploy();
       await registry.waitForDeployment();
       wiring = {
         checker: await checker.getAddress(),
-        router: await router.getAddress(),
         registry: await registry.getAddress(),
       };
     }
   } else {
-    // Live / testnet path. Read the phase1b artifact + chain-pinned
+    // Live / testnet path. Read the V3 artifact + chain-pinned
     // service registry, allow env overrides for any of the three.
     const normalizedNetwork = networkName === "base-sepolia" ? "baseSepolia" : networkName;
-    const phase1bPath =
+    const v3Path =
       process.env.JINN_MVI_L2_ARTIFACT_PATH
-        ?? getPhase1bArtifactPath(normalizedNetwork, fastSuffix);
-    const checkerRouter = resolveCheckerRouter({ artifactPath: phase1bPath });
+        ?? getTaskV3ArtifactPath(normalizedNetwork, fastSuffix);
+    const checker = resolveChecker({ artifactPath: v3Path });
     const registry = resolveServiceRegistry({ chainId });
     wiring = {
-      checker: checkerRouter.checker,
-      router: checkerRouter.router,
+      checker: checker.checker,
       registry,
     };
   }
@@ -290,15 +271,14 @@ async function main() {
   console.log(
     `Balance:                 ${ethers.formatEther(await ethers.provider.getBalance(deployer.address))} ETH`,
   );
-  console.log(`Activity checker (V2):   ${wiring.checker}`);
-  console.log(`JinnRouter (V2 proxy):   ${wiring.router}`);
+  console.log(`Task activity checker:   ${wiring.checker}`);
   console.log(`OLAS ServiceRegistry:    ${wiring.registry}`);
   console.log();
 
   const result = await deployJinnMviL2(deployer, wiring);
 
   console.log("=== Deployment Summary ===");
-  console.log(`  JinnClaimEmitter   ${result.emitter}`);
+  console.log(`  TaskClaimEmitter   ${result.emitter}`);
   console.log(`  tx                 ${result.txHash}`);
   console.log();
 
@@ -310,9 +290,8 @@ async function main() {
     deployer: deployer.address,
     deployedAt: new Date().toISOString(),
     contracts: {
-      JinnClaimEmitter: result.emitter,
-      RestorationActivityCheckerV2: wiring.checker,
-      JinnRouterV2: wiring.router,
+      TaskClaimEmitter: result.emitter,
+      TaskActivityCheckerV3: wiring.checker,
       ServiceRegistry: wiring.registry,
     },
   };

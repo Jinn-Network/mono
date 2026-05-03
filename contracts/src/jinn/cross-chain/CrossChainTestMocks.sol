@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-/// @notice Test-only mocks for the V2 checker, V2 router, and OLAS
-///         ServiceRegistry surfaces consumed by `JinnClaimEmitter`.
+/// @notice Test-only mocks for legacy V2 checker/router surfaces, plus the
+///         Task-native checker snapshot used by `TaskClaimEmitter`.
 ///         Compiled into the Hardhat artifact set so the TypeScript
 ///         tests can deploy them via getContractFactory.
 
@@ -24,6 +24,24 @@ contract MockRouterV2 {
 
     function setEvaluationDeliveryCount(address multisig, uint256 v) external {
         evaluationDeliveryCount[multisig] = v;
+    }
+}
+
+contract MockTaskActivityCheckerSnapshot {
+    mapping(address => uint256) public taskCreationWeight;
+    mapping(address => uint256) public solutionDeliveryWeight;
+    mapping(address => uint256) public verdictDeliveryWeight;
+
+    function setTaskCreationWeight(address multisig, uint256 v) external {
+        taskCreationWeight[multisig] = v;
+    }
+
+    function setSolutionDeliveryWeight(address multisig, uint256 v) external {
+        solutionDeliveryWeight[multisig] = v;
+    }
+
+    function setVerdictDeliveryWeight(address multisig, uint256 v) external {
+        verdictDeliveryWeight[multisig] = v;
     }
 }
 

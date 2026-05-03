@@ -36,12 +36,6 @@ export function computeDeploymentDigest(config: JinnConfig): {
         config.testnetStolasDeploymentPath ??
         (isTestnet ? DEFAULT_TESTNET_ARTIFACTS.stolas : undefined),
     },
-    {
-      name: 'testnetClaimRegistry',
-      path:
-        config.testnetClaimRegistryDeploymentPath ??
-        (isTestnet ? DEFAULT_TESTNET_ARTIFACTS.claimRegistry : undefined),
-    },
   ];
 
   const artifacts: DeploymentArtifactRow[] = [];

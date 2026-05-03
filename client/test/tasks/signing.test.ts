@@ -3,6 +3,13 @@ import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import { signTaskV1 } from '../../src/tasks/signing.js';
 import { parseSignedTaskV1, type TaskV1 } from '../../src/types/task-document.js';
 
+const DEFAULT_CLAIM_POLICY = {
+  mode: 'parallel' as const,
+  maxClaims: 25,
+  maxClaimsPerOperator: 1,
+  claimLeaseTtlSeconds: 600,
+};
+
 describe('signTaskV1', () => {
   it('produces a SignedTaskV1 that round-trips through parseSignedTaskV1', async () => {
     const pk = generatePrivateKey();
@@ -16,6 +23,7 @@ describe('signTaskV1', () => {
       window: { startTs: 1, endTs: 86400001 },
       spec: {},
       eligibility: {},
+      claimPolicy: DEFAULT_CLAIM_POLICY,
       creator: {
         safeAddress: '0x3333333333333333333333333333333333333333',
         agentEoa: account.address,
@@ -44,6 +52,7 @@ describe('signTaskV1', () => {
       window: { startTs: 1, endTs: 86400001 },
       spec: {},
       eligibility: {},
+      claimPolicy: DEFAULT_CLAIM_POLICY,
       creator: {
         safeAddress: '0x3333333333333333333333333333333333333333',
         agentEoa: account.address,
@@ -72,6 +81,7 @@ describe('signTaskV1', () => {
       window: { startTs: 1, endTs: 86400001 },
       spec: {},
       eligibility: {},
+      claimPolicy: DEFAULT_CLAIM_POLICY,
       creator: {
         safeAddress: '0x3333333333333333333333333333333333333333',
         agentEoa: account.address,
