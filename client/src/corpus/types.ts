@@ -56,6 +56,7 @@ export interface EnvelopeProjection {
 }
 
 export interface EnvelopeProjectionQuery {
+  envelopeRefs?: readonly string[];
   solverType?: string;
   role?: Role;
   taskCid?: string;

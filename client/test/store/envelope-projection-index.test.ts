@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { projectEnvelope } from '../../src/corpus/envelope-projection.js';
 import { Store } from '../../src/store/store.js';
 import type { SignedEnvelope } from '../../src/types/envelope.js';
@@ -101,6 +105,47 @@ describe('Store envelope projection index', () => {
       solutionEnvelopeRef: null,
     });
     expect(results[0].metadata['source.venue']).toBeUndefined();
+  });
+
+  it('migrates older envelope projection tables with missing Task scoreboard columns', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-projection-migration-'));
+    const dbPath = join(dir, 'store.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE envelope_projections (
+        envelope_id TEXT PRIMARY KEY,
+        envelope_cid TEXT,
+        envelope_sha256 TEXT,
+        signature_hash TEXT NOT NULL,
+        solver_type TEXT NOT NULL,
+        role TEXT NOT NULL,
+        task_cid TEXT,
+        request_id TEXT,
+        generated_at INTEGER NOT NULL,
+        evidence_tier TEXT NOT NULL,
+        participant_safe_address TEXT,
+        participant_agent_eoa TEXT,
+        executor_impl_name TEXT,
+        executor_impl_version TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    db.close();
+
+    const migrated = new Store(dbPath);
+    try {
+      const cols = migrated.db.prepare(`PRAGMA table_info(envelope_projections)`).all() as Array<{ name: string }>;
+      const names = new Set(cols.map((col) => col.name));
+      expect(names.has('task_id')).toBe(true);
+      expect(names.has('executor_runtime_bundle_digest')).toBe(true);
+      expect(names.has('executor_plugins_json')).toBe(true);
+      expect(names.has('solution_envelope_ref')).toBe(true);
+      expect(names.has('metadata_json')).toBe(true);
+      expect(migrated.queryEnvelopeProjections({ solverType: 'prediction.v1' })).toEqual([]);
+    } finally {
+      migrated.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -36,6 +36,28 @@ export {
   queryScoreablePredictionBrierVerdicts,
   type ScoreablePredictionBrierVerdictQuery,
 } from './prediction-scoreable-verdicts.js';
+export {
+  DEFAULT_PREDICTION_BRIER_SCOREBOARD_WINDOW_DAYS,
+  aggregatePredictionBrierScoreboard,
+  type PredictionBrierExclusionCounts,
+  type PredictionBrierHarnessSummary,
+  type PredictionBrierMetricSummary,
+  type PredictionBrierOperatorSummary,
+  type PredictionBrierOverallSummary,
+  type PredictionBrierPluginSummary,
+  type PredictionBrierScoreboard,
+  type PredictionBrierScoreboardOptions,
+  type PredictionBrierWeeklySummary,
+} from './prediction-brier-scoreboard.js';
+export {
+  DEFAULT_PREDICTION_SCOREBOARD_REPORT_PATH,
+  buildPredictionBrierScoreboard,
+  queryPredictionBrierScoreboardProjections,
+  renderPredictionBrierScoreboardMarkdown,
+  type BuildPredictionBrierScoreboardOptions,
+  type PredictionBrierScoreboardMarkdownOptions,
+  type PredictionBrierScoreboardProjectionQuery,
+} from './prediction-brier-scoreboard-report.js';
 
 interface InternalDeps {
   fetch?: typeof globalThis.fetch;

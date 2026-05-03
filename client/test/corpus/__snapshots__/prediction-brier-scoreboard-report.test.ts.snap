@@ -1,0 +1,57 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderPredictionBrierScoreboardMarkdown > renders a deterministic Markdown report with headline, trend, attribution, and exclusions 1`] = `
+"# Prediction SolverNet Scoreboard
+
+Generated: 2026-05-03T12:00:00.000Z
+Status: OK
+Window: trailing 84 days ending 2026-05-03T00:00:00.000Z
+
+## Headline
+
+| Metric | Value |
+|---|---:|
+| Mean Brier spread | -0.070000 |
+| Mean solver Brier | 0.090000 |
+| Mean consensus Brier | 0.160000 |
+| Scored Verdicts | 1 |
+| Shared Tasks | 1 |
+| Active operators | 1 |
+
+## Weekly Trend
+
+| Week | Scored Verdicts | Mean Spread | Solver Brier | Consensus Brier | Tasks | Operators |
+|---|---:|---:|---:|---:|---:|---:|
+| 2026-04-27 | 1 | -0.070000 | 0.090000 | 0.160000 | 1 | 1 |
+
+## Operators
+
+| Operator | Scored Verdicts | Mean Spread | Solver Brier | Consensus Brier | Tasks |
+|---|---:|---:|---:|---:|---:|
+| 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | 1 | -0.070000 | 0.090000 | 0.160000 | 1 |
+
+## Harnesses
+
+| Harness | Runtime Digest | Scored Verdicts | Mean Spread | Tasks |
+|---|---:|---:|---:|---:|
+| solver-harness@1.0.0 | sha256:solver-runtime | 1 | -0.070000 | 1 |
+
+## Plugins
+
+| Plugin | Scored Verdicts | Mean Spread | Tasks |
+|---|---:|---:|---:|
+| solver-plugin@1.0.0 | 1 | -0.070000 | 1 |
+
+## Exclusions
+
+| Reason | Count |
+|---|---:|
+| Total input rows | 3 |
+| Included score rows | 1 |
+| Non-prediction/non-Verdict rows | 1 |
+| Non-SCORED Verdict rows | 1 |
+| Missing score rows | 0 |
+| Non-numeric score rows | 0 |
+| Outside trailing window | 0 |
+"
+`;

@@ -263,9 +263,7 @@ CREATE TABLE IF NOT EXISTS envelope_projections (
 );
 CREATE INDEX IF NOT EXISTS idx_envelope_projections_solver_role ON envelope_projections (solver_type, role);
 CREATE INDEX IF NOT EXISTS idx_envelope_projections_task_cid ON envelope_projections (task_cid);
-CREATE INDEX IF NOT EXISTS idx_envelope_projections_task_id ON envelope_projections (task_id);
 CREATE INDEX IF NOT EXISTS idx_envelope_projections_request ON envelope_projections (request_id);
-CREATE INDEX IF NOT EXISTS idx_envelope_projections_solution_ref ON envelope_projections (solution_envelope_ref);
 CREATE INDEX IF NOT EXISTS idx_envelope_projections_generated ON envelope_projections (generated_at DESC);
 
 CREATE TABLE IF NOT EXISTS envelope_projection_metadata (
@@ -308,6 +306,7 @@ export class Store {
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
     this.ensureTaskPostsTaskCoordinatorColumns();
+    this.ensureEnvelopeProjectionColumns();
     this.backfillActivityEvents();
     this.recordLegacyRestorationIntentsIgnored();
   }
@@ -333,6 +332,33 @@ export class Store {
     if (!names.has('task_cid')) {
       this.db.exec(`ALTER TABLE task_posts ADD COLUMN task_cid TEXT`);
     }
+  }
+
+  /** Older local DBs may have the projection table from before Task grouping fields landed. */
+  private ensureEnvelopeProjectionColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(envelope_projections)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    const addColumn = (name: string, ddl: string) => {
+      if (!names.has(name)) this.db.exec(`ALTER TABLE envelope_projections ADD COLUMN ${ddl}`);
+    };
+
+    addColumn('task_id', 'task_id TEXT');
+    addColumn('executor_runtime_bundle_digest', 'executor_runtime_bundle_digest TEXT');
+    addColumn('executor_plugins_json', `executor_plugins_json TEXT NOT NULL DEFAULT '[]'`);
+    addColumn('solution_envelope_cid', 'solution_envelope_cid TEXT');
+    addColumn('solution_envelope_sha256', 'solution_envelope_sha256 TEXT');
+    addColumn('solution_envelope_ref', 'solution_envelope_ref TEXT');
+    addColumn('metadata_json', `metadata_json TEXT NOT NULL DEFAULT '{}'`);
+
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_envelope_projections_task_id ON envelope_projections (task_id)`,
+    );
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_envelope_projections_solution_ref ON envelope_projections (solution_envelope_ref)`,
+    );
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_envelope_projections_generated ON envelope_projections (generated_at DESC)`,
+    );
   }
 
   /**
@@ -1263,6 +1289,19 @@ export class Store {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
+    if (query.envelopeRefs && query.envelopeRefs.length > 0) {
+      const placeholders = query.envelopeRefs.map((ref, index) => {
+        const key = `envelopeRef${index}`;
+        params[key] = ref;
+        return `@${key}`;
+      }).join(', ');
+      conditions.push(
+        `(envelope_id IN (${placeholders})
+          OR envelope_cid IN (${placeholders})
+          OR envelope_sha256 IN (${placeholders})
+          OR signature_hash IN (${placeholders}))`,
+      );
+    }
     if (query.solverType) {
       conditions.push('solver_type = @solverType');
       params['solverType'] = query.solverType;
