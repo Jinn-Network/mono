@@ -124,7 +124,7 @@ describe('gatherPredictionV1Status', () => {
             harness: 'prediction-v1-baseline',
             taskGeneratorEnabled: true,
           },
-          extraPlugins: [],
+          runtimePlugins: [],
           diagnostics: [],
           nextAction: { description: 'Run', cli: 'jinn run' },
         },

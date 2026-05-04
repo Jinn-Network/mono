@@ -80,6 +80,55 @@ export function fakeExecuteSummary(
   });
 }
 
+export function fakePredictionCorpusRetrieval(
+  workingDir: string,
+  opts: {
+    retrievalUsed?: boolean;
+    recordsConsidered?: string[];
+    recordsCited?: string[];
+    recordsUsed?: string[];
+    inspectedRefs?: string[];
+    acquiredArtifacts?: Array<Record<string, unknown>>;
+    affectedForecast?: boolean;
+    probabilityYes?: string;
+    consensusSnapshotRef?: string;
+  } = {},
+): void {
+  const recordsConsidered = opts.recordsConsidered ?? [];
+  const recordsCited = opts.recordsCited ?? [];
+  const recordsUsed = opts.recordsUsed ?? recordsCited;
+  const inspectedRefs = opts.inspectedRefs ?? recordsConsidered.slice(0, 1);
+
+  writeJson(join(workingDir, '.execute', 'prediction-corpus-retrieval.json'), {
+    schemaVersion: 'jinn.prediction_corpus_retrieval.v1',
+    retrievalUsed: opts.retrievalUsed ?? recordsUsed.length > 0,
+    queries: [
+      {
+        tool: 'search_records',
+        intent: 'exact-condition',
+        query: 'solverType:prediction.v1 conditionId:0xabc venue:polymarket',
+      },
+    ],
+    records: {
+      considered: recordsConsidered,
+      inspected: inspectedRefs,
+      cited: recordsCited,
+      used: recordsUsed,
+    },
+    acquiredArtifacts: opts.acquiredArtifacts ?? [],
+    forecast: {
+      probabilityYes: opts.probabilityYes ?? '0.62',
+      consensusSnapshotRef: opts.consensusSnapshotRef ?? 'task.spec.consensusSnapshot',
+    },
+    selfAssessment: {
+      affectedForecast: opts.affectedForecast ?? recordsUsed.length > 0,
+      summary: recordsUsed.length > 0
+        ? 'Prior scored records affected calibration.'
+        : 'Retrieval was attempted but no useful records were found.',
+    },
+  });
+}
+
 export function fakeDebriefAnalysis(
   workingDir: string,
   verdict: 'yes' | 'no' | 'partial',
@@ -91,6 +140,49 @@ export function fakeDebriefAnalysis(
     crossOperatorSignals: [],
     trend: { kind: 'fake', lastNRuns: 0, passRate: 1, direction: 'flat', notableFailureShapes: [] },
     recommendationsForImprove: [],
+  });
+}
+
+export function fakeLearnerFeedback(
+  workingDir: string,
+  opts: {
+    recordsConsidered?: string[];
+    recordsCited?: string[];
+    recordsUsed?: string[];
+    acquiredArtifacts?: Array<Record<string, unknown>>;
+    solverBrier?: string;
+    consensusBrier?: string;
+    brierSpread?: string;
+  } = {},
+): void {
+  writeJson(join(workingDir, '.debrief', 'learner-feedback.json'), {
+    schemaVersion: 'jinn.learner_feedback.v1',
+    task: { solverType: 'prediction.v1' },
+    skillsUsed: ['prediction-corpus-retrieval'],
+    toolsUsed: ['get_task', 'search_records', 'inspect_record'],
+    retrieval: {
+      queries: [
+        { tool: 'search_records', intent: 'similar-scored-verdicts', query: 'prediction.v1 scored verdict' },
+      ],
+      recordsConsidered: opts.recordsConsidered ?? [],
+      recordsCited: opts.recordsCited ?? [],
+      recordsUsed: opts.recordsUsed ?? opts.recordsCited ?? [],
+      acquiredArtifacts: opts.acquiredArtifacts ?? [],
+    },
+    forecast: {
+      probabilityYes: '0.62',
+      consensusSnapshotRef: 'task.spec.consensusSnapshot',
+    },
+    selfAssessment: {
+      affectedForecast: (opts.recordsUsed ?? opts.recordsCited ?? []).length > 0,
+      summary: 'Captured learner-facing evidence for future strategy analysis.',
+    },
+    verdictFeedback: {
+      verdictRef: 'verdict:prediction-v1:example',
+      solverBrier: opts.solverBrier ?? '0.144400',
+      consensusBrier: opts.consensusBrier ?? '0.184900',
+      brierSpread: opts.brierSpread ?? '-0.040500',
+    },
   });
 }
 

@@ -1,0 +1,29 @@
+{
+  "name": "@jinn-network/network-tools",
+  "version": "0.1.0",
+  "description": "Network Tools for agent Harnesses. Declares shared runtime MCP tooling provided by the client runtime; SolverNet contracts remain the canonical protocol and schema authority.",
+  "jinn": {
+    "supports": ["jinn.runtime"],
+    "capabilities": {
+      "tools": {
+        "jinn-runtime": [
+          "search_records",
+          "inspect_record",
+          "acquire_artifact",
+          "get_task"
+        ]
+      }
+    },
+    "mcpServers": {
+      "jinn-runtime": {
+        "providedBy": "jinn-client-runtime",
+        "tools": [
+          "search_records",
+          "inspect_record",
+          "acquire_artifact",
+          "get_task"
+        ]
+      }
+    }
+  }
+}

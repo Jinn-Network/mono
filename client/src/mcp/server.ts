@@ -18,13 +18,15 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
-import { handleSearchArtifactsOrLocalFallback } from './search-artifacts.js';
+import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
 
 const server = new McpServer({
   name: 'jinn-client',
   version: '0.1.0',
 });
+
+const metadataValueSchema = z.union([z.string(), z.number(), z.boolean()]);
 
 // Read task from env vars (passed by ClaudeRunner)
 const task = {
@@ -46,17 +48,18 @@ const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
 const daemonApiToken = process.env['DAEMON_API_TOKEN'] ?? '';
 
 // ── Corpus ──────────────────────────────────────────────────────────────────
-// Build a query-only corpus capability when the daemon supplied the keyless
-// URLs. The MCP subprocess gets `Pick<Corpus, 'query'>` — `acquire` and
-// `acquireBySha256` are NOT exposed here, so any future call site in this
-// process structurally cannot reach into the signer. `acquire_artifact`
-// proxies to the daemon over DAEMON_API_URL (which holds the agent EOA
-// private key in-process). See spec §4.
+// Build a read-only corpus capability when the daemon supplied the keyless
+// URLs. The MCP subprocess gets only `query` and `fetchManifest`; `read`,
+// `acquire`, and `acquireBySha256` are NOT exposed here, so discovery and
+// inspection can fetch manifests but cannot trigger x402/payment or artifact
+// byte acquisition. `acquire_artifact` proxies to the daemon over
+// DAEMON_API_URL (which holds the agent EOA private key in-process). See spec
+// §4.
 //
 // `signer.privateKey` and `selfSafeAddress` are required by CorpusOptions
-// but unused by corpus.query. Placeholder values are confined to this
-// closure and never escape via the returned object.
-function buildCorpusQuery(): Pick<Corpus, 'query'> | null {
+// but unused by corpus.query/fetchManifest. Placeholder values are confined
+// to this closure and never escape via the returned object.
+function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
   if (!store) return null;
   const subgraphUrl = process.env['JINN_CORPUS_SUBGRAPH_URL'] ?? '';
   const ipfsGatewayUrl = process.env['JINN_CORPUS_IPFS_GATEWAY_URL'] ?? '';
@@ -70,9 +73,12 @@ function buildCorpusQuery(): Pick<Corpus, 'query'> | null {
     signer: { privateKey: '0x0' },
     selfSafeAddress: '0x0000000000000000000000000000000000000000',
   });
-  return { query: full.query.bind(full) };
+  return {
+    query: full.query.bind(full),
+    fetchManifest: full.fetchManifest.bind(full),
+  };
 }
-const corpus = buildCorpusQuery();
+const corpus = buildReadOnlyCorpus();
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -224,12 +230,20 @@ server.tool(
 );
 
 server.tool(
-  'search_artifacts',
-  'Search the corpus for relevant past trajectories and artifacts. Returns local fast-path hits (own served + cached network) plus subgraph-indexed network manifests with their full envelopes.',
+  'search_records',
+  'Search local and network corpus records. Returns lightweight record refs, envelope refs, artifact refs, source, access, and price metadata. This tool is read-only and never acquires artifact bytes.',
   {
     solverType: z.string().optional().describe('SolverType filter, e.g. "prediction.v1"'),
     artifactType: z.string().optional().describe('Artifact type filter, e.g. "output.prediction.v1"'),
     taskCid: z.string().optional().describe('Filter to a specific task CID'),
+    role: z.enum(['restoration', 'verdict']).optional().describe('Envelope role filter'),
+    taskId: z.string().optional().describe('Runtime task id filter for local envelope projections'),
+    requestId: z.string().optional().describe('On-chain request id filter'),
+    participant: z.object({
+      safeAddress: z.string().optional().describe('Participant Safe address filter'),
+      agentEoa: z.string().optional().describe('Participant agent EOA filter for local envelope projections'),
+    }).optional().describe('Participant identity filters'),
+    metadata: z.record(metadataValueSchema).optional().describe('Exact metadata key/value filters for local envelope projections'),
     evidenceTier: z.enum(['self-signed', 'committed', 'attested']).optional(),
     generatedAfter: z.number().int().optional().describe('Unix seconds — only manifests published after this time'),
     generatedBefore: z.number().int().optional().describe('Unix seconds — only manifests published before this time'),
@@ -238,10 +252,44 @@ server.tool(
   async (args) => {
     if (!store) {
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured', local: [], network: [] }) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured', records: [] }) }],
       };
     }
-    const out = await handleSearchArtifactsOrLocalFallback(corpus, store, args);
+    const out = await handleSearchRecords(corpus, store, args);
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(out) }],
+    };
+  },
+);
+
+server.tool(
+  'inspect_record',
+  'Inspect a local or network corpus record by record, envelope, projection, or artifact ref. Returns index-card metadata and acquisition costs without acquiring artifact bytes.',
+  {
+    ref: z.string().optional().describe('Any record/envelope/projection/artifact ref returned by search_records'),
+    recordRef: z.string().optional(),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    envelopeCid: z.string().optional(),
+    manifestCid: z.string().optional(),
+    projectionRef: z.string().optional(),
+    envelopeRef: z.object({
+      manifestCid: z.string(),
+      manifestHash: z.string(),
+      operator: z.object({
+        agentId: z.string(),
+        safeAddress: z.string(),
+      }),
+      evidenceTier: z.enum(['self-signed', 'committed', 'attested', 'unknown']),
+      publishedAt: z.number(),
+    }).optional(),
+  },
+  async (args) => {
+    if (!store) {
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured', record: null, projections: [], artifacts: [] }) }],
+      };
+    }
+    const out = await handleInspectRecord(corpus, store, args as InspectRecordArgs);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(out) }],
     };

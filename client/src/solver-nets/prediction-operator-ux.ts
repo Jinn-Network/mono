@@ -47,8 +47,7 @@ export interface PredictionOperatorStatus {
     harness?: string;
     taskGeneratorEnabled: boolean;
   };
-  canonicalPlugin?: PredictionPluginStatus;
-  extraPlugins: PredictionPluginStatus[];
+  runtimePlugins: PredictionPluginStatus[];
   harness?: {
     name: string;
     version: string;
@@ -64,7 +63,7 @@ export interface PredictionOperatorStatus {
 }
 
 export interface PredictionPluginStatus {
-  role: RuntimePlugin['role'];
+  provenance: RuntimePlugin['provenance'];
   source: string | null;
   name?: string;
   version?: string;
@@ -124,13 +123,13 @@ function sourceOf(entry: SolverPluginEntry | undefined): string | null {
 }
 
 function pluginStatus(
-  role: RuntimePlugin['role'],
+  provenance: RuntimePlugin['provenance'],
   source: string | null,
   plugin?: RuntimePlugin,
 ): PredictionPluginStatus {
   return {
-    role,
-    source,
+    provenance,
+    source: plugin?.source ?? source,
     ...(plugin
       ? {
           name: plugin.name,
@@ -190,7 +189,7 @@ function missingSolverNetStatus(
       solverType: 'prediction.v1',
       taskGeneratorEnabled: false,
     },
-    extraPlugins: [],
+    runtimePlugins: [],
     diagnostics,
     nextAction: diagnosticNextAction(diagnostics),
   };
@@ -250,9 +249,9 @@ export async function buildPredictionOperatorStatus({
         code: 'prediction_plugin_unavailable',
         severity: 'error',
         message: pluginLoadError,
-        configField: `solverNets.${name}.canonicalPlugin`,
+        configField: `solverNets.${name}.plugins`,
         nextAction: {
-          description: 'Fix the Prediction SolverPlugin source or restore the bundled plugin.',
+          description: 'Fix the Prediction runtime plugin source or restore the bundled plugin.',
           cli: `jinn solver-nets show ${name}`,
         },
       });
@@ -383,7 +382,6 @@ export async function buildPredictionOperatorStatus({
     });
   }
 
-  const extraPluginSources = net.plugins.map(sourceOf);
   const status: PredictionOperatorStatus = {
     kind: 'prediction.v1.operatorStatus',
     ok: diagnostics.every((diagnostic) => diagnostic.severity !== 'error'),
@@ -395,22 +393,13 @@ export async function buildPredictionOperatorStatus({
       harness: net.harness,
       taskGeneratorEnabled: net.taskGenerator.enabled,
     },
-    canonicalPlugin: pluginStatus(
-      'canonical',
-      sourceOf(net.canonicalPlugin),
-      loadedNet?.canonicalPlugin,
-    ),
-    extraPlugins: loadedNet
-      ? loadedNet.plugins.map((plugin, index) => pluginStatus('extra', extraPluginSources[index] ?? null, plugin))
-      : extraPluginSources.map((source) => pluginStatus('extra', source)),
+    runtimePlugins: loadedNet
+      ? loadedNet.runtimePlugins.map((plugin) => pluginStatus(plugin.provenance, plugin.source, plugin))
+      : net.plugins.map((entry) => pluginStatus('configured', sourceOf(entry))),
     ...(harnessStatus ? { harness: harnessStatus } : {}),
     diagnostics,
     nextAction: diagnosticNextAction(diagnostics),
   };
-
-  if (pluginLoadError && !status.canonicalPlugin?.source) {
-    status.canonicalPlugin = pluginStatus('canonical', sourceOf(net.canonicalPlugin));
-  }
 
   return status;
 }

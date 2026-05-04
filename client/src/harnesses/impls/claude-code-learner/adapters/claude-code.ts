@@ -10,6 +10,21 @@ export interface ClaudeCodeHarnessAdapterConfig {
   /** Optional model override (e.g. 'claude-sonnet-4-6'). */
   claudeModel?: string;
   /**
+   * Local SQLite store path forwarded to the Jinn client MCP server exposed by
+   * Network Tools. Without it, read-only record search degrades to an empty
+   * no-store response.
+   */
+  storePath?: string;
+  /** Daemon API URL used by explicit cost-mutating MCP tools such as acquire_artifact. */
+  daemonApiUrl?: string;
+  /** Bearer token for daemon API cost-mutating routes. */
+  daemonApiToken?: string;
+  /** Keyless corpus endpoints for read-only record search and inspection. */
+  corpusEnv?: {
+    subgraphUrl?: string;
+    ipfsGatewayUrl?: string;
+  };
+  /**
    * Plugin install directory for Claude Code. Defaults to
    * `~/.claude/plugins/`. The adapter copies (or symlinks) the plugin
    * into this directory before spawning.
@@ -62,6 +77,20 @@ function buildAgentEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   return { ...env, ...extra };
 }
 
+function stringField(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function taskContextJson(inputs: TaskSessionInputs): string {
+  const context = inputs.taskBody?.context;
+  if (!context || typeof context !== 'object') return '';
+  try {
+    return JSON.stringify(context);
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Construct the initial prompt that invokes the coordinator skill with
  * the task context.
@@ -104,12 +133,20 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
 
   private readonly claudePath: string;
   private readonly claudeModel: string | undefined;
+  private readonly storePath: string | undefined;
+  private readonly daemonApiUrl: string | undefined;
+  private readonly daemonApiToken: string | undefined;
+  private readonly corpusEnv: ClaudeCodeHarnessAdapterConfig['corpusEnv'];
   private readonly pluginInstallDir: string;
   private readonly spawnFn: typeof spawn;
 
   constructor(config: ClaudeCodeHarnessAdapterConfig = {}) {
     this.claudePath = config.claudePath ?? 'claude';
     this.claudeModel = config.claudeModel;
+    this.storePath = config.storePath;
+    this.daemonApiUrl = config.daemonApiUrl;
+    this.daemonApiToken = config.daemonApiToken;
+    this.corpusEnv = config.corpusEnv;
     this.pluginInstallDir = config.pluginInstallDir ?? join(homedir(), '.claude', 'plugins');
     this.spawnFn = config._spawnFn ?? spawn;
   }
@@ -134,6 +171,17 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       WORKING_DIR: inputs.workingDir,
       JINN_WORKING_DIR: inputs.workingDir,
       JINN_CLAUDE_CODE_LEARNER_PLUGIN_ROOT: pluginRoot,
+      DESIRED_STATE_ID: inputs.taskId,
+      DESIRED_STATE_DESCRIPTION: stringField(inputs.taskBody?.description),
+      DESIRED_STATE_CONTEXT: taskContextJson(inputs),
+      DESIRED_STATE_ROLE: stringField(inputs.taskBody?.role),
+      RESTORATION_REQUEST_ID: stringField(inputs.taskBody?.restorationRequestId),
+      REQUEST_ID: inputs.requestId ?? inputs.taskId,
+      STORE_PATH: this.storePath ?? '',
+      DAEMON_API_URL: this.daemonApiUrl ?? '',
+      DAEMON_API_TOKEN: this.daemonApiToken ?? '',
+      JINN_CORPUS_SUBGRAPH_URL: this.corpusEnv?.subgraphUrl ?? '',
+      JINN_CORPUS_IPFS_GATEWAY_URL: this.corpusEnv?.ipfsGatewayUrl ?? '',
       ...(inputs.adapterEnv ?? {}),
     });
 

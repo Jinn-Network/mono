@@ -1,0 +1,12 @@
+{
+  "name": "network-tools",
+  "version": "0.1.0",
+  "description": "Network Tools for agent Harnesses. Exposes the Jinn client MCP tools as a Claude Code plugin.",
+  "mcpServers": {
+    "jinn-client": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/jinn-client-server.mjs"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+    }
+  }
+}

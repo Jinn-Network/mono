@@ -290,7 +290,6 @@ describe('update command', () => {
         prediction: {
           enabled: true,
           solverType: 'prediction.v1',
-          canonicalPlugin: 'bundled:jinn-prediction-plugin',
           harness: 'claude-code-learner',
           plugins: [],
           taskGenerator: { enabled: true },

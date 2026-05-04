@@ -70,10 +70,11 @@ export interface ApiServerConfig {
    * `access.endpoint` URLs and drain the operator's USDC balance via the
    * payment dance.
    *
-   * Asymmetry with `search_artifacts`: search is keyless (subgraph + IPFS
-   * gateway only) and stays client-side in the MCP server. Acquire is the
-   * only path that needs the signing key for x402 payments, so it's the only
-   * one that moves to the daemon. See spec/2026-04-30-phase-a-umbrella.md §4.
+   * Asymmetry with `search_records` / `inspect_record`: record discovery is
+   * keyless (subgraph + IPFS gateway only) and stays client-side in the MCP
+   * server. Artifact acquisition is the only path that needs the signing key
+   * for x402 payments, so it's the only one that moves to the daemon. See
+   * spec/2026-04-30-phase-a-umbrella.md §4.
    */
   corpus?: Corpus | (() => Corpus | undefined);
   /** When set, GET /v1/bootstrap reads <earningDir>/earning_state.json. */
@@ -331,9 +332,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // NOT be exposed across the network without an auth layer because the
   // daemon will sign x402 payments on the caller's behalf.
   //
-  // Asymmetry with `search_artifacts`: that path stays client-side because
-  // subgraph queries and IPFS manifest fetches are keyless. Only the buyer
-  // side of x402 needs the signing key, so only the buyer path moves here.
+  // Asymmetry with `search_records` / `inspect_record`: record lookup stays
+  // client-side because subgraph queries and IPFS manifest fetches are keyless.
+  // Only the buyer side of x402 needs the signing key, so only the buyer path
+  // moves here.
   // See spec/2026-04-30-phase-a-umbrella.md §4.
   if (config.corpus) {
     const resolveCorpus = (): Corpus | undefined =>

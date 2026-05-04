@@ -6,6 +6,10 @@ import {
   harvestOutput,
   requiredReadJson,
 } from '../../../../src/harnesses/impls/claude-code-learner/harvest.js';
+import {
+  fakeLearnerFeedback,
+  fakePredictionCorpusRetrieval,
+} from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
 
 function writePhaseArtifact(workingDir: string, phase: string, fileName: string, payload: unknown): void {
   const dir = join(workingDir, `.${phase}`);
@@ -239,5 +243,149 @@ describe('harvestOutput', () => {
     writeFullPipeline(workingDir);
     const out = harvestOutput(workingDir, 'full');
     expect(out.venueRef.name).toEqual('claude-code-learner');
+  });
+
+  // ── Optional learner feedback artifacts ───────────────────────────────────
+
+  it('does not invent learner feedback artifacts when retrieval output is absent', () => {
+    writeFullPipeline(workingDir);
+    const out = harvestOutput(workingDir, 'full');
+    expect(out.artifacts ?? []).toEqual([]);
+    expect(out.informational?.learnerFeedbackArtifacts).toBeUndefined();
+  });
+
+  it('harvests prediction corpus retrieval attempts with no results', () => {
+    writeFullPipeline(workingDir);
+    fakePredictionCorpusRetrieval(workingDir, {
+      retrievalUsed: false,
+      recordsConsidered: [],
+      recordsCited: [],
+      recordsUsed: [],
+      inspectedRefs: [],
+      affectedForecast: false,
+    });
+
+    const out = harvestOutput(workingDir, 'full');
+    expect(out.artifacts).toEqual([
+      expect.objectContaining({
+        path: '.execute/prediction-corpus-retrieval.json',
+        artifactType: 'prediction_corpus_retrieval',
+        tags: expect.arrayContaining(['learner-feedback', 'prediction', 'corpus-retrieval']),
+        access: { priceUsdc: '0' },
+        metadata: expect.objectContaining({
+          schema: 'jinn.prediction_corpus_retrieval.v1',
+          source: 'agent-authored',
+          queries: 1,
+          recordsConsidered: 0,
+          recordsCited: 0,
+          recordsUsed: 0,
+          inspectedRefs: 0,
+          acquiredArtifacts: 0,
+          retrievalUsed: false,
+          affectedForecast: false,
+        }),
+      }),
+    ]);
+  });
+
+  it('harvests cited and used prediction corpus record refs without ranking in the Harness', () => {
+    writeFullPipeline(workingDir);
+    fakePredictionCorpusRetrieval(workingDir, {
+      recordsConsidered: ['record:older', 'record:same-condition'],
+      recordsCited: ['record:same-condition'],
+      recordsUsed: ['record:same-condition'],
+      inspectedRefs: ['projection:same-condition'],
+      affectedForecast: true,
+    });
+
+    const out = harvestOutput(workingDir, 'full');
+    expect(out.artifacts?.[0]).toMatchObject({
+      path: '.execute/prediction-corpus-retrieval.json',
+      metadata: {
+        recordsConsidered: 2,
+        recordsCited: 1,
+        recordsUsed: 1,
+        inspectedRefs: 1,
+        affectedForecast: true,
+      },
+    });
+    expect(requiredReadJson(join(workingDir, '.execute', 'prediction-corpus-retrieval.json'))).toMatchObject({
+      records: {
+        cited: ['record:same-condition'],
+        used: ['record:same-condition'],
+      },
+    });
+  });
+
+  it('preserves explicit acquisition and payment metadata authored by the agent', () => {
+    writeFullPipeline(workingDir);
+    fakePredictionCorpusRetrieval(workingDir, {
+      recordsConsidered: ['record:paid-context'],
+      recordsCited: ['record:paid-context'],
+      acquiredArtifacts: [
+        {
+          artifactRef: 'artifact:paid-analysis',
+          priceUsdc: '0.25',
+          acquisition: {
+            tool: 'acquire_artifact',
+            status: 'paid',
+            txHash: '0xabc123',
+          },
+          reason: 'Needed full prior reasoning to resolve an ambiguity.',
+        },
+      ],
+    });
+
+    const out = harvestOutput(workingDir, 'full');
+    expect(out.artifacts?.[0].metadata).toMatchObject({
+      acquiredArtifacts: 1,
+    });
+    expect(requiredReadJson(join(workingDir, '.execute', 'prediction-corpus-retrieval.json'))).toMatchObject({
+      acquiredArtifacts: [
+        {
+          priceUsdc: '0.25',
+          acquisition: {
+            tool: 'acquire_artifact',
+            status: 'paid',
+            txHash: '0xabc123',
+          },
+        },
+      ],
+    });
+  });
+
+  it('harvests verdict-linked generic learner feedback when debrief writes it', () => {
+    writeFullPipeline(workingDir);
+    fakeLearnerFeedback(workingDir, {
+      recordsConsidered: ['record:a', 'record:b'],
+      recordsCited: ['record:b'],
+      recordsUsed: ['record:b'],
+      solverBrier: '0.144400',
+      consensusBrier: '0.184900',
+      brierSpread: '-0.040500',
+    });
+
+    const out = harvestOutput(workingDir, 'full');
+    expect(out.artifacts).toEqual([
+      expect.objectContaining({
+        path: '.debrief/learner-feedback.json',
+        artifactType: 'learner_feedback',
+        metadata: expect.objectContaining({
+          schema: 'jinn.learner_feedback.v1',
+          queries: 1,
+          recordsConsidered: 2,
+          recordsCited: 1,
+          recordsUsed: 1,
+          acquiredArtifacts: 0,
+          hasVerdictFeedback: true,
+        }),
+      }),
+    ]);
+    expect(out.informational?.learnerFeedbackArtifacts).toEqual([
+      expect.objectContaining({
+        path: '.debrief/learner-feedback.json',
+        artifactType: 'learner_feedback',
+      }),
+    ]);
   });
 });

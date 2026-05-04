@@ -121,7 +121,7 @@ function predictionOperatorUnavailable(
       harness: net?.harness,
       taskGeneratorEnabled: net?.taskGenerator.enabled ?? false,
     },
-    extraPlugins: [],
+    runtimePlugins: [],
     diagnostics: [diagnostic],
     nextAction: diagnostic.nextAction,
   };

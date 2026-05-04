@@ -76,11 +76,12 @@ interface StatusV1 {
         harness?: string;
         taskGeneratorEnabled?: boolean;
       };
-      canonicalPlugin?: {
+      runtimePlugins?: Array<{
         name?: string;
         version?: string;
         source?: string | null;
-      };
+        provenance?: string;
+      }>;
       harness?: {
         name: string;
         version: string;
@@ -317,9 +318,13 @@ function PredictionPanel({ status }: { status?: StatusV1 }): JSX.Element {
     : prediction
       ? 'var(--wane)'
       : 'var(--fg-dim)';
-  const pluginLabel = operator?.canonicalPlugin?.name
-    ? `${operator.canonicalPlugin.name}@${operator.canonicalPlugin.version ?? 'unknown'}`
-    : operator?.canonicalPlugin?.source ?? '—';
+  const pluginLabel = operator?.runtimePlugins?.length
+    ? operator.runtimePlugins
+        .map((plugin) => plugin.name
+          ? `${plugin.name}@${plugin.version ?? 'unknown'}`
+          : plugin.source ?? 'unknown')
+        .join(', ')
+    : '—';
   const harnessLabel = operator?.harness
     ? `${operator.harness.name}@${operator.harness.version}`
     : operator?.solverNet?.harness ?? '—';
@@ -350,7 +355,7 @@ function PredictionPanel({ status }: { status?: StatusV1 }): JSX.Element {
         >
           <PredictionDetail label="solver net" value={operator?.solverNet?.name ?? 'prediction'} />
           <PredictionDetail label="harness" value={harnessLabel} />
-          <PredictionDetail label="plugin" value={pluginLabel} />
+          <PredictionDetail label="runtime plugins" value={pluginLabel} />
           <PredictionDetail label="task generator" value={operator?.solverNet?.taskGeneratorEnabled ? 'enabled' : 'disabled'} />
           <PredictionDetail label="latest solution" value={formatTimestamp(prediction?.latest?.solutionAt)} />
           <PredictionDetail label="latest verdict" value={formatTimestamp(prediction?.latest?.verdictAt)} />

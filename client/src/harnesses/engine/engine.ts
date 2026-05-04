@@ -78,8 +78,7 @@ export interface SolverNetRegistryLike {
     name: string;
     solverType: string;
     harness: string;
-    canonicalPlugin: RuntimePlugin;
-    plugins: RuntimePlugin[];
+    runtimePlugins: RuntimePlugin[];
   } | undefined;
 }
 
@@ -586,9 +585,7 @@ export class TaskEngine {
     if (!impl) {
       throw new NotImplementedError('runImpl');
     }
-    const runtimePlugins: RuntimePlugin[] = solverNet
-      ? [solverNet.canonicalPlugin, ...solverNet.plugins]
-      : [];
+    const runtimePlugins: RuntimePlugin[] = solverNet?.runtimePlugins ?? [];
     this.runtimePluginsByRequest.set(task.requestId, runtimePlugins);
 
     const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
@@ -619,6 +616,7 @@ export class TaskEngine {
           role,
           window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
         }) as import('../../types/task.js').Task,
+        requestId: task.requestId,
         taskCid: task.taskCid,
         solverNet: solverNet ? { name: solverNet.name, solverType: solverNet.solverType } : undefined,
         runtimePlugins,

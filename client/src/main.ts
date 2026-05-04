@@ -937,7 +937,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
 
   const solverNetRegistry = await loadSolverNets(config);
   for (const net of solverNetRegistry.list()) {
-    const plugins = [net.canonicalPlugin, ...net.plugins]
+    const plugins = net.runtimePlugins
       .map((plugin) => `${plugin.name}@${plugin.version}`)
       .join(', ');
     console.log(
@@ -1208,7 +1208,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   if (!corpusFactory) {
     console.warn(
       '[main] Corpus disabled (config.subgraphUrl not set); ' +
-        'MCP acquire_artifact / search_artifacts network branches will be unavailable.',
+        'MCP record lookup and artifact acquisition network branches will be unavailable.',
     );
   }
 

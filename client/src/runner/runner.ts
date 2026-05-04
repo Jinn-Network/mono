@@ -16,12 +16,12 @@ export interface RunnerContext {
    */
   daemonApiToken?: string;
   /**
-   * Optional corpus configuration forwarded to the MCP subprocess so its
-   * `search_artifacts` tool can hit the keyless subgraph + IPFS gateway.
-   * `acquire_artifact` no longer needs anything from this block — it
-   * proxies to the daemon at `daemonApiUrl` and the daemon owns the agent
-   * EOA private key. When omitted, both tools fall back to local-only
-   * behavior. Spec: spec/2026-04-30-phase-a-umbrella.md §4.
+   * Optional corpus configuration forwarded to the MCP subprocess so
+   * `search_records` / `inspect_record` can hit the keyless subgraph + IPFS
+   * gateway. `acquire_artifact` no longer needs anything from this block — it
+   * proxies to the daemon at `daemonApiUrl` and the daemon owns the agent EOA
+   * private key. When omitted, record lookup and artifact acquisition fall
+   * back to local-only behavior. Spec: spec/2026-04-30-phase-a-umbrella.md §4.
    */
   corpusEnv?: {
     subgraphUrl?: string;

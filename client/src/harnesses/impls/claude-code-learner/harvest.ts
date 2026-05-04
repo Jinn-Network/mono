@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import type { OutputArtifact } from '../../../types/portfolio.js';
 import type { Solution } from '../../types.js';
 
 const PHASE_ORDER = [
@@ -32,11 +33,43 @@ const REQUIRED_PHASES: Record<PhaseRange, Phase[]> = {
   'post-execute': ['debrief', 'improve', 'memory-consolidation'],
 };
 
+const OPTIONAL_LEARNER_ARTIFACTS = [
+  {
+    path: '.execute/prediction-corpus-retrieval.json',
+    artifactType: 'prediction_corpus_retrieval',
+    schema: 'jinn.prediction_corpus_retrieval.v1',
+    tags: ['learner-feedback', 'prediction', 'corpus-retrieval'],
+  },
+  {
+    path: 'prediction-corpus-retrieval.json',
+    artifactType: 'prediction_corpus_retrieval',
+    schema: 'jinn.prediction_corpus_retrieval.v1',
+    tags: ['learner-feedback', 'prediction', 'corpus-retrieval'],
+  },
+  {
+    path: '.debrief/learner-feedback.json',
+    artifactType: 'learner_feedback',
+    schema: 'jinn.learner_feedback.v1',
+    tags: ['learner-feedback', 'prediction'],
+  },
+  {
+    path: 'learner-feedback.json',
+    artifactType: 'learner_feedback',
+    schema: 'jinn.learner_feedback.v1',
+    tags: ['learner-feedback', 'prediction'],
+  },
+] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function safeReadJson(path: string): Record<string, unknown> | null {
   if (!existsSync(path)) return null;
   try {
     const text = readFileSync(path, 'utf8');
-    return JSON.parse(text) as Record<string, unknown>;
+    const parsed = JSON.parse(text) as unknown;
+    return isRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -60,11 +93,33 @@ export function requiredReadJson(path: string): Record<string, unknown> {
     );
   }
   try {
-    return JSON.parse(text) as Record<string, unknown>;
+    const parsed = JSON.parse(text) as unknown;
+    if (!isRecord(parsed)) {
+      throw new Error('expected a JSON object');
+    }
+    return parsed;
   } catch (err) {
     throw new Error(
       `Required artifact contains invalid JSON: ${path}: ${err instanceof Error ? err.message : String(err)}`,
     );
+  }
+}
+
+function readOptionalLearnerArtifact(path: string): Record<string, unknown> | null {
+  if (!existsSync(path)) return null;
+  try {
+    const text = readFileSync(path, 'utf8');
+    const parsed = JSON.parse(text) as unknown;
+    if (!isRecord(parsed)) {
+      console.warn(`[claude-code-learner] harvestOutput: learner artifact skipped; expected JSON object — ${path}`);
+      return null;
+    }
+    return parsed;
+  } catch (err) {
+    console.warn(
+      `[claude-code-learner] harvestOutput: learner artifact skipped; invalid JSON — ${path}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
   }
 }
 
@@ -89,6 +144,78 @@ function resolvePhaseRange(override?: string): PhaseRange {
   const raw = override ?? process.env.JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE ?? 'full';
   if (raw === 'pre-execute' || raw === 'post-execute') return raw;
   return 'full';
+}
+
+function lengthOf(value: unknown): number | undefined {
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+function nestedRecord(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = record[key];
+  return isRecord(value) ? value : null;
+}
+
+function summarizeLearnerArtifact(payload: Record<string, unknown>): Record<string, unknown> {
+  const records = nestedRecord(payload, 'records');
+  const retrieval = nestedRecord(payload, 'retrieval');
+  const inspectedRefs = payload['inspectedRefs'] ?? records?.['inspected'] ?? retrieval?.['inspectedRefs'];
+  const acquiredArtifacts = payload['acquiredArtifacts'] ?? retrieval?.['acquiredArtifacts'];
+  const selfAssessment = nestedRecord(payload, 'selfAssessment');
+  const verdictFeedback = payload['verdictFeedback'] ?? payload['postVerdict'] ?? payload['outcome'];
+  const summary: Record<string, unknown> = {};
+
+  const queries = lengthOf(payload['queries'] ?? payload['searchIntents'] ?? retrieval?.['queries']);
+  if (queries !== undefined) summary.queries = queries;
+
+  const considered = lengthOf(payload['recordsConsidered'] ?? records?.['considered'] ?? retrieval?.['recordsConsidered']);
+  if (considered !== undefined) summary.recordsConsidered = considered;
+
+  const cited = lengthOf(payload['recordsCited'] ?? records?.['cited'] ?? retrieval?.['recordsCited']);
+  if (cited !== undefined) summary.recordsCited = cited;
+
+  const used = lengthOf(payload['recordsUsed'] ?? records?.['used'] ?? retrieval?.['recordsUsed']);
+  if (used !== undefined) summary.recordsUsed = used;
+
+  const inspected = lengthOf(inspectedRefs);
+  if (inspected !== undefined) summary.inspectedRefs = inspected;
+
+  const acquired = lengthOf(acquiredArtifacts);
+  if (acquired !== undefined) summary.acquiredArtifacts = acquired;
+
+  if (typeof payload['retrievalUsed'] === 'boolean') summary.retrievalUsed = payload['retrievalUsed'];
+  if (typeof selfAssessment?.['affectedForecast'] === 'boolean') {
+    summary.affectedForecast = selfAssessment['affectedForecast'];
+  }
+  if (verdictFeedback !== undefined) summary.hasVerdictFeedback = true;
+
+  return summary;
+}
+
+function collectLearnerArtifacts(workingDir: string): OutputArtifact[] {
+  const artifacts: OutputArtifact[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of OPTIONAL_LEARNER_ARTIFACTS) {
+    if (seen.has(candidate.path)) continue;
+    const fullPath = join(workingDir, candidate.path);
+    const payload = readOptionalLearnerArtifact(fullPath);
+    if (!payload) continue;
+    seen.add(candidate.path);
+
+    artifacts.push({
+      path: candidate.path,
+      artifactType: candidate.artifactType,
+      tags: [...candidate.tags],
+      metadata: {
+        schema: candidate.schema,
+        source: 'agent-authored',
+        ...summarizeLearnerArtifact(payload),
+      },
+      access: { priceUsdc: '0' },
+    });
+  }
+
+  return artifacts;
 }
 
 /**
@@ -151,8 +278,21 @@ export function harvestOutput(workingDir: string, phaseRange?: string): Solution
     gating.debriefVerdict = debrief.successCriteriaMet;
   }
 
+  const learnerArtifacts = collectLearnerArtifacts(workingDir);
+  const informational = learnerArtifacts.length > 0
+    ? {
+        learnerFeedbackArtifacts: learnerArtifacts.map((artifact) => ({
+          path: artifact.path,
+          artifactType: artifact.artifactType,
+          metadata: artifact.metadata,
+        })),
+      }
+    : undefined;
+
   return {
     venueRef: { name: 'claude-code-learner' },
     gating,
+    ...(informational ? { informational } : {}),
+    ...(learnerArtifacts.length > 0 ? { artifacts: learnerArtifacts } : {}),
   };
 }

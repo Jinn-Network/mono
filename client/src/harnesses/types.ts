@@ -12,19 +12,23 @@ import type { ScopedSigner, ScopedRpc, ScopedSecrets } from './capability/index.
 export interface RuntimePlugin {
   name: string;
   version: string;
+  source: string;
+  sourceKind?: string;
   solverType?: string;
   supports?: string[];
   root: string;
   manifestPath: string;
   sha256: string;
   cid?: string;
-  role: 'canonical' | 'extra';
+  provenance: 'default' | 'configured';
 }
 
 // ── HarnessContext ────────────────────────────────────────────────────────
 
 export interface HarnessContext {
   task: Task;
+  /** On-chain / persisted request id for this run. May differ from task.id. */
+  requestId?: string;
   solverNet?: { name: string; solverType: string };
   runtimePlugins?: RuntimePlugin[];
   solverPluginRoots?: string[];

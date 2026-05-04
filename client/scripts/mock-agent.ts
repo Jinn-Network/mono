@@ -58,9 +58,10 @@ interface McpConfig {
   mcpServers: Record<string, McpServerDef>;
 }
 
-interface SearchArtifactsResult {
-  local?: unknown[];
-  network?: unknown[];
+interface SearchRecordsResult {
+  records?: unknown[];
+  warning?: string;
+  warnings?: string[];
 }
 
 const fullConfigPath = resolve(mcpConfigPath);
@@ -151,17 +152,17 @@ if (isEvaluation) {
 
   process.stderr.write(`[mock-agent] Delivery data: ${deliverySummary}\n`);
 
-  // Search for restoration results via artifacts (proves search-based discovery works)
-  const searchJson = await callTool('search_artifacts', { tags: ['restoration-result'], limit: 5 });
-  const searchResults = JSON.parse(searchJson) as SearchArtifactsResult;
-  const restorationResultCount = (searchResults.local?.length ?? 0) + (searchResults.network?.length ?? 0);
-  process.stderr.write(`[mock-agent] Found ${restorationResultCount} restoration-result artifact(s) via search\n`);
+  // Search for prior restoration records (proves record-based discovery works)
+  const searchJson = await callTool('search_records', { role: 'restoration', limit: 5 });
+  const searchResults = JSON.parse(searchJson) as SearchRecordsResult;
+  const restorationResultCount = searchResults.records?.length ?? 0;
+  process.stderr.write(`[mock-agent] Found ${restorationResultCount} restoration record(s) via search\n`);
 
   // Verify search results are consistent with delivery data
   if (hasDelivery && restorationResultCount > 0) {
-    process.stderr.write('[mock-agent] Search-based discovery confirmed: delivery data and artifact search both have results\n');
+    process.stderr.write('[mock-agent] Record-based discovery confirmed: delivery data and record search both have results\n');
   } else if (hasDelivery && restorationResultCount === 0) {
-    process.stderr.write('[mock-agent] WARNING: delivery data exists but search found no restoration-result artifacts\n');
+    process.stderr.write('[mock-agent] WARNING: delivery data exists but search found no restoration records\n');
   }
 
   const verdict = {
@@ -192,10 +193,10 @@ if (isEvaluation) {
   // ── Restoration flow ─────────────────────────────────────────────────────
 
   // Check for prior knowledge before attempting restoration
-  const priorJson = await callTool('search_artifacts', { tags: ['restoration'], limit: 5 });
-  const prior = JSON.parse(priorJson) as SearchArtifactsResult;
-  const priorCount = (prior.local?.length ?? 0) + (prior.network?.length ?? 0);
-  process.stderr.write(`[mock-agent] Found ${priorCount} prior artifacts\n`);
+  const priorJson = await callTool('search_records', { role: 'restoration', limit: 5 });
+  const prior = JSON.parse(priorJson) as SearchRecordsResult;
+  const priorCount = prior.records?.length ?? 0;
+  process.stderr.write(`[mock-agent] Found ${priorCount} prior records\n`);
 
   // Try acquiring a remote artifact (proves the tool is wired)
   const acquireJson = await callTool('acquire_artifact', {

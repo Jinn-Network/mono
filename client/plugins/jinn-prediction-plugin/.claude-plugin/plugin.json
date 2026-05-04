@@ -13,6 +13,7 @@
     "skills/base-rate-forecasting/SKILL.md",
     "skills/calibration/SKILL.md",
     "skills/common-biases/SKILL.md",
+    "skills/prediction-corpus-retrieval/SKILL.md",
     "skills/polymarket-task-handling/SKILL.md"
   ]
 }

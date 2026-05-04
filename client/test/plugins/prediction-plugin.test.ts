@@ -124,7 +124,7 @@ const sampleVerdict = {
   checks: [{ name: 'solution.schema', status: 'PASS' }],
 };
 
-describe('jinn prediction reference pack manifests', () => {
+describe('jinn prediction plugin manifests', () => {
   it('loads jinn.plugin.json before host manifests and declares prediction.v1 support', () => {
     const { path, manifest } = loadSolverPluginManifest(pluginRoot);
     expect(path.endsWith('jinn.plugin.json')).toBe(true);
@@ -134,7 +134,7 @@ describe('jinn prediction reference pack manifests', () => {
     expect(manifest.jinn).not.toHaveProperty('solverType');
   });
 
-  it('keeps canonical prediction.v1 schemas in the SolverNet contract registry', () => {
+  it('keeps prediction.v1 schemas in the SolverNet contract registry', () => {
     const contract = SOLVER_NET_CONTRACTS['prediction.v1'];
     expect(contract).toBeDefined();
     contract!.schemas.task.parse(sampleTask());
@@ -155,19 +155,49 @@ describe('jinn prediction reference pack manifests', () => {
     expect(JSON.stringify(mcp)).toContain('${CLAUDE_PLUGIN_ROOT}/mcp/polymarket-server.mjs');
   });
 
-  it('uses root-relative MCP and skill paths in the Jinn pack manifest', () => {
+  it('declares prediction skills for Claude and Jinn hosts', () => {
+    const claude = readJson('.claude-plugin/plugin.json');
     const manifest = readJson('jinn.plugin.json');
     const jinn = manifest.jinn as Record<string, unknown>;
     const servers = jinn.mcpServers as Record<string, { args: string[] }>;
     const skills = jinn.skills as string[];
-
-    expect(servers.polymarket.args).toEqual(['mcp/polymarket-server.mjs']);
-    expect(skills).toEqual([
+    const claudeSkills = claude.skills as string[];
+    const expectedSkills = [
       'skills/base-rate-forecasting/SKILL.md',
       'skills/calibration/SKILL.md',
       'skills/common-biases/SKILL.md',
+      'skills/prediction-corpus-retrieval/SKILL.md',
       'skills/polymarket-task-handling/SKILL.md',
-    ]);
+    ];
+
+    expect(servers.polymarket.args).toEqual(['mcp/polymarket-server.mjs']);
+    expect(skills).toEqual(expectedSkills);
+    expect(claudeSkills).toEqual(expectedSkills);
+  });
+
+  it('teaches prediction agents to use Network Tools for corpus retrieval', () => {
+    const skill = readFileSync(
+      join(pluginRoot, 'skills/prediction-corpus-retrieval/SKILL.md'),
+      'utf-8',
+    );
+    const geminiContext = readFileSync(join(pluginRoot, 'GEMINI.md'), 'utf-8');
+
+    expect(skill).toContain('get_task');
+    expect(skill).toContain('search_records');
+    expect(skill).toContain('inspect_record');
+    expect(skill).toContain('acquire_artifact');
+    expect(skill).toContain('polymarket_get_market');
+    expect(skill).toContain('polymarket_get_orderbook');
+    expect(skill).toContain('conditionId');
+    expect(skill).toContain('scored Verdicts');
+    expect(skill).toContain('read-only');
+    expect(skill).toContain('price-aware');
+    expect(skill).toContain('only acquisition/payment path');
+    expect(skill).toContain('cite');
+    expect(skill).toContain('Plugins provide runtime tools and skills only');
+    expect(geminiContext).toContain('Network Tools');
+    expect(geminiContext).toContain('search_records');
+    expect(geminiContext).toContain('price-aware');
   });
 
   it('declares only read-only task-scoped Polymarket MCP tools', async () => {
@@ -261,7 +291,7 @@ describe('jinn prediction reference pack manifests', () => {
     ]);
   });
 
-  it('rejects old canonical schema fields in plugin manifests', () => {
+  it('rejects schema fields in plugin manifests because SolverNet contracts own schemas', () => {
     expect(() =>
       validateSolverPluginManifest({
         name: '@bad/plugin',

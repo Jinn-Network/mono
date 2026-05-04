@@ -73,6 +73,16 @@ export interface ServedArtifactRow {
   createdAt: string;
 }
 
+export interface ServedArtifactMetadataRow {
+  sha256: string;
+  artifactType: string;
+  requestId: string | null;
+  envelopeCid: string | null;
+  contentSize: number;
+  priceUsdc: string;
+  createdAt: string;
+}
+
 export type NetworkArtifactSource = 'origin' | 'route-resolver' | 'self-store-mirror';
 
 export interface NetworkArtifactInput {
@@ -94,6 +104,20 @@ export interface NetworkArtifactRow {
   artifactType: string;
   envelopeCid: string | null;
   content: Buffer;
+  contentSize: number;
+  source: NetworkArtifactSource;
+  sourceOperator: string | null;
+  sourceEndpoint: string | null;
+  paidAmountUsdc: string;
+  fetchedAt: string;
+  lastUsedAt: string;
+  peerCatalogId: string | null;
+}
+
+export interface NetworkArtifactMetadataRow {
+  sha256: string;
+  artifactType: string;
+  envelopeCid: string | null;
   contentSize: number;
   source: NetworkArtifactSource;
   sourceOperator: string | null;
@@ -1052,6 +1076,31 @@ export class Store {
     };
   }
 
+  getServedArtifactMetadata(sha256: string): ServedArtifactMetadataRow | null {
+    const row = this.db.prepare(
+      `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE sha256 = ?`,
+    ).get(sha256) as {
+      sha256: string;
+      artifact_type: string;
+      request_id: string | null;
+      envelope_cid: string | null;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      requestId: row.request_id,
+      envelopeCid: row.envelope_cid,
+      contentSize: row.content_size,
+      priceUsdc: row.price_usdc,
+      createdAt: row.created_at,
+    };
+  }
+
   setServedArtifactEnvelopeCid(sha256: string, envelopeCid: string): void {
     this.db.prepare(
       `UPDATE served_artifacts SET envelope_cid = ? WHERE sha256 = ?`,
@@ -1147,6 +1196,41 @@ export class Store {
     };
   }
 
+  getNetworkArtifactMetadata(sha256: string): NetworkArtifactMetadataRow | null {
+    const row = this.db.prepare(
+      `SELECT sha256, artifact_type, envelope_cid, content_size, source,
+              source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at,
+              peer_catalog_id
+       FROM network_artifacts WHERE sha256 = ?`,
+    ).get(sha256) as {
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content_size: number;
+      source: NetworkArtifactSource;
+      source_operator: string | null;
+      source_endpoint: string | null;
+      paid_amount_usdc: string;
+      fetched_at: string;
+      last_used_at: string;
+      peer_catalog_id: string | null;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      envelopeCid: row.envelope_cid,
+      contentSize: row.content_size,
+      source: row.source,
+      sourceOperator: row.source_operator,
+      sourceEndpoint: row.source_endpoint,
+      paidAmountUsdc: row.paid_amount_usdc,
+      fetchedAt: row.fetched_at,
+      lastUsedAt: row.last_used_at,
+      peerCatalogId: row.peer_catalog_id,
+    };
+  }
+
   touchNetworkArtifactUsage(sha256: string, ts: string): void {
     this.db.prepare(
       `UPDATE network_artifacts SET last_used_at = ? WHERE sha256 = ?`,
@@ -1155,8 +1239,8 @@ export class Store {
 
   /**
    * Local fast-path search across own (served) artifacts and cached (network)
-   * artifacts. Used by the MCP `search_artifacts` tool to prepend local
-   * matches to corpus query results.
+   * artifacts. Used by MCP record search to prepend locally held matches to
+   * corpus query results without loading artifact bytes.
    */
   searchOwnAndCached(filter: { artifactType?: string; limit: number }): Array<{
     sha256: string;
@@ -1164,14 +1248,19 @@ export class Store {
     source: 'served' | 'network';
     envelopeCid: string | null;
     createdAt: string;
+    contentSize: number;
+    priceUsdc?: string;
+    sourceEndpoint?: string | null;
+    sourceOperator?: string | null;
+    paidAmountUsdc?: string;
   }> {
     const limit = Math.min(Math.max(1, filter.limit), 500);
     const ownSql = filter.artifactType
-      ? `SELECT sha256, artifact_type, envelope_cid, created_at FROM served_artifacts WHERE artifact_type = @type ORDER BY created_at DESC LIMIT @limit`
-      : `SELECT sha256, artifact_type, envelope_cid, created_at FROM served_artifacts ORDER BY created_at DESC LIMIT @limit`;
+      ? `SELECT sha256, artifact_type, envelope_cid, content_size, price_usdc, created_at FROM served_artifacts WHERE artifact_type = @type ORDER BY created_at DESC LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, content_size, price_usdc, created_at FROM served_artifacts ORDER BY created_at DESC LIMIT @limit`;
     const cachedSql = filter.artifactType
-      ? `SELECT sha256, artifact_type, envelope_cid, fetched_at FROM network_artifacts WHERE artifact_type = @type ORDER BY fetched_at DESC LIMIT @limit`
-      : `SELECT sha256, artifact_type, envelope_cid, fetched_at FROM network_artifacts ORDER BY fetched_at DESC LIMIT @limit`;
+      ? `SELECT sha256, artifact_type, envelope_cid, content_size, source_operator, source_endpoint, paid_amount_usdc, fetched_at FROM network_artifacts WHERE artifact_type = @type ORDER BY fetched_at DESC LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, content_size, source_operator, source_endpoint, paid_amount_usdc, fetched_at FROM network_artifacts ORDER BY fetched_at DESC LIMIT @limit`;
     const params: Record<string, unknown> = { limit };
     if (filter.artifactType) params['type'] = filter.artifactType;
 
@@ -1179,12 +1268,18 @@ export class Store {
       sha256: string;
       artifact_type: string;
       envelope_cid: string | null;
+      content_size: number;
+      price_usdc: string;
       created_at: string;
     }>;
     const cached = this.db.prepare(cachedSql).all(params) as Array<{
       sha256: string;
       artifact_type: string;
       envelope_cid: string | null;
+      content_size: number;
+      source_operator: string | null;
+      source_endpoint: string | null;
+      paid_amount_usdc: string;
       fetched_at: string;
     }>;
 
@@ -1195,6 +1290,8 @@ export class Store {
         source: 'served' as const,
         envelopeCid: r.envelope_cid,
         createdAt: r.created_at,
+        contentSize: r.content_size,
+        priceUsdc: r.price_usdc,
       })),
       ...cached.map((r) => ({
         sha256: r.sha256,
@@ -1202,6 +1299,10 @@ export class Store {
         source: 'network' as const,
         envelopeCid: r.envelope_cid,
         createdAt: r.fetched_at,
+        contentSize: r.content_size,
+        sourceEndpoint: r.source_endpoint,
+        sourceOperator: r.source_operator,
+        paidAmountUsdc: r.paid_amount_usdc,
       })),
     ];
   }

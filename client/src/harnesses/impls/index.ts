@@ -53,8 +53,8 @@ export interface HarnessEnv {
    */
   legacyClaudeWorkingDirectory?: string;
   /**
-   * Corpus env for {@link LegacyClaudeImpl} / MCP `jinn-client` tools
-   * (`search_artifacts`, `acquire_artifact`).
+   * Corpus env for {@link LegacyClaudeImpl} / MCP `jinn-client` record lookup
+   * and artifact acquisition tools.
    */
   corpusEnv?: RunnerContext['corpusEnv'];
   /**
@@ -184,6 +184,10 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   const learnerAdapter = new ClaudeCodeHarnessAdapter({
     claudePath: env.claudePath,
     claudeModel: env.claudeModel,
+    storePath: env.storePath,
+    daemonApiUrl: env.daemonApiUrl,
+    daemonApiToken: env.daemonApiToken,
+    corpusEnv: env.corpusEnv,
   });
   out.push(new ClaudeCodeLearnerImpl({
     adapter: learnerAdapter,

@@ -25,7 +25,6 @@ function predictionConfig(overrides: Record<string, unknown> = {}): Record<strin
       prediction: {
         enabled: true,
         solverType: 'prediction.v1',
-        canonicalPlugin: 'bundled:jinn-prediction-plugin',
         harness: 'claude-code-learner',
         plugins: [],
         taskGenerator: { enabled: true },
@@ -45,7 +44,9 @@ async function runSolverNets(argv: string[]): Promise<{ envelope: Record<string,
 }
 
 const predictionPlugin: RuntimePlugin = {
-  role: 'canonical',
+  provenance: 'default',
+  source: 'bundled:jinn-prediction-plugin',
+  sourceKind: 'bundled',
   name: '@jinn-network/prediction-plugin',
   version: '0.2.0',
   supports: ['prediction.v1'],
@@ -85,8 +86,7 @@ const operatorStatusDeps = {
           name: 'prediction',
           enabled: true,
           solverType: 'prediction.v1',
-          canonicalPlugin: predictionPlugin,
-          plugins: [],
+          runtimePlugins: [predictionPlugin],
           taskGenerator: { enabled: true },
         }
       : undefined,
@@ -136,13 +136,15 @@ describe('solver-nets command', () => {
       harness: 'claude-code-learner',
       taskGeneratorEnabled: true,
     });
-    expect(envelope['canonicalPlugin']).toMatchObject({
-      role: 'canonical',
-      source: 'bundled:jinn-prediction-plugin',
-      name: '@jinn-network/prediction-plugin',
-      version: '0.2.0',
-      supports: ['prediction.v1'],
-    });
+    expect(envelope['runtimePlugins']).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provenance: 'default',
+        source: 'bundled:jinn-prediction-plugin',
+        name: '@jinn-network/prediction-plugin',
+        version: '0.2.0',
+        supports: ['prediction.v1'],
+      }),
+    ]));
     expect(envelope['harness']).toMatchObject({
       name: 'claude-code-learner',
       supportsPredictionV1Restoration: true,
@@ -150,9 +152,9 @@ describe('solver-nets command', () => {
     });
   });
 
-  it('surfaces Prediction SolverPlugin load failures as operator diagnostics', async () => {
+  it('surfaces Prediction runtime plugin load failures as operator diagnostics', async () => {
     const configPath = tempConfig(predictionConfig({
-      canonicalPlugin: 'npm:@jinn-network/definitely-missing-prediction-canonical-plugin',
+      plugins: ['npm:@jinn-network/definitely-missing-prediction-runtime-plugin'],
     }));
     const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
 
@@ -164,7 +166,7 @@ describe('solver-nets command', () => {
         expect.objectContaining({
           code: 'prediction_plugin_unavailable',
           severity: 'error',
-          configField: 'solverNets.prediction.canonicalPlugin',
+          configField: 'solverNets.prediction.plugins',
         }),
       ]),
     );
@@ -296,14 +298,14 @@ describe('solver-nets command', () => {
       config: () => loadPredictionTestConfig({ enabled: false }),
     },
     {
-      label: 'invalid canonical plugin',
+      label: 'invalid runtime plugin',
       fatalForSolvingNow: true,
       warningForGeneratorOrDashboardCompleteness: false,
       expectedOk: false,
       expected: {
         code: 'prediction_plugin_unavailable',
         severity: 'error' as const,
-        configField: 'solverNets.prediction.canonicalPlugin',
+        configField: 'solverNets.prediction.plugins',
       },
       deps: {
         loadSolverNets: async () => {
@@ -311,45 +313,26 @@ describe('solver-nets command', () => {
         },
       },
       config: () => loadPredictionTestConfig({
-        canonicalPlugin: 'npm:@jinn-network/missing-prediction-plugin',
+        plugins: ['npm:@jinn-network/missing-prediction-plugin'],
       }),
     },
     {
-      label: 'missing canonical plugin',
+      label: 'unsupported runtime plugin solverType mismatch',
       fatalForSolvingNow: true,
       warningForGeneratorOrDashboardCompleteness: false,
       expectedOk: false,
       expected: {
         code: 'prediction_plugin_unavailable',
         severity: 'error' as const,
-        configField: 'solverNets.prediction.canonicalPlugin',
+        configField: 'solverNets.prediction.plugins',
       },
       deps: {
         loadSolverNets: async () => {
-          throw new Error('Prediction SolverNet canonicalPlugin is missing');
-        },
-      },
-      config: () => loadPredictionTestConfig({}, (config) => {
-        config.solverNets.prediction.canonicalPlugin = undefined as unknown as string;
-      }),
-    },
-    {
-      label: 'unsupported canonical plugin solverType mismatch',
-      fatalForSolvingNow: true,
-      warningForGeneratorOrDashboardCompleteness: false,
-      expectedOk: false,
-      expected: {
-        code: 'prediction_plugin_unavailable',
-        severity: 'error' as const,
-        configField: 'solverNets.prediction.canonicalPlugin',
-      },
-      deps: {
-        loadSolverNets: async () => {
-          throw new Error('SolverNet prediction solverType mismatch: config=prediction.v1 plugin supports=portfolio.v0');
+          throw new Error('SolverNet prediction runtime plugin example solverType mismatch: config=prediction.v1 plugin supports=portfolio.v0');
         },
       },
       config: () => loadPredictionTestConfig({
-        canonicalPlugin: 'bundled:portfolio-v0-plugin',
+        plugins: ['bundled:portfolio-v0-plugin'],
       }),
     },
     {

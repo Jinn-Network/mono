@@ -40,6 +40,7 @@ export class ClaudeCodeLearnerImpl implements Harness {
     const window = ctx.task.window ?? { startTs: 0, endTs: 0 };
     const inputs: TaskSessionInputs = {
       taskId: ctx.task.id,
+      requestId: ctx.requestId,
       taskCid: ctx.taskCid,
       solverType: ctx.task.solverType,
       taskBody: ctx.task as TaskSessionInputs['taskBody'],

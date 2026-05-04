@@ -40,6 +40,16 @@ export function validateSolverPluginManifest(input: unknown): SolverPluginManife
   if (!Array.isArray(supports) || supports.length === 0 || supports.some((item) => typeof item !== 'string' || item.length === 0)) {
     throw new Error('manifest.jinn.supports must be a non-empty string array');
   }
+  // Two exclusive modes (per spec/2026-05-01-harness-pack-architecture.md §5.1):
+  //   - Runtime plugin: supports === ['jinn.runtime'] (singleton, no SolverType entries).
+  //   - SolverType plugin: every entry is a SolverType identifier; 'jinn.runtime' may not appear.
+  // Mixed mode is rejected so a SolverType plugin can't claim runtime status to bypass solverType checks.
+  const hasRuntime = supports.includes('jinn.runtime');
+  if (hasRuntime && supports.length !== 1) {
+    throw new Error(
+      `manifest.jinn.supports may not mix 'jinn.runtime' with SolverType identifiers; got [${supports.join(', ')}]`,
+    );
+  }
   return input as unknown as SolverPluginManifest;
 }
 

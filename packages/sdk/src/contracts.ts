@@ -54,7 +54,7 @@ export interface SolverNetContract {
   credentialRequirements: Record<SolverNetContractRole, CredentialRequirement[]>;
   evaluationFunction: SolverNetEvaluationFunction;
   aggregationFunction: SolverNetAggregationFunction;
-  referencePlugins: string[];
+  defaultRuntimePlugins: string[];
 }
 
 export type SolverNetContractMap = Record<SupportedSolverType, SolverNetContract>;
@@ -106,7 +106,7 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     output: 'trailing mean brierSpread',
     windowDays: 84,
   },
-  referencePlugins: ['bundled:jinn-prediction-plugin'],
+  defaultRuntimePlugins: ['bundled:jinn-prediction-plugin'],
 };
 
 export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
