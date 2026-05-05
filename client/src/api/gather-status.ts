@@ -86,7 +86,10 @@ async function getCachedPredictionOperatorStatus(
   const key = predictionOperatorCacheKey(configPath, name);
   let cached = byKey.get(key);
   if (!cached) {
-    cached = buildPredictionOperatorStatus({ config, configPath, name })
+    // gather-status only runs inside a live daemon; the operator-status
+    // surface should reflect that (Issue #86 §1: drop the vacuous
+    // "start the daemon" copy when the daemon is already running).
+    cached = buildPredictionOperatorStatus({ config, configPath, name, daemonRunning: true })
       .catch((error) => predictionOperatorUnavailable(config, configPath, name, errorMessage(error)));
     byKey.set(key, cached);
   }

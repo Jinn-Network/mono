@@ -43,6 +43,7 @@ export class ClaudeCodeLearnerImpl implements Harness {
       requestId: ctx.requestId,
       taskCid: ctx.taskCid,
       solverType: ctx.task.solverType,
+      claudeModel: ctx.solverNet?.model,
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,

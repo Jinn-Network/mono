@@ -103,6 +103,7 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
     `- task.id = ${inputs.taskId}`,
     inputs.taskCid ? `- task.cid = ${inputs.taskCid}` : '',
     inputs.solverType ? `- solverType = ${inputs.solverType}` : '',
+    inputs.claudeModel ? `- claudeModel = ${inputs.claudeModel}` : '',
     `- workingDir = ${inputs.workingDir}`,
     `- implStateDir = ${inputs.implStateDir}`,
     `- window.startTs = ${inputs.windowStartTs} (ms since epoch)`,
@@ -160,7 +161,8 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
 
     const prompt = buildInitialPrompt(inputs);
     const args: string[] = ['-p', prompt];
-    if (this.claudeModel) args.push('--model', this.claudeModel);
+    const claudeModel = inputs.claudeModel ?? this.claudeModel;
+    if (claudeModel) args.push('--model', claudeModel);
 
     for (const dir of [pluginRoot, ...(inputs.pluginRoots ?? [])]) {
       args.push('--plugin-dir', dir);

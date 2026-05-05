@@ -28,7 +28,24 @@ import { viemFeeOverridesForAttempt, withRecoverableRetry } from '../tx-retry.js
 
 export type { MetaTransactionData, TransactionResult };
 
-const SAFE_EXECUTION_FALLBACK_GAS_LIMIT = 2_000_000;
+/**
+ * Lower bound used only when on-chain `eth_estimateGas` itself fails (RPC error,
+ * contract reverts during simulation, etc.). Real bootstrap operations call
+ * `estimateGas` first and apply a 30 % buffer; this fallback exists so a
+ * temporarily flaky RPC does not block a tx that would otherwise succeed.
+ *
+ * Set high enough to cover the most gas-heavy Safe wrapper we know about
+ * (mech deploy on Base Sepolia: ~2.23M as of 2026-05-04). 5M leaves headroom
+ * for small drifts without tripping a sane RPC's per-tx upper bound.
+ */
+const SAFE_EXECUTION_FALLBACK_GAS_LIMIT = 5_000_000;
+
+/** Buffer applied to `estimateGas` results to absorb minor variance between
+ *  estimation and actual execution gas (storage refunds, warm/cold slot
+ *  differences, etc.). 30 % matches viem's `multiplier` default ballpark and
+ *  keeps us well clear of the cap on the heaviest call we measure. */
+const SAFE_EXECUTION_GAS_ESTIMATE_BUFFER_NUMERATOR = 130n;
+const SAFE_EXECUTION_GAS_ESTIMATE_BUFFER_DENOMINATOR = 100n;
 
 const SAFE_ABI = [
   {
@@ -254,7 +271,7 @@ export async function executeSafeTxDirect(opts: {
   const safeAddress = opts.safeAddress as Address;
   const to = opts.to as Address;
   const value = opts.value ?? 0n;
-  const baseGas = opts.gasLimit ?? BigInt(SAFE_EXECUTION_FALLBACK_GAS_LIMIT);
+  const explicitGasLimit = opts.gasLimit;
 
   const hash = await withRecoverableRetry(
     async (attemptIndex) => {
@@ -287,12 +304,41 @@ export async function executeSafeTxDirect(opts: {
         args: [to, value, opts.data, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, adjustedSig],
       });
 
+      // Estimate gas dynamically — Safe wrappers around heavy contract creates
+      // (mech deploy, large storage writes) have drifted past static defaults
+      // before. Estimate once per attempt, apply a 30 % buffer, fall back to
+      // SAFE_EXECUTION_FALLBACK_GAS_LIMIT only if the RPC genuinely cannot
+      // estimate (transient failures, vendor-specific eth_estimateGas quirks).
+      let resolvedGas: bigint;
+      if (explicitGasLimit !== undefined) {
+        resolvedGas = explicitGasLimit;
+      } else {
+        try {
+          const estimated = await publicClient.estimateGas({
+            account: account.address,
+            to: safeAddress,
+            data,
+            value: 0n,
+          });
+          resolvedGas =
+            (estimated * SAFE_EXECUTION_GAS_ESTIMATE_BUFFER_NUMERATOR) /
+            SAFE_EXECUTION_GAS_ESTIMATE_BUFFER_DENOMINATOR;
+        } catch (err) {
+          console.error(
+            `[safe-adapter] estimateGas failed for Safe.execTransaction; falling back to ${SAFE_EXECUTION_FALLBACK_GAS_LIMIT.toLocaleString()}: ${
+              err instanceof Error ? err.message.split('\n')[0] : String(err)
+            }`,
+          );
+          resolvedGas = BigInt(SAFE_EXECUTION_FALLBACK_GAS_LIMIT);
+        }
+      }
+
       const feeOverrides = await viemFeeOverridesForAttempt(publicClient, attemptIndex);
       const txParams: Parameters<typeof walletClient.sendTransaction>[0] = {
         account,
         to: safeAddress,
         data,
-        gas: baseGas + BigInt(attemptIndex) * 50_000n,
+        gas: resolvedGas + BigInt(attemptIndex) * 50_000n,
         ...feeOverrides,
       };
       if (

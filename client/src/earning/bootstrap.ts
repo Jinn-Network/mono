@@ -73,7 +73,11 @@ import {
   previousSafeBeingAbandoned,
   sweepOrphanedServiceFunds,
 } from './orphan-sweep.js';
-import { requestTestnetFunding } from './faucet.js';
+import {
+  DEFAULT_FAUCET_LOOP_TIMEOUT_MS,
+  computeFaucetDripCap,
+  requestTestnetFunding,
+} from './faucet.js';
 import {
   flattenErrorMessage,
   viemSendTransactionWithRetry,
@@ -129,6 +133,10 @@ export interface FleetBootstrapperOptions {
    * Provided in tests to avoid hitting the real CDP endpoint.
    */
   requestFunding?: typeof requestTestnetFunding;
+  /** Wall-clock cutoff for the auto-faucet loop. */
+  faucetLoopTimeoutMs?: number;
+  /** Now-source override for deterministic faucet-loop tests. */
+  now?: () => number;
   /**
    * When true, bootstrap may request Base Sepolia faucet drips before returning
    * an awaiting-funding result. `jinn run` disables this so the panel can make
@@ -148,6 +156,8 @@ export class FleetBootstrapper {
   private readonly masterEthDailyEstimateWei: bigint;
   private readonly env: NodeJS.ProcessEnv;
   private readonly requestFunding: typeof requestTestnetFunding;
+  private readonly faucetLoopTimeoutMs: number;
+  private readonly now: () => number;
   private readonly autoTestnetFaucet: boolean;
 
   constructor(options: FleetBootstrapperOptions = {}) {
@@ -158,6 +168,8 @@ export class FleetBootstrapper {
     this.targetServices = options.targetServices ?? 1;
     this.debug = options.debug ?? isJinnDebug();
     this.requestFunding = options.requestFunding ?? requestTestnetFunding;
+    this.faucetLoopTimeoutMs = options.faucetLoopTimeoutMs ?? DEFAULT_FAUCET_LOOP_TIMEOUT_MS;
+    this.now = options.now ?? Date.now;
     this.autoTestnetFaucet =
       options.autoTestnetFaucet ?? this.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
     const dailyOpt = options.masterEthDailyEstimateWei;
@@ -197,6 +209,31 @@ export class FleetBootstrapper {
     const txCostWei = 150_000n * 2_000_000_000n; // ~150k gas @ 2 gwei
     const fromPoll = BigInt(txsPerDay) * txCostWei;
     return fromPoll > DEFAULT_MASTER_ETH_DAILY_WEI ? fromPoll : DEFAULT_MASTER_ETH_DAILY_WEI;
+  }
+
+  /**
+   * Snapshot of the current persisted fleet state. Reads only — no chain
+   * calls. Used by the operator-app endpoint that lists services with an
+   * unbound Safe so the SPA can offer a retry affordance.
+   */
+  async loadState(): Promise<FleetState> {
+    return this.store.load(this.chain);
+  }
+
+  /**
+   * Re-run the ERC-1271 bind step for a single service whose Safe is not
+   * yet bound to its agent NFT. The underlying step (`stepRegisterAgent`)
+   * is idempotent: if `agent_id` is already set it skips the mint, and if
+   * `safe_bound_to_agent` is already true it skips the bind. So calling
+   * this against a fully-bound service is a safe no-op.
+   *
+   * Operator-facing surface: `POST /v1/setup/agent-binding/retry` from the
+   * IdentityCard's "binding pending" chip on Overview.
+   */
+  async retryAgentBindingFor(serviceIndex: number, password: string): Promise<FleetState> {
+    const state = await this.store.load(this.chain);
+    const mnemonic = await this.loadExistingMnemonic(state, password);
+    return this.stepRegisterAgent(state, mnemonic, serviceIndex);
   }
 
   async bootstrap(password: string): Promise<FleetBootstrapResult> {
@@ -282,19 +319,32 @@ export class FleetBootstrapper {
       };
 
       // On testnet, drain the CDP faucet in a loop until master has enough ETH.
-      // CDP's drip is tiny (~0.0001 ETH) vs the 0.005 ETH bootstrap floor — a
-      // single drip is never enough, and the older two-drip pattern forced
-      // operators to re-run `jinn bootstrap` 25+ times. We loop until funded,
-      // rate-limited, or an error. Cap at 60 iterations as a safety bound.
+      // CDP's drip is tiny (~0.0001 ETH) vs a 0.005-0.010 ETH bootstrap floor —
+      // a single drip is never enough, and a fixed cap of 60 was below the
+      // fresh-fleet target (0.010 ETH on first bootstrap), so onboarding could
+      // never auto-complete. The cap is derived from the actual gap, while a
+      // wall-clock timeout remains the real runaway safety rail.
       if (systemEth < requiredMasterEth && this.chain === 'base-sepolia' && autoFaucetEnabled) {
-        const MAX_FAUCET_ITERS = 60;
+        const maxFaucetIters = computeFaucetDripCap({
+          targetWei: requiredMasterEth,
+          balanceWei: systemEth,
+        });
         const INTER_DRIP_PAUSE_MS = 1_000;
+        const deadline = this.now() + this.faucetLoopTimeoutMs;
         console.error(
           `[fleet-bootstrap] Master has ${formatEther(systemEth)} ETH; need ${formatEther(requiredMasterEth)} ETH. ` +
           `Draining CDP faucet on ${this.chain} via ${rpcHostForDisplay(this.config.rpcUrl)} ` +
-          `(each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-60 s on first run).`,
+          `(each drip ≈ 0.0001 ETH, up to ${maxFaucetIters} drips or ${Math.round(this.faucetLoopTimeoutMs / 1000)}s, whichever comes first).`,
         );
-        for (let i = 0; i < MAX_FAUCET_ITERS; i++) {
+        for (let i = 0; i < maxFaucetIters; i++) {
+          if (this.now() >= deadline) {
+            console.error(
+              `[fleet-bootstrap] Faucet drip loop hit ${Math.round(this.faucetLoopTimeoutMs / 1000)}s timeout after ${i} drips ` +
+              `(master=${formatEther(masterBalance)} ETH; target=${formatEther(requiredMasterEth)} ETH). ` +
+              'Retry later or fund manually.',
+            );
+            break;
+          }
           const faucetResult = await this.requestFunding(masterAddress, 'base-sepolia');
           if (!faucetResult.ok) {
             if (faucetResult.rateLimited) {
@@ -310,7 +360,7 @@ export class FleetBootstrapper {
           masterBalance = refreshed.master;
           if ((i + 1) % 5 === 0) {
             console.error(
-              `[fleet-bootstrap] drip ${i + 1}/${MAX_FAUCET_ITERS} · chain=${this.chain} · rpc=${rpcHostForDisplay(this.config.rpcUrl)} · ` +
+              `[fleet-bootstrap] drip ${i + 1}/${maxFaucetIters} · chain=${this.chain} · rpc=${rpcHostForDisplay(this.config.rpcUrl)} · ` +
               `master=${formatEther(masterBalance)} ETH · target=${formatEther(requiredMasterEth)} ETH`,
             );
           }
@@ -349,10 +399,7 @@ export class FleetBootstrapper {
       this.warnMasterEthRunway(masterAddress, masterBalance, requiredMasterEth);
 
       // Phase 2: Bootstrap services up to target
-      const mnemonic = await decryptMnemonic(
-        await this.store.loadMnemonicKeystore(),
-        password,
-      );
+      const mnemonic = await this.loadExistingMnemonic(state, password);
 
       if (pendingSetupMigration) {
         const masterAccount = deriveMasterSigner(mnemonic);
@@ -404,18 +451,25 @@ export class FleetBootstrapper {
         message: `Fleet bootstrap complete. ${state.services.filter(s => isOperationalServiceStep(s.step)).length}/${this.targetServices} services running.`,
       };
     } catch (error) {
-      const { summary, hint } = formatBootstrapOperatorMessage(error);
+      const { summary, hint, rawMessage } = formatBootstrapOperatorMessage(error);
       const userMessage = hint !== undefined ? `${summary}\nHint: ${hint}` : summary;
       if (this.debug) {
         console.error(`[fleet-bootstrap] Bootstrap failed:`, error);
       } else {
         console.error(`[fleet-bootstrap] ${summary}`);
         if (hint !== undefined) console.error(`Hint: ${hint}`);
+        // Always log the raw cause once on stderr, even outside JINN_DEBUG.
+        // The summary may misclassify; the raw line lets operators and
+        // maintainers verify the diagnosis without flipping debug mode.
+        if (rawMessage && rawMessage !== summary) {
+          console.error(`[fleet-bootstrap] raw: ${rawMessage.split('\n')[0]}`);
+        }
       }
       return {
         ok: false,
         fleet_state: state,
         message: userMessage,
+        rawErrorMessage: rawMessage,
       };
     }
   }
@@ -447,14 +501,13 @@ export class FleetBootstrapper {
     state: FleetState,
     password: string,
   ): Promise<FleetState> {
-    if (this.store.hasMnemonicKeystore() && state.master_address) {
-      return state;
-    }
-
     // `jinn init` writes the mnemonic keystore but does not patch earning_state.json.
     // Hydrate master_address from the existing keystore instead of generating a new wallet.
     if (this.store.hasMnemonicKeystore()) {
-      const mnemonic = await decryptMnemonic(await this.store.loadMnemonicKeystore(), password);
+      const mnemonic = await this.loadExistingMnemonic(state, password);
+      if (state.master_address) {
+        return state;
+      }
       const masterAddress = deriveMasterAddress(mnemonic);
       return this.store.patchFleet({
         master_address: masterAddress,
@@ -476,6 +529,32 @@ export class FleetBootstrapper {
       chain: this.chain,
       staking_mode: this.stakingMode,
     });
+  }
+
+  private async loadExistingMnemonic(
+    state: FleetState,
+    password: string,
+  ): Promise<string> {
+    try {
+      return await decryptMnemonic(await this.store.loadMnemonicKeystore(), password);
+    } catch (err) {
+      if (state.master_address || state.services.length > 0) {
+        throw new Error(
+          `Existing mnemonic keystore could not be decrypted: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      const archivePath = await this.store.archiveMnemonicKeystore('invalid-before-wallet-init');
+      console.error(
+        '[fleet-bootstrap] Existing mnemonic keystore was not usable for a fresh fleet; ' +
+          `archived it at ${archivePath ?? '(unknown path)'} and generating a new test wallet.`,
+      );
+      const freshMnemonic = generateMnemonic();
+      const encrypted = await encryptMnemonic(freshMnemonic, password);
+      await this.store.saveMnemonicKeystore(encrypted);
+      return freshMnemonic;
+    }
   }
 
   // ── Phase 2: Per-service bootstrap ───────────────────────────────────
@@ -976,12 +1055,6 @@ export class FleetBootstrapper {
     // Deploy mech via the service Safe (agent is Safe owner)
     const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
 
-    const safe = await initDeployedSafe({
-      rpcUrl: this.config.rpcUrl,
-      signerKey: agentKey,
-      safeAddress,
-    });
-
     const payload = encodeAbiParameters([{ type: 'uint256' }], [this.config.mechRequestPrice]);
 
     const createData = encodeFunctionData({
@@ -991,9 +1064,13 @@ export class FleetBootstrapper {
     }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: deploying mech`);
-    const result = await executeSafeTxBatch(safe, [
-      { to: this.config.mechMarketplace, value: '0', data: createData },
-    ]);
+    const result = await executeSafeTxDirect({
+      rpcUrl: this.config.rpcUrl,
+      signerKey: agentKey,
+      safeAddress,
+      to: this.config.mechMarketplace,
+      data: createData,
+    });
 
     const mechReceipt = await waitForTransactionReceiptWithRetry(
       this.publicClient,

@@ -83,6 +83,34 @@ describe('GET /v1/bootstrap', () => {
     expect(body.services).toHaveLength(0);
   });
 
+  it('exposes funding balance/target on a fresh fleet (services=[]) so the SPA can render real progress', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [],
+    });
+    writeFileSync(join(earningDir, 'bootstrap-funding.json'), JSON.stringify({
+      schemaVersion: 1,
+      master_address: '0xabc',
+      eth_required: '10000000000000000',
+      eth_balance: '0',
+    }));
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      mode: string;
+      funding?: { eth_required?: string; eth_balance?: string; targetWei?: string };
+    };
+    expect(body.mode).toBe('setup');
+    expect(body.funding).toMatchObject({
+      eth_required: '10000000000000000',
+      eth_balance: '0',
+      targetWei: '10000000000000000',
+    });
+  });
+
   it('reports awaiting_funding when the daemon persists a funding gate during a partial bootstrap', async () => {
     const earningDir = makeFixtureEarningDir({
       master_address: '0xabc',
@@ -99,10 +127,20 @@ describe('GET /v1/bootstrap', () => {
     addBootstrapRoutes(app, { earningDir });
     const res = await app.request('/v1/bootstrap');
     expect(res.status).toBe(200);
-    const body = await res.json() as { mode: string; currentStep: string; services: unknown[] };
+    const body = await res.json() as {
+      mode: string;
+      currentStep: string;
+      services: unknown[];
+      funding?: { eth_required?: string; eth_balance?: string; targetWei?: string };
+    };
     expect(body.mode).toBe('setup');
     expect(body.currentStep).toBe('awaiting_funding');
     expect(body.services).toHaveLength(1);
+    expect(body.funding).toMatchObject({
+      eth_required: '1',
+      eth_balance: '0',
+      targetWei: '1',
+    });
   });
 
   it('surfaces persisted bootstrap-error.json envelope so the panel can render the failure', async () => {
@@ -144,5 +182,32 @@ describe('GET /v1/bootstrap', () => {
     const res = await app.request('/v1/bootstrap');
     const body = await res.json() as { error?: unknown };
     expect(body.error).toBeUndefined();
+  });
+
+  it('includes rpcUrl, defaultRpcUrl, and solverNets when configReader is supplied', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 1, step: 'complete' }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, {
+      earningDir,
+      configReader: () => ({
+        rpcUrl: 'https://my-tenderly.example/abc',
+        defaultRpcUrl: 'https://sepolia.base.org',
+        solverNets: { prediction: { enabled: true, role: 'solving' } },
+      }),
+    });
+    const res = await app.request('/v1/bootstrap');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      rpcUrl?: string;
+      defaultRpcUrl?: string;
+      solverNets?: Record<string, unknown>;
+    };
+    expect(body.rpcUrl).toBe('https://my-tenderly.example/abc');
+    expect(body.defaultRpcUrl).toBe('https://sepolia.base.org');
+    expect(body.solverNets).toMatchObject({ prediction: { enabled: true, role: 'solving' } });
   });
 });

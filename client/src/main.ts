@@ -29,10 +29,10 @@ import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
 import { ensureUiToken } from './api/ui-token.js';
-import { attachAgentWs } from './agent/agent-ws.js';
+import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
-import { buildEnvelope, emitEnvelope, type ErrorCode } from './errors/envelope.js';
+import { buildEnvelope, emitEnvelope, type ErrorCode, type ErrorEnvelope } from './errors/envelope.js';
 import {
   clearBootstrapError,
   persistBootstrapError,
@@ -76,7 +76,9 @@ import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from '
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
 
-dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
+  dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+}
 
 // ── Password (env > file > auto-generated) ─────────────────────────────────
 //
@@ -135,6 +137,17 @@ if (passwordResolution.source === 'generated') {
 
 const CONFIG_PATH = getConfigPathFromArgs();
 const config = loadConfig(CONFIG_PATH);
+if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') {
+  console.warn('[main] Mainnet is disabled before launch; using testnet defaults.');
+  config.network = 'testnet';
+  config.rpcUrl = 'https://sepolia.base.org';
+}
+let activeClaudePath = config.claudePath ?? 'claude';
+const selectClaudePath = (claudePath: string): void => {
+  activeClaudePath = claudePath;
+  config.claudePath = claudePath;
+  updateAgentClaudePath(claudePath);
+};
 
 const NETWORK_CHAIN = config.network === 'testnet' ? 'base-sepolia' : 'base';
 const CHAIN_CONFIG = applyChainGasOverrides(getChainConfig(NETWORK_CHAIN, {
@@ -262,6 +275,23 @@ async function bootstrap(): Promise<{
   }): never {
     const envelope = buildEnvelope(input);
     persistBootstrapError(envelope, config.earningDir);
+    if (keepSetupUiOnBootstrapError()) {
+      emitStructured({
+        kind: 'error',
+        message: envelope.message,
+        errorCode: envelope.code,
+        details: {
+          phase: 'bootstrap',
+          exitCode: envelope.exitCode,
+          ...(envelope.details ?? {}),
+        },
+      });
+      console.error(
+        `[main] Bootstrap halted (${envelope.code}); setup UI remains available. ` +
+          `Resolve the issue and run jinn run again.`,
+      );
+      throw new SetupBootstrapHalted(envelope);
+    }
     emitEnvelope(input);
     // Unreachable in production (emitEnvelope exits); satisfies `never`.
     throw new Error('unreachable');
@@ -397,7 +427,14 @@ async function bootstrap(): Promise<{
       code: 'fatal',
       message: result.message,
       hint: 'Bootstrap failed before the fleet reached a runnable state.',
-      details: { cause: result.message },
+      details: {
+        cause: result.message,
+        // Preserve the raw underlying error so a misclassified summary can
+        // be diagnosed without re-running with JINN_DEBUG. See jinn-mono-jz9f.
+        ...(result.rawErrorMessage && result.rawErrorMessage !== result.message
+          ? { rawErrorMessage: result.rawErrorMessage }
+          : {}),
+      },
     });
   }
 
@@ -500,6 +537,28 @@ export interface DaemonStartupInfo {
   serviceId: number | null;
 }
 
+export interface SetupHaltedInfo {
+  schemaVersion: 1;
+  generatedAt: string;
+  kind: 'setup_halted';
+  pid: number;
+  network: 'testnet' | 'mainnet';
+  phase: 'phase-1b' | 'phase-0';
+  apiPort: number;
+  dashboardUrl: string;
+  error: ErrorEnvelope;
+}
+
+class SetupBootstrapHalted extends Error {
+  constructor(readonly envelope: ErrorEnvelope) {
+    super(envelope.message);
+    this.name = 'SetupBootstrapHalted';
+  }
+}
+
+const keepSetupUiOnBootstrapError = (): boolean =>
+  process.env['JINN_NO_UI'] !== '1' && process.env['JINN_NO_DAEMON'] !== '1';
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 /**
@@ -530,7 +589,7 @@ function emitProgress(envelope: ProgressEnvelope): void {
   }
 }
 
-export async function main(): Promise<DaemonStartupInfo | void> {
+export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
 
   // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
@@ -590,6 +649,17 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     });
   }
 
+  const preflightEarningStateStore = new FleetStateStore(config.earningDir);
+  const archivedMismatchedState =
+    await preflightEarningStateStore.archiveIfChainMismatch(NETWORK_CHAIN);
+  if (archivedMismatchedState) {
+    console.warn(
+      `[main] Archived ${archivedMismatchedState.actualChain} earning state before starting ` +
+        `${archivedMismatchedState.expectedChain}. ` +
+        `Files: ${archivedMismatchedState.archivedPaths.join(', ')}`,
+    );
+  }
+
   // ── Setup-mode API server ────────────────────────────────────────────────
   // Start the operator-facing API early so the SPA can show bootstrap
   // progress while we may still be waiting on funding. The daemon loops are
@@ -627,12 +697,95 @@ export async function main(): Promise<DaemonStartupInfo | void> {
           process.exit(0);
         },
       },
-      bootstrap: { earningDir: config.earningDir },
+      bootstrap: {
+        earningDir: config.earningDir,
+        configReader: () => ({
+          rpcUrl: config.rpcUrl,
+          defaultRpcUrl: CHAIN_CONFIG.rpcUrl,
+          solverNets: config.solverNets as Record<string, unknown> | undefined,
+        }),
+      },
+      // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
+      // Once the daemon's harness/plugin registry is loaded, swap this for a
+      // real registry adapter (separate task in the page-split plan).
+      solverNets: {
+        registry: {
+          list: () => [
+            {
+              name: 'prediction',
+              description: 'Forecast resolved outcomes; rewarded by Brier score on verified resolutions.',
+              intrinsicSolverType: 'prediction.v1',
+              state: 'live' as const,
+              supportedRoles: ['solving' as const, 'evaluating' as const],
+              compatibleHarnesses: [
+                { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+              ],
+              compatiblePlugins: [
+                { name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' },
+              ],
+            },
+          ],
+        },
+      },
+      // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
+      // without forcing a daemon restart. Constructs a fresh bootstrapper
+      // per call so we don't tangle lifecycle with the long-running one.
+      agentBinding: {
+        listUnbound: async () => {
+          const bs = new FleetBootstrapper({
+            earningDir: config.earningDir,
+            chain: NETWORK_CHAIN,
+            rpcUrl: config.rpcUrl,
+            stakingMode: config.stakingMode,
+            targetServices: config.targetServices,
+          });
+          const state = await bs.loadState();
+          return state.services
+            .filter((s) => !s.safe_bound_to_agent && s.agent_id !== null)
+            .map((s) => ({ serviceIndex: s.index }));
+        },
+        retryBind: async (serviceIndex: number) => {
+          const bs = new FleetBootstrapper({
+            earningDir: config.earningDir,
+            chain: NETWORK_CHAIN,
+            rpcUrl: config.rpcUrl,
+            stakingMode: config.stakingMode,
+            targetServices: config.targetServices,
+            testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+            testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+            testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+            testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+          });
+          try {
+            const state = await bs.retryAgentBindingFor(serviceIndex, PASSWORD);
+            const svc = state.services.find((s) => s.index === serviceIndex);
+            return {
+              serviceIndex,
+              status: svc?.safe_bound_to_agent ? 'success' as const : 'reverted' as const,
+              txHash: svc?.agent_registered_tx ?? undefined,
+            };
+          } catch (err) {
+            return {
+              serviceIndex,
+              status: 'reverted' as const,
+              detail: err instanceof Error ? err.message : String(err),
+            };
+          }
+        },
+      },
       setup: {
         earningDir: config.earningDir,
         chain: NETWORK_CHAIN,
         rpcUrl: config.rpcUrl,
         minEoaGasWei: (CHAIN_CONFIG.minEoaGasEth * 2n).toString(),
+        claudePath: activeClaudePath,
+        getClaudePath: () => activeClaudePath,
+        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+        defaultRpcUrlForChain: () => CHAIN_CONFIG.rpcUrl,
+        onClaudePathSelected: selectClaudePath,
+        onSolverNetsUpdated: (solverNets) => {
+          config.solverNets = solverNets as typeof config.solverNets;
+        },
       },
       status: {
         earningDir: config.earningDir,
@@ -714,7 +867,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   attachAgentWs({
     httpServer: setupApiServer.server,
     uiToken,
-    claudePath: config.claudePath ?? 'claude',
+    claudePath: activeClaudePath,
     cwd: process.cwd(),
     mcpConfigPath: operatorMcpConfigPath,
   });
@@ -764,6 +917,19 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   try {
     bootstrapResult = await bootstrap();
   } catch (err) {
+    if (err instanceof SetupBootstrapHalted) {
+      return {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        kind: 'setup_halted',
+        pid: process.pid,
+        network: config.network,
+        phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
+        apiPort: setupApiServer.port,
+        dashboardUrl: `http://127.0.0.1:${setupApiServer.port}`,
+        error: err.envelope,
+      };
+    }
     // If bootstrap throws (vs. emitEnvelope-exits), tear down the API we
     // just started so we don't leave a dangling listener on the port.
     await setupApiServer.close().catch(() => undefined);
@@ -823,13 +989,17 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     });
   }
 
-  const preflight = await checkClaudeBinary(config.claudePath);
+  const preflight = await checkClaudeBinary(activeClaudePath);
   if (!preflight.ok) {
-    emitClaudeBinaryPreflightFailure(preflight.detail, config.claudePath);
+    emitClaudeBinaryPreflightFailure(preflight.detail, activeClaudePath);
   }
 
   const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
-  const authProbe = probeClaudeAuth({ context: authContext, cwd: process.cwd() });
+  const authProbe = probeClaudeAuth({
+    context: authContext,
+    cwd: process.cwd(),
+    claudePath: activeClaudePath,
+  });
   if (!authProbe.authenticated) {
     emitEnvelope({
       code: 'invalid_invocation',
@@ -845,7 +1015,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   }
 
   const runner = new ClaudeRunner({
-    claudePath: config.claudePath,
+    claudePath: activeClaudePath,
     model: config.claudeModel,
   });
 
@@ -1003,7 +1173,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   for (const impl of buildHarnesses({
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
-    claudePath: config.claudePath,
+    claudePath: activeClaudePath,
     claudeModel: config.claudeModel,
     pk: agentPrivateKey,
     safe: safeAddress,
@@ -1184,7 +1354,9 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   const taskSources = [
     new StaticConfiguredTaskSource(config.tasks),
     ...autoTaskGenerators
-      .filter(({ solverType }) => solverNetRegistry.forSolverType(solverType)?.taskGenerator.enabled)
+      .filter(({ solverType }) =>
+        solverNetRegistry.forSolverType(solverType, 'restoration')?.taskGenerator.enabled,
+      )
       .map(({ solverType, generator }) => new GeneratedTaskSource(`generated:${solverType}`, generator)),
   ];
 

@@ -89,6 +89,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
 
     const sessionId = `apy-pred-${Date.now()}`;
     const prompt = buildSessionPrompt(parsed, sessionId);
+    const claudeModel = ctx.solverNet?.model ?? this.config.claudeModel;
 
     if (testDeps?.runSession) {
       const session = await testDeps.runSession({
@@ -100,7 +101,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
         timeoutMs: this.config.sessionMaxMs ?? 180_000,
         signalSubmit,
       });
-      return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt);
+      return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt, claudeModel);
     }
 
     const { venue, pool, reserve, reserveSymbol } = parsed.spec.oracle;
@@ -166,7 +167,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
 
     const session = await spawnSession(sessionId, prompt, {
       claudePath: this.config.claudePath ?? 'claude',
-      ...(this.config.claudeModel ? { claudeModel: this.config.claudeModel } : {}),
+      ...(claudeModel ? { claudeModel } : {}),
       mcpConfigPath,
       workingDir,
       abort: ctx.abort,
@@ -177,7 +178,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
 
     if (!submissionState.predictedBps) isSubmitted();
 
-    return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt);
+    return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt, claudeModel);
   }
 
   private _finalize(
@@ -187,6 +188,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
     submission: SubmissionState,
     startedAt: number,
     endedAt: number,
+    claudeModel?: string,
   ): Solution {
     if (!submission.predictedBps || !submission.rationale) {
       throw new Error(
@@ -195,7 +197,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
     }
 
     const submittedAt = submission.submittedAt ?? Date.now();
-    const modelId = `claude-mcp-prediction-apy.${this.config.claudeModel ?? 'default'}.v1`;
+    const modelId = `claude-mcp-prediction-apy.${claudeModel ?? 'default'}.v1`;
 
     const predictionPath = join(dirname(transcriptPath), '..', '..', 'prediction-apy.json');
     writeFileSync(

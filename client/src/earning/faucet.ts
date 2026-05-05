@@ -20,6 +20,59 @@ export interface FaucetResult {
   rateLimited?: boolean;
 }
 
+/**
+ * Conservative estimate for one CDP drip (~0.0001 ETH). Used to size the drip
+ * loop cap so it can actually reach the bootstrap target.
+ */
+export const ESTIMATED_DRIP_WEI = 100_000_000_000_000n;
+
+/**
+ * Default wall-clock safety cutoff for faucet drip loops. Real loops should
+ * exit on success, rate-limit, or this deadline, whichever comes first.
+ */
+export const DEFAULT_FAUCET_LOOP_TIMEOUT_MS = 5 * 60 * 1000;
+
+export interface ComputeFaucetDripCapInput {
+  /** Bootstrap target (wei) the drip loop is trying to reach. */
+  targetWei?: bigint | null;
+  /** Current balance (wei) at the start of the loop. */
+  balanceWei?: bigint | null;
+  /** Explicit override; bypasses the calculation entirely when provided. */
+  override?: number;
+  /** Lower bound: preserves the historical 60-drip cap for callers without a target. */
+  floor?: number;
+  /** Upper bound: prevents runaway loops if estimates are wrong. */
+  ceiling?: number;
+}
+
+/**
+ * Compute the maximum number of faucet drip iterations needed to clear
+ * `targetWei` from `balanceWei`, given a conservative per-drip estimate.
+ *
+ * The cap is a safety bound, not the target. The loop still exits when the
+ * balance reaches the target, the faucet rate-limits, or the wall-clock
+ * deadline elapses.
+ */
+export function computeFaucetDripCap(input: ComputeFaucetDripCapInput): number {
+  const floor = input.floor ?? 60;
+  const ceiling = input.ceiling ?? 500;
+  if (typeof input.override === 'number') {
+    return Math.max(0, Math.floor(input.override));
+  }
+  const target = input.targetWei ?? null;
+  if (target === null || target <= 0n) {
+    return floor;
+  }
+  const balance = input.balanceWei ?? 0n;
+  const remaining = target - balance;
+  if (remaining <= 0n) {
+    return floor;
+  }
+  const estimatedDrips = remaining / ESTIMATED_DRIP_WEI;
+  const computed = Number(estimatedDrips * 2n) + 20;
+  return Math.max(floor, Math.min(ceiling, computed));
+}
+
 export async function requestTestnetFunding(
   address: string,
   network: 'base-sepolia',

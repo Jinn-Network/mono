@@ -73,10 +73,6 @@ export function Agent({ agentGated = false }: AgentProps = {}): JSX.Element {
     ws.onopen = () => setConnected(true);
     ws.onclose = () => setConnected(false);
     ws.onerror = () => setConnected(false);
-    // De-dupe URLs we've already opened — the WS may replay them on reconnect
-    // (see auth_url replay in agent-ws.ts).
-    const openedAuthUrls = new Set<string>();
-
     ws.onmessage = (msg) => {
       try {
         const parsed = JSON.parse(msg.data) as {
@@ -98,15 +94,9 @@ export function Agent({ agentGated = false }: AgentProps = {}): JSX.Element {
             setAgentReady(parsed.agentReady);
           }
         } else if (parsed.kind === 'auth_url' && typeof parsed.url === 'string') {
-          if (!openedAuthUrls.has(parsed.url)) {
-            openedAuthUrls.add(parsed.url);
-            // Open in a new tab in the operator's current browser. Best-effort:
-            // popup blockers may interfere; the URL is also visible in the
-            // terminal so the operator can copy it manually.
-            try {
-              window.open(parsed.url, '_blank', 'noopener,noreferrer');
-            } catch { /* fall through to terminal */ }
-          }
+          // Claude Code already prints and may open the OAuth URL from its PTY.
+          // Keep auth_url as protocol data only so the app does not open a
+          // duplicate browser window.
         } else if (parsed.kind === 'error') {
           if (parsed.recoverable && parsed.remediation) {
             // Surface the diagnostic out-of-band so the operator sees it

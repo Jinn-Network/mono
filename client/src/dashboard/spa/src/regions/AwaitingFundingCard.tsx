@@ -98,6 +98,23 @@ export function AwaitingFundingCard({
       ? dripStatus.txHashes?.length ?? dripStatus.attempts ?? (dripStatus.txHash ? 1 : 0)
       : 0;
 
+  // The /v1/setup/drip endpoint returns ok:true whenever any drips landed,
+  // even if the balance is still under target. Treat 'sent' as terminal only
+  // when the balance has actually cleared the target — otherwise let the user
+  // click again to top up the gap.
+  const targetReached =
+    dripStatus.state === 'sent' &&
+    dripStatus.balanceWei !== undefined &&
+    dripStatus.targetWei !== undefined &&
+    (() => {
+      try {
+        return BigInt(dripStatus.balanceWei!) >= BigInt(dripStatus.targetWei!);
+      } catch {
+        return false;
+      }
+    })();
+  const partialDrip = dripStatus.state === 'sent' && !targetReached;
+
   return (
     <div
       className="px-6 py-5 flex flex-col gap-4"
@@ -127,7 +144,7 @@ export function AwaitingFundingCard({
         <button
           onClick={requestDrip}
           type="button"
-          disabled={dripStatus.state === 'requesting' || dripStatus.state === 'sent'}
+          disabled={dripStatus.state === 'requesting' || targetReached}
           className="px-3 py-1.5 j-label hover:opacity-90 disabled:opacity-50"
           style={{
             background: 'var(--accent-gold)',
@@ -137,9 +154,11 @@ export function AwaitingFundingCard({
         >
           {dripStatus.state === 'requesting'
             ? 'Funding...'
-            : dripStatus.state === 'sent'
+            : targetReached
               ? 'Faucet funded'
-              : 'Fund from faucet'}
+              : partialDrip
+                ? 'Fund more'
+                : 'Fund from faucet'}
         </button>
         <button
           onClick={copy}
@@ -169,12 +188,16 @@ export function AwaitingFundingCard({
         </a>
       </div>
       {dripStatus.state === 'sent' && (
-        <p className="j-mono text-[11px]" style={{ color: 'var(--vow-green)' }}>
-          Faucet funding complete
+        <p
+          className="j-mono text-[11px]"
+          style={{ color: targetReached ? 'var(--vow-green)' : 'var(--accent-gold)' }}
+        >
+          {targetReached ? 'Faucet funding complete' : 'Faucet funding partial'}
           {sentTxCount > 0 ? ` (${sentTxCount} drip${sentTxCount === 1 ? '' : 's'})` : ''}.
           {dripStatus.balanceWei && dripStatus.targetWei
             ? ` Balance ${formatEth(dripStatus.balanceWei)} / target ${formatEth(dripStatus.targetWei)}.`
             : ''}
+          {partialDrip ? ' Click "Fund more" to top up.' : ''}
           {dripStatus.txHash && (
             <>
               {' '}

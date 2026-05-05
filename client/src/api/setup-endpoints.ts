@@ -26,12 +26,16 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { FleetStateStore } from '../earning/store.js';
 import { decryptMnemonic, encryptMnemonic } from '../earning/wallet.js';
-import { requestTestnetFunding } from '../earning/faucet.js';
+import {
+  DEFAULT_FAUCET_LOOP_TIMEOUT_MS,
+  computeFaucetDripCap,
+  requestTestnetFunding,
+} from '../earning/faucet.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from '../earning/viem-clients.js';
 import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
 import { triggerAgentSpawn } from '../agent/agent-ws.js';
-import { DEFAULT_CONFIG_PATH, persistTopLevelConfigValue } from '../config.js';
+import { DEFAULT_CONFIG_PATH, DEFAULT_SOLVER_NETS, persistTopLevelConfigValue } from '../config.js';
 import {
   installClaudeCodeLocally,
   type ExecFileAsync,
@@ -41,6 +45,14 @@ const ChangePasswordSchema = z.object({
   current: z.string().min(1),
   next: z.string().min(8),
 });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
 
 export interface SetupRoutesConfig {
   earningDir?: string;
@@ -57,9 +69,17 @@ export interface SetupRoutesConfig {
   execFileAsync?: ExecFileAsync;
   persistConfigValue?: typeof persistTopLevelConfigValue;
   onClaudePathSelected?: (claudePath: string) => void;
+  onSolverNetsUpdated?: (solverNets: Record<string, Record<string, unknown>>) => void;
   requestFunding?: typeof requestTestnetFunding;
   maxFaucetIters?: number;
   interDripPauseMs?: number;
+  /** Wall-clock cutoff for the drip loop; reaching target/rate-limit still wins first. */
+  faucetLoopTimeoutMs?: number;
+  /** Now-source override for deterministic faucet-loop tests. */
+  now?: () => number;
+  /** Returns the chain default RPC URL — used by POST /v1/setup/network when
+   *  the operator clears the field to revert to the default. */
+  defaultRpcUrlForChain?: () => string;
 }
 
 export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void {
@@ -157,21 +177,38 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
 
     const requestFunding = config.requestFunding ?? requestTestnetFunding;
-    const maxFaucetIters = config.maxFaucetIters ?? 60;
     const interDripPauseMs = config.interDripPauseMs ?? 1_000;
     const targetWei = config.minEoaGasWei ? BigInt(config.minEoaGasWei) : null;
     const publicClient = config.rpcUrl
       ? createJinnPublicClient(config.rpcUrl, 'base-sepolia')
       : null;
+    const now = config.now ?? Date.now;
+    const faucetLoopTimeoutMs = config.faucetLoopTimeoutMs ?? DEFAULT_FAUCET_LOOP_TIMEOUT_MS;
 
     const getBalance = async (): Promise<bigint | null> => {
       if (!publicClient) return null;
       return publicClient.getBalance({ address: address as `0x${string}` });
     };
+    const persistFundingGate = (balanceWei: bigint | null): void => {
+      if (targetWei === null || balanceWei === null) return;
+      const requiredWei = balanceWei >= targetWei ? 0n : targetWei - balanceWei;
+      writeFileSync(
+        join(earningDir, 'bootstrap-funding.json'),
+        `${JSON.stringify({
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          master_address: address,
+          eth_required: requiredWei.toString(),
+          eth_balance: balanceWei.toString(),
+        }, null, 2)}\n`,
+        { mode: 0o600 },
+      );
+    };
 
     try {
       const txHashes: string[] = [];
       let balanceWei = await getBalance();
+      persistFundingGate(balanceWei);
       if (targetWei !== null && balanceWei !== null && balanceWei >= targetWei) {
         return c.json({
           ok: true,
@@ -183,7 +220,28 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         });
       }
 
+      const maxFaucetIters = computeFaucetDripCap({
+        override: config.maxFaucetIters,
+        targetWei,
+        balanceWei,
+      });
+      const deadline = now() + faucetLoopTimeoutMs;
       for (let i = 0; i < maxFaucetIters; i++) {
+        if (now() >= deadline) {
+          return c.json(
+            {
+              ok: txHashes.length > 0,
+              address,
+              txHash: txHashes.at(-1),
+              txHashes,
+              attempts: i,
+              balanceWei: balanceWei?.toString(),
+              targetWei: targetWei?.toString(),
+              reason: 'faucet_loop_timeout',
+            },
+            txHashes.length > 0 ? 202 : 200,
+          );
+        }
         const result = await requestFunding(address, 'base-sepolia');
         if (!result.ok) {
           return c.json(
@@ -206,6 +264,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
           await new Promise((r) => setTimeout(r, interDripPauseMs));
         }
         balanceWei = await getBalance();
+        persistFundingGate(balanceWei);
         if (targetWei !== null && balanceWei !== null && balanceWei >= targetWei) {
           return c.json(
             {
@@ -244,6 +303,161 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         500,
       );
     }
+  });
+
+  // Edit a single SolverNet's enabled flag and/or solverType from the SPA.
+  // The operator click that triggers this is the in-app replacement for
+  // hand-editing config.json; the daemon does not hot-reload, so callers
+  // must follow up with /api/admin/restart (the existing "Restart Node"
+  // affordance) for the change to take effect. See jinn-mono-* (config-UX).
+  app.post('/v1/setup/solvernets/:name', async (c) => {
+    const name = c.req.param('name');
+    if (!name) return c.json({ error: 'invalid_invocation', detail: 'missing solvernet name' }, 400);
+
+    let body: {
+      enabled?: unknown;
+      solverType?: unknown; // deprecated; accepted for one release cycle
+      role?: unknown;
+      harness?: unknown;
+      model?: unknown;
+      plugins?: unknown;
+    };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_body', detail: 'expected JSON body' }, 400);
+    }
+
+    const editableFields: Array<keyof typeof body> = [
+      'enabled', 'solverType', 'role', 'harness', 'model', 'plugins',
+    ];
+    if (!editableFields.some((f) => body[f] !== undefined)) {
+      return c.json({ error: 'invalid_body', detail: 'must include at least one editable field' }, 400);
+    }
+    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
+      return c.json({ error: 'invalid_body', detail: '`enabled` must be a boolean' }, 400);
+    }
+    const KNOWN_SOLVER_TYPES = ['prediction.v0', 'prediction.v1'];
+    if (body.solverType !== undefined && (typeof body.solverType !== 'string' || !KNOWN_SOLVER_TYPES.includes(body.solverType))) {
+      return c.json({
+        error: 'invalid_body',
+        detail: `\`solverType\` must be one of ${KNOWN_SOLVER_TYPES.join(', ')}`,
+      }, 400);
+    }
+    const KNOWN_ROLES = ['solving', 'evaluating'];
+    if (body.role !== undefined && (typeof body.role !== 'string' || !KNOWN_ROLES.includes(body.role))) {
+      return c.json({ error: 'invalid_body', detail: '`role` must be `solving` or `evaluating`' }, 400);
+    }
+    if (body.harness !== undefined && typeof body.harness !== 'string') {
+      return c.json({ error: 'invalid_body', detail: '`harness` must be a string' }, 400);
+    }
+    if (body.model !== undefined && typeof body.model !== 'string') {
+      return c.json({ error: 'invalid_body', detail: '`model` must be a string' }, 400);
+    }
+    if (body.plugins !== undefined) {
+      if (!Array.isArray(body.plugins) || !body.plugins.every((p): p is string => typeof p === 'string')) {
+        return c.json({ error: 'invalid_body', detail: '`plugins` must be an array of plugin names' }, 400);
+      }
+    }
+
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    let current: Record<string, unknown> = {};
+    try {
+      if (existsSync(cfgPath)) {
+        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+      }
+    } catch (err) {
+      return c.json({
+        error: 'config_unreadable',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+
+    const rawSolverNets = isRecord(current.solverNets) ? current.solverNets : {};
+    const solverNets: Record<string, Record<string, unknown>> = {};
+    for (const [netName, netConfig] of Object.entries(rawSolverNets)) {
+      if (isRecord(netConfig)) solverNets[netName] = { ...netConfig };
+    }
+    const defaultNet = DEFAULT_SOLVER_NETS[name];
+    const existing = solverNets[name] ?? (isRecord(defaultNet) ? cloneRecord(defaultNet) : undefined);
+    if (!existing) {
+      const available = [...new Set([...Object.keys(DEFAULT_SOLVER_NETS), ...Object.keys(solverNets)])];
+      return c.json({ error: 'solvernet_not_found', name, available }, 404);
+    }
+
+    if (body.enabled !== undefined) existing.enabled = body.enabled;
+    if (body.solverType !== undefined) existing.solverType = body.solverType;
+    if (body.role !== undefined) existing.role = body.role;
+    if (body.harness !== undefined) existing.harness = body.harness;
+    if (body.model !== undefined) existing.model = body.model;
+    if (body.plugins !== undefined) existing.plugins = body.plugins;
+    solverNets[name] = existing;
+
+    try {
+      persistConfigValue('solverNets', solverNets, cfgPath);
+      config.onSolverNetsUpdated?.(solverNets);
+    } catch (err) {
+      return c.json({
+        error: 'config_write_failed',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+
+    return c.json({
+      ok: true,
+      restartRequired: true,
+      name,
+      config: existing,
+    });
+  });
+
+  // Edit the chain's RPC URL from the SPA's Configuration > Network section.
+  // Chain itself is read-only here; switching chains is a separate flow.
+  // Empty / null rpcUrl reverts to the chain's bundled default.
+  app.post('/v1/setup/network', async (c) => {
+    let body: { rpcUrl?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_body', detail: 'expected JSON body' }, 400);
+    }
+
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    if (!existsSync(cfgPath)) {
+      return c.json({ error: 'config_not_found', path: cfgPath }, 404);
+    }
+
+    let nextRpcUrl: string;
+    if (body.rpcUrl === null || body.rpcUrl === '') {
+      nextRpcUrl = config.defaultRpcUrlForChain?.() ?? 'https://sepolia.base.org';
+    } else if (typeof body.rpcUrl === 'string') {
+      try {
+        const parsed = new URL(body.rpcUrl);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return c.json({ error: 'invalid_body', detail: '`rpcUrl` must use http or https' }, 400);
+        }
+        nextRpcUrl = body.rpcUrl;
+      } catch {
+        return c.json({ error: 'invalid_body', detail: '`rpcUrl` is not a valid URL' }, 400);
+      }
+    } else {
+      return c.json({ error: 'invalid_body', detail: '`rpcUrl` must be a string or null' }, 400);
+    }
+
+    try {
+      persistConfigValue('rpcUrl', nextRpcUrl, cfgPath);
+    } catch (err) {
+      return c.json({
+        error: 'config_write_failed',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+
+    return c.json({
+      ok: true,
+      restartRequired: true,
+      rpcUrl: nextRpcUrl,
+    });
   });
 
   app.post('/v1/setup/change-password', async (c) => {

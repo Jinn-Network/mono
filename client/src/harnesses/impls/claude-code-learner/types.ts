@@ -19,6 +19,8 @@ export interface TaskSessionInputs {
   taskCid?: string;
   /** SolverType (e.g. 'portfolio.v0', 'prediction.v1') */
   solverType?: string;
+  /** Optional per-SolverNet Claude model override. */
+  claudeModel?: string;
   /** Operator-private impl-state directory; passed to the plugin via env IMPL_STATE_DIR */
   implStateDir: string;
   /** Ephemeral workingDir for this attempt */

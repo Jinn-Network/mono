@@ -172,7 +172,6 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_outcome ON artifacts (outcome);
 CREATE INDEX IF NOT EXISTS idx_artifacts_remote ON artifacts (remote);
 
@@ -227,7 +226,6 @@ CREATE TABLE IF NOT EXISTS task_posts (
   post_count INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
 );
-CREATE INDEX IF NOT EXISTS idx_task_posts_task ON task_posts (task_id);
 
 CREATE TABLE IF NOT EXISTS served_artifacts (
   sha256 TEXT PRIMARY KEY,
@@ -327,12 +325,32 @@ export class Store {
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
     this.db.exec(TASK_RUNS_SCHEMA);
+    this.ensureArtifactsTaskColumns();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
     this.ensureTaskPostsTaskCoordinatorColumns();
     this.ensureEnvelopeProjectionColumns();
     this.backfillActivityEvents();
     this.recordLegacyRestorationIntentsIgnored();
+  }
+
+  /** Older request-first DBs keyed artifacts by desired_state_id before Task-native IDs landed. */
+  private ensureArtifactsTaskColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(artifacts)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('task_id')) {
+      this.db.exec(`ALTER TABLE artifacts ADD COLUMN task_id TEXT`);
+      if (names.has('desired_state_id')) {
+        this.db.exec(`UPDATE artifacts SET task_id = desired_state_id WHERE task_id IS NULL`);
+      }
+    }
+    if (!names.has('protocol_task_id')) {
+      this.db.exec(`ALTER TABLE artifacts ADD COLUMN protocol_task_id TEXT`);
+    }
+    if (!names.has('task_cid')) {
+      this.db.exec(`ALTER TABLE artifacts ADD COLUMN task_cid TEXT`);
+    }
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id)`);
   }
 
   /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */
@@ -350,12 +368,16 @@ export class Store {
   private ensureTaskPostsTaskCoordinatorColumns(): void {
     const cols = this.db.prepare(`PRAGMA table_info(task_posts)`).all() as Array<{ name: string }>;
     const names = new Set(cols.map((c) => c.name));
+    if (!names.has('task_id')) {
+      this.db.exec(`ALTER TABLE task_posts ADD COLUMN task_id TEXT`);
+    }
     if (!names.has('protocol_task_id')) {
       this.db.exec(`ALTER TABLE task_posts ADD COLUMN protocol_task_id TEXT`);
     }
     if (!names.has('task_cid')) {
       this.db.exec(`ALTER TABLE task_posts ADD COLUMN task_cid TEXT`);
     }
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_task_posts_task ON task_posts (task_id)`);
   }
 
   /** Older local DBs may have the projection table from before Task grouping fields landed. */

@@ -58,6 +58,12 @@ export interface EarningMigrationArchive {
   entries: EarningMigrationArchiveEntry[];
 }
 
+export interface ArchivedMismatchedFleetState {
+  expectedChain: 'base' | 'base-sepolia';
+  actualChain: 'base' | 'base-sepolia';
+  archivedPaths: string[];
+}
+
 /** Absolute path to the encrypted mnemonic keystore for a given earning dir. */
 export function mnemonicKeystorePath(earningDir: string): string {
   return path.join(earningDir, MNEMONIC_KEYSTORE_FILE);
@@ -168,6 +174,38 @@ export class FleetStateStore {
     return parseFleetStateJson(raw);
   }
 
+  async archiveIfChainMismatch(
+    expectedChain: 'base' | 'base-sepolia',
+  ): Promise<ArchivedMismatchedFleetState | null> {
+    const existing = await this.tryLoadExisting();
+    if (!existing || existing.chain === expectedChain) {
+      return null;
+    }
+
+    await mkdir(this.earningDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const suffix = `.chain-${existing.chain}-archived-for-${expectedChain}.${stamp}.bak`;
+    const archivedPaths: string[] = [];
+    const archiveFile = async (fileName: string): Promise<void> => {
+      const src = path.join(this.earningDir, fileName);
+      if (!existsSync(src)) return;
+      const dest = path.join(this.earningDir, `${fileName}${suffix}`);
+      await rename(src, dest);
+      archivedPaths.push(dest);
+    };
+
+    await archiveFile(STATE_FILE);
+    await archiveFile(MIGRATIONS_FILE);
+    await archiveFile('bootstrap-funding.json');
+    await archiveFile('bootstrap-error.json');
+
+    return {
+      expectedChain,
+      actualChain: existing.chain,
+      archivedPaths,
+    };
+  }
+
   async load(chain: 'base' | 'base-sepolia' = 'base'): Promise<FleetState> {
     if (!existsSync(this.statePath)) {
       const state = createDefaultFleetState(chain);
@@ -211,6 +249,21 @@ export class FleetStateStore {
     const backupPath = path.join(this.earningDir, `${STATE_FILE}.${safeLabel}.${stamp}.bak`);
     await copyFile(this.statePath, backupPath);
     return backupPath;
+  }
+
+  async archiveMnemonicKeystore(label: string): Promise<string | null> {
+    if (!existsSync(this.mnemonicKeystorePath)) {
+      return null;
+    }
+    await mkdir(this.earningDir, { recursive: true });
+    const safeLabel = label.replace(/[^a-zA-Z0-9_.-]/g, '-');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const archivePath = path.join(
+      this.earningDir,
+      `${MNEMONIC_KEYSTORE_FILE}.${safeLabel}.${stamp}.bak`,
+    );
+    await rename(this.mnemonicKeystorePath, archivePath);
+    return archivePath;
   }
 
   async loadMigrationArchive(): Promise<EarningMigrationArchive> {

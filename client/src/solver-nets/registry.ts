@@ -5,10 +5,15 @@ import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
 export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
 
+export type SolverNetOperatorRole = 'solving' | 'evaluating';
+export type SolverNetTaskRole = 'restoration' | 'evaluation';
+
 export interface SolverNetConfig {
   enabled: boolean;
   solverType: string;
+  role?: SolverNetOperatorRole;
   harness: string;
+  model?: string;
   plugins: SolverPluginEntry[];
   taskGenerator: { enabled: boolean };
 }
@@ -17,10 +22,16 @@ export interface LoadedSolverNet {
   name: string;
   enabled: boolean;
   solverType: string;
+  role: SolverNetOperatorRole;
   contract: SolverNetContract;
   harness: string;
+  model?: string;
   runtimePlugins: RuntimePlugin[];
   taskGenerator: { enabled: boolean };
+}
+
+function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetTaskRole {
+  return role === 'evaluating' ? 'evaluation' : 'restoration';
 }
 
 function runtimePluginFrom(
@@ -64,9 +75,11 @@ export class SolverNetRegistry {
     return this.nets.get(name);
   }
 
-  forSolverType(solverType: string): LoadedSolverNet | undefined {
+  forSolverType(solverType: string, taskRole?: SolverNetTaskRole): LoadedSolverNet | undefined {
     return [...this.nets.values()].find((net) =>
-      net.enabled && net.solverType === solverType,
+      net.enabled &&
+      net.solverType === solverType &&
+      (taskRole === undefined || taskRoleForOperatorRole(net.role) === taskRole),
     );
   }
 
@@ -78,6 +91,14 @@ export class SolverNetRegistry {
     const out: Record<string, string> = {};
     for (const net of this.nets.values()) {
       if (net.enabled) out[net.solverType] = net.harness;
+    }
+    return out;
+  }
+
+  claudeModelSelections(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const net of this.nets.values()) {
+      if (net.enabled && net.model) out[net.solverType] = net.model;
     }
     return out;
   }
@@ -123,8 +144,10 @@ export async function loadSolverNets(
       name,
       enabled: net.enabled,
       solverType: net.solverType,
+      role: net.role ?? 'solving',
       contract,
       harness: net.harness,
+      ...(net.model ? { model: net.model } : {}),
       runtimePlugins,
       taskGenerator: net.taskGenerator,
     });

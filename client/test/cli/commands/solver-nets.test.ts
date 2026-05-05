@@ -461,4 +461,17 @@ describe('solver-nets command', () => {
       severity: 'error',
     });
   });
+
+  it('does not say "start the daemon" in nextAction when daemonRunning is true', async () => {
+    const { config, configPath } = loadPredictionTestConfig({});
+    const status = await buildPredictionOperatorStatus({
+      config,
+      configPath,
+      ...operatorStatusDeps,
+      daemonRunning: true,
+    });
+    const text = JSON.stringify(status);
+    expect(text).not.toMatch(/start the daemon/i);
+    expect(text).toMatch(/waiting for tasks/i);
+  });
 });

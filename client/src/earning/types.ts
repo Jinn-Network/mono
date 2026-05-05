@@ -157,6 +157,10 @@ export interface FleetBootstrapResult {
   ok: boolean;
   fleet_state: FleetState;
   message: string;
+  /** Raw underlying error message, preserved when `ok` is false so the
+   *  envelope-side error formatter has not yet collapsed the diagnostic.
+   *  See `operator-errors.ts` and jinn-mono-jz9f. */
+  rawErrorMessage?: string;
   funding?: FundingRequirement;
   self_bond_funding?: SelfBondFundingRequirement;
 }

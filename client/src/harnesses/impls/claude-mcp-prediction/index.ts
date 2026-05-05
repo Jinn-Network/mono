@@ -77,6 +77,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
 
     const sessionId = `pred-${Date.now()}`;
     const prompt = buildSessionPrompt(parsed, sessionId);
+    const claudeModel = ctx.solverNet?.model ?? this.config.claudeModel;
 
     // ── Test-mode short-circuit ────────────────────────────────────────────────
     if (testDeps?.runSession) {
@@ -89,7 +90,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
         timeoutMs: this.config.sessionMaxMs ?? 180_000,
         signalSubmit,
       });
-      return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt);
+      return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt, claudeModel);
     }
 
     // ── Live path ──────────────────────────────────────────────────────────────
@@ -150,7 +151,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
 
     const session = await spawnSession(sessionId, prompt, {
       claudePath: this.config.claudePath ?? 'claude',
-      ...(this.config.claudeModel ? { claudeModel: this.config.claudeModel } : {}),
+      ...(claudeModel ? { claudeModel } : {}),
       mcpConfigPath,
       workingDir,
       abort: ctx.abort,
@@ -162,7 +163,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
     // One final read in case isSubmitted's poll raced with session exit.
     if (!submissionState.probability) isSubmitted();
 
-    return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt);
+    return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt, claudeModel);
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -174,6 +175,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
     submission: SubmissionState,
     startedAt: number,
     endedAt: number,
+    claudeModel?: string,
   ): Solution {
     if (!submission.probability || !submission.rationale) {
       throw new Error(
@@ -182,7 +184,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
     }
 
     const submittedAt = submission.submittedAt ?? Date.now();
-    const modelId = `claude-mcp-prediction.${this.config.claudeModel ?? 'default'}.v1`;
+    const modelId = `claude-mcp-prediction.${claudeModel ?? 'default'}.v1`;
 
     const predictionPath = join(dirname(transcriptPath), '..', '..', 'prediction.json');
     writeFileSync(

@@ -30,3 +30,4 @@ examples/external-restorer-impls/*/node_modules/
 examples/external-restorer-impls/*/dist/
 examples/external-restorer-impls/*/.yarn/cache/
 examples/external-restorer-impls/*/.yarn/install-state.gz
+.superpowers/

@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Store } from '../../src/store/store.js';
 
 describe('Store', () => {
@@ -59,6 +63,50 @@ describe('Store', () => {
 
     const noMatch = store.searchArtifacts({ taskId: 'nonexistent' });
     expect(noMatch).toHaveLength(0);
+  });
+
+  it('migrates legacy desired_state artifact rows to task_id on startup', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-legacy-store-'));
+    const dbPath = join(dir, 'jinn.db');
+    const legacy = new Database(dbPath);
+    legacy.exec(`
+      CREATE TABLE config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE artifacts (
+        id TEXT PRIMARY KEY,
+        desired_state_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT,
+        tags TEXT NOT NULL DEFAULT '[]',
+        outcome TEXT NOT NULL CHECK (outcome IN ('SUCCESS', 'FAILURE', 'UNKNOWN')),
+        remote INTEGER NOT NULL DEFAULT 0,
+        owner_address TEXT,
+        endpoint TEXT,
+        price TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO artifacts
+        (id, desired_state_id, request_id, title, content, tags, outcome)
+      VALUES
+        ('legacy-art-1', 'legacy-state-1', 'req-1', 'Legacy artifact', 'content', '["legacy"]', 'SUCCESS');
+    `);
+    legacy.close();
+
+    const migrated = new Store(dbPath);
+    try {
+      const cols = migrated.db.prepare(`PRAGMA table_info(artifacts)`).all() as Array<{ name: string }>;
+      expect(cols.map((c) => c.name)).toContain('task_id');
+      expect(cols.map((c) => c.name)).toContain('protocol_task_id');
+      expect(cols.map((c) => c.name)).toContain('task_cid');
+      expect(migrated.searchArtifacts({ taskId: 'legacy-state-1' })).toMatchObject([
+        { id: 'legacy-art-1', task_id: 'legacy-state-1' },
+      ]);
+    } finally {
+      migrated.close();
+    }
   });
 
   it('stores durable task post records', () => {

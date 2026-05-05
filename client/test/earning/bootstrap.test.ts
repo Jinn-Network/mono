@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
+import { mkdtemp, readdir, rm, writeFile, mkdir } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { getAddress } from 'viem';
@@ -82,6 +82,84 @@ describe('Fleet bootstrap', () => {
 
     const state = await store.load();
     expect(getAddress(state.master_address!)).toBe(getAddress(expected));
+  });
+
+  it('archives an unusable keystore only when fleet state is still fresh', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const store = new FleetStateStore(earningDir);
+    await store.save(createDefaultFleetState('base-sepolia'));
+    await writeFile(
+      path.join(earningDir, 'master_keystore.json'),
+      JSON.stringify({
+        version: 1,
+        type: 'hd-mnemonic',
+        master_address: '0x0000000000000000000000000000000000000000',
+        keystore: {},
+        mnemonic_obfuscated: '',
+        mnemonic_length: 0,
+      }),
+    );
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      autoTestnetFaucet: false,
+    });
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.funding?.master_address).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    const files = await readdir(earningDir);
+    expect(files.some((name) => name.startsWith('master_keystore.json.invalid-before-wallet-init.'))).toBe(true);
+    expect(store.hasMnemonicKeystore()).toBe(true);
+    const state = await store.load('base-sepolia');
+    expect(state.chain).toBe('base-sepolia');
+    expect(getAddress(state.master_address!)).toBe(getAddress(result.funding!.master_address));
+  });
+
+  it('does not archive an unusable keystore once fleet state references a wallet', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const store = new FleetStateStore(earningDir);
+    await store.save({
+      ...createDefaultFleetState('base-sepolia'),
+      master_address: '0x1111111111111111111111111111111111111111',
+    });
+    await writeFile(
+      path.join(earningDir, 'master_keystore.json'),
+      JSON.stringify({
+        version: 1,
+        type: 'hd-mnemonic',
+        master_address: '0x1111111111111111111111111111111111111111',
+        keystore: {},
+        mnemonic_obfuscated: '',
+        mnemonic_length: 0,
+      }),
+    );
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      autoTestnetFaucet: false,
+    });
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/Existing mnemonic keystore could not be decrypted/);
+    const files = await readdir(earningDir);
+    expect(files.some((name) => name.startsWith('master_keystore.json.invalid-before-wallet-init.'))).toBe(false);
+    expect(store.hasMnemonicKeystore()).toBe(true);
   });
 
   it('requires master gas before automatic testnet setup migration even when legacy service is complete', async () => {

@@ -10,6 +10,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { startApiServer, type ApiServer } from '../../src/api/server.js';
 import { Store } from '../../src/store/store.js';
 import type { Corpus, ArtifactContent } from '../../src/corpus/index.js';
@@ -58,8 +61,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await server.close();
-  store.close();
+  await server?.close();
+  store?.close();
 });
 
 describe('daemon-api-auth (bearer middleware)', () => {
@@ -149,5 +152,91 @@ describe('daemon-api-auth (bearer middleware)', () => {
   it('GET /v1/status stays public (no bearer required)', async () => {
     const res = await fetch(`${baseUrl}/v1/status`);
     expect(res.status).toBe(200);
+  });
+
+  it('requires the UI token before retrying agent binding', async () => {
+    await server.close();
+    store.close();
+
+    let retryCalls = 0;
+    store = new Store(':memory:');
+    server = await startApiServer({
+      port: 0,
+      store,
+      apiToken: TEST_TOKEN,
+      ui: { token: 'ui-token', handshakeKey: 'handshake-key' },
+      agentBinding: {
+        listUnbound: async () => [{ serviceIndex: 0 }],
+        retryBind: async (serviceIndex) => {
+          retryCalls += 1;
+          return { serviceIndex, status: 'queued' };
+        },
+      },
+    });
+    baseUrl = `http://127.0.0.1:${server.port}`;
+
+    const unauthenticated = await fetch(`${baseUrl}/v1/setup/agent-binding/retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceIndex: 0 }),
+    });
+    expect(unauthenticated.status).toBe(401);
+    expect(retryCalls).toBe(0);
+
+    const authenticated = await fetch(`${baseUrl}/v1/setup/agent-binding/retry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-jinn-ui-token': 'ui-token',
+      },
+      body: JSON.stringify({ serviceIndex: 0 }),
+    });
+    expect(authenticated.status).toBe(200);
+    expect(retryCalls).toBe(1);
+  });
+
+  it('requires the UI token for SPA-only bootstrap, events, and SolverNet routes', async () => {
+    await server.close();
+    store.close();
+
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-ui-auth-'));
+    writeFileSync(join(earningDir, 'earning_state.json'), JSON.stringify({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
+    }));
+
+    store = new Store(':memory:');
+    server = await startApiServer({
+      port: 0,
+      store,
+      apiToken: TEST_TOKEN,
+      ui: { token: 'ui-token', handshakeKey: 'handshake-key' },
+      bootstrap: { earningDir },
+      solverNets: {
+        registry: {
+          list: () => [{
+            name: 'prediction',
+            description: 'Prediction',
+            state: 'live' as const,
+            intrinsicSolverType: 'prediction.v1',
+            supportedRoles: ['solving' as const],
+            compatibleHarnesses: [],
+            compatiblePlugins: [],
+          }],
+        },
+      },
+    });
+    baseUrl = `http://127.0.0.1:${server.port}`;
+
+    for (const path of ['/v1/bootstrap', '/v1/events/recent', '/v1/solvernets']) {
+      const unauthenticated = await fetch(`${baseUrl}${path}`);
+      expect(unauthenticated.status).toBe(401);
+
+      const authenticated = await fetch(`${baseUrl}${path}`, {
+        headers: { 'x-jinn-ui-token': 'ui-token' },
+      });
+      expect(authenticated.status).toBe(200);
+    }
   });
 });

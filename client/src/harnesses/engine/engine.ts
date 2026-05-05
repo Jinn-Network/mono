@@ -74,10 +74,11 @@ export interface ImplRegistry {
 }
 
 export interface SolverNetRegistryLike {
-  forSolverType(solverType: string): {
+  forSolverType(solverType: string, taskRole?: 'restoration' | 'evaluation'): {
     name: string;
     solverType: string;
     harness: string;
+    model?: string;
     runtimePlugins: RuntimePlugin[];
   } | undefined;
 }
@@ -482,10 +483,10 @@ export class TaskEngine {
     task?: Task,
   ): Promise<string | null> {
     const solverNet = this.solverNetRegistry && solverType
-      ? this.solverNetRegistry.forSolverType(solverType)
+      ? this.solverNetRegistry.forSolverType(solverType, role)
       : undefined;
     if (this.solverNetRegistry && solverType && !solverNet) {
-      return `no enabled SolverNet for solverType '${solverType}'; run \`jinn solver-nets enable <name>\``;
+      return `no enabled SolverNet for solverType '${solverType}' and role '${role}'; run \`jinn solver-nets enable <name>\``;
     }
     if (solverType && task && getSolverNetContract(solverType)) {
       const validation = validateTask(solverType, task);
@@ -580,7 +581,7 @@ export class TaskEngine {
   protected async runImpl(task: PersistedTaskRun): Promise<void> {
     const solverType = task.solverType ?? '';
     const role = task.taskRole ?? 'restoration';
-    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType) : undefined;
+    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType, task.taskRole ?? 'restoration') : undefined;
     const impl = this.implRegistry?.findFor({ solverType, role });
     if (!impl) {
       throw new NotImplementedError('runImpl');
@@ -618,7 +619,13 @@ export class TaskEngine {
         }) as import('../../types/task.js').Task,
         requestId: task.requestId,
         taskCid: task.taskCid,
-        solverNet: solverNet ? { name: solverNet.name, solverType: solverNet.solverType } : undefined,
+        solverNet: solverNet
+          ? {
+              name: solverNet.name,
+              solverType: solverNet.solverType,
+              ...(solverNet.model ? { model: solverNet.model } : {}),
+            }
+          : undefined,
         runtimePlugins,
         solverPluginRoots: runtimePlugins.map((plugin) => plugin.root),
         implStateDir,
@@ -922,7 +929,9 @@ export class TaskEngine {
         }))
         .sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
     const implNameForEnvelope = task.implName ?? solverType;
-    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType) : undefined;
+    const solverNet = solverType
+      ? this.solverNetRegistry?.forSolverType(solverType, task.taskRole ?? 'restoration')
+      : undefined;
     const runtimeBundleDigest = `sha256:${createHash('sha256')
       .update(JSON.stringify({
         harness: {

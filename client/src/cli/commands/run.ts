@@ -35,12 +35,25 @@ function routeConsoleToStderr(): void {
 
 function humanRunSummary(value: unknown): string {
   const v = value as {
+    kind?: string;
     pid: number;
     network: string;
     apiPort: number;
     serviceIndex: number;
     safeAddress: string;
+    dashboardUrl?: string;
+    error?: { code?: string; message?: string; hint?: string };
   };
+  if (v.kind === 'setup_halted') {
+    return [
+      'Setup needs attention.',
+      `PID: ${v.pid}`,
+      `Network: ${v.network}`,
+      `Dashboard: ${v.dashboardUrl ?? `http://127.0.0.1:${v.apiPort}`}`,
+      `Error: ${v.error?.message ?? v.error?.code ?? 'bootstrap halted'}`,
+      ...(v.error?.hint ? [`Hint: ${v.error.hint}`] : []),
+    ].join('\n');
+  }
   return [
     'Daemon running.',
     `PID: ${v.pid}`,

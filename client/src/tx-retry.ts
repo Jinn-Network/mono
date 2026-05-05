@@ -109,6 +109,20 @@ export function isRecoverableTransactionError(error: unknown): boolean {
     return true;
   }
 
+  // Multi-node RPC eventual-consistency: a contract just deployed in a
+  // confirmed transaction can briefly read as "no code" / "no data" on
+  // a sibling node that has not yet propagated the block. viem surfaces
+  // this as 'The contract function "..." returned no data ("0x").' or
+  // 'Cannot decode zero data ("0x") with ABI parameters.' Retrying
+  // a few hundred ms later usually reads the now-propagated state.
+  if (
+    lower.includes('returned no data ("0x")') ||
+    lower.includes('cannot decode zero data') ||
+    lower.includes('the address is not a contract')
+  ) {
+    return true;
+  }
+
   if (
     lower.includes('429') ||
     lower.includes('rate limit') ||

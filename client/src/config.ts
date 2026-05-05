@@ -23,6 +23,27 @@ import type { Task } from './types/task.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
+export interface DefaultSolverNetConfig extends Record<string, unknown> {
+  enabled?: boolean;
+  solverType: string;
+  role?: 'solving' | 'evaluating';
+  harness?: string;
+  model?: string;
+  plugins?: Array<string | { name?: string; source: string; version?: string }>;
+  taskGenerator?: { enabled?: boolean };
+}
+
+export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {
+  prediction: {
+    enabled: true,
+    solverType: 'prediction.v1',
+    role: 'solving',
+    harness: 'claude-code-learner',
+    plugins: [],
+    taskGenerator: { enabled: true },
+  },
+};
+
 export const JinnConfigSchema = z.object({
   /**
    * Network to connect to.
@@ -357,7 +378,9 @@ export const JinnConfigSchema = z.object({
   solverNets: z.record(z.object({
     enabled: z.boolean().default(true),
     solverType: z.string(),
+    role: z.enum(['solving', 'evaluating']).default('solving'),
     harness: z.string().default('claude-code-learner'),
+    model: z.string().optional(),
     plugins: z.array(z.union([
       z.string(),
       z.object({
@@ -369,15 +392,7 @@ export const JinnConfigSchema = z.object({
     taskGenerator: z.object({
       enabled: z.boolean().default(true),
     }).default({ enabled: true }),
-  })).default({
-    prediction: {
-      enabled: true,
-      solverType: 'prediction.v1',
-      harness: 'claude-code-learner',
-      plugins: [],
-      taskGenerator: { enabled: true },
-    },
-  }),
+  })).default(DEFAULT_SOLVER_NETS),
 
   /**
    * Trusted ed25519 publishers for external harness impls. The daemon

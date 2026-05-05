@@ -30,7 +30,9 @@ import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js'
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
 import { addEventsRoutes } from './events-endpoint.js';
-import { addBootstrapRoutes } from './bootstrap-endpoint.js';
+import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
+import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
+import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
@@ -78,9 +80,14 @@ export interface ApiServerConfig {
    */
   corpus?: Corpus | (() => Corpus | undefined);
   /** When set, GET /v1/bootstrap reads <earningDir>/earning_state.json. */
-  bootstrap?: { earningDir: string };
+  bootstrap?: BootstrapEndpointConfig;
   /** Optional panel-driven setup actions such as testnet faucet funding. */
   setup?: SetupRoutesConfig;
+  /** When set, GET /v1/solvernets exposes the catalog from a daemon registry. */
+  solverNets?: { registry: SolverNetsRegistry };
+  /** When set, POST /v1/setup/agent-binding/retry is mounted so the SPA can
+   *  retry the ERC-1271 bind step for unbound services. */
+  agentBinding?: AgentBindingRoutesConfig;
   /** When set, /auth/handshake is mounted and SPA-only routes are gated by the token. */
   ui?: { token: string; handshakeKey: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
@@ -96,14 +103,53 @@ export interface ApiServer {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dashboardDir = join(__dirname, '..', 'dashboard');
+
+/**
+ * Resolve the operator dashboard directory.
+ *
+ * jinn-client is meant to be installed as a package and run via the `jinn`
+ * binary, which executes the compiled `dist/` tree — there `__dirname` is
+ * `dist/api/` and the SPA lives at `dist/dashboard/`.
+ *
+ * Repo contributors running `yarn jinn run` (tsx + src/) do not have
+ * `dist/dashboard/` next to `src/api/`. They build the SPA into
+ * `src/dashboard/spa/dist/` via `yarn build:spa`. We try both so the dev
+ * loop produces the same UI as production after a single SPA build.
+ *
+ * If neither candidate has an `index.html`, the daemon emits a clear error
+ * page rather than silently serving stale or missing assets.
+ */
+function resolveDashboardDir(): string | null {
+  const candidates = [
+    join(__dirname, '..', 'dashboard'),                  // packaged: dist/api/.. = dist/dashboard
+    join(__dirname, '..', 'dashboard', 'spa', 'dist'),   // dev: src/api/.. = src/dashboard/spa/dist
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, 'index.html'))) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+const dashboardDir = resolveDashboardDir() ?? join(__dirname, '..', 'dashboard');
 const assetsDir = join(dashboardDir, 'assets');
 
 function readSpaIndex(): string {
   try {
     return readFileSync(join(dashboardDir, 'index.html'), 'utf-8');
   } catch {
-    return '<html><body><p>SPA not built. Run <code>yarn build</code>.</p></body></html>';
+    return [
+      '<!doctype html><html><body style="font-family:system-ui;padding:2rem;max-width:48rem;line-height:1.5">',
+      '<h1>jinn dashboard bundle missing</h1>',
+      '<p>jinn-client is meant to be installed as a published package and launched via the <code>jinn</code> binary. ',
+      'On a healthy install, the operator dashboard ships inside the package.</p>',
+      '<p>If you installed jinn from npm and are seeing this page, the package is corrupted — re-install it.</p>',
+      '<p>If you are running from a checkout of this repo (e.g. <code>yarn jinn run</code>), build the SPA first:</p>',
+      '<pre>yarn build         # full build (recommended)\nyarn build:spa     # SPA only</pre>',
+      '<p>Then re-run <code>jinn run</code>.</p>',
+      '</body></html>',
+    ].join('');
   }
 }
 
@@ -200,22 +246,33 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     }
   });
 
-  addEventsRoutes(app);
-
-  if (config.bootstrap) {
-    addBootstrapRoutes(app, config.bootstrap);
-  }
-
   if (config.ui) {
     addHandshakeRoutes(app, config.ui);
     // Gate SPA-only routes (do NOT gate /v1/status or /artifacts/*).
     app.use('/v1/events', requireUiToken(config.ui.token));
     app.use('/v1/events/*', requireUiToken(config.ui.token));
     app.use('/v1/bootstrap', requireUiToken(config.ui.token));
+    app.use('/v1/solvernets', requireUiToken(config.ui.token));
+    app.use('/v1/auth/*', requireUiToken(config.ui.token));
+    app.use('/v1/setup/*', requireUiToken(config.ui.token));
+    app.use('/api/admin/*', requireUiToken(config.ui.token));
+  }
+
+  addEventsRoutes(app);
+
+  if (config.bootstrap) {
+    addBootstrapRoutes(app, config.bootstrap);
+  }
+
+  if (config.solverNets) {
+    addSolverNetsRoutes(app, { registry: config.solverNets.registry });
+  }
+
+  if (config.agentBinding) {
+    addAgentBindingRoutes(app, config.agentBinding);
   }
 
   if (config.ui && config.admin) {
-    app.use('/api/admin/*', requireUiToken(config.ui.token));
     addAdminRoutes(app, config.admin);
   }
 
@@ -223,8 +280,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     // Setup routes (claude auth probe + login spawn, keystore password change)
     // gated behind the UI token so external callers can't fingerprint the host
     // or rotate keys.
-    app.use('/v1/auth/*', requireUiToken(config.ui.token));
-    app.use('/v1/setup/*', requireUiToken(config.ui.token));
     addSetupRoutes(app, config.setup);
   }
 

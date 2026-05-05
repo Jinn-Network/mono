@@ -1,26 +1,27 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { Router, Route, Switch, Redirect } from 'wouter';
 import { api } from './api/client.js';
 import type { BootstrapState } from './api/types.js';
 import { LoadingScreen } from './regions/LoadingScreen.js';
 import { Onboarding } from './regions/Onboarding.js';
-import { Operating } from './regions/Operating.js';
+import { AppShell } from './shell/AppShell.js';
+import { Header } from './shell/Header.js';
+import { TopTabs } from './shell/TopTabs.js';
+import { AgentRail } from './shell/AgentRail.js';
+import { RestartBanner } from './shell/RestartBanner.js';
+import { OverviewPage } from './pages/Overview.js';
+import { ConfigurationPage } from './pages/Configuration.js';
 
 /**
  * App routes between two distinct phases of operator life:
  *
- *   Onboarding — bootstrap not yet 'running'. A focused, full-screen flow that
- *                narrates the 11-step state machine and surfaces only the
- *                actions the operator can take right now (fund, sign in).
+ *   Onboarding — bootstrap not yet 'running'. A focused, full-screen flow.
  *
- *   Operating  — bootstrap complete. A dashboard that leads with the metrics
- *                a steady-state operator actually checks (earnings, gas,
- *                in-flight intents) and routes recurring actions through a
- *                single column. Activity is collapsed by default; the agent
- *                takes the right column at proper width.
- *
- * The split is intentional: onboarding is a one-time experience, not a
- * permanent dashboard region. Once bootstrap completes, the step list goes
- * away and the operator stays in Operating forever.
+ *   Operating  — bootstrap complete. A persistent shell (header, top tabs,
+ *                agent rail) wraps two routed pages: /overview and
+ *                /configuration. The operator's relationship with the agent
+ *                stays continuous across both pages.
  */
 export default function App(): JSX.Element {
   const { data, isLoading } = useQuery<BootstrapState>({
@@ -28,10 +29,8 @@ export default function App(): JSX.Element {
     queryFn: () => api.getBootstrap(),
     refetchInterval: 1500,
   });
+  const [restartPending, setRestartPending] = useState(false);
 
-  // While the very first /v1/bootstrap poll hasn't returned OR the daemon is
-  // still 'uninitialized' (init hasn't finished writing the keystore), show
-  // the loading screen instead of flashing into onboarding.
   if (isLoading || !data || data.mode === 'uninitialized') {
     const headline = !data
       ? 'Starting jinn'
@@ -45,5 +44,31 @@ export default function App(): JSX.Element {
     return <Onboarding />;
   }
 
-  return <Operating />;
+  const network = (data.chain === 'base' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet';
+  const masterAddress = data.master_address ?? '';
+
+  return (
+    <Router>
+      <RestartBanner
+        restartPending={restartPending}
+        onRestart={async () => {
+          await api.restartDaemon();
+          setRestartPending(false);
+        }}
+      />
+      <AppShell
+        header={<Header network={network} rpcHealthy={true} masterAddress={masterAddress} />}
+        tabs={<TopTabs />}
+        rail={<AgentRail />}
+      >
+        <Switch>
+          <Route path="/overview" component={OverviewPage} />
+          <Route path="/configuration">
+            <ConfigurationPage onRestartPending={() => setRestartPending(true)} />
+          </Route>
+          <Route><Redirect to="/overview" /></Route>
+        </Switch>
+      </AppShell>
+    </Router>
+  );
 }

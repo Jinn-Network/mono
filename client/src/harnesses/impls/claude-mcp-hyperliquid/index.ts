@@ -468,6 +468,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
 
     const rationale: RationaleEntry[] = [];
     let allSessions: SessionResult[] = [];
+    const claudeModel = ctx.solverNet?.model ?? this.config.claudeModel;
 
     if (testDeps?.runSession) {
       // Test mode: use injected runner instead of spawning Claude
@@ -479,7 +480,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         abort,
         msUntilEndTs,
         log,
-        this.config,
+        { ...this.config, claudeModel },
       );
     } else {
       // Production mode: spawn Claude with MCP config
@@ -494,7 +495,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         }),
         {
           claudePath: this.config.claudePath ?? 'claude',
-          claudeModel: this.config.claudeModel,
+          claudeModel,
           mcpConfigPath,
           workingDir,
           abort,
@@ -645,7 +646,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         sessionId: session.sessionId,
         startedAt: session.startedAt,
         endedAt: session.endedAt,
-        modelId: this.config.claudeModel ?? 'unknown',
+        modelId: claudeModel ?? 'unknown',
         initiatedFillTids: session.initiatedFillTids,
       },
       tags: ['transcript', 'session'],

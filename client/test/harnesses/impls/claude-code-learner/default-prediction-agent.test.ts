@@ -36,6 +36,7 @@ describe('default prediction agent runtime plugins', () => {
           enabled: true,
           solverType: 'prediction.v1',
           harness: 'claude-code-learner',
+          model: 'claude-opus-test',
           plugins: [],
           taskGenerator: { enabled: true },
         },
@@ -64,7 +65,7 @@ describe('default prediction agent runtime plugins', () => {
       workingDir,
       implStateDir,
       extra: {
-        solverNet: { name: net!.name, solverType: net!.solverType },
+        solverNet: { name: net!.name, solverType: net!.solverType, model: net!.model },
         runtimePlugins: net!.runtimePlugins,
         solverPluginRoots: net!.runtimePlugins.map((plugin) => plugin.root),
       },
@@ -72,6 +73,7 @@ describe('default prediction agent runtime plugins', () => {
 
     const invocation = adapter.getInvocations()[0];
     expect(invocation?.inputs.solverType).toBe('prediction.v1');
+    expect(invocation?.inputs.claudeModel).toBe('claude-opus-test');
     expect(invocation?.inputs.pluginRoots).toEqual(net!.runtimePlugins.map((plugin) => plugin.root));
 
     const pluginNames = net!.runtimePlugins.map((plugin) => plugin.name);

@@ -2,6 +2,7 @@ import type {
   BootstrapState,
   ClaudeAuthState,
   StructuredEvent,
+  SolverNetsCatalogResponse,
 } from './types.js';
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -68,6 +69,52 @@ export const api = {
   restartDaemon: () =>
     jfetch<{ ok: boolean; scheduled?: boolean }>('/api/admin/restart', {
       method: 'POST',
+    }),
+  getSolverNets: () => jfetch<SolverNetsCatalogResponse>('/v1/solvernets'),
+  updateSolverNet: (
+    name: string,
+    patch: {
+      enabled?: boolean;
+      role?: 'solving' | 'evaluating';
+      harness?: string;
+      model?: string;
+      plugins?: string[];
+      solverType?: string; // deprecated; remove next release
+    },
+  ) =>
+    jfetch<{
+      ok: boolean;
+      restartRequired: boolean;
+      name: string;
+      config: {
+        enabled?: boolean;
+        role?: 'solving' | 'evaluating';
+        harness?: string;
+        model?: string;
+        plugins?: string[];
+      };
+    }>(`/v1/setup/solvernets/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  updateNetwork: (patch: { rpcUrl: string | null }) =>
+    jfetch<{ ok: boolean; restartRequired: boolean; rpcUrl: string }>(
+      '/v1/setup/network',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      },
+    ),
+  retryAgentBinding: (patch?: { serviceIndex?: number }) =>
+    jfetch<{
+      ok: boolean;
+      attempts: Array<{ serviceIndex: number; status: 'success' | 'reverted' | 'queued'; txHash?: string; detail?: string }>;
+    }>('/v1/setup/agent-binding/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch ?? {}),
     }),
 };
 

@@ -22,10 +22,36 @@ describe('formatBootstrapOperatorMessage', () => {
     expect(r.hint).toBeDefined();
   });
 
-  it('maps insufficient funds', () => {
-    const r = formatBootstrapOperatorMessage(new Error('insufficient funds for gas'));
+  it('maps insufficient funds (specific viem phrasing)', () => {
+    const r = formatBootstrapOperatorMessage(new Error('insufficient funds for gas * price + value'));
     expect(r.summary).toMatch(/ETH|eth/i);
     expect(r.hint).toBeDefined();
+    expect(r.rawMessage).toBe('insufficient funds for gas * price + value');
+  });
+
+  it('maps out-of-gas as a gas-supply problem, not a funding problem (jinn-mono-jz9f)', () => {
+    const oog = new Error(
+      'execution reverted: out of gas while creating contract during mech deploy',
+    );
+    const r = formatBootstrapOperatorMessage(oog);
+    expect(r.summary.toLowerCase()).toContain('gas');
+    // The summary must NOT pretend the operator is short on ETH.
+    expect(r.summary.toLowerCase()).not.toContain('not enough eth');
+    expect(r.summary.toLowerCase()).not.toContain('paying account');
+    expect(r.hint).toBeDefined();
+  });
+
+  it('does not misclassify generic execution-reverted errors as insufficient funds', () => {
+    const r = formatBootstrapOperatorMessage(new Error('execution reverted: insufficient gas for inner call'));
+    // The substring "insufficient" appears but this is gas, not balance — make
+    // sure the funds matcher does not trip on it.
+    expect(r.summary.toLowerCase()).not.toContain('paying account');
+  });
+
+  it('always preserves the raw error message in rawMessage', () => {
+    const original = 'some unrecognised RPC failure with multiple\nlines\nof detail';
+    const r = formatBootstrapOperatorMessage(new Error(original));
+    expect(r.rawMessage).toBe(original);
   });
 
   it('maps unauthorized restake to earning-dir guidance', () => {

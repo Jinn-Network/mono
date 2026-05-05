@@ -25,7 +25,7 @@ jinn-cli-agents/ Git subtree — historical Jinn agent repo (IMPORTANT: see belo
 
 client/          TypeScript daemon — the main runnable component
   src/
-    main.ts              Production entry point (yarn start)
+    main.ts              Production entry point (`jinn run` from the published package)
     config.ts            Config loader (file > env > defaults)
     index.ts             Library exports
     adapters/
@@ -120,23 +120,46 @@ yarn e2e         # full loop on Anvil fork of Base
 
 The e2e script spawns Anvil, bootstraps from scratch, runs create → restore → evaluate, and verifies staking rewards. Needs internet (Base RPC + IPFS).
 
-### Production run
+### How the daemon is meant to be launched
+
+`jinn-client` is published as `@jinn-network/client`. The intended operator
+flow is:
+
+1. `npm install -g @jinn-network/client@latest` (or `yarn global add …`).
+2. `jinn run` — the binary in the published package executes the compiled
+   `dist/` tree, which ships the operator dashboard SPA next to the daemon.
+
+The CLI auto-generates a keystore password on first run and reads it from
+`~/.jinn-client/keystore-password` thereafter; set `JINN_PASSWORD` only if
+you need to manage the password yourself (CI, secrets manager).
 
 ```bash
-cd client
-JINN_PASSWORD=your-keystore-password yarn start
-```
-
-Or with a config file:
-
-```bash
-JINN_PASSWORD=secret yarn start -- --config ./my-config.json
+jinn run                                   # default config at ~/.jinn-client/config.json
+jinn run --config ./my-config.json         # alternate config file
+JINN_PASSWORD=your-secret jinn run         # supply password via env (no on-disk file)
 ```
 
 The daemon will:
 1. Run the earning bootstrap (wallet → Safe → service → staking → mech)
 2. Pause at `awaiting_funding` if the wallet needs ETH/OLAS — fund and re-run
 3. Start the daemon with 3 loops (creator, restorer, delivery-watcher)
+
+### Repo contributors only
+
+When iterating inside this repo, run the *built* binary so you get the same
+dashboard the published package serves:
+
+```bash
+cd client
+yarn build           # compiles tsc + bundles SPA into dist/dashboard
+node dist/bin/jinn.js run
+```
+
+`yarn jinn run` (tsx + src) works for daemon-side iteration but only renders
+the SPA after at least one `yarn build:spa` — the dev path resolves the
+dashboard from `src/dashboard/spa/dist/` once that directory exists. If you
+have no SPA bundle on disk the daemon serves a clear "dashboard bundle
+missing" page instead of silently falling back to anything stale.
 
 ### Running against Anvil fork (local dev)
 
@@ -162,7 +185,7 @@ cat > ~/.jinn-client/config.json << 'EOF'
 }
 EOF
 
-JINN_PASSWORD=test yarn start
+JINN_PASSWORD=test jinn run
 # Will pause at awaiting_funding — fund via cast, then re-run
 ```
 
@@ -223,13 +246,7 @@ Three layers, top to bottom:
 
 ### How the daemon works
 
-The daemon runs three concurrent loops:
-
-1. **CreatorLoop** — posts each Task once via the deployed `JinnRouter.createRestorationJob()` boundary
-2. **Engine watcher + TaskEngine** — consumes `adapter.watchForRequests()`, resolves the Task's SolverNet, selects a Harness, runs it, packages the Solution, then calls `mech.deliverToMarketplace()` + `JinnRouter.claimDelivery()`
-3. **DeliveryWatcherLoop** — watches for deliveries, calls `JinnRouter.claimDelivery()`, then creates evaluation jobs via `JinnRouter.createEvaluationJob()`
-
-Each JinnRouter call increments activity counters for the Safe multisig. The OLAS staking contract reads these counters at checkpoints to determine reward eligibility.
+See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. The current daemon shape is eight long-running loops (creator, engine-watcher, engine-tick, delivery-watcher, reward-claim, balance-topup, jinn-claim L1↔L2, peer-sync) plus one-shot in-flight recovery on startup. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
 
 ### Earning bootstrap
 
@@ -276,11 +293,11 @@ where tests go, the mock policy, shared helpers. Design rationale lives in
 # Client
 cd client
 yarn install         # install deps (CI: yarn install --immutable)
-yarn build           # tsc compile
+yarn build           # tsc compile + bundle SPA into dist/dashboard
 yarn test            # vitest run
 yarn e2e             # end-to-end on Anvil fork
 yarn staking         # earning bootstrap validation on Anvil
-yarn start           # production daemon (requires JINN_PASSWORD)
+node dist/bin/jinn.js run    # contributor daemon launch (after `yarn build`)
 
 # Contracts
 cd contracts

@@ -108,6 +108,10 @@ export interface BuildPredictionOperatorStatusOptions {
   buildHarnesses?: BuildHarnesses;
   loadExternalImpl?: LoadExternalImpl;
   loadSolverNets?: LoadSolverNets;
+  /** True when this status is being built for a running daemon. Suppresses
+   *  the vacuous "start the daemon" nextAction copy and replaces it with a
+   *  "waiting for tasks" message. See Issue #86 §1. */
+  daemonRunning?: boolean;
 }
 
 export interface RunPredictionSampleOptions {
@@ -150,11 +154,17 @@ function errorMessage(error: unknown): string {
 
 function diagnosticNextAction(
   diagnostics: PredictionOperatorDiagnostic[],
+  daemonRunning = false,
 ): PredictionOperatorStatus['nextAction'] {
   const firstError = diagnostics.find((d) => d.severity === 'error' && d.nextAction);
   if (firstError?.nextAction) return firstError.nextAction;
   const firstWarning = diagnostics.find((d) => d.severity === 'warning' && d.nextAction);
   if (firstWarning?.nextAction) return firstWarning.nextAction;
+  if (daemonRunning) {
+    return {
+      description: 'Waiting for Tasks. SolverNet active, Harness loaded; no incoming Tasks since startup.',
+    };
+  }
   return {
     description: 'Prediction SolverNet is configured; start the daemon to watch shared Tasks.',
     cli: 'jinn run',
@@ -164,6 +174,7 @@ function diagnosticNextAction(
 function missingSolverNetStatus(
   configPath: string,
   name: string,
+  daemonRunning = false,
 ): PredictionOperatorStatus {
   const diagnostics: PredictionOperatorDiagnostic[] = [
     {
@@ -191,7 +202,7 @@ function missingSolverNetStatus(
     },
     runtimePlugins: [],
     diagnostics,
-    nextAction: diagnosticNextAction(diagnostics),
+    nextAction: diagnosticNextAction(diagnostics, daemonRunning),
   };
 }
 
@@ -202,9 +213,10 @@ export async function buildPredictionOperatorStatus({
   buildHarnesses = defaultBuildHarnesses,
   loadExternalImpl = defaultLoadExternalImpl,
   loadSolverNets = defaultLoadSolverNets,
+  daemonRunning = false,
 }: BuildPredictionOperatorStatusOptions): Promise<PredictionOperatorStatus> {
   const net = config.solverNets[name];
-  if (!net) return missingSolverNetStatus(configPath, name);
+  if (!net) return missingSolverNetStatus(configPath, name, daemonRunning);
 
   const diagnostics: PredictionOperatorDiagnostic[] = [];
   let loadedNet: LoadedSolverNet | undefined;
@@ -398,7 +410,7 @@ export async function buildPredictionOperatorStatus({
       : net.plugins.map((entry) => pluginStatus('configured', sourceOf(entry))),
     ...(harnessStatus ? { harness: harnessStatus } : {}),
     diagnostics,
-    nextAction: diagnosticNextAction(diagnostics),
+    nextAction: diagnosticNextAction(diagnostics, daemonRunning),
   };
 
   return status;

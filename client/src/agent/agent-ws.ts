@@ -8,7 +8,8 @@
  *   - The PTY's stdout is buffered (last N chunks) so a reconnecting browser
  *     can replay context.
  *   - The server scans stdout for OAuth URL patterns and emits a typed
- *     `auth_url` frame to the SPA. The SPA opens the URL in a new tab.
+ *     `auth_url` frame to the SPA. The SPA treats it as protocol data only;
+ *     Claude Code's PTY output remains the operator-visible sign-in source.
  *
  * Spawn gating (mc24 follow-up):
  *   - claude is NOT spawned automatically on first WS connect for fresh

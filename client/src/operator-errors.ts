@@ -48,10 +48,24 @@ export interface OperatorErrorParts {
   summary: string;
   /** Optional follow-up guidance */
   hint?: string;
+  /**
+   * The raw underlying error message, preserved verbatim so callers can
+   * include it in error envelopes / debug logs. The formatter's `summary`
+   * is a heuristic interpretation; when the heuristic is wrong, operators
+   * (and maintainers reading bootstrap-error.json post-mortem) need the
+   * untouched message to diagnose. Always populated.
+   */
+  rawMessage: string;
 }
 
 /**
  * Map common Safe / RPC failures to short messages. Falls back to a trimmed raw line.
+ *
+ * The summary is a best-effort diagnosis. Always keep `rawMessage` in the
+ * caller's envelope so a wrong diagnosis can be debugged instead of
+ * masquerading as the truth (cf. jinn-mono-jz9f: a gas-limit shortage was
+ * misclassified as an insufficient-funds error and sent operators chasing
+ * a funding fix that did not exist).
  */
 export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorParts {
   const msg = stringifyUnknown(error);
@@ -64,6 +78,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
     return {
       summary: msg.split('reStake revert:')[0]?.trim() ?? msg,
       hint: 'Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service. Otherwise request owner / managing-agent recovery or abandon-and-rebootstrap.',
+      rawMessage: msg,
     };
   }
 
@@ -72,6 +87,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
       summary:
         'Gnosis Safe could not execute or estimate this transaction (GS013: inner call may have reverted or gas estimation failed).',
       hint: 'Retry after a few blocks or switch RPC. Full cause chain is in the error envelope details.',
+      rawMessage: msg,
     };
   }
 
@@ -80,6 +96,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
       summary:
         'Gnosis Safe rejected the transaction (GS026: invalid owner address or signature).',
       hint: 'Confirm the signing key is a Safe owner and the Safe address matches your fleet state.',
+      rawMessage: msg,
     };
   }
 
@@ -91,24 +108,49 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
     return {
       summary: 'A transaction with the same nonce is already pending, and the new gas price is too low.',
       hint: 'Wait for confirmation, cancel/replace with a higher maxFeePerGas, or clear the stuck nonce.',
+      rawMessage: msg,
     };
   }
 
+  // Gas-supply shortage (gas limit < execution gas, intrinsic floor, etc.).
+  // Match before the funds branch so OOG errors that incidentally mention
+  // "insufficient" do not get mislabeled as a balance problem.
   if (
-    lower.includes('insufficient funds') ||
-    msg.includes('INSUFFICIENT_FUNDS') ||
-    lower.includes('exceeds the balance of the account')
+    lower.includes('out of gas') ||
+    lower.includes('intrinsic gas too low') ||
+    lower.includes('gas required exceeds allowance') ||
+    lower.includes('contract creation code storage out of gas') ||
+    lower.includes('exceeds block gas limit')
+  ) {
+    return {
+      summary:
+        'Transaction ran out of gas — the Safe wrapper or inner contract call needed more gas than the supplied limit.',
+      hint: 'Re-run; the daemon estimates gas dynamically and a transient RPC failure may have forced a fallback. If it persists, the gas requirement of the underlying step has likely drifted past the safe-adapter fallback floor.',
+      rawMessage: msg,
+    };
+  }
+
+  // Genuine insufficient-funds. The substring `insufficient funds` alone is
+  // too loose — vendor RPC errors can wrap OOG / revert text using "insufficient
+  // gas" or similar phrasing that contains the substring. Match the specific
+  // viem / EVM phrasings that mean balance < gas*price + value.
+  if (
+    lower.includes('insufficient funds for gas') ||
+    lower.includes('insufficient funds for transfer') ||
+    lower.includes('exceeds the balance of the account') ||
+    msg.includes('INSUFFICIENT_FUNDS')
   ) {
     return {
       summary: 'Not enough ETH on the paying account to cover gas (and value, if any).',
       hint: 'Send ETH to the master wallet, agent EOA, or Safe depending on which step failed.',
+      rawMessage: msg,
     };
   }
 
   const firstLine = msg.split('\n')[0]?.trim() ?? msg;
   if (firstLine.length > 220) {
-    return { summary: `${firstLine.slice(0, 220)}…` };
+    return { summary: `${firstLine.slice(0, 220)}…`, rawMessage: msg };
   }
 
-  return { summary: firstLine };
+  return { summary: firstLine, rawMessage: msg };
 }

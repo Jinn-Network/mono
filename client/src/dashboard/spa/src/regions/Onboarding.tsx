@@ -97,6 +97,8 @@ export function Onboarding(): JSX.Element {
   const masterAddress = bootstrap.master_address ?? '';
   const { phase: bootstrapPhase, subState } = bootstrapPhaseFor(bootstrap.currentStep);
   const bootstrapError = bootstrap.error;
+  const activeService = bootstrap.services.find((svc) => svc.step === bootstrap.currentStep)
+    ?? bootstrap.services[0];
 
   // Current phase is the FIRST not-done phase. Phase 1 (auth) is done once
   // claude reports authenticated:true. Phases 2/3/4 are bootstrap-driven.
@@ -139,12 +141,19 @@ export function Onboarding(): JSX.Element {
                   {!showError && p === 3 && status === 'active' && masterAddress && (
                     <AwaitingFundingCard
                       address={masterAddress}
-                      minimumWei="10000000000000000"
+                      minimumWei={bootstrap.funding?.targetWei ?? '10000000000000000'}
                       chainExplorerBase={explorer}
                     />
                   )}
                   {!showError && p === 4 && status === 'active' && (
-                    <SubStateLine label={subState ?? 'Working'} />
+                    <SubStateLine
+                      label={subState ?? 'Working'}
+                      step={bootstrap.currentStep}
+                      serviceIndex={activeService?.index}
+                      serviceId={activeService?.service_id}
+                      safeAddress={activeService?.safe_address}
+                      explorer={explorer}
+                    />
                   )}
                 </PhaseRow>
               );
@@ -482,9 +491,9 @@ function BootstrapErrorCard({ envelope }: { envelope: BootstrapErrorEnvelope }):
         </a>
       )}
       <p className="j-mono text-[11px]" style={{ color: 'var(--fg-dim)' }}>
-        The daemon exited; once you've addressed the cause, run{' '}
+        Setup is paused at this step. Once you've addressed the cause, run{' '}
         <code style={{ color: 'var(--fg-muted)' }}>jinn run</code> again to retry from
-        this step.
+        the persisted state.
       </p>
     </div>
   );
@@ -519,38 +528,90 @@ function formatRelativeTime(iso: string): string | null {
   }
 }
 
-function SubStateLine({ label }: { label: string }): JSX.Element {
+function SubStateLine({
+  label,
+  step,
+  serviceIndex,
+  serviceId,
+  safeAddress,
+  explorer,
+}: {
+  label: string;
+  step: string;
+  serviceIndex?: number;
+  serviceId?: number;
+  safeAddress?: string;
+  explorer: string;
+}): JSX.Element {
   return (
     <div
-      className="px-4 py-3 flex items-center gap-3"
+      className="px-4 py-3 flex flex-col gap-3"
       style={{
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-2)',
         background: 'var(--bg-elevated)',
       }}
     >
-      <span
-        aria-hidden="true"
-        style={{
-          width: '6px',
-          height: '6px',
-          borderRadius: '50%',
-          background: 'var(--accent-sky)',
-          boxShadow: '0 0 0 0 rgba(122, 167, 220, 0.6)',
-          animation: 'jinnPulse 1.6s ease-out infinite',
-        }}
-      />
-      <span className="j-mono text-sm" style={{ color: 'var(--fg)' }}>
-        {label}
-      </span>
-      <span
-        className="j-mono text-[10px] ml-auto"
-        style={{ color: 'var(--fg-dim)' }}
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden="true"
+          style={{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            background: 'var(--accent-sky)',
+            boxShadow: '0 0 0 0 rgba(122, 167, 220, 0.6)',
+            animation: 'jinnPulse 1.6s ease-out infinite',
+          }}
+        />
+        <span className="j-mono text-sm" style={{ color: 'var(--fg)' }}>
+          {label}
+        </span>
+        <span
+          className="j-mono text-[10px] ml-auto"
+          style={{ color: 'var(--fg-dim)' }}
+        >
+          running · no action needed
+        </span>
+      </div>
+      <div
+        className="grid grid-cols-1 md:grid-cols-[120px_1fr] gap-x-4 gap-y-1 j-mono text-[11px]"
+        style={{ color: 'var(--fg-muted)' }}
       >
-        a few minutes · no action needed
-      </span>
+        <span style={{ color: 'var(--fg-dim)' }}>Current step</span>
+        <span>{formatOperatorStep(step)}</span>
+        {serviceIndex !== undefined && (
+          <>
+            <span style={{ color: 'var(--fg-dim)' }}>Service</span>
+            <span>
+              #{serviceIndex}{serviceId !== undefined ? ` · id ${serviceId}` : ''}
+            </span>
+          </>
+        )}
+        {safeAddress && (
+          <>
+            <span style={{ color: 'var(--fg-dim)' }}>Safe</span>
+            <a
+              href={`${explorer}/address/${safeAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline break-all"
+              style={{ color: 'var(--accent-sky)' }}
+            >
+              {safeAddress}
+            </a>
+          </>
+        )}
+      </div>
     </div>
   );
+}
+
+function formatOperatorStep(step: string): string {
+  return step
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 const ANIMATIONS = `

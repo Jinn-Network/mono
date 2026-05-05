@@ -53,6 +53,23 @@ describe('tx-retry', () => {
       expect(isRecoverableTransactionError(new Error('insufficient funds for gas'))).toBe(false);
     });
 
+    it('returns true for "returned no data" — multi-node RPC eventual consistency', () => {
+      // When a Safe is deployed in tx N and the daemon immediately reads
+      // Safe.nonce(), Tenderly's load-balanced RPC sometimes hits a sibling
+      // node that has not yet propagated the new contract. viem surfaces this
+      // as 'The contract function "nonce" returned no data ("0x").' — the
+      // daemon must retry, not bail.
+      expect(isRecoverableTransactionError(
+        new Error('The contract function "nonce" returned no data ("0x").'),
+      )).toBe(true);
+      expect(isRecoverableTransactionError(
+        new Error('Cannot decode zero data ("0x") with ABI parameters.'),
+      )).toBe(true);
+      expect(isRecoverableTransactionError(
+        new Error('something happened\n  - The address is not a contract.'),
+      )).toBe(true);
+    });
+
     it('returns false for user rejection', () => {
       expect(isRecoverableTransactionError(new Error('user rejected the request'))).toBe(false);
     });

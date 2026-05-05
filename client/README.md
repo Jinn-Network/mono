@@ -7,7 +7,7 @@ Jinn protocol client. Runs a headless daemon that participates in the Jinn train
 
 ## Operator panel (local web UI)
 
-Running `jinn run` (or `yarn start`) opens a browser to `http://127.0.0.1:7331`
+Running `jinn run` opens a browser to `http://127.0.0.1:7331`
 with the operator panel — Status, Visibility (live event stream), Setup
 (bootstrap state machine), and an embedded Claude Code session in Auto Mode
 (when available).
@@ -388,13 +388,7 @@ Quick answers to the things that typically surprise new operators:
 
 ## How it works
 
-The daemon runs three concurrent loops:
-
-1. **CreatorLoop** — posts Tasks via the deployed restoration-job contract boundary
-2. **TaskEngine** — claims requests, runs the selected Harness, submits Solutions
-3. **DeliveryWatcherLoop** — claims deliveries, creates evaluation jobs
-
-Each loop call increments on-chain activity counters. Staking contracts read these at checkpoints to determine reward eligibility.
+See [`client/ARCHITECTURE.md`](https://github.com/Jinn-Network/mono/blob/main/client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points — with code pointers for each layer.
 
 ## Development
 

@@ -23,7 +23,9 @@ yarn dev:spa
 # vite serves at :5173 with /v1, /artifacts, /auth, /api proxied to the daemon
 ```
 
-Run the daemon separately on `:7331` (e.g. `JINN_PASSWORD=test yarn start` in `client/`).
+Run the daemon separately on `:7331`. From a contributor checkout that means
+`yarn build && node dist/bin/jinn.js run` in `client/` (the operator package
+launches the same binary as `jinn run`).
 
 The dev server hot-reloads on `.tsx` / `.css` changes. The daemon's API is the
 backend, so it must be running for the SPA to fetch data.

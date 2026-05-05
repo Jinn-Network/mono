@@ -38,6 +38,12 @@ export interface BootstrapState {
   }>;
   master_address?: string;
   chain?: string;
+  funding?: {
+    master_address?: string;
+    eth_required?: string;
+    eth_balance?: string;
+    targetWei?: string;
+  };
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
 }
@@ -53,4 +59,24 @@ export interface ClaudeAuthState {
     resolvedPath?: string;
   };
   email?: string;
+}
+
+export interface SolverNetCatalogEntry {
+  name: string;
+  description: string;
+  state: 'live' | 'available' | 'coming_soon';
+  intrinsicSolverType: string;
+  supportedRoles: ('solving' | 'evaluating')[];
+  compatibleHarnesses: Array<{
+    name: string;
+    version: string;
+    supportsRoles: ('solving' | 'evaluating')[];
+  }>;
+  compatiblePlugins: Array<{ name: string; version: string; source: string }>;
+}
+
+export interface SolverNetsCatalogResponse {
+  schemaVersion: 1;
+  generatedAt: string;
+  nets: SolverNetCatalogEntry[];
 }

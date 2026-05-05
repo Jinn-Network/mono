@@ -44,13 +44,20 @@ describe('SolverNet contracts', () => {
         prediction: {
           enabled: true,
           solverType: 'prediction.v1',
+          role: 'evaluating',
           harness: 'prediction-v1-baseline',
+          model: 'claude-opus-test',
           plugins: ['bundled:jinn-prediction-plugin'],
           taskGenerator: { enabled: true },
         },
       },
     });
-    const net = registry.forSolverType('prediction.v1');
+    const net = registry.forSolverType('prediction.v1', 'evaluation');
+    expect(registry.forSolverType('prediction.v1', 'restoration')).toBeUndefined();
+    expect(net).toMatchObject({
+      role: 'evaluating',
+      model: 'claude-opus-test',
+    });
     expect(net?.contract.evaluationFunction.id).toBe('prediction.brier-loss.v1');
     expect(net?.runtimePlugins.map((plugin) => plugin.name)).toEqual([
       '@jinn-network/network-tools',

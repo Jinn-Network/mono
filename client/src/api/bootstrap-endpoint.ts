@@ -16,6 +16,14 @@ import { readBootstrapError } from '../errors/persisted-bootstrap-error.js';
 
 export interface BootstrapEndpointConfig {
   earningDir: string;
+  /** Reads operator-tunable runtime fields (rpcUrl, defaultRpcUrl,
+   *  solverNets) and merges them into the response so the SPA's
+   *  Configuration page can render them without a separate fetch. */
+  configReader?: () => {
+    rpcUrl?: string;
+    defaultRpcUrl?: string;
+    solverNets?: Record<string, unknown>;
+  };
 }
 
 const STEPS = [
@@ -54,6 +62,16 @@ interface FleetStateOnDisk {
 
 interface FundingGateOnDisk {
   master_address?: string;
+  eth_required?: string;
+  eth_balance?: string;
+}
+
+function fundingTargetWei(fundingGate: FundingGateOnDisk): string | undefined {
+  const required = fundingGate.eth_required;
+  const balance = fundingGate.eth_balance;
+  if (required === undefined || balance === undefined) return undefined;
+  if (!/^\d+$/.test(required) || !/^\d+$/.test(balance)) return undefined;
+  return (BigInt(required) + BigInt(balance)).toString();
 }
 
 export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): void {
@@ -86,22 +104,28 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
         fundingGate = null;
       }
     }
+    // `[].every(...)` returns true vacuously, so a fresh fleet (no services
+    // yet) was previously treated as "all services running" and the funding
+    // gate was suppressed even when bootstrap-funding.json existed. Compute
+    // allRunning explicitly and gate funding on it instead.
+    const allRunning = services.length > 0 && services.every((s) => RUNNING_STEPS.has(s.step));
     const fundingGateActive =
       Boolean(parsed.master_address) &&
       fundingGate?.master_address?.toLowerCase() === parsed.master_address?.toLowerCase() &&
-      !services.every((s) => RUNNING_STEPS.has(s.step));
+      !allRunning;
     const currentStepIdx = fundingGateActive
       ? STEP_INDEX.get('awaiting_funding')!
       : services.length === 0
       ? (parsed.master_address ? STEP_INDEX.get('awaiting_funding')! : 0)
       : Math.min(...services.map((s) => STEP_INDEX.get(s.step) ?? 0));
     const currentStep = STEPS[currentStepIdx];
-    const allRunning = services.length > 0 && services.every((s) => RUNNING_STEPS.has(s.step));
 
     // Surface the most recent persisted bootstrap-error envelope so the panel
     // can render a "Bootstrap failed at X" state instead of staying frozen on
     // the last persisted step. Cleared at the start of each bootstrap attempt.
     const error = readBootstrapError(config.earningDir);
+
+    const cfg = config.configReader?.() ?? {};
 
     return c.json({
       schemaVersion: 1,
@@ -111,6 +135,17 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       services,
       master_address: parsed.master_address,
       chain: parsed.chain,
+      ...(cfg.rpcUrl !== undefined ? { rpcUrl: cfg.rpcUrl } : {}),
+      ...(cfg.defaultRpcUrl !== undefined ? { defaultRpcUrl: cfg.defaultRpcUrl } : {}),
+      ...(cfg.solverNets !== undefined ? { solverNets: cfg.solverNets } : {}),
+      ...(fundingGateActive && fundingGate ? {
+        funding: {
+          master_address: fundingGate.master_address,
+          eth_required: fundingGate.eth_required,
+          eth_balance: fundingGate.eth_balance,
+          targetWei: fundingTargetWei(fundingGate),
+        },
+      } : {}),
       ...(error ? { error } : {}),
     });
   });
