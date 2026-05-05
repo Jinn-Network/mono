@@ -58,37 +58,52 @@ Read in order:
 
 ### Step 2 — Yesterday's loop check
 
-Compare yesterday's plan in growth-log §5 against what actually shipped, using these signals:
-- **Teach:** did Oak's timeline gain a substantive original post yesterday? Use `bird user-tweets tannedoaksprout -n 5 --plain`. If yes, mark Teach `[done]`. If a thread was scheduled in §5 but no post landed, mark `[skipped — surface to today]`.
-- **Understand:** did Oak reply substantively to a candidate post? Use `bird user-tweets tannedoaksprout -n 10 --plain` and look for replies (tweets starting with `@`).
-- **Direct offer:** did the warm list see a contact? Update `Status / Next action` field per row.
-- **Interact:** mostly invisible from public data; do not infer. Mark `[unknown]`.
+Compare yesterday's plan in growth-log §5 against what actually shipped, using these signals.
 
-If §5 has no entry for yesterday (skill is being run for the first time, or yesterday was skipped), mark each bucket `[no plan]` and skip the compliance check.
+**Important: `bird user-tweets` excludes replies by default in bird ≥0.8.0.** It returns originals, retweets, and self-threads but not @-prefixed replies. To detect replies you must use `bird search` with the `filter:replies` operator. Run both queries:
+
+- **Teach** (originals + threads): `bird user-tweets tannedoaksprout -n 10 --plain`
+  - Look for non-RT tweets dated yesterday (UTC). A self-thread counts as one Teach.
+  - Mark `[done]` if ≥1 original lands. Mark `[skipped — surface to today]` if §5 scheduled a thread that never posted.
+- **Understand** (replies): `bird search "from:tannedoaksprout filter:replies" -n 20 --plain`
+  - Look for substantive replies dated yesterday (UTC). One-word acknowledgements ("nice", "agreed") do not count; replies that pose a methodology question, surface a constraint, or extend the other person's argument do count.
+  - Mark `[done]` if ≥1 substantive reply lands. List up to 4 reply URLs and the handle replied to in the brief.
+- **Direct offer:** did the warm list see a contact yesterday? Read `growth/.local/jinn-warm-contacts.csv` and look for `Status / Next action` updates dated yesterday or `Prior context` entries with yesterday's date. Mark `[done]`, `[skipped]`, or `[unchecked]` if the CSV has no dated fields.
+- **Interact:** synchronous DM / Telegram / voice activity is invisible from public data. Always mark `[unknown — out of scope]`. Do not infer.
+
+If §5 has no entry for yesterday (skill is being run for the first time, or yesterday was skipped), mark each bucket `[no plan]` and skip the compliance check — but still run the `bird` queries and surface what you find as informational notes ("yesterday's actuals: 4 replies, 0 originals") so today's plan has signal.
 
 ### Step 3 — Compute today's top-3 actions, ranked by leverage
 
-The leverage ranking heuristic, in priority order (do not invent a different ranking):
+Walk the tiers in order and collect candidate actions; do not skip a tier. Each candidate must already be specific (handle, URL, draft pointer) by the time it enters the list — if you can't name the target, it's not a candidate yet.
 
-**Tier A — high leverage, ship today:**
-- Reply opportunity in the 30-min top-replies window from today's watcher file.
-- Bridge post (from `cluster-model` handoff) ready to ship and Tue–Thu 09:00–14:00 cluster-peak window is open today.
-- Warm-list contact whose `Next action` is overdue (>7 days since last contact for High priority, >14 days for Medium).
+**Tier A — ship today (verb: post, reply, send):**
+- A1. **Top-replies window reply.** From today's watcher file §1, any reply opportunity inside the 30-min window after a priority-audience post. Action shape: *"Reply to @<handle>'s <topic> (<URL>): <one-line angle>. Draft via x-post-builder."*
+- A2. **Bridge post.** Bridge angle from `growth-log.md` §2, only if today is Tue/Wed/Thu and the cluster-peak window 09:00–14:00 (Oak's local time) is still open. Action shape: *"Post the <cluster> bridge: <one-line hook>. Draft via x-post-builder, score via x-algorithm-grader before posting."*
+- A3. **Overdue warm-list contact.** From `jinn-warm-contacts.csv`: High priority and last contact >7 days ago, OR Medium priority and >14 days. Action shape: *"DM @<handle>: <next action from CSV>."*
 
-**Tier B — schedule:**
-- Methodology question on a candidate's recent post (from watcher §2 fresh-substantive-posts).
-- Discovery round in `discover-twitter-recruits` if the last round was >14 days ago.
-- Cluster-model refresh if last snapshot is >7 days old.
+**Tier B — schedule today, ship later this week (verb: draft, schedule, prepare):**
+- B1. **Methodology question** on a candidate's fresh substantive post from watcher §2. Action shape: *"Draft a methodology question on @<handle>'s post (<URL>): <angle>. Reply tomorrow."*
+- B2. **Discovery round** if the last `discover-twitter-recruits` run is >14 days old. Action shape: *"Run discover-twitter-recruits to refresh candidate pool (last run YYYY-MM-DD)."*
+- B3. **Feed refresh** if cluster-model snapshot is >7 days old or twitter-strategy is >7 days old. Action shape: *"Run cluster-model to refresh §1 (last sampled YYYY-MM-DD)."*
+- B4. **Teach draft** if today's Teach has no candidate angle. Pull a thread or essay seed from today's Understand replies, recent watcher signals, or a `THESIS.md` section that has not been taught publicly yet. Action shape: *"Draft Monday Teach off <source>: <one-line hook>."*
 
-**Tier C — defer unless deep-block has slack:**
-- Stewardship pings (segment E in warm contacts).
-- DeFiLlama / parking-lot integrations.
+**Tier C — defer unless deep-block has slack (verb: ping, audit):**
+- C1. Stewardship pings to segment E in warm contacts.
+- C2. DeFiLlama / parking-lot integrations.
+- C3. Inbound triage for unanswered DMs >7 days old.
 
-Pick three actions, one per Tier A item (or two from A and one from B if A has only two), to surface in the brief. Each action must be specific: handle, post URL where relevant, exact phrasing of the reply or post (or pointer to where the draft lives — growth-log §3 or §2).
+**Selection rule.** Take Tier A first, then Tier B to fill, then Tier C. Aim for three; never fewer than two. If Tier A is empty (common on Mondays before watcher runs, and on weekends), the brief is allowed to be all Tier B — but say so explicitly: *"All Tier B today — no live windows."* Never invent a Tier A action to fill the slot.
+
+**Weekend / strategy-session mode.** If running on Sat or Sun, prefer Tier B actions that *prepare Monday's Tier A*: feed refreshes, draft Teach posts, reconcile warm-contacts cadence, plan discovery rounds. Posting on weekends is allowed but not the goal. Mark the brief header `(Saturday — weekly strategy session)` or `(Sunday — weekly strategy session)`.
+
+**Cold-start mode.** If `growth/.local/` was just created and §1/§2/§3 are empty, the top-3 must be: (1) bootstrap the missing state (cluster-model, warm-contacts reconcile), (2) one Teach draft to keep the discipline alive, (3) schedule the rest of the feed routines. Do not pretend to compute Tier A from missing data.
+
+Each action that lands in the brief must answer: **who, what, where the draft lives.** "Reply to TreebeardAI's architecture follow-up: draft in growth-log §3" passes. "Engage Treebeard if you have time" fails — rewrite or drop it.
 
 ### Step 4 — Read drift flags from twitter-strategy if available
 
-If `twitter-strategy` was run within the last 7 days (no automated detection — Oak supplies the date), incorporate its top-3 drift flags as a separate section. Do not re-run `twitter-strategy` from this skill — invoking another skill from inside a skill should be done by Oak, not auto-chained.
+Use the `twitter-strategy` state after Step 0. If Step 0 refreshed it or `growth/.local/twitter-strategy-last-run.md` is still within the last 7 days, incorporate the top-3 drift flags as a separate section. If it is missing, stale, or failed to refresh, mark the DRIFT section as unavailable and surface the feed failure in HEADS-UP.
 
 ### Step 5 — Output the brief
 

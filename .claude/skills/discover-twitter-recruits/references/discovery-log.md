@@ -157,3 +157,74 @@ Captured here so future rounds do not re-recommend them.
 Append using the same shape: search query, who they are, conversion rationale, outreach path, outcome (or pending), lesson (if any). Date at the top.
 
 After 5–10 entries, scan the lessons column. Patterns that recur (e.g. "first-touch question must not be answerable from the README") should be promoted into `audience-profile.md` or `search-strategy.md`.
+
+---
+
+## 2026-05-04 — Update on prior PENDING entries
+
+- **`@Vtrivedy10`.** First-touch reply 2026-05-01 received Viv's reply same day ("what does this look like?? there's def gains from adjusting the harness to the task dist, open harnesses make this easier", 44 views). Re-engaged 2026-05-04 with the three-gap framing (access ≠ market: demand signal / funding / runtime trust). Coined memetic line "access ≠ market" in the process. **Status: DELIVERED** — watching for follow-up. Likely follow-up: "what does the funding mechanism look like concretely?" or "who issues the runtime trust signal?"
+- **`@Maxibtc2009` (Observer Protocol).** Cron-pattern caveat held for the @Maxibtc2009 personal handle, but the Observer Protocol project handle (@Obsrver_Prtcl) replied substantively to Oak's methodology question on the @boydcohen thread on 2026-05-03. Re-engaged 2026-05-04 with Tier-2 issuer-verification methodology question (Sybil-Tier-2 attack vector). **Status: DELIVERED via project handle** — watching. Lesson: when a candidate has a personal handle (cron-shape) AND a project handle (substantive), engage the project handle for methodology questions.
+- **`@TreebeardAI`.** Verified counterpart, explicit invitation to feedback received 2026-05-01 with methodology page link. Engaged 2026-05-04 with recomputability-as-2008-shape framing after reading the methodology page end-to-end. **Status: DELIVERED** — high-probability substantive reply expected. Watch paths: (a) "auditable under NDA closes the gap" → 2008-shape rebuttal, (b) "canary catches drift" → drift ≠ recomputability, (c) they ship something.
+
+---
+
+## 2026-05-04 — `@askdrvoyage` (Voyage Health) (Outcome: pending)
+
+**Search query.** Cluster-model 2026-05-04 cumulative evidence (ai-cluster §1, originally surfaced via Oak's reading); cross-checked via `bird search "shadow eval OR shadow evaluation agent -filter:replies lang:en"` (n=30) and `bird search "shared evals OR portable evals OR eval sharing -filter:replies lang:en"`.
+
+**Who they are.** US-based; runs vertical AI in veterinary clinical workflows ("Voyage Health"). Real eval rig — calibration set, abstain heads, failure-mode taxonomy. Coined "the harness *is* the moat" on 2026-05-03. Posts substantive operational content multiple times per week; QT-engages with other operators (paulg, EXM7777, amix3k).
+
+**Conversion rationale at recommendation.** Functional adjacency to Jinn evaluator role at the vertical-AI layer. Already running their own eval pipeline; would understand a portable / multiplayer extension immediately. Priority 1 (operators / builders / contributors).
+
+**Outreach path.** Public reply to his 2026-05-04 "static test sets pass once and rot, shadow-eval is the cadence" post. Methodology question: shadow-eval is private to one rig — two vertical-AI teams pooling shadow-eval, moat erosion or compounding? Where's the line between sharing failure-mode taxonomy and giving up the harness moat?
+
+**Outcome.** *Pending.*
+
+**Lesson (provisional).** Vertical-AI builders who already articulate the harness-as-moat thesis are pre-positioned to recognise the multiplayer extension. The bridge here is "harness moat at one rig vs at the network" — a one-step extension of their own thinking, not a frame change. Calibration evidence (Silverarrow / autoharness, yieldfreaks): inner-loop builders convert at higher rate than thought-leadership accounts.
+
+---
+
+## 2026-05-04 — `@pkyanam` (Preetham Kyanam) (Outcome: pending — soft)
+
+**Search query.** Builder vocabulary `bird search "agent eval harness -filter:replies lang:en"` (n=30).
+
+**Who they are.** US-based; builds Brainbase (agent memory product); shipped a Neo4j backend for @GarryTan's GBrain on 2026-05-03 (25/25 integration tests). Posted "if you're shipping agent memory without a labeled eval harness, you're flying blind" with concrete MRR numbers (v3 0.73, v7 0.75, v10 0.74) and the line "feelings are bad search metrics."
+
+**Conversion rationale at recommendation.** Real builder; ships product with quantitative eval discipline. Priority 1 (builders) — soft. Mixed-cluster feed (GTAVI RTs, @sama replies, builder posts) but on-thesis posts are sharp and unguarded.
+
+**Outreach path.** Reply to his 2026-05-01 "feelings are bad search metrics" post. Methodology question: is the harness signal portable across teams running similar agents, or does eval rot map directly to harness-config drift?
+
+**Outcome.** *Pending — not yet contacted.*
+
+**Lesson (provisional).** Mixed-cluster feeds (general builder + occasional thesis-shaped posts) need sharper bridge-question filtering than single-thesis feeds. Don't expect his audience to QT-amplify; expect his eyes only. Reply-rate signal lower than dedicated-thesis accounts.
+
+---
+
+## 2026-05-04 — `@AbbieTyrell01` (Tier 3 amplifier, yellow content-broadcaster pattern)
+
+**Search query.** Builder vocabulary `bird search "evaluation framework agent -filter:replies lang:en"` (n=30).
+
+**Who they are.** US-based account posting daily as "X days as a production AI agent" — multi-paragraph operational diary covering 8 agents, 37 SKILL.md files, 571-file knowledge graph, 8-category eval framework, 340+ regression cases from production, 65k+ interaction ledger entries. Detailed and technically substantive content. Bio explicitly states "production AI agent."
+
+**Conversion rationale at recommendation.** YELLOW per `audience-profile.md` §3 (cron / scheduled-broadcaster pattern). The agent itself is presented as the protagonist; the human operator is uncredited in the recent feed. Re-route recommendation: **find the human operator** — if surfaced, this becomes Priority 1 (real production eval framework at scale). Until then: amplifier-only.
+
+**Outreach path.** Not yet contacted. Future option: methodology question on a specific operational claim (e.g. the 37 SKILL.md → 8-category eval mapping, or the 3-day distillation cycles).
+
+**Outcome.** *Pending — not yet contacted.*
+
+**Lesson (provisional).** "Production-AI-agent-as-broadcaster" is a new pattern distinct from the @Maxibtc2009 cron-content pattern. There the project markets itself; here the agent is presented as the protagonist itself. Worth a separate `audience-profile.md` §3 note: deeply technical content from agent-narrated accounts needs human-operator surfacing before recruit recommendation.
+
+---
+
+## 2026-05-04 — Skipped notable rejects
+
+- **`@jjfleagle` (Jason Fleagle).** REJECT — enterprise-AI-consultant register. The "keep evals portable across providers" line surfaced him; full feed is VMware renewals, "AI readiness" PDFs, cloud migration, and CIO-buyer framing. Canonical @JohnCarbrey shape per `audience-profile.md` §3. Audience is corporate buyers, not protocol contributors.
+- **`@TheSebBlack`.** REJECT for recruit list (possible amplifier). Sharp shadow-eval post ("mirror 1-5% of live traffic into a shadow eval pipeline") but full feed is VC/founder-advisor narrative ($30M ARR founders, anthropic comp at $900B, term sheets, Series A pivots). Won't run a node; could amplify if a thesis-shaped post crosses his desk, but not a recruit.
+- **`@willleebuilds`.** REJECT for recruit list (yellow zinger pattern). Posted the source "leaderboards rank the wrong layer" line that anchored Oak's 2026-05-04 Teach post. Profile-check: 8 of 8 most recent posts are single-message hot takes, 0 likes / 0 retweets / 0 replies on most posts, no QT-engagement, no replies-to-others. Bot-shaped or cron-content-agent shape per §4. **NB: Oak still replied** as anchor citation rather than pre-warm — the source post matters as a reference point even if the account doesn't convert. Lesson: not all reply targets are recruit candidates; some are thread anchors.
+
+**Cross-cutting lesson from this round.** AI-cluster *eval / harness* vocabulary (~2026-05-04) cleanly splits into three audiences:
+  1. **Real builders** shipping eval-disciplined products (askdrvoyage, pkyanam) — Priority 1, the recruit pool.
+  2. **Institutional / vendor accounts** (braintrust, arizeai, allen_ai, langchain) — amplifiers, not operators.
+  3. **Thought-leadership / VC-narrative accounts** (TheSebBlack, jjfleagle, willleebuilds) — skip the recruit list.
+
+The three are linguistically similar in any given tweet; only profile-check resolves them. The §7 post-filter catches some patterns but not all — VC-narrative accounts have 0% token-ticker prelude rate yet still fail the recruit bar. Profile-check (§3) remains mandatory and cannot be replaced by linguistic filters alone.
