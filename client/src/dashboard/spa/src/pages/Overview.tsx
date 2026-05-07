@@ -2,9 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
 import { AlertBand } from './overview/AlertBand.js';
+import { LiveNowBand } from './overview/LiveNowBand.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard, type OperatorCardRole } from './overview/OperatorCard.js';
-import { RecentActivity } from './overview/RecentActivity.js';
 import { QuickActions } from './overview/QuickActions.js';
 import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
 import { AdvancedDetails } from './overview/AdvancedDetails.js';
@@ -167,17 +167,6 @@ function formatEth(wei?: string): string {
   }
 }
 
-function formatActivityKind(kind: string): string {
-  return kind.replace(/_/g, ' ');
-}
-
-function formatActivityTime(ts: string | null): string {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toISOString().slice(11, 16);
-}
-
 export function OverviewPage(): JSX.Element {
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
@@ -209,9 +198,6 @@ export function OverviewPage(): JSX.Element {
     verdicts: status?.predictionV1?.totals?.verdicts ?? 0,
     failed: status?.predictionV1?.totals?.failed ?? 0,
   };
-  const firstAttention = (operator?.diagnostics ?? []).find(
-    (d) => d.severity === 'error' && d.code !== 'prediction_solvernet_disabled',
-  );
   const services: ServiceIdentity[] = (status?.fleet?.services ?? []).map((s) => ({
     index: s.index,
     safeAddress: s.safeAddress ?? '',
@@ -222,14 +208,6 @@ export function OverviewPage(): JSX.Element {
   const tasksDelivered = totals.solutions;
   const jinnEarned = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
-  const allOperational = (status?.fleet?.services ?? []).every((s) => s.step === 'complete' || s.step === 'safe_binding_pending');
-  const nodeStatus = allOperational ? 'Running' : 'Resuming';
-  const recentActivity = (status?.activity?.recent ?? []).map((e) => ({
-    id: String(e.id),
-    ts: formatActivityTime(e.ts),
-    message: e.requestId ? `${formatActivityKind(e.kind)} · ${e.requestId}` : formatActivityKind(e.kind),
-    txHash: e.txHash ?? undefined,
-  }));
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -237,17 +215,9 @@ export function OverviewPage(): JSX.Element {
         tasksDelivered={tasksDelivered}
         jinnEarned={jinnEarned}
         gasRunwayDays={gasRunwayDays}
-        nodeStatus={nodeStatus}
       />
 
-      {firstAttention && (
-        <AlertBand
-          lead="Needs attention"
-          body={firstAttention.message}
-          ctaLabel="Configure prediction"
-          ctaHref="/operator#solvernets/prediction"
-        />
-      )}
+      <LiveNowBand />
 
       {/* Public counters — always shown when the catalog has prediction. */}
       <NetworkCard name="prediction" totals={totals} />
@@ -259,7 +229,8 @@ export function OverviewPage(): JSX.Element {
        * deep-links to `/operator#solvernets` where the registry catalog
        * is rendered. `detectJoinedSolverNet` accepts the legacy short-name
        * shape and the new manifestCid-keyed shape during the Tasks 21/22
-       * migration window.
+       * migration window. The diagnostic-attention AlertBand has moved
+       * into <LiveNowBand />; this Get-Started AlertBand stays.
        */}
       {joined ? (
         <OperatorCard
@@ -277,8 +248,6 @@ export function OverviewPage(): JSX.Element {
         />
       )}
 
-      <RecentActivity events={recentActivity} />
-      <HarnessStatusPanel />
       <QuickActions
         claimableJinn={formatEth(status?.rewards?.pendingStakingRewardsWei)}
         gasEth={formatEth(status?.masterGas?.balanceWei)}
@@ -287,13 +256,15 @@ export function OverviewPage(): JSX.Element {
         onManage={() => undefined}
         onRestart={() => { void api.restartDaemon(); }}
       />
-      <IdentityCard
-        agentId={services[0]?.agentId ?? null}
-        chain="Base Sepolia"
-        safeAddress={services[0]?.safeAddress ?? null}
-        services={services}
-      />
-      <AdvancedDetails />
+      <AdvancedDetails>
+        <IdentityCard
+          agentId={services[0]?.agentId ?? null}
+          chain="Base Sepolia"
+          safeAddress={services[0]?.safeAddress ?? null}
+          services={services}
+        />
+        <HarnessStatusPanel />
+      </AdvancedDetails>
     </div>
   );
 }

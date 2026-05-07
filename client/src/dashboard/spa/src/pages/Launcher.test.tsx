@@ -19,8 +19,6 @@ import type {
 
 vi.mock('../api/client.js', () => ({
   api: {
-    fetchLauncherStatus: vi.fn(),
-    fetchLauncherTasks: vi.fn(),
     solvernets: {
       listLaunched: vi.fn(),
     },
@@ -89,16 +87,6 @@ function wrap(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.fetchLauncherStatus).mockResolvedValue({
-    schemaVersion: 1,
-    generatedAt: '2026-05-06T17:30:00.000Z',
-    nets: [],
-  });
-  vi.mocked(api.fetchLauncherTasks).mockResolvedValue({
-    schemaVersion: 1,
-    generatedAt: '2026-05-06T17:30:00.000Z',
-    tasks: [],
-  });
 });
 
 afterEach(() => {
@@ -121,7 +109,6 @@ describe('LauncherPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('launcher-empty-state')).toBeTruthy(),
     );
-    expect(screen.getByTestId('launcher-activity')).toBeTruthy();
     expect(screen.getByText(/No SolverNets created yet\./i)).toBeTruthy();
     expect(
       screen.getByText(

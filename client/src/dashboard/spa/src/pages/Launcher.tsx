@@ -3,7 +3,6 @@ import { Link, useLocation } from 'wouter';
 import { api } from '../api/client.js';
 import type { LaunchedSolverNetRecord, LaunchedStatus } from '../api/types.js';
 import { formatEthFromWei } from './launcher-create/draft-helpers.js';
-import { LauncherActivity } from './launcher/LauncherActivity.js';
 
 /**
  * Launcher mode > `/launcher`. Owned-SolverNets list page.
@@ -323,8 +322,6 @@ export function LauncherPage(): JSX.Element {
           </Link>
         )}
       </div>
-
-      <LauncherActivity />
 
       {isLoading && (
         <p

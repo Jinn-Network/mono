@@ -1,12 +1,13 @@
 /**
- * Four-up stat hero on the Overview page. Numbers are mono (data = doing,
- * per the two-voices rule); labels are ALL-CAPS-MONO eyebrows.
+ * Three-up stat hero on the Overview page. Numbers are mono (data = doing,
+ * per the two-voices rule); labels are ALL-CAPS-MONO eyebrows. Live state
+ * (running / resuming / attention / etc.) lives in <LiveNowBand /> below
+ * this component, so it's no longer represented here.
  */
 export interface HeroStatsProps {
   tasksDelivered: number;
   jinnEarned: string;
   gasRunwayDays: number | string;
-  nodeStatus: string;
 }
 
 function Stat({ label, value, unit }: { label: string; value: string | number; unit?: string }): JSX.Element {
@@ -63,7 +64,7 @@ function Stat({ label, value, unit }: { label: string; value: string | number; u
   );
 }
 
-export function HeroStats({ tasksDelivered, jinnEarned, gasRunwayDays, nodeStatus }: HeroStatsProps): JSX.Element {
+export function HeroStats({ tasksDelivered, jinnEarned, gasRunwayDays }: HeroStatsProps): JSX.Element {
   return (
     <div
       style={{
@@ -75,7 +76,6 @@ export function HeroStats({ tasksDelivered, jinnEarned, gasRunwayDays, nodeStatu
       <Stat label="Tasks delivered" value={tasksDelivered} />
       <Stat label="JINN earned" value={jinnEarned} unit="JINN" />
       <Stat label="Gas runway" value={gasRunwayDays} unit="days" />
-      <Stat label="Node status" value={nodeStatus} />
     </div>
   );
 }

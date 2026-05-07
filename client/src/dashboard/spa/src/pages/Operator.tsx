@@ -5,7 +5,6 @@ import { NetworkSection } from './configuration/NetworkSection.js';
 import { SecuritySection } from './configuration/SecuritySection.js';
 import { HarnessSection } from './configuration/HarnessSection.js';
 import { useHashSection } from './configuration/useHashSection.js';
-import { OperatorActivity } from './operator/OperatorActivity.js';
 
 export interface OperatorPageProps {
   onRestartPending?: () => void;
@@ -40,7 +39,6 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
       data-testid="operator-page"
       style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}
     >
-      <OperatorActivity />
       <SolverNetsSection
         defaultExpanded={expandedSection === 'solvernets' || expandedSection === undefined}
       />

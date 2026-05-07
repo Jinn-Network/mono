@@ -4,6 +4,7 @@ import { Router, Route, Switch } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
+import { OverviewActivityPage } from './pages/OverviewActivity.js';
 import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
@@ -56,6 +57,7 @@ describe('App routes', () => {
     render(
       withProviders(
         <Switch>
+          <Route path="/overview/activity"><OverviewActivityPage /></Route>
           <Route path="/overview"><OverviewPage /></Route>
           <Route path="/operator"><OperatorPage /></Route>
         </Switch>,
@@ -65,6 +67,22 @@ describe('App routes', () => {
     // Overview renders HeroStats with these canonical eyebrows.
     expect(screen.getByText(/tasks delivered/i)).toBeTruthy();
     expect(screen.getByText(/jinn earned/i)).toBeTruthy();
+  });
+
+  it('renders OverviewActivityPage on /overview/activity', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/overview/activity"><OverviewActivityPage /></Route>
+          <Route path="/overview"><OverviewPage /></Route>
+        </Switch>,
+        '/overview/activity',
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity')).toBeTruthy();
+    });
+    expect(screen.getByTestId('live-now-band')).toBeTruthy();
   });
 
   it('renders OperatorPage on /operator', async () => {
@@ -77,10 +95,10 @@ describe('App routes', () => {
         '/operator',
       ),
     );
-    expect(screen.getByTestId('operator-activity')).toBeTruthy();
-    // Operator is composed of activity plus the former configuration section
-    // cards; the SolverNets head is the most stable assertion since it never
-    // collapses to nothing.
+    expect(screen.getByTestId('operator-page')).toBeTruthy();
+    // Operator is the configuration surface (SolverNets / Harness / Network /
+    // Security). The SolverNets head is the most stable assertion since it
+    // never collapses to nothing.
     await waitFor(() => expect(
       screen.getByText((_, el) =>
         el?.tagName === 'SPAN' && el.textContent === 'SolverNets',

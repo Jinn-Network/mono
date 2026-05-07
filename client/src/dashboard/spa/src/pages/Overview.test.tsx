@@ -192,4 +192,21 @@ describe('OverviewPage empty-state gating', () => {
       '/operator#solvernets',
     );
   });
+
+  it('mounts the LiveNowBand below the HeroStats', async () => {
+    getStatusMock.mockResolvedValue({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      activity: { recent: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+        recentTasks: [],
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() => expect(screen.getByTestId('live-now-band')).toBeTruthy());
+    expect(screen.getByTestId('live-now-band').getAttribute('data-state')).toBe('idle');
+  });
 });

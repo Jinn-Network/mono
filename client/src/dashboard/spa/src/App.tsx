@@ -11,6 +11,7 @@ import { TopTabs } from './shell/TopTabs.js';
 import { AgentRail } from './shell/AgentRail.js';
 import { RestartBanner } from './shell/RestartBanner.js';
 import { OverviewPage } from './pages/Overview.js';
+import { OverviewActivityPage } from './pages/OverviewActivity.js';
 import { LeaderboardPage } from './pages/leaderboard/Leaderboard.js';
 import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
@@ -67,6 +68,7 @@ export default function App(): JSX.Element {
         rail={<AgentRail />}
       >
         <Switch>
+          <Route path="/overview/activity"><OverviewActivityPage /></Route>
           <Route path="/overview" component={OverviewPage} />
           <Route path="/operator/join/:cid"><JoinFlow /></Route>
           <Route path="/operator">
