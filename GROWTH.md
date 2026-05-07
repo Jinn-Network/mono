@@ -20,11 +20,13 @@ One named target cluster at a time, with a canonical pitch and a bridge model �
 
 *During PMF search, §3 records our current bet on cluster, pitch, and bridge. Bet rotation is the rewrite-and-archive flow already specified above — the spec-proposal flow is the velocity governor, not a claim that the bet is settled. Read this section as "this is what we're testing right now," not "this is who Jinn is for."*
 
-### Current target cluster: open-source agentic project contributors
+### Current target cluster: open-source coding agent contributors
 
-People who contribute to agentic systems shipping publicly, alone or in small teams, with real day-to-day tasks they're trying to solve in their own work — multi-agent framework authors, indie agent-app maintainers, OSS agent-tooling builders.
+People who maintain or actively contribute to **open-source coding agents** — agents that take a task description and modify a codebase to fulfil it — shipping their harness publicly, alone or in small teams, with day-to-day work (issue triage, regression hunting, capability extension) that would benefit from pooling attempts with others on the same task class.
 
-The functional boundary: they ship verifiable agentic artefacts (repos, demos, datasets) at the harness layer of agentic AI, and have day-to-day work that would benefit from pooling attempts with others on the same task class.
+Concrete project anchors: Aider, OpenHands / All Hands AI, SWE-agent, Continue, Cline, Sweep, Agentless, gpt-engineer, smol-ai, Open Interpreter, Codename Goose, Devon AI, Roo Code, plus adjacent active OSS coding agents not yet enumerated. Active SWE-bench / swe-rebench leaderboard contributors and their associated researcher-builder accounts also fall inside the cluster.
+
+The functional boundary: they ship verifiable coding-agent artefacts (the harness repo, evaluation tooling, leaderboard runs, PR test suites) at the harness layer, and have day-to-day work that would benefit from pooling attempts with others on the same task class.
 
 The ethos boundary, equally load-bearing: they are open to identifying publicly with a decentralised project. The token is not foregrounded but it is not hidden — recruits who can't accept that filter themselves out, and that filter is the right shape for §1's legitimacy bet (see §6.1).
 
@@ -32,27 +34,29 @@ Eval-as-research practitioners at institutional labs (METR, Apollo, AISI externa
 
 ### The pitch
 
-> *"This is a public-good network for agentic training data. People contributing to agentic projects pool their real work into shared SolverNets — others attempt the same tasks, evaluators verify, the corpus accrues to everyone. It's coordinated via a token because there is no central operator; participation is how stake accrues."*
+> *"This is a public-good network for agentic training data. People shipping agentic projects pool their real work into shared SolverNets — others attempt the same tasks, evaluators verify, the corpus accrues to everyone. It's coordinated via a token because there is no central operator; participation is how stake accrues."*
 
-Real usage of Jinn on the contributor's own work is the conversion shape. The corpus of agent runs that accumulates publicly is the public good. Talk about the work the network does and the artefacts that accrue; let participation imply ownership rather than leading with it.
+> *"The first SolverNet is **swe-rebench v2** — a rolling-refresh program-repair benchmark on real GitHub issues. People who ship coding agents pool their attempts on the same task stream; evaluators verify with docker-grade test gates; the corpus accrues. Help collectively train a swe-rebench v2 harness."*
+
+The umbrella generalises (other SolverNets will follow); the instance gives the cluster a concrete surface to recognise. Real usage of Jinn on the contributor's own coding-agent work is the conversion shape. The corpus of coding-agent runs that accumulates publicly is the public good. Talk about the work the network does and the artefacts that accrue; let participation imply ownership rather than leading with it.
 
 ### Bridge model
 
-**Frame this cluster currently holds.** People contributing to agentic projects iterate against their own private eval signal — their tests, their qualitative checks, their personal sense of whether the agent is good. The eval-as-research clusters they look up to publish *static* benchmarks (SWE-bench, GAIA, HumanEval, AgentBench) that snapshot capability at a point in time. Continuous shadow-eval against production traffic is starting to be named as the right cadence, but it stays private — the deploying team eats the cost and keeps the signal. The contributor's own iteration loop is structurally solo: their harness, their tasks, their corpus.
+**Frame this cluster currently holds.** People shipping coding agents iterate against their own private eval signal — their tests, their dogfooding, their personal sense of whether the agent is good. The eval-as-research clusters they look up to publish *static* benchmarks (SWE-bench, SWE-bench Verified, swe-rebench v1) that snapshot capability at a point in time. Private eval against the team's own dogfooding is starting to be named as the right cadence, but it stays private — the maintaining team eats the cost and keeps the signal. The contributor's own iteration loop is structurally solo: their harness, their issue triage, their PR test suite, their corpus.
 
-**Frame Jinn offers.** The eval-signal is a coordination primitive, not a private artefact. When a SolverNet exists for a task class the contributor actually cares about, others attempt the same tasks; their solutions enter the contributor's decision space and the contributor's enter theirs. Static benchmarks are the snapshot; this is the stream — public, attributable, stake-backed. The harness around the model becomes the substrate of a network, not the moat of a deploying team.
+**Frame Jinn offers.** The eval-signal is a coordination primitive, not a private artefact. When a SolverNet exists for a task class the contributor actually cares about, others attempt the same tasks; their solutions enter the contributor's decision space and the contributor's enter theirs. Static benchmarks are the snapshot; this is the stream — public, attributable, stake-backed. The harness around the model becomes the substrate of a network, not the moat of a maintaining team.
 
-**The bridge.** The methodology question that moves a cluster member across the gap, in the shape that has worked in past first-touches: *static benchmarks are last year's agents; live eval is a coordination problem nobody owns. What does it look like to run the harness you already have alongside others doing the same work — and who pays for the task stream?* The question must not be answerable from their own README, post, or pinned thread.
+**The bridge.** The methodology question that moves a cluster member across the gap, in the shape that has worked in past first-touches: *static benchmarks are last year's coding agents; live eval against rolling fresh GitHub issues is a coordination problem nobody owns. What does it look like to run the harness you already have alongside others doing the same work — and who pays for the task stream?* The question must not be answerable from their own README, post, or pinned thread.
 
 ## 4. GTM sequence
 
 Three phases. Each phase has a transition trigger; phase changes ratchet — we do not regress.
 
-### Phase 1 — Open-source agentic project contributors (current)
+### Phase 1 — Open-source coding agent contributors (current)
 
-Recruit operators, contributors, evaluators among people already shipping in the agentic-AI space. Pitch is §3 above. Channel is X plus the cluster's habitual surfaces (GitHub, the few cluster-shaping accounts, OSS agentic project communities). The cluster is product-pitch-receptive, not ethos-pitch-receptive — the token is downstream of the work. Phase 2 transition trigger: a meaningful number of testnet operators from this cluster, at least one SolverNet running with attempts from multiple operators, and visible adoption signal — the cluster's own audience pattern-matching to running-network rather than to-be-launched.
+Recruit operators, contributors, evaluators among people already shipping in the open-source coding-agent space. Pitch is §3 above. Channel is X plus the cluster's habitual surfaces (GitHub, the few cluster-shaping accounts, OSS coding-agent project communities, SWE-bench / swe-rebench leaderboard contributor pool). The cluster is product-pitch-receptive, not ethos-pitch-receptive — the token is downstream of the work. Phase 2 transition trigger: a meaningful number of testnet operators from this cluster, swe-rebench v2 SolverNet (and successors) running with attempts from multiple operators, and visible adoption signal — the cluster's own audience pattern-matching to running-network rather than to-be-launched.
 
-*The cluster name was tightened from "AI builders" on 2026-05-07 (see `spec/2026-05-07-growth-niche-and-pitch-pmf-search.md`) because the broader name was identity-shaped where the recruit reality is usage-shaped, and because token-tolerance is a structural filter that the broader name did not encode.*
+*The cluster name was tightened from "AI builders" on 2026-05-07 morning (see `spec/2026-05-07-growth-niche-and-pitch-pmf-search.md`), then tightened again from "open-source agentic project contributors" on 2026-05-07 afternoon (see `spec/2026-05-07-growth-cluster-tightening-coding-agents.md`) because Sprint #3's vertical commitment to swe-rebench v2 implied a tighter recruit base than the morning's broader §3 named. The harness-layer functional boundary and the §6.1 token-tolerance ethos are unchanged across both tightenings.*
 
 ### Phase 2 — Domain professionals (provisional)
 
@@ -125,7 +129,7 @@ One headline metric at a time.
 
 **Supporting metrics, in order of signal strength:**
 
-- **Live-eval SolverNet runs** — agent runs against the SolverNet(s) of focus in the cluster-native vertical. The specific SolverNet(s) and vertical are named here once the operational test in the active sprint produces signal. Currently testing: **swe-rebench v2** — a rolling-refresh program-repair benchmark on real GitHub issues, with `task generator → solvers → docker eval → settlement` shape (chosen partly because the same shape doubles as setup for the next SolverNet, the sidecar / trace-harvester surface per [#103](https://github.com/Jinn-Network/mono/discussions/103)). Tasks refresh monthly; within-month memorisation is partially mitigated (not eliminated) by the refresh cadence and is being instrumented in Sprint #3.
+- **swe-rebench v2 SolverNet runs** — coding-agent runs against swe-rebench v2 (rolling-refresh program-repair benchmark on real GitHub issues, monthly task refresh, docker-grade test gates). Pinned 2026-05-07 with the §3 tightening to coding agents (see `spec/2026-05-07-growth-cluster-tightening-coding-agents.md`). The SolverNet is the operational shape Sprint #3 stands up; subsequent SolverNets are additions, not replacements.
 - **Contributors** — PRs, issues, forks from non-team. Independent technical engagement is a stronger signal than passive node-running.
 - **Inbound interest** — DMs, applications, unsolicited mentions from the §3 target cluster. Lagging indicator of public teaching.
 

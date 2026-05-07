@@ -90,6 +90,10 @@ One sentence. Concrete. The edit should plausibly lift the binding constraint fa
 
 If the user asks for a rewritten version, produce one — in the user's voice (see voice constraints below), applying only the binding-constraint edit. Don't smuggle in other changes.
 
+**Do not propose edits that smooth out a deliberate filter.** Posts that name an adversary or carry a register pattern-matching a worldview (decentralisation, value-capture, anti-frontier-lab) are filtering for a recruit shape. The tone factor reads them as combative or mildly provocative; that cost is structural, not a content failure. Surface in `SHOULD THINK ABOUT`, not in `EDIT`. See `scoring-tables.md` §4 (deliberate-filtering note) and `x-post-builder` voice constraints.
+
+**Run reader-pattern-match auto-flags before recommending the edit** (see `scoring-tables.md` §6.5). Em-dashes inside sentences, "Instead," at sentence start, one-word LLM lead-ins, and insider-shorthand (`the cluster`, `the loop`, etc. without antecedent) are flagged separately and surfaced in `SHOULD THINK ABOUT`. If three or more fire in the same post, downgrade the recommendation by one tier.
+
 ## Output format (pre-publish mode)
 
 Always use this exact structure. The structure is the value — it forces the user to see the binding constraint.
@@ -117,7 +121,15 @@ BINDING CONSTRAINT: [factor name] (0.X)
   [2-line explanation grounded in mechanism, not just rule]
 
 EDIT
-  [one-sentence concrete edit]
+  [one-sentence concrete edit; do not smooth out deliberate filters]
+
+GOLD (keep verbatim)
+  - [lines / phrases that work; do not change]
+
+SHOULD THINK ABOUT
+  - [reader pattern-match auto-flags from scoring-tables §6.5: em-dashes, "Instead,", insider-shorthand, etc.]
+  - [tone-cost-as-deliberate-filter notes — surface, do not edit away]
+  - [cluster-fingerprint lag, account cadence drag, other structural risks]
 
 REWRITE (only if requested)
   [the rewritten draft, in the user's voice]

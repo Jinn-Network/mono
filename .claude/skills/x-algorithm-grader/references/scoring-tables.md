@@ -78,6 +78,8 @@ INFERRED multipliers. Calibrate against own posts over time.
 - Stacked rhetorical questions (>1 in same post)
 - Lead-with-dismissal ("Sigh, …", "No,", "Wrong,") before the claim
 
+**Deliberate filtering is a structural cost — flag, do not fix.** Some posts deliberately filter for a recruit shape (naming an adversary the audience must pattern-match, using a register that signals decentralisation / value-capture worldview). These score 0.9–1.0 on tone (mildly provocative without contempt) but the operator may be willing to accept lower (0.7–0.85) when the filter is the goal. When the post is sprint-stage recruitment (per `GROWTH.md` §1 *recruiting, not reach*), the EDIT line should *surface* the tone cost in `SHOULD THINK ABOUT`, not propose smoothing it out. A 0.55–0.65 final score that filters correctly beats a 0.85 generic post that recruits zero. See `x-post-builder` voice constraints for the operating principle.
+
 ---
 
 ## 5. Author-reply-trap quality (model §2)
@@ -116,6 +118,32 @@ Three levers; add 0.2 per lever applied. Floor 0.5, ceiling 1.0.
 | 3 | 1.0 |
 
 ---
+
+## 6.5. Reader pattern-match auto-flags (LLM tells + insider-shorthand)
+
+INFERRED tier. These do not enter the multiplicative score directly — the algorithm's mechanical scoring does not detect them. They affect *reader* pattern-match, which gates whether engagement fires at all. Flag in `SHOULD THINK ABOUT` of the pre-publish output. If three or more fire in the same post, downgrade the recommendation by one tier (ship → fix-then-ship; fix-then-ship → rework).
+
+**LLM tells (strip on sight):**
+
+| Tell | Detection cue | Recommendation |
+|------|---------------|----------------|
+| Em-dashes inside sentences (—) | regex `[a-z] — [a-z]` | Replace with parens, semicolons, or sentence breaks. Em-dashes are a strong reader-side AI signal in 2026. |
+| `Instead,` at sentence start | regex `^Instead, ` after newline or `\. Instead, ` | Cut the word; let the contrast land on its own. |
+| One-word transition lead-ins (`Concretely:`, `Operationally:`, `Specifically:`) | regex `^(Concretely\|Operationally\|Specifically): ` | Soft tell. Rare use is fine; reflexive use signals AI structure. Prefer leading with the substantive sentence. |
+| Marketing-register polish (`unlock`, `leverage`, `drive`, `empower`, `supercharge`) | wordlist scan | Almost certainly imported by the model from a rewrite step; the user almost never says these. |
+| Three-clause balanced lists where the user gave two | structural inspection | AI loves the rule of three; user-voiced rewrites are often deliberately uneven. |
+
+**Insider-shorthand (post-to-cold-recruits):**
+
+The bridge-model rule (`GROWTH.md` §3) says recruits self-identify into the canonical frame. The post cannot presume they already speak it. Words that fail this test:
+
+| Shorthand | Why it fails | Fix |
+|-----------|--------------|-----|
+| "the cluster", "the loop", "the substrate", "the bridge", "the sprint" | All are canonical `GROWTH.md` / `THESIS.md` vocabulary with no antecedent in the post | Name the referent inline or restructure |
+| Project handle without context (`@xxx`-tags dropped without setup) | Reader must already know who that is | Either name what the project ships or omit |
+| Internal sequence vocabulary (`Phase A`, `Phase 1b`, `the operator gate`) | `GROWTH.md` §6.1 retired these as external | Use external framing only |
+
+**The check:** would an OSS coding-agent maintainer who has never read `GROWTH.md` know what every noun in this post refers to? If "they'd guess from context" — restructure or name the referent.
 
 ## 7. Penalties (model §14)
 

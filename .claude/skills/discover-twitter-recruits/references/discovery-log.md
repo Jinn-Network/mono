@@ -288,3 +288,24 @@ After 5–10 entries, scan the lessons column. Patterns that recur (e.g. "first-
   3. **Thought-leadership / VC-narrative accounts** (TheSebBlack, jjfleagle, willleebuilds) — skip the recruit list.
 
 The three are linguistically similar in any given tweet; only profile-check resolves them. The §7 post-filter catches some patterns but not all — VC-narrative accounts have 0% token-ticker prelude rate yet still fail the recruit bar. Profile-check (§3) remains mandatory and cannot be replaced by linguistic filters alone.
+
+---
+
+## 2026-05-07 PM — OSS coding agent contributors (Sprint #3 cluster bootstrap)
+
+**Search queries.** Validated working: `swe-rebench`, `swe-bench harness`, `coding agent harness`, `OpenHands OR "SWE-agent"`, `aider coding agent`. Failed: `patch contract OR "agent_main" OR "docker harness" coding` (too cross-domain — DeFi smart-contract talk + sports contracts dominate the namespace).
+
+**Recommendations.** Five candidates passed profile-check. Reply-rate ranking: `@rasdani_` (Prime Intellect, swe-rebench v2 verifier infrastructure — actively dialoguing with `@nebiusai` 2026-05-06), `@luciusluxfire` (Brazil-based, ships agent-execution-harness OSS, npm + GitHub), `@alexpinkone` (CodeBot AI MIT solo build, +14pt SWE-bench Verified lift posted today, "DMs are open"), `@ibragim_bad` (Nebius, SWE-rebench leaderboard maintainer — methodology-dialogue not operator-recruit, see new sub-rule), `@kylemathews` (Gatsby founder, building coding harness, large account, lower reply rate).
+
+**Outreach paths.** None landed yet. Plan: `@rasdani_` is the natural first contact — engage on the statamic/cms verifier-passes-wrong-subsystem case with the methodology question on stake-backed corpus shape vs single-team verifier upgrade.
+
+**New sub-rule landed in `audience-profile.md` §3.** Pinned-vertical maintainers (upstream of the SolverNet, e.g. Nebius / Prime Intellect / Princeton SWE-bench teams) are *adjacent*, not in-cluster. Engagement is methodology dialogue and amplification, never operator-recruit. The OSS contributor cluster proper is solo / small-team builders shipping their *own* harnesses.
+
+**Lesson (provisional, will firm up after first-touches land).** Vertical pinning narrows discovery anchor surfaces sharply — once §7 names a benchmark, the maintainer/operator distinction becomes load-bearing in a way it isn't for unanchored cluster work. The previous "AI builders" cluster tolerated maintainer/operator ambiguity; this cluster does not.
+
+**Skipped (notable).**
+- `@vinhnx` — built VT Code (real OSS coding agent) but recent timeline is Anthropic-RT + podcast-link + "thank you for support" pattern, not substantive-builder. Re-evaluate if posting pattern shifts.
+- `@MrAhmadAwais` — CommandCodeAI commercial product, token-giveaway contests, marketing register. `audience-profile.md` §3 *agent-skills product founder* shape.
+- `@musiol_martin` — newsletter / aggregator (aigeneral.net) + "Managed Claude Code" commercial layer; high-frequency takes-with-Translation framing, not builder.
+- `@KLieret`, `@ofirpress`, `@neubig`, `@xingyaoww`, `@OpenHandsDev` — institutional / core-team / org accounts. GROWTH §6.1 token-tolerance rule + audience-profile §3 founders-of-adjacent-protocols rule cover the exclusions.
+- `@affine_io`, `@DkingYooo18516`, `@DreadBong0` — `$TAO` Bittensor SN120 token-pumpers running coding-themed RL. Sprint #1 retired Bittensor cluster; freeze.

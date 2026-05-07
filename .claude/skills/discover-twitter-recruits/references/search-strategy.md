@@ -64,6 +64,28 @@ bird search "subnet emissions OR \"miner emissions\" -filter:replies lang:en"
 
 Why it works: subnet name + mechanism term is insider vocabulary for Bittensor operator-users. Token-pumpers don't write *"agent_main(input) → patch contract"* because there's nothing to pump in the architecture detail. 2026-05-05 calibration: this is how `@danielderedev` was found after operator-first-person yielded zero in the same session.
 
+### §2.2.2 — OSS coding agent contributors: vertical + harness vocabulary (validated 2026-05-07 PM)
+
+For the GROWTH §3 cluster (open-source coding agent contributors) anchored on the swe-rebench v2 vertical, the working queries are:
+
+```
+bird search "swe-rebench -filter:replies lang:en"
+bird search "swe-bench harness -filter:replies lang:en"
+bird search "coding agent harness -filter:replies lang:en"
+bird search "OpenHands OR \"SWE-agent\" -filter:replies lang:en"
+bird search "aider coding agent -filter:replies lang:en"
+bird search "agent execution harness -filter:replies lang:en"
+```
+
+Why it works: *swe-rebench* surfaces both maintainer-orbit (Nebius, Prime Intellect — adjacent, not in-cluster — see audience-profile §3 maintainer-vs-operator sub-rule) and downstream operators reporting honest deltas. *swe-bench harness* and *coding agent harness* surface solo / small-team builders shipping their own harnesses (the in-cluster shape proper). Combine vertical query + builder-vocabulary query for breadth, then profile-check against the maintainer-vs-operator distinction.
+
+Anti-patterns specific to this cluster:
+- *patch contract OR "agent_main"* — too cross-domain (DeFi smart-contract talk + sports contracts dominate the namespace). Use Bittensor §2.2.1 vocabulary if targeting that cluster instead.
+- *swe-rebench* paired with `min_faves:N` — catches Bittensor SN120 `$TAO`-pumpers running coding-agent-themed RL (`@affine_io`, `@DkingYooo18516`, etc.). Sprint #1 retired that cluster; freeze rather than re-engage.
+- Generic *"AI agent"* — catches enterprise / no-code / non-coding agents. Always pair with coding-specific vocabulary.
+
+Calibration evidence (2026-05-07 PM round): `swe-rebench` surfaced `@rasdani_` and `@ibragim_bad`; `coding agent harness` surfaced `@vinhnx` (rejected — curator pattern), `@luciusluxfire` (passed), `@kylemathews` (passed); `swe-bench harness` surfaced `@alexpinkone` (passed) and `@musiol_martin` (rejected — curator/aggregator pattern with commercial layer).
+
 ### §2.3 — Cross-reference queries (replies and mentions)
 
 ```

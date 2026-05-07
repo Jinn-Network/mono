@@ -102,6 +102,23 @@ Inspect §6 of `growth-log.md`. An *active* sprint block has all of: a cluster n
 - If §6 is missing entirely, or contains no sprint block, or the most recent sprint's `end_date` is in the past with no successor: **stop here**. Emit the fail-loud message (see Failure modes) and do NOT continue to Steps 2–6. The user must either declare a new sprint or explicitly mark a rest day in §6.
 - If §6 contains an active sprint, parse: cluster, window, inputs target (as a list of countable items, e.g. "6 teach posts", "1 bridge post"), thresholds. Compute progress so far against the inputs target by counting matching entries from §5 daily plans within the sprint window. This becomes the SPRINT section of the brief.
 
+### Step 1.6 — Sprint/canon alignment lint
+
+The active sprint block (§6) must be aligned with GROWTH canon. Two checks:
+
+**Check A — cluster definition match.** §6's cluster definition must be a verbatim restatement (or stricter sub-segment) of GROWTH §3's current target cluster. If §6 declares a different cluster handle than §3, this is a canon-cluster mismatch and must be resolved by spec proposal (tighten §3) or sprint-block revision (re-state §6 to match §3) before the daily loop produces top-3 work.
+
+**Check B — vertical/cluster alignment.** If §6 names a vertical (a specific SolverNet, benchmark, or task class — e.g. "swe-rebench v2", "AlpacaEval-live", "math-bench") *or* a vertical-instance pitch (e.g. "help collectively train a swe-rebench v2 harness"), the natural recruit base of that vertical must fit inside GROWTH §3's cluster definition. If §3's cluster is broader than the vertical implies, the warm-list and discovery output will silently include out-of-vertical candidates — exactly the failure mode that produced today's stale top-3 on 2026-05-07 PM (full forensic in `spec/2026-05-07-growth-cluster-tightening-coding-agents.md`).
+
+The check is a judgement call, not a string match. Read §6's vertical, read §3's cluster definition, ask: *would a typical contributor to the §6 vertical see themselves in the §3 cluster description?* If the answer is "yes obviously" — pass. If it requires squinting — surface as drift. If the answer is "no, the §3 description is too broad / too narrow / wrong shape" — fail loud.
+
+**Behaviour on detected misalignment:**
+
+- **Day 1 of detected mismatch:** surface in HEADS-UP with text *"CANON-CLUSTER/VERTICAL MISMATCH: Sprint §6 [cluster=X | vertical=Y] does not align with GROWTH §3 [cluster=Z]. Resolve by spec proposal (tighten §3) or sprint-block revision (re-state §6). Resolves Day 2 if unfixed."* Continue to produce top-3 (with the warning) so the operator has time to act.
+- **Day 2+ of unresolved mismatch:** fail loud. Block top-3 production. Emit the same text marked `BLOCKED — alignment unresolved`. The operator must land a spec proposal or revise §6 before another daily-loop run.
+
+This step prevents a class of silent failure where the cluster gate filters correctly against §3 but §3 itself is misaligned with operational state. The forcing function is the same as Step 1.5: structural mismatch must surface, not accumulate.
+
 ### Step 2 — Yesterday's loop check (against GROWTH §5)
 
 Compare yesterday's plan in growth-log §5 against what actually shipped, using these signals. Buckets follow GROWTH §5's four-function loop: Understand / Teach / Engage / Refine.

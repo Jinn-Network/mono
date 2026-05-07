@@ -53,6 +53,38 @@ Same as `oak-content-strategy` and `x-algorithm-grader`:
 - **One question per response during elicitation.** Multiple questions overwhelm; the user answers only the first.
 - **Refuse the next layer.** If the user pushes back ("no idea, just decide"), make the call and move on. Do not loop.
 
+### LLM tells — strip these from any draft before grading
+
+The reader's pattern-match against AI-authored content is sharper than the algorithm's. A post that reads as machine-written gets mentally discounted before the engagement signal even fires. These are tells that have surfaced in calibration runs — strip on sight, in your own drafting and in any rewrite the user hands back:
+
+- **Em-dashes (—) inside sentences.** Strong LLM tell — high prior-probability of AI authorship in 2026 reader pattern-match. Replace with parens, semicolons, sentence breaks, or restructure. Hyphens in compound words are fine; em-dashes inside sentences are not.
+- **"Instead," at sentence start as a transition.** Soft LLM tell. Use a paragraph break, semicolon, or just cut the word and let the contrast land on its own.
+- **"Concretely:", "Operationally:", "Specifically:" as one-word lead-ins.** Soft LLM tells. Rare use is fine; reflexive use signals AI structure. Prefer leading with the substantive sentence directly.
+- **Marketing-register polish that wasn't in the user's elicitation.** "Unlock", "leverage", "drive", "empower", "supercharge". The user almost never says these; if they appear in a rewrite they came from the model.
+- **Three-clause balanced lists when the user gave you two.** AI loves the rule of three; a user-voiced rewrite often has two or four items, deliberately uneven.
+
+### ZERO insider-shorthand in posts to cold recruits
+
+The bridge-model rule (`GROWTH.md` §3) says recruits self-identify into the canonical frame. The post cannot presume they already speak it. Words that fail this test:
+
+- **"the cluster", "the loop", "the substrate", "the bridge", "the sprint"** — all are canonical vocabulary from `GROWTH.md` / `THESIS.md` with no antecedent inside the post itself.
+- **Project names without context** ("Aider folks", "the OpenHands crowd") — fine if the post has previously named what they share; not fine if dropped without setup.
+- **Internal sequence references** ("Phase A", "Phase 1b", "the operator gate") — `GROWTH.md` §6.1 retired these as external vocabulary; the rule applies to posts even when the canonical doc updates.
+
+The check: would a maintainer of an OSS coding agent who has never read `GROWTH.md` know what every noun in this post refers to? If the answer requires "well, they'd guess from context" — restructure or name the referent inline.
+
+### Deliberate filtering is a structural cost, not a content failure
+
+Some posts deliberately filter for a recruit shape — naming an adversary the audience must pattern-match (e.g. "mega labs"), using a register that signals decentralisation worldview, or making a claim that requires shared values to nod at. The algorithm grader (`x-algorithm-grader`) reads filtering register as combative or mildly provocative and applies a tone-factor penalty (typically 0.05–0.15). This is the algorithm's framing, not a verdict on the post.
+
+When the goal is sprint-stage cluster-fit recruitment (per `GROWTH.md` §1's *recruiting, not reach*), a 0.5–0.7 grader score that filters correctly beats a 0.85 generic post that recruits zero. Surface the trade in the grader output (`SHOULD THINK ABOUT`) but do not edit the filter away. The filter is the structure; reach is downstream of legitimacy, not above it.
+
+Operational corollary: post-mortems on filtering posts must distinguish *filter-cost-as-designed* from *content-cost-by-accident*. If observed reach is at or near the predicted-with-filter band, the post is working. The recruit signal is per-engagement quality, not aggregate impressions.
+
+### Cluster-fingerprint lag during §3 pivots
+
+When `GROWTH.md` §3 tightens or rotates (cluster handle changes, vertical pinning), the account's algorithmic cluster fingerprint takes 1–2 weeks of consistent in-cluster posting to follow. Posts shipped during that window may distribute conservatively to the *prior* cluster fingerprint and underperform the predicted reach band. This is not content failure; it is the expected cost of a cluster pivot. Surface in Stage 4 grading and Stage 6 post-mortem so the diagnosis is honest.
+
 ## Stage 0 — Account state check
 
 Before drafting anything, ask:
