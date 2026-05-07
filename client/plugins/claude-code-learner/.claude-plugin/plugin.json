@@ -1,6 +1,6 @@
 {
   "name": "claude-code-learner",
-  "description": "Jinn default learning restorer — runs intent restorations through a seven-phase pipeline (Orient → Strategize → Plan → Execute → Debrief → Improve → Memory consolidation) and self-improves between runs by mutating implStateDir.",
+  "description": "Generic learning agent plugin — runs a goal through a seven-phase pipeline (Orient → Strategize → Plan → Execute → Debrief → Improve → Memory consolidation) and self-improves between runs by mutating its own state directory.",
   "version": "0.1.0",
   "author": {
     "name": "Jinn Network",

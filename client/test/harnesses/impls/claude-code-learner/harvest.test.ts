@@ -9,7 +9,9 @@ import {
 import {
   fakeLearnerFeedback,
   fakePredictionCorpusRetrieval,
+  fakePredictionV1Solution,
 } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
+import { makePredictionV1Task } from '../prediction-v1-test-helpers.js';
 
 function writePhaseArtifact(workingDir: string, phase: string, fileName: string, payload: unknown): void {
   const dir = join(workingDir, `.${phase}`);
@@ -78,7 +80,7 @@ describe('harvestOutput', () => {
   });
   afterEach(() => {
     rmSync(workingDir, { recursive: true, force: true });
-    delete process.env.JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE;
+    delete process.env.LEARNER_PHASE_RANGE;
   });
 
   // ── Required artifact validation ────────────────────────────────────────────
@@ -168,8 +170,8 @@ describe('harvestOutput', () => {
 
   // ── Phase range from env var ────────────────────────────────────────────────
 
-  it('reads JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE from env when phaseRange arg not provided', () => {
-    process.env.JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE = 'pre-execute';
+  it('reads LEARNER_PHASE_RANGE from env when phaseRange arg not provided', () => {
+    process.env.LEARNER_PHASE_RANGE = 'pre-execute';
     writePhaseArtifact(workingDir, 'orient', 'summary.json', { topics: [] });
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
     writePhaseArtifact(workingDir, 'plan', 'plan.json', { steps: [] });
@@ -177,8 +179,8 @@ describe('harvestOutput', () => {
     expect(() => harvestOutput(workingDir)).not.toThrow();
   });
 
-  it('defaults to full range when JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE is not set', () => {
-    delete process.env.JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE;
+  it('defaults to full range when LEARNER_PHASE_RANGE is not set', () => {
+    delete process.env.LEARNER_PHASE_RANGE;
     // Only pre-execute phases present — full range requires all 7
     writePhaseArtifact(workingDir, 'orient', 'summary.json', { topics: [] });
     writePhaseArtifact(workingDir, 'strategize', 'strategy.json', { approach: 'a' });
@@ -243,6 +245,73 @@ describe('harvestOutput', () => {
     writeFullPipeline(workingDir);
     const out = harvestOutput(workingDir, 'full');
     expect(out.venueRef.name).toEqual('claude-code-learner');
+  });
+
+  // -- prediction.v1 typed solution harvesting --------------------------------
+
+  it('requires learner-authored prediction.v1 solution output for prediction tasks', () => {
+    writeFullPipeline(workingDir);
+    expect(() => harvestOutput(workingDir, 'full', makePredictionV1Task())).toThrow(
+      /prediction\.v1 learner solution missing/,
+    );
+  });
+
+  it('harvests learner-authored prediction.v1 solution payload and artifact metadata', () => {
+    writeFullPipeline(workingDir);
+    fakePredictionV1Solution(workingDir, {
+      probabilityYes: '62%',
+      submittedAt: '2026-05-02T01:00:00.000Z',
+      modelId: 'claude-code-learner/prediction-v1-test',
+      confidence: 'high',
+    });
+
+    const out = harvestOutput(workingDir, 'full', makePredictionV1Task());
+
+    expect(out.venueRef.name).toEqual('claude-code-learner');
+    expect(out.solutionPayload).toMatchObject({
+      probabilityYes: '0.6200',
+      submittedAt: '2026-05-02T01:00:00.000Z',
+      format: 'decimal',
+      modelId: 'claude-code-learner/prediction-v1-test',
+      confidence: 'high',
+      methodology: 'Test fixture for the learner-authored prediction.v1 Execute output.',
+      sourceRefs: [
+        {
+          title: 'Polymarket market',
+          url: 'https://polymarket.com/event/test-market',
+        },
+      ],
+    });
+    expect(out.gating).toMatchObject({
+      probabilityYes: '0.6200',
+      submittedAt: '2026-05-02T01:00:00.000Z',
+      modelId: 'claude-code-learner/prediction-v1-test',
+      phasesCompleted: [
+        'orient',
+        'strategize',
+        'plan',
+        'execute',
+        'debrief',
+        'improve',
+        'memory-consolidation',
+      ],
+    });
+    expect(out.informational).toMatchObject({
+      source: makePredictionV1Task().spec.source,
+      consensusSnapshot: makePredictionV1Task().spec.consensusSnapshot,
+    });
+    expect(out.artifacts).toEqual([
+      expect.objectContaining({
+        path: '.execute/prediction-v1-solution.json',
+        artifactType: 'prediction_v1_solution',
+        tags: expect.arrayContaining(['prediction', 'solution', 'learner-output']),
+        access: { priceUsdc: '0' },
+        metadata: expect.objectContaining({
+          schema: 'jinn.prediction_v1_restoration_payload.v1',
+          source: 'agent-authored',
+        }),
+      }),
+    ]);
   });
 
   // ── Optional learner feedback artifacts ───────────────────────────────────

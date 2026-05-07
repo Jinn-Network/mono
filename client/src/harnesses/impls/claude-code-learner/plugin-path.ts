@@ -26,9 +26,9 @@ export function resolvePluginRoot(): string {
         `Resolved from impl dir: ${here}.`,
     );
   }
-  if (!existsSync(join(pluginRoot, 'skills', 'coordinator', 'SKILL.md'))) {
+  if (!existsSync(join(pluginRoot, 'skills', 'learn', 'SKILL.md'))) {
     throw new Error(
-      `claude-code-learner plugin at ${pluginRoot} is missing skills/coordinator/SKILL.md`,
+      `claude-code-learner plugin at ${pluginRoot} is missing skills/learn/SKILL.md`,
     );
   }
   return pluginRoot;

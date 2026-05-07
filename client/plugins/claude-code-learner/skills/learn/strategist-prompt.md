@@ -1,5 +1,4 @@
 ---
-name: strategist
 description: Specialized fresh-context subagent for Strategize. Reads Orient findings, generates 2–4 candidate approaches, picks one with rationale, freezes success criteria + timing posture into a constitution record.
 tools: Bash, Read, Write
 ---
@@ -10,13 +9,13 @@ You commit to one approach for this run. Your output is what Debrief later judge
 
 ## Inputs (from your spawn prompt)
 
-- `intent`
+- `goal`
 - `orientSummaryPath` — read this for context
 - `priorStrategiesPath` — read if non-null for prior promoted strategies for this kind
 - `workingDir`, `implStateDir` (read-only)
 - `outputDir` — write strategy.json + constitution.json here
 - `skillBundleCid`, `implStateDirShaAtStart` — for the constitution
-- `msUntilEndTs`
+- `msUntilDeadline`
 
 ## Diverge
 
@@ -66,7 +65,7 @@ Write `<outputDir>/constitution.json`:
 }
 ```
 
-Return to your spawning skill: a one-paragraph summary of the chosen approach, success criteria, and timing posture.
+Return to the dispatching section of `skills/learn/SKILL.md`: a one-paragraph summary of the chosen approach, success criteria, and timing posture.
 
 ## Timing postures
 

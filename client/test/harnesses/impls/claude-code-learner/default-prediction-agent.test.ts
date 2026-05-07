@@ -151,11 +151,25 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
         windowStartTs: 1,
         windowEndTs: 2,
         msUntilEndTs: 1,
+        mode: 'train',
         abort: new AbortController().signal,
       }, '/plugins/claude-code-learner');
 
       expect(calls).toHaveLength(1);
       expect(calls[0]!.command).toBe('claude-test');
+      expect(calls[0]!.args).toEqual(expect.arrayContaining([
+        '--setting-sources',
+        'project',
+        '--permission-mode',
+        'bypassPermissions',
+        '--output-format',
+        'stream-json',
+        '--include-hook-events',
+        '-p',
+      ]));
+      const promptArg = calls[0]!.args[calls[0]!.args.indexOf('-p') + 1]!;
+      expect(promptArg).toContain('claude-code-learner:learn');
+      expect(promptArg).toContain('- mode = train');
       expect(calls[0]!.args).toEqual(expect.arrayContaining([
         '--plugin-dir',
         '/plugins/claude-code-learner',

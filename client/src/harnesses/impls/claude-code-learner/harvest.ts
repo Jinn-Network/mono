@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { buildSolutionOutput } from '@jinn-network/sdk/solvernets/prediction-v1';
 import type { OutputArtifact } from '../../../types/portfolio.js';
+import type { Task } from '../../../types/task.js';
 import type { Solution } from '../../types.js';
 
 const PHASE_ORDER = [
@@ -60,6 +62,11 @@ const OPTIONAL_LEARNER_ARTIFACTS = [
   },
 ] as const;
 
+const PREDICTION_V1_SOLUTION_PATHS = [
+  '.execute/prediction-v1-solution.json',
+  'prediction-v1-solution.json',
+] as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -73,6 +80,112 @@ function safeReadJson(path: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function decimalProbability(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (value >= 0 && value <= 100) {
+      return (value > 1 ? value / 100 : value).toFixed(4);
+    }
+    return undefined;
+  }
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const percent = trimmed.endsWith('%');
+  const numeric = Number(percent ? trimmed.slice(0, -1).trim() : trimmed);
+  if (!Number.isFinite(numeric)) return undefined;
+  const probability = percent || numeric > 1 ? numeric / 100 : numeric;
+  if (probability < 0 || probability > 1) return undefined;
+  return probability.toFixed(4);
+}
+
+function isoDateTime(value: unknown): string {
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+function confidence(value: unknown): 'low' | 'medium' | 'high' | undefined {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
+}
+
+function predictionSourceUrl(task?: Task): string | undefined {
+  const source = task?.spec && typeof task.spec === 'object'
+    ? (task.spec as Record<string, unknown>)['source']
+    : undefined;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return undefined;
+  const url = (source as Record<string, unknown>)['url'];
+  return typeof url === 'string' && url.startsWith('http') ? url : undefined;
+}
+
+function normalizeSourceRefs(value: unknown): Array<{ title: string; url: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const refs = value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    const title = typeof record['title'] === 'string' && record['title'].trim()
+      ? record['title'].trim()
+      : undefined;
+    const url = typeof record['url'] === 'string' && record['url'].startsWith('http')
+      ? record['url']
+      : undefined;
+    return title && url ? [{ title, url }] : [];
+  });
+  return refs.length > 0 ? refs : undefined;
+}
+
+function findPredictionV1Solution(workingDir: string): { path: string; payload: Record<string, unknown> } | null {
+  for (const relPath of PREDICTION_V1_SOLUTION_PATHS) {
+    const payload = safeReadJson(join(workingDir, relPath));
+    if (payload) return { path: relPath, payload };
+  }
+  return null;
+}
+
+function normalizePredictionV1SolutionPayload(
+  raw: Record<string, unknown>,
+  task?: Task,
+): Record<string, unknown> {
+  const probabilityYes = decimalProbability(raw['probabilityYes']);
+  if (!probabilityYes) {
+    throw new Error(
+      'prediction.v1 learner output is missing a valid decimal probabilityYes in .execute/prediction-v1-solution.json',
+    );
+  }
+
+  const sourceRefs = normalizeSourceRefs(raw['sourceRefs']);
+  const taskSourceUrl = predictionSourceUrl(task);
+  const fallbackSourceRefs = taskSourceUrl
+    ? [{ title: 'Polymarket market', url: taskSourceUrl }]
+    : undefined;
+
+  const normalizedConfidence = confidence(raw['confidence']);
+
+  return {
+    probabilityYes,
+    submittedAt: isoDateTime(raw['submittedAt']),
+    format: 'decimal',
+    modelId: typeof raw['modelId'] === 'string' && raw['modelId'].trim()
+      ? raw['modelId'].trim()
+      : 'claude-code-learner/prediction-v1',
+    ...(normalizedConfidence ? { confidence: normalizedConfidence } : {}),
+    ...(typeof raw['methodology'] === 'string' && raw['methodology'].trim()
+      ? { methodology: raw['methodology'].trim() }
+      : {}),
+    ...(sourceRefs ?? fallbackSourceRefs ? { sourceRefs: sourceRefs ?? fallbackSourceRefs } : {}),
+  };
+}
+
+function predictionInformationalFromTask(task?: Task): Record<string, unknown> {
+  if (!task?.spec || typeof task.spec !== 'object') return {};
+  const spec = task.spec as Record<string, unknown>;
+  const informational: Record<string, unknown> = {};
+  if (spec['source'] !== undefined) informational.source = spec['source'];
+  if (spec['consensusSnapshot'] !== undefined) informational.consensusSnapshot = spec['consensusSnapshot'];
+  return informational;
 }
 
 /**
@@ -141,7 +254,7 @@ function detectCompletedPhases(workingDir: string): string[] {
 }
 
 function resolvePhaseRange(override?: string): PhaseRange {
-  const raw = override ?? process.env.JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE ?? 'full';
+  const raw = override ?? process.env.LEARNER_PHASE_RANGE ?? 'full';
   if (raw === 'pre-execute' || raw === 'post-execute') return raw;
   return 'full';
 }
@@ -221,7 +334,7 @@ function collectLearnerArtifacts(workingDir: string): OutputArtifact[] {
 /**
  * Construct Solution from the plugin's per-phase artifacts.
  *
- * Phase range (from phaseRange arg, JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE env, or 'full'):
+ * Phase range (from phaseRange arg, LEARNER_PHASE_RANGE env, or 'full'):
  *   full         — all 7 phases required
  *   pre-execute  — orient, strategize, plan required (phases 1–3)
  *   post-execute — debrief, improve, memory-consolidation required (phases 5–7)
@@ -229,7 +342,7 @@ function collectLearnerArtifacts(workingDir: string): OutputArtifact[] {
  * Required phase artifacts: hard-fail (throw) if missing or corrupt JSON.
  * Optional phase artifacts (outside the required range): safeReadJson + warn on null.
  */
-export function harvestOutput(workingDir: string, phaseRange?: string): Solution {
+export function harvestOutput(workingDir: string, phaseRange?: string, task?: Task): Solution {
   const range = resolvePhaseRange(phaseRange);
   const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
 
@@ -279,6 +392,53 @@ export function harvestOutput(workingDir: string, phaseRange?: string): Solution
   }
 
   const learnerArtifacts = collectLearnerArtifacts(workingDir);
+  const artifacts = [...learnerArtifacts];
+  const solverType = typeof task?.solverType === 'string' ? task.solverType : undefined;
+
+  if (solverType === 'prediction.v1') {
+    const predictionSolution = findPredictionV1Solution(workingDir);
+    if (!predictionSolution) {
+      throw new Error(
+        `Required prediction.v1 learner solution missing: ${join(workingDir, '.execute', 'prediction-v1-solution.json')}`,
+      );
+    }
+    const payload = normalizePredictionV1SolutionPayload(predictionSolution.payload, task);
+    artifacts.push({
+      path: predictionSolution.path,
+      artifactType: 'prediction_v1_solution',
+      tags: ['prediction', 'solution', 'learner-output'],
+      metadata: {
+        schema: 'jinn.prediction_v1_restoration_payload.v1',
+        source: 'agent-authored',
+      },
+      access: { priceUsdc: '0' },
+    });
+    return buildSolutionOutput({
+      solverType: 'prediction.v1',
+      venueName: 'claude-code-learner',
+      payload,
+      gating: {
+        ...gating,
+        probabilityYes: payload.probabilityYes,
+        submittedAt: payload.submittedAt,
+        modelId: payload.modelId,
+      },
+      informational: {
+        ...predictionInformationalFromTask(task),
+        ...(learnerArtifacts.length > 0
+          ? {
+              learnerFeedbackArtifacts: learnerArtifacts.map((artifact) => ({
+                path: artifact.path,
+                artifactType: artifact.artifactType,
+                metadata: artifact.metadata,
+              })),
+            }
+          : {}),
+      },
+      artifacts,
+    }) as Solution;
+  }
+
   const informational = learnerArtifacts.length > 0
     ? {
         learnerFeedbackArtifacts: learnerArtifacts.map((artifact) => ({
@@ -293,6 +453,6 @@ export function harvestOutput(workingDir: string, phaseRange?: string): Solution
     venueRef: { name: 'claude-code-learner' },
     gating,
     ...(informational ? { informational } : {}),
-    ...(learnerArtifacts.length > 0 ? { artifacts: learnerArtifacts } : {}),
+    ...(artifacts.length > 0 ? { artifacts } : {}),
   };
 }

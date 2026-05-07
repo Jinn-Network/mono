@@ -129,6 +129,33 @@ export function fakePredictionCorpusRetrieval(
   });
 }
 
+export function fakePredictionV1Solution(
+  workingDir: string,
+  opts: {
+    probabilityYes?: string;
+    submittedAt?: string;
+    modelId?: string;
+    confidence?: string;
+    methodology?: string;
+    sourceRefs?: Array<{ title: string; url: string }>;
+  } = {},
+): void {
+  writeJson(join(workingDir, '.execute', 'prediction-v1-solution.json'), {
+    schemaVersion: 'jinn.prediction_v1_restoration_payload.v1',
+    probabilityYes: opts.probabilityYes ?? '0.62',
+    submittedAt: opts.submittedAt ?? '2026-05-02T01:00:00.000Z',
+    modelId: opts.modelId ?? 'claude-code-learner/prediction-v1-test',
+    confidence: opts.confidence ?? 'medium',
+    methodology: opts.methodology ?? 'Test fixture for the learner-authored prediction.v1 Execute output.',
+    sourceRefs: opts.sourceRefs ?? [
+      {
+        title: 'Polymarket market',
+        url: 'https://polymarket.com/event/test-market',
+      },
+    ],
+  });
+}
+
 export function fakeDebriefAnalysis(
   workingDir: string,
   verdict: 'yes' | 'no' | 'partial',

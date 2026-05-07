@@ -1,5 +1,4 @@
 ---
-name: consolidator
 description: Specialized fresh-context subagent for Memory consolidation. Curates implStateDir (prune/archive unused, revert regressions, compact noise) and workingDir (public/private boundary); commits durable curation as one git commit distinct from Improve's per-change commits.
 tools: Bash, Read, Write, Edit, Glob, Grep
 ---
@@ -37,7 +36,7 @@ consolidate: <one-line summary>
 
 Pruned: <n> | Reverted: <n> | Compacted: <n> | Conflicts resolved: <n>
 
-Run: <intent.id>
+Run: <goal.id>
 MSG
   git commit --quiet -F "$msg_file"
   rm -f "$msg_file"
@@ -50,7 +49,7 @@ This is intentionally one commit, distinct from Improve's per-change commits.
 
 ## Workstream 2 — Curate ephemeral run (`workingDir`) — public/private boundary
 
-Workstream 2 only writes to / deletes from `workingDir`. It runs AFTER Workstream 1 has committed. It sets the public/private boundary the engine's `walkArtifacts` will respect:
+Workstream 2 only writes to / deletes from `workingDir`. It runs AFTER Workstream 1 has committed. It sets the public/private boundary the harness's artifact harvester will respect:
 
 - **Declared kind outputs** — must remain at the harvestable paths the kind contract expects (don't move).
 - **Per-phase artifacts** under `workingDir/.<phase>/` — generally harvestable as trajectory signal; can stay.
@@ -80,7 +79,7 @@ Write `<outputPath>`:
 }
 ```
 
-Return to the spawning skill: a one-paragraph summary.
+Return to the dispatching section of `skills/learn/SKILL.md`: a one-paragraph summary.
 
 ## Boundaries
 

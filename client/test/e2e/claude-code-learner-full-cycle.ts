@@ -2,7 +2,7 @@
  * Automated two-cycle full-cycle e2e for the claude-code-learner plugin.
  *
  * Verifies the load-bearing claim: between cycle 1 and cycle 2, `implStateDir`
- * HEAD sha advances AND cycle 2's coordinator boot reads the new sha.
+ * HEAD sha advances AND cycle 2's learn skill's boot reads the new sha.
  *
  * This script invokes the `claude` CLI directly with the plugin loaded
  * (--plugin-dir) — it does NOT go through the engine. The daemon-path
@@ -44,8 +44,8 @@ const PHASES = [
 
 interface CycleParams {
   cycleLabel: string;
-  intentId: string;
-  intentDescription: string;
+  goalId: string;
+  goalDescription: string;
   fieldValue: string;
   workingDir: string;
   implStateDir: string;
@@ -63,8 +63,8 @@ interface CycleResult {
 interface BootJson {
   implStateDirShaAtStart: string;
   skillBundleCid?: string;
-  intentId: string;
-  windowEndTs: number;
+  goalId: string;
+  deadline: number;
 }
 
 async function main(): Promise<void> {
@@ -99,8 +99,8 @@ async function main(): Promise<void> {
     console.log('--- CYCLE 1 ---');
     const cycle1 = await runCycle({
       cycleLabel: 'cycle-1',
-      intentId: 'fullcycle-c1',
-      intentDescription:
+      goalId: 'fullcycle-c1',
+      goalDescription:
         "Trivial smoke test. Write a JSON file with three fields named foo, bar, baz, each containing the string 'hello'. Output to workingDir/output.json.",
       fieldValue: 'hello',
       workingDir: cycle1WorkingDir,
@@ -120,8 +120,8 @@ async function main(): Promise<void> {
     console.log('--- CYCLE 2 ---');
     const cycle2 = await runCycle({
       cycleLabel: 'cycle-2',
-      intentId: 'fullcycle-c2',
-      intentDescription:
+      goalId: 'fullcycle-c2',
+      goalDescription:
         "Second cycle. Same kind as cycle 1 — write a JSON output file with three fields named foo, bar, baz, each containing the string 'world' (different value). The implStateDir already contains content from cycle 1; the agent should leverage it.",
       fieldValue: 'world',
       workingDir: cycle2WorkingDir,
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
       throw new Error(
         `cycle 2 boot.json.implStateDirShaAtStart=${cycle2.bootJson.implStateDirShaAtStart} ` +
           `did not match cycle 1's final HEAD ${sha1}. ` +
-          `Cycle 2's coordinator did not read the updated implStateDir.`,
+          `Cycle 2's learn skill did not read the updated implStateDir.`,
       );
     }
     console.log(`  ✓ cycle 2 boot.json.implStateDirShaAtStart matches cycle 1's HEAD`);
@@ -201,24 +201,24 @@ async function runCycle(params: CycleParams): Promise<CycleResult> {
   const startTs = startedAt;
   const endTs = startedAt + 600_000; // 10-minute window per cycle
 
-  const intent = {
-    id: params.signedTaskId,
-    description: params.signedTaskDescription,
-    solverType: 'smoke-test',
-    window: { startTs, endTs },
+  const goal = {
+    id: params.goalId,
+    description: params.goalDescription,
+    kind: 'smoke-test',
+    deadline: endTs,
     spec: { fieldNames: ['foo', 'bar', 'baz'], fieldValue: params.fieldValue },
   };
 
   const prompt = [
-    'You are running a Jinn restoration Task. Use the Skill tool to invoke',
-    "'claude-code-learner:coordinator' and run the FULL seven-phase pipeline",
+    'You are running a task. Use the Skill tool to invoke',
+    "'claude-code-learner:learn' and run the FULL seven-phase pipeline",
     '(Orient → Strategize → Plan → Execute → Debrief → Improve → Memory consolidation).',
     '',
     'Session inputs:',
-    `- intent = ${JSON.stringify(intent)}`,
+    `- goal = ${JSON.stringify(goal)}`,
     `- workingDir = ${params.workingDir}`,
     `- implStateDir = ${params.implStateDir}`,
-    `- msUntilEndTs = ${endTs - startTs}`,
+    `- msUntilDeadline = ${endTs - startTs}`,
     '',
     'Run all phases. For Improve: even if Debrief found no major issues, write at',
     'least one trivial improvement (e.g. a note in implStateDir/notes/) so the',

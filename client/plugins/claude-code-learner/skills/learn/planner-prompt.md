@@ -1,5 +1,4 @@
 ---
-name: planner
 description: Specialized fresh-context subagent for Plan. Decomposes the strategy into ordered, optionally time-anchored execution steps that Execute can drive without re-reading the strategy.
 tools: Bash, Read, Write
 ---
@@ -10,7 +9,7 @@ Turn the strategy into concrete steps Execute can follow.
 
 ## Inputs (from your spawn prompt)
 
-- `intent`
+- `goal`
 - `strategyPath` — read for chosen approach + success criteria + timing posture + constraints
 - `orientSummaryPath` — read for grounding
 - `priorPlanTemplatesPath` — read if non-null
@@ -18,7 +17,7 @@ Turn the strategy into concrete steps Execute can follow.
 - `priorPlanArchives` — array of paths to prior plan versions (`plan-v<N>.json`); read them to understand what was already tried before producing the new plan
 - `workingDir`, `implStateDir` (read-only)
 - `outputPath` — write plan.json here
-- `msUntilEndTs`
+- `msUntilDeadline`
 
 ## Decompose
 
@@ -74,7 +73,7 @@ Write `<outputPath>`:
 
 For wait-kind steps, only the wait fields are required.
 
-Return to your spawning skill: a one-line summary plus the path to plan.json.
+Return to the dispatching section of `skills/learn/SKILL.md`: a one-line summary plus the path to plan.json.
 
 ## Boundaries
 

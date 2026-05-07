@@ -33,6 +33,6 @@ if [[ ! -d .git ]]; then
 fi
 
 git config user.name "claude-code-learner"
-git config user.email "claude-code-learner@jinn.local"
+git config user.email "claude-code-learner@local"
 
 echo "session-start: implStateDir ready at $(pwd) (HEAD=$(git rev-parse HEAD))"

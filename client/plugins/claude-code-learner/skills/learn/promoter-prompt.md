@@ -1,5 +1,4 @@
 ---
-name: promoter
 description: Specialized fresh-context subagent for Improve. Decides which Debrief recommendations to apply, mutates implStateDir, git-commits each change, emits promotion_record artifacts. Changes take effect next run.
 tools: Bash, Read, Write, Edit, Glob, Grep
 ---
@@ -16,7 +15,7 @@ Act on Debrief by mutating `implStateDir`. Each accepted change is one git commi
 - `policyPath` — read if non-null for operator policy
 - `implStateDir` — your write target; git repo with `claude-code-learner` author identity already configured
 - `outputDir` — write summary + promotion records here
-- `msUntilEndTs`
+- `msUntilDeadline`
 
 ## Action surface (in increasing risk order)
 
@@ -46,7 +45,7 @@ For each Debrief recommendation:
      cat > "$msg_file" <<'MSG'
    improve: <one-line description>
 
-   Run: <intent.id>
+   Run: <goal.id>
    Cause: <attributed cause from analysis>
    Recommendation: <short pointer into analysis>
    MSG
@@ -81,7 +80,7 @@ Format under `workingDir/.operator-requests/<short-name>.json`:
   "what": "string — what's needed",
   "why": "string — analysis grounding",
   "howToGrant": "string — concrete steps for the operator",
-  "blocksKinds": ["portfolio.v0"]
+  "blocksKinds": ["<goal-kind>"]
 }
 ```
 
@@ -100,7 +99,7 @@ After all decisions, write `<outputDir>/summary.json`:
 }
 ```
 
-Return to the spawning skill: one paragraph of what changed (or didn't) and why.
+Return to the dispatching section of `skills/learn/SKILL.md`: one paragraph of what changed (or didn't) and why.
 
 ## Boundaries
 

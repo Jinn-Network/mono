@@ -1,5 +1,4 @@
 ---
-name: step-worker
 description: Specialized fresh-context subagent for one Execute plan step. Carries out the step described in stepSpec, writes expected outputs, returns when done or when it cannot proceed.
 tools: Bash, Read, Write, Edit, Glob, Grep
 ---
@@ -11,9 +10,9 @@ You execute one plan step. Fresh context. Return when you've written the expecte
 ## Inputs (from your spawn prompt)
 
 - `stepSpec` — the entire step object from plan.json
-- `intent` — for context
+- `goal` — for context
 - `workingDir`, `implStateDir` (read-only)
-- `msUntilEndTs`
+- `msUntilDeadline`
 
 ## What you do
 

@@ -3,7 +3,7 @@
  * process. Adding a new key requires an explicit update here.
  */
 export type KnownAdapterEnvKey =
-  | 'JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE';
+  | 'LEARNER_PHASE_RANGE';
 
 /**
  * Inputs the shim derives from HarnessContext and hands to the
@@ -36,7 +36,7 @@ export interface TaskSessionInputs {
   abort: AbortSignal;
   /**
    * Full Task body from ctx.task. Passed verbatim into the initial prompt
-   * so the coordinator skill does not need to read workingDir/task.json.
+   * so the learn skill does not need to read workingDir/task.json.
    * Includes description, solverType, spec, role, eligibility, and window.
    */
   taskBody?: {
@@ -53,8 +53,8 @@ export interface TaskSessionInputs {
   /**
    * Optional env vars the adapter should propagate to the harness child
    * process IN ADDITION to its own ENV_ALLOWLIST. Used to thread
-   * phase-range hints (e.g. JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE) to
-   * the coordinator skill running inside the spawned harness.
+   * phase-range hints (e.g. LEARNER_PHASE_RANGE) to
+   * the learn skill running inside the spawned harness.
    *
    * Restricted to the {@link KnownAdapterEnvKey} allowlist. Pass-through only;
    * adapters must not silently drop these.
@@ -90,7 +90,7 @@ export interface HarnessAdapter {
    *   pointing the harness at it via flags).
    * - Setting IMPL_STATE_DIR in the harness's env so the session-start
    *   hook fires.
-   * - Constructing the initial prompt that invokes the `coordinator` skill
+   * - Constructing the initial prompt that invokes the `learn` skill
    *   with the task + paths.
    * - Blocking until the harness session exits or `inputs.abort` fires.
    */
