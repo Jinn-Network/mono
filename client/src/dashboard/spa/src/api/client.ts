@@ -18,6 +18,9 @@ import type {
   OwnedLaunchedListResponse,
   RegistryListResponse,
   RegistryManifestResponse,
+  OperatorArtifactSource,
+  OperatorArtifactsResponse,
+  OperatorPricingConfig,
 } from './types.js';
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -268,6 +271,25 @@ export const api = {
   // manifest-keyed entry to `config.solverNets[<cid>]`; restart-required
   // — the daemon does not hot-reload SolverNet config.
   operator: {
+    listArtifacts: (opts: { source?: OperatorArtifactSource; artifactType?: string; limit?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (opts.source) q.set('source', opts.source);
+      if (opts.artifactType) q.set('artifactType', opts.artifactType);
+      if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+      const qs = q.toString();
+      return jfetch<OperatorArtifactsResponse>(
+        `/v1/operator/artifacts${qs ? `?${qs}` : ''}`,
+      );
+    },
+    updatePricing: (pricing: OperatorPricingConfig) =>
+      jfetch<{ ok: boolean; restartRequired: boolean; pricing: OperatorPricingConfig }>(
+        '/v1/operator/pricing',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(pricing),
+        },
+      ),
     join: (
       manifestCid: string,
       body: {

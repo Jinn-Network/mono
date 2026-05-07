@@ -135,3 +135,26 @@ describe('api.solvernets — owned launched + registry', () => {
     expect(lastCall().url).toBe('/v1/solvernets/registry/QmXyz12345abcdef');
   });
 });
+
+describe('api.operator — artifact store', () => {
+  it('listArtifacts: GET /v1/operator/artifacts with source and limit', async () => {
+    await api.operator.listArtifacts({ source: 'network', limit: 25 });
+    expect(lastCall().url).toBe('/v1/operator/artifacts?source=network&limit=25');
+  });
+
+  it('updatePricing: POST /v1/operator/pricing with full pricing config', async () => {
+    await api.operator.updatePricing({
+      publicEndpoint: 'https://op.example.com',
+      defaultPriceUsdc: '0.001',
+      perArtifactTypePrice: { design_document: '0.01' },
+    });
+    const c = lastCall();
+    expect(c.url).toBe('/v1/operator/pricing');
+    expect(c.init?.method).toBe('POST');
+    expect(JSON.parse(c.init!.body as string)).toEqual({
+      publicEndpoint: 'https://op.example.com',
+      defaultPriceUsdc: '0.001',
+      perArtifactTypePrice: { design_document: '0.01' },
+    });
+  });
+});

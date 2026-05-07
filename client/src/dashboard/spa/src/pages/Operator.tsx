@@ -4,6 +4,7 @@ import { SolverNetsSection } from './configuration/SolverNetsSection.js';
 import { NetworkSection } from './configuration/NetworkSection.js';
 import { SecuritySection } from './configuration/SecuritySection.js';
 import { useHashSection } from './configuration/useHashSection.js';
+import { OperatorDataMarket } from './operator/OperatorDataMarket.js';
 
 export interface OperatorPageProps {
   onRestartPending?: () => void;
@@ -43,6 +44,10 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
       <SolverNetsSection
         defaultExpanded={expandedSection === 'solvernets' || expandedSection === undefined}
         joinedHashFragment={joinedHashFragment}
+        onRestartPending={onRestartPending}
+      />
+      <OperatorDataMarket
+        defaultExpanded={expandedSection === 'data-market'}
         onRestartPending={onRestartPending}
       />
       <NetworkSection

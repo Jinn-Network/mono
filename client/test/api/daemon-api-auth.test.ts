@@ -205,6 +205,14 @@ describe('daemon-api-auth (bearer middleware)', () => {
       chain: 'base-sepolia',
       services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
     }));
+    const configPath = join(earningDir, 'config.json');
+    writeFileSync(configPath, JSON.stringify({
+      operator: {
+        publicEndpoint: 'https://op.example.com',
+        defaultPriceUsdc: '0',
+        perArtifactTypePrice: {},
+      },
+    }));
 
     store = new Store(':memory:');
     server = await startApiServer({
@@ -213,6 +221,14 @@ describe('daemon-api-auth (bearer middleware)', () => {
       apiToken: TEST_TOKEN,
       ui: { token: 'ui-token', handshakeKey: 'handshake-key' },
       bootstrap: { earningDir },
+      operatorArtifacts: {
+        configPath,
+        operatorConfig: {
+          publicEndpoint: 'https://op.example.com',
+          defaultPriceUsdc: '0',
+          perArtifactTypePrice: {},
+        },
+      },
       solverNets: {
         registry: {
           list: () => [{
@@ -229,7 +245,7 @@ describe('daemon-api-auth (bearer middleware)', () => {
     });
     baseUrl = `http://127.0.0.1:${server.port}`;
 
-    for (const path of ['/v1/bootstrap', '/v1/events/recent', '/v1/solvernets']) {
+    for (const path of ['/v1/bootstrap', '/v1/events/recent', '/v1/solvernets', '/v1/operator/artifacts']) {
       const unauthenticated = await fetch(`${baseUrl}${path}`);
       expect(unauthenticated.status).toBe(401);
 

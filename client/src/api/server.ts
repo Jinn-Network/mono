@@ -42,6 +42,10 @@ import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
 import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
+import {
+  addOperatorArtifactsRoutes,
+  type OperatorArtifactsRoutesConfig,
+} from './operator-artifacts-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -119,6 +123,8 @@ export interface ApiServerConfig {
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
    */
   harnessStatus?: HarnessStatusDeps;
+  /** Operator-local artifact inventory + future-artifact pricing controls. */
+  operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
 }
 
 export interface ApiServer {
@@ -287,6 +293,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/solvernets/*', requireUiToken(config.ui.token));
     app.use('/v1/auth/*', requireUiToken(config.ui.token));
     app.use('/v1/setup/*', requireUiToken(config.ui.token));
+    app.use('/v1/operator', requireUiToken(config.ui.token));
+    app.use('/v1/operator/*', requireUiToken(config.ui.token));
     app.use('/v1/launcher', requireUiToken(config.ui.token));
     app.use('/v1/launcher/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
@@ -341,6 +349,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.harnessStatus) {
     addHarnessStatusRoutes(app, config.harnessStatus);
+  }
+
+  if (config.ui) {
+    addOperatorArtifactsRoutes(app, {
+      store,
+      ...(config.operatorArtifacts ?? {}),
+    });
   }
 
   if (config.ui) {

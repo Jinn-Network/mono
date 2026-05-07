@@ -683,6 +683,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const uiToken = ensureUiToken();
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
   const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
+  const operatorArtifactsConfig = {
+    publicEndpoint: config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`,
+    defaultPriceUsdc: config.operator?.defaultPriceUsdc ?? '0',
+    perArtifactTypePrice: config.operator?.perArtifactTypePrice ?? {},
+  };
   let corpusForApi: ReturnType<typeof createCorpus> | undefined;
   // Launcher mode wiring (Task 6 of spec/2026-05-05-launcher-role-and-mode.md).
   // The API server is constructed before bootstrap finishes, so the operator's
@@ -736,6 +741,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             codeDigest,
             ...(persisted ? { lastModeSwitchAt: persisted.switchedAt } : {}),
           };
+        },
+      },
+      operatorArtifacts: {
+        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+        operatorConfig: operatorArtifactsConfig,
+        onOperatorConfigUpdated: (operator) => {
+          config.operator = operator;
         },
       },
       bootstrap: {

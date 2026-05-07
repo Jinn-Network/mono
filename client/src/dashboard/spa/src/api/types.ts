@@ -188,6 +188,116 @@ export interface LauncherSolverNetPatchResponse {
   generator: Record<string, unknown>;
 }
 
+export type OperatorArtifactSource = 'served' | 'network';
+
+export interface OperatorPricingConfig {
+  publicEndpoint: string;
+  defaultPriceUsdc: string;
+  perArtifactTypePrice: Record<string, string>;
+}
+
+export interface OperatorArtifactTypeSummary {
+  artifactType: string;
+  count: number;
+  totalBytes: number;
+  gatedCount?: number;
+}
+
+export interface OperatorServedStorageSummary {
+  totalCount: number;
+  totalBytes: number;
+  freeCount: number;
+  gatedCount: number;
+  latestCreatedAt: string | null;
+  artifactTypes: OperatorArtifactTypeSummary[];
+}
+
+export interface OperatorNetworkStorageSummary {
+  totalCount: number;
+  totalBytes: number;
+  latestFetchedAt: string | null;
+  artifactTypes: OperatorArtifactTypeSummary[];
+}
+
+export type OperatorArtifactAccessOutcome =
+  | 'free_served'
+  | 'payment_required'
+  | 'paid_served'
+  | 'verification_failed'
+  | 'settlement_failed'
+  | 'payment_malformed'
+  | 'not_found';
+
+export interface OperatorArtifactAccessStats {
+  accessCount: number;
+  paidServeCount: number;
+  freeServeCount: number;
+  failedPaymentCount: number;
+  paymentRequiredCount: number;
+  revenueUsdc: string;
+  lastAccessAt: string | null;
+  lastPaidAt: string | null;
+}
+
+export interface OperatorArtifactAccessEvent {
+  id: number;
+  sha256: string;
+  artifactType: string | null;
+  priceUsdc: string | null;
+  outcome: OperatorArtifactAccessOutcome;
+  httpStatus: number;
+  payer: string | null;
+  settlementTx: string | null;
+  errorReason: string | null;
+  remoteAddr: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface OperatorServedArtifact {
+  source: 'served';
+  sha256: string;
+  artifactType: string;
+  requestId: string | null;
+  envelopeCid: string | null;
+  contentSize: number;
+  priceUsdc: string;
+  createdAt: string;
+  endpoint: string | null;
+  access: OperatorArtifactAccessStats;
+}
+
+export interface OperatorNetworkArtifact {
+  source: 'network';
+  sha256: string;
+  artifactType: string;
+  envelopeCid: string | null;
+  contentSize: number;
+  origin: 'origin' | 'route-resolver' | 'self-store-mirror';
+  sourceOperator: string | null;
+  sourceEndpoint: string | null;
+  paidAmountUsdc: string;
+  fetchedAt: string;
+  lastUsedAt: string;
+  peerCatalogId: string | null;
+}
+
+export type OperatorArtifact = OperatorServedArtifact | OperatorNetworkArtifact;
+
+export interface OperatorArtifactsResponse {
+  schemaVersion: 1;
+  generatedAt: string;
+  source: OperatorArtifactSource;
+  pricing: OperatorPricingConfig;
+  summary: {
+    served: OperatorServedStorageSummary;
+    network: OperatorNetworkStorageSummary;
+    access: OperatorArtifactAccessStats;
+  };
+  recentAccesses: OperatorArtifactAccessEvent[];
+  artifacts: OperatorArtifact[];
+}
+
 // ── SolverNet creation + launch (spec/2026-05-05-solvernet-creation-and-launch.md) ──
 //
 // These types mirror the daemon-side shapes:

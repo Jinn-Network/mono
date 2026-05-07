@@ -83,6 +83,55 @@ export interface ServedArtifactMetadataRow {
   createdAt: string;
 }
 
+export type ArtifactAccessOutcome =
+  | 'free_served'
+  | 'payment_required'
+  | 'paid_served'
+  | 'verification_failed'
+  | 'settlement_failed'
+  | 'payment_malformed'
+  | 'not_found';
+
+export interface ArtifactAccessEventInput {
+  sha256: string;
+  artifactType?: string | null;
+  priceUsdc?: string | null;
+  outcome: ArtifactAccessOutcome;
+  httpStatus: number;
+  payer?: string | null;
+  settlementTx?: string | null;
+  errorReason?: string | null;
+  remoteAddr?: string | null;
+  userAgent?: string | null;
+  createdAt: string;
+}
+
+export interface ArtifactAccessEventRow {
+  id: number;
+  sha256: string;
+  artifactType: string | null;
+  priceUsdc: string | null;
+  outcome: ArtifactAccessOutcome;
+  httpStatus: number;
+  payer: string | null;
+  settlementTx: string | null;
+  errorReason: string | null;
+  remoteAddr: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface ArtifactAccessStats {
+  accessCount: number;
+  paidServeCount: number;
+  freeServeCount: number;
+  failedPaymentCount: number;
+  paymentRequiredCount: number;
+  revenueUsdc: string;
+  lastAccessAt: string | null;
+  lastPaidAt: string | null;
+}
+
 export type NetworkArtifactSource = 'origin' | 'route-resolver' | 'self-store-mirror';
 
 export interface NetworkArtifactInput {
@@ -240,6 +289,32 @@ CREATE TABLE IF NOT EXISTS served_artifacts (
 CREATE INDEX IF NOT EXISTS idx_served_artifacts_request ON served_artifacts (request_id);
 CREATE INDEX IF NOT EXISTS idx_served_artifacts_envelope ON served_artifacts (envelope_cid);
 CREATE INDEX IF NOT EXISTS idx_served_artifacts_artifact_type ON served_artifacts (artifact_type);
+
+CREATE TABLE IF NOT EXISTS artifact_access_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sha256 TEXT NOT NULL,
+  artifact_type TEXT,
+  price_usdc TEXT,
+  outcome TEXT NOT NULL CHECK (outcome IN (
+    'free_served',
+    'payment_required',
+    'paid_served',
+    'verification_failed',
+    'settlement_failed',
+    'payment_malformed',
+    'not_found'
+  )),
+  http_status INTEGER NOT NULL,
+  payer TEXT,
+  settlement_tx TEXT,
+  error_reason TEXT,
+  remote_addr TEXT,
+  user_agent TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_access_events_sha ON artifact_access_events (sha256);
+CREATE INDEX IF NOT EXISTS idx_artifact_access_events_created ON artifact_access_events (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_artifact_access_events_outcome ON artifact_access_events (outcome);
 
 CREATE TABLE IF NOT EXISTS network_artifacts (
   sha256 TEXT PRIMARY KEY,
@@ -1227,6 +1302,190 @@ export class Store {
     };
   }
 
+  listServedArtifactMetadata(filter: { artifactType?: string; limit?: number } = {}): ServedArtifactMetadataRow[] {
+    const limit = Math.min(Math.max(1, filter.limit ?? 100), 500);
+    const sql = filter.artifactType
+      ? `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
+         FROM served_artifacts
+         WHERE artifact_type = @artifactType
+         ORDER BY created_at DESC
+         LIMIT @limit`
+      : `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
+         FROM served_artifacts
+         ORDER BY created_at DESC
+         LIMIT @limit`;
+    const rows = this.db.prepare(sql).all({
+      limit,
+      ...(filter.artifactType ? { artifactType: filter.artifactType } : {}),
+    }) as Array<{
+      sha256: string;
+      artifact_type: string;
+      request_id: string | null;
+      envelope_cid: string | null;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      requestId: row.request_id,
+      envelopeCid: row.envelope_cid,
+      contentSize: row.content_size,
+      priceUsdc: row.price_usdc,
+      createdAt: row.created_at,
+    }));
+  }
+
+  recordArtifactAccessEvent(input: ArtifactAccessEventInput): void {
+    this.db.prepare(
+      `INSERT INTO artifact_access_events
+         (sha256, artifact_type, price_usdc, outcome, http_status, payer,
+          settlement_tx, error_reason, remote_addr, user_agent, created_at)
+       VALUES
+         (@sha256, @artifactType, @priceUsdc, @outcome, @httpStatus, @payer,
+          @settlementTx, @errorReason, @remoteAddr, @userAgent, @createdAt)`,
+    ).run({
+      sha256: input.sha256,
+      artifactType: input.artifactType ?? null,
+      priceUsdc: input.priceUsdc ?? null,
+      outcome: input.outcome,
+      httpStatus: input.httpStatus,
+      payer: input.payer ?? null,
+      settlementTx: input.settlementTx ?? null,
+      errorReason: input.errorReason ?? null,
+      remoteAddr: input.remoteAddr ?? null,
+      userAgent: input.userAgent ?? null,
+      createdAt: input.createdAt,
+    });
+  }
+
+  listArtifactAccessEvents(filter: { sha256?: string; limit?: number } = {}): ArtifactAccessEventRow[] {
+    const limit = Math.min(Math.max(1, filter.limit ?? 50), 500);
+    const sql = filter.sha256
+      ? `SELECT id, sha256, artifact_type, price_usdc, outcome, http_status,
+                payer, settlement_tx, error_reason, remote_addr, user_agent, created_at
+         FROM artifact_access_events
+         WHERE sha256 = @sha256
+         ORDER BY created_at DESC, id DESC
+         LIMIT @limit`
+      : `SELECT id, sha256, artifact_type, price_usdc, outcome, http_status,
+                payer, settlement_tx, error_reason, remote_addr, user_agent, created_at
+         FROM artifact_access_events
+         ORDER BY created_at DESC, id DESC
+         LIMIT @limit`;
+    const rows = this.db.prepare(sql).all({
+      limit,
+      ...(filter.sha256 ? { sha256: filter.sha256 } : {}),
+    }) as Array<{
+      id: number;
+      sha256: string;
+      artifact_type: string | null;
+      price_usdc: string | null;
+      outcome: ArtifactAccessOutcome;
+      http_status: number;
+      payer: string | null;
+      settlement_tx: string | null;
+      error_reason: string | null;
+      remote_addr: string | null;
+      user_agent: string | null;
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      priceUsdc: row.price_usdc,
+      outcome: row.outcome,
+      httpStatus: row.http_status,
+      payer: row.payer,
+      settlementTx: row.settlement_tx,
+      errorReason: row.error_reason,
+      remoteAddr: row.remote_addr,
+      userAgent: row.user_agent,
+      createdAt: row.created_at,
+    }));
+  }
+
+  getArtifactAccessSummary(): ArtifactAccessStats {
+    const row = this.db.prepare(
+      `SELECT
+         COUNT(*) AS access_count,
+         COALESCE(SUM(CASE WHEN outcome = 'paid_served' THEN 1 ELSE 0 END), 0) AS paid_serve_count,
+         COALESCE(SUM(CASE WHEN outcome = 'free_served' THEN 1 ELSE 0 END), 0) AS free_serve_count,
+         COALESCE(SUM(CASE WHEN outcome IN ('verification_failed', 'settlement_failed', 'payment_malformed') THEN 1 ELSE 0 END), 0) AS failed_payment_count,
+         COALESCE(SUM(CASE WHEN outcome = 'payment_required' THEN 1 ELSE 0 END), 0) AS payment_required_count,
+         COALESCE(SUM(CASE WHEN outcome = 'paid_served' THEN CAST(price_usdc AS REAL) ELSE 0 END), 0) AS revenue_usdc,
+         MAX(created_at) AS last_access_at,
+         MAX(CASE WHEN outcome = 'paid_served' THEN created_at ELSE NULL END) AS last_paid_at
+       FROM artifact_access_events`,
+    ).get() as {
+      access_count: number;
+      paid_serve_count: number;
+      free_serve_count: number;
+      failed_payment_count: number;
+      payment_required_count: number;
+      revenue_usdc: number;
+      last_access_at: string | null;
+      last_paid_at: string | null;
+    };
+    return {
+      accessCount: row.access_count,
+      paidServeCount: row.paid_serve_count,
+      freeServeCount: row.free_serve_count,
+      failedPaymentCount: row.failed_payment_count,
+      paymentRequiredCount: row.payment_required_count,
+      revenueUsdc: String(row.revenue_usdc),
+      lastAccessAt: row.last_access_at,
+      lastPaidAt: row.last_paid_at,
+    };
+  }
+
+  getArtifactAccessStatsBySha(sha256s: string[]): Record<string, ArtifactAccessStats> {
+    const unique = Array.from(new Set(sha256s)).filter((sha256) => sha256.length > 0);
+    if (unique.length === 0) return {};
+    const placeholders = unique.map((_, idx) => `@sha${idx}`).join(', ');
+    const params = Object.fromEntries(unique.map((sha256, idx) => [`sha${idx}`, sha256]));
+    const rows = this.db.prepare(
+      `SELECT
+         sha256,
+         COUNT(*) AS access_count,
+         COALESCE(SUM(CASE WHEN outcome = 'paid_served' THEN 1 ELSE 0 END), 0) AS paid_serve_count,
+         COALESCE(SUM(CASE WHEN outcome = 'free_served' THEN 1 ELSE 0 END), 0) AS free_serve_count,
+         COALESCE(SUM(CASE WHEN outcome IN ('verification_failed', 'settlement_failed', 'payment_malformed') THEN 1 ELSE 0 END), 0) AS failed_payment_count,
+         COALESCE(SUM(CASE WHEN outcome = 'payment_required' THEN 1 ELSE 0 END), 0) AS payment_required_count,
+         COALESCE(SUM(CASE WHEN outcome = 'paid_served' THEN CAST(price_usdc AS REAL) ELSE 0 END), 0) AS revenue_usdc,
+         MAX(created_at) AS last_access_at,
+         MAX(CASE WHEN outcome = 'paid_served' THEN created_at ELSE NULL END) AS last_paid_at
+       FROM artifact_access_events
+       WHERE sha256 IN (${placeholders})
+       GROUP BY sha256`,
+    ).all(params) as Array<{
+      sha256: string;
+      access_count: number;
+      paid_serve_count: number;
+      free_serve_count: number;
+      failed_payment_count: number;
+      payment_required_count: number;
+      revenue_usdc: number;
+      last_access_at: string | null;
+      last_paid_at: string | null;
+    }>;
+    return Object.fromEntries(rows.map((row) => [
+      row.sha256,
+      {
+        accessCount: row.access_count,
+        paidServeCount: row.paid_serve_count,
+        freeServeCount: row.free_serve_count,
+        failedPaymentCount: row.failed_payment_count,
+        paymentRequiredCount: row.payment_required_count,
+        revenueUsdc: String(row.revenue_usdc),
+        lastAccessAt: row.last_access_at,
+        lastPaidAt: row.last_paid_at,
+      },
+    ]));
+  }
+
   setServedArtifactEnvelopeCid(sha256: string, envelopeCid: string): void {
     this.db.prepare(
       `UPDATE served_artifacts SET envelope_cid = ? WHERE sha256 = ?`,
@@ -1355,6 +1614,53 @@ export class Store {
       lastUsedAt: row.last_used_at,
       peerCatalogId: row.peer_catalog_id,
     };
+  }
+
+  listNetworkArtifactMetadata(filter: { artifactType?: string; limit?: number } = {}): NetworkArtifactMetadataRow[] {
+    const limit = Math.min(Math.max(1, filter.limit ?? 100), 500);
+    const sql = filter.artifactType
+      ? `SELECT sha256, artifact_type, envelope_cid, content_size, source,
+                source_operator, source_endpoint, paid_amount_usdc, fetched_at,
+                last_used_at, peer_catalog_id
+         FROM network_artifacts
+         WHERE artifact_type = @artifactType
+         ORDER BY fetched_at DESC
+         LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, content_size, source,
+                source_operator, source_endpoint, paid_amount_usdc, fetched_at,
+                last_used_at, peer_catalog_id
+         FROM network_artifacts
+         ORDER BY fetched_at DESC
+         LIMIT @limit`;
+    const rows = this.db.prepare(sql).all({
+      limit,
+      ...(filter.artifactType ? { artifactType: filter.artifactType } : {}),
+    }) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content_size: number;
+      source: NetworkArtifactSource;
+      source_operator: string | null;
+      source_endpoint: string | null;
+      paid_amount_usdc: string;
+      fetched_at: string;
+      last_used_at: string;
+      peer_catalog_id: string | null;
+    }>;
+    return rows.map((row) => ({
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      envelopeCid: row.envelope_cid,
+      contentSize: row.content_size,
+      source: row.source,
+      sourceOperator: row.source_operator,
+      sourceEndpoint: row.source_endpoint,
+      paidAmountUsdc: row.paid_amount_usdc,
+      fetchedAt: row.fetched_at,
+      lastUsedAt: row.last_used_at,
+      peerCatalogId: row.peer_catalog_id,
+    }));
   }
 
   touchNetworkArtifactUsage(sha256: string, ts: string): void {

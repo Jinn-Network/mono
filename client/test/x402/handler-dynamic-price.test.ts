@@ -36,6 +36,15 @@ describe('x402 handler — dynamic per-row price', () => {
     expect(res.status).toBe(200);
     const body = await res.arrayBuffer();
     expect(Buffer.from(body).equals(bytes)).toBe(true);
+    expect(store.listArtifactAccessEvents({ sha256 })).toEqual([
+      expect.objectContaining({
+        sha256,
+        artifactType: 'design_document',
+        priceUsdc: '0',
+        outcome: 'free_served',
+        httpStatus: 200,
+      }),
+    ]);
   });
 
   it('returns 402 for paid content without X-PAYMENT header', async () => {
@@ -55,11 +64,54 @@ describe('x402 handler — dynamic per-row price', () => {
     expect(body.accepts.length).toBeGreaterThan(0);
     // The 402 response carries this artifact's price, not a server-static one.
     expect(body.accepts.some((a) => a.price.includes('0.001'))).toBe(true);
+    expect(store.listArtifactAccessEvents({ sha256 })).toEqual([
+      expect.objectContaining({
+        sha256,
+        artifactType: 'output.prediction.v0',
+        priceUsdc: '0.001',
+        outcome: 'payment_required',
+        httpStatus: 402,
+      }),
+    ]);
   });
 
   it('returns 404 for unknown sha256', async () => {
-    const res = await app.request(`/v1/artifacts/${'c'.repeat(64)}/content`);
+    const sha256 = 'c'.repeat(64);
+    const res = await app.request(`/v1/artifacts/${sha256}/content`);
     expect(res.status).toBe(404);
+    expect(store.listArtifactAccessEvents({ sha256 })).toEqual([
+      expect.objectContaining({
+        sha256,
+        artifactType: null,
+        outcome: 'not_found',
+        httpStatus: 404,
+      }),
+    ]);
+  });
+
+  it('records malformed paid attempts', async () => {
+    const sha256 = '7'.repeat(64);
+    store.saveServedArtifact({
+      sha256,
+      artifactType: 'design_document',
+      content: Buffer.from('paid'),
+      priceUsdc: '0.001',
+      createdAt: '2026-04-30T00:00:00.000Z',
+    });
+
+    const res = await app.request(`/v1/artifacts/${sha256}/content`, {
+      headers: { 'X-Payment': Buffer.from('{not json').toString('base64') },
+    });
+
+    expect(res.status).toBe(402);
+    expect(store.listArtifactAccessEvents({ sha256 })).toEqual([
+      expect.objectContaining({
+        sha256,
+        artifactType: 'design_document',
+        outcome: 'payment_malformed',
+        httpStatus: 402,
+      }),
+    ]);
   });
 
   // ─── Content-Type + X-Artifact-Type headers ────────────────────────────────
