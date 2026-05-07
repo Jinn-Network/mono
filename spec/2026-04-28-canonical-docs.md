@@ -27,7 +27,7 @@ A **canonical doc** is a root-level `CAPITALISED.md` file that:
 
 1. Names a stable, repo-wide source of truth on a single topic.
 2. Is referenced from `CLAUDE.md` with explicit triggers, so agents reliably consult it before producing related work.
-3. Changes only via an approved PR (CODEOWNERS review + a linked spec proposal that justifies the change).
+3. Changes only via an approved PR (CODEOWNERS review + a linked GitHub Discussion that justifies the change).
 4. Is referenced from non-canonical docs via a "Canonical references" footer, making drift greppable.
 
 Think of canonical docs as the repo's `const` declarations. Most of the codebase (and most of `docs/`) is `let` — it changes freely. Canonical docs change rarely and require the equivalent of a code review for a constant: a deliberate, recorded act.
@@ -75,14 +75,16 @@ Two requirements, both enforced.
 
 GitHub branch protection on `main` enforces that CODEOWNERS approval is required before merge.
 
-### 2. Linked spec proposal
+### 2. Linked GitHub Discussion
 
-Any PR that creates or modifies a canonical doc MUST link to a `spec/YYYY-MM-DD-<topic>.md` proposal that justifies the change. Enforced by:
+Any PR that creates or modifies a canonical doc MUST link to a [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions) that justifies the change. Discussions are where upstream reasoning happens; the PR is the ratification act, and the linked discussion is the audit trail. Enforced by:
 
-- A canonical-change section in `.github/PULL_REQUEST_TEMPLATE.md` that prompts for the spec link and lists the canonical-doc checklist.
-- A CI workflow (`.github/workflows/canonical-docs-check.yml`) that fails the PR if any canonical file is in the diff and no `spec/*.md` path appears in the PR body or in the diff itself.
+- A canonical-change section in `.github/PULL_REQUEST_TEMPLATE.md` that prompts for the discussion link and lists the canonical-doc checklist.
+- A CI workflow (`.github/workflows/canonical-docs-check.yml`) that fails the PR if any canonical file is in the diff and no `github.com/Jinn-Network/mono/discussions/<n>` URL appears in the PR body.
 
-Trivial edits (typo fixes) still go through CODEOWNERS but may cite the originating spec for the doc rather than authoring a new one. The CI check is path-based, not semantic — reviewers decide whether the cited spec actually justifies the change.
+Trivial edits (typo fixes) still go through CODEOWNERS but may cite an existing discussion (or skip the link if the change is purely cosmetic — reviewer's call). The CI check is path-based, not semantic — reviewers decide whether the cited discussion actually justifies the change.
+
+Dated specs in `spec/` remain available for cases where the upstream thinking is too long-form for a discussion thread, but they are not the default and are not required by CI.
 
 ## CLAUDE.md integration
 
@@ -91,7 +93,7 @@ A new top-level section is added to `CLAUDE.md`. References use **triggered** ph
 ```markdown
 ## Canonical Docs
 
-Canonical docs are the repo's stable sources of truth. They change only via approved PRs (see `spec/2026-04-28-canonical-docs.md`). Always prefer canonical docs over restated information found elsewhere in the repo, and never redefine canonical content locally — link instead.
+Canonical docs are the repo's stable sources of truth. They change only via approved PRs (CODEOWNERS review + a linked GitHub Discussion; see `spec/2026-04-28-canonical-docs.md`). Always prefer canonical docs over restated information found elsewhere in the repo, and never redefine canonical content locally — link instead.
 
 - `SPEC.md` — read before reasoning about the protocol loop, roles, contracts, or phase boundaries
 - `THESIS.md` — read before writing positioning, pitch, strategic copy, or any "why Jinn" framing
@@ -154,27 +156,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify spec link for canonical-doc changes
+      - name: Verify discussion link for canonical-doc changes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           CANON='^(SPEC|THESIS|BRAND|GROWTH|GLOSSARY)\.md$'
           changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
           if echo "$changed" | grep -E "$CANON" > /dev/null; then
-            if ! echo "$changed" | grep -E '^spec/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' > /dev/null \
-               && ! echo "${{ github.event.pull_request.body }}" | grep -E 'spec/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md' > /dev/null; then
-              echo "Canonical doc changed but no spec/YYYY-MM-DD-*.md linked in PR body or diff."
+            if ! echo "$PR_BODY" | grep -E 'github\.com/Jinn-Network/mono/discussions/[0-9]+' > /dev/null; then
+              echo "Canonical doc changed but no GitHub Discussion linked in PR body."
               exit 1
             fi
           fi
 ```
 
-The check is path-based by design. Semantic checks (does the spec actually justify the change) are the human reviewer's job.
+The check is URL-pattern based by design. Semantic checks (does the discussion actually justify the change) are the human reviewer's job.
 
 ### Suggested PR template addition
 
 ```markdown
 ### Canonical-doc changes (delete if not applicable)
 
-- [ ] Linked spec proposal: `spec/YYYY-MM-DD-<topic>.md`
+- [ ] Linked GitHub Discussion: `https://github.com/Jinn-Network/mono/discussions/<n>`
 - [ ] CODEOWNERS approval obtained
 - [ ] Ran `git grep -l "Canonical references.*<changed-file>"` and re-reviewed downstream docs
 - [ ] Updated downstream docs that needed it (or noted why none did)

@@ -148,7 +148,7 @@ Sprints live in `growth/.local/growth-log.md` §6 (active block + daily progress
 
 ## 10. Where the long-form lives
 
-[`growth/`](growth/) is this doc's working appendix. Strategy notes, channel experiments, copy drafts, campaign tracking, and tooling all live there. When `growth/` contradicts this doc, this doc wins; when `growth/` extends it, the extension stays in `growth/` unless it is load-bearing enough to be promoted via a spec proposal.
+[`growth/`](growth/) is this doc's working appendix. Strategy notes, channel experiments, copy drafts, campaign tracking, and tooling all live there. When growth/ contradicts this doc, this doc wins; when growth/ extends it, the extension stays in growth/ unless it is load-bearing enough to be promoted into this doc via a canonical-doc PR.
 
 Bootstrap reference points inside `growth/`:
 
@@ -167,4 +167,4 @@ Skills under [`.claude/skills/`](.claude/skills/) implement the techniques behin
 
 Each skill names which sections of this doc it reads. Skills do not redefine canonical claims; when a skill's reference content drifts from canon, the fix is a refine proposal, not a skill-side restatement.
 
-Changes to this document require a linked spec proposal under `spec/YYYY-MM-DD-<topic>.md` and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
+Changes to this document require a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions) and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).

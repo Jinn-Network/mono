@@ -8,7 +8,7 @@
 
 ### Canonical-doc changes (delete if not applicable)
 
-- [ ] Linked spec proposal: `spec/YYYY-MM-DD-<topic>.md`
+- [ ] Linked GitHub Discussion: `https://github.com/Jinn-Network/mono/discussions/<n>`
 - [ ] CODEOWNERS approval obtained
 - [ ] Ran `git grep -l "Canonical references.*<changed-file>"` and re-reviewed downstream docs
 - [ ] Updated downstream docs that needed it (or noted why none did)
