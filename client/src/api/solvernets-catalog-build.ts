@@ -14,7 +14,14 @@ export interface SolverNetCatalogEntry {
   name: string;
   description: string;
   state: 'live' | 'available' | 'coming_soon';
-  intrinsicSolverType: string;
+  /**
+   * Canonical contract identity post-SDK-migration (PRs d4491879 / 26548969):
+   * the legacy `intrinsicSolverType: string` (concatenated `id.version`) was
+   * removed in favour of the `{id, version}` pair carried by the manifest's
+   * contract block. Catalog entries match a manifest's `contract` field
+   * directly — no string concatenation on either side.
+   */
+  contract: { id: string; version: string };
   supportedRoles: ('solving' | 'evaluating')[];
   compatibleHarnesses: Array<{
     name: string;

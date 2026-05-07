@@ -68,18 +68,29 @@ export interface LiveNowStatusInput {
 const SERVICE_COMPLETE_STEPS = new Set(['complete', 'safe_binding_pending']);
 
 function diagnosticHref(diagnostic: { code: string; configField?: string }): string {
+  // Harness-related diagnostics belong on /operator → SolverNets → Joined,
+  // where each joined SolverNet exposes a per-net harness/plugins/model
+  // editor (see JoinedNetCard). The global #harness section is mode-only
+  // (train/frozen) and can't resolve "this harness doesn't support
+  // <solverType>" — that's a per-SolverNet concern.
+  //
+  // v1 routes to the section root; deep-linking to a specific manifestCid
+  // is gated on the legacy diagnostic emitter learning the joinedSolverNets
+  // mapping, which is out of scope for this change. Follow-up: thread
+  // manifestCid through `PredictionOperatorDiagnostic` and route to
+  // `/operator#solvernets/<cid>/harness`.
+  if (diagnostic.code.includes('harness')) {
+    return '/operator#solvernets';
+  }
   if (diagnostic.configField) {
-    return `/operator#solvernets/prediction`;
+    return `/operator#solvernets`;
   }
-  if (diagnostic.code.startsWith('harness') || diagnostic.code.includes('harness')) {
-    return '/operator#harness';
-  }
-  return '/operator#solvernets/prediction';
+  return '/operator#solvernets';
 }
 
 function diagnosticCtaLabel(diagnostic: { code: string }): string {
-  if (diagnostic.code.includes('harness')) return 'Configure harness';
-  return 'Configure prediction';
+  if (diagnostic.code.includes('harness')) return 'Configure SolverNet';
+  return 'Configure SolverNet';
 }
 
 function formatElapsed(ms: number): string {

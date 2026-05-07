@@ -98,7 +98,7 @@ const baseCatalog = {
       name: 'prediction',
       description: 'Prediction Markets',
       state: 'live' as const,
-      intrinsicSolverType: 'prediction.v1',
+      contract: { id: 'prediction', version: 'v1' },
       supportedRoles: ['solving' as const, 'evaluating' as const],
       compatibleHarnesses: [
         {

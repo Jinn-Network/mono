@@ -755,7 +755,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             {
               name: 'prediction',
               description: 'Forecast resolved outcomes; rewarded by Brier score on verified resolutions.',
-              intrinsicSolverType: 'prediction.v1',
+              contract: { id: 'prediction', version: 'v1' },
               state: 'live' as const,
               supportedRoles: ['solving' as const, 'evaluating' as const],
               compatibleHarnesses: [

@@ -94,7 +94,7 @@ const SOLVERNETS_CATALOG = {
       name: 'prediction',
       description:
         'Forecast resolved outcomes; rewarded by Brier score on verified resolutions.',
-      intrinsicSolverType: 'prediction.v1',
+      contract: { id: 'prediction', version: 'v1' },
       state: 'live',
       supportedRoles: ['solving', 'evaluating'],
       compatibleHarnesses: [

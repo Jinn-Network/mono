@@ -3,7 +3,6 @@ import { api } from '../api/client.js';
 import { SolverNetsSection } from './configuration/SolverNetsSection.js';
 import { NetworkSection } from './configuration/NetworkSection.js';
 import { SecuritySection } from './configuration/SecuritySection.js';
-import { HarnessSection } from './configuration/HarnessSection.js';
 import { useHashSection } from './configuration/useHashSection.js';
 
 export interface OperatorPageProps {
@@ -14,9 +13,6 @@ interface BootstrapWithChain {
   chain?: 'base' | 'base-sepolia';
   rpcUrl?: string;
   defaultRpcUrl?: string;
-  harness?: {
-    mode: 'train' | 'frozen';
-  };
 }
 
 export function OperatorPage({ onRestartPending = () => undefined }: OperatorPageProps): JSX.Element {
@@ -27,12 +23,17 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
   });
 
   const hash = useHashSection();
-  const expandedSection = hash?.split('/')[0];
+  const hashParts = hash?.split('/') ?? [];
+  const expandedSection = hashParts[0];
+  // Anything after `solvernets/` is forwarded to the section so a deep-link
+  // like `solvernets/<cid>/harness` can auto-expand the matching joined card
+  // and focus the harness picker.
+  const joinedHashFragment =
+    expandedSection === 'solvernets' ? hashParts.slice(1).join('/') || undefined : undefined;
 
   const chain = data?.chain ?? 'base-sepolia';
   const rpcUrl = data?.rpcUrl ?? '';
   const defaultRpcUrl = data?.defaultRpcUrl ?? (chain === 'base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org');
-  const harnessMode = data?.harness?.mode ?? 'train';
 
   return (
     <div
@@ -41,11 +42,8 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
     >
       <SolverNetsSection
         defaultExpanded={expandedSection === 'solvernets' || expandedSection === undefined}
-      />
-      <HarnessSection
-        mode={harnessMode}
+        joinedHashFragment={joinedHashFragment}
         onRestartPending={onRestartPending}
-        defaultExpanded={expandedSection === 'harness'}
       />
       <NetworkSection
         chain={chain}

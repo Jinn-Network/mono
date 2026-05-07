@@ -96,8 +96,10 @@ describe('deriveLiveNow', () => {
     });
     expect(result.state).toBe('attention');
     expect(result.line).toContain('does not support prediction.v1');
-    expect(result.cta.label).toBe('Configure harness');
-    expect(result.cta.href).toBe('/operator#harness');
+    expect(result.cta.label).toBe('Configure SolverNet');
+    // Harness diagnostics route to the SolverNets section so the operator
+    // can pick the matching joined-net card and edit its harness inline.
+    expect(result.cta.href).toBe('/operator#solvernets');
   });
 
   it('excludes prediction_solvernet_disabled from attention triggers', () => {
@@ -241,8 +243,9 @@ describe('<LiveNowBand />', () => {
     });
     expect(screen.getByTestId('live-now-line').textContent).toContain('does not support');
     // In attention state the right-side CTA IS the fix-it action; the
-    // operator goes to /operator#harness, not /overview/activity.
-    expect(screen.getByTestId('live-now-cta').textContent).toMatch(/Configure harness/);
+    // operator goes to /operator#solvernets where the per-net harness
+    // editor lives.
+    expect(screen.getByTestId('live-now-cta').textContent).toMatch(/Configure SolverNet/);
   });
 
   it('renders the "N more" pill when multiple attention diagnostics exist', async () => {

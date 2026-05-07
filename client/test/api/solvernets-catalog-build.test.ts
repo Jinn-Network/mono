@@ -8,7 +8,7 @@ describe('buildSolverNetsCatalog', () => {
         {
           name: 'prediction',
           description: 'Forecast resolved outcomes; rewarded by Brier score on verified resolutions.',
-          intrinsicSolverType: 'prediction.v1',
+          contract: { id: 'prediction', version: 'v1' },
           state: 'live',
           supportedRoles: ['solving', 'evaluating'],
           compatibleHarnesses: [{ name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving'] }],
@@ -21,7 +21,7 @@ describe('buildSolverNetsCatalog', () => {
     expect(catalog.nets[0]).toMatchObject({
       name: 'prediction',
       state: 'live',
-      intrinsicSolverType: 'prediction.v1',
+      contract: { id: 'prediction', version: 'v1' },
       supportedRoles: ['solving', 'evaluating'],
     });
     expect(catalog.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

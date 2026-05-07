@@ -219,7 +219,7 @@ describe('daemon-api-auth (bearer middleware)', () => {
             name: 'prediction',
             description: 'Prediction',
             state: 'live' as const,
-            intrinsicSolverType: 'prediction.v1',
+            contract: { id: 'prediction', version: 'v1' },
             supportedRoles: ['solving' as const],
             compatibleHarnesses: [],
             compatiblePlugins: [],

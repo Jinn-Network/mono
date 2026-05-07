@@ -42,17 +42,20 @@ interface JoinFormState {
   model: string;
 }
 
-function deriveIntrinsicSolverType(manifest: {
-  contract: { id: string; version: string };
-}): string {
-  return `${manifest.contract.id}.${manifest.contract.version}`;
-}
-
+/**
+ * Match a manifest's contract to a catalog entry by the canonical
+ * `{id, version}` pair. Replaces the predecessor concatenated-solverType
+ * string match (PRs d4491879 / 26548969 removed the `solverType` concept
+ * from the SDK; the catalog now exposes `contract: { id, version }` to
+ * match).
+ */
 function findCatalogEntry(
   catalog: SolverNetsCatalogResponse | undefined,
-  intrinsicSolverType: string,
+  contract: { id: string; version: string },
 ): SolverNetCatalogEntry | undefined {
-  return catalog?.nets.find((n) => n.intrinsicSolverType === intrinsicSolverType);
+  return catalog?.nets.find(
+    (n) => n.contract.id === contract.id && n.contract.version === contract.version,
+  );
 }
 
 function formatEthFromWei(wei: string | undefined): string {
@@ -100,7 +103,7 @@ export function JoinFlow({
   // / plugins / model default to the catalog's first compatible option.
   const manifest = manifestQuery.data?.manifest;
   const catalogEntry = manifest
-    ? findCatalogEntry(catalogQuery.data, deriveIntrinsicSolverType(manifest))
+    ? findCatalogEntry(catalogQuery.data, manifest.contract)
     : undefined;
   const defaultHarness =
     catalogEntry?.compatibleHarnesses[0]?.name ?? DEFAULT_HARNESS;
