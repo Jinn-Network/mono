@@ -196,9 +196,14 @@ function PricingEditor({
               minWidth: 0,
             }}
           />
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', lineHeight: 1.5 }}>
+            Where evaluators reach this operator over HTTPS. Must be reachable
+            from the public internet — set a tunnel or reverse proxy that forwards
+            here.
+          </span>
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span className="j-label">Default USDC</span>
+          <span className="j-label">Default price (USDC)</span>
           <input
             type="text"
             inputMode="decimal"
@@ -215,11 +220,18 @@ function PricingEditor({
               minWidth: 0,
             }}
           />
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', lineHeight: 1.5 }}>
+            Charged per artifact served. <code>0</code> = free.
+          </span>
         </label>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <span className="j-label">Type overrides</span>
+        <span className="j-label">Per-artifact-type pricing</span>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', lineHeight: 1.5, marginTop: '-4px' }}>
+          Override the default for specific artifact types you serve. Types
+          shown below are auto-discovered from your local store.
+        </span>
         {displayedTypes.length === 0 && (
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: 'var(--fg-muted)' }}>
             No artifact types recorded yet.
@@ -554,17 +566,26 @@ export function OperatorDataMarket({
   const summary = data?.summary;
   const sectionSummary = summary
     ? `${summary.served.totalCount} served · ${summary.served.gatedCount} gated · ${summary.network.totalCount} cached`
-    : 'Local artifact inventory and publish-time pricing';
+    : 'Earn USDC by serving the artifacts you produce.';
+
+  // Public endpoint defaults to `http://localhost:<apiPort>` when the operator
+  // hasn't set one. The daemon logs a warning at startup; surface the same
+  // signal in the UI so operators don't ship behind a localhost URL.
+  const endpointNotPublic = isLocalhostEndpoint(data?.pricing.publicEndpoint);
 
   return (
     <SectionCard
       title="Data market"
       summary={sectionSummary}
       defaultExpanded={defaultExpanded}
-      metaChip={{
-        label: summary && summary.served.gatedCount > 0 ? 'Gated' : 'Free',
-        tone: summary && summary.served.gatedCount > 0 ? 'attention' : 'default',
-      }}
+      metaChip={
+        endpointNotPublic
+          ? { label: 'Endpoint not set', tone: 'attention' }
+          : {
+              label: summary && summary.served.gatedCount > 0 ? 'Gated' : 'Free',
+              tone: summary && summary.served.gatedCount > 0 ? 'attention' : 'default',
+            }
+      }
     >
       {isLoading && (
         <p data-testid="operator-data-market-loading" style={{ margin: 0, color: 'var(--fg-muted)', fontSize: '13px' }}>
@@ -608,6 +629,32 @@ export function OperatorDataMarket({
         </div>
       )}
 
+      {data && endpointNotPublic && (
+        <div
+          data-testid="operator-data-market-endpoint-warning"
+          style={{
+            border: '1px solid var(--wane)',
+            borderRadius: 'var(--radius-2)',
+            padding: '12px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+            color: 'var(--fg)',
+          }}
+        >
+          <span style={{ color: 'var(--wane)', textTransform: 'uppercase', letterSpacing: '0.14em', fontSize: '10px' }}>
+            ⚠ Public endpoint not set
+          </span>
+          <span style={{ color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+            Currently <code style={{ color: 'var(--fg)' }}>{data.pricing.publicEndpoint}</code> — external
+            evaluators can't reach this operator. Set a public hostname below
+            (or via <code>JINN_OPERATOR_PUBLIC_ENDPOINT</code>) before going live.
+          </span>
+        </div>
+      )}
+
       {data && (
         <>
           <div
@@ -641,7 +688,7 @@ export function OperatorDataMarket({
             <Stat
               label="Default price"
               value={priceLabel(data.pricing.defaultPriceUsdc)}
-              meta={`${Object.keys(data.pricing.perArtifactTypePrice).length} overrides`}
+              meta={`${Object.keys(data.pricing.perArtifactTypePrice).length} per-type prices`}
             />
             <Stat
               label="Cached"
@@ -730,4 +777,20 @@ export function OperatorDataMarket({
       )}
     </SectionCard>
   );
+}
+
+/**
+ * Heuristic for the "you haven't set a real public endpoint" state. Mirrors
+ * the daemon's startup-warning condition: if the URL hostname is localhost
+ * or 127.0.0.1, the operator is on the default fallback and external
+ * evaluators won't be able to reach them.
+ */
+function isLocalhostEndpoint(url: string | undefined): boolean {
+  if (!url) return true;
+  try {
+    const host = new URL(url).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch {
+    return false;
+  }
 }

@@ -124,7 +124,7 @@ describe('OperatorDataMarket', () => {
 
     await waitFor(() => expect(screen.getByTestId('operator-pricing-editor')).toBeTruthy());
 
-    fireEvent.change(screen.getByLabelText('Default USDC'), {
+    fireEvent.change(screen.getByLabelText(/default price/i), {
       target: { value: '0.001' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save pricing' }));
