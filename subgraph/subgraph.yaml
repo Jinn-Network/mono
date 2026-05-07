@@ -26,6 +26,10 @@ dataSources:
         - Execution
         - MetadataEntry
         - URIUpdate
+        - HarnessRollup
+        - LanguageRollup
+        - FreezeViolation
+        - SigningKeyFrozenState
       abis:
         - name: IdentityRegistry
           file: ./abis/IdentityRegistry.json

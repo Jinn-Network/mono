@@ -60,6 +60,11 @@ export interface TaskSessionInputs {
    * adapters must not silently drop these.
    */
   adapterEnv?: Partial<Record<KnownAdapterEnvKey, string>>;
+  /**
+   * Harness execution mode forwarded from HarnessContext. The orchestrator
+   * skill gates Improve and Memory phase invocations on mode === 'train'.
+   */
+  mode: 'train' | 'frozen';
 }
 
 /**

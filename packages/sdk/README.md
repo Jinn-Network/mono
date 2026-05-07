@@ -59,3 +59,31 @@ export default function createHarness(env: ExternalHarnessEnv): Harness {
 
 The daemon still performs final runtime validation, envelope assembly, signing,
 storage, and submission.
+
+## Frozen mode (the freeze contract)
+
+Every Harness implementation must respect `HarnessContext.mode`:
+
+- `'train'` (default): writes to `ctx.implStateDir` are allowed. Improve /
+  Memory / equivalent learning phases run.
+- `'frozen'`: writes to `ctx.implStateDir` are forbidden. The daemon
+  hashes the directory before and after each Task; mismatch rejects the
+  envelope and rolls back.
+
+Use `requireTrain(ctx, action)` at write call sites to fail fast in
+frozen mode rather than after the Task completes:
+
+```typescript
+import { requireTrain } from '@jinn-network/sdk/harness';
+
+async function updateConstitutionalState(ctx: HarnessContext, delta: StateDelta) {
+  requireTrain(ctx, 'update constitutional state');
+  await fs.writeFile(constitutionPath, serialize(delta));
+}
+```
+
+Frozen mode is the discipline that crystallises the flowing substrate
+into externally-comparable artifacts; see
+`docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md` §5–6
+for the full design (trust stack, daemon enforcement, verified vs
+unverified frozen credibility tier).

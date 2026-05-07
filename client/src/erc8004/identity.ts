@@ -51,11 +51,15 @@
  */
 
 import { encodeAbiParameters, type Hex, type PublicClient, type WalletClient } from 'viem';
-import { IDENTITY_REGISTRY_SET_METADATA_ABI, PAYLOAD_TUPLE } from './abis.js';
+import {
+  IDENTITY_REGISTRY_SET_METADATA_ABI,
+  PAYLOAD_TUPLE,
+  PAYLOAD_TUPLE_V2,
+} from './abis.js';
 
 // Re-export ABI / payload tuple so callers that import them from the identity
 // module continue to work without depending on `./abis.js` directly.
-export { IDENTITY_REGISTRY_SET_METADATA_ABI, PAYLOAD_TUPLE };
+export { IDENTITY_REGISTRY_SET_METADATA_ABI, PAYLOAD_TUPLE, PAYLOAD_TUPLE_V2 };
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -101,6 +105,13 @@ export interface PublishContentArgs {
   /** Textual CID embedded in the metadataKey (`<kind>:<cid>`). */
   cid: string;
   payload: ExecutionPayload;
+}
+
+export interface PublishContentV2Args {
+  kind: ContentKind;
+  /** Textual CID embedded in the metadataKey (`<kind>:<cid>`). */
+  cid: string;
+  payload: ExecutionPayloadV2;
 }
 
 // ── Errors ───────────────────────────────────────────────────────────────────
@@ -224,6 +235,172 @@ export function encodeExecutionPayload(payload: ExecutionPayload): Hex {
   ]);
 }
 
+// ── V2 payload (Tier 4 verification gap, jinn-mono-9fe5) ─────────────────────
+//
+// V2 appends three fields to the v1 tuple per payload-schema §3 ("Append,
+// never re-order"). The first five fields keep their v1 semantics + offsets
+// so a v1 prefix decoder still finds them — but indexers MUST dispatch on
+// `version` (1 vs 2) before reading any field beyond the prefix.
+//
+// New fields surface harness identity to the on-chain payload so the subgraph
+// can index `(implName, codeDigest, mode)` directly, unlocking the inert
+// HarnessRollup / LanguageRollup / FreezeViolation entities.
+//
+// See:
+//   - docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md §3
+//   - docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6
+
+/** Mode flag: 0 = train, 1 = frozen. */
+export type ExecutionModeFlag = 0 | 1;
+
+/**
+ * v2 payload as caller-friendly hex strings + plain TS values.
+ *
+ * - `codeDigest` is the 32-byte raw bytes of the executor's implStateDir hash
+ *   (NOT the textual `sha256:` prefix). All-zero is the legitimate "no digest"
+ *   value used by callers that opt into v2 but don't yet produce harness
+ *   identity (e.g. setMetadata callers without a fence-attached run).
+ * - `implName` is the harness implementation name, e.g. "claude-code-learner".
+ *   Empty string is permitted as the "no harness identity" value.
+ * - `modeFlag` is 0 (train) or 1 (frozen).
+ */
+export interface ExecutionPayloadV2 {
+  version: 2;
+  tier: ExecutionTier;
+  /** 32-byte hex (= JinnRouter evidenceHash). */
+  manifestHash: Hex;
+  /** Raw multibase-decoded CID bytes hex. `"0x"` for tier < 3. */
+  attestationQuoteCid: Hex;
+  /** 32-byte hex enclave measurement. All-zero for tier < 3. */
+  sourceMeasurement: Hex;
+  /**
+   * 32-byte raw codeDigest hex. Strip the `sha256:` prefix from
+   * `executor.codeDigest` and hex-decode before constructing this field.
+   * All-zero when no digest is available.
+   */
+  codeDigest: Hex;
+  /** Harness implementation name. Empty string when no harness identity. */
+  implName: string;
+  /** 0 = train, 1 = frozen. See HarnessExecutionMode. */
+  modeFlag: ExecutionModeFlag;
+}
+
+/** Convert a textual `sha256:<hex>` codeDigest to the 32-byte raw hex form. */
+export function codeDigestSha256ToBytes32(textual: string | null | undefined): Hex {
+  if (!textual) return ZERO_BYTES32;
+  // Accept both "sha256:<hex>" and bare "<hex>" — be liberal in what we accept
+  // so callers don't have to format defensively.
+  const hex = textual.startsWith('sha256:') ? textual.slice('sha256:'.length) : textual;
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+    return ZERO_BYTES32;
+  }
+  return (`0x${hex}`) as Hex;
+}
+
+/** Convert a HarnessExecutionMode string to the v2 numeric flag. */
+export function modeStringToFlag(mode: 'train' | 'frozen'): ExecutionModeFlag {
+  return mode === 'frozen' ? 1 : 0;
+}
+
+/**
+ * Validate `payload` against v2 strict-mode rules.
+ *
+ * Same per-tier rules as v1 (admit only {0,1,3}; tier ≥ 3 requires non-empty
+ * quote + non-zero measurement). Adds modeFlag ∈ {0,1} and 32-byte codeDigest
+ * shape checks. `implName` may be any string including empty.
+ */
+export function validatePayloadV2(payload: ExecutionPayloadV2): ExecutionPayloadV2 {
+  if (payload.version !== 2) {
+    throw new PayloadValidationError(payload.tier, `version must be 2, got ${payload.version}`);
+  }
+  if (payload.tier !== 0 && payload.tier !== 1 && payload.tier !== 3) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `V2 admits only tiers {0,1,3}; got ${payload.tier}.`,
+    );
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(payload.manifestHash)) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `manifestHash must be 32-byte hex (0x + 64 hex chars)`,
+    );
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(payload.sourceMeasurement)) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `sourceMeasurement must be 32-byte hex (0x + 64 hex chars)`,
+    );
+  }
+  if (!/^0x([0-9a-fA-F]{2})*$/.test(payload.attestationQuoteCid)) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `attestationQuoteCid must be hex (0x + even number of hex chars)`,
+    );
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(payload.codeDigest)) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `codeDigest must be 32-byte hex (0x + 64 hex chars)`,
+    );
+  }
+  if (payload.modeFlag !== 0 && payload.modeFlag !== 1) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `modeFlag must be 0 (train) or 1 (frozen); got ${payload.modeFlag}`,
+    );
+  }
+
+  const requiresAttestation = payload.tier >= 3;
+  const hasQuote = !isEmptyBytes(payload.attestationQuoteCid);
+  const hasMeasurement = !isZeroBytes32(payload.sourceMeasurement);
+
+  if (requiresAttestation && !hasQuote) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `tier >= 3 requires non-empty attestationQuoteCid`,
+    );
+  }
+  if (!requiresAttestation && hasQuote) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `tier < 3 requires empty attestationQuoteCid`,
+    );
+  }
+  if (requiresAttestation && !hasMeasurement) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `tier >= 3 requires non-zero sourceMeasurement`,
+    );
+  }
+  if (!requiresAttestation && hasMeasurement) {
+    throw new PayloadValidationError(
+      payload.tier,
+      `tier < 3 requires zero sourceMeasurement`,
+    );
+  }
+
+  return payload;
+}
+
+/**
+ * ABI-encode a v2 payload per payload-schema §3.
+ *
+ * Validates first; throws `PayloadValidationError` on mismatch.
+ */
+export function encodeExecutionPayloadV2(payload: ExecutionPayloadV2): Hex {
+  validatePayloadV2(payload);
+  return encodeAbiParameters(PAYLOAD_TUPLE_V2, [
+    payload.version,
+    payload.tier,
+    payload.manifestHash,
+    payload.attestationQuoteCid,
+    payload.sourceMeasurement,
+    payload.codeDigest,
+    payload.implName,
+    payload.modeFlag,
+  ]);
+}
+
 /** Build the `<kind>:<cid>` metadata key per payload-schema §6.1. */
 export function buildMetadataKey(kind: ContentKind, cid: string): string {
   return `${kind}:${cid}`;
@@ -271,7 +448,28 @@ export class IdentityPublisher {
   async publishContent(args: PublishContentArgs): Promise<Hex> {
     const metadataKey = buildMetadataKey(args.kind, args.cid);
     const metadataValue = encodeExecutionPayload(args.payload);
+    return this._writeMetadata(metadataKey, metadataValue);
+  }
 
+  /**
+   * Publish a per-execution commitment using the v2 payload tuple.
+   *
+   * Identical write path to `publishContent` — the only difference is the
+   * encoder. Use this when the caller has `codeDigest`, `implName`, and
+   * `mode` in hand and wants the subgraph to index harness identity directly
+   * from the on-chain bytes.
+   *
+   * Legacy callers without harness identity should keep using `publishContent`
+   * (v1) — the subgraph decoder handles both versions and treats v1 as
+   * `mode='train'` with empty `codeDigest`/`implName`.
+   */
+  async publishContentV2(args: PublishContentV2Args): Promise<Hex> {
+    const metadataKey = buildMetadataKey(args.kind, args.cid);
+    const metadataValue = encodeExecutionPayloadV2(args.payload);
+    return this._writeMetadata(metadataKey, metadataValue);
+  }
+
+  private async _writeMetadata(metadataKey: string, metadataValue: Hex): Promise<Hex> {
     const account = this.walletClient.account;
     if (!account) {
       throw new Error('IdentityPublisher: walletClient has no account configured');

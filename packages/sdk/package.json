@@ -27,6 +27,14 @@
     "./solvernets/prediction-v1": {
       "import": "./dist/solvernets/prediction-v1.js",
       "types": "./dist/solvernets/prediction-v1.d.ts"
+    },
+    "./solvernets/swe-rebench-v2": {
+      "import": "./dist/solvernets/swe-rebench-v2.js",
+      "types": "./dist/solvernets/swe-rebench-v2.d.ts"
+    },
+    "./checkpoint": {
+      "import": "./dist/checkpoint.js",
+      "types": "./dist/checkpoint.d.ts"
     }
   },
   "files": [

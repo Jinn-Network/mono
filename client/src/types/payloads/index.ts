@@ -15,6 +15,10 @@ import {
   PredictionApyV0RestorationPayloadSchema,
   PredictionApyV0VerdictPayloadSchema,
 } from './prediction-apy-v0.js';
+import {
+  SweRebenchV2SolutionPayloadSchema,
+  SweRebenchV2VerdictPayloadSchema,
+} from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import type { Role } from '../envelope.js';
 
 /**
@@ -43,6 +47,13 @@ export const SOLVER_TYPE_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
   'prediction.apy.v0': {
     restoration: PredictionApyV0RestorationPayloadSchema,
     verdict: PredictionApyV0VerdictPayloadSchema,
+  },
+  // SWE-rebench v2 SolverNet. Solution maps to the `restoration` role,
+  // Verdict to the `verdict` role; the SolverNet's "solving" / "evaluating"
+  // role labels are surface-level synonyms in the daemon's two-role model.
+  'swe-rebench-v2.v1': {
+    restoration: SweRebenchV2SolutionPayloadSchema,
+    verdict: SweRebenchV2VerdictPayloadSchema,
   },
   // Passthrough SolverType for legacy / untyped tasks.
   // Produced by the legacy-claude impl; no structural validation on payload.

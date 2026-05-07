@@ -99,17 +99,23 @@ export function parseMetadataKey(metadataKey: string): ParsedKey {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Payload decoding for envelope/evaluation v1 tuple:
-//   (uint8 version, uint8 tier, bytes32 manifestHash,
+// Payload decoding.
+//
+// V1 tuple (5 fields):
+//   (uint8 version=1, uint8 tier, bytes32 manifestHash,
 //    bytes attestationQuoteCid, bytes32 sourceMeasurement)
 //
-// version must equal 1; tier must be in 0..4. If anything fails to decode
-// cleanly, we set ok=false and leave the typed fields zeroed. The raw
-// payload bytes are always stored separately for forward-compat.
+// V2 tuple (8 fields, append-not-reorder per payload-schema §3):
+//   (uint8 version=2, uint8 tier, bytes32 manifestHash,
+//    bytes attestationQuoteCid, bytes32 sourceMeasurement,
+//    bytes32 codeDigest, string implName, uint8 modeFlag)
 //
-// Per the DR (§4.2), the exact byte layout is deferred to a follow-up spec
-// (`jinn-mono-g7h`). This decoder follows the documented provisional layout
-// and is written so it can be swapped out cleanly.
+// We dispatch on the leading `version` byte. Unknown versions decode as
+// `ok=false` and the raw payload bytes are still stored separately so a
+// future migration can re-decode them.
+//
+// Spec: docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md §3
+//       docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6
 // ────────────────────────────────────────────────────────────────────────────
 export class DecodedPayload {
   ok: bool;
@@ -119,6 +125,26 @@ export class DecodedPayload {
   manifestHash: Bytes;
   attestationQuoteCid: Bytes; // raw multibase-decoded CID bytes (g7h §4)
   sourceMeasurement: Bytes;
+  /**
+   * Executor mode decoded from the payload. "train" | "frozen".
+   * v1 payload ABI tuple does not include mode — reserved for v2.
+   * v1 payloads default to "train"; v2 reads it from the modeFlag (0=train, 1=frozen).
+   * See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+   */
+  mode: string;
+  /**
+   * Executor codeDigest (32 raw bytes) decoded from a v2 payload. Empty for
+   * v1 payloads. The caller re-applies the textual `sha256:` prefix when
+   * surfacing this on the Execution entity so it matches the off-chain
+   * SignedEnvelope shape.
+   */
+  codeDigest: Bytes;
+  /**
+   * Executor implementation name decoded from a v2 payload. Empty string for
+   * v1 payloads. Surfaced as `Execution.implName` and used as the first
+   * dimension of the HarnessRollup identity.
+   */
+  implName: string;
 
   constructor() {
     this.ok = false;
@@ -128,6 +154,9 @@ export class DecodedPayload {
     this.manifestHash = Bytes.empty();
     this.attestationQuoteCid = Bytes.empty();
     this.sourceMeasurement = Bytes.empty();
+    this.mode = "train"; // default; v1 payload does not encode mode
+    this.codeDigest = Bytes.empty();
+    this.implName = "";
   }
 }
 
@@ -138,17 +167,43 @@ export function decodeExecutionPayload(payload: Bytes): DecodedPayload {
     return result;
   }
 
+  // The ABI-encoded tuple's first 32 bytes hold `uint8 version` (left-padded
+  // to 32 bytes by Solidity ABI encoding). Peek at it to decide which tuple
+  // shape to decode.
+  // Index 31 is the LSB of the first 32-byte word.
+  if (payload.length < 32) {
+    log.warning("decodeExecutionPayload: payload too short to read version ({} bytes)", [
+      payload.length.toString(),
+    ]);
+    return result;
+  }
+  let versionByte = payload[31];
+
+  if (versionByte == 1) {
+    return decodeV1Tuple(payload, result);
+  }
+  if (versionByte == 2) {
+    return decodeV2Tuple(payload, result);
+  }
+
+  log.warning("decodeExecutionPayload: unsupported version {} (expected 1 or 2)", [
+    versionByte.toString(),
+  ]);
+  return result;
+}
+
+function decodeV1Tuple(payload: Bytes, result: DecodedPayload): DecodedPayload {
   // ABI-decode (uint8,uint8,bytes32,bytes,bytes32)
   let decoded = ethereum.decode("(uint8,uint8,bytes32,bytes,bytes32)", payload);
   if (decoded === null) {
-    log.warning("decodeExecutionPayload: ethereum.decode returned null (len={})", [
+    log.warning("decodeExecutionPayload: v1 ethereum.decode returned null (len={})", [
       payload.length.toString(),
     ]);
     return result;
   }
   let tuple = decoded.toTuple();
   if (tuple.length != 5) {
-    log.warning("decodeExecutionPayload: tuple has wrong arity ({})", [
+    log.warning("decodeExecutionPayload: v1 tuple has wrong arity ({})", [
       tuple.length.toString(),
     ]);
     return result;
@@ -161,34 +216,10 @@ export function decodeExecutionPayload(payload: Bytes): DecodedPayload {
   let sourceMeasurement = tuple[4].toBytes();
 
   if (version != 1) {
-    log.warning("decodeExecutionPayload: unsupported version {} (expected 1)", [
-      version.toString(),
-    ]);
+    log.warning("decodeExecutionPayload: v1 dispatch but version={}", [version.toString()]);
     return result;
   }
-  // V1 admits only {0=self-signed, 1=committed, 3=attested}. Tiers 2 (consensus)
-  // and 4 (proved) are V2+ — aligned with EvidenceTierSchema in
-  // client/src/types/envelope.ts (PR #37 fix 44cc949b).
-  if (tier != 0 && tier != 1 && tier != 3) {
-    log.warning(
-      "decodeExecutionPayload: V1 rejects tier {} (admits only 0,1,3)",
-      [tier.toString()],
-    );
-    return result;
-  }
-
-  // Per-tier validity (g7h §5, strict mode):
-  //   tier ∈ {0,1}: attestationQuoteCid MUST be empty AND sourceMeasurement MUST be zero.
-  //   tier === 3:  attestationQuoteCid MUST be non-empty AND sourceMeasurement MUST be non-zero.
-  let requiresAttestation = tier == 3;
-  let hasQuote = attestationQuoteBytes.length > 0;
-  let measurementIsZero = sourceMeasurement.length == 0 || isAllZeroBytes(sourceMeasurement);
-  let hasMeasurement = !measurementIsZero;
-  if (requiresAttestation != hasQuote || requiresAttestation != hasMeasurement) {
-    log.warning(
-      "decodeExecutionPayload: tier-field mismatch (tier={}, hasQuote={}, hasMeasurement={})",
-      [tier.toString(), hasQuote ? "true" : "false", hasMeasurement ? "true" : "false"],
-    );
+  if (!validateTierAndAttestation(tier, attestationQuoteBytes, sourceMeasurement)) {
     return result;
   }
 
@@ -197,11 +228,97 @@ export function decodeExecutionPayload(payload: Bytes): DecodedPayload {
   result.tierRaw = tier;
   result.tierString = TIER_STRINGS[tier];
   result.manifestHash = manifestHash;
-  // attestationQuoteCid is raw multibase-decoded CID bytes (g7h §4). Stored
-  // verbatim; consumers reconstruct the textual CID at read time.
   result.attestationQuoteCid = attestationQuoteBytes;
   result.sourceMeasurement = sourceMeasurement;
+  // v1 payload does not encode mode/codeDigest/implName — defaults preserved.
+  result.mode = "train";
   return result;
+}
+
+function decodeV2Tuple(payload: Bytes, result: DecodedPayload): DecodedPayload {
+  // ABI-decode (uint8,uint8,bytes32,bytes,bytes32,bytes32,string,uint8)
+  let decoded = ethereum.decode(
+    "(uint8,uint8,bytes32,bytes,bytes32,bytes32,string,uint8)",
+    payload,
+  );
+  if (decoded === null) {
+    log.warning("decodeExecutionPayload: v2 ethereum.decode returned null (len={})", [
+      payload.length.toString(),
+    ]);
+    return result;
+  }
+  let tuple = decoded.toTuple();
+  if (tuple.length != 8) {
+    log.warning("decodeExecutionPayload: v2 tuple has wrong arity ({})", [
+      tuple.length.toString(),
+    ]);
+    return result;
+  }
+
+  let version = tuple[0].toI32();
+  let tier = tuple[1].toI32();
+  let manifestHash = tuple[2].toBytes();
+  let attestationQuoteBytes = tuple[3].toBytes();
+  let sourceMeasurement = tuple[4].toBytes();
+  let codeDigestBytes = tuple[5].toBytes();
+  let implName = tuple[6].toString();
+  let modeFlag = tuple[7].toI32();
+
+  if (version != 2) {
+    log.warning("decodeExecutionPayload: v2 dispatch but version={}", [version.toString()]);
+    return result;
+  }
+  if (!validateTierAndAttestation(tier, attestationQuoteBytes, sourceMeasurement)) {
+    return result;
+  }
+  if (modeFlag != 0 && modeFlag != 1) {
+    log.warning("decodeExecutionPayload: v2 modeFlag must be 0 or 1, got {}", [
+      modeFlag.toString(),
+    ]);
+    return result;
+  }
+
+  result.ok = true;
+  result.version = version;
+  result.tierRaw = tier;
+  result.tierString = TIER_STRINGS[tier];
+  result.manifestHash = manifestHash;
+  result.attestationQuoteCid = attestationQuoteBytes;
+  result.sourceMeasurement = sourceMeasurement;
+  result.codeDigest = codeDigestBytes;
+  result.implName = implName;
+  result.mode = modeFlag == 1 ? "frozen" : "train";
+  return result;
+}
+
+function validateTierAndAttestation(
+  tier: i32,
+  attestationQuoteBytes: Bytes,
+  sourceMeasurement: Bytes,
+): bool {
+  // V1+V2 admit only {0=self-signed, 1=committed, 3=attested}. Tiers 2
+  // (consensus) and 4 (proved) are V3+ — aligned with EvidenceTierSchema in
+  // client/src/types/envelope.ts.
+  if (tier != 0 && tier != 1 && tier != 3) {
+    log.warning(
+      "decodeExecutionPayload: rejected tier {} (admits only 0,1,3)",
+      [tier.toString()],
+    );
+    return false;
+  }
+  let requiresAttestation = tier == 3;
+  let hasQuote = attestationQuoteBytes.length > 0;
+  let measurementIsZero =
+    sourceMeasurement.length == 0 || isAllZeroBytes(sourceMeasurement);
+  let hasMeasurement = !measurementIsZero;
+  if (requiresAttestation != hasQuote || requiresAttestation != hasMeasurement) {
+    log.warning(
+      "decodeExecutionPayload: tier-field mismatch (tier={}, hasQuote={}, hasMeasurement={})",
+      [tier.toString(), hasQuote ? "true" : "false", hasMeasurement ? "true" : "false"],
+    );
+    return false;
+  }
+  return true;
 }
 
 function isAllZeroBytes(b: Bytes): bool {

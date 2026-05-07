@@ -29,6 +29,8 @@ import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { hashImplStateDir } from './harnesses/freeze.js';
+import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
@@ -695,6 +697,27 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         onRestartRequested: () => {
           console.log('[main] Restart requested via operator MCP. Exiting...');
           process.exit(0);
+        },
+      },
+      harnessStatus: {
+        getStatus: async () => {
+          const mode = config.harness.mode;
+          const defaultHarness = config.harnesses?.default ?? DEFAULT_HARNESS;
+          const implStateDir = join(config.engine.implStateDirRoot, defaultHarness);
+          let codeDigest = '';
+          try {
+            codeDigest = await hashImplStateDir(implStateDir);
+          } catch {
+            // implStateDir may not exist yet on first boot. Surface as empty
+            // rather than 500ing — the panel renders "—" gracefully.
+            codeDigest = '';
+          }
+          const persisted = readModeState();
+          return {
+            mode,
+            codeDigest,
+            ...(persisted ? { lastModeSwitchAt: persisted.switchedAt } : {}),
+          };
         },
       },
       bootstrap: {
@@ -1462,6 +1485,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       identityPublisher,
       reputationFeedback,
       operatorConfig,
+      harnessMode: config.harness.mode,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

@@ -1,0 +1,12 @@
+{
+  "name": "swe-rebench-v2-runtime",
+  "version": "0.1.0",
+  "jinn": {
+    "supports": ["swe-rebench-v2.v1"],
+    "skills": [
+      "skills/orient/SKILL.md",
+      "skills/plan/SKILL.md"
+    ],
+    "description": "Provides Solver-side orientation + planning skills for SWE-rebench v2 code-issue Tasks."
+  }
+}

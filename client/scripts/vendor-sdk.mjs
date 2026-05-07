@@ -32,13 +32,19 @@ await writeFile(
   `${JSON.stringify(packagedSdkPackageJson, null, 2)}\n`,
 );
 
-const sdkExports = new Map([
-  ['@jinn-network/sdk/solvernets/prediction-v1', join(targetRoot, 'dist/solvernets/prediction-v1.js')],
-  ['@jinn-network/sdk/solvernets', join(targetRoot, 'dist/solvernets/index.js')],
-  ['@jinn-network/sdk/plugins', join(targetRoot, 'dist/plugins.js')],
-  ['@jinn-network/sdk/harness', join(targetRoot, 'dist/harness.js')],
-  ['@jinn-network/sdk', join(targetRoot, 'dist/index.js')],
-]);
+const sdkExports = new Map(
+  Object.entries(sdkPackageJson.exports ?? {}).map(([subpath, entry]) => {
+    const importPath = typeof entry === 'string' ? entry : entry.import;
+    if (typeof importPath !== 'string') {
+      throw new Error(`Unsupported @jinn-network/sdk export entry for ${subpath}`);
+    }
+
+    const source = subpath === '.'
+      ? '@jinn-network/sdk'
+      : `@jinn-network/sdk/${subpath.replace(/^\.\//, '')}`;
+    return [source, join(targetRoot, importPath)];
+  }),
+);
 
 function relativeImport(fromFile, toFile) {
   let specifier = relative(dirname(fromFile), toFile).split(sep).join('/');

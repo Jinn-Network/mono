@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,7 +44,9 @@ import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../src/harnesses/engine/state.js';
 import { PredictionV1Evaluator } from '../../src/harnesses/impls/prediction-v1-evaluator/index.js';
 import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY, RESTORATION_TASK_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
-import type { Harness, Solution } from '../../src/harnesses/types.js';
+import type { Harness, HarnessContext, Solution } from '../../src/harnesses/types.js';
+import { runHarnessWithFreezeFence } from '../../src/daemon/freeze-fence.js';
+import { hashImplStateDir } from '../../src/harnesses/freeze.js';
 import { Store } from '../../src/store/store.js';
 import { TaskPostingService } from '../../src/tasks/posting-service.js';
 import { SignedEnvelopeSchema, type SignedEnvelope } from '../../src/types/envelope.js';
@@ -86,14 +88,14 @@ const BASE_SEPOLIA_E2E_FUNDING_WEI = 100n * 10n ** 18n;
 const BASE_SEPOLIA_E2E_PASSWORD = 'jinn-task-first-fork-e2e';
 const BASE_SEPOLIA_DISTRIBUTOR_STAKE_FLOAT = 1_000n * 10n ** 18n;
 
-const ANVIL_PRIVATE_KEYS = [
+export const ANVIL_PRIVATE_KEYS = [
   '0x0000000000000000000000000000000000000000000000000000000000000001',
   '0x0000000000000000000000000000000000000000000000000000000000000002',
   '0x0000000000000000000000000000000000000000000000000000000000000003',
   '0x0000000000000000000000000000000000000000000000000000000000000004',
 ] as const satisfies readonly Hex[];
 
-const JINN_ROUTER_V3_E2E_ABI = [
+export const JINN_ROUTER_V3_E2E_ABI = [
   ...JINN_ROUTER_ABI,
   {
     name: 'taskCoordinator',
@@ -143,7 +145,7 @@ const JINN_ROUTER_V3_E2E_ABI = [
   },
 ] as const satisfies Abi;
 
-const TASK_COORDINATOR_E2E_ABI = [
+export const TASK_COORDINATOR_E2E_ABI = [
   {
     name: 'authorizedRouter',
     type: 'function',
@@ -825,7 +827,7 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
   }
 }
 
-interface ContractArtifact {
+export interface ContractArtifact {
   abi: Abi;
   bytecode: Hex;
 }
@@ -836,12 +838,12 @@ interface DeploymentArtifact {
   config?: Record<string, unknown>;
 }
 
-interface AnvilHarness {
+export interface AnvilHarness {
   rpcUrl: string;
   teardown(): Promise<void>;
 }
 
-interface Deployment {
+export interface Deployment {
   coordinator: Address;
   router: Address;
   marketplace: Address;
@@ -860,7 +862,7 @@ export interface AnvilTaskFirstFullLoopResult {
   refundedUnusedBudget: boolean;
 }
 
-async function spawnPlainAnvil(): Promise<AnvilHarness> {
+export async function spawnPlainAnvil(): Promise<AnvilHarness> {
   const anvilCheck = spawnSync('anvil', ['--version'], { stdio: 'ignore' });
   if (anvilCheck.status !== 0) {
     throw new Error('anvil not in PATH; install Foundry to run the Task-first Anvil e2e');
@@ -923,7 +925,7 @@ async function runChild(command: string, args: string[], options: { cwd: string;
   });
 }
 
-async function compileContracts(): Promise<void> {
+export async function compileContracts(): Promise<void> {
   await runChild('yarn', ['compile'], { cwd: CONTRACTS_DIR });
 }
 
@@ -986,7 +988,7 @@ async function deployContract(
   return getAddress(receipt.contractAddress);
 }
 
-async function writeContractTx(params: {
+export async function writeContractTx(params: {
   publicClient: PublicClient;
   rpcUrl: string;
   account: PrivateKeyAccount;
@@ -1012,7 +1014,7 @@ async function writeContractTx(params: {
   return { hash, receipt };
 }
 
-function decodeFirstEvent(receipt: TransactionReceipt, abi: Abi, eventName: string): Record<string, unknown> {
+export function decodeFirstEvent(receipt: TransactionReceipt, abi: Abi, eventName: string): Record<string, unknown> {
   for (const log of receipt.logs as Log[]) {
     try {
       const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics });
@@ -1026,13 +1028,13 @@ function decodeFirstEvent(receipt: TransactionReceipt, abi: Abi, eventName: stri
   throw new Error(`missing ${eventName} event in tx ${receipt.transactionHash}`);
 }
 
-function tupleField<T>(value: unknown, key: string, index: number): T {
+export function tupleField<T>(value: unknown, key: string, index: number): T {
   const record = value as Record<string, unknown>;
   if (record[key] !== undefined) return record[key] as T;
   return (value as readonly unknown[])[index] as T;
 }
 
-async function deployTaskFirstStack(
+export async function deployTaskFirstStack(
   publicClient: PublicClient,
   rpcUrl: string,
   owner: PrivateKeyAccount,
@@ -1116,7 +1118,7 @@ async function deployTaskFirstStack(
   };
 }
 
-async function signedExecutionEnvelope(params: {
+export async function signedExecutionEnvelope(params: {
   solverType: string;
   role: 'restoration' | 'verdict';
   taskCid: string;
@@ -1127,6 +1129,7 @@ async function signedExecutionEnvelope(params: {
   privateKey: Hex;
   window: { startTs: number; endTs: number };
   payload: Record<string, unknown>;
+  implName?: string;
 }): Promise<SignedEnvelope> {
   const account = privateKeyToAccount(params.privateKey);
   const unsigned = {
@@ -1146,7 +1149,9 @@ async function signedExecutionEnvelope(params: {
     },
     window: params.window,
     executor: {
-      implName: params.role === 'verdict' ? 'prediction-v1-evaluator' : 'prediction-v1-e2e-harness',
+      implName:
+        params.implName ??
+        (params.role === 'verdict' ? 'prediction-v1-evaluator' : 'prediction-v1-e2e-harness'),
       implVersion: '1.0.0',
       clientGitSha: 'dev-e2e',
       codeDigest: `sha256:${'11'.repeat(32)}`,
@@ -2404,6 +2409,405 @@ export async function runPredictionV1Smoke(): Promise<void> {
   assert(task.solverType === 'prediction.v1', 'prediction smoke did not create prediction.v1 task');
   makePredictionV1SolutionPayload();
   makePredictionV1VerdictPayload();
+}
+
+// ── Freeze-mode Anvil-fork e2e (Phase A) ──────────────────────────────────────
+
+/**
+ * Build a HarnessContext suitable for invoking `runHarnessWithFreezeFence`
+ * directly. Uses a real TrajectoryCollector so callers can snapshot spans
+ * after the run.
+ */
+function buildFreezeFenceCtx(params: {
+  task: Task;
+  implStateDir: string;
+  workingDir: string;
+  mode: 'train' | 'frozen';
+  trajectory?: TrajectoryCollector;
+}): HarnessContext {
+  const trajectory = params.trajectory ?? new TrajectoryCollector({
+    taskCid: 'freeze-fence-fork-e2e',
+    runId: `${params.task.id}:${params.mode}`,
+  });
+  const endTs = params.task.window?.endTs ?? Date.now() + 3_600_000;
+  return {
+    task: params.task,
+    implStateDir: params.implStateDir,
+    workingDir: params.workingDir,
+    log: () => { /* no-op for fork e2e */ },
+    abort: new AbortController().signal,
+    msUntilEndTs: () => Math.max(0, endTs - Date.now()),
+    trajectory,
+    mode: params.mode,
+  };
+}
+
+export interface FreezeFenceForkE2EResult {
+  rpcUrl: string;
+  /** codeDigest from the first frozen run (sha256 hex of empty implStateDir contents). */
+  codeDigestRun1: string;
+  /** codeDigest from the second frozen run; must equal run 1 (Phase A.1). */
+  codeDigestRun2: string;
+  /** Hash of implStateDir before the violating run (Phase A.3). */
+  preViolationHash: string;
+  /** Hash of implStateDir after rollback (Phase A.3); must equal preViolationHash. */
+  postViolationHash: string;
+  /** Files that survived rollback (Phase A.3); should equal pre-state files. */
+  survivingFiles: string[];
+  /** Violation metadata reported by the fence (Phase A.2). */
+  violationHarnessName: string;
+  violationStateHashBefore: string;
+  violationStateHashAfter: string;
+}
+
+/**
+ * Phase A — Anvil-fork e2e for the freeze-fence.
+ *
+ * Reuses `spawnPlainAnvil()` (the lighter local-Anvil path that the existing
+ * `runAnvilTaskFirstFullLoop` uses) so this phase runs without depending on
+ * an external Base Sepolia RPC. The fork env is incidental: the freeze-fence
+ * is a pure file-system + harness contract, but spawning the Anvil harness
+ * proves the fence works in the same process configuration that the daemon's
+ * task lifecycle uses (and matches the existing e2e harness shape).
+ *
+ * Three assertions:
+ *   1. Stable codeDigest — frozen-mode run twice on the same task yields
+ *      identical `executor.codeDigest` values.
+ *   2. Mutation detected — a harness that writes to implStateDir under
+ *      `mode='frozen'` produces no envelope and a structured violation.
+ *   3. Rollback works — after a violation, the implStateDir hash matches
+ *      its pre-run hash (snapshot was restored).
+ */
+export async function runFreezeFenceForkE2E(): Promise<FreezeFenceForkE2EResult> {
+  const anvil = await spawnPlainAnvil();
+  const tmp = await mkdtemp(join(tmpdir(), 'jinn-freeze-fence-fork-e2e-'));
+
+  try {
+    // ── Case 1: stable codeDigest across two frozen runs ────────────────────
+    const stableImplDir = join(tmp, 'stable', 'impl');
+    const stableWorkDir = join(tmp, 'stable', 'work');
+    await mkdir(stableImplDir, { recursive: true });
+    await mkdir(stableWorkDir, { recursive: true });
+    // Pre-populate so the hash is over real content (not the empty-dir sentinel).
+    await writeFile(join(stableImplDir, 'knowledge.json'), JSON.stringify({ version: 1 }));
+    await writeFile(join(stableImplDir, 'memory.txt'), 'baseline memory');
+
+    const stableTask = makePredictionV1Task();
+    const readonlyHarness: Harness = {
+      name: 'freeze-fence-fork-readonly',
+      version: '1.0.0',
+      supports: () => true,
+      async run(ctx) {
+        // Frozen-compliant: emit a phase span but do NOT touch implStateDir.
+        const t = String(Date.now() * 1_000_000);
+        ctx.trajectory.addSpan({
+          name: 'execute',
+          kind: 'INTERNAL',
+          startTimeUnixNano: t,
+          endTimeUnixNano: t,
+          attributes: { 'jinn.span.kind': 'jinn.phase', 'jinn.phase.name': 'execute' },
+          events: [],
+          status: { code: 'OK' },
+        });
+        return {
+          venueRef: { name: 'freeze-fence-fork' },
+          gating: { accepted: true },
+          informational: { rpcUrl: anvil.rpcUrl },
+        } satisfies Solution;
+      },
+    };
+
+    const ctxRun1 = buildFreezeFenceCtx({
+      task: stableTask,
+      implStateDir: stableImplDir,
+      workingDir: stableWorkDir,
+      mode: 'frozen',
+    });
+    const fenceRun1 = await runHarnessWithFreezeFence(readonlyHarness, ctxRun1);
+    assert(fenceRun1.ok === true, 'Phase A.1: frozen run 1 must not violate');
+    const codeDigestRun1 = fenceRun1.codeDigest;
+
+    const ctxRun2 = buildFreezeFenceCtx({
+      task: stableTask,
+      implStateDir: stableImplDir,
+      workingDir: stableWorkDir,
+      mode: 'frozen',
+    });
+    const fenceRun2 = await runHarnessWithFreezeFence(readonlyHarness, ctxRun2);
+    assert(fenceRun2.ok === true, 'Phase A.1: frozen run 2 must not violate');
+    const codeDigestRun2 = fenceRun2.codeDigest;
+
+    assert(
+      codeDigestRun1 === codeDigestRun2,
+      `Phase A.1: codeDigest must be stable across frozen runs (run1=${codeDigestRun1}, run2=${codeDigestRun2})`,
+    );
+
+    // ── Case 2 & 3: mutation detected + rollback works ──────────────────────
+    const violatingImplDir = join(tmp, 'violating', 'impl');
+    const violatingWorkDir = join(tmp, 'violating', 'work');
+    await mkdir(violatingImplDir, { recursive: true });
+    await mkdir(violatingWorkDir, { recursive: true });
+    await writeFile(join(violatingImplDir, 'baseline.json'), JSON.stringify({ stable: true }));
+    await writeFile(join(violatingImplDir, 'knowledge.json'), JSON.stringify({ version: 2 }));
+
+    const preViolationFiles = (await readdir(violatingImplDir)).sort();
+    const preViolationHash = await hashImplStateDir(violatingImplDir);
+
+    const violatingTask = makePredictionV1Task();
+    const violatingHarness: Harness = {
+      name: 'freeze-fence-fork-violator',
+      version: '1.0.0',
+      supports: () => true,
+      async run(ctx) {
+        // Mid-task mutation: write a forbidden file under frozen mode.
+        await writeFile(
+          join(ctx.implStateDir, 'forbidden.txt'),
+          'frozen-mode contract violation',
+        );
+        return {
+          venueRef: { name: 'freeze-fence-fork' },
+          gating: { accepted: false },
+        } satisfies Solution;
+      },
+    };
+
+    const ctxViolation = buildFreezeFenceCtx({
+      task: violatingTask,
+      implStateDir: violatingImplDir,
+      workingDir: violatingWorkDir,
+      mode: 'frozen',
+    });
+    const fenceViolation = await runHarnessWithFreezeFence(violatingHarness, ctxViolation);
+
+    assert(
+      fenceViolation.ok === false,
+      'Phase A.2: violating frozen-mode harness must NOT produce a successful fence result',
+    );
+
+    const violation = !fenceViolation.ok ? fenceViolation.violation : undefined;
+    assert(violation !== undefined, 'Phase A.2: violation metadata must be present');
+    assert(
+      violation.harnessName === 'freeze-fence-fork-violator',
+      `Phase A.2: violation.harnessName mismatch: ${violation.harnessName}`,
+    );
+    assert(
+      violation.stateHashBefore !== violation.stateHashAfter,
+      'Phase A.2: violation must report differing pre/post state hashes',
+    );
+
+    // Rollback assertion (Phase A.3).
+    const postViolationHash = await hashImplStateDir(violatingImplDir);
+    assert(
+      postViolationHash === preViolationHash,
+      `Phase A.3: rollback must restore implStateDir hash (pre=${preViolationHash}, post=${postViolationHash})`,
+    );
+    const survivingFiles = (await readdir(violatingImplDir)).sort();
+    assert(
+      survivingFiles.length === preViolationFiles.length &&
+        survivingFiles.every((f, i) => f === preViolationFiles[i]),
+      `Phase A.3: rollback must restore the original file set ` +
+      `(pre=[${preViolationFiles.join(', ')}], post=[${survivingFiles.join(', ')}])`,
+    );
+
+    process.stdout.write(
+      `  case 1 (stable codeDigest): ${codeDigestRun1.slice(0, 16)}... == ${codeDigestRun2.slice(0, 16)}...\n` +
+      `  case 2 (violation detected): harness=${violation.harnessName} ` +
+      `before=${violation.stateHashBefore.slice(0, 12)}... after=${violation.stateHashAfter.slice(0, 12)}...\n` +
+      `  case 3 (rollback): files=[${survivingFiles.join(', ')}] hash=${postViolationHash.slice(0, 16)}...\n`,
+    );
+
+    return {
+      rpcUrl: anvil.rpcUrl,
+      codeDigestRun1,
+      codeDigestRun2,
+      preViolationHash,
+      postViolationHash,
+      survivingFiles,
+      violationHarnessName: violation.harnessName,
+      violationStateHashBefore: violation.stateHashBefore,
+      violationStateHashAfter: violation.stateHashAfter,
+    };
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+    await anvil.teardown();
+  }
+}
+
+// ── Train-vs-frozen trajectory e2e (Phase B) ──────────────────────────────────
+
+/**
+ * A modeful mock harness that emits trajectory phase spans gated on
+ * `ctx.mode`. Mirrors the SKILL-level dispatch in
+ * `client/plugins/claude-code-learner/skills/coordinator/SKILL.md`:
+ *
+ *   - Always emits `orient`, `strategize`, `plan`, `execute`, `debrief`.
+ *   - Only emits `improve` and `memory` when ctx.mode === 'train'.
+ *
+ * The point of this harness is the e2e plumbing — confirming that
+ * `ctx.mode` reaches the harness and observably changes its trajectory
+ * output. The harness writes a small file in train mode (legitimate
+ * implStateDir mutation) so the freeze-fence is also exercised.
+ */
+function modefulCoordinatorMockHarness(): Harness {
+  const ALWAYS_PHASES = ['orient', 'strategize', 'plan', 'execute', 'debrief'] as const;
+  const TRAIN_ONLY_PHASES = ['improve', 'memory'] as const;
+  return {
+    name: 'modeful-coordinator-mock',
+    version: '1.0.0',
+    supports: () => true,
+    async run(ctx) {
+      const emit = (phaseName: string) => {
+        const t = String(Date.now() * 1_000_000);
+        ctx.trajectory.addSpan({
+          name: phaseName,
+          kind: 'INTERNAL',
+          startTimeUnixNano: t,
+          endTimeUnixNano: t,
+          attributes: {
+            'jinn.span.kind': 'jinn.phase',
+            'jinn.phase.name': phaseName,
+            'jinn.mode': ctx.mode,
+          },
+          events: [],
+          status: { code: 'OK' },
+        });
+      };
+
+      for (const p of ALWAYS_PHASES) emit(p);
+      if (ctx.mode === 'train') {
+        for (const p of TRAIN_ONLY_PHASES) emit(p);
+        // Exercise the train-mode write path so the fence's train branch
+        // is also covered. No-op in frozen mode to honour the contract.
+        await writeFile(
+          join(ctx.implStateDir, 'train-memory.json'),
+          JSON.stringify({ phase: 'memory', writtenAt: Date.now() }),
+        );
+      }
+
+      return {
+        venueRef: { name: 'modeful-mock' },
+        gating: { accepted: true },
+        informational: { mode: ctx.mode },
+      } satisfies Solution;
+    },
+  };
+}
+
+export interface TrainVsFrozenTrajectoryE2EResult {
+  rpcUrl: string;
+  trainPhaseSpans: string[];
+  frozenPhaseSpans: string[];
+  trainCodeDigest: string;
+  frozenCodeDigest: string;
+}
+
+/**
+ * Phase B — assert that `ctx.mode` flows from config → engine → harness →
+ * trajectory and is observable downstream by reading phase span names.
+ *
+ *   - Train run: trajectory contains `improve` and `memory` phase spans.
+ *   - Frozen run: trajectory contains NO `improve` or `memory` phase spans.
+ *
+ * Both runs are driven through `runHarnessWithFreezeFence` (the same fence
+ * the daemon uses) on a freshly spawned Anvil — exercising the same plumbing
+ * the fork-Task-first lifecycle uses, minus the on-chain settlement (the
+ * trajectory contract is a pure ctx.mode propagation property and does not
+ * require on-chain state).
+ */
+export async function runTrainVsFrozenTrajectoryE2E(): Promise<TrainVsFrozenTrajectoryE2EResult> {
+  const anvil = await spawnPlainAnvil();
+  const tmp = await mkdtemp(join(tmpdir(), 'jinn-train-vs-frozen-e2e-'));
+
+  try {
+    const harness = modefulCoordinatorMockHarness();
+    const sharedTask = makePredictionV1Task();
+
+    // ── Train run ───────────────────────────────────────────────────────────
+    const trainImplDir = join(tmp, 'train', 'impl');
+    const trainWorkDir = join(tmp, 'train', 'work');
+    await mkdir(trainImplDir, { recursive: true });
+    await mkdir(trainWorkDir, { recursive: true });
+    const trainTrajectory = new TrajectoryCollector({
+      taskCid: 'modeful-train',
+      runId: 'train-run-1',
+    });
+    const trainCtx = buildFreezeFenceCtx({
+      task: sharedTask,
+      implStateDir: trainImplDir,
+      workingDir: trainWorkDir,
+      mode: 'train',
+      trajectory: trainTrajectory,
+    });
+    const trainFence = await runHarnessWithFreezeFence(harness, trainCtx);
+    assert(trainFence.ok === true, 'Phase B: train run must not violate');
+    const trainSnapshot = trainTrajectory.snapshot();
+    const trainPhaseSpans = trainSnapshot.spans
+      .filter((s) => s.attributes['jinn.span.kind'] === 'jinn.phase')
+      .map((s) => String(s.attributes['jinn.phase.name']));
+
+    assert(
+      trainPhaseSpans.includes('improve'),
+      `Phase B (train): trajectory must contain "improve" span; got [${trainPhaseSpans.join(', ')}]`,
+    );
+    assert(
+      trainPhaseSpans.includes('memory'),
+      `Phase B (train): trajectory must contain "memory" span; got [${trainPhaseSpans.join(', ')}]`,
+    );
+
+    // ── Frozen run ──────────────────────────────────────────────────────────
+    const frozenImplDir = join(tmp, 'frozen', 'impl');
+    const frozenWorkDir = join(tmp, 'frozen', 'work');
+    await mkdir(frozenImplDir, { recursive: true });
+    await mkdir(frozenWorkDir, { recursive: true });
+    // Pre-populate so the codeDigest is over real content.
+    await writeFile(join(frozenImplDir, 'frozen-baseline.json'), JSON.stringify({ baseline: true }));
+
+    const frozenTrajectory = new TrajectoryCollector({
+      taskCid: 'modeful-frozen',
+      runId: 'frozen-run-1',
+    });
+    const frozenCtx = buildFreezeFenceCtx({
+      task: sharedTask,
+      implStateDir: frozenImplDir,
+      workingDir: frozenWorkDir,
+      mode: 'frozen',
+      trajectory: frozenTrajectory,
+    });
+    const frozenFence = await runHarnessWithFreezeFence(harness, frozenCtx);
+    assert(
+      frozenFence.ok === true,
+      'Phase B: frozen run must not violate (modeful harness must not write in frozen mode)',
+    );
+    const frozenSnapshot = frozenTrajectory.snapshot();
+    const frozenPhaseSpans = frozenSnapshot.spans
+      .filter((s) => s.attributes['jinn.span.kind'] === 'jinn.phase')
+      .map((s) => String(s.attributes['jinn.phase.name']));
+
+    assert(
+      !frozenPhaseSpans.includes('improve'),
+      `Phase B (frozen): trajectory must NOT contain "improve" span; got [${frozenPhaseSpans.join(', ')}]`,
+    );
+    assert(
+      !frozenPhaseSpans.includes('memory'),
+      `Phase B (frozen): trajectory must NOT contain "memory" span; got [${frozenPhaseSpans.join(', ')}]`,
+    );
+
+    process.stdout.write(
+      `  train phases:  [${trainPhaseSpans.join(', ')}]\n` +
+      `  frozen phases: [${frozenPhaseSpans.join(', ')}]\n`,
+    );
+
+    return {
+      rpcUrl: anvil.rpcUrl,
+      trainPhaseSpans,
+      frozenPhaseSpans,
+      trainCodeDigest: trainFence.ok ? trainFence.codeDigest : '',
+      frozenCodeDigest: frozenFence.ok ? frozenFence.codeDigest : '',
+    };
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+    await anvil.teardown();
+  }
 }
 
 export async function runContractIntegration(): Promise<void> {

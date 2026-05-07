@@ -72,6 +72,11 @@ export interface HarnessContext {
    * Spec: `spec/2026-05-executor-trust-boundary.md` §3.4.
    */
   secrets?: ScopedSecrets;
+  /**
+   * Harness execution mode. See @jinn-network/sdk/harness HarnessContext.mode
+   * for full documentation.
+   */
+  mode: 'train' | 'frozen';
 }
 
 // ── Solution ─────────────────────────────────────────────────────────

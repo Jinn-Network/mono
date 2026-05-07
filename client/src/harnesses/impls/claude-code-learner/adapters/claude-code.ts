@@ -109,6 +109,7 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
     `- window.startTs = ${inputs.windowStartTs} (ms since epoch)`,
     `- window.endTs = ${inputs.windowEndTs} (ms since epoch)`,
     `- msUntilEndTs = ${inputs.msUntilEndTs}`,
+    `- mode = ${inputs.mode}`,
     inputs.taskBody
       ? `\ntask (full body):\n${JSON.stringify(inputs.taskBody, null, 2)}`
       : '',

@@ -36,6 +36,7 @@ import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-bi
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
+import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -92,6 +93,11 @@ export interface ApiServerConfig {
   ui?: { token: string; handshakeKey: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
   admin?: { onRestartRequested: () => void };
+  /**
+   * When set, mounts `GET /api/harness/status` under the UI token gate.
+   * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
+   */
+  harnessStatus?: HarnessStatusDeps;
 }
 
 export interface ApiServer {
@@ -256,6 +262,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/auth/*', requireUiToken(config.ui.token));
     app.use('/v1/setup/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
+    app.use('/api/harness/*', requireUiToken(config.ui.token));
   }
 
   addEventsRoutes(app);
@@ -274,6 +281,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.ui && config.admin) {
     addAdminRoutes(app, config.admin);
+  }
+
+  if (config.harnessStatus) {
+    addHarnessStatusRoutes(app, config.harnessStatus);
   }
 
   if (config.ui) {

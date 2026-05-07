@@ -12,6 +12,7 @@ import { AgentRail } from './shell/AgentRail.js';
 import { RestartBanner } from './shell/RestartBanner.js';
 import { OverviewPage } from './pages/Overview.js';
 import { ConfigurationPage } from './pages/Configuration.js';
+import { LeaderboardPage } from './pages/leaderboard/Leaderboard.js';
 
 /**
  * App routes between two distinct phases of operator life:
@@ -65,6 +66,14 @@ export default function App(): JSX.Element {
           <Route path="/overview" component={OverviewPage} />
           <Route path="/configuration">
             <ConfigurationPage onRestartPending={() => setRestartPending(true)} />
+          </Route>
+          <Route path="/leaderboard/:solverNet">
+            {(params: { solverNet: string }) => (
+              <LeaderboardPage solverNet={params.solverNet} />
+            )}
+          </Route>
+          <Route path="/leaderboard">
+            <Redirect to="/leaderboard/prediction" />
           </Route>
           <Route><Redirect to="/overview" /></Route>
         </Switch>

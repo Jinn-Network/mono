@@ -107,6 +107,49 @@ type Execution @entity(immutable: false) {
   "Payload schema version (always 1 for now, null if not decoded)"
   payloadVersion: Int
 
+  """
+  Harness execution mode declared by the operator on this envelope.
+  "train" — Improve + Memory phases active; implStateDir mutates across Tasks.
+  "frozen" — writes to implStateDir disabled; codeDigest stable across the window.
+
+  Back-compat default: envelopes published before Plan 1 (2026-05-06) do not
+  carry mode in the on-chain payload and are indexed as "train". New envelopes
+  populate this field when the payload v2 encoding ships. See
+  docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+  """
+  mode: String!
+
+  """
+  Harness implementation name (e.g. "claude-code-learner"). Decoded from payload
+  v2 encoding when it ships; null for all v1 payloads. Used as the first
+  dimension of HarnessRollup identity.
+  See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+  """
+  implName: String
+
+  """
+  Merkle hash of implStateDir contents at the time of execution. Stable across
+  a frozen window; changes each Task in train mode. Decoded from payload v2;
+  null for v1 payloads.
+  See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §5.
+  """
+  codeDigest: String
+
+  """
+  Programming language of the Task this execution addresses (from the Task's
+  SWE-rebench-v2 metadata). Null until payload v2 carries it or a separate
+  task-metadata lookup is wired. Used for LanguageRollup stratification.
+  """
+  language: String
+
+  """
+  Score for EVALUATION kind executions: 0 (fail) or 1 (pass). Null for
+  ENVELOPE kind. Decoded from the Verdict payload when v2 encoding ships;
+  always null for v1 payloads.
+  See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §3.5.
+  """
+  score: Int
+
   "True iff payload bytes parsed cleanly into the v1 envelope/evaluation tuple"
   payloadDecoded: Boolean!
 
@@ -299,4 +342,139 @@ type RouterJob @entity(immutable: false) {
 
   "If we matched the request to an operator by creator address (best-effort)"
   operator: Operator
+}
+
+# ── HarnessRollup (per-harness 30-day aggregation) ────────────────────────────
+
+"""
+Aggregated Verdict statistics per (implName, codeDigest, mode) tuple over a
+30-day rolling window. Updated each time an EVALUATION Execution (Verdict) is
+indexed that carries implName + codeDigest from the corresponding Solution
+envelope.
+
+STUB NOTE (2026-05-07): The Verdict→Solution join that extracts implName +
+codeDigest from the evaluator's counterpart envelope is not yet wired. The
+HarnessRollup handler is scaffolded and called from the EVALUATION execution
+path but is a no-op pending payload v2 encoding (which will carry implName,
+codeDigest, mode, language, and score in the on-chain payload). Once payload
+v2 ships, the handler will be activated and rollups will populate. See
+docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §3.5 and
+log/decisions/2026-05-06-aggregation-multi-winrate.md.
+"""
+type HarnessRollup @entity(immutable: false) {
+  "Composite: \"<implName>|<codeDigest>|<mode>|<windowStart>\""
+  id: ID!
+
+  implName: String!
+  codeDigest: String!
+
+  "\"train\" | \"frozen\""
+  mode: String!
+
+  "Unix timestamp of the first second of the 30-day window (floor(ts/86400/30)*30*86400)"
+  windowStart: BigInt!
+
+  "windowStart + 30*86400"
+  windowEnd: BigInt!
+
+  verdictCount: BigInt!
+
+  "Sum of Execution.score values (0 or 1) over the window"
+  scoreSum: BigInt!
+
+  "= scoreSum / verdictCount (0 when verdictCount == 0)"
+  meanResolved: BigDecimal!
+
+  "Count of distinct operator signing keys that contributed Verdicts in this window"
+  uniqueOperators: BigInt!
+
+  firstSeenAt: BigInt!
+  lastSeenAt: BigInt!
+
+  byLanguage: [LanguageRollup!]! @derivedFrom(field: "parent")
+}
+
+"""
+Language-stratified slice of a HarnessRollup. One row per (HarnessRollup,
+language) pair.
+"""
+type LanguageRollup @entity(immutable: false) {
+  "Composite: \"<harnessRollupId>|<language>\""
+  id: ID!
+
+  parent: HarnessRollup!
+  language: String!
+
+  verdictCount: BigInt!
+  scoreSum: BigInt!
+  meanResolved: BigDecimal!
+}
+
+# ── FreezeViolation (cross-envelope codeDigest consistency detector) ──────────
+
+"""
+Mutable state entity tracking the last-seen codeDigest for a signing key
+while it is in frozen mode. Used by the cross-envelope consistency detector
+to compare consecutive frozen-mode envelopes from the same operator.
+
+STUB NOTE (2026-05-07): This entity is always null for now because
+Execution.codeDigest is never populated until payload v2 ships. The
+freeze-violation detector reads this entity but its early-return guard
+(codeDigest == null) means SigningKeyFrozenState rows are never written yet.
+Activates automatically when payload v2 lands and populates codeDigest.
+
+Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.2
+DR: log/decisions/2026-05-06-trust-stack-composition.md (layer 2)
+"""
+type SigningKeyFrozenState @entity(immutable: false) {
+  "Operator.id (agentId as decimal string) — one row per signing key"
+  id: ID!
+
+  "The codeDigest seen on the most recent frozen-mode envelope from this key"
+  lastFrozenCodeDigest: String!
+
+  "Block timestamp of the envelope that set lastFrozenCodeDigest"
+  lastFrozenAt: BigInt!
+
+  "Execution.id of the envelope that set lastFrozenCodeDigest"
+  lastFrozenExecutionId: String!
+}
+
+"""
+Immutable record of a codeDigest mutation detected within a frozen-mode
+window for a single signing key. Two consecutive frozen-mode envelopes from
+the same operator that carry different codeDigest values are flagged here.
+Mode boundaries (frozen → train → frozen) reset the consistency requirement
+so violations are not raised across separate frozen windows.
+
+STUB NOTE (2026-05-07): No FreezeViolation rows will be written until
+payload v2 carries codeDigest in the on-chain Execution payload. The handler
+is wired and the schema is registered — activation requires only the
+removal of the early-return guard in freeze-violation-detector.ts once
+payload v2 data flows are live.
+
+Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.2
+DR: log/decisions/2026-05-06-trust-stack-composition.md (layer 2)
+"""
+type FreezeViolation @entity(immutable: true) {
+  "Composite: \"<signingKey>|<envelopeId>\""
+  id: ID!
+
+  "Operator.id (agentId decimal) of the operator that published the violating envelope"
+  signingKey: String!
+
+  "Execution.id of the envelope that triggered the violation"
+  envelopeId: String!
+
+  "Block timestamp of the violating envelope"
+  detectedAt: BigInt!
+
+  "Human-readable reason, e.g. \"codeDigest changed within frozen window\""
+  reason: String!
+
+  "codeDigest seen on the prior frozen-mode envelope from this signing key"
+  priorCodeDigest: String!
+
+  "codeDigest seen on the current (violating) frozen-mode envelope"
+  envelopeCodeDigest: String!
 }

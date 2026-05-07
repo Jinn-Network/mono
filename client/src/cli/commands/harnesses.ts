@@ -29,6 +29,7 @@ import {
   verifyManifestSignature,
 } from '../../harnesses/manifest/index.js';
 import { verifyPackageHash } from '../../harnesses/external-impls/package-hash.js';
+import { writeModeState } from '../../harnesses/mode-state.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -184,13 +185,46 @@ function runRemove(ctx: CommandContext, configPath: string, name: string): void 
 }
 
 // ---------------------------------------------------------------------------
+// mode
+// ---------------------------------------------------------------------------
+
+function runMode(ctx: CommandContext, configPath: string, mode: string): void {
+  if (mode !== 'train' && mode !== 'frozen') {
+    emitError(ctx, 'invalid_invocation', `Invalid mode "${mode}". Expected 'train' or 'frozen'.`);
+    return;
+  }
+  const cfg = readConfigFile(configPath);
+  cfg.harness = { ...(cfg.harness ?? {}), mode: mode as 'train' | 'frozen' };
+  writeConfigFile(configPath, cfg);
+  // Persist mode-switch metadata for the dashboard's HarnessStatusPanel.
+  // Best-effort; failures are non-fatal — the config write above is the source of truth.
+  try {
+    writeModeState({ mode: mode as 'train' | 'frozen', switchedAt: Date.now() });
+  } catch {
+    // ignore — status panel falls back to lastModeSwitchAt: undefined
+  }
+  emitJson(ctx, { verb: 'harness mode', mode, configPath });
+}
+
+// ---------------------------------------------------------------------------
+// status
+// ---------------------------------------------------------------------------
+
+function runStatus(ctx: CommandContext, configPath: string): void {
+  const cfg = readConfigFile(configPath);
+  const mode = (cfg.harness as any)?.mode ?? 'train';
+  ctx.writer.write('harness:\n');
+  ctx.writer.write(`  mode: ${mode}\n`);
+}
+
+// ---------------------------------------------------------------------------
 // dispatcher
 // ---------------------------------------------------------------------------
 
 const HELP_TEXT = `\
-jinn harnesses <list|add|remove> [options]
+jinn harnesses <list|add|remove|mode|status> [options]
 
-Manage operator-supplied external Harnesses (Path 2 plug-in surface).
+Manage operator-supplied external Harnesses (Path 2 plug-in surface) and harness mode.
 
 Subcommands:
   list                   Print configured external Harnesses
@@ -198,15 +232,20 @@ Subcommands:
                          trustedImplSigners[] and append the entry to
                          harnesses.externalImpls in the config file
   remove <name>          Drop the named entry from the config file
+  mode <train|frozen>    Set harness mode (train=default allows learning,
+                         frozen=stable codeDigest for benchmarking)
+  status                 Print harness configuration
 
 Options:
   --config <path>        Path to config file (default: ~/.jinn-client/config.json)
-  --json                 JSON output (default; only mode currently supported)
+  --json                 JSON output (default for list/add/remove; not used for status)
 
 Examples:
   jinn harnesses list
   jinn harnesses add ./node_modules/@example/forecaster
   jinn harnesses remove @example/forecaster
+  jinn harnesses mode frozen
+  jinn harnesses status
 `;
 
 async function run(ctx: CommandContext): Promise<void> {
@@ -258,11 +297,23 @@ async function run(ctx: CommandContext): Promise<void> {
       runRemove(ctx, configPath, name);
       return;
     }
+    case 'mode': {
+      const mode = parsed.positionals[0];
+      if (!mode) {
+        emitError(ctx, 'invalid_invocation', 'usage: jinn harnesses mode <train|frozen>');
+        return;
+      }
+      runMode(ctx, configPath, mode);
+      return;
+    }
+    case 'status':
+      runStatus(ctx, configPath);
+      return;
     default:
       emitError(
         ctx,
         'invalid_invocation',
-        `Unknown harnesses subcommand: ${sub} (expected list|add|remove)`,
+        `Unknown harnesses subcommand: ${sub} (expected list|add|remove|mode|status)`,
       );
       return;
   }
@@ -276,3 +327,60 @@ const command: CommandModule = {
 };
 
 export default command;
+
+// ---------------------------------------------------------------------------
+// Named exports for direct consumption by tests + other modules
+// ---------------------------------------------------------------------------
+
+/**
+ * Named export for direct consumption by tests + other modules.
+ * Wraps the internal runMode dispatcher with a focused signature.
+ *
+ * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6
+ */
+export async function harnessModeCommand(opts: {
+  mode: 'train' | 'frozen';
+  configPath: string;
+}): Promise<void> {
+  // Create a minimal mock CommandContext to pass to runMode
+  const mockCtx: CommandContext = {
+    argv: [],
+    stdoutIsTty: false,
+    writer: {
+      write: () => true, // Return true to indicate successful write
+    },
+    exit: () => {
+      // silent in library mode
+    },
+    env: process.env,
+  };
+  runMode(mockCtx, opts.configPath, opts.mode);
+}
+
+/**
+ * Named export for direct consumption by tests + other modules.
+ * Wraps the internal runStatus dispatcher with a focused signature.
+ *
+ * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6
+ */
+export async function harnessStatusCommand(opts: {
+  configPath: string;
+  log?: (s: string) => void;
+}): Promise<void> {
+  // Create a minimal mock CommandContext to pass to runStatus
+  const mockCtx: CommandContext = {
+    argv: [],
+    stdoutIsTty: false,
+    writer: {
+      write: (s: string) => {
+        if (opts.log) opts.log(s);
+        return true; // Return true to indicate successful write
+      },
+    },
+    exit: () => {
+      // silent in library mode
+    },
+    env: process.env,
+  };
+  runStatus(mockCtx, opts.configPath);
+}

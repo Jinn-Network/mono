@@ -454,6 +454,30 @@ describe('buildConfigProvenance', () => {
   });
 });
 
+describe('harness.mode config field', () => {
+  it('defaults harness.mode to "train"', () => {
+    const config = loadConfig();
+    expect(config.harness?.mode).toBe('train');
+  });
+
+  it('accepts harness.mode = "frozen"', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ harness: { mode: 'frozen' } }, null, 2));
+    const config = loadConfig(configPath);
+    expect(config.harness?.mode).toBe('frozen');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('rejects invalid harness.mode values', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ harness: { mode: 'eval' } }, null, 2));
+    expect(() => loadConfig(configPath)).toThrow();
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
 describe('operator config (jinn-mono-vy37.1.3)', () => {
   const dirs: string[] = [];
   const ENV_KEYS = [

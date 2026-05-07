@@ -52,6 +52,7 @@ export class ClaudeCodeLearnerImpl implements Harness {
       windowEndTs: window.endTs,
       msUntilEndTs: ctx.msUntilEndTs(),
       abort: ctx.abort,
+      mode: ctx.mode,
     };
 
     await this.adapter.runTask(inputs, this.pluginRoot);

@@ -1,0 +1,9 @@
+{
+  "name": "swe-rebench-v2-runtime",
+  "version": "0.1.0",
+  "description": "Runtime plugin for the swe-rebench-v2.v1 SolverNet — provides Solver-side orientation skills for code-issue resolution tasks.",
+  "skills": [
+    "skills/orient/SKILL.md",
+    "skills/plan/SKILL.md"
+  ]
+}

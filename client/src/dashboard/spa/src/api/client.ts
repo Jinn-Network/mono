@@ -116,6 +116,15 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch ?? {}),
     }),
+  updateHarnessMode: (mode: 'train' | 'frozen') =>
+    jfetch<{ ok: boolean; restartRequired: boolean; mode: 'train' | 'frozen' }>(
+      '/v1/setup/harness',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      },
+    ),
 };
 
 /**

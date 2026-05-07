@@ -24,6 +24,34 @@ export const PAYLOAD_TUPLE = [
   { name: 'sourceMeasurement', type: 'bytes32' },
 ] as const;
 
+/**
+ * Canonical v2 ABI tuple for per-execution payloads.
+ *
+ * Append-not-reorder per payload-schema §3 — the first five fields keep their
+ * v1 semantics + offsets so a v1 prefix decode still finds them. The trailing
+ * three fields surface harness identity to the subgraph indexer:
+ *
+ *   - `codeDigest`: 32-byte raw bytes of the executor's implStateDir hash
+ *     (NOT the textual `sha256:` prefix). Empty bytes32 when not produced.
+ *   - `implName`: harness implementation name, e.g. "claude-code-learner".
+ *     Empty string when not produced.
+ *   - `modeFlag`: 0 = train, 1 = frozen. Aligned with HarnessExecutionMode in
+ *     the off-chain SignedEnvelope.
+ *
+ * See `docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md` §6
+ * (executor.mode + codeDigest) and `docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md`.
+ */
+export const PAYLOAD_TUPLE_V2 = [
+  { name: 'version', type: 'uint8' },
+  { name: 'tier', type: 'uint8' },
+  { name: 'manifestHash', type: 'bytes32' },
+  { name: 'attestationQuoteCid', type: 'bytes' },
+  { name: 'sourceMeasurement', type: 'bytes32' },
+  { name: 'codeDigest', type: 'bytes32' },
+  { name: 'implName', type: 'string' },
+  { name: 'modeFlag', type: 'uint8' },
+] as const;
+
 /** ERC-8004 IdentityRegistry — only the function the publisher calls. */
 export const IDENTITY_REGISTRY_SET_METADATA_ABI = [
   {

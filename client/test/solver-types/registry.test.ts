@@ -138,6 +138,7 @@ describe('SOLVER_TYPES manifest', () => {
       'prediction.v1',
       'prediction.apy.v0',
       'learner-loop-test',
+      'swe-rebench-v2.v1',
     ]);
   });
 

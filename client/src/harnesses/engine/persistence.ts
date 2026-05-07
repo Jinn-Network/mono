@@ -93,6 +93,14 @@ CREATE TABLE IF NOT EXISTS task_runs (
   solution_outputs_json       TEXT,
   runtime_plugins_json        TEXT,
 
+  -- Additive columns for ERC-8004 payload v2 (jinn-mono-9fe5):
+  --   executor_mode: 'train' | 'frozen', captured by pack() from the freeze-fence
+  --     and reused by deliver() to emit a payload v2 setMetadata.
+  --   executor_code_digest: sha256:<hex> form, same source.
+  -- NULL for pre-migration rows; deliver() falls back to the v1 encoder.
+  executor_mode               TEXT,
+  executor_code_digest        TEXT,
+
   failure_reason          TEXT,
   failure_at              INTEGER
 );
@@ -180,6 +188,20 @@ export interface PersistedTaskRun {
   solutionOutputsJson: string | null;
   runtimePluginsJson: string | null;
 
+  /**
+   * Executor mode declared on this run ('train' | 'frozen').
+   * Captured by `pack()` from the freeze-fence's HarnessExecutionMode and
+   * read by `deliver()` to emit a payload v2 setMetadata. Null for legacy
+   * rows that completed before payload v2 wiring (deliver() defaults to v1).
+   */
+  executorMode: 'train' | 'frozen' | null;
+  /**
+   * Executor codeDigest (`sha256:<hex>` form) declared on this run.
+   * Captured by `pack()` from the freeze-fence and read by `deliver()` for
+   * payload v2 setMetadata. Null for legacy rows; deliver() defaults to v1.
+   */
+  executorCodeDigest: string | null;
+
   failureReason: string | null;
   failureAt: number | null;
 }
@@ -216,6 +238,10 @@ export type TaskRunPatch = Partial<{
    */
   solutionOutputsJson: string | null;
   runtimePluginsJson: string | null;
+  /** Executor mode captured from freeze-fence. Reused by deliver() for v2 setMetadata. */
+  executorMode: 'train' | 'frozen' | null;
+  /** Executor codeDigest captured from freeze-fence. Reused by deliver() for v2 setMetadata. */
+  executorCodeDigest: string | null;
 }>;
 
 // ── Raw DB row (snake_case from SQLite) ───────────────────────────────────────
@@ -251,6 +277,8 @@ interface RawRow {
   task_payload: string | null;
   solution_outputs_json: string | null;
   runtime_plugins_json: string | null;
+  executor_mode: string | null;
+  executor_code_digest: string | null;
   failure_reason: string | null;
   failure_at: number | null;
 }
@@ -276,6 +304,11 @@ function runAdditiveMigrations(db: Database.Database): void {
     { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
     { column: 'task_id',             ddl: 'ALTER TABLE task_runs ADD COLUMN task_id TEXT' },
     { column: 'attempt_index',       ddl: 'ALTER TABLE task_runs ADD COLUMN attempt_index INTEGER' },
+    // ERC-8004 payload v2 (jinn-mono-9fe5): persists executor mode + codeDigest
+    // from pack() so deliver() can emit a v2 setMetadata payload after the
+    // transient maps are cleared.
+    { column: 'executor_mode',         ddl: 'ALTER TABLE task_runs ADD COLUMN executor_mode TEXT' },
+    { column: 'executor_code_digest',  ddl: 'ALTER TABLE task_runs ADD COLUMN executor_code_digest TEXT' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
@@ -335,6 +368,10 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     task: parseJson<Task>(row.task_payload),
     solutionOutputsJson: row.solution_outputs_json,
     runtimePluginsJson: row.runtime_plugins_json,
+    executorMode: (row.executor_mode === 'train' || row.executor_mode === 'frozen')
+      ? row.executor_mode
+      : null,
+    executorCodeDigest: row.executor_code_digest,
     failureReason: row.failure_reason,
     failureAt: row.failure_at,
   };
@@ -476,6 +513,14 @@ export class TaskRunPersistence {
     if (patch.runtimePluginsJson !== undefined) {
       setClauses.push('runtime_plugins_json = @runtimePluginsJson');
       params['runtimePluginsJson'] = patch.runtimePluginsJson;
+    }
+    if (patch.executorMode !== undefined) {
+      setClauses.push('executor_mode = @executorMode');
+      params['executorMode'] = patch.executorMode;
+    }
+    if (patch.executorCodeDigest !== undefined) {
+      setClauses.push('executor_code_digest = @executorCodeDigest');
+      params['executorCodeDigest'] = patch.executorCodeDigest;
     }
     // Optimistic concurrency: include AND state = @expectedState in the WHERE
     // clause so a concurrent call that already advanced the row results in 0

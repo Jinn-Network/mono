@@ -577,7 +577,7 @@ describe('POST /v1/setup/solvernets/:name', () => {
     expect(res.status).toBe(404);
     const body = await res.json() as { error: string; available: string[] };
     expect(body.error).toBe('solvernet_not_found');
-    expect(body.available).toEqual(['prediction']);
+    expect(body.available).toEqual(['prediction', 'swe-rebench-v2']);
   });
 
   it('accepts role and persists it', async () => {

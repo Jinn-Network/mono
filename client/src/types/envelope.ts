@@ -66,6 +66,18 @@ const ExecutorSchema = z.object({
   })),
   signingKey: SigningKeySchema,
   source: SourceBundleSchema.optional(),
+  /**
+   * Harness execution mode. Optional in v1 envelope schema for back-compat with
+   * envelopes produced before this field was introduced. 'train' means the harness was running
+   * with state writes enabled (Improve + Memory phases active in
+   * claude-code-learner); 'frozen' means writes were disabled and the
+   * implStateDir hash was preserved across the Task. See
+   * docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+   *
+   * New envelopes always populate this field at assembly time. Readers should
+   * treat undefined as 'train' (the legacy behaviour).
+   */
+  mode: z.enum(['train', 'frozen']).optional(),
 });
 
 const AttestationSchema = z.object({

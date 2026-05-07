@@ -42,6 +42,14 @@ export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {
     plugins: [],
     taskGenerator: { enabled: true },
   },
+  'swe-rebench-v2': {
+    enabled: false, // opt-in; operator enables via config.solverNets['swe-rebench-v2'].enabled = true
+    solverType: 'swe-rebench-v2.v1',
+    role: 'solving',
+    harness: 'claude-code-learner',
+    plugins: [],
+    taskGenerator: { enabled: false },
+  },
 };
 
 export const JinnConfigSchema = z.object({
@@ -373,6 +381,19 @@ export const JinnConfigSchema = z.object({
         .optional(),
     })
     .optional(),
+
+  /**
+   * Harness execution settings. The `mode` field controls whether the
+   * harness runs with state-write phases enabled (`train`) or disabled
+   * (`frozen`). Frozen mode produces stable codeDigest across Tasks for
+   * benchmark-grade per-snapshot scoring; see
+   * docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §5.
+   */
+  harness: z
+    .object({
+      mode: z.enum(['train', 'frozen']).default('train'),
+    })
+    .default({ mode: 'train' }),
 
   /** SolverNet activation, Harness selection, and operator-configured runtime plugins. */
   solverNets: z.record(z.object({

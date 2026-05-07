@@ -7,10 +7,15 @@ import {
   type PredictionV1RestorationPayload,
   type PredictionV1VerdictPayload,
 } from './payloads/prediction-v1.js';
+import { SweRebenchV2TaskSchema } from './swe-rebench-v2.js';
+import {
+  SweRebenchV2SolutionPayloadSchema,
+  SweRebenchV2VerdictPayloadSchema,
+} from './payloads/swe-rebench-v2.js';
 
 export type SolverNetContractRole = 'creator' | 'solver' | 'evaluator';
 export type PayloadKind = 'task' | 'solution' | 'verdict';
-export type SupportedSolverType = 'prediction.v1';
+export type SupportedSolverType = 'prediction.v1' | 'swe-rebench-v2.v1';
 
 export interface CredentialRequirement {
   id: string;
@@ -109,8 +114,59 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
   defaultRuntimePlugins: ['bundled:jinn-prediction-plugin'],
 };
 
+export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
+  name: 'SWE-rebench v2',
+  solverType: 'swe-rebench-v2.v1',
+  schemas: {
+    task: SweRebenchV2TaskSchema,
+    solution: SweRebenchV2SolutionPayloadSchema,
+    verdict: SweRebenchV2VerdictPayloadSchema,
+  },
+  claimPolicyDefaults: {
+    mode: 'parallel',
+    maxClaims: 50,
+    maxClaimsPerOperator: 5,
+    claimLeaseTtlSeconds: 60 * 60, // 1 hour per Task — coding tasks need more time than predictions
+  },
+  credentialRequirements: {
+    creator: [
+      {
+        id: 'huggingface.dataset.read',
+        kind: 'public-api',
+        required: true,
+        description: 'Read public HuggingFace dataset rows for Task creation (datasets-server.huggingface.co).',
+      },
+    ],
+    solver: [],
+    evaluator: [
+      {
+        id: 'docker.hub.swerebenchv2.read',
+        kind: 'public-api',
+        required: true,
+        description: 'Pull SWE-rebench v2 per-instance Docker images from docker.io/swerebenchv2.',
+      },
+    ],
+  },
+  evaluationFunction: {
+    id: 'swe-rebench-v2.docker-test-suite.v1',
+    deterministic: true,
+    inputs: ['SWE-rebench v2 Task', 'SWE-rebench v2 Solution', 'per-instance Docker image'],
+    output: 'SWE-rebench v2 Verdict',
+    implementation: 'client/src/harnesses/impls/swe-rebench-v2-evaluator',
+  },
+  aggregationFunction: {
+    id: 'swe-rebench-v2.multi-winrate.v1',
+    deterministic: true,
+    inputs: ['SCORED swe-rebench-v2.v1 Verdicts'],
+    output: 'structured network-result (mean/complexity-weighted/byLanguage/frontier/parityTrip)',
+    windowDays: 30,
+  },
+  defaultRuntimePlugins: ['bundled:swe-rebench-v2-runtime'],
+};
+
 export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
   'prediction.v1': PREDICTION_V1_SOLVER_NET_CONTRACT,
+  'swe-rebench-v2.v1': SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT,
 };
 
 export function getSolverNetContract(solverType: string): SolverNetContract | undefined {

@@ -22,6 +22,9 @@ import {
   metadataEntryId,
 } from "../utils";
 
+import { updateHarnessRollup } from "./harness-rollup";
+import { detectFreezeViolation } from "./freeze-violation-detector";
+
 // ────────────────────────────────────────────────────────────────────────────
 // Registered(uint256 indexed agentId, string agentURI, address indexed owner)
 // ────────────────────────────────────────────────────────────────────────────
@@ -138,6 +141,24 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
     if (sm.length > 0 && !isAllZero(sm)) {
       exec.sourceMeasurement = sm;
     }
+    // Index Executor.mode. v1 payloads default to "train"; v2 reads the
+    // actual operator-declared value from the payload's modeFlag.
+    // See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+    exec.mode = decoded.mode;
+
+    // Payload v2: surface harness identity (codeDigest + implName) so the
+    // HarnessRollup / FreezeViolation entities can populate. v1 payloads
+    // produce empty codeDigest bytes + empty implName — leave the entity
+    // fields null in that case so the rollup handlers' early-return guards
+    // continue to filter them.
+    if (decoded.codeDigest.length > 0 && !isAllZero(decoded.codeDigest)) {
+      // Re-apply the textual `sha256:` prefix so the on-chain index matches
+      // the off-chain SignedEnvelope.executor.codeDigest shape.
+      exec.codeDigest = "sha256:" + decoded.codeDigest.toHexString().substr(2);
+    }
+    if (decoded.implName.length > 0) {
+      exec.implName = decoded.implName;
+    }
 
     // NOTE: Execution.routerJob and Execution.deliveredAt are intentionally
     // NOT populated here. The previous code compared manifestHash (an operator-
@@ -152,10 +173,28 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
     // See: docs/superpowers/specs — "subgraph routerJob join gap".
   } else {
     exec.tier = "UNKNOWN";
+    // Payload did not decode; default mode to "train" for back-compat.
+    exec.mode = "train";
   }
 
   exec.save();
   op.save();
+
+  // ── HarnessRollup aggregation ────────────────────────────────────────────
+  // Called for every Execution save, but the handler short-circuits early for
+  // ENVELOPE kind and for any execution where implName/codeDigest are absent
+  // (all v1 payloads). EVALUATION kind with payload v2 will populate rollups.
+  // FreezeViolation detection:
+  // Called for ENVELOPE kind only (envelopes carry the mode + codeDigest
+  // fields that drive the detector). Short-circuits early for all v1 payloads
+  // because codeDigest is null until payload v2 ships. No-op until then.
+  if (exec.kind == "ENVELOPE") {
+    detectFreezeViolation(exec, event.block.timestamp);
+  }
+
+  if (exec.kind == "EVALUATION") {
+    updateHarnessRollup(exec, event.block.timestamp, op.id);
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

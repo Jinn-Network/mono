@@ -75,6 +75,20 @@ EOF
 
 This protocol exists so the daemon's first-match wrapper can wrap kind-specific specialist Execute paths in the learning envelope without the specialist needing to know about the wrapper.
 
+## Phase dispatch
+
+Phases run in order: Orient → Strategize → Plan → Execute → Debrief.
+
+Then **conditionally on mode**:
+
+- If `mode === 'train'`: also run Improve and Memory consolidation phases (these write to implStateDir).
+- If `mode === 'frozen'`: skip Improve and Memory consolidation phases. The harness does NOT mutate
+  implStateDir. This is the protocol-level frozen contract; violation is detected by
+  the daemon hash-fence and rejects the envelope.
+
+Mode is provided as input parameter `mode` in the session inputs (one of `'train'` | `'frozen'`).
+Default if absent: `'train'`.
+
 For each phase below, in order:
 
 1. Load the phase skill via the `Skill` tool. Skills are namespaced by plugin: invoke as `claude-code-learner:<phase-name>` (e.g., `Skill claude-code-learner:orient`).
@@ -88,8 +102,8 @@ Phases in order (full skill names shown):
 3. `claude-code-learner:plan` — concrete steps, optionally time-anchored
 4. `claude-code-learner:execute` — walk plan, spawn step-workers, decide stuck
 5. `claude-code-learner:debrief` — post-execution analysis
-6. `claude-code-learner:improve` — mutate `implStateDir`, commit
-7. `claude-code-learner:memory-consolidation` — curate, separate commit
+6. `claude-code-learner:improve` — mutate `implStateDir`, commit (**skipped when `mode === 'frozen'`**)
+7. `claude-code-learner:memory-consolidation` — curate, separate commit (**skipped when `mode === 'frozen'`**)
 
 ## Constitution span
 

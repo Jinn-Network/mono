@@ -8,6 +8,7 @@ import { RecentActivity } from './overview/RecentActivity.js';
 import { QuickActions } from './overview/QuickActions.js';
 import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
 import { AdvancedDetails } from './overview/AdvancedDetails.js';
+import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
 
 interface OverviewStatusV1 {
   fleet?: {
@@ -122,6 +123,7 @@ export function OverviewPage(): JSX.Element {
       )}
 
       <RecentActivity events={[]} />
+      <HarnessStatusPanel />
       <QuickActions
         claimableJinn={formatEth(status?.rewards?.pendingStakingRewardsWei)}
         gasEth={formatEth(status?.masterGas?.balanceWei)}

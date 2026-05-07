@@ -46,6 +46,7 @@ export interface EnvelopeInputs {
       buildRecipe: { kind: 'dockerfile' | 'nix' | 'bazel'; path: string };
       measurement: string;
     };
+    mode?: 'train' | 'frozen';
   };
   evidenceTier?: EvidenceTier;
   attestation?: SignedEnvelope['attestation'];
@@ -86,7 +87,7 @@ export async function assembleAndSignEnvelope(
     task: inputs.task,
     participant: inputs.participant,
     window: inputs.window,
-    executor: inputs.executor,
+    executor: { ...inputs.executor, mode: inputs.executor.mode ?? 'train' },
     evidenceTier,
     attestation,
     trajectory,

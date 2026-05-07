@@ -18,6 +18,7 @@ export {
 export {
   IDENTITY_REGISTRY_SET_METADATA_ABI,
   PAYLOAD_TUPLE,
+  PAYLOAD_TUPLE_V2,
   REPUTATION_REGISTRY_ABI,
   VALIDATION_REGISTRY_ABI,
 } from './abis.js';
@@ -28,13 +29,20 @@ export {
   PayloadValidationError,
   buildMetadataKey,
   encodeExecutionPayload,
+  encodeExecutionPayloadV2,
   validatePayload,
+  validatePayloadV2,
+  codeDigestSha256ToBytes32,
+  modeStringToFlag,
   resolveAgentIdForManifest,
   type ContentKind,
   type ExecutionPayload,
+  type ExecutionPayloadV2,
+  type ExecutionModeFlag,
   type ExecutionTier,
   type IdentityPublisherConfig,
   type PublishContentArgs,
+  type PublishContentV2Args,
   type ResolveAgentIdArgs,
   type ResolvedAgent,
 } from './identity.js';

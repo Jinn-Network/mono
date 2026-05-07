@@ -3,6 +3,7 @@ import { Link, useLocation } from 'wouter';
 const TABS = [
   { path: '/overview', label: 'Overview' },
   { path: '/configuration', label: 'Configuration' },
+  { path: '/leaderboard', label: 'Leaderboard' },
 ] as const;
 
 export function TopTabs(): JSX.Element {

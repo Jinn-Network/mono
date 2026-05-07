@@ -547,6 +547,7 @@ export async function runPredictionSample({
     abort: new AbortController().signal,
     msUntilEndTs: () => Math.max(0, task.window.endTs - Date.now()),
     trajectory: new TrajectoryCollector({ taskCid: 'local-sample-task-cid', runId: 'local-sample' }),
+    mode: 'train',
   });
   const payload = solution.solutionPayload ?? {};
   const parsedPayload = PredictionV1RestorationPayloadSchema.safeParse(payload);

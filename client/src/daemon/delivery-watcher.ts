@@ -4,6 +4,7 @@ import { emitEvent } from '../observability/emit-event.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
 import { SignedEnvelopeSchema } from '../types/envelope.js';
 import { validatePayload } from '../types/payloads/index.js';
+import { getSweRebenchV2StateStore } from '../solver-types/swe-rebench-v2.js';
 
 export class DeliveryWatcherLoop {
   private stopped = false;
@@ -47,6 +48,26 @@ export class DeliveryWatcherLoop {
                   `[delivery-watcher] envelope ok solverType=${envelope.solverType} role=${envelope.role} ` +
                   `tier=${envelope.evidenceTier} requestId=${delivery.requestId.slice(0, 10)}...`,
                 );
+
+                // swe-rebench-v2 verdict success hook: when a score=1 verdict arrives,
+                // increment successful_count so the generator's post-until-target-successes
+                // policy converges. instance_id is sourced from the Task spec on the delivery.
+                if (
+                  envelope.solverType === 'swe-rebench-v2.v1' &&
+                  envelope.role === 'verdict' &&
+                  typeof envelope.payload['score'] === 'number' &&
+                  envelope.payload['score'] === 1
+                ) {
+                  const instanceId = delivery.task.spec?.['instance_id'];
+                  if (typeof instanceId === 'string' && instanceId.length > 0) {
+                    const stateStore = getSweRebenchV2StateStore();
+                    stateStore.recordSuccess(instanceId).catch((err) => {
+                      console.warn(
+                        `[delivery-watcher] swe-rebench-v2 recordSuccess failed for ${instanceId}: ${err instanceof Error ? err.message : err}`,
+                      );
+                    });
+                  }
+                }
               } catch (err) {
                 console.error(
                   `[delivery-watcher] envelope parse/validate failed for ${delivery.requestId.slice(0, 10)}...: ${err}`,
