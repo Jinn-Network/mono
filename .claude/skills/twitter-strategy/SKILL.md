@@ -8,7 +8,7 @@ description: Use to analyse Oak's X account activity vs GROWTH.md targets and su
 Account-level activity vs GROWTH targets. Not per-post grading. Catches drift between what Oak is doing on X and what the GROWTH bet calls for.
 
 ## Read first
-- [`GROWTH.md`](../../../GROWTH.md) — the bet (§1), the daily loop (§4), what we will not chase (§5), the metrics (§6).
+- [`GROWTH.md`](../../../GROWTH.md) — the bet (§1), the bottleneck (§2), the current target cluster (§3), the GTM sequence (§4), the daily loop (§5), what we will not chase (§6 — split into §6.1 permanent rules and §6.2 tactical deferrals), metrics (§7), channel canon (§8).
 - [`THESIS.md`](../../../THESIS.md) — the structural argument the teach loop is supposed to teach.
 - [`BRAND.md`](../../../BRAND.md) — voice canon. *"Lead from structure, not from fear."*
 
@@ -16,7 +16,7 @@ This skill points at GROWTH; it does not restate it.
 
 ## What this skill does
 
-One mode: **review**. Three windows by default — last 7 days, last 30 days, and rolling. Outputs drift flags per GROWTH §4 loop bucket and per §6 metric.
+One mode: **review**. Three windows by default — last 7 days, last 30 days, and rolling. Outputs drift flags per GROWTH §5 loop bucket, per §6 will-not-chase rule (split §6.1 permanent vs §6.2 tactical), per §7 metric, and per §8 channel-canon claim.
 
 ## When to run
 
@@ -36,35 +36,46 @@ bird mentions -u tannedoaksprout -n 200 --plain > /tmp/oak-mentions-30d.txt
 
 `-n` is a count, not a window. Post-filter both corpora to tweets with timestamp `>= now - 30 days`. If the earliest tweet in either corpus is still less than 30 days old after `-n 200`, paginate with `--cursor` until the cutoff is reached (cap at 5 pages).
 
-### Step 2 — Bucket posts by GROWTH §4 loop
+### Step 2 — Bucket posts by GROWTH §5 loop
 
-Classify each original post (not retweet) into one of the four buckets:
-- **Teach** — public artefact on the thesis. Threads, essays, talks, recorded walkthroughs.
-- **Understand** — listening reply on someone else's substantive post.
-- **Direct offer** — explicit testnet operator slot ask.
-- **Interact** — synchronous DM-style exchange. Mostly invisible from public-only data; treat as `[unknown — out of scope for this skill]`.
+Classify each original post (not retweet) into one of the four buckets named in GROWTH §5:
+- **Understand** — listening reply on someone else's substantive post; replies that surface a methodology question or extend the cluster's argument toward Jinn's frame.
+- **Teach** — public artefact on the thesis or the bridge model. Threads, essays, talks, recorded walkthroughs, originals carrying the canonical pitch.
+- **Engage** — direct offers and warm-list moves visible from public data (named asks, public DM-equivalents, quote-tweet outreach to specific candidates). Most synchronous Engage activity (DMs, calls) is invisible from public-only data; treat as `[unknown — out of scope for this skill]`.
+- **Refine** — invocations of `growth-refine` proposing canon amendments. Visible from this account only when the user posts about a refine output; otherwise tracked in chat history, not on X.
 
-Quote tweets are Teach if the QT itself adds substance; otherwise Interact. Replies are Understand by default; reclassify to Teach if the reply is a substantive standalone artefact.
+Quote tweets are Teach if the QT itself adds substance; otherwise Engage. Replies are Understand by default; reclassify to Teach if the reply is a substantive standalone artefact.
 
 ### Step 3 — Compute targets vs actuals
 
 Derive the *actual* window from the corpus: `span_days = first_tweet_ts − last_tweet_ts` (in days, after the 30-day post-filter from Step 1). Working-day target = `span_days × 5/7`. Do not assume a literal 30d / 5-per-week — use the span the corpus actually covers.
 
-GROWTH §4 implicit targets:
+GROWTH §5 implicit targets:
 - **Teach:** ≥1 per working day. Compute: count(Teach posts) / (span_days × 5/7).
 - **Understand:** ≥1 per working day. Same denominator.
-- **Direct offer:** weekly cadence to warm list. Cross-check against `growth/.local/jinn-warm-contacts.csv` last-contact dates if present.
+- **Engage:** weekly cadence of direct offers / warm-list moves to the named warm list. Cross-check against `growth/.local/jinn-warm-contacts.csv` last-contact dates and rung advancement if present.
 
-GROWTH §6 metrics:
+GROWTH §7 metrics:
 - **External testnet operators** — surface count if known (manual input — out of scope here).
-- **Inbound interest** — count DMs / unsolicited mentions from priority audiences in window. Use mentions corpus.
+- **Inbound interest** — count DMs / unsolicited mentions from §3 target-cluster handles in window. Use mentions corpus.
 
-### Step 4 — Detect §5 violations
+### Step 4 — Detect §6 violations and §8 channel-canon drift
 
-Scan posts in window for:
+**Permanent-rule violations (GROWTH §6.1).** Hard-fail items, flagged unconditionally:
 - *Fear-bait, empowerment-bait, or marketing register.* Heuristic: posts containing "the future is", "we are so early", "this changes everything", "bullish doesn't even cover it", "if you don't do X you'll miss Y", or scare quotes around opponents. Flag each as a candidate violation; do not auto-fail without context.
 - *Retired framings.* Heuristic: literal substring match against `Own What You Know`, `become a founder`, `your AI's experience is worth something`, `desired obsolescence`, `launch a token`. Flag.
 - *Founder framing.* Posts that pitch from a separate-status position to the reader. Heuristic: posts using "we" referring to Oak + Ritsu without including the reader.
+
+**Tactical-deferral surfacing (GROWTH §6.2).** Soft signals — surface as informational, do not flag as violation. Posts that touch a §6.2 tactical deferral (e.g. crypto-native cluster pitch language while Phase 1 is current) are noted in the review as *deferral drift* but only escalate to violations if §6.2 explicitly ratchets the deferral to permanent in a future spec.
+
+**Channel-canon drift (GROWTH §8).** Surface when:
+- *Premium-mandatory* claim contradicted by a non-Premium post on the account being reviewed.
+- *Reply-to-reply engine* claim contradicted by a sustained pattern of replies received with no reply back from the author.
+- *Cluster-fit* claim contradicted by Teach posts written for a different cluster than GROWTH §3's current target.
+- *Weekday cluster-peak* claim contradicted by Teach posts shipping consistently outside the 09:00–14:00 cluster-peak window.
+- *Constructive-tone overlay* contradicted by negative / combative register in the corpus.
+
+§8 drift signals point to a `growth-refine` candidate, not a §8 amendment direct from this skill.
 
 ### Step 5 — Detect engagement drift
 

@@ -1,6 +1,8 @@
 # X algorithm model — for compilation into a Claude skill
 
-29 April 2026. A mechanistic, decision-ready model of how X distributes posts as of late April 2026. Companion to `2026-04-10-x-algorithm-playbook.md`. The playbook is narrative; this doc is the model — every claim has a confidence tier, every mechanism has a lever, every section ends in a heuristic a skill can apply.
+29 April 2026. A mechanistic, decision-ready model of how X distributes posts as of late April 2026. Every claim has a confidence tier, every mechanism has a lever, every section ends in a heuristic a skill can apply.
+
+The directional claims in this doc derive from [`GROWTH.md`](../../../../GROWTH.md) §8 (channel canon). When this doc and §8 disagree, §8 wins by definition; flag the divergence to `growth-refine` so canon can be updated. The numerics below recalibrate freely; the directions do not.
 
 Compile this into a skill that takes (a) a draft, (b) optional account context, and returns: a predicted-reach score, the binding constraint, and the highest-leverage edit.
 

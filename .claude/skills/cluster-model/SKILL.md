@@ -1,29 +1,27 @@
 ---
 name: cluster-model
-description: Use to refine thought-models of the AI / crypto / AI×crypto clusters Jinn recruits from, identify gaps to the canonical THESIS frame, and output bridge angles for both broadcast posts and per-individual replies. Triggers on "what does the X cluster think", "build a cluster model", "find bridges to cluster Y", "where does our thinking diverge from the AI cluster", "update the cluster snapshot", "what bridges have we got", "refresh the market model". Reads canonical docs (THESIS, BRAND, GROWTH); writes cluster snapshots and bridge angles to growth/.local/growth-log.md sections 1 and 2. Composes upstream of discover-twitter-recruits (refines vocabulary) and x-post-builder bridge-post mode (consumes angles produced here).
+description: Use to refine the bridge model in GROWTH.md §3 (how the current target cluster thinks vs how Jinn frames the same problem) by sampling fresh evidence from the cluster, and to propose bridge angles for broadcast posts and per-individual replies. Triggers on "what does the X cluster think", "build a cluster model", "refresh cluster snapshot", "find bridges to cluster Y", "where does our thinking diverge from the AI cluster", "update the cluster snapshot", "what bridges have we got", "refresh the market model". Reads canonical docs (GROWTH §3 target recruit, §4 GTM sequence, THESIS, BRAND); appends evidence to growth/.local/growth-log.md §1 and bridge angles to §2. Bridge-model promotions to GROWTH §3 happen via growth-refine, not direct write. Composes upstream of discover-twitter-recruits (refines vocabulary) and x-post-builder bridge-post mode (consumes angles produced here).
 ---
 
 # Cluster model
 
-Refine per-cluster thought-models with verbatim evidence. Identify gaps to Jinn's canonical frame. Propose bridge angles for broadcast and per-individual outreach.
+Sample fresh evidence from the current target cluster (GROWTH §3) and adjacent GTM-phase clusters (GROWTH §4). Refine the bridge model — *how this cluster currently thinks vs how Jinn frames the same problem* — by appending verbatim evidence and proposing bridge angles for outreach. Do not redefine canonical cluster claims here; promotions go through `growth-refine`.
 
 ## Read first
-- [`GROWTH.md`](../../../GROWTH.md) — the recruiting bet and what we will not chase.
-- [`THESIS.md`](../../../THESIS.md) — the canonical structural argument.
+- [`GROWTH.md`](../../../GROWTH.md) §3 (target recruit + bridge model — the canonical cluster definition this skill samples against), §4 (GTM sequence — Phase 2 / Phase 3 clusters sampled lighter, see `references/cluster-vocabulary.md`), §6 (will-not-chase rules), §8 (channel canon — for the bridge-angle output's directional claims).
+- [`THESIS.md`](../../../THESIS.md) — the canonical structural argument the bridge points at.
 - [`BRAND.md`](../../../BRAND.md) — voice and headless-brand posture.
-- [`growth/.local/growth-log.md`](../../../growth/.local/growth-log.md) §1 — current cluster snapshot.
+- [`growth/.local/growth-log.md`](../../../growth/.local/growth-log.md) §1 — accumulated evidence sample (history per cluster); §2 — bridge angles archive.
+- [`references/cluster-vocabulary.md`](references/cluster-vocabulary.md) — operational search vocabulary per cluster, refined over time.
 - [`references/bridge-shapes.md`](references/bridge-shapes.md) — canonical sub-patterns by cluster.
 
-This skill operationalises the recruitment loop articulated 2026-05-01: *continuously refine a model of how the market is thinking about decentralised agentic AI; look for opportunities to bridge clusters and individuals over to our way of thinking; out of that, source individual recruits, and speak to parts of the existing audience in a way that will resonate*. Do not redefine GROWTH-level claims here.
+This skill operationalises the **Understand** function from GROWTH §5: maintain the bridge model in §3 by sampling fresh evidence; refer drift back to `growth-refine` for proposed §3 amendments. Do not redefine canonical claims (target cluster, GTM phases, will-not-chase rules, channel direction). Skill-internal calibration (vocabulary, bridge sub-patterns) is fair game.
 
 ## What this skill does
 
-One mode: **refresh**. Pulls fresh evidence per cluster, compares against last snapshot, identifies deltas, proposes bridge angles. Writes the result back to the growth log.
+One mode: **refresh**. Pulls fresh evidence from the current target cluster (and lighter samples from adjacent phase clusters), compares against last snapshot, identifies deltas, proposes bridge angles. Appends the result to the growth log; does *not* edit GROWTH.md §3 directly — drift in the bridge model surfaces as a `growth-refine` candidate.
 
-Three target clusters (canonical, do not invent new ones without a proposal):
-- **AI** — AI-capability builders. Coordination treated as research/cryptography problem, not protocol-economic.
-- **Crypto** — DeFi / mechanism-design fluent. Treats AI as productivity tool, not participant class.
-- **AI × crypto** — agent-economy operators. Already shipping at one specific layer (identity / payment / execution / eval); often miss the outer-loop-with-stake.
+Cluster definitions are canonical and live in GROWTH §3 (target) and §4 (GTM phases). Do not introduce a new cluster here; that is a §3 / §4 change requiring a spec proposal.
 
 ## Mental model in one paragraph
 
@@ -51,11 +49,7 @@ For each cluster, run 2–3 `bird search` queries using cluster-specific vocabul
 - Prefer mid-sized accounts (~1k–50k followers); skip mega-accounts unless they are the substantive surface for that vocabulary right now.
 - Skip handles already in growth-log §3 active threads (those are tracked by `growth-watcher`, not the cluster model).
 
-Suggested vocabulary per cluster (refine over time as the cluster shifts; keep the search-strategy.md anti-patterns in mind):
-
-- **AI cluster:** *agent eval harness*, *decentralized AI*, *agent observability*, *alignment is a coordination problem*, *open harness*, *long-horizon agent*, *eval signal*.
-- **Crypto cluster:** *vault curation*, *stablecoin oracle design*, *perp mechanism*, *DeFi risk parameters*, *AMM design*, *liquidation cascade*.
-- **AI × crypto cluster:** *ERC-8004*, *x402*, *OLAS PoAA*, *agent registry*, *agent payment rail*, *outcome attestation*, *agent stake*.
+Search vocabulary per cluster lives in [`references/cluster-vocabulary.md`](references/cluster-vocabulary.md) — the current target cluster gets primary sampling; Phase 2 / Phase 3 clusters sample lighter (mostly to feed `growth-refine`'s phase-transition checks). Update that file as the cluster's vocabulary shifts.
 
 Then for each sampled handle, run `bird user-tweets <handle> -n 12 --plain` and extract: recurring frames, named gaps, vocabulary they use, vocabulary they avoid, recent shifts in stance.
 
@@ -63,8 +57,9 @@ If a search returns mostly noise after the filter, refine the vocabulary for nex
 
 ### Step 3 — Update cluster snapshot — append, don't replace
 
-Each cluster's §1 entry has three sub-sections:
+Each cluster's §1 entry has three sub-sections, plus a top-line `cluster:` tag matching the cluster's canonical name (the GROWTH §3 current-target name, or a GROWTH §4 phase name for non-current clusters):
 
+- **`cluster: <name>`** — the canonical cluster identifier. Required at the top of every §1 cluster block. `growth-day` and `growth-refine` both use this tag to filter what is current vs archival.
 - **Frame (current):** one-paragraph synthesis of how the cluster is thinking *as of this refresh*. Replace the prior frame *only* if today's evidence shifts it; otherwise keep the prior frame and add a one-line dated note (`2026-MM-DD: no frame shift; N new evidence points added`).
 - **Evidence (cumulative, dated):** append today's evidence under a new `Sampled this run: YYYY-MM-DD — N handles via "<vocab>" search; M passed §7 filter` sub-heading, then list verbatim quotes with handle, date, URL beneath. Do not delete prior `Sampled this run:` blocks — the historical record is the dynamic model. The literal `Sampled this run: YYYY-MM-DD` prefix lets `growth-day` Step 0 detect freshness with a simple grep.
 - **Gap to Jinn (current + drift log):** the current synthesis of where the cluster sits relative to the THESIS frame, plus a dated change-log when the gap shifts (`2026-MM-DD: gap refined from X to Y because [evidence]`).
@@ -78,6 +73,7 @@ For each cluster, propose 1–3 bridge angles. Each angle has:
 - **Claim:** the contestable claim or question that makes the bridge.
 - **Target:** which voices in the cluster the bridge is calibrated for.
 - **Sub-pattern reference:** which of `references/bridge-shapes.md`'s sub-patterns this instance applies.
+- **`cluster:` tag** — the cluster identifier (matching GROWTH §3 / §4 naming) the angle is for. Required; `growth-day` filters §2 angles by current cluster, so an untagged angle will not surface.
 
 ### Step 5 — Write the deltas to growth-log §2
 

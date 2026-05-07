@@ -7,6 +7,12 @@ description: Grade and optimise X (Twitter) drafts and replies against the 2026 
 
 Score X drafts against a working model of the 2026 X algorithm. Return a relative reach prediction, identify the binding constraint, and suggest the single highest-leverage edit.
 
+## Read first
+
+- [`GROWTH.md`](../../../GROWTH.md) §8 — channel canon. The five direction-only claims (Premium mandatory, reply-to-reply is the engine, cluster-fit dominates first-impression distribution, weekday cluster-peak window, constructive-tone overlay) are what this skill optimises *toward*. The numerics in `references/algorithm-model.md` and `references/scoring-tables.md` are the calibrated derivative — they evolve freely; §8 changes require a spec proposal.
+- [`GROWTH.md`](../../../GROWTH.md) §3 — the current target cluster. Cluster-fit scoring uses §3's named cluster as the cluster the post is graded against.
+- [`GROWTH.md`](../../../GROWTH.md) §6.1 — the *no fear-bait, no marketing register* permanent rule is also load-bearing for §8's constructive-tone overlay; flagged drafts should hit both checks.
+
 ## What this skill does
 
 Three modes:

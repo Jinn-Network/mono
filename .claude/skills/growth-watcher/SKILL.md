@@ -8,11 +8,11 @@ description: Use to run a daily sweep across active recruitment threads — chec
 Daily sweep for active recruitment threads. Cheap to run; high signal-to-noise because it only watches handles already in the growth log.
 
 ## Read first
-- [`GROWTH.md`](../../../GROWTH.md) §4 (the daily loop) — context for why this skill exists.
+- [`GROWTH.md`](../../../GROWTH.md) §3 (current target cluster — defines who counts as priority-audience), §5 *Engage* (the daily-loop function this skill serves), §8 (channel canon — the 30-minute top-replies window comes from §8's reply-to-reply / cluster-fit / cluster-peak claims).
 - [`growth/.local/growth-log.md`](../../../growth/.local/growth-log.md) §3 — active-thread handles to watch.
 - [`growth/.local/jinn-warm-contacts.csv`](../../../growth/.local/jinn-warm-contacts.csv) segments F and G — additional handles to watch.
 
-This skill operationalises GROWTH §4 *Understand* — surfacing the candidates worth engaging today.
+This skill operationalises the GROWTH §5 *Engage* function — surfacing live signals (replies, mentions, fresh in-cluster posts inside the §8 reply window) so Oak can advance the funnel.
 
 ## What this skill does
 
@@ -71,9 +71,11 @@ Run:
 ```
 bird home --following -n 30 --plain
 ```
-Filter to posts from priority-audience accounts (defined in `cluster-model` SKILL.md or in growth-log §1 evidence). Flag any post that lands a clear gap-shape (uses Jinn-cluster vocabulary, names a structural problem the canonical THESIS addresses).
+Filter to posts from priority-audience accounts — i.e. accounts in the GROWTH §3 current target cluster, plus growth-log §1 evidence handles for that cluster. Flag any post that lands a clear gap-shape (uses cluster vocabulary, names a structural problem the canonical THESIS addresses).
 
-This is the "cold opportunity" bucket — candidates Oak hasn't engaged yet but who just posted something that matches the canonical bridge shapes (see `cluster-model/references/bridge-shapes.md`).
+This is the "cold opportunity" bucket — candidates Oak hasn't engaged yet but who just posted something that matches the canonical bridge shapes (see `cluster-model/references/bridge-shapes.md`; treated as starting-point catalogue, not contract).
+
+**Cluster classification is a *suggestion*, not an assertion.** Watcher entries should record each surfaced handle with a `suggested_cluster:` annotation (the cluster the watcher believes the handle fits) but should NOT mark a candidate `FROZEN per Sprint #X` based on the watcher's own classification. `growth-day` re-classifies every watcher entry against the *current* GROWTH §3 cluster at brief-construction time — between watcher-write-time and growth-day-read-time the active sprint may have changed. The watcher emits raw signals; growth-day decides actionability.
 
 ### Step 5 — Write the alerts file
 

@@ -29,13 +29,13 @@ Apply in order. Stop early if the search consistently returns the wrong shape.
 
 ### Step 1 — Frame the audience
 
-Before any search, write down (internally) the specific audience for this invocation. Defaults from `growth/CLAUDE.md`:
+Before any search, write down (internally) the specific audience for this invocation. Defaults derive from [`GROWTH.md`](../../../GROWTH.md) §3 (current target cluster) and §4 (GTM phase clusters, sampled lighter when active sprint allows):
 
-- *Priority 1*: ex-Bittensor subnet operators, OLAS Polystrat / Pearl operators, ERC-8004 registry builders, agent-verification / observability / evaluation-tooling builders.
-- *Priority 2*: prediction-tool builders, Numerai-orbit forecasters, MiroFish-orbit quants, Polymarket bot operators.
-- *Tier 3 — amplifiers*: builders with primitives-not-platforms instincts who repost rather than operate. Output as a separate tier.
+- **Primary** — current target cluster from GROWTH §3.
+- **Adjacent (Phase 2 / Phase 3)** — GROWTH §4 phases sampled only when the active sprint or refine-skill output flags a phase-transition check.
+- **Amplifiers (separate tier)** — builders with primitives-not-platforms instincts who repost rather than operate. Output as a separate bucket; conversion shape differs (a quote-tweet, not a node).
 
-If the user names a topic that does not map to any of the above, ask once which audience they are aiming at before searching. Wrong-audience candidates burn discovery budget.
+If the user names a topic that does not map to GROWTH §3 / §4, ask once which audience they are aiming at before searching. Wrong-audience candidates burn discovery budget.
 
 ### Step 2 — Search with builder vocabulary
 

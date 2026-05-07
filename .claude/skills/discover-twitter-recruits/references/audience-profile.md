@@ -1,38 +1,22 @@
 # Audience profile — who counts as a Jinn recruit
 
-Companion to the `discover-twitter-recruits` skill. Defines the conversion bar in operational terms. Read once at the start of a discovery session.
+Companion to the `discover-twitter-recruits` skill. Defines the *conversion bar* in operational terms — skill-internal calibration only. The canonical priority audience is in [`GROWTH.md`](../../../../GROWTH.md) §3 (current target cluster) + §4 (GTM phase clusters). This file does not redefine the priority list; it documents what the *operational filter* checks for.
 
 ## §1. The conversion question
 
 For every candidate, the only question that matters is:
 
-> Would this person plausibly run a Jinn solver, build adjacent tooling, contribute code or research, or boost the protocol with intellectual reach?
+> Would this person plausibly run a Jinn client, build adjacent tooling, contribute code or research, or boost the protocol with intellectual reach?
 
-If the answer to all four is no, the candidate is out — no matter how thesis-perfect their wording is. Discovery is an audience filter, not a language filter.
+The four conversion roles are named in GROWTH §5 (the loop's *Engage* function): operator, contributor, evaluator, amplifier. If a candidate maps to none of those for the current GROWTH §3 target cluster, they are out — no matter how thesis-perfect their wording is. Discovery is an audience filter, not a language filter.
 
-## §2. Priority audiences
+## §2. Audience derivation
 
-These are the audiences `growth/CLAUDE.md` names. In priority order:
+Read GROWTH §3 (target cluster) and §4 (GTM phases) at the start of every discovery session. Sample primarily against §3; sample §4 phases lighter, only when the active sprint or a refine-skill output flags a phase-transition check.
 
-### §2.1 — Priority 1 (operators / builders / contributors)
+The historical priority lists (Priority 1 / Priority 2 / Tier 3) that lived in this file have been retired. They are now derived from GROWTH §3 (currently named: AI builders — eval-harness builders, agent-observability tooling, RL-environment authors, shadow-eval practitioners, public-benchmark contributors). When the target cluster changes, this file does not need to change — the derivation re-targets automatically.
 
-- **Ex-Bittensor subnet operators.** Validators or miners who have run on TAO subnets, especially in agent-shaped subnets (Numinous SN6, Score SN44, BitMind SN34). Already know the operator economics, already capable of running staked services.
-- **OLAS Polystrat / Pearl operators.** Anyone who has run Pearl, Trader Quickstart, or built on the Mech Marketplace. Direct functional overlap with the Jinn client; lowest-friction operational conversion.
-- **ERC-8004 registry builders.** People who index, score, or visualise the on-chain agent registry — `@yieldfreaks` (AHM), `@8004_scan`, comparable accounts. Adjacent infra, would naturally extend coverage to a new outcome-attested registry.
-- **Agent-verification / observability / evaluation tooling builders.** People shipping registries, dashboards, evaluation harnesses, or scoring pipelines. `@ta_eis_eauton` / Silverarrow (autoharness) is the canonical example. Functional adjacency to Jinn's evaluator role.
-
-### §2.2 — Priority 2 (prediction-side technical audiences)
-
-- **Prediction-tool builders.** People building forecasting platforms, market-maker bots, or aggregation systems over markets like Polymarket / Kalshi.
-- **Numerai-orbit forecasters.** Already trained on the paradigm "labelled history → unlabelled future → paid by accuracy." Jinn's Prediction SolverNet is that pattern generalised.
-- **MiroFish-orbit quants.** Adjacent technical audience; substantial overlap with Numerai people in practice.
-- **Polymarket / Kalshi bot operators.** Independents who already run prediction stacks against live oracles. Direct candidate operators for the Prediction SolverNet.
-
-### §2.3 — Tier 3 (amplifiers — separate output bucket)
-
-People with primitives-not-platforms instincts who *repost* and *curate* rather than build. Will not run a node. Will broadcast to the right audience if a primitive lands well in their hands.
-
-Output amplifiers in a separate section of the skill's response, never collapsed into the main list. Their conversion shape is different (a quote-tweet or essay reference, not a solver instance) and conflating the two distorts the recruitment lattice.
+**Amplifiers** remain a separate output bucket regardless of target cluster (their conversion shape is a quote-tweet or essay reference, not a node — conflating them with operators distorts the recruitment lattice).
 
 ## §3. Out-of-scope audiences
 
@@ -51,7 +35,7 @@ These look thesis-aligned in language but do not convert. Each is a real failure
 
 ## §4. Defining traits of real recruits
 
-When in doubt between a Priority 1/2 candidate and an out-of-scope one, the following signals bias toward "real":
+When in doubt between an in-cluster candidate (current GROWTH §3 target) and an out-of-scope one, the following signals bias toward "real":
 
 - Ships a verifiable artefact: linked repo, dashboard, dataset, paper, deployed product.
 - Engages with the right orbit: replies to and gets replies from `@autonolas`, `@numinous_ai`, `@opentensor`, a16z crypto on agent infrastructure threads, Numerai accounts.
@@ -61,7 +45,7 @@ When in doubt between a Priority 1/2 candidate and an out-of-scope one, the foll
 
 ## §5. The two-tier rule
 
-The skill's main list contains *only* Priority 1 and Priority 2 accounts that pass the profile-check. Amplifiers go in a separate tier. Out-of-scope candidates that were considered but rejected go in the SKIPPED section (audit trail, not output). The boundary between tiers must be sharp — collapsing them is the most common failure mode of this kind of discovery work.
+The skill's main list contains *only* candidates inside the current GROWTH §3 target cluster (and adjacent §4 phase clusters when the active sprint allows) that pass the profile-check. Amplifiers go in a separate tier. Out-of-scope candidates that were considered but rejected go in the SKIPPED section (audit trail, not output). The boundary between tiers must be sharp — collapsing them is the most common failure mode of this kind of discovery work.
 
 ## §6. The canonical first-touch bridge
 

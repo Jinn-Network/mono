@@ -7,6 +7,13 @@ description: Build a single X post or thread end-to-end in the user's voice — 
 
 Build a single X post or thread end-to-end. Elicit the user's best ideas in their own phrasing, scaffold a draft, run it through the grader, schedule, and post-mortem. The skill orchestrates other skills; it does not replace them.
 
+## Read first
+
+- [`GROWTH.md`](../../../GROWTH.md) §3 — current target cluster + bridge model. The post should serve §3's pitch or move the cluster across the named gap.
+- [`GROWTH.md`](../../../GROWTH.md) §5 — the four-function daily loop. Tag every post you build with which function it serves: **Teach** (public artefact on the bridge model — most posts), **Understand** (substantive reply that surfaces a methodology question), or **Engage** (named direct offer / public funnel-advancement).
+- [`GROWTH.md`](../../../GROWTH.md) §6.1 — permanent will-not-chase rules. Posts that violate fear-bait, marketing register, retired framings, or founder framing fail this skill at the scaffold stage; do not pass them to the grader.
+- [`GROWTH.md`](../../../GROWTH.md) §8 — channel canon. Posts must respect Premium-mandatory, reply-to-reply (build for follow-up), cluster-fit (write to §3 cluster), weekday cluster-peak window, constructive tone.
+
 ## Why this skill exists
 
 Generating posts is easy. Posting in the user's voice — recognisable to the cluster — is the hard part. The failure mode of generic content tools is averaging: pulling phrasing toward the median viral tweet, which is the opposite of the edge. This skill is the inverse. It elicits the user's actual position in their actual phrasing, applies the algorithm grader as a check, and ships.
