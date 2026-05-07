@@ -18,35 +18,45 @@ A founder-only network at mainnet launch would concentrate JINN on two addresses
 
 One named target cluster at a time, with a canonical pitch and a bridge model — *how this cluster currently thinks vs how Jinn frames the same problem*. Updated as we learn. When the target changes, this section is rewritten via a spec proposal and the prior content is moved to `growth/.local/growth-log.md` §1 as a dated archival entry. Do not delete history when this section is rewritten.
 
-### Current target cluster: AI builders
+*During PMF search, §3 records our current bet on cluster, pitch, and bridge. Bet rotation is the rewrite-and-archive flow already specified above — the spec-proposal flow is the velocity governor, not a claim that the bet is settled. Read this section as "this is what we're testing right now," not "this is who Jinn is for."*
 
-Eval-harness builders, agent-observability tooling builders, RL-environment authors, shadow-eval practitioners, public-benchmark contributors. The functional boundary: they ship verifiable artefacts (repos, dashboards, datasets, papers, deployed products) at the harness layer of agentic AI — the layer that determines whether an agent ships, as distinct from the model layer.
+### Current target cluster: open-source agentic project contributors
+
+People who contribute to agentic systems shipping publicly, alone or in small teams, with real day-to-day tasks they're trying to solve in their own work — multi-agent framework authors, indie agent-app maintainers, OSS agent-tooling builders.
+
+The functional boundary: they ship verifiable agentic artefacts (repos, demos, datasets) at the harness layer of agentic AI, and have day-to-day work that would benefit from pooling attempts with others on the same task class.
+
+The ethos boundary, equally load-bearing: they are open to identifying publicly with a decentralised project. The token is not foregrounded but it is not hidden — recruits who can't accept that filter themselves out, and that filter is the right shape for §1's legitimacy bet (see §6.1).
+
+Eval-as-research practitioners at institutional labs (METR, Apollo, AISI external, academic eval groups, frontier-lab evals teams) are *not* the recruit pool. They overlap technically but face structural recruit friction (public token-association is reputationally costly in their professional context) that pitch quality cannot move. They may flow in via teach-loop overflow once visible adoption develops, but the loop is not organised around them.
 
 ### The pitch
 
-> We use Jinn to compete on public benchmarks. The product is — here's a way to bring your talent to training agentic AI as a public good.
+> *"This is a public-good network for agentic training data. People contributing to agentic projects pool their real work into shared SolverNets — others attempt the same tasks, evaluators verify, the corpus accrues to everyone. It's coordinated via a token because there is no central operator; participation is how stake accrues."*
 
-Public-benchmark contribution is the conversion shape. The token is fuel for the contribution loop, not the headline. Talk about the work the network does and the corpus of agent runs that accumulates publicly; let participation imply ownership rather than leading with it.
+Real usage of Jinn on the contributor's own work is the conversion shape. The corpus of agent runs that accumulates publicly is the public good. Talk about the work the network does and the artefacts that accrue; let participation imply ownership rather than leading with it.
 
 ### Bridge model
 
-**Frame this cluster currently holds.** Harness-level work — context, tools, retries, eval gates — is starting to be named as the layer that determines whether an agent ships, distinct from model benchmarks. Continuous shadow-eval against production traffic is being pitched as the post-static-test-set cadence. The "leash hierarchy" framing (full autonomy → guardrails → HITL → never-headless) is appearing as a maturity model. Coordination is still framed as a per-deployment trust-boundary problem, not a multi-party protocol-economic one.
+**Frame this cluster currently holds.** People contributing to agentic projects iterate against their own private eval signal — their tests, their qualitative checks, their personal sense of whether the agent is good. The eval-as-research clusters they look up to publish *static* benchmarks (SWE-bench, GAIA, HumanEval, AgentBench) that snapshot capability at a point in time. Continuous shadow-eval against production traffic is starting to be named as the right cadence, but it stays private — the deploying team eats the cost and keeps the signal. The contributor's own iteration loop is structurally solo: their harness, their tasks, their corpus.
 
-**Frame Jinn offers.** The eval-signal is not a private artefact owned by the deploying team and validated against their own production traffic. It is the coordination primitive of a public benchmark — multi-party, stake-backed, portable. The corpus of agent runs accumulates publicly and gets better as more participants attempt it. The harness around the model becomes the substrate of a network, not the moat of a deploying team.
+**Frame Jinn offers.** The eval-signal is a coordination primitive, not a private artefact. When a SolverNet exists for a task class the contributor actually cares about, others attempt the same tasks; their solutions enter the contributor's decision space and the contributor's enter theirs. Static benchmarks are the snapshot; this is the stream — public, attributable, stake-backed. The harness around the model becomes the substrate of a network, not the moat of a deploying team.
 
-**The bridge.** The methodology question that moves a cluster member across the gap, in the shape that has worked in past first-touches: *if leaderboards rank the wrong layer and the right signal lives in the harness, who else should see the harness-eval signal, and what would it cost someone to fake it?* The question must not be answerable from their own README, post, or pinned thread.
+**The bridge.** The methodology question that moves a cluster member across the gap, in the shape that has worked in past first-touches: *static benchmarks are last year's agents; live eval is a coordination problem nobody owns. What does it look like to run the harness you already have alongside others doing the same work — and who pays for the task stream?* The question must not be answerable from their own README, post, or pinned thread.
 
 ## 4. GTM sequence
 
 Three phases. Each phase has a transition trigger; phase changes ratchet — we do not regress.
 
-### Phase 1 — AI builders (current)
+### Phase 1 — Open-source agentic project contributors (current)
 
-Recruit operators, contributors, evaluators among people already shipping in the agentic-AI space. Pitch is §3 above. Channel is X plus the cluster's habitual surfaces (GitHub, the few cluster-shaping accounts, public-benchmark leaderboards). The cluster is product-pitch-receptive, not ethos-pitch-receptive — the token is downstream of the work. Phase 2 transition trigger: a meaningful number of testnet operators from this cluster, and at least one visible benchmark engagement that other clusters can pattern-match.
+Recruit operators, contributors, evaluators among people already shipping in the agentic-AI space. Pitch is §3 above. Channel is X plus the cluster's habitual surfaces (GitHub, the few cluster-shaping accounts, OSS agentic project communities). The cluster is product-pitch-receptive, not ethos-pitch-receptive — the token is downstream of the work. Phase 2 transition trigger: a meaningful number of testnet operators from this cluster, at least one SolverNet running with attempts from multiple operators, and visible adoption signal — the cluster's own audience pattern-matching to running-network rather than to-be-launched.
+
+*The cluster name was tightened from "AI builders" on 2026-05-07 (see `spec/2026-05-07-growth-niche-and-pitch-pmf-search.md`) because the broader name was identity-shaped where the recruit reality is usage-shaped, and because token-tolerance is a structural filter that the broader name did not encode.*
 
 ### Phase 2 — Domain professionals (provisional)
 
-Bankers, consultants, lawyers, and other white-collar professionals whose work is being benchmarked. Provisional because it is benchmark-coupled — if the SolverNet of focus changes, this phase's audience shifts. Pitch shape: *contribute aligned with your interests, not your firm's*. Brand-risk gate: the pitch must be agency-framed (skin-in-the-game on whether AI can do your job), not displacement-framed (anxiety about being replaced). [BRAND.md](BRAND.md) §1's *lead from structure, not from fear* and §6.1's no-fear-bait rule both apply. Phase 3 transition trigger: visible adoption in Phase 1 + 2.
+Bankers, consultants, lawyers, and other white-collar professionals whose work is being benchmarked. Provisional because it is benchmark-coupled — if the SolverNet of focus changes, this phase's audience shifts. Pitch shape: *contribute aligned with your interests, not your firm's*. Brand-risk gate: the pitch must be agency-framed (skin-in-the-game on whether AI can do your job), not displacement-framed (anxiety about being replaced). [BRAND.md](BRAND.md) §1's *lead from structure, not from fear* and §6.1's no-fear-bait rule both apply. §6.1's token-tolerance rule also applies; the brand-risk gate is necessary but not sufficient — a future spec will revisit Phase 2's recruit shape under the §6.1 lens. Phase 3 transition trigger: visible adoption in Phase 1 + 2.
 
 ### Phase 3 — Crypto-native operators
 
@@ -90,6 +100,8 @@ These do not move without a spec proposal that argues against the rule itself.
 
 **No mercenary-launch tells.** No VC, no pre-sale, no team keys, no allocation. Communicated plainly because it is a real differentiator, not because it is a slogan.
 
+**No clusters whose professional context makes token-association reputationally costly.** Some technically-aligned audiences (institutional eval-research labs, frontier-lab safety teams, regulated-industry employees) cannot publicly associate with a decentralised project without professional friction. Recruiting from those clusters means betting on individuals who quietly identify against their employer's posture; conversion friction dominates, and the recruits we land carry reputational caveats that undermine §1's legitimacy bet. Token-tolerance is a structural recruit qualifier, not a marketing problem.
+
 **No external phase names.** *Phase 0 / Phase 1a / Phase 1b* are internal engineering vocabulary. External framing is *testnet live, mainnet gated on operator set*.
 
 **No retired framings.** *Own What You Know*, *become a founder*, *your AI's experience is worth something*, *desired obsolescence*, *launch a token*. All previously tried, all retired. Do not revive without a proposal.
@@ -113,7 +125,7 @@ One headline metric at a time.
 
 **Supporting metrics, in order of signal strength:**
 
-- **Benchmark-SolverNet runs** — agent runs against the public benchmark Jinn is competing on. The specific benchmark is named here when chosen; not pinned today, pending a product-side decision (T&C concern on the candidate Archipelago harness needs resolving before §7 is updated to name a specific benchmark).
+- **Live-eval SolverNet runs** — agent runs against the SolverNet(s) of focus in the cluster-native vertical. The specific SolverNet(s) and vertical are named here once the operational test in the active sprint produces signal. Currently testing: cluster-native live OSS issues with test-gated resolution, sourced from AI / eval / agent OSS the cluster builds and uses.
 - **Contributors** — PRs, issues, forks from non-team. Independent technical engagement is a stronger signal than passive node-running.
 - **Inbound interest** — DMs, applications, unsolicited mentions from the §3 target cluster. Lagging indicator of public teaching.
 
