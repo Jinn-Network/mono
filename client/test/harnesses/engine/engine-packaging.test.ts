@@ -261,6 +261,12 @@ describe('Engine packaging integration', () => {
     const intent = engine.testPersistence.getByRequestId(requestId);
     expect(intent!.state).toBe(TaskRunState.COMPLETE);
     expect(intent!.deliveryTxHash).toBe('0xdeliverytx');
+
+    // Artifact-row invariant: deliver() must emit a restoration-result row so
+    // the release acceptance gate and search API can observe this cycle.
+    const artifact = store.getArtifactByRequestId(requestId, 'restoration-result');
+    expect(artifact).not.toBeNull();
+    expect(artifact!.outcome).toBe('SUCCESS');
   });
 
   it('pack() throws when safeAddress is not configured', async () => {
