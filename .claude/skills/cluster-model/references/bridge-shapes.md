@@ -62,6 +62,25 @@ The question must not be answerable from the candidate's own README, post, or pi
 
 **When to use:** when a candidate post is substantive but the account is bot-shaped. Always profile-check the project tags / co-builders before deciding to skip.
 
+## Sub-pattern 7 — Jinn-adjacent cluster: capture-asymmetric substrate + free-oracle-vs-judgment-evaluator
+
+**Latent assumption to surface:** the protocol's existing economics (staked solvers, deterministic graders) generalise — and the substrate the participants produce is fairly distributed.
+
+**Bridge claim (two-beat):**
+
+1. *Capture-asymmetric substrate* — in Numerai / Allora / Bittensor, the data and artefacts the participants produce flow into a privately-captured surface (the fund, the foundation, subnet-team equity). The substrate isn't a public good even when the protocol has decentralised primitives.
+2. *Free oracle vs judgment evaluator* — those protocols can structure capture this way because their work has a free ground-truth oracle (the market resolves Numerai; test suites resolve Bittensor SN62; price feeds resolve Allora). Most agentic work doesn't have a free oracle. The protocol that works without one needs the evaluator as a first-class staked role doing real judgment, with the substrate itself as a public good.
+
+The bridge composes — Beat 1 names the structural difference; Beat 2 explains why the existing protocols can avoid it (free oracles), and why Jinn can't.
+
+**Evidence this lands:** unverified at time of writing — Sprint #1 first teach post uses this frame (2026-05-05). Three pending recruits queued: `@danielderedev` (Bittensor mechanism-design essayist; prediction-stack-unbundling lens makes Beat 2 land cleanly), `@MattiasLamotte` (Numerai Signals participant; market-as-free-oracle question lands on his BetaForesight LSTM stuck-state work), `@matlabulous` (Numerai Pending Master since 2020; meta-model-evaluator question targets his TC-stake intuition).
+
+**When to use:** operators on Bittensor / Numerai / Allora / OLAS who post substantively about their protocol's mechanism design. **Skip:** founders / chief scientists / official research voices of those protocols (per `audience-profile.md` §3); third-party analytics orgs over those protocols (same exclusion).
+
+**Vocabulary discipline (mandatory):** see `references/jinn-adjacent-frame.md` *what NOT to say* — avoid "Bittensor is a private network", avoid "Allora is forecasting; Numerai is stocks; Bittensor is LLMs", avoid the worker-"$ALLO scam" framing. The full frame, per-protocol breakdown, and corrected vocabulary are in that file.
+
+**Reference:** `references/jinn-adjacent-frame.md` for the full analysis.
+
 ## How to update this file
 
 Add a new sub-pattern when a successful first-touch produces a reusable shape across two or more candidates. Each sub-pattern needs: latent assumption, bridge claim, evidence, when-to-use. Remove a sub-pattern only if it is empirically falsified across three or more attempts.

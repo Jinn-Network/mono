@@ -14,6 +14,8 @@ These query shapes have been tried and produced shill / consultant / bot results
 | `bird search "agent ownership / value capture"` | Catches VC analysts and "AI x crypto" thread-writers. |
 | `bird search "<thesis quote verbatim>"` | Catches accounts whose entire output is rephrased landing-page copy. |
 | `bird search "olas pearl"` / `bird search "bittensor subnet operator"` (audience-name vocabulary, no post-filter) | Surfaces marketing-quest accounts (NEAR Legion, BASE quest, daily-GM-on-Robinhood-Chain pattern) and signal-bots before real builders. The vocabulary is correct; the lack of post-filter is the bug. Always combine audience-name vocabulary with the post-filter in §7. |
+| `bird search "pearl operator"` / `bird search "my pearl agent"` (OLAS Pearl operator-first-person) | "Pearl operator" is a polluted namespace. Hard collisions: Pearl Talent (recruitment company), Valorant (gaming map), Arknights & Call of Duty (game operators), Judea Pearl operator (philosophy / statistics), Pearl Mii (Animal Crossing), pearl jewelry, Pearl Jam. 2026-05-05 calibration: ~95% of results were collision-noise. Use the §2.3 cross-reference path instead — search inside `@autonolas` reply graph or use OLAS-specific service names (*"trader_quickstart"*, *"Mech Marketplace"*, *"predict subnet"*). |
+| `bird search "my miner on SN46"` / `bird search "running on SN50"` (Bittensor operator-first-person) | Returns hackathon-tutorial posts ("HackQuest co-learning camp"), not real subnet operators. Real Bittensor operator-users surface as substantive mid-thread commentators on subnet architecture, not as first-person "my miner" posts. Use §2.2.1 (subnet-name + mechanism vocabulary) instead. |
 
 The common failure mode in all five: thesis vocabulary is now broadly ambient. Searching for it surfaces the people *talking about* the space, not the people *building in* it.
 
@@ -48,6 +50,19 @@ bird search "autoharness OR \"agent eval harness\" -filter:replies lang:en"
 ```
 
 Project names self-select for the orbit. "Pearl" matches OLAS operators; "Numinous" matches forecasting subnet users; "Tau2" or "HAL" matches agent-benchmark builders.
+
+### §2.2.1 — Bittensor: subnet-name + mechanism vocabulary (replaces operator-first-person)
+
+Operator-first-person Bittensor vocabulary (`"my miner on SN50"`, `"running on SN46"`) returns hackathon-tutorial posts, not real operators. Real Bittensor operator-users surface as substantive mid-thread commentators on subnet architecture — discoverable by pairing subnet name with mechanism-vocabulary:
+
+```
+bird search "Numinous Brier OR \"WTA Brier\" OR \"agent main patch\" -filter:replies lang:en"
+bird search "Ridges patch OR \"agent_main\" OR \"Harbor sandbox\" -filter:replies lang:en"
+bird search "Yuma weights OR \"yuma consensus\" -filter:replies lang:en"
+bird search "subnet emissions OR \"miner emissions\" -filter:replies lang:en"
+```
+
+Why it works: subnet name + mechanism term is insider vocabulary for Bittensor operator-users. Token-pumpers don't write *"agent_main(input) → patch contract"* because there's nothing to pump in the architecture detail. 2026-05-05 calibration: this is how `@danielderedev` was found after operator-first-person yielded zero in the same session.
 
 ### §2.3 — Cross-reference queries (replies and mentions)
 

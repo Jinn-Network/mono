@@ -14,6 +14,7 @@ Sample fresh evidence from the current target cluster (GROWTH §3) and adjacent 
 - [`growth/.local/growth-log.md`](../../../growth/.local/growth-log.md) §1 — accumulated evidence sample (history per cluster); §2 — bridge angles archive.
 - [`references/cluster-vocabulary.md`](references/cluster-vocabulary.md) — operational search vocabulary per cluster, refined over time.
 - [`references/bridge-shapes.md`](references/bridge-shapes.md) — canonical sub-patterns by cluster.
+- [`references/jinn-adjacent-frame.md`](references/jinn-adjacent-frame.md) — substrate-and-evaluator analysis for the jinn-adjacent cluster (Bittensor / Numerai / Allora / OLAS). Read when revisiting that retired sprint surface or when a future active sprint targets it.
 
 This skill operationalises the **Understand** function from GROWTH §5: maintain the bridge model in §3 by sampling fresh evidence; refer drift back to `growth-refine` for proposed §3 amendments. Do not redefine canonical claims (target cluster, GTM phases, will-not-chase rules, channel direction). Skill-internal calibration (vocabulary, bridge sub-patterns) is fair game.
 
@@ -50,6 +51,8 @@ For each cluster, run 2–3 `bird search` queries using cluster-specific vocabul
 - Skip handles already in growth-log §3 active threads (those are tracked by `growth-watcher`, not the cluster model).
 
 Search vocabulary per cluster lives in [`references/cluster-vocabulary.md`](references/cluster-vocabulary.md) — the current target cluster gets primary sampling; Phase 2 / Phase 3 clusters sample lighter (mostly to feed `growth-refine`'s phase-transition checks). Update that file as the cluster's vocabulary shifts.
+
+When revisiting the jinn-adjacent surface, read [`references/jinn-adjacent-frame.md`](references/jinn-adjacent-frame.md) and the protocol-specific search guidance in `discover-twitter-recruits/references/search-strategy.md` §2.2.1 before sampling.
 
 Then for each sampled handle, run `bird user-tweets <handle> -n 12 --plain` and extract: recurring frames, named gaps, vocabulary they use, vocabulary they avoid, recent shifts in stance.
 

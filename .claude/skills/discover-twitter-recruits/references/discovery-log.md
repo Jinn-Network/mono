@@ -152,6 +152,66 @@ Captured here so future rounds do not re-recommend them.
 
 ---
 
+## 2026-05-05 — `@matlabulous` / Jo-fai (Joe) Chow (Outcome: pending)
+
+**Search query.** Operator-first-person Numerai vocabulary: `bird search "\"my numerai\" OR \"submitted my signal\" OR \"my NMR stake\" -filter:replies lang:en"` (n=25).
+
+**Who they are.** Numerai *Pending Master* tournament participant since 2020. Self-described: *"$NMR skin in the game since 2020 — still here, still staking, still earning... still training and improving my Numerai models."* Organises Numerai community meetups (Prague 2023, DeAI Day Tokyo 2026). Heavy retweeter of NumeraiCoE content; connected to but not on the Council of Elders. Senior community-bridge node.
+
+**Conversion rationale at recommendation.** Exactly the participant-shape recruit Sprint #1 wants: skin in someone else's protocol (Numerai), multi-year, real model + real stake. Bridge value high — if he engages, his peers (Lingster888, Numeroo, CoE-adjacent submitters) see it. Priority 2 (Numerai-orbit). Caveat: his current feed leans more curator/organiser than active-modeller; treat as P2 with amplifier upside, not pure builder.
+
+**Outreach path.** TBD by Oak. Bridge shape candidate: methodology question on *what True Contribution doesn't capture* — TC measures unique alpha vs the meta-model, but the meta-model itself is constructed inside Numerai. The question Jinn answers is *what happens when the meta-model evaluator and the data provider are the same entity, and how does that change the design of evaluator-with-stake systems for outcome-scoring beyond stocks*. The question must be answerable only by someone who has staked through the V1→V2→TC transitions.
+
+**Outcome.** *Pending.*
+
+**Lesson (provisional).** Operator-first-person vocabulary (`"my numerai"`, `"submitted my signal"`, `"my NMR stake"`) is the right Numerai-side filter. Caught real participants without surfacing the @numerai / @NumeraiCoE official accounts (which are out-of-scope per the new founders/core-team exclusion).
+
+---
+
+## 2026-05-05 — `@MattiasLamotte` (Outcome: pending)
+
+**Search query.** Same Numerai operator-first-person query as `@matlabulous` (n=25). Surfaced via 2023 *"My Numerai Signals rankings have plummeted since the default rank shifted to True Contribution"* post.
+
+**Who they are.** Multi-year Numerai Signals participant. Ships *BetaForesight* — a publicly-named model with ongoing methodology updates. Currently testing an LSTM regression layer for the directional classifier; previously analysed the V2-dataset depreciation impact on his correlation/TC scores. Tried building a market-neutral long-short strategy on top of his own Numerai rankings.
+
+**Conversion rationale at recommendation.** Real ML-researcher voice on Numerai-substantive posts. Public OSS performance metrics (CWMM, APCWNM, TC). Ships own model with public name. Engages with @numerai / @richardcraib in replies. Priority 2 (Numerai-orbit forecasters per audience-profile §2.2). Top reply-rate signal of this round's two recruit picks.
+
+**Outreach path.** TBD by Oak. Bridge shape candidate: methodology question on his BetaForesight LSTM directional-classifier *bearish/bullish mean-reversion stuck state* — specifically, what happens to the stuck-state when the eval signal comes from outside the model (independent evaluator with stake) vs inside the model (self-graded OSS performance window). Not answerable from his README; engages his stated current problem.
+
+**Outcome.** *Pending.*
+
+**Lesson (provisional).** *Mixed feeds (heavy political RTs alongside on-thesis builder posts) are not a §4 reject signal* — political-RT-side and builder-side coexist in the same account; the methodology question only has to land on the builder-side identity. Distinguishes from `@CoreyJMcDonald` shape (one TaoScout plug surrounded by 100% culture-war RTs — not a real builder identity at all) vs `@MattiasLamotte` (regular substantive BetaForesight builds *plus* unrelated political RTs — a real builder with a side identity). The decisive signal is whether the on-thesis posts are themselves substantive and recurring, not whether they're surrounded by off-thesis content.
+
+---
+
+## 2026-05-05 — `@aventurine_eth` (Skipped: amplifier audience overlaps the protocol's own audience)
+
+**Surfaced via.** Same Numerai query as `@matlabulous` and `@MattiasLamotte`.
+
+**Why skipped (Oak's call).** Sells Numerai prediction files via NumerBay (so technically a participant), but the X-feed is dominated by NumeraiCoE retweets + Art Blocks / NFT amplification. The amplifier-shape concern: *his audience IS Numerai's audience*. Amplifying Jinn through him would not extend reach to operators outside the Numerai loyalist circle — same audience would just see the message twice. Different from a true cross-cluster amplifier (e.g. `@VictorVL_EN` reaches Bittensor operators, not OLAS loyalists).
+
+**Lesson.** Audience-overlap is a Tier 3 disqualifier even when the candidate is a real participant. The amplifier value is in *audience extension*, not *audience reinforcement*. Future amplifier triage: ask *whose audience does this amplifier reach that the candidate's home protocol does not already reach?* If the answer is "the same audience", the amplifier is structurally redundant. Add to `audience-profile.md` §3 if pattern recurs.
+
+---
+
+## 2026-05-05 — `@danielderedev` / Dx (Outcome: pending)
+
+**Search query.** Polymarket-bot vocabulary surfaced him as a substantive commenter on an unrelated thread; profile-check then revealed sustained Bittensor mechanism-design essays. Specifically: `bird search "polymarket bot OR ..."` returned his post on execution-vs-forecasting alpha; subsequent `bird user-tweets danielderedev` confirmed the Ridges SN62 architecture post and the Numinous SN6 architecture post.
+
+**Who they are.** Bittensor participant-observer (Nigeria-based per `bird about`, with `Location accurate: No` flag). Multi-paragraph essayist on subnet mechanism design. Names *Ridges SN62* as a software-engineering execution market with the agent_main(input) → patch contract, Harbor sandbox, verifier-scores-result inner loop. Names *Numinous SN6* explicitly because it scores the agent itself, not the output. Frames TAO as monetising intelligence vs Bitcoin monetising security. Distinguishes execution alpha from forecasting alpha: *"the prediction stack is unbundling — forecasting gets cheaper, resolution gets more important, execution gets more profitable."* Self-describes using *"Cody inside real workflows for infra, security, research, prompt systems, code execution"* — operator-user, not subnet-team.
+
+**Conversion rationale at recommendation.** Exactly the participant-shape recruit Sprint #1 wants — Bittensor operator-user (not on any subnet team), thinks in mechanism-design terms, names the same primitives Jinn names. The bridge from his current "subnets like Ridges are worth watching" stance to Jinn is one step, not five. Priority 1 (Bittensor operator/contributor).
+
+**Outreach path.** TBD by Oak. Bridge shape candidate: extend-his-argument-one-step on the prediction-stack unbundling — *forecasting cheap, resolution important, execution profitable*. Methodology question: where in his three-layer split does the *evaluator's* stake sit, and what changes about resolution-market design when the resolver is themselves slashable on the resolution. Not answerable from any subnet's README; engages the layer he's already named but not yet stake-priced.
+
+**Outcome.** *Pending.*
+
+**Lesson (provisional).** Substantive Bittensor commentators do not surface under operator-first-person vocabulary (`"my miner on SN46"` yielded zero useful candidates). They surface as *substantive mid-thread commenters* on adjacent topics — @danielderedev was discovered on a Polymarket-bot search via his post distinguishing execution from forecasting alpha, then validated via `user-tweets`. Future Bittensor passes: pair subnet name + mechanism vocabulary (*"Numinous Brier"*, *"Ridges patch"*, *"Yuma weights"*) rather than operator-first-person. Update `search-strategy.md` §2 accordingly.
+
+**Caveat noted at recommendation.** `bird about` reports `Location accurate: No`. Could be VPN or location-misset. Not a hard kill given substantive multi-paragraph essay shape, but watch for inconsistencies in any reply. Score on content, not geography.
+
+---
+
 ## How to add an entry
 
 Append using the same shape: search query, who they are, conversion rationale, outreach path, outcome (or pending), lesson (if any). Date at the top.
