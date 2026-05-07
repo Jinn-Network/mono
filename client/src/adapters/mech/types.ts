@@ -192,7 +192,7 @@ export const JINN_ROUTER_ABI = [
     stateMutability: 'payable',
     inputs: [
       { name: 'taskCidDigest', type: 'bytes32' },
-      { name: 'solverTypeDigest', type: 'bytes32' },
+      { name: 'manifestDigest', type: 'bytes32' },
       {
         name: 'policy',
         type: 'tuple',
@@ -242,7 +242,7 @@ export const JINN_ROUTER_ABI = [
     inputs: [
       { name: 'creator', type: 'address', indexed: true },
       { name: 'taskId', type: 'uint256', indexed: true },
-      { name: 'solverTypeDigest', type: 'bytes32', indexed: true },
+      { name: 'manifestDigest', type: 'bytes32', indexed: true },
       { name: 'taskCidDigest', type: 'bytes32', indexed: false },
       { name: 'maxClaims', type: 'uint16', indexed: false },
       { name: 'requiredVerdicts', type: 'uint16', indexed: false },

@@ -799,6 +799,7 @@ __metadata:
   resolution: "@jinn-network/sdk@portal:../packages/sdk::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
     zod: "npm:^3.22.0"
+    zod-to-json-schema: "npm:^3.23.0"
   languageName: node
   linkType: soft
 
@@ -6266,7 +6267,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod-to-json-schema@npm:^3.25.1":
+"zod-to-json-schema@npm:^3.23.0, zod-to-json-schema@npm:^3.25.1":
   version: 3.25.2
   resolution: "zod-to-json-schema@npm:3.25.2"
   peerDependencies:

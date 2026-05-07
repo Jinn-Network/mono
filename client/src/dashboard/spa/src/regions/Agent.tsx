@@ -26,51 +26,81 @@ export function Agent({ agentGated = false }: AgentProps = {}): JSX.Element {
   useEffect(() => {
     if (!ref.current) return;
 
-    const term = new Terminal({
-      fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace',
-      fontSize: 13,
-      lineHeight: 1.3,
-      letterSpacing: 0,
-      theme: {
-        background: '#070d18',
-        foreground: '#f2f7fc',
-        cursor: '#dcb866',
-        selectionBackground: '#1f3a66',
-        black: '#0c1628',
-        red: '#a85a5a',
-        green: '#6a9b8f',
-        yellow: '#dcb866',
-        blue: '#7aa7dc',
-        magenta: '#7a6db0',
-        cyan: '#a8c8ea',
-        white: '#a4b0c2',
-        brightBlack: '#33394a',
-        brightRed: '#c87a7a',
-        brightGreen: '#8abbaf',
-        brightYellow: '#ead08e',
-        brightBlue: '#a8c8ea',
-        brightMagenta: '#9a8dd0',
-        brightCyan: '#cbdef3',
-        brightWhite: '#f2f7fc',
-      },
-      convertEol: true,
-      scrollback: 5000,
-      allowProposedApi: true,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
-    term.open(ref.current);
-    fit.fit();
-    const resizeObs = new ResizeObserver(() => {
-      try { fit.fit(); } catch { /* container too small etc */ }
-    });
-    resizeObs.observe(ref.current);
+    let disposed = false;
+    let fitFrame: number | null = null;
+    let term: Terminal | null = null;
+    let resizeObs: ResizeObserver | null = null;
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${window.location.host}/api/agent/ws`);
 
-    ws.onopen = () => setConnected(true);
+    const mountTerminal = (): Terminal | null => {
+      if (term || !ref.current) return term;
+      const nextTerm = new Terminal({
+        fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace',
+        fontSize: 13,
+        lineHeight: 1.3,
+        letterSpacing: 0,
+        theme: {
+          background: '#070d18',
+          foreground: '#f2f7fc',
+          cursor: '#dcb866',
+          selectionBackground: '#1f3a66',
+          black: '#0c1628',
+          red: '#a85a5a',
+          green: '#6a9b8f',
+          yellow: '#dcb866',
+          blue: '#7aa7dc',
+          magenta: '#7a6db0',
+          cyan: '#a8c8ea',
+          white: '#a4b0c2',
+          brightBlack: '#33394a',
+          brightRed: '#c87a7a',
+          brightGreen: '#8abbaf',
+          brightYellow: '#ead08e',
+          brightBlue: '#a8c8ea',
+          brightMagenta: '#9a8dd0',
+          brightCyan: '#cbdef3',
+          brightWhite: '#f2f7fc',
+        },
+        convertEol: true,
+        scrollback: 5000,
+        allowProposedApi: true,
+      });
+      const fit = new FitAddon();
+      nextTerm.loadAddon(fit);
+      nextTerm.loadAddon(new WebLinksAddon());
+      nextTerm.open(ref.current);
+
+      const safeFit = (): void => {
+        if (disposed || !ref.current) return;
+        if (ref.current.offsetWidth === 0 || ref.current.offsetHeight === 0) return;
+        try { fit.fit(); } catch { /* xterm can race layout during first paint */ }
+      };
+      fitFrame = window.requestAnimationFrame(safeFit);
+      resizeObs = new ResizeObserver(() => {
+        safeFit();
+      });
+      resizeObs.observe(ref.current);
+
+      nextTerm.onData((d) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ kind: 'input', data: d }));
+        }
+      });
+      nextTerm.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ kind: 'resize', cols, rows }));
+        }
+      });
+      term = nextTerm;
+      return nextTerm;
+    };
+
+    ws.onopen = () => {
+      setConnected(true);
+      mountTerminal();
+    };
     ws.onclose = () => setConnected(false);
     ws.onerror = () => setConnected(false);
     ws.onmessage = (msg) => {
@@ -87,7 +117,7 @@ export function Agent({ agentGated = false }: AgentProps = {}): JSX.Element {
           agentReady?: boolean;
         };
         if (parsed.kind === 'data' && typeof parsed.data === 'string') {
-          term.write(parsed.data);
+          term?.write(parsed.data);
         } else if (parsed.kind === 'meta') {
           setAutoMode({ active: !!parsed.autoMode, reason: parsed.reason ?? '' });
           if (typeof parsed.agentReady === 'boolean') {
@@ -106,31 +136,22 @@ export function Agent({ agentGated = false }: AgentProps = {}): JSX.Element {
               remediation: parsed.remediation,
             });
           } else {
-            term.write(`\r\n\x1b[31m[error] ${parsed.message ?? 'unknown error'}\x1b[0m\r\n`);
+            term?.write(`\r\n\x1b[31m[error] ${parsed.message ?? 'unknown error'}\x1b[0m\r\n`);
           }
         } else if (parsed.kind === 'exit') {
-          term.write(`\r\n\x1b[33m[claude session exited]\x1b[0m\r\n`);
+          term?.write(`\r\n\x1b[33m[claude session exited]\x1b[0m\r\n`);
         }
       } catch {
         // ignore unparseable frame
       }
     };
 
-    term.onData((d) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ kind: 'input', data: d }));
-      }
-    });
-    term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ kind: 'resize', cols, rows }));
-      }
-    });
-
     return () => {
+      disposed = true;
+      if (fitFrame !== null) window.cancelAnimationFrame(fitFrame);
       ws.close();
-      resizeObs.disconnect();
-      term.dispose();
+      resizeObs?.disconnect();
+      term?.dispose();
     };
   }, []);
 

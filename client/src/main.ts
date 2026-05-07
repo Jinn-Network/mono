@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
+import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
@@ -65,11 +66,11 @@ import {
   DEFAULT_HARNESS,
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
+import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import type { Harness } from './harnesses/types.js';
 import { createClients } from './adapters/mech/safe.js';
-import { collectTestnetAutoTaskGenerators } from './solver-types/index.js';
 import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
@@ -683,6 +684,23 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
   const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
   let corpusForApi: ReturnType<typeof createCorpus> | undefined;
+  // Launcher mode wiring (Task 6 of spec/2026-05-05-launcher-role-and-mode.md).
+  // The API server is constructed before bootstrap finishes, so the operator's
+  // Safe address and the prediction.v1 generator are not yet known at start-up.
+  // We capture both into closures here and let `addLauncherRoutes` read them
+  // lazily — by the time `/v1/launcher/status` is hit, both are populated.
+  let predictionGeneratorRef:
+    | { getState(): import('./solver-types/prediction-v1-auto.js').PredictionV1GeneratorStateSnapshot }
+    | undefined;
+  let safeAddressForLauncher: `0x${string}` | undefined;
+
+  // jinn-mono-hqz0: holder for SolverNet creation/launch endpoint deps.
+  // The routes register eagerly in startApiServer (Hono freezes its matcher
+  // on first request); subsystem init below populates `holder.current` and
+  // the route handlers dereference it per-request.
+  const solverNetEndpointsDepsHolder: {
+    current: import('./api/solvernets-endpoints.js').SolverNetsEndpointsDeps | undefined;
+  } = { current: undefined };
 
   let setupApiServer: ApiServer;
   try {
@@ -750,6 +768,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           ],
         },
       },
+      // jinn-mono-hqz0: SolverNet creation/launch endpoints. Routes register
+      // eagerly here; deps are populated by main.ts post-bootstrap via the
+      // holder, and each route handler reads `holder.current` per-request.
+      solverNetsLauncher: { holder: solverNetEndpointsDepsHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -808,6 +830,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         onClaudePathSelected: selectClaudePath,
         onSolverNetsUpdated: (solverNets) => {
           config.solverNets = solverNets as typeof config.solverNets;
+          // The prediction operator status is memoised per-`JinnConfig`
+          // reference; mutating in place leaves the cache pointing at the
+          // pre-edit snapshot. Drop the entry so the next /v1/status read
+          // (and thus Overview's `solverNet.enabled` gating) reflects the
+          // toggle immediately. (jinn-mono-l2zl.15.4.12)
+          invalidatePredictionOperatorStatusCache(config);
         },
       },
       status: {
@@ -824,6 +852,81 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         engine: config.engine,
         config,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+      },
+      // Launcher mode (Tasks 6 + 7). Deps are resolved lazily because the
+      // generator and Safe address are constructed after bootstrap, after
+      // this `startApiServer` call. By the time the SPA hits the route,
+      // bootstrap has completed and both refs are populated.
+      //
+      // Open-task-count is now real: it counts posted Tasks recorded against
+      // the creator Safe with the SolverNet's solver_type. The result is a
+      // strict superset of the in-flight count (we don't yet drop settled or
+      // failed Tasks; that lifecycle tracking lands with the router-watcher
+      // hardening lane, jinn-mono-l2zl.12). Reserved-budget and Safe-balance
+      // remain stubbed and are tracked for Task 8+.
+      //
+      // TODO(jinn-mono-l2zl.12): once Task lifecycle events are persisted,
+      // narrow `getOpenTaskCount` to states in
+      // ('open', 'claims-in-flight', 'fully-claimed') so the operator's
+      // "open Tasks" stat doesn't drift upward across the daemon's lifetime.
+      // TODO(jinn-mono launcher Task 8): real `getReservedBudgetWei`
+      // (sum of unconsumed claim payments across open Tasks) and
+      // `getSafeBalanceWei` (live `eth_getBalance` against the creator Safe).
+      launcher: {
+        getConfig: () => ({ solverNets: config.solverNets }),
+        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+        // Cache-invalidation hook retained for the operator-mode
+        // setup-endpoints flow; the launcher-mode PATCH route was retired
+        // by Task 22, so this currently fires only when operator mode
+        // mutates `solverNets`.
+        onSolverNetsUpdated: (solverNets) => {
+          config.solverNets = solverNets as typeof config.solverNets;
+          invalidatePredictionOperatorStatusCache(config);
+        },
+        getGeneratorState: (netName) => {
+          if (netName !== 'prediction') return undefined;
+          return predictionGeneratorRef?.getState();
+        },
+        getOpenTaskCount: (netName) => {
+          const net = config.solverNets?.[netName];
+          const solverType = net?.solverType;
+          if (!solverType || !safeAddressForLauncher) return 0;
+          return sharedStore.countPostedTasksByCreatorAndSolverType({
+            creatorSafeAddress: safeAddressForLauncher,
+            solverType,
+          });
+        },
+        getReservedBudgetWei: () => '0',
+        getSafeBalanceWei: () => '0',
+        safeAddress: () =>
+          safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000',
+        tasksDeps: {
+          // Resolved per-request for the same reason `safeAddress` is a
+          // closure — `safeAddressForLauncher` is undefined until bootstrap
+          // finishes. Before that, the response is an empty list, which is
+          // accurate (no posts can have happened pre-bootstrap).
+          get creatorAddress() {
+            return safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000';
+          },
+          fetchPostedTasks: ({ creatorAddress, limit, before }) => {
+            // No-op when bootstrap hasn't resolved a Safe yet.
+            if (creatorAddress === '0x0000000000000000000000000000000000000000') {
+              return [];
+            }
+            const opts: { creatorSafeAddress: string; limit: number; before?: string } = {
+              creatorSafeAddress: creatorAddress,
+              limit,
+            };
+            if (before) opts.before = before;
+            const rows = sharedStore.listPostedTasksByCreator(opts);
+            return rows.map((r) => ({
+              taskId: r.taskId,
+              taskCid: r.taskCid,
+              solverType: r.solverType ?? undefined,
+              postedAt: r.postedAt,
+            }));
+          },
+        },
       },
     });
   } catch (error) {
@@ -998,6 +1101,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     agentId,
     identityRegistryAddress,
   } = bootstrapResult;
+  // Now that bootstrap has resolved a Safe, expose it to the Launcher
+  // mode endpoint so `/v1/launcher/status.budget.safeAddress` is accurate
+  // on the very first SPA poll. (Task 6 of the launcher plan.)
+  safeAddressForLauncher = safeAddress;
 
   if (!mechAddress) {
     emitEnvelope({
@@ -1345,42 +1452,221 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     );
   }
 
-  // ── Auto Task generators (testnet only, opt-out via env) ─────────────────
-  const autoTasksDisabled =
-    process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
+  // ── SolverNet subsystem (Task 11 of solvernet-creation-and-launch.md) ─────
+  //
+  // Loads owned launched records from `~/.jinn-client/solvernets/launched/`,
+  // resumes any in-flight launch / lifecycle transitions, and starts the
+  // operator catalog refresher. Generator construction per launched record
+  // lands in Task 12; until then we expose `pendingGenerators` so the
+  // upcoming wiring has a clean handoff point.
+  //
+  // Day-1 SubgraphClient is the no-op stub — Task 25 wires the real
+  // subgraph extension. The launch state machine still resumes correctly
+  // through the receipt-confirmation path; only the mempool-drop fallback
+  // depends on subgraph reads.
+  let solverNetSubsystem: import('./solvernets/daemon-init.js').SolverNetSubsystem | undefined;
+  // Hoisted so the engine wiring below can pick the registry client up as
+  // its `manifestResolver` (Task 27 of the SolverNet creation-and-launch
+  // spec — task validation goes manifest → contract → schemas).
+  let solverNetRegistryClientForEngine:
+    | import('./solvernets/registry-client.js').SolverNetRegistryClient
+    | undefined;
+  if (agentId && identityRegistryAddress && config.network === 'testnet') {
+    const {
+      initSolverNetSubsystem,
+      createIpfsClientAdapter,
+      createNoopSubgraphClient,
+      createGraphqlSubgraphClient,
+      createMetadataPublisherFromViem,
+      createDefaultRegistryClient,
+    } = await import('./solvernets/daemon-init.js');
+    const { createSolverNetStore } = await import('./solvernets/store.js');
+
+    const solverNetStore = createSolverNetStore({ baseDir: config.earningDir });
+    const solverNetIpfs = createIpfsClientAdapter({
+      registryUrl: config.ipfsRegistryUrl,
+      gatewayUrl: config.ipfsGatewayUrl,
+    });
+    const solverNetSubgraph = config.subgraphUrl?.trim()
+      ? createGraphqlSubgraphClient({ url: config.subgraphUrl })
+      : createNoopSubgraphClient();
+    const solverNetPublisher = createMetadataPublisherFromViem({
+      identityRegistryAddress,
+      walletClient: agentClients.walletClient,
+      publicClient: agentClients.publicClient,
+    });
+    const solverNetRegistryClient = createDefaultRegistryClient({
+      ipfs: solverNetIpfs,
+      publisher: solverNetPublisher,
+      subgraph: solverNetSubgraph,
+      network: 'base-sepolia',
+    });
+    solverNetRegistryClientForEngine = solverNetRegistryClient;
+
+    const launcherSigner: import('./solvernets/registry-client.js').SignerWithAgentEoa = {
+      agentEoaAddress: privateKeyToAccount(agentPrivateKey).address as `0x${string}`,
+      agentEoaPrivateKey: agentPrivateKey,
+      agentId,
+    };
+
+    try {
+      solverNetSubsystem = await initSolverNetSubsystem({
+        store: solverNetStore,
+        ipfs: solverNetIpfs,
+        publisher: solverNetPublisher,
+        subgraph: solverNetSubgraph,
+        registryClient: solverNetRegistryClient,
+        network: 'base-sepolia',
+        resolveSigner: async () => launcherSigner,
+        lifecycleSigner: launcherSigner,
+        awaitTxConfirmation: async (txHash) => {
+          const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
+          return { blockNumber: Number(receipt.blockNumber) };
+        },
+      });
+      console.log(
+        `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s), ` +
+          `${solverNetSubsystem.pendingGenerators.length} ready for spawn (Task 12)`,
+      );
+
+      // jinn-mono-hqz0: populate the launcher endpoints' deps holder. The
+      // routes themselves were registered eagerly inside startApiServer
+      // (Hono's matcher freezes before the holder is filled, so handlers
+      // dereference holder.current per-request). Without this the SPA's
+      // /launcher list page 404s on /v1/solvernets/launched.
+      if (solverNetEndpointsDepsHolder) {
+        const { LaunchAction } = await import('./solvernets/launch-state-machine.js');
+        const { LifecycleTransition } = await import('./solvernets/lifecycle-transitions.js');
+        const awaitLauncherTxConfirmation = async (txHash: `0x${string}`) => {
+          const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
+          return { blockNumber: Number(receipt.blockNumber) };
+        };
+        const pendingGeneratorsRef = { current: solverNetSubsystem.pendingGenerators };
+        const launchAction = new LaunchAction({
+          store: solverNetStore,
+          ipfs: solverNetIpfs,
+          publisher: solverNetPublisher,
+          subgraph: solverNetSubgraph,
+          spawnGenerator: async () => {
+            /* Generators are spawned by main.ts post-launch loop;
+             * the launcher endpoint just persists the record here. */
+          },
+          awaitTxConfirmation: awaitLauncherTxConfirmation,
+        });
+        const lifecycleTransition = new LifecycleTransition({
+          store: solverNetStore,
+          registry: solverNetRegistryClient,
+          signer: launcherSigner,
+          subgraph: solverNetSubgraph,
+          awaitTxConfirmation: awaitLauncherTxConfirmation,
+        });
+        if (!safeAddressForLauncher) {
+          throw new Error('[main] safeAddressForLauncher missing at SolverNet endpoints registration');
+        }
+        solverNetEndpointsDepsHolder.current = {
+          store: solverNetStore,
+          launch: {
+            launchAction,
+            lifecycleTransition,
+            pendingGenerators: pendingGeneratorsRef,
+            signer: launcherSigner,
+            network: 'base-sepolia',
+            launcher: {
+              safeAddress: safeAddressForLauncher,
+              agentEoa: launcherSigner.agentEoaAddress,
+              agentId: launcherSigner.agentId,
+            },
+          },
+          catalog: solverNetSubsystem.catalog,
+          registry: solverNetRegistryClient,
+        };
+        console.log('[main] SolverNet endpoints deps populated (jinn-mono-hqz0)');
+      }
+    } catch (err) {
+      console.warn(
+        `[main] SolverNet subsystem init failed; continuing without it: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  } else {
+    console.log(
+      '[main] SolverNet subsystem: disabled ' +
+        '(requires testnet + agent_id + identity_registry_address — Task 11 scaffolding)',
+    );
+  }
+  // The catalog cache will be consumed by the API server in Tasks 14/15.
+  // The `pendingGenerators` set is iterated below to wire generators per
+  // launched record (Task 12).
+
+  // ── Auto Task generators (launched-record-driven) ────────────────────────
+  //
+  // Per spec/2026-05-05-solvernet-creation-and-launch.md §11 + Task 22 of the
+  // implementation plan, generator construction is wholly driven by the
+  // SolverNet launched-record subsystem. The legacy
+  // `collectTestnetAutoTaskGenerators` path (config-block-keyed Polymarket
+  // generator + role-based hot-spawn gate) is retired — SolverNet ownership
+  // is determined by which launched records the daemon owns, not by the
+  // operator-config role enum.
+  const autoTasksDisabled = process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
   const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
   const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
-  const { generators: autoTaskGenerators, logLines: autoTaskLogLines } = collectTestnetAutoTaskGenerators({
-    network: config.network,
-    rpcUrl: config.rpcUrl,
-    autoTasksDisabled,
-    env: process.env,
-    agentEoa: agentEoaAddress,
-    safeAddress,
-    agentPrivateKey,
-    predictionV1LauncherEnabled: config.predictionV1LauncherEnabled,
-    predictionV1WindowMs: config.predictionV1WindowMs,
-    predictionV1CadenceMs: config.predictionV1CadenceMs,
-    predictionV1MaxNewRoundsPerPoll: config.predictionV1MaxNewRoundsPerPoll,
-    predictionV1MaxNewRoundsPerDay: config.predictionV1MaxNewRoundsPerDay,
-    predictionV1MaxOpenRounds: config.predictionV1MaxOpenRounds,
-    predictionV1AllowlistConditionIds: config.predictionV1AllowlistConditionIds,
-    predictionV1BlocklistConditionIds: config.predictionV1BlocklistConditionIds,
-    predictionV1ResolveGapMs: config.predictionV1ResolveGapMs,
-  });
-  for (const line of autoTaskLogLines) {
-    console.log(line);
+  // ── SolverNet launched-record generators (Task 12 of
+  //     spec/2026-05-05-solvernet-creation-and-launch.md §11) ────────────────
+  //
+  // For each owned launched record where `status === 'launched'` and
+  // `generatorEnabled === true`, construct a prediction.v1 Polymarket
+  // generator wired to the live `recordRef` and `configRef` exposed by
+  // `initSolverNetSubsystem`. Lifecycle transitions (pause/resume/retire)
+  // and the SolverNet config API endpoint (Task 14) mutate these refs at
+  // runtime; the per-tick gate inside the generator picks the change up
+  // within one cadence — no daemon restart, no recreation.
+  const launchedRecordGenerators: Array<{
+    solverType: string;
+    generator: import('./tasks/sources.js').TaskGenerator;
+  }> = [];
+  if (solverNetSubsystem && !autoTasksDisabled) {
+    const { makePredictionV1GeneratorForLaunchedRecord } = await import(
+      './solver-types/prediction-v1-auto.js'
+    );
+    for (const pending of solverNetSubsystem.pendingGenerators) {
+      // Static deps (agent identity + Polymarket transport) are construction-
+      // time-fixed; runtime-editable settings flow through `configRef`.
+      const generator = makePredictionV1GeneratorForLaunchedRecord({
+        recordRef: pending.recordRef,
+        configRef: pending.configRef,
+        staticConfig: {
+          agentEoa: agentEoaAddress,
+          safeAddress,
+          agentPrivateKey,
+        },
+      });
+      launchedRecordGenerators.push({ solverType: 'prediction.v1', generator });
+      // First launched prediction.v1 generator becomes the legacy
+      // `predictionGeneratorRef` source for the launcher status endpoint
+      // (kept thin; multi-record launcher status lives in the launched-record
+      // surface — see spec §11/Task 14).
+      if (
+        !predictionGeneratorRef &&
+        typeof generator === 'function' &&
+        typeof (generator as { getState?: unknown }).getState === 'function'
+      ) {
+        predictionGeneratorRef =
+          generator as unknown as typeof predictionGeneratorRef;
+      }
+      console.log(
+        `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
+          `(prediction.v1, status=${pending.record.status})`,
+      );
+    }
   }
   if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
     // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
   }
+
   const taskSources = [
     new StaticConfiguredTaskSource(config.tasks),
-    ...autoTaskGenerators
-      .filter(({ solverType }) =>
-        solverNetRegistry.forSolverType(solverType, 'restoration')?.taskGenerator.enabled,
-      )
-      .map(({ solverType, generator }) => new GeneratedTaskSource(`generated:${solverType}`, generator)),
+    ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
+      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator),
+    ),
   ];
 
   // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
@@ -1482,6 +1768,22 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       deliveryDeps,
       implRegistry,
       solverNetRegistry,
+      // Spec §14, Task 28: per-launch claim eligibility filter. Operators
+      // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
+      // the engine refuses tasks whose `manifestDigest = keccak256(cid)`
+      // doesn't match a joined entry (plus a role gate). Absent when the
+      // operator hasn't joined any nets yet — the engine then falls back to
+      // the legacy solverType-keyed gate.
+      ...(config.joinedSolverNets
+        ? { joinedSolverNets: joinedSolverNetsViewFromConfig(config.joinedSolverNets) }
+        : {}),
+      // Spec §14: task validation resolves manifest → contract → schemas.
+      // Threaded only when the SolverNet registry client was constructed
+      // (testnet branch above). The engine treats absence as "schema
+      // validation skipped" — production callers always have it.
+      ...(solverNetRegistryClientForEngine
+        ? { manifestResolver: solverNetRegistryClientForEngine }
+        : {}),
       identityPublisher,
       reputationFeedback,
       operatorConfig,

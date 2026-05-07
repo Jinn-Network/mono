@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 
 /**
- * Reads the URL hash (after `#`) so the Configuration page can auto-expand
- * the section the operator deep-linked to (e.g. /configuration#solvernets/prediction
+ * Reads the URL hash (after `#`) so the Operator page can auto-expand
+ * the section the operator deep-linked to (e.g. /operator#solvernets/prediction
  * → expand the SolverNets section).
  */
 export function useHashSection(): string | null {

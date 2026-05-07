@@ -11,21 +11,35 @@ for the entity model that drives this schema.
 ```
 subgraph.yaml          per-dataSource manifest, default network: base-sepolia
 schema.graphql         entities: Operator, Execution, Validation, Feedback,
-                       FeedbackResponse, MetadataEntry, URIUpdate, RouterJob
+                       FeedbackResponse, MetadataEntry, URIUpdate, RouterJob,
+                       Task, TaskAttempt, Verdict, SolverNetManifestEvent
 networks.json          per-network addresses + start blocks (see "Networks")
 abis/                  real ABIs:
   IdentityRegistry.json
   ValidationRegistry.json
   ReputationRegistry.json
   JinnRouter.json (Phase 1 createRestoration/Evaluation + claimDelivery)
+  TaskCoordinator.json (V3 task lifecycle — claim/submit/verdict/finalize)
+  JinnRouterV3.json (V3 router — task creation, mech routing, refunds)
 src/utils.ts           shared helpers — payload decoding, id construction,
-                       manifest-ref parsing
+                       manifest-ref parsing, V3 task ids,
+                       SolverNet manifest key parsing
 src/handlers/
   identity.ts          Registered, MetadataSet, URIUpdated
+                       (also emits SolverNetManifestEvent rows for
+                        `solvernet-manifest:<cid>` keys)
   validation.ts        ValidationRequest, ValidationResponse
   reputation.ts        NewFeedback, FeedbackRevoked, ResponseAppended
   router.ts            RestorationJobCreated, EvaluationJobCreated,
                        DeliveryClaimed
+  task-coordinator.ts  V3 TaskCoordinator: TaskCreated, TaskClaimed,
+                       TaskAttemptRequestRegistered, TaskSubmitted,
+                       EvaluationClaimed, VerdictRequestRegistered,
+                       VerdictDelivered, AttemptFinalized,
+                       TaskCreationCreditLocked, TaskAttemptExpired
+  jinn-router-v3.ts    V3 router: TaskCreated (with budget), TaskAttemptCreated,
+                       EvaluationAttemptCreated, SolutionDeliveryClaimed,
+                       VerdictDeliveryClaimed, TaskBudgetRefunded
 ```
 
 ## Networks
@@ -123,3 +137,41 @@ Execution.manifestCid` at query time when the heuristic misses.
   and signatures come from the canonical reference repo and the deployment
   artifacts. First testnet deployment of an envelope publish should be
   cross-checked against `Operator.agentURI` + `Execution.manifestCid`.
+
+## V3 task lifecycle and SolverNet manifest events
+
+The V3 datasources (`TaskCoordinator` + `JinnRouterV3`) cover the post-Phase 1b
+task primitive — see `contracts/src/tasks/TaskCoordinator.sol` and
+`contracts/src/staking/JinnRouterV3.sol`. Both emit paired events for every
+state transition; the subgraph load-or-creates entity rows keyed by composite
+ids (`<taskId>` for `Task`, `<taskId>-<attemptIndex>` for `TaskAttempt`,
+`<taskId>-<attemptIndex>-<verdictIndex>` for `Verdict`) so events can arrive
+in either order.
+
+Authoritative split:
+- **TaskCoordinator** is the source of truth for state machine transitions
+  (claimed → submitted → finalized; verdict claimed → delivered) and for the
+  manifest digest + deadline fields on the task.
+- **JinnRouterV3** carries the JINN budgets (`solutionBudget`,
+  `verdictBudget`), mech routing details, and the on-chain `requestId`s pinned
+  to each attempt / verdict.
+
+The base-sepolia addresses come from
+`contracts/deployment-task-coordinator-router-v3-baseSepolia-fast.json`:
+
+| Component         | Address                                      |
+|-------------------|----------------------------------------------|
+| TaskCoordinator   | `0x9ce736d3CB367cC5Db538B7962bdf416EbD7451B` |
+| JinnRouterV3      | `0xdC9BCcEB7aca21Ad4Ca2Fc5B4d7aea6b4F6CedD9` |
+
+Mainnet addresses are not yet wired into `networks.json` — V3 has not been
+deployed to base mainnet at the time of this writing.
+
+`SolverNetManifestEvent` rows are produced by the existing `IdentityRegistry`
+datasource. Whenever a launcher writes
+`setMetadata(agentId, "solvernet-manifest:<cid>", payload)` on its operator
+NFT, the handler emits an immutable per-write row keyed by `<txHash>-<logIndex>`.
+Latest-state lookups still use the `MetadataEntry` row for the same key; the
+manifest event entity preserves the full append history. This is the data
+that powers `api.solvernets.listRegistry` (operator catalog) and the
+launched-record-aware claim eligibility filter.

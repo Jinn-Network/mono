@@ -1,0 +1,212 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { SpendPanel } from './SpendPanel.js';
+import type {
+  LauncherStatusResponse,
+  LaunchedSolverNetRecord,
+  SolverNetManifestV1,
+} from '../../api/types.js';
+
+function buildRecord(
+  overrides: Partial<LaunchedSolverNetRecord> = {},
+): LaunchedSolverNetRecord {
+  return {
+    schemaVersion: 'solvernet.launched.v1',
+    solverNetId: 'sn-1',
+    manifestCid: 'bafybeig',
+    manifestHash: '0xabc',
+    launcherAgentId: '5474',
+    launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+    launchedAt: '2026-05-05T15:00:00Z',
+    status: 'launched',
+    statusUpdatedAt: '2026-05-05T15:00:00Z',
+    generatorEnabled: true,
+    registry: {},
+    ...overrides,
+  };
+}
+
+function buildManifest(
+  overrides: Partial<SolverNetManifestV1> = {},
+): SolverNetManifestV1 {
+  return {
+    schemaVersion: 'solvernet.manifest.v1',
+    solverNetId: 'sn-1',
+    network: 'base-sepolia',
+    name: 'Polymarket',
+    description: '',
+    launcher: {
+      safeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+      agentEoa: '0xeoa',
+      agentId: '5474',
+    },
+    contract: {
+      id: 'prediction',
+      version: 'v1',
+      schemas: { task: {}, solution: {}, verdict: {} },
+      claimPolicyDefaults: {
+        mode: 'parallel',
+        maxClaims: 1,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+      },
+      credentialRequirements: { creator: [], solver: [], evaluator: [] },
+      evaluationFunction: {
+        id: 'e',
+        deterministic: true,
+        inputs: [],
+        output: '',
+        implementation: '',
+      },
+      aggregationFunction: { id: 'a', deterministic: true, inputs: [], output: '' },
+    },
+    solutionPriceWei: '100',
+    verdictPriceWei: '50',
+    openRoles: ['solver', 'evaluator'],
+    createdAt: '2026-05-05T00:00:00Z',
+    launchedAt: '2026-05-05T00:00:00Z',
+    signature: { alg: 'eip-191', signer: '0xabc', value: '0xabc' },
+    ...overrides,
+  };
+}
+
+function buildStatusResponse(
+  netName: string,
+  safeBalanceWei: string,
+): LauncherStatusResponse {
+  return {
+    schemaVersion: 1,
+    generatedAt: '2026-05-05T15:00:00Z',
+    nets: [
+      {
+        name: netName,
+        generator: { state: 'active', cadenceMs: 21600000, stale: false },
+        openTasks: 0,
+        budget: {
+          safeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+          safeBalanceWei,
+          reservedBudgetWei: '0',
+        },
+      },
+    ],
+  };
+}
+
+function wrap(ui: JSX.Element): ReturnType<typeof render> {
+  const qc = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+describe('SpendPanel', () => {
+  it('renders manifest prices and Safe address up front', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      buildStatusResponse('Polymarket', '1500000000000000000'),
+    );
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest()}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-safe-balance').textContent,
+      ).toMatch(/wei/),
+    );
+    expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toContain('100 wei');
+    expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toContain('50 wei');
+    expect(screen.getByTestId('launcher-launched-spend-safe-address').textContent).toMatch(/0xE64b…B5CF/);
+  });
+
+  it('projects runway as Safe balance / per-Task cost', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      buildStatusResponse('Polymarket', '1500'),
+    );
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest({ solutionPriceWei: '100', verdictPriceWei: '50' })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-runway').textContent,
+      ).toContain('10 Tasks'),
+    );
+    // Per-Task cost = 100 + 50 = 150 wei.
+    expect(screen.getByTestId('launcher-launched-spend-per-task').textContent).toContain('150 wei');
+  });
+
+  it('falls back to "balance unavailable" when no matching launcher-status entry', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      buildStatusResponse('SomeOtherNet', '999'),
+    );
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest({ name: 'Polymarket' })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-safe-balance').textContent,
+      ).toBe('unavailable'),
+    );
+    expect(
+      screen.getByTestId('launcher-launched-spend-runway').textContent,
+    ).toMatch(/manifest or balance unavailable/);
+  });
+
+  it('renders error indicator when fetchLauncherStatus rejects', async () => {
+    const fetchLauncherStatus = vi.fn().mockRejectedValue(new Error('500 boom'));
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest()}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('launcher-launched-spend-error')).toBeTruthy(),
+    );
+  });
+
+  it('still renders without a manifest (read-only fields go to —)', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '',
+      nets: [],
+    } satisfies LauncherStatusResponse);
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+    // No manifest → no entry match → safe balance "unavailable".
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-safe-balance').textContent,
+      ).toBe('unavailable'),
+    );
+    expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toBe('—');
+    expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toBe('—');
+  });
+});

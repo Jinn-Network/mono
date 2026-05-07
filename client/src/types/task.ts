@@ -18,7 +18,26 @@ export const TaskSchema = z.object({
   id: z.string().optional(),
   description: z.string().min(1).optional(),
   context: z.record(z.unknown()).optional(),
+  /**
+   * @deprecated Derived from `${contractId}.${contractVersion}` post Task 24
+   * of spec/2026-05-05-solvernet-creation-and-launch.md. Kept on the runtime
+   * Task for migration-period routing; new code should rely on
+   * `contractId` / `contractVersion` and on `solverNetManifestCid` for
+   * protocol identity.
+   */
   solverType: z.string().optional(),
+  /** SolverNet contract id (e.g. `prediction`). Spec §14. */
+  contractId: z.string().optional(),
+  /** SolverNet contract version (e.g. `v1`). Spec §14. */
+  contractVersion: z.string().optional(),
+  /**
+   * BINDING — IPFS CID of the launched SolverNet manifest. The on-chain
+   * `manifestDigest` is `keccak256(solverNetManifestCid)`. Required for
+   * tasks posted through the production adapter (mech); optional on the
+   * runtime Task type so tests / kitchen-sink consumers don't have to
+   * supply it for paths that never hit `postTask`.
+   */
+  solverNetManifestCid: z.string().optional(),
   role: z.enum(['restoration', 'evaluation']).optional(),
   attemptId: z.string().optional(),
   attemptNumber: z.number().int().optional(),
@@ -44,7 +63,21 @@ export interface Task {
   id: string;
   description: string;
   context?: Record<string, unknown>;
+  /**
+   * @deprecated Derived from `${contractId}.${contractVersion}` post Task 24
+   * of spec/2026-05-05-solvernet-creation-and-launch.md.
+   */
   solverType?: string;
+  /** SolverNet contract id (e.g. `prediction`). Spec §14. */
+  contractId?: string;
+  /** SolverNet contract version (e.g. `v1`). Spec §14. */
+  contractVersion?: string;
+  /**
+   * BINDING — IPFS CID of the launched SolverNet manifest. The on-chain
+   * `manifestDigest` is `keccak256(solverNetManifestCid)`. Required for
+   * tasks posted through the production adapter (mech).
+   */
+  solverNetManifestCid?: string;
   role?: 'restoration' | 'evaluation';
   attemptId?: string;
   attemptNumber?: number;
@@ -77,6 +110,9 @@ export function parseTask(input: unknown): Task {
     throw new Error('Task spec.kind is retired; use top-level solverType');
   }
   const solverType = parsed.solverType ?? signedTask?.solverType;
+  const contractId = parsed.contractId ?? signedTask?.contractId;
+  const contractVersion = parsed.contractVersion ?? signedTask?.contractVersion;
+  const solverNetManifestCid = parsed.solverNetManifestCid ?? signedTask?.solverNetManifestCid;
   const spec = parsedSpec ?? signedTask?.spec;
   const claimPolicy = parsed.claimPolicy ?? signedTask?.claimPolicy;
   return {
@@ -84,6 +120,9 @@ export function parseTask(input: unknown): Task {
     description,
     context: parsed.context ?? signedRuntime?.context,
     solverType,
+    contractId,
+    contractVersion,
+    solverNetManifestCid,
     role: parsed.role ?? signedTask?.role,
     attemptId: parsed.attemptId ?? signedRuntime?.attemptId,
     attemptNumber: parsed.attemptNumber ?? signedRuntime?.attemptNumber,

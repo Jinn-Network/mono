@@ -45,6 +45,7 @@ describe('makePredictionApyV0Generator', () => {
       agentEoa: account.address as `0x${string}`,
       safeAddress,
       agentPrivateKey: pk,
+      solverNetManifestCid: 'bafyfixturecid',
     });
     const state = await gen();
     expect(state).not.toBeNull();

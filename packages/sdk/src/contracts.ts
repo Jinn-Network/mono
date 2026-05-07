@@ -12,6 +12,7 @@ import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
 } from './payloads/swe-rebench-v2.js';
+import { type JsonSchema, zodToJsonSchema } from './json-schema.js';
 
 export type SolverNetContractRole = 'creator' | 'solver' | 'evaluator';
 export type PayloadKind = 'task' | 'solution' | 'verdict';
@@ -41,36 +42,60 @@ export interface SolverNetAggregationFunction {
 }
 
 export interface SolverNetClaimPolicyDefaults {
-  mode: 'exclusive' | 'parallel';
+  mode: 'parallel' | 'serial';
   maxClaims: number;
   maxClaimsPerOperator: number;
   claimLeaseTtlSeconds: number;
 }
 
+/**
+ * A schema entry on a SolverNet contract. Carries both the canonical wire
+ * format (JSON Schema, embedded into manifests) and a Zod validator
+ * (daemon-side ergonomic check). See `spec/2026-05-05-solvernet-creation-and-launch.md` §8.
+ *
+ * The two forms are kept in sync at definition time via `zodToJsonSchema`.
+ */
+export interface SolverNetContractSchema {
+  zod: z.ZodTypeAny;
+  json: JsonSchema;
+}
+
 export interface SolverNetContract {
+  /** Stable contract identity (e.g. `'prediction'`). */
+  id: string;
+  /** Contract version label (e.g. `'v1'`). */
+  version: string;
   name: string;
-  solverType: SupportedSolverType;
   schemas: {
-    task: z.ZodTypeAny;
-    solution: z.ZodTypeAny;
-    verdict: z.ZodTypeAny;
+    task: SolverNetContractSchema;
+    solution: SolverNetContractSchema;
+    verdict: SolverNetContractSchema;
   };
   claimPolicyDefaults: SolverNetClaimPolicyDefaults;
   credentialRequirements: Record<SolverNetContractRole, CredentialRequirement[]>;
   evaluationFunction: SolverNetEvaluationFunction;
   aggregationFunction: SolverNetAggregationFunction;
-  defaultRuntimePlugins: string[];
 }
 
 export type SolverNetContractMap = Record<SupportedSolverType, SolverNetContract>;
 
 export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
+  id: 'prediction',
+  version: 'v1',
   name: 'Prediction',
-  solverType: 'prediction.v1',
   schemas: {
-    task: PredictionV1TaskSchema,
-    solution: PredictionV1RestorationPayloadSchema,
-    verdict: PredictionV1VerdictPayloadSchema,
+    task: {
+      zod: PredictionV1TaskSchema,
+      json: zodToJsonSchema(PredictionV1TaskSchema),
+    },
+    solution: {
+      zod: PredictionV1RestorationPayloadSchema,
+      json: zodToJsonSchema(PredictionV1RestorationPayloadSchema),
+    },
+    verdict: {
+      zod: PredictionV1VerdictPayloadSchema,
+      json: zodToJsonSchema(PredictionV1VerdictPayloadSchema),
+    },
   },
   claimPolicyDefaults: {
     mode: 'parallel',
@@ -111,16 +136,25 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     output: 'trailing mean brierSpread',
     windowDays: 84,
   },
-  defaultRuntimePlugins: ['bundled:jinn-prediction-plugin'],
 };
 
 export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
+  id: 'swe-rebench-v2',
+  version: 'v1',
   name: 'SWE-rebench v2',
-  solverType: 'swe-rebench-v2.v1',
   schemas: {
-    task: SweRebenchV2TaskSchema,
-    solution: SweRebenchV2SolutionPayloadSchema,
-    verdict: SweRebenchV2VerdictPayloadSchema,
+    task: {
+      zod: SweRebenchV2TaskSchema,
+      json: zodToJsonSchema(SweRebenchV2TaskSchema),
+    },
+    solution: {
+      zod: SweRebenchV2SolutionPayloadSchema,
+      json: zodToJsonSchema(SweRebenchV2SolutionPayloadSchema),
+    },
+    verdict: {
+      zod: SweRebenchV2VerdictPayloadSchema,
+      json: zodToJsonSchema(SweRebenchV2VerdictPayloadSchema),
+    },
   },
   claimPolicyDefaults: {
     mode: 'parallel',
@@ -161,7 +195,6 @@ export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     output: 'structured network-result (mean/complexity-weighted/byLanguage/frontier/parityTrip)',
     windowDays: 30,
   },
-  defaultRuntimePlugins: ['bundled:swe-rebench-v2-runtime'],
 };
 
 export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
@@ -169,8 +202,32 @@ export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
   'swe-rebench-v2.v1': SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT,
 };
 
-export function getSolverNetContract(solverType: string): SolverNetContract | undefined {
-  return SOLVER_NET_CONTRACTS[solverType as SupportedSolverType];
+/**
+ * Look up a SolverNet contract template by stable identity ({id, version}).
+ *
+ * The legacy string-keyed signature (`getSolverNetContract('prediction.v1')`)
+ * was removed in Task 30 of `spec/2026-05-05-solvernet-creation-and-launch.md`
+ * alongside `SolverNetContract.solverType`.
+ */
+export function getSolverNetContract(
+  ref: { id: string; version: string },
+): SolverNetContract | undefined {
+  const key = `${ref.id}.${ref.version}`;
+  return SOLVER_NET_CONTRACTS[key as SupportedSolverType];
+}
+
+/**
+ * Internal helper: derives the legacy `solverType` string (`${id}.${version}`)
+ * from a contract id and version.
+ *
+ * @internal Used only by daemon-internal harness dispatch's compatibility
+ * layer (spec §15 non-goal: the internal `solverType` alias in harness
+ * dispatch is intentionally retained for one cycle past Task 30). NOT
+ * re-exported from the `@jinn-network/sdk/solvernets` barrel and not part
+ * of the SDK's public surface.
+ */
+export function solverTypeAlias(ref: { id: string; version: string }): string {
+  return `${ref.id}.${ref.version}`;
 }
 
 export interface PayloadValidationIssue {
@@ -213,8 +270,16 @@ function issuesFrom(error: z.ZodError): PayloadValidationIssue[] {
   }));
 }
 
+function parseSolverTypeString(solverType: string): { id: string; version: string } | undefined {
+  const dot = solverType.lastIndexOf('.');
+  if (dot <= 0 || dot === solverType.length - 1) return undefined;
+  return { id: solverType.slice(0, dot), version: solverType.slice(dot + 1) };
+}
+
 function getSchema(solverType: string, kind: PayloadKind): z.ZodTypeAny | undefined {
-  return getSolverNetContract(solverType)?.schemas[kind];
+  const ref = parseSolverTypeString(solverType);
+  if (!ref) return undefined;
+  return getSolverNetContract(ref)?.schemas[kind].zod;
 }
 
 function validateWithSchema<T>(solverType: string, kind: PayloadKind, value: unknown): PayloadValidationResult<T> {

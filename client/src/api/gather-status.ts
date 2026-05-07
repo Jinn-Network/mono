@@ -26,7 +26,11 @@ import {
   gatherPortfolioV0Status,
   DEFAULT_ENGINE_WORKING_DIR_ROOT,
 } from './portfolio-v0-build.js';
-import { gatherPredictionV1Status, type PredictionV1Status } from './prediction-v1-build.js';
+import {
+  gatherPredictionV1Status,
+  type PredictionOperatorStatusForApi,
+  type PredictionV1Status,
+} from './prediction-v1-build.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
   buildPredictionOperatorStatus,
@@ -45,6 +49,21 @@ const ERC20_BALANCE_OF_ABI = [
 
 const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
+
+/**
+ * Drop any cached prediction operator status for `config`.
+ *
+ * The cache key is the live `JinnConfig` object reference. When the SPA
+ * mutates `config.solverNets` in place via `onSolverNetsUpdated`
+ * (see `main.ts`), the WeakMap still resolves to the previously-built
+ * status — leaving Overview reading stale operator metadata
+ * even though the operator just toggled it on. Invalidating here keeps
+ * the Overview gating in sync with the latest config without a daemon
+ * restart. (jinn-mono-l2zl.15.4.12)
+ */
+export function invalidatePredictionOperatorStatusCache(config: JinnConfig): void {
+  predictionOperatorStatusCache.delete(config);
+}
 
 export interface StatusGatherConfig {
   earningDir: string;
@@ -113,6 +132,17 @@ function predictionOperatorUnavailable(
     },
   };
 
+  // Roles are best-effort: an unavailable status path means the daemon
+  // could not load the SolverNet, so we surface whatever the operator has
+  // configured (post-migration) without trying to default further.
+  const rawRoles = (net as { roles?: unknown } | undefined)?.roles;
+  const netRoles = Array.isArray(rawRoles)
+    ? rawRoles.filter(
+        (r): r is 'solving' | 'evaluating' =>
+          r === 'solving' || r === 'evaluating',
+      )
+    : [];
+
   return {
     kind: 'prediction.v1.operatorStatus',
     ok: false,
@@ -121,6 +151,7 @@ function predictionOperatorUnavailable(
       name,
       enabled: net?.enabled ?? false,
       solverType: net?.solverType ?? 'prediction.v1',
+      roles: netRoles,
       harness: net?.harness,
       taskGeneratorEnabled: net?.taskGenerator.enabled ?? false,
     },
@@ -130,8 +161,52 @@ function predictionOperatorUnavailable(
   };
 }
 
+/**
+ * Project the daemon-side `PredictionOperatorStatus` (full role typing) into
+ * the API-facing variant. With Task 22 of
+ * spec/2026-05-05-solvernet-creation-and-launch.md the operator role enum
+ * is `'solving' | 'evaluating'` everywhere; this projection is structural
+ * (no narrowing required), retained as a thin boundary for clarity and to
+ * keep the `PredictionOperatorStatusForApi` type stable.
+ */
+function narrowOperatorStatusForApi(
+  status: PredictionOperatorStatus,
+): PredictionOperatorStatusForApi {
+  const roles = status.solverNet.roles.filter(
+    (r): r is 'solving' | 'evaluating' => r === 'solving' || r === 'evaluating',
+  );
+  const hasOperatorRole = roles.length > 0;
+  const diagnostics = hasOperatorRole
+    ? status.diagnostics.filter((d) => d.code !== 'prediction_solvernet_disabled')
+    : status.diagnostics;
+  const disabledNextAction =
+    status.nextAction?.description === 'Enable the Prediction SolverNet before participating.';
+  const nextDiagnosticAction = diagnostics.find(
+    (d) => (d.severity === 'error' || d.severity === 'warning') && d.nextAction,
+  )?.nextAction;
+
+  return {
+    ...status,
+    ok: diagnostics.every((diagnostic) => diagnostic.severity !== 'error'),
+    diagnostics,
+    nextAction: hasOperatorRole && disabledNextAction
+      ? (nextDiagnosticAction ?? {
+          description: 'Waiting for Tasks. SolverNet active, Harness loaded; no incoming Tasks since startup.',
+        })
+      : status.nextAction,
+    solverNet: {
+      ...status.solverNet,
+      // `roles[]` is canonical for operator participation. Preserve the
+      // legacy field for older consumers, but derive it from operator-visible
+      // roles so stale `enabled: false` configs do not hide active operators.
+      enabled: hasOperatorRole,
+      roles,
+    },
+  };
+}
+
 function predictionV1Unavailable(
-  operator: PredictionOperatorStatus | null,
+  operator: PredictionOperatorStatusForApi | null,
   operatorError: string,
 ): PredictionV1Status {
   return {
@@ -376,15 +451,16 @@ export async function gatherGatheredStatusRaw(
     portfolioV0 = undefined;
   }
 
-  let predictionOperator: PredictionOperatorStatus | null = null;
+  let predictionOperator: PredictionOperatorStatusForApi | null = null;
   let predictionOperatorError: string | undefined;
   if (status?.config) {
     try {
-      predictionOperator = await getCachedPredictionOperatorStatus(
+      const raw = await getCachedPredictionOperatorStatus(
         status.config,
         status.configPath ?? '<default>',
         'prediction',
       );
+      predictionOperator = narrowOperatorStatusForApi(raw);
     } catch (error) {
       predictionOperatorError = errorMessage(error);
     }

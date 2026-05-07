@@ -2,7 +2,7 @@
 pragma solidity ^0.8.25;
 
 interface ITaskPolicyHook {
-    function canClaim(address operator, uint256 taskId, bytes32 solverTypeDigest) external view returns (bool);
+    function canClaim(address operator, uint256 taskId, bytes32 manifestDigest) external view returns (bool);
 }
 
 error TCZeroAddress();
@@ -106,7 +106,7 @@ contract TaskCoordinator {
     struct TaskRecord {
         address creator;
         bytes32 taskCidDigest;
-        bytes32 solverTypeDigest;
+        bytes32 manifestDigest;
         TaskStatus status;
         TaskPolicy policy;
         uint32 claimCount;
@@ -178,7 +178,7 @@ contract TaskCoordinator {
     event TaskCreated(
         uint256 indexed taskId,
         address indexed creator,
-        bytes32 indexed solverTypeDigest,
+        bytes32 indexed manifestDigest,
         bytes32 taskCidDigest,
         uint16 maxClaims,
         uint16 requiredVerdicts,
@@ -276,12 +276,12 @@ contract TaskCoordinator {
     function createTask(
         address creator,
         bytes32 taskCidDigest,
-        bytes32 solverTypeDigest,
+        bytes32 manifestDigest,
         TaskPolicy calldata policy
     ) external onlyRouter returns (uint256 taskId) {
         if (!initialized) revert TCNotInitialized();
         if (creator == address(0)) revert TCZeroAddress();
-        if (taskCidDigest == bytes32(0) || solverTypeDigest == bytes32(0)) revert TCZeroValue();
+        if (taskCidDigest == bytes32(0) || manifestDigest == bytes32(0)) revert TCZeroValue();
 
         TaskPolicy memory normalizedPolicy = _normalizePolicy(policy);
         _validatePolicy(normalizedPolicy);
@@ -290,7 +290,7 @@ contract TaskCoordinator {
         _tasks[taskId] = TaskRecord({
             creator: creator,
             taskCidDigest: taskCidDigest,
-            solverTypeDigest: solverTypeDigest,
+            manifestDigest: manifestDigest,
             status: TaskStatus.Open,
             policy: normalizedPolicy,
             claimCount: 0,
@@ -302,7 +302,7 @@ contract TaskCoordinator {
         emit TaskCreated(
             taskId,
             creator,
-            solverTypeDigest,
+            manifestDigest,
             taskCidDigest,
             normalizedPolicy.maxClaims,
             normalizedPolicy.evaluationPolicy.requiredVerdicts,
@@ -332,7 +332,7 @@ contract TaskCoordinator {
             revert TCOperatorClaimLimitReached(taskId, operator);
         }
         if (policy.policyHook != address(0)) {
-            if (!ITaskPolicyHook(policy.policyHook).canClaim(operator, taskId, record.solverTypeDigest)) {
+            if (!ITaskPolicyHook(policy.policyHook).canClaim(operator, taskId, record.manifestDigest)) {
                 revert TCPolicyHookRejected(taskId, operator);
             }
         }

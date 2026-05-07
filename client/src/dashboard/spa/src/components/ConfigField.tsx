@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { RestartPill } from './RestartPill.js';
 
 /**
- * Label + control wrapper used inside Configuration sections. Optional
+ * Label + control wrapper used inside Operator configuration sections. Optional
  * `restartRequired` flag surfaces a per-field RestartPill so the operator
  * sees which fields will trigger a daemon restart on save.
  */

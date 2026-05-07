@@ -51,7 +51,26 @@ const NoLegacyKindSchema = z.record(z.unknown()).superRefine((spec, ctx) => {
 const TaskV1Fields = {
   schemaVersion: z.literal('task.v1'),
   id: z.string().min(1),
+  /**
+   * Legacy SolverType identity string (e.g. `prediction.v1`). Daemon-internal
+   * dispatch still uses it during migration; new code should derive it as
+   * ``${contractId}.${contractVersion}`` from the BINDING fields below.
+   * Spec §14 (Task 24, 2026-05-05-solvernet-creation-and-launch.md).
+   * @deprecated Use `contractId` + `contractVersion` (and `solverNetManifestCid`
+   *   for protocol identity).
+   */
   solverType: z.string().min(1),
+  /**
+   * BINDING — IPFS CID of the launched SolverNet manifest the task is posted
+   * under. Becomes `manifestDigest = keccak256(solverNetManifestCid)` on
+   * chain (replaces the prior `keccak256(solverType)` digest). Per spec §14
+   * this is the protocol identity; per-launch eligibility derives from it.
+   */
+  solverNetManifestCid: z.string().min(1),
+  /** SolverNet contract id (e.g. `prediction`). See spec §14. */
+  contractId: z.string().min(1),
+  /** SolverNet contract version (e.g. `v1`). See spec §14. */
+  contractVersion: z.string().min(1),
   role: z.enum(['restoration', 'evaluation']).default('restoration'),
   description: z.string().min(1),
   window: WindowSchema,

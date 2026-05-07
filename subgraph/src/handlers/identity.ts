@@ -11,6 +11,7 @@ import {
   Execution,
   MetadataEntry,
   URIUpdate,
+  SolverNetManifestEvent,
 } from "../../generated/schema";
 
 import {
@@ -20,6 +21,8 @@ import {
   executionId,
   executionIdFallback,
   metadataEntryId,
+  parseSolverNetManifestKey,
+  SOLVERNET_MANIFEST_PREFIX,
 } from "../utils";
 
 import { updateHarnessRollup } from "./harness-rollup";
@@ -76,6 +79,28 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
     op.agentWallet = metadataValue as Bytes;
     op.save();
     return;
+  }
+
+  // SolverNet launcher manifests: `setMetadata(agentId, "solvernet-manifest:<cid>", payload)`.
+  // Emit an immutable per-write event row so the operator catalog API can replay
+  // history; the running `MetadataEntry` row carries the latest payload.
+  if (metadataKey.startsWith(SOLVERNET_MANIFEST_PREFIX)) {
+    let evtId =
+      event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
+    let evt = new SolverNetManifestEvent(evtId);
+    evt.agentId = agentId;
+    evt.operator = op.id;
+    evt.metadataKey = metadataKey;
+    evt.manifestCid = parseSolverNetManifestKey(metadataKey);
+    evt.payload = metadataValue as Bytes;
+    evt.blockNumber = event.block.number;
+    evt.transactionIndex = event.transaction.index.toI32();
+    evt.logIndex = event.logIndex;
+    evt.timestamp = event.block.timestamp;
+    evt.txHash = event.transaction.hash;
+    evt.save();
+    // Fall through: the catch-all branch below also persists this as a
+    // generic MetadataEntry so existing consumers keep working.
   }
 
   // Try parsing as an execution-kind prefix.

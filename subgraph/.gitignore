@@ -4,3 +4,5 @@ build/
 .yarn/
 .pnp.*
 *.log
+tests/.latest.json
+tests/.bin/

@@ -70,6 +70,37 @@ const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {
   claimLeaseTtlSeconds: 30 * 60,
 };
 
+/**
+ * Spec §14 (Task 24): a Task carries `contractId` + `contractVersion` (BINDING)
+ * and a derivable `solverType = `${contractId}.${contractVersion}``. When the
+ * caller only supplies a legacy `solverType`, derive the BINDING fields from
+ * its `<id>.<version>` shape; fall back to `('legacy', 'v0')` so signing never
+ * produces an empty BINDING field.
+ */
+function deriveSolverType(state: Task): string {
+  if (state.contractId && state.contractVersion) {
+    return `${state.contractId}.${state.contractVersion}`;
+  }
+  return 'legacy';
+}
+
+function deriveContractIdVersion(
+  state: Task,
+  solverType: string,
+): { contractId: string; contractVersion: string } {
+  if (state.contractId && state.contractVersion) {
+    return { contractId: state.contractId, contractVersion: state.contractVersion };
+  }
+  const dot = solverType.lastIndexOf('.');
+  if (dot > 0 && dot < solverType.length - 1) {
+    return {
+      contractId: solverType.slice(0, dot),
+      contractVersion: solverType.slice(dot + 1),
+    };
+  }
+  return { contractId: solverType || 'legacy', contractVersion: 'v0' };
+}
+
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
 
@@ -222,7 +253,17 @@ export class MechAdapter implements ExecutionAdapter {
 
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
-    const solverTypeDigest = keccak256(toBytes(signedTask.solverType));
+    // Task 24 (spec/2026-05-05-solvernet-creation-and-launch.md §14): the
+    // on-chain digest is now manifest-bound — `keccak256(manifestCid)` —
+    // replacing the prior `keccak256(solverType)` derivation. This makes
+    // operator eligibility per-launch, not per-protocol.
+    if (!signedTask.solverNetManifestCid) {
+      throw new PermanentError(
+        `Cannot post task ${signedTask.id}: signed task is missing solverNetManifestCid ` +
+        `(BINDING — required for keccak256(manifestCid) digest derivation).`,
+      );
+    }
+    const manifestDigest = keccak256(toBytes(signedTask.solverNetManifestCid));
     const policy = this.contractPolicyForTask(restorationState);
 
     const taskSubmission = await submitTask(
@@ -231,7 +272,7 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.safeAddress,
       this.config.routerAddress,
       restorationDataHex,
-      solverTypeDigest,
+      manifestDigest,
       policy,
       deliveryRate,
       deliveryRate,
@@ -269,10 +310,28 @@ export class MechAdapter implements ExecutionAdapter {
     if (state.attemptNumber !== undefined) extras['attemptNumber'] = state.attemptNumber;
     if (state.restorationRequestId) extras['restorationRequestId'] = state.restorationRequestId;
 
+    // Task 24: BINDING SolverNet manifest CID + contract id/version.
+    // The runtime Task may be missing them when the daemon falls back to
+    // ad-hoc posting paths (legacy / tests). For those we derive the
+    // contract id/version from solverType and require the caller to surface
+    // the missing manifest cid downstream — postTask() throws on missing
+    // solverNetManifestCid before submitTask is invoked.
+    if (!state.solverNetManifestCid) {
+      throw new PermanentError(
+        `Cannot sign task ${state.id}: missing solverNetManifestCid ` +
+        `(BINDING — spec/2026-05-05-solvernet-creation-and-launch.md §14).`,
+      );
+    }
+    const solverType = state.solverType ?? deriveSolverType(state);
+    const { contractId, contractVersion } = deriveContractIdVersion(state, solverType);
+
     const taskDoc = {
       schemaVersion: 'task.v1',
       id: state.id,
-      solverType: state.solverType ?? 'legacy',
+      solverType,
+      contractId,
+      contractVersion,
+      solverNetManifestCid: state.solverNetManifestCid,
       role: state.role ?? 'restoration',
       description: state.description,
       window: state.window ?? { startTs: now, endTs: now + 86_400_000 },

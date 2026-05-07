@@ -33,6 +33,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         'solver-net': { type: 'string' },
         'solver-type': { type: 'string' },
         'spec-file': { type: 'string' },
+        'manifest-cid': { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
       },
@@ -241,10 +242,42 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     const overlay = specOverlay ?? {};
     const taskKind = overlay.solverType ?? requestedSolverType ?? solverTypeFromNet ?? 'prediction.v1';
     const taskWindow = overlay.window ?? { startTs: Date.now(), endTs: Date.now() + 86_400_000 };
+    // Task 24 (spec/2026-05-05-solvernet-creation-and-launch.md §14): the
+    // signed task must carry `solverNetManifestCid` so the on-chain digest
+    // is `keccak256(manifestCid)`. Resolution order: explicit
+    // --manifest-cid flag → joinedSolverNets[--solver-net].manifestCid.
+    // Without one we refuse to submit; admin paths posting orphan tasks
+    // need to supply a cid.
+    const explicitManifestCid = parsed.values['manifest-cid'] as string | undefined;
+    const joinedManifestCid = requestedSolverNet
+      ? config.joinedSolverNets?.[requestedSolverNet]?.manifestCid
+      : undefined;
+    const solverNetManifestCid = explicitManifestCid ?? joinedManifestCid;
+    if (!solverNetManifestCid) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message:
+            '--manifest-cid is required (or --solver-net pointing at an entry in joinedSolverNets with a manifestCid). ' +
+            'Spec/2026-05-05-solvernet-creation-and-launch.md §14: the on-chain manifestDigest derives from keccak256(manifestCid).',
+          exampleCli:
+            'jinn tasks submit --id my-task --description "..." --solver-type prediction.v1 --manifest-cid <bafy…> --dry-run',
+          details: { field: '--manifest-cid', expected: 'IPFS CID of the launched SolverNet manifest' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    const dotIdx = taskKind.lastIndexOf('.');
+    const contractId = dotIdx > 0 ? taskKind.slice(0, dotIdx) : taskKind;
+    const contractVersion = dotIdx > 0 ? taskKind.slice(dotIdx + 1) : 'v0';
     const taskDoc: TaskV1 = {
       schemaVersion: 'task.v1',
       id,
       solverType: taskKind,
+      contractId,
+      contractVersion,
+      solverNetManifestCid,
       role: 'restoration',
       description,
       window: taskWindow,
@@ -271,6 +304,9 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       description,
       ...(specOverlay ?? {}),
       solverType: taskKind,
+      contractId,
+      contractVersion,
+      solverNetManifestCid,
       signedTask,
     };
     const postResult = await postingService.postCandidate(

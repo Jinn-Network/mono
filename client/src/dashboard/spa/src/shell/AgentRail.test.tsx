@@ -13,7 +13,9 @@ vi.mock('../regions/Agent.js', () => ({
 describe('AgentRail', () => {
   it('renders the Claude eyebrow + Agent placeholder', () => {
     render(<AgentRail agentGated={false} />);
-    expect(screen.getByText(/claude/i)).toBeTruthy();
+    const eyebrow = screen.getByText(/claude/i);
+    expect(eyebrow).toBeTruthy();
+    expect(eyebrow.parentElement?.classList.contains('agent-rail')).toBe(true);
     expect(screen.getByTestId('agent-stub')).toBeTruthy();
   });
 });

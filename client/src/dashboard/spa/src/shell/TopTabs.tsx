@@ -2,7 +2,8 @@ import { Link, useLocation } from 'wouter';
 
 const TABS = [
   { path: '/overview', label: 'Overview' },
-  { path: '/configuration', label: 'Configuration' },
+  { path: '/operator', label: 'Operator' },
+  { path: '/launcher', label: 'Launcher' },
   { path: '/leaderboard', label: 'Leaderboard' },
 ] as const;
 

@@ -3,15 +3,23 @@
   "base-sepolia": {
     "IdentityRegistry": {
       "address": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
-      "startBlock": 22000000
+      "startBlock": 41100000
     },
     "ReputationRegistry": {
       "address": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
-      "startBlock": 22000000
+      "startBlock": 41100000
     },
     "JinnRouter": {
       "address": "0x7c502a4288C4f4279edbb363d692f530200e22dC",
-      "startBlock": 22000000
+      "startBlock": 41100000
+    },
+    "TaskCoordinator": {
+      "address": "0x9ce736d3CB367cC5Db538B7962bdf416EbD7451B",
+      "startBlock": 41153289
+    },
+    "JinnRouterV3": {
+      "address": "0xdC9BCcEB7aca21Ad4Ca2Fc5B4d7aea6b4F6CedD9",
+      "startBlock": 41153291
     }
   },
   "base": {

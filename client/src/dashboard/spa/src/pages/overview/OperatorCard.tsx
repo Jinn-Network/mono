@@ -3,17 +3,27 @@ import { Link } from 'wouter';
 /**
  * Operator-side state for one *enabled* SolverNet on Overview. Distinct
  * from NetworkCard: NetworkCard is public counters; OperatorCard is "you"
- * — your role, your live state, and a deep-link into the per-net config.
+ * — your active roles, your live state, and a deep-link into the per-net
+ * config. The card renders one or both of "Solver" / "Evaluator" pills
+ * based on the operator's current configuration.
  */
+export type OperatorCardRole = 'solving' | 'evaluating';
+
 export interface OperatorCardProps {
   name: string;
-  role: 'solving' | 'evaluating';
+  /** Active operator roles. Empty array renders a placeholder rather than
+   *  inventing a role — that situation indicates a misconfigured net. */
+  roles: OperatorCardRole[];
   state: 'live' | 'available' | 'coming_soon';
   /** Operator-facing message describing what the node is waiting for / doing. */
   waitingMessage?: string;
 }
 
-export function OperatorCard({ name, role, state, waitingMessage }: OperatorCardProps): JSX.Element {
+function roleLabel(role: OperatorCardRole): string {
+  return role === 'solving' ? 'Solver' : 'Evaluator';
+}
+
+export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCardProps): JSX.Element {
   const stateColor =
     state === 'live' ? 'var(--vow-green)' : state === 'available' ? 'var(--fg-muted)' : 'var(--fg-dim)';
   return (
@@ -53,11 +63,34 @@ export function OperatorCard({ name, role, state, waitingMessage }: OperatorCard
         </span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
-        <span style={{ color: 'var(--fg)', fontSize: '14px' }}>
-          Role <span style={{ color: 'var(--fg-muted)' }}>·</span> {role}
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--fg)', fontSize: '14px' }}>
+          <span style={{ color: 'var(--fg-muted)' }}>{roles.length > 1 ? 'Roles' : 'Role'}</span>
+          <span style={{ color: 'var(--fg-muted)' }}>·</span>
+          {roles.length === 0 ? (
+            <span style={{ color: 'var(--fg-dim)' }}>none</span>
+          ) : (
+            roles.map((role, idx) => (
+              <span
+                key={role}
+                data-role={role}
+                style={{
+                  fontSize: '11px',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: 'var(--fg)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '999px',
+                  padding: '2px 10px',
+                  marginLeft: idx === 0 ? 0 : '4px',
+                }}
+              >
+                {roleLabel(role)}
+              </span>
+            ))
+          )}
         </span>
         <Link
-          href={`/configuration#solvernets/${name}`}
+          href={`/operator#solvernets/${name}`}
           style={{
             color: 'var(--accent-sky)',
             fontSize: '11px',

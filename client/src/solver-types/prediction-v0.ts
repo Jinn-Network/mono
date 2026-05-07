@@ -1,4 +1,3 @@
-import { BASE_SEPOLIA_FEEDS } from '../venues/chainlink/feeds.js';
 import {
   predictionV1TemplateNeedsReadCurrent,
   resolvePredictionV1Template,
@@ -7,6 +6,16 @@ import { makePredictionV1Generator, type PredictionV1AutoConfig } from './predic
 import type { SolverTypeDefinition } from './solver-type.js';
 import { PREDICTION_V1_KIND } from './constants.js';
 
+/**
+ * Legacy Chainlink prediction.v1 SolverType — retained for spec parsing only.
+ * This module is not registered in the SOLVER_TYPES dispatch table; the
+ * Polymarket-driven `predictionV1` definition in `./prediction-v1.ts` is the
+ * canonical entry. Task 22 of
+ * spec/2026-05-05-solvernet-creation-and-launch.md retired the
+ * `getTestnetAutoConfig` plumbing; existing test consumers wire
+ * `makePredictionV1Generator` (the Chainlink-specific factory in
+ * `./prediction-v0-auto.ts`) directly.
+ */
 export const legacyChainlinkPredictionV1: SolverTypeDefinition<PredictionV1AutoConfig> = {
   solverType: PREDICTION_V1_KIND,
   async parseSpec(raw, deps) {
@@ -21,20 +30,6 @@ export const legacyChainlinkPredictionV1: SolverTypeDefinition<PredictionV1AutoC
     return { window: task.window, spec: task.spec, eligibility: task.eligibility };
   },
   buildGenerator: (config) => makePredictionV1Generator(config),
-  getTestnetAutoConfig: (ctx) => {
-    if (ctx.network !== 'testnet') return undefined;
-    return {
-      feed: BASE_SEPOLIA_FEEDS['ETH / USD'],
-      feedDescription: 'ETH / USD',
-      venue: 'chainlink-base-sepolia',
-      rpcUrl: ctx.rpcUrl,
-      agentEoa: ctx.agentEoa,
-      safeAddress: ctx.safeAddress,
-      agentPrivateKey: ctx.agentPrivateKey,
-      windowDurationMs: ctx.predictionV1WindowMs,
-      resolveGapMs: ctx.predictionV1ResolveGapMs,
-    };
-  },
   ui: {
     description: 'Price threshold prediction (Chainlink oracle)',
     category: 'prediction',

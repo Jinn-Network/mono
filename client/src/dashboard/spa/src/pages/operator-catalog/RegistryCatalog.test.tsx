@@ -1,0 +1,191 @@
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { Router } from 'wouter';
+import { memoryLocation } from 'wouter/memory-location';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+/**
+ * Tests for the operator-side registry catalog. Each test mocks
+ * `api.solvernets.listRegistry` per its scenario; the dynamic-import dance
+ * mirrors `Overview.test.tsx` so the mock takes effect before the component
+ * picks up the api module.
+ */
+
+const listRegistryMock = vi.fn();
+
+vi.mock('../../api/client.js', () => ({
+  api: {
+    solvernets: {
+      listRegistry: () => listRegistryMock(),
+    },
+  },
+}));
+
+const { RegistryCatalog } = await import('./RegistryCatalog.js');
+
+function withProviders(node: JSX.Element, path = '/operator'): JSX.Element {
+  const { hook } = memoryLocation({ path });
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={qc}>
+      <Router hook={hook}>{node}</Router>
+    </QueryClientProvider>
+  );
+}
+
+describe('RegistryCatalog', () => {
+  it('shows the spec §12 empty-state copy when no SolverNets are launched', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(/no launched solvernets available\./i),
+    ).toBeTruthy();
+  });
+
+  it('renders one card per registry summary with status badges and prices', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        {
+          manifestCid: 'bafybeiaaa',
+          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
+          name: 'Prediction Markets',
+          network: 'base-sepolia',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '1000000000000000', // 0.001 ETH
+          verdictPriceWei: '500000000000000', // 0.0005 ETH
+          openRoles: ['solver', 'evaluator'],
+          anchorBlock: 1,
+        },
+        {
+          manifestCid: 'bafybeibbb',
+          solverNetId: 'agent9999_prediction.v1-1_bbbbbbbb',
+          name: 'Sports Prediction',
+          network: 'base-sepolia',
+          launcherAgentId: '9999',
+          launcherSafeAddress: '0xAA112233445566778899AABBCCDDEEFF11223344',
+          status: 'paused',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '2000000000000000',
+          verdictPriceWei: '1000000000000000',
+          openRoles: ['solver'],
+          anchorBlock: 2,
+        },
+        {
+          manifestCid: 'bafybeiccc',
+          solverNetId: 'agent1234_prediction.v1-1_cccccccc',
+          name: 'Retired Net',
+          network: 'base-sepolia',
+          launcherAgentId: '1234',
+          launcherSafeAddress: '0x0000000000000000000000000000000000000000',
+          status: 'retired',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '1000000000000000',
+          verdictPriceWei: '500000000000000',
+          openRoles: [],
+          anchorBlock: 3,
+        },
+      ],
+      lastRefreshedAt: '2026-05-05T01:00:00Z',
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(3),
+    );
+
+    expect(screen.getByText('Prediction Markets')).toBeTruthy();
+    expect(screen.getByText('Sports Prediction')).toBeTruthy();
+    expect(screen.getByText('Retired Net')).toBeTruthy();
+
+    // Status badges reflect each summary's status verbatim.
+    const badges = screen.getAllByTestId('registry-status-badge');
+    expect(badges.map((b) => b.getAttribute('data-status'))).toEqual([
+      'launched',
+      'paused',
+      'retired',
+    ]);
+
+    // Open-role chips render for the launched + paused entries.
+    const roleChips = screen.getAllByTestId('registry-open-role');
+    expect(roleChips.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('routes the Join CTA to /operator/join/<manifestCid> for launched nets', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        {
+          manifestCid: 'bafybeiaaa',
+          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
+          name: 'Prediction Markets',
+          network: 'base-sepolia',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '1000000000000000',
+          verdictPriceWei: '500000000000000',
+          openRoles: ['solver'],
+          anchorBlock: 1,
+        },
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    const cta = await screen.findByTestId('registry-join-cta');
+    expect(cta.getAttribute('href')).toBe('/operator/join/bafybeiaaa');
+  });
+
+  it('shows a loading state while the query resolves', () => {
+    // Never-resolving promise keeps the query pending.
+    listRegistryMock.mockReturnValue(new Promise(() => undefined));
+    render(withProviders(<RegistryCatalog />));
+    expect(screen.getByTestId('registry-catalog-loading')).toBeTruthy();
+  });
+
+  it('shows an error banner with retry when the query fails', async () => {
+    listRegistryMock.mockRejectedValue(new Error('upstream subgraph error'));
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-error')).toBeTruthy(),
+    );
+    expect(screen.getByText(/upstream subgraph error/i)).toBeTruthy();
+    expect(screen.getByTestId('registry-catalog-retry')).toBeTruthy();
+  });
+
+  it('surfaces lastRefreshedAt and lastError from the response envelope', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [],
+      lastRefreshedAt: '2026-05-05T01:23:00Z',
+      lastError: { message: 'subgraph 502', at: '2026-05-05T01:24:00Z' },
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-meta')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('registry-catalog-meta').textContent).toContain(
+      '2026-05-05',
+    );
+    expect(screen.getByTestId('registry-catalog-warn').textContent).toContain(
+      'subgraph 502',
+    );
+  });
+});

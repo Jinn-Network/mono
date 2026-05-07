@@ -4,11 +4,15 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Store } from '../../../src/store/store.js';
-import { TaskEngine } from '../../../src/harnesses/engine/engine.js';
+import { TaskEngine, type ManifestResolver } from '../../../src/harnesses/engine/engine.js';
 import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
 import type { Task } from '../../../src/types/task.js';
-import { makePredictionV1Task } from '../impls/prediction-v1-test-helpers.js';
+import {
+  makePredictionV1Task,
+  TEST_PREDICTION_V1_MANIFEST_CID,
+} from '../impls/prediction-v1-test-helpers.js';
+import { makeStubManifestResolver } from './manifest-resolver-stub.js';
 
 function stubHarness(overrides: Partial<Harness> = {}): Harness {
   return {
@@ -63,6 +67,7 @@ describe('prediction.v1 runtime gate', () => {
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
       implRegistry: { findFor: () => stubHarness({ canAttempt }) },
+      manifestResolver: makeStubManifestResolver(),
     });
     const task = {
       ...makePredictionV1Task(),
@@ -89,6 +94,7 @@ describe('prediction.v1 runtime gate', () => {
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
       implRegistry: { findFor: () => stubHarness({ canAttempt }) },
+      manifestResolver: makeStubManifestResolver(),
     });
     const task = makePredictionV1Task();
 
@@ -103,5 +109,133 @@ describe('prediction.v1 runtime gate', () => {
       reason: "impl 'prediction-v1-test-harness' cannot attempt task: operator policy declined",
     });
     expect(canAttempt).toHaveBeenCalledWith(task);
+  });
+
+  // Task 27 of `spec/2026-05-05-solvernet-creation-and-launch.md` — the
+  // §14 task validation pipeline: resolve manifest → contract → schemas.
+  describe('Task 27 — manifest-backed task validation', () => {
+    function makeEngine(opts: {
+      manifestResolver?: ManifestResolver;
+      canAttempt?: (task: Task) => Promise<{ ok: true } | { ok: false; reason: string }>;
+    } = {}): TaskEngine {
+      const canAttempt = opts.canAttempt ?? (async () => ({ ok: true as const }));
+      return new TaskEngine({
+        store,
+        paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
+        implRegistry: { findFor: () => stubHarness({ canAttempt }) },
+        ...(opts.manifestResolver ? { manifestResolver: opts.manifestResolver } : {}),
+      });
+    }
+
+    it('resolves the manifest, validates the body, and dispatches via the contract id+version alias', async () => {
+      const resolver = makeStubManifestResolver();
+      const canAttempt = vi.fn(async () => ({ ok: true as const }));
+      const findFor = vi.fn((ctx: { solverType: string; role?: string }) => {
+        if (ctx.solverType === 'prediction.v1' && ctx.role === 'restoration') {
+          return stubHarness({ canAttempt });
+        }
+        return undefined;
+      });
+      const engine = new TaskEngine({
+        store,
+        paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
+        implRegistry: { findFor },
+        manifestResolver: resolver,
+      });
+      const task = makePredictionV1Task();
+
+      const accept = await engine.canAcceptTask({
+        // Routing alias parameter intentionally left unset — the engine
+        // should derive `prediction.v1` from `task.contractId/Version`.
+        taskRole: 'restoration',
+        task,
+      });
+
+      expect(accept).toEqual({ ok: true });
+      expect(resolver.getManifest).toHaveBeenCalledWith({
+        manifestCid: TEST_PREDICTION_V1_MANIFEST_CID,
+      });
+      // Harness lookup keyed by `${contractId}.${contractVersion}`.
+      expect(findFor).toHaveBeenCalledWith({
+        solverType: 'prediction.v1',
+        role: 'restoration',
+      });
+      expect(canAttempt).toHaveBeenCalledWith(task);
+    });
+
+    it('surfaces an explicit failure when manifest resolution throws', async () => {
+      const failingResolver: ManifestResolver = {
+        getManifest: vi.fn(async () => {
+          throw new Error('manifest not found for cid');
+        }),
+      };
+      const engine = makeEngine({ manifestResolver: failingResolver });
+      const task = makePredictionV1Task({
+        solverNetManifestCid: 'bafy-does-not-exist',
+      });
+
+      const accept = await engine.canAcceptTask({
+        solverType: 'prediction.v1',
+        taskRole: 'restoration',
+        task,
+      });
+
+      expect(accept.ok).toBe(false);
+      if (!accept.ok) {
+        expect(accept.reason).toMatch(/manifest resolution failed/);
+        expect(accept.reason).toMatch(/bafy-does-not-exist/);
+      }
+    });
+
+    it('rejects a task when contractId disagrees with the manifest', async () => {
+      const engine = makeEngine({ manifestResolver: makeStubManifestResolver() });
+      const task = makePredictionV1Task({
+        contractId: 'forecasting' as 'prediction',
+      });
+
+      const accept = await engine.canAcceptTask({
+        taskRole: 'restoration',
+        task,
+      });
+
+      expect(accept.ok).toBe(false);
+      if (!accept.ok) {
+        expect(accept.reason).toMatch(/contractId 'forecasting' does not match manifest contract\.id 'prediction'/);
+      }
+    });
+
+    it('rejects a task body that fails the resolved contract schema', async () => {
+      const engine = makeEngine({ manifestResolver: makeStubManifestResolver() });
+      const task = {
+        ...makePredictionV1Task(),
+        spec: { source: { venue: 'polymarket' } },
+      } as unknown as Task;
+
+      const accept = await engine.canAcceptTask({
+        taskRole: 'restoration',
+        task,
+      });
+
+      expect(accept.ok).toBe(false);
+      if (!accept.ok) {
+        expect(accept.reason).toMatch(/prediction\.v1 task failed validation/);
+      }
+    });
+
+    it('skips manifest validation when no resolver is wired and no CID is supplied (legacy / health-check path)', async () => {
+      const engine = makeEngine();
+      const task: Task = {
+        id: 'health-check',
+        description: 'health check',
+      };
+
+      const accept = await engine.canAcceptTask({
+        // No solverType either — this is the legacy health-check shape.
+        taskRole: 'restoration',
+        task,
+      });
+
+      expect(accept).toEqual({ ok: true });
+    });
   });
 });

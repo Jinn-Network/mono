@@ -3,7 +3,7 @@ import { useState } from 'react';
 /** Collapsed disclosure at the end of Overview that holds power-user
  *  details (raw fleet state, full claim history, env provenance). Empty
  *  for now — content lifts in as we identify what genuinely belongs here
- *  vs in Configuration vs in a future Activity page. */
+ *  vs in Operator configuration vs the Activity surface. */
 export function AdvancedDetails(): JSX.Element {
   const [open, setOpen] = useState(false);
   return (

@@ -1,20 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { Router, Route, Switch } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
-import { ConfigurationPage } from './pages/Configuration.js';
+import { OperatorPage } from './pages/Operator.js';
+import { LauncherPage } from './pages/Launcher.js';
+import { LauncherCreatePage } from './pages/LauncherCreate.js';
+import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 
-// Configuration + Overview pages both useQuery for the daemon API; mock so
-// the routing tests don't depend on a live server.
+// Operator + Overview + Launcher pages all useQuery for the daemon API;
+// mock so the routing tests don't depend on a live server.
 vi.mock('./api/client.js', () => ({
   api: {
     getBootstrap: async () => ({}),
-    getStatus: async () => ({}),
+    getStatus: async () => ({ activity: { counts: {}, recent: [] } }),
     getSolverNets: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
     claimRewards: async () => ({ ok: true }),
     restartDaemon: async () => ({ ok: true }),
+    solvernets: {
+      listDrafts: async () => ({ drafts: [] }),
+      getDraft: async () => ({}),
+      createDraft: async () => ({
+        schemaVersion: 'solvernet.draft.v1',
+        draftId: 'd-routing-test',
+        completedSteps: [],
+        createdAt: '2026-05-05T00:00:00Z',
+        updatedAt: '2026-05-05T00:00:00Z',
+      }),
+      updateDraft: async () => ({}),
+      deleteDraft: async () => ({ ok: true }),
+      launch: async () => ({ solverNetId: '', status: 'launching', pollUrl: '' }),
+      transitionLifecycle: async () => ({}),
+      updateGeneratorConfig: async () => ({}),
+      get: async () => ({}),
+      listLaunched: async () => ({ records: [] }),
+      listRegistry: async () => ({ summaries: [], lastRefreshedAt: null, lastError: null }),
+      getManifest: async () => ({}),
+    },
   },
 }));
 
@@ -34,7 +57,7 @@ describe('App routes', () => {
       withProviders(
         <Switch>
           <Route path="/overview"><OverviewPage /></Route>
-          <Route path="/configuration"><ConfigurationPage /></Route>
+          <Route path="/operator"><OperatorPage /></Route>
         </Switch>,
         '/overview',
       ),
@@ -44,18 +67,95 @@ describe('App routes', () => {
     expect(screen.getByText(/jinn earned/i)).toBeTruthy();
   });
 
-  it('renders ConfigurationPage on /configuration', () => {
+  it('renders OperatorPage on /operator', async () => {
     render(
       withProviders(
         <Switch>
           <Route path="/overview"><OverviewPage /></Route>
-          <Route path="/configuration"><ConfigurationPage /></Route>
+          <Route path="/operator"><OperatorPage /></Route>
         </Switch>,
-        '/configuration',
+        '/operator',
       ),
     );
-    // Configuration is composed of three section cards; the SolverNets head
-    // is the most stable assertion since it never collapses to nothing.
-    expect(screen.getByText(/solvernets/i)).toBeTruthy();
+    expect(screen.getByTestId('operator-activity')).toBeTruthy();
+    // Operator is composed of activity plus the former configuration section
+    // cards; the SolverNets head is the most stable assertion since it never
+    // collapses to nothing.
+    await waitFor(() => expect(
+      screen.getByText((_, el) =>
+        el?.tagName === 'SPAN' && el.textContent === 'SolverNets',
+      ),
+    ).toBeTruthy());
+  });
+
+  it('renders LauncherPage on /launcher', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/launcher/create"><LauncherCreatePage /></Route>
+          <Route path="/launcher/launched/:solverNetId">
+            <LauncherLaunchedPage />
+          </Route>
+          <Route path="/launcher"><LauncherPage /></Route>
+        </Switch>,
+        '/launcher',
+      ),
+    );
+    // No owned launched records yet -> empty state surfaces (spec §10).
+    await waitFor(() =>
+      expect(screen.getByText(/no solvernets created yet\./i)).toBeTruthy(),
+    );
+  });
+
+  // ── New SolverNet creation/launch routes ──
+  // /launcher/create renders the 5-step wizard (Task 18); /launcher/launched/:id
+  // renders the post-launch dashboard (Task 19). The routing test asserts the
+  // route matches and the dashboard shell mounts without crashing.
+
+  it('renders LauncherCreatePage wizard on /launcher/create', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/launcher/create"><LauncherCreatePage /></Route>
+          <Route path="/launcher/launched/:solverNetId">
+            <LauncherLaunchedPage />
+          </Route>
+          <Route path="/launcher"><LauncherPage /></Route>
+        </Switch>,
+        '/launcher/create',
+      ),
+    );
+    // The wizard shows a loading state while the draft is created on mount,
+    // then advances to Step 1.
+    expect(screen.getByTestId('launcher-create-loading')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('launcher-create-step-1')).toBeTruthy(),
+    );
+  });
+
+  it('renders LauncherLaunchedPage on /launcher/launched/:solverNetId and exposes the param', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/launcher/create"><LauncherCreatePage /></Route>
+          <Route path="/launcher/launched/:solverNetId">
+            <LauncherLaunchedPage />
+          </Route>
+          <Route path="/launcher"><LauncherPage /></Route>
+        </Switch>,
+        '/launcher/launched/agent-1_prediction.v1-1_abcdef01',
+      ),
+    );
+    // The dashboard polls `api.solvernets.get(:id)` on mount; while the query
+    // is in flight the loading state shows. Once the mocked stub resolves the
+    // record query falls into the error path (the stub returns `{}`); either
+    // way the route is mounted under its outermost test id.
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId('launcher-launched-loading') ??
+          screen.queryByTestId('launcher-launched-error') ??
+          screen.queryByTestId('launcher-launched'),
+      ).toBeTruthy(),
+    );
   });
 });

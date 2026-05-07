@@ -478,3 +478,191 @@ type FreezeViolation @entity(immutable: true) {
   "codeDigest seen on the current (violating) frozen-mode envelope"
   envelopeCodeDigest: String!
 }
+
+# ── V3 task lifecycle (TaskCoordinator + JinnRouterV3) ────────────────────────
+
+"""
+A V3 task minted by `JinnRouterV3.createTask`. The router relays the bundle
+into `TaskCoordinator`, which is the source of truth for claim/submit/verdict
+state machines. Indexed from BOTH datasources — the router emits creation
+budget, the coordinator emits the manifest hashes and deadlines.
+"""
+type Task @entity(immutable: false) {
+  "taskId as decimal string"
+  id: ID!
+
+  taskId: BigInt!
+  creator: Bytes!
+
+  "keccak256 of canonical task manifest bytes"
+  manifestDigest: Bytes!
+
+  "keccak256 of the task CID bytes (commitment to off-chain task definition)"
+  taskCidDigest: Bytes!
+
+  "Maximum concurrent claim attempts permitted by the task config"
+  maxClaims: Int
+
+  "Number of independent verdicts required to finalize an attempt"
+  requiredVerdicts: Int
+
+  "JINN budget reserved for solution delivery (router-side bookkeeping)"
+  solutionBudget: BigInt
+
+  "JINN budget reserved for verdict delivery (router-side bookkeeping)"
+  verdictBudget: BigInt
+
+  "TaskCoordinator claim window start (unix seconds)"
+  claimWindowStart: BigInt
+
+  "TaskCoordinator claim window end (unix seconds)"
+  claimWindowEnd: BigInt
+
+  "TaskCoordinator submission deadline (unix seconds)"
+  submissionDeadline: BigInt
+
+  "TaskCoordinator evaluation deadline (unix seconds)"
+  evaluationDeadline: BigInt
+
+  "True once any attempt has been finalized as passed (best-effort)"
+  finalized: Boolean!
+
+  "True once the router has refunded any unspent budget for this task"
+  refunded: Boolean!
+
+  refundedSolutionAmount: BigInt
+  refundedVerdictAmount: BigInt
+
+  createdAt: BigInt!
+  createdAtBlock: BigInt!
+  createdAtTx: Bytes!
+
+  attempts: [TaskAttempt!]! @derivedFrom(field: "task")
+}
+
+enum TaskAttemptStatus {
+  CLAIMED
+  SUBMITTED
+  FINALIZED
+  EXPIRED
+}
+
+"""
+A claim by a single operator on a Task. attemptIndex is unique within a task.
+Submission + finalize transitions are folded onto this row.
+"""
+type TaskAttempt @entity(immutable: false) {
+  "Composite id: `<taskId>-<attemptIndex>`"
+  id: ID!
+
+  task: Task!
+  attemptIndex: Int!
+  operator: Bytes!
+
+  status: TaskAttemptStatus!
+
+  claimExpiresAt: BigInt
+  claimedAtBlock: BigInt!
+  claimedAtTx: Bytes!
+
+  "JinnRouterV3 requestId pinned to this attempt"
+  solutionRequestId: Bytes
+
+  "TaskCoordinator solutionCidDigest from TaskSubmitted, if submitted"
+  solutionCidDigest: Bytes
+
+  "TaskCoordinator solutionWeight from TaskSubmitted, if submitted"
+  solutionWeight: BigInt
+
+  submittedAt: BigInt
+  submittedAtBlock: BigInt
+  submittedAtTx: Bytes
+
+  "True iff AttemptFinalized has been emitted for this attempt"
+  finalized: Boolean!
+
+  "True iff AttemptFinalized.passed for this attempt"
+  passed: Boolean
+
+  validVerdictCount: Int
+  passVerdictCount: Int
+
+  finalizedAt: BigInt
+  finalizedAtBlock: BigInt
+  finalizedAtTx: Bytes
+
+  expiredAt: BigInt
+  expiredAtTx: Bytes
+
+  verdicts: [Verdict!]! @derivedFrom(field: "attempt")
+}
+
+enum VerdictStatus {
+  CLAIMED
+  DELIVERED
+}
+
+"""
+A single evaluator verdict slot on a TaskAttempt. verdictIndex is unique
+within an attempt.
+"""
+type Verdict @entity(immutable: false) {
+  "Composite id: `<taskId>-<attemptIndex>-<verdictIndex>`"
+  id: ID!
+
+  attempt: TaskAttempt!
+  verdictIndex: Int!
+  evaluator: Bytes!
+
+  status: VerdictStatus!
+
+  claimExpiresAt: BigInt
+  claimedAtBlock: BigInt!
+  claimedAtTx: Bytes!
+
+  "JinnRouterV3 requestId pinned to this verdict"
+  verdictRequestId: Bytes
+
+  "Verdict CID digest from VerdictDelivered, if delivered"
+  verdictCidDigest: Bytes
+
+  "uint8 verdict code (0=unknown, 1=pass, 2=fail) from VerdictDelivered"
+  verdictCode: Int
+
+  deliveredAt: BigInt
+  deliveredAtBlock: BigInt
+  deliveredAtTx: Bytes
+}
+
+# ── SolverNet manifest events (operator catalog) ──────────────────────────────
+
+"""
+Each `MetadataSet(agentId, "solvernet-manifest:<cid>", ...)` write becomes
+one immutable row. Powers `api.solvernets.listRegistry` and the launched-
+record-aware claim eligibility filter. Per-key latest state lives on
+`MetadataEntry`; this entity preserves the full append history.
+"""
+type SolverNetManifestEvent @entity(immutable: true) {
+  "Composite id: `<txHash>-<logIndex>`"
+  id: ID!
+
+  "Launcher's agentId from the IdentityRegistry"
+  agentId: BigInt!
+
+  operator: Operator!
+
+  "Full metadata key, e.g. `solvernet-manifest:bafy…`"
+  metadataKey: String!
+
+  "CID parsed from the metadata key suffix (after `solvernet-manifest:`)"
+  manifestCid: String!
+
+  "Raw bytes from the setMetadata payload"
+  payload: Bytes!
+
+  blockNumber: BigInt!
+  transactionIndex: Int!
+  logIndex: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
+}

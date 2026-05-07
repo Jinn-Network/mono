@@ -43,7 +43,7 @@ const TASK_COORDINATOR_ABI = [
         components: [
           { name: 'creator', type: 'address' },
           { name: 'taskCidDigest', type: 'bytes32' },
-          { name: 'solverTypeDigest', type: 'bytes32' },
+          { name: 'manifestDigest', type: 'bytes32' },
           { name: 'status', type: 'uint8' },
           {
             name: 'policy',
@@ -215,7 +215,7 @@ export async function submitTask(
   safeAddress: Address,
   routerAddress: Address,
   taskCidDigest: Hex,
-  solverTypeDigest: Hex,
+  manifestDigest: Hex,
   policy: RouterTaskPolicy,
   solutionMaxDeliveryRateWei: bigint,
   verdictMaxDeliveryRateWei: bigint,
@@ -227,7 +227,7 @@ export async function submitTask(
     functionName: 'createTask',
     args: [
       taskCidDigest,
-      solverTypeDigest,
+      manifestDigest,
       policy,
       solutionMaxDeliveryRateWei,
       verdictMaxDeliveryRateWei,

@@ -3,7 +3,7 @@ import { Agent } from '../regions/Agent.js';
 /**
  * Persistent right-rail Agent panel. Wraps the existing Agent region in a
  * column that flows naturally inside AppShell. The agent stays visible on
- * both Overview and Configuration so the operator's relationship with
+ * Overview, Operator, and Launcher so the operator's relationship with
  * Claude is continuous, not gated behind a tab.
  */
 export interface AgentRailProps {
@@ -12,7 +12,18 @@ export interface AgentRailProps {
 
 export function AgentRail({ agentGated }: AgentRailProps): JSX.Element {
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
+    <div
+      className="agent-rail"
+      style={{
+        padding: '16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+        height: '100%',
+        minWidth: 0,
+        overflow: 'hidden',
+      }}
+    >
       <span
         style={{
           fontFamily: "'JetBrains Mono', monospace",
@@ -21,6 +32,7 @@ export function AgentRail({ agentGated }: AgentRailProps): JSX.Element {
           letterSpacing: '0.14em',
           textTransform: 'uppercase',
           color: 'var(--fg-muted)',
+          overflowWrap: 'anywhere',
         }}
       >
         Claude

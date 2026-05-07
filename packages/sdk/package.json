@@ -53,7 +53,8 @@
     "release:sdk": "node scripts/release-sdk.mjs"
   },
   "dependencies": {
-    "zod": "^3.22.0"
+    "zod": "^3.22.0",
+    "zod-to-json-schema": "^3.23.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

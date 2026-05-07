@@ -18,6 +18,9 @@ describe('TaskV1Schema', () => {
     schemaVersion: 'task.v1',
     id: '550e8400-e29b-41d4-a716-446655440000',
     solverType: 'portfolio.v0',
+    contractId: 'portfolio',
+    contractVersion: 'v0',
+    solverNetManifestCid: 'bafyfixturecid',
     role: 'restoration',
     description: 'trade one day on HL',
     window: { startTs: 1000, endTs: 87400000 },
@@ -67,6 +70,9 @@ describe('SignedTaskV1Schema', () => {
     schemaVersion: 'task.v1',
     id: '550e8400-e29b-41d4-a716-446655440000',
     solverType: 'portfolio.v0',
+    contractId: 'portfolio',
+    contractVersion: 'v0',
+    solverNetManifestCid: 'bafyfixturecid',
     role: 'restoration',
     description: 'trade one day on HL',
     window: { startTs: 1000, endTs: 87400000 },
@@ -111,6 +117,9 @@ describe('parseTaskV1', () => {
       schemaVersion: 'task.v1',
       id: '550e8400-e29b-41d4-a716-446655440000',
       solverType: 'portfolio.v0',
+      contractId: 'portfolio',
+      contractVersion: 'v0',
+      solverNetManifestCid: 'bafyfixturecid',
       role: 'restoration',
       description: 'x',
       window: { startTs: 1, endTs: 2 },
@@ -122,6 +131,9 @@ describe('parseTaskV1', () => {
     };
     const parsed = parseTaskV1(valid);
     expect(parsed.solverType).toBe('portfolio.v0');
+    expect(parsed.contractId).toBe('portfolio');
+    expect(parsed.contractVersion).toBe('v0');
+    expect(parsed.solverNetManifestCid).toBe('bafyfixturecid');
     expect(parsed.schemaVersion).toBe('task.v1');
   });
 

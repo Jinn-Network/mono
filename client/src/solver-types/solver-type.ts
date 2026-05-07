@@ -21,7 +21,15 @@ export interface ParseDeps {
   }) => Promise<string>;
 }
 
-/** Context for optional testnet auto-task registration (see {@link collectTestnetAutoTaskGenerators}). */
+/**
+ * Context for optional testnet auto-task registration. Retained for SolverType
+ * definitions that opt in via `getTestnetAutoConfig`; the daemon no longer
+ * exposes a config-block-keyed `collectTestnetAutoTaskGenerators` entrypoint
+ * — generator construction is launched-record-driven (Task 22 of
+ * spec/2026-05-05-solvernet-creation-and-launch.md). Existing in-repo
+ * SolverTypes (e.g. `prediction.apy.v0`) continue to consume this surface
+ * directly through registry tests and bespoke wiring.
+ */
 export interface TestnetAutoContext {
   network: 'mainnet' | 'testnet';
   rpcUrl: string;
@@ -32,30 +40,6 @@ export interface TestnetAutoContext {
   safeAddress?: `0x${string}`;
   /** Agent EOA private key — threaded into auto-gen configs so generators can sign SignedTaskV1. */
   agentPrivateKey?: `0x${string}`;
-  /**
-   * Explicit opt-in for the launcher-owned Polymarket prediction.v1 generator.
-   * Ordinary operator daemons leave this unset/false and do not create rounds.
-   */
-  predictionV1LauncherEnabled?: boolean;
-  /**
-   * Override the prediction.v1 Polymarket submission window (ms).
-   * The generator default applies when unset.
-   */
-  predictionV1WindowMs?: number;
-  /** Launcher-owned Polymarket generator cadence (ms). */
-  predictionV1CadenceMs?: number;
-  /** Launcher-owned Polymarket generator safety caps. */
-  predictionV1MaxNewRoundsPerPoll?: number;
-  predictionV1MaxNewRoundsPerDay?: number;
-  predictionV1MaxOpenRounds?: number;
-  /** Launcher-owned Polymarket manual conditionId controls. */
-  predictionV1AllowlistConditionIds?: string[];
-  predictionV1BlocklistConditionIds?: string[];
-  /**
-   * Legacy Chainlink prediction.v1 gap from window end → resolveTs (ms).
-   * Retained for direct legacy generator tests; unused by Polymarket prediction.v1.
-   */
-  predictionV1ResolveGapMs?: number;
 }
 
 export interface SolverTypeDefinition<GenConfig = unknown> {

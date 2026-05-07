@@ -16,7 +16,8 @@ function Stat({ label, value, unit }: { label: string; value: string | number; u
         background: 'var(--bg-elevated)',
         border: '1px solid var(--border)',
         borderRadius: '10px',
-        padding: '24px',
+        padding: '20px',
+        minWidth: 0,
       }}
     >
       <span
@@ -36,33 +37,41 @@ function Stat({ label, value, unit }: { label: string; value: string | number; u
       <span
         style={{
           fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '28px',
+          fontSize: '24px',
           fontWeight: 500,
           color: 'var(--fg)',
-          letterSpacing: '-0.01em',
+          letterSpacing: 0,
+          display: 'block',
         }}
       >
         {value}
-        {unit && (
-          <span
-            style={{
-              color: 'var(--fg-muted)',
-              fontSize: '14px',
-              marginLeft: '6px',
-              fontFamily: "'JetBrains Mono', monospace",
-            }}
-          >
-            {unit}
-          </span>
-        )}
       </span>
+      {unit && (
+        <span
+          style={{
+            color: 'var(--fg-muted)',
+            fontSize: '14px',
+            marginTop: '4px',
+            display: 'block',
+            fontFamily: "'JetBrains Mono', monospace",
+          }}
+        >
+          {unit}
+        </span>
+      )}
     </div>
   );
 }
 
 export function HeroStats({ tasksDelivered, jinnEarned, gasRunwayDays, nodeStatus }: HeroStatsProps): JSX.Element {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+        gap: '16px',
+      }}
+    >
       <Stat label="Tasks delivered" value={tasksDelivered} />
       <Stat label="JINN earned" value={jinnEarned} unit="JINN" />
       <Stat label="Gas runway" value={gasRunwayDays} unit="days" />

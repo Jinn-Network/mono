@@ -1,4 +1,5 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
+import { z } from 'zod';
 import {
   REQUIRES_LIVE_DAEMON_READINESS,
   SkippableError,
@@ -17,6 +18,17 @@ import type {
   ScopedRpc,
   ScopedSecrets,
 } from '../src/harness.js';
+import {
+  SolverNetManifestV1Schema,
+  validateSolverNetManifest,
+  zodToJsonSchema,
+  jsonSchemaToZod,
+} from '../src/solvernets/index.js';
+import type {
+  SolverNetManifestV1,
+  ManifestValidationResult,
+  JsonSchema,
+} from '../src/solvernets/index.js';
 
 describe('@jinn-network/sdk surface', () => {
   it('root exports generic protocol types', () => {
@@ -104,6 +116,26 @@ describe('@jinn-network/sdk surface', () => {
       trajectory: { addSpan: () => ({}) },
     };
     expect(ctx.signer).toBeUndefined();
+  });
+
+  it('exposes manifest helpers + JSON Schema converters via @jinn-network/sdk/solvernets', () => {
+    // Public exports must be reachable, not undefined, from the solvernets
+    // subpath. This guards against a regression where the value-level helpers
+    // are only re-exported as types.
+    expect(typeof SolverNetManifestV1Schema.safeParse).toBe('function');
+    expect(typeof validateSolverNetManifest).toBe('function');
+    expect(typeof zodToJsonSchema).toBe('function');
+    expect(typeof jsonSchemaToZod).toBe('function');
+
+    // Type-level: the inferred SolverNetManifestV1 carries the v1 marker.
+    expectTypeOf<SolverNetManifestV1['schemaVersion']>().toEqualTypeOf<'solvernet.manifest.v1'>();
+    expectTypeOf<ManifestValidationResult>().not.toBeAny();
+
+    // JsonSchema is a permissive object alias.
+    const schema: JsonSchema = zodToJsonSchema(z.object({ x: z.number() }));
+    expect(schema.type).toBe('object');
+    const zodBack = jsonSchemaToZod(schema);
+    expect(zodBack.safeParse({ x: 1 }).success).toBe(true);
   });
 
 });

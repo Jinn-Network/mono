@@ -68,6 +68,117 @@ const PINNED_SLOTS: PinnedSlot[] = [
     downstream:
       'JinnRouterV2 is deployed behind an upgradeable proxy. Proxy upgrades skip the constructor, so there is NO assembly guard — only this CI check enforces layout stability for the V2 → V2.1 upgrade path used by the `pwg` ops phase.',
   },
+  {
+    contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
+    variable: 'nextTaskId',
+    // NOTE: declaration order suggested slot 3, but Solidity packs the
+    // address `authorizedRouter` and `bool initialized` into slot 1, shifting
+    // nextTaskId up to slot 2.
+    expectedSlot: '2',
+    downstream:
+      'TaskCoordinator is deployed behind JinnUpgradeableProxy. Drift on nextTaskId silently corrupts task ID assignment across upgrades — pre-cutover tasks become unreachable. The 217cb804 manifestDigest rename was cosmetic; this pin is the regression guard for any future PR that reorders state.',
+  },
+  {
+    contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
+    variable: '_tasks',
+    // NOTE: declaration order suggested slot 4; actual is slot 3 because of
+    // the authorizedRouter/initialized packing in slot 1 (see nextTaskId pin).
+    expectedSlot: '3',
+    downstream:
+      'TaskCoordinator._tasks holds every persisted TaskRecord (creator, taskCidDigest, manifestDigest, status, policy, claimCount). Drift makes ALL pre-upgrade tasks unreadable via getTask/claimTask.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'taskCoordinator',
+    expectedSlot: '3',
+    downstream:
+      'JinnRouterV3.taskCoordinator address is read from storage on every createTask/claimTask. Drift unwires the router from the coordinator proxy.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'taskPayments',
+    // NOTE: declaration order suggested slot 9, but slot 3 packs
+    // `taskCoordinator` (address) + `initialized` (bool), shifting all
+    // subsequent mapping slots down by one. Actual slot is 8.
+    expectedSlot: '8',
+    downstream:
+      'JinnRouterV3.taskPayments holds creator, manifestDigest, and JINN budget remaining for every task. Drift makes pre-upgrade tasks unrefundable and unverifiable.',
+  },
+  // ── Phase-7 cutover regression-guard expansion ────────────────────────────
+  // The pins above were sufficient to catch silent slot drift on the headline
+  // mappings touched by the manifestDigest rename. The pins below extend the
+  // guard to the rest of the load-bearing state on both contracts so future
+  // refactors that reorder fields fail loudly before the proxy upgrade runs.
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'mechMarketplace',
+    expectedSlot: '1',
+    downstream:
+      'JinnRouterV3.mechMarketplace is the OLAS mech marketplace address read on every createTask. Drift unwires the router from the marketplace.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'activityChecker',
+    expectedSlot: '2',
+    downstream:
+      'JinnRouterV3.activityChecker provides the canClaim policy hook. Drift breaks operator claim eligibility checks.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'requestKinds',
+    expectedSlot: '4',
+    downstream:
+      'JinnRouterV3.requestKinds maps requestId → RequestKind. Drift makes pre-upgrade open requests unrecognized; in-flight tasks orphan.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'claimed',
+    expectedSlot: '5',
+    downstream:
+      'JinnRouterV3.claimed is the dedup set for processed setMetadata events. Drift causes double-spend on JINN budget refunds.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'solutionDeliveryClaimed',
+    expectedSlot: '6',
+    downstream:
+      'Solution-delivery dedup set. Drift permits double-payment to solvers.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'verdictDeliveryClaimed',
+    expectedSlot: '7',
+    downstream:
+      'Verdict-delivery dedup set. Drift permits double-payment to evaluators.',
+  },
+  {
+    contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
+    variable: '_attempts',
+    expectedSlot: '4',
+    downstream:
+      'TaskCoordinator._attempts holds AttemptRecord per (taskId, attemptIndex). Drift makes pre-upgrade in-flight attempts unreachable; solvers cannot submit.',
+  },
+  {
+    contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
+    variable: '_verdicts',
+    expectedSlot: '5',
+    downstream:
+      'TaskCoordinator._verdicts holds VerdictRecord per (taskId, attemptIndex, verdictIndex). Drift makes pre-upgrade verdicts unreachable; evaluators cannot finalize.',
+  },
+  {
+    contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
+    variable: '_requestRefs',
+    expectedSlot: '8',
+    downstream:
+      'TaskCoordinator._requestRefs maps mech requestId → (taskId, attemptIndex). Drift orphans pre-upgrade pending requests.',
+  },
+  {
+    contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
+    variable: '_verdictRequestRefs',
+    expectedSlot: '9',
+    downstream:
+      'TaskCoordinator._verdictRequestRefs maps verdict request → (taskId, attemptIndex, verdictIndex). Drift orphans pre-upgrade evaluator requests.',
+  },
 ];
 
 /**

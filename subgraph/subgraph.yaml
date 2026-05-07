@@ -30,6 +30,7 @@ dataSources:
         - LanguageRollup
         - FreezeViolation
         - SigningKeyFrozenState
+        - SolverNetManifestEvent
       abis:
         - name: IdentityRegistry
           file: ./abis/IdentityRegistry.json
@@ -125,3 +126,75 @@ dataSources:
           handler: handleEvaluationJobCreated
         - event: DeliveryClaimed(indexed address,indexed bytes32,uint8)
           handler: handleDeliveryClaimed
+  - kind: ethereum/contract
+    name: TaskCoordinator
+    network: base-sepolia
+    source:
+      address: "0x9ce736d3CB367cC5Db538B7962bdf416EbD7451B"
+      abi: TaskCoordinator
+      startBlock: 22000000
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/handlers/task-coordinator.ts
+      entities:
+        - Task
+        - TaskAttempt
+        - Verdict
+      abis:
+        - name: TaskCoordinator
+          file: ./abis/TaskCoordinator.json
+      eventHandlers:
+        - event: TaskCreated(indexed uint256,indexed address,indexed bytes32,bytes32,uint16,uint16,uint64,uint64,uint64,uint64)
+          handler: handleTaskCreated
+        - event: TaskClaimed(indexed uint256,indexed uint32,indexed address,uint64)
+          handler: handleTaskClaimed
+        - event: TaskAttemptRequestRegistered(indexed uint256,indexed uint32,indexed bytes32)
+          handler: handleTaskAttemptRequestRegistered
+        - event: TaskSubmitted(indexed uint256,indexed uint32,indexed address,bytes32,bytes32,uint256)
+          handler: handleTaskSubmitted
+        - event: EvaluationClaimed(indexed uint256,indexed uint32,indexed uint32,address,uint64)
+          handler: handleEvaluationClaimed
+        - event: VerdictRequestRegistered(indexed uint256,indexed uint32,indexed uint32,bytes32)
+          handler: handleVerdictRequestRegistered
+        - event: VerdictDelivered(indexed uint256,indexed uint32,indexed uint32,address,bytes32,uint8)
+          handler: handleVerdictDelivered
+        - event: AttemptFinalized(indexed uint256,indexed uint32,bool,uint16,uint16)
+          handler: handleAttemptFinalized
+        - event: TaskCreationCreditLocked(indexed uint256,indexed address,uint256)
+          handler: handleTaskCreationCreditLocked
+        - event: TaskAttemptExpired(indexed uint256,indexed uint32,indexed address)
+          handler: handleTaskAttemptExpired
+  - kind: ethereum/contract
+    name: JinnRouterV3
+    network: base-sepolia
+    source:
+      address: "0xdC9BCcEB7aca21Ad4Ca2Fc5B4d7aea6b4F6CedD9"
+      abi: JinnRouterV3
+      startBlock: 22000000
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/handlers/jinn-router-v3.ts
+      entities:
+        - Task
+        - TaskAttempt
+        - Verdict
+      abis:
+        - name: JinnRouterV3
+          file: ./abis/JinnRouterV3.json
+      eventHandlers:
+        - event: TaskCreated(indexed address,indexed uint256,indexed bytes32,bytes32,uint16,uint16,uint256,uint256)
+          handler: handleRouterTaskCreated
+        - event: TaskAttemptCreated(indexed uint256,indexed uint32,indexed bytes32,address,address,uint256)
+          handler: handleTaskAttemptCreated
+        - event: EvaluationAttemptCreated(indexed uint256,indexed uint32,indexed uint32,bytes32,address,address,uint256)
+          handler: handleEvaluationAttemptCreated
+        - event: SolutionDeliveryClaimed(indexed address,indexed bytes32,indexed uint256,uint32)
+          handler: handleSolutionDeliveryClaimed
+        - event: VerdictDeliveryClaimed(indexed address,indexed bytes32,indexed uint256,uint32,uint32,uint8)
+          handler: handleVerdictDeliveryClaimed
+        - event: TaskBudgetRefunded(indexed uint256,indexed address,uint256,uint256)
+          handler: handleTaskBudgetRefunded

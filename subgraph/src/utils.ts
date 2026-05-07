@@ -360,6 +360,47 @@ export function routerJobId(requestId: Bytes): string {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// V3 task lifecycle id helpers
+// ────────────────────────────────────────────────────────────────────────────
+export function taskId(taskIdValue: BigInt): string {
+  return taskIdValue.toString();
+}
+
+export function taskAttemptId(taskIdValue: BigInt, attemptIndex: BigInt): string {
+  return taskIdValue.toString() + "-" + attemptIndex.toString();
+}
+
+export function verdictId(
+  taskIdValue: BigInt,
+  attemptIndex: BigInt,
+  verdictIndex: BigInt,
+): string {
+  return (
+    taskIdValue.toString() +
+    "-" +
+    attemptIndex.toString() +
+    "-" +
+    verdictIndex.toString()
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// SolverNet manifest key parsing
+//
+// `setMetadata(agentId, "solvernet-manifest:<cid>", payload)` carries the
+// launcher's published manifest CID in the key suffix. Returns the bare CID
+// (or empty string when the prefix is absent or malformed).
+// ────────────────────────────────────────────────────────────────────────────
+export const SOLVERNET_MANIFEST_PREFIX: string = "solvernet-manifest:";
+
+export function parseSolverNetManifestKey(metadataKey: string): string {
+  if (!metadataKey.startsWith(SOLVERNET_MANIFEST_PREFIX)) {
+    return "";
+  }
+  return metadataKey.substr(SOLVERNET_MANIFEST_PREFIX.length);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Manifest-ref extraction from feedback
 //
 // Reputation `giveFeedback(...)` does not have a manifest-CID parameter, so we

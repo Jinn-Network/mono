@@ -26,31 +26,37 @@ import type { Task } from './types/task.js';
 export interface DefaultSolverNetConfig extends Record<string, unknown> {
   enabled?: boolean;
   solverType: string;
-  role?: 'solving' | 'evaluating';
+  /**
+   * Operator-selected roles for this SolverNet. A non-empty subset of
+   * `['solving', 'evaluating']`. Multiple roles can run concurrently — the
+   * daemon enforces `disallowSolverSelfEvaluation` on-chain so the operator
+   * never evaluates its own Solutions, and the on-chain
+   * TaskActivityCheckerV3 keeps `solutionDeliveryWeight` and
+   * `verdictDeliveryWeight` as independent additive counters.
+   *
+   * Launcher-side flagging is no longer expressed as an operator role —
+   * launcher ownership is determined by the launched-record subsystem
+   * (spec/2026-05-05-solvernet-creation-and-launch.md §11). Operator config
+   * carries only the participation roles.
+   *
+   * Legacy `role: 'solving' | 'evaluating'` configs are auto-migrated to
+   * `roles: [<role>]` by the loader (zod preprocessor on solverNets[*]).
+   */
+  roles?: Array<'solving' | 'evaluating'>;
   harness?: string;
   model?: string;
   plugins?: Array<string | { name?: string; source: string; version?: string }>;
   taskGenerator?: { enabled?: boolean };
 }
 
-export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {
-  prediction: {
-    enabled: true,
-    solverType: 'prediction.v1',
-    role: 'solving',
-    harness: 'claude-code-learner',
-    plugins: [],
-    taskGenerator: { enabled: true },
-  },
-  'swe-rebench-v2': {
-    enabled: false, // opt-in; operator enables via config.solverNets['swe-rebench-v2'].enabled = true
-    solverType: 'swe-rebench-v2.v1',
-    role: 'solving',
-    harness: 'claude-code-learner',
-    plugins: [],
-    taskGenerator: { enabled: false },
-  },
-};
+/**
+ * Default `solverNets` is empty per Decision 5 of
+ * spec/2026-05-05-solvernet-creation-and-launch.md — pre-release, no
+ * migration burden. Fresh installs no longer seed the `prediction` entry;
+ * the operator joins SolverNets through the registry (Task 21's
+ * `joinedSolverNets` block).
+ */
+export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {};
 
 export const JinnConfigSchema = z.object({
   /**
@@ -294,57 +300,6 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
-   * prediction.v1 auto-generator submission window (ms). Default 600000 (10 min).
-   * Docker acceptance gate sets 120000 to keep cycles tight.
-   * Env: JINN_PREDICTION_V1_WINDOW_MS
-   */
-  predictionV1WindowMs: z.number().int().positive().optional(),
-
-  /**
-   * prediction.v1 auto-generator gap from window end → resolveTs (ms).
-   * Default 300000 (5 min). Docker acceptance gate sets 60000.
-   * Env: JINN_PREDICTION_V1_RESOLVE_GAP_MS
-   */
-  predictionV1ResolveGapMs: z.number().int().positive().optional(),
-
-  /**
-   * Enables launcher-owned Polymarket prediction.v1 Task generation.
-   * Default false: ordinary operator daemons do not create Polymarket rounds.
-   * Env: JINN_PREDICTION_V1_LAUNCHER_ENABLED
-   */
-  predictionV1LauncherEnabled: z.boolean().default(false),
-
-  /**
-   * prediction.v1 Polymarket generator cadence (ms). Default 21600000 (6h).
-   * Set to 0 only for launcher/test loops that intentionally poll every tick.
-   * Env: JINN_PREDICTION_V1_CADENCE_MS
-   */
-  predictionV1CadenceMs: z.number().int().nonnegative().optional(),
-
-  /**
-   * prediction.v1 Polymarket generator safety caps.
-   * Defaults live in the generator: per-poll 25, per-day 100, open 250.
-   * Env:
-   *   JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL
-   *   JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY
-   *   JINN_PREDICTION_V1_MAX_OPEN_ROUNDS
-   */
-  predictionV1MaxNewRoundsPerPoll: z.number().int().nonnegative().optional(),
-  predictionV1MaxNewRoundsPerDay: z.number().int().nonnegative().optional(),
-  predictionV1MaxOpenRounds: z.number().int().nonnegative().optional(),
-
-  /**
-   * Manual prediction.v1 Polymarket conditionId controls.
-   * Allowlist prioritizes consideration but never bypasses eligibility checks;
-   * blocklist always wins.
-   * Env:
-   *   JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS
-   *   JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS
-   */
-  predictionV1AllowlistConditionIds: z.array(z.string()).optional(),
-  predictionV1BlocklistConditionIds: z.array(z.string()).optional(),
-
-  /**
    * Operator-controlled Harness inventory.
    */
   harnesses: z
@@ -395,25 +350,103 @@ export const JinnConfigSchema = z.object({
     })
     .default({ mode: 'train' }),
 
-  /** SolverNet activation, Harness selection, and operator-configured runtime plugins. */
-  solverNets: z.record(z.object({
-    enabled: z.boolean().default(true),
-    solverType: z.string(),
-    role: z.enum(['solving', 'evaluating']).default('solving'),
-    harness: z.string().default('claude-code-learner'),
-    model: z.string().optional(),
-    plugins: z.array(z.union([
+  /**
+   * SolverNet activation, Harness selection, and operator-configured runtime plugins.
+   *
+   * Each entry's `roles` is a non-empty subset of `['solving', 'evaluating']`.
+   * Multiple roles can run concurrently for the same SolverNet; the
+   * protocol-level `disallowSolverSelfEvaluation` flag prevents the operator
+   * from evaluating its own Solutions and the on-chain
+   * TaskActivityCheckerV3 tracks Solution and Verdict counters independently
+   * (additive into `eligibleActivityWeight`).
+   *
+   * Launcher ownership lives in the launched-record subsystem
+   * (spec/2026-05-05-solvernet-creation-and-launch.md §11), not in operator
+   * config — there is no `'launching'` operator role. Legacy entries that
+   * include `'launching'` in `roles` have it stripped by the preprocessor so
+   * older config files keep loading.
+   *
+   * Backwards-compat: a legacy `role: 'solving' | 'evaluating'` field is
+   * auto-promoted to `roles: [<role>]` by the zod preprocessor below so
+   * existing `~/.jinn-client/config.json` files keep loading without an
+   * operator migration step.
+   */
+  solverNets: z.record(z.preprocess(
+    (raw) => {
+      if (typeof raw !== 'object' || raw === null) return raw;
+      const obj = raw as Record<string, unknown>;
+      // Promote legacy `role: X` → `roles: [X]` when only the singular form
+      // is provided. If both are present (mid-migration third-party config),
+      // `roles` wins and `role` is dropped.
+      if (Array.isArray(obj['roles']) && obj['roles'].length > 0) {
+        // Drop legacy `'launching'` entries — operator config no longer
+        // carries the launcher role; ownership is via launched records.
+        const filteredRoles = (obj['roles'] as unknown[]).filter(
+          (r) => r !== 'launching',
+        );
+        const { role: _legacyRole, ...rest } = obj;
+        return { ...rest, roles: filteredRoles };
+      }
+      if (typeof obj['role'] === 'string' && (obj['role'] === 'solving' || obj['role'] === 'evaluating')) {
+        const { role, ...rest } = obj;
+        return { ...rest, roles: [role] };
+      }
+      return obj;
+    },
+    z.object({
+      enabled: z.boolean().default(true),
+      solverType: z.string(),
+      roles: z.array(z.enum(['solving', 'evaluating']))
+        .min(1, 'each SolverNet must enable at least one role')
+        .default(['solving'])
+        // Deduplicate to keep downstream consumers simple.
+        .transform((arr) => Array.from(new Set(arr))),
+      harness: z.string().default('claude-code-learner'),
+      model: z.string().optional(),
+      plugins: z.array(z.union([
+        z.string(),
+        z.object({
+          name: z.string().optional(),
+          source: z.string(),
+          version: z.string().optional(),
+        }),
+      ])).default([]),
+      taskGenerator: z.object({
+        enabled: z.boolean().default(true),
+      }).default({ enabled: true }),
+    }),
+  )).default(DEFAULT_SOLVER_NETS),
+
+  /**
+   * Manifest-keyed joined SolverNets (Task 21).
+   *
+   * Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
+   *
+   * Populated by `POST /v1/operator/join/:cid` when an operator joins a
+   * launched SolverNet from the registry catalog. Keys are `manifestCid`
+   * (CIDv0 / CIDv1) — the only stable identifier that maps back to a
+   * launched-instance authority across launchers.
+   *
+   * Kept structurally separate from `solverNets` for now — Task 22 collapses
+   * the two branches into a single manifest-keyed shape. The daemon-side
+   * runtime does not consume this block yet; it is round-trip-only at this
+   * stage so the SPA's join/leave actions persist correctly across restarts.
+   */
+  joinedSolverNets: z
+    .record(
       z.string(),
       z.object({
+        manifestCid: z.string().min(1),
         name: z.string().optional(),
-        source: z.string(),
-        version: z.string().optional(),
+        roles: z
+          .array(z.enum(['solver', 'evaluator']))
+          .min(1, 'each joined SolverNet must enable at least one role'),
+        harness: z.string().optional(),
+        model: z.string().optional(),
+        plugins: z.array(z.string()).default([]),
       }),
-    ])).default([]),
-    taskGenerator: z.object({
-      enabled: z.boolean().default(true),
-    }).default({ enabled: true }),
-  })).default(DEFAULT_SOLVER_NETS),
+    )
+    .optional(),
 
   /**
    * Trusted ed25519 publishers for external harness impls. The daemon
@@ -666,46 +699,10 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_MIN_SAFE_ETH_WEI']) {
     merged.minSafeEthWei = env['JINN_MIN_SAFE_ETH_WEI'].trim();
   }
-  if (env['JINN_PREDICTION_V1_WINDOW_MS']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_WINDOW_MS'].trim());
-    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV1WindowMs = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_RESOLVE_GAP_MS']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_RESOLVE_GAP_MS'].trim());
-    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV1ResolveGapMs = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_LAUNCHER_ENABLED'] !== undefined) {
-    const v = env['JINN_PREDICTION_V1_LAUNCHER_ENABLED'].trim().toLowerCase();
-    merged.predictionV1LauncherEnabled = v === '1' || v === 'true' || v === 'yes';
-  }
-  if (env['JINN_PREDICTION_V1_CADENCE_MS']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_CADENCE_MS'].trim());
-    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1CadenceMs = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL'].trim());
-    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxNewRoundsPerPoll = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY'].trim());
-    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxNewRoundsPerDay = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_MAX_OPEN_ROUNDS']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_MAX_OPEN_ROUNDS'].trim());
-    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxOpenRounds = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS'] !== undefined) {
-    merged.predictionV1AllowlistConditionIds = env['JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS']
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean);
-  }
-  if (env['JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS'] !== undefined) {
-    merged.predictionV1BlocklistConditionIds = env['JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS']
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean);
-  }
+  // Legacy `JINN_PREDICTION_V1_*` env vars are no longer recognised. Their
+  // values now live in the launched-record's generator-config block per
+  // spec/2026-05-05-solvernet-creation-and-launch.md (Decision 5 + Task 14)
+  // — set them through the SolverNet config API instead.
 
   if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
   if (env['JINN_VALIDATION_REGISTRY_ADDRESS']) merged.validationRegistryAddress = env['JINN_VALIDATION_REGISTRY_ADDRESS'];
@@ -893,15 +890,6 @@ const TRACKED_ENV_VARS = [
   'JINN_MASTER_ETH_DAILY_WEI',
   'JINN_MIN_EOA_GAS_WEI',
   'JINN_MIN_SAFE_ETH_WEI',
-  'JINN_PREDICTION_V1_WINDOW_MS',
-  'JINN_PREDICTION_V1_RESOLVE_GAP_MS',
-  'JINN_PREDICTION_V1_LAUNCHER_ENABLED',
-  'JINN_PREDICTION_V1_CADENCE_MS',
-  'JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL',
-  'JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY',
-  'JINN_PREDICTION_V1_MAX_OPEN_ROUNDS',
-  'JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS',
-  'JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS',
   'JINN_IDENTITY_REGISTRY_ADDRESS',
   'JINN_VALIDATION_REGISTRY_ADDRESS',
   'JINN_REPUTATION_ENABLED',

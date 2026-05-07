@@ -11,6 +11,9 @@ const HOISTED = vi.hoisted(() => {
     schemaVersion: 'task.v1',
     id: 'prediction-task-1',
     solverType: 'prediction.v1',
+    contractId: 'prediction',
+    contractVersion: 'v1',
+    solverNetManifestCid: 'bafyfixturecid',
     role: 'restoration',
     description: 'Will the test market resolve YES?',
     window: { startTs: 1_775_000_000_000, endTs: 1_775_000_600_000 },
@@ -161,6 +164,9 @@ describe('MechAdapter TaskCoordinator flow', () => {
       id: 'prediction-task-1',
       description: 'Will the test market resolve YES?',
       solverType: 'prediction.v1',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      solverNetManifestCid: 'bafyfixturecid',
       claimPolicy: {
         mode: 'parallel',
         maxClaims: 25,
@@ -180,16 +186,24 @@ describe('MechAdapter TaskCoordinator flow', () => {
       expect.objectContaining({
         schemaVersion: 'task.v1',
         solverType: 'prediction.v1',
+        contractId: 'prediction',
+        contractVersion: 'v1',
+        solverNetManifestCid: 'bafyfixturecid',
         claimPolicy: expect.objectContaining({ maxClaims: 25 }),
       }),
     );
+    // Task 24 (spec/2026-05-05-solvernet-creation-and-launch.md §14): on-chain
+    // `manifestDigest` is `keccak256(toBytes(manifestCid))` — bound to the
+    // launched SolverNet manifest, not to the SolverType label.
+    const { keccak256, toBytes } = await import('viem');
+    const expectedManifestDigest = keccak256(toBytes('bafyfixturecid'));
     expect(submitTask).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       TEST_CONFIG.safeAddress,
       TEST_CONFIG.routerAddress,
       TASK_CID_DIGEST,
-      expect.any(String),
+      expectedManifestDigest,
       expect.objectContaining({
         maxClaims: 25,
         maxClaimsPerOperator: 1,
@@ -205,6 +219,25 @@ describe('MechAdapter TaskCoordinator flow', () => {
       300n,
       undefined,
     );
+
+    await adapter.stop();
+  });
+
+  it('postTask refuses to sign and post a Task without solverNetManifestCid', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { submitTask } = await import('../../../src/adapters/mech/contracts.js');
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    await expect(
+      adapter.postTask({
+        id: 'orphan-task',
+        description: 'orphan — no SolverNet manifest cid',
+        solverType: 'prediction.v1',
+      }),
+    ).rejects.toThrow(/solverNetManifestCid/);
+    expect(submitTask).not.toHaveBeenCalled();
 
     await adapter.stop();
   });

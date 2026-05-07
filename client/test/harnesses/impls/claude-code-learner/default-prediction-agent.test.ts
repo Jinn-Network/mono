@@ -2,14 +2,14 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadSolverNets } from '../../../../src/solver-nets/registry.js';
 import { HarnessRegistry } from '../../../../src/harnesses/engine/registry.js';
 import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/index.js';
 import { ClaudeCodeHarnessAdapter } from '../../../../src/harnesses/impls/claude-code-learner/adapters/claude-code.js';
 import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/noop-adapter.js';
+import { PredictionV1BaselineImpl } from '../../../../src/harnesses/impls/prediction-v1-baseline/index.js';
 import { makePredictionV1Task } from '../prediction-v1-test-helpers.js';
-import { makeHarnessCtx } from '@test/harness-ctx.js';
 
 function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
@@ -21,15 +21,11 @@ function toolList(manifest: Record<string, unknown>): string[] {
 }
 
 describe('default prediction agent runtime plugins', () => {
-  const tmpDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tmpDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('routes prediction.v1 to the default learner with Network Tools and Prediction plugin surfaces', async () => {
+  it('routes prediction.v1 to the specialist harness with Network Tools and Prediction plugin surfaces', async () => {
+    // Per `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9, the
+    // bundled prediction plugin is operator-configured (not contract-bound),
+    // so the launcher's quick-start defaults seed it into
+    // `solverNets.prediction.plugins`.
     const registry = await loadSolverNets({
       solverNets: {
         prediction: {
@@ -37,7 +33,7 @@ describe('default prediction agent runtime plugins', () => {
           solverType: 'prediction.v1',
           harness: 'claude-code-learner',
           model: 'claude-opus-test',
-          plugins: [],
+          plugins: ['bundled:jinn-prediction-plugin'],
           taskGenerator: { enabled: true },
         },
       },
@@ -51,37 +47,19 @@ describe('default prediction agent runtime plugins', () => {
     });
     const adapter = new NoOpHarnessAdapter();
     const learner = new ClaudeCodeLearnerImpl({ adapter });
+    harnessRegistry.register(new PredictionV1BaselineImpl());
     harnessRegistry.register(learner);
 
     expect(harnessRegistry.findFor({ solverType: 'prediction.v1', role: 'restoration' })?.name)
-      .toBe('claude-code-learner');
-
-    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-default-prediction-work-'));
-    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-default-prediction-state-'));
-    tmpDirs.push(workingDir, implStateDir);
-
-    await learner.run(makeHarnessCtx({
-      task: makePredictionV1Task(),
-      workingDir,
-      implStateDir,
-      extra: {
-        solverNet: { name: net!.name, solverType: net!.solverType, model: net!.model },
-        runtimePlugins: net!.runtimePlugins,
-        solverPluginRoots: net!.runtimePlugins.map((plugin) => plugin.root),
-      },
-    }));
-
-    const invocation = adapter.getInvocations()[0];
-    expect(invocation?.inputs.solverType).toBe('prediction.v1');
-    expect(invocation?.inputs.claudeModel).toBe('claude-opus-test');
-    expect(invocation?.inputs.pluginRoots).toEqual(net!.runtimePlugins.map((plugin) => plugin.root));
+      .toBe('prediction-v1-baseline');
+    expect(adapter.getInvocations()).toHaveLength(0);
 
     const pluginNames = net!.runtimePlugins.map((plugin) => plugin.name);
     expect(pluginNames).toEqual([
       '@jinn-network/network-tools',
       '@jinn-network/prediction-plugin',
     ]);
-    expect(net!.runtimePlugins.map((plugin) => plugin.provenance)).toEqual(['default', 'default']);
+    expect(net!.runtimePlugins.map((plugin) => plugin.provenance)).toEqual(['default', 'configured']);
     expect(JSON.stringify(net!.runtimePlugins)).not.toMatch(/canonical/i);
 
     const networkTools = net!.runtimePlugins.find((plugin) => plugin.name === '@jinn-network/network-tools')!;

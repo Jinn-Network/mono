@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 
 /**
- * Shared collapsed/expanded section pattern used across the Configuration
+ * Shared collapsed/expanded section pattern used across the Operator
  * page. Head shows title + summary + optional meta chip; body renders only
  * when expanded. When `dirty` is supplied, a per-section save footer
  * surfaces with Cancel + Save changes — no global save button.

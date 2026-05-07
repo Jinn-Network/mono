@@ -3,9 +3,11 @@ import { SOLVER_NET_CONTRACTS, getSolverNetContract } from '../src/contracts.js'
 
 describe('SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT', () => {
   it('is registered under "swe-rebench-v2.v1"', () => {
-    const contract = getSolverNetContract('swe-rebench-v2.v1');
+    const contract = getSolverNetContract({ id: 'swe-rebench-v2', version: 'v1' });
     expect(contract).toBeDefined();
-    expect(contract?.solverType).toBe('swe-rebench-v2.v1');
+    expect(contract).toBe(SOLVER_NET_CONTRACTS['swe-rebench-v2.v1']);
+    expect(contract?.id).toBe('swe-rebench-v2');
+    expect(contract?.version).toBe('v1');
     expect(contract?.name).toBe('SWE-rebench v2');
   });
 
@@ -28,8 +30,8 @@ describe('SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT', () => {
     expect(contract.aggregationFunction.windowDays).toBe(30);
   });
 
-  it('declares the runtime plugin', () => {
+  it('does not declare contract-bound runtime plugin defaults', () => {
     const contract = SOLVER_NET_CONTRACTS['swe-rebench-v2.v1'];
-    expect(contract.defaultRuntimePlugins).toContain('bundled:swe-rebench-v2-runtime');
+    expect(contract as Record<string, unknown>).not.toHaveProperty('defaultRuntimePlugins');
   });
 });

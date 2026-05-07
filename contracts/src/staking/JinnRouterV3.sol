@@ -78,7 +78,7 @@ contract JinnRouterV3 {
     struct TaskPayment {
         address creator;
         bytes32 taskCidDigest;
-        bytes32 solverTypeDigest;
+        bytes32 manifestDigest;
         uint256 solutionMaxDeliveryRate;
         uint256 verdictMaxDeliveryRate;
         uint256 responseTimeout;
@@ -110,7 +110,7 @@ contract JinnRouterV3 {
     event TaskCreated(
         address indexed creator,
         uint256 indexed taskId,
-        bytes32 indexed solverTypeDigest,
+        bytes32 indexed manifestDigest,
         bytes32 taskCidDigest,
         uint16 maxClaims,
         uint16 requiredVerdicts,
@@ -175,7 +175,7 @@ contract JinnRouterV3 {
 
     function createTask(
         bytes32 taskCidDigest,
-        bytes32 solverTypeDigest,
+        bytes32 manifestDigest,
         TaskCoordinator.TaskPolicy calldata policy,
         uint256 solutionMaxDeliveryRate,
         uint256 verdictMaxDeliveryRate,
@@ -184,7 +184,7 @@ contract JinnRouterV3 {
         if (!initialized) revert RouterNotInitialized();
         if (
             taskCidDigest == bytes32(0) ||
-            solverTypeDigest == bytes32(0) ||
+            manifestDigest == bytes32(0) ||
             solutionMaxDeliveryRate == 0 ||
             verdictMaxDeliveryRate == 0
         ) {
@@ -197,11 +197,11 @@ contract JinnRouterV3 {
         uint256 requiredBudget = solutionBudget + verdictBudget;
         if (msg.value != requiredBudget) revert RouterInsufficientTaskBudget(0, msg.value, requiredBudget);
 
-        taskId = taskCoordinator.createTask(msg.sender, taskCidDigest, solverTypeDigest, policy);
+        taskId = taskCoordinator.createTask(msg.sender, taskCidDigest, manifestDigest, policy);
         taskPayments[taskId] = TaskPayment({
             creator: msg.sender,
             taskCidDigest: taskCidDigest,
-            solverTypeDigest: solverTypeDigest,
+            manifestDigest: manifestDigest,
             solutionMaxDeliveryRate: solutionMaxDeliveryRate,
             verdictMaxDeliveryRate: verdictMaxDeliveryRate,
             responseTimeout: responseTimeout,
@@ -214,7 +214,7 @@ contract JinnRouterV3 {
         emit TaskCreated(
             msg.sender,
             taskId,
-            solverTypeDigest,
+            manifestDigest,
             taskCidDigest,
             policy.maxClaims,
             requiredVerdicts,

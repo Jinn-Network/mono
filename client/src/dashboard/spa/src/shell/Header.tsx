@@ -21,17 +21,19 @@ export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX
         padding: '14px 24px',
       }}
     >
-      <Link href="/overview" style={{ textDecoration: 'none', color: 'var(--fg)' }}>
-        <span
-          style={{
-            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-            fontSize: '26px',
-            color: 'var(--fg)',
-          }}
-        >
-          jinn operator
-        </span>
-      </Link>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <Link href="/overview" style={{ textDecoration: 'none', color: 'var(--fg)' }}>
+          <span
+            style={{
+              fontFamily: "'Instrument Serif', 'Times New Roman', serif",
+              fontSize: '26px',
+              color: 'var(--fg)',
+            }}
+          >
+            jinn operator
+          </span>
+        </Link>
+      </div>
       <div
         style={{
           display: 'flex',

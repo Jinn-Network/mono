@@ -248,6 +248,10 @@ Three layers, top to bottom:
 
 See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. The current daemon shape is eight long-running loops (creator, engine-watcher, engine-tick, delivery-watcher, reward-claim, balance-topup, jinn-claim L1↔L2, peer-sync) plus one-shot in-flight recovery on startup. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
 
+Generators are **launched-record-driven**, not config-flag-driven (per `spec/2026-05-05-solvernet-creation-and-launch.md` §11). On startup the daemon walks `~/.jinn-client/solvernets/launched/` for records this operator owns; for each record where `status === 'launched'` and `generatorEnabled === true`, it spawns the matching SolverType-specific generator. The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone — gating is "do I have a launched record where I'm the owner." Joining a SolverNet as an operator (writing a `joinedSolverNets[<manifestCid>]` config entry, see §12) never starts a generator; that's launcher-only.
+
+Operator participation is keyed by `manifestCid`, not by SolverNet name. The operator's local config has the shape `joinedSolverNets[<manifestCid>] = { name, manifestCid, roles, harness, plugins, model }` — one entry per launched SolverNet the operator has joined. Edits to this shape are restart-required; the daemon does not hot-reload SolverNet config. Claim eligibility filters on these entries: a daemon with no joined SolverNets does not claim *any* tasks, and tasks whose `solverNetManifestCid` is not in `joinedSolverNets` are ignored regardless of contract type.
+
 ### Earning bootstrap
 
 The `EarningBootstrapper` walks through 11 idempotent steps:
@@ -275,7 +279,7 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 
 - **Phase 0** (complete): Prove on OLAS ecosystem, single chain (Base), OLAS Mech Marketplace + JinnRouter, optimistic evidence, no JINN token
 - **Phase 1a** (complete): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
-- **Phase A** (in progress): Knowledge-market substrate framing per DR-2026-04-30. A.1 operational loop (corpus library + gating leak fix + manifest hygiene + cache + MCP rewiring) shipped; A.2 plug-in surface, A.3 campaign infra, A.4 campaign-launch underway. See `spec/2026-04-30-phase-a-umbrella.md`. Subsumes the original Phase 1b roadmap; anti-farming decay + ve-JINN already shipped, residual challenge mechanism re-homed to Phase B.2.
+- **Phase A** (in progress): Knowledge-market substrate framing per DR-2026-04-30. A.1 operational loop (corpus library + gating leak fix + manifest hygiene + cache + MCP rewiring) shipped; A.2 plug-in surface and A.3 campaign infra shipped; A.4 campaign-launch / SolverNet creation + launch experience shipped on testnet (`spec/2026-05-05-solvernet-creation-and-launch.md` v0.2 — Launcher SPA, manifest-anchored registry, operator join flow, manifest-cid claim eligibility). See `spec/2026-04-30-phase-a-umbrella.md`. Subsumes the original Phase 1b roadmap; anti-farming decay + ve-JINN already shipped, residual challenge mechanism re-homed to Phase B.2.
 - **Phase B** (parallel after A.1): Trust infrastructure — B.1 verifiability tier activation, B.2 evaluator economics + signal-design (includes challenge mechanism)
 - **Phase C** (gated by community formation): Flagship marketplace API — the canonical app the team ships in-house
 - **Phase 2**: Mainnet launch — fair-launch JINN, multi-chain (Base, Arbitrum), ZK-requiring distribution contracts

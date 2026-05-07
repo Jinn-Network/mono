@@ -2,13 +2,12 @@
  * Single dispatch table for in-repo SolverTypes — jinn-mono-6q1.1.
  */
 
-import type { TaskGenerator } from '../tasks/sources.js';
 import { portfolioV0 } from './portfolio-v0.js';
 import { predictionV1 } from './prediction-v1.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
 import { learnerLoopTest } from './learner-loop-test.js';
 import { sweRebenchV2 } from './swe-rebench-v2.js';
-import type { SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
+import type { SolverTypeDefinition } from './solver-type.js';
 
 export type { ParsedSpecOverlay, ParseDeps, SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
 export { PREDICTION_V1_KIND } from './constants.js';
@@ -31,69 +30,8 @@ export function unknownSolverTypeMessage(kind: string | undefined): string {
   return `unknown SolverType: ${k}; known SolverTypes: ${knownSolverTypes().join(', ')}`;
 }
 
-/**
- * Testnet auto-task generators: every registered SolverType with both
- * `getTestnetAutoConfig` and `buildGenerator` is included when config is non-undefined.
- * Add a new in-repo auto SolverType by implementing those on the SolverType module — no `main.ts` edit.
- */
-export function collectTestnetAutoTaskGenerators(opts: {
-  network: 'mainnet' | 'testnet';
-  rpcUrl: string;
-  autoTasksDisabled: boolean;
-  env: NodeJS.ProcessEnv;
-  /** Agent EOA address — passed to generator configs that produce SignedTaskV1. */
-  agentEoa?: `0x${string}`;
-  /** Safe address — passed to generator configs that populate task.creator. */
-  safeAddress?: `0x${string}`;
-  /** Agent EOA private key — passed to generator configs that sign tasks. */
-  agentPrivateKey?: `0x${string}`;
-  /** Explicit launcher opt-in for Polymarket prediction.v1 Task generation. */
-  predictionV1LauncherEnabled?: boolean;
-  /** Override prediction.v1 submission window (ms). */
-  predictionV1WindowMs?: number;
-  /** Override prediction.v1 Polymarket generator cadence (ms). */
-  predictionV1CadenceMs?: number;
-  /** Override prediction.v1 Polymarket generator safety caps. */
-  predictionV1MaxNewRoundsPerPoll?: number;
-  predictionV1MaxNewRoundsPerDay?: number;
-  predictionV1MaxOpenRounds?: number;
-  /** Override prediction.v1 Polymarket manual conditionId controls. */
-  predictionV1AllowlistConditionIds?: string[];
-  predictionV1BlocklistConditionIds?: string[];
-  /** Override prediction.v1 window→resolveTs gap (ms). */
-  predictionV1ResolveGapMs?: number;
-}): { generators: Array<{ solverType: string; generator: TaskGenerator }>; logLines: string[] } {
-  const generators: Array<{ solverType: string; generator: TaskGenerator }> = [];
-  const logLines: string[] = [];
-  if (opts.autoTasksDisabled || opts.network !== 'testnet') {
-    return { generators, logLines };
-  }
-  const ctx: TestnetAutoContext = {
-    network: opts.network,
-    rpcUrl: opts.rpcUrl,
-    env: opts.env,
-    agentEoa: opts.agentEoa,
-    safeAddress: opts.safeAddress,
-    agentPrivateKey: opts.agentPrivateKey,
-    predictionV1LauncherEnabled: opts.predictionV1LauncherEnabled,
-    predictionV1WindowMs: opts.predictionV1WindowMs,
-    predictionV1CadenceMs: opts.predictionV1CadenceMs,
-    predictionV1MaxNewRoundsPerPoll: opts.predictionV1MaxNewRoundsPerPoll,
-    predictionV1MaxNewRoundsPerDay: opts.predictionV1MaxNewRoundsPerDay,
-    predictionV1MaxOpenRounds: opts.predictionV1MaxOpenRounds,
-    predictionV1AllowlistConditionIds: opts.predictionV1AllowlistConditionIds,
-    predictionV1BlocklistConditionIds: opts.predictionV1BlocklistConditionIds,
-    predictionV1ResolveGapMs: opts.predictionV1ResolveGapMs,
-  };
-  for (const kind of knownSolverTypes()) {
-    const entry = SOLVER_TYPES[kind] as SolverTypeDefinition;
-    const genConfig = entry.getTestnetAutoConfig?.(ctx);
-    if (genConfig === undefined) continue;
-    const g = entry.buildGenerator?.(genConfig as never);
-    if (g) {
-      generators.push({ solverType: entry.solverType, generator: g });
-      logLines.push(`[main] auto-task generator enabled: ${entry.solverType} (testnet)`);
-    }
-  }
-  return { generators, logLines };
-}
+// `collectTestnetAutoTaskGenerators` was retired by Task 22 of
+// spec/2026-05-05-solvernet-creation-and-launch.md — the daemon constructs
+// generators from launched-record ownership instead of a config-block-keyed
+// auto-task helper. SolverType-specific `getTestnetAutoConfig` definitions
+// remain available for direct/test consumers.

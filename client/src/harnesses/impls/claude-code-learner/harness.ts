@@ -33,7 +33,15 @@ export class ClaudeCodeLearnerImpl implements Harness {
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    return spec.role !== 'evaluation';
+    if (spec.role === 'evaluation') return false;
+    // These SolverTypes have first-party restoration Harnesses that return
+    // typed solutionPayload objects. The learner emits phase artifacts for its
+    // own pipeline; letting it claim these specialist tasks can run Claude but
+    // fail packaging when the phase artifacts are absent.
+    if (spec.solverType === 'prediction.v1' || spec.solverType === 'prediction.apy.v0') {
+      return false;
+    }
+    return true;
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {

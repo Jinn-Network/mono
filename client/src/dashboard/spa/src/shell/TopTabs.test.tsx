@@ -13,19 +13,32 @@ describe('TopTabs', () => {
       </Router>,
     );
     const overview = screen.getByText('Overview');
-    const configuration = screen.getByText('Configuration');
+    const operator = screen.getByText('Operator');
+    const launcher = screen.getByText('Launcher');
     expect(overview.getAttribute('data-active')).toBe('true');
-    expect(configuration.getAttribute('data-active')).toBe('false');
+    expect(operator.getAttribute('data-active')).toBe('false');
+    expect(launcher.getAttribute('data-active')).toBe('false');
   });
 
-  it('marks Configuration active when location is /configuration', () => {
-    const { hook } = memoryLocation({ path: '/configuration' });
+  it('marks Operator active for operator routes', () => {
+    const { hook } = memoryLocation({ path: '/operator/join/bafybeiaaa' });
     render(
       <Router hook={hook}>
         <TopTabs />
       </Router>,
     );
-    const configuration = screen.getByText('Configuration');
-    expect(configuration.getAttribute('data-active')).toBe('true');
+    const operator = screen.getByText('Operator');
+    expect(operator.getAttribute('data-active')).toBe('true');
+  });
+
+  it('marks Launcher active for launcher routes', () => {
+    const { hook } = memoryLocation({ path: '/launcher/create' });
+    render(
+      <Router hook={hook}>
+        <TopTabs />
+      </Router>,
+    );
+    const launcher = screen.getByText('Launcher');
+    expect(launcher.getAttribute('data-active')).toBe('true');
   });
 });

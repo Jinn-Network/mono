@@ -1,5 +1,5 @@
 /**
- * Persistent banner that appears across both Overview and Configuration
+ * Persistent banner that appears across Overview and Operator
  * tabs after the operator saves a restart-required config change. Hosts
  * the call-to-action that triggers `/api/admin/restart`.
  *
@@ -26,7 +26,7 @@ export function RestartBanner({ restartPending, onRestart }: RestartBannerProps)
       }}
     >
       <span style={{ color: 'var(--fg)' }}>
-        Configuration saved. Restart the node to apply.
+        Operator settings saved. Restart the node to apply.
       </span>
       <button
         type="button"

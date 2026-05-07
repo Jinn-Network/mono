@@ -31,6 +31,9 @@ describe('parseTask signedTask hydration', () => {
       schemaVersion: 'task.v1' as const,
       id: 'abc',
       solverType: 'portfolio.v0',
+      contractId: 'portfolio',
+      contractVersion: 'v0',
+      solverNetManifestCid: 'bafyfixturecid',
       role: 'restoration' as const,
       description: 'trade',
       window: { startTs: 1, endTs: 86400001 },
@@ -51,6 +54,9 @@ describe('parseTask signedTask hydration', () => {
     expect(parsed.description).toBe('trade');
     expect(parsed.window).toEqual({ startTs: 1, endTs: 86400001 });
     expect(parsed.solverType).toBe('portfolio.v0');
+    expect(parsed.contractId).toBe('portfolio');
+    expect(parsed.contractVersion).toBe('v0');
+    expect(parsed.solverNetManifestCid).toBe('bafyfixturecid');
     expect(parsed.spec).toEqual({});
     expect(parsed.signedTask).toBeDefined();
   });
@@ -60,6 +66,9 @@ describe('parseTask signedTask hydration', () => {
       schemaVersion: 'task.v1' as const,
       id: 'abc',
       solverType: 'portfolio.v0',
+      contractId: 'portfolio',
+      contractVersion: 'v0',
+      solverNetManifestCid: 'bafyfixturecid',
       role: 'restoration' as const,
       description: 'from-task',
       window: { startTs: 1, endTs: 86400001 },

@@ -317,7 +317,8 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     let body: {
       enabled?: unknown;
       solverType?: unknown; // deprecated; accepted for one release cycle
-      role?: unknown;
+      role?: unknown;       // legacy singular form, accepted for one release cycle
+      roles?: unknown;
       harness?: unknown;
       model?: unknown;
       plugins?: unknown;
@@ -329,7 +330,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
 
     const editableFields: Array<keyof typeof body> = [
-      'enabled', 'solverType', 'role', 'harness', 'model', 'plugins',
+      'enabled', 'solverType', 'role', 'roles', 'harness', 'model', 'plugins',
     ];
     if (!editableFields.some((f) => body[f] !== undefined)) {
       return c.json({ error: 'invalid_body', detail: 'must include at least one editable field' }, 400);
@@ -345,8 +346,27 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       }, 400);
     }
     const KNOWN_ROLES = ['solving', 'evaluating'];
-    if (body.role !== undefined && (typeof body.role !== 'string' || !KNOWN_ROLES.includes(body.role))) {
-      return c.json({ error: 'invalid_body', detail: '`role` must be `solving` or `evaluating`' }, 400);
+    let normalizedRoles: string[] | undefined;
+    if (body.roles !== undefined) {
+      if (
+        !Array.isArray(body.roles) ||
+        body.roles.length === 0 ||
+        !body.roles.every((r): r is string => typeof r === 'string' && KNOWN_ROLES.includes(r))
+      ) {
+        return c.json({
+          error: 'invalid_body',
+          detail: '`roles` must be a non-empty array of `solving` and/or `evaluating`',
+        }, 400);
+      }
+      // Deduplicate so the persisted shape is canonical even if the SPA double-includes a value.
+      normalizedRoles = Array.from(new Set(body.roles as string[]));
+    } else if (body.role !== undefined) {
+      // Legacy singular form. Accept it (operators on older config tooling),
+      // promote to the canonical roles array.
+      if (typeof body.role !== 'string' || !KNOWN_ROLES.includes(body.role)) {
+        return c.json({ error: 'invalid_body', detail: '`role` must be `solving` or `evaluating`' }, 400);
+      }
+      normalizedRoles = [body.role];
     }
     if (body.harness !== undefined && typeof body.harness !== 'string') {
       return c.json({ error: 'invalid_body', detail: '`harness` must be a string' }, 400);
@@ -387,7 +407,18 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
 
     if (body.enabled !== undefined) existing.enabled = body.enabled;
     if (body.solverType !== undefined) existing.solverType = body.solverType;
-    if (body.role !== undefined) existing.role = body.role;
+    if (normalizedRoles !== undefined) {
+      // Operator-mode patch overwrites the role array. Task 22 of
+      // spec/2026-05-05-solvernet-creation-and-launch.md retired the
+      // operator-config `'launching'` role; the previous "preserve
+      // non-operator roles" pass is no longer needed because every valid
+      // operator role is in `KNOWN_ROLES`.
+      existing.roles = Array.from(new Set(normalizedRoles));
+      // Strip any legacy singular `role` so the persisted shape is canonical.
+      // Eliminates ambiguity if a third-party tool reads the file and prefers
+      // `role` over `roles`.
+      delete existing['role'];
+    }
     if (body.harness !== undefined) existing.harness = body.harness;
     if (body.model !== undefined) existing.model = body.model;
     if (body.plugins !== undefined) existing.plugins = body.plugins;
@@ -409,6 +440,206 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       name,
       config: existing,
     });
+  });
+
+  // POST /v1/operator/join/:cid — operator joins a launched SolverNet.
+  //
+  // Writes a manifest-keyed entry to `config.joinedSolverNets[<cid>]` with
+  // the operator's chosen roles + (for solver role) harness/model/plugins.
+  // The entry is keyed by `manifestCid` rather than the SolverNet's short
+  // name — multiple launchers can launch a SolverNet with the same name on
+  // the same network, and the manifestCid is the only stable identifier
+  // that maps back to a launched-instance authority.
+  //
+  // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
+  //
+  // Note (Task 21 / Task 22 transition): the spec example shows
+  // `solverNets[<cid>]` directly, but the legacy `solverNets` zod entry has
+  // required `solverType` + role enum that conflicts with the new shape, and
+  // many daemon-side consumers read those fields without narrowing. Keeping
+  // the new shape under a structurally-separate `joinedSolverNets` block
+  // avoids touching every consumer; Task 22 collapses both into a single
+  // manifest-keyed shape once the legacy block is fully drained.
+  //
+  // The daemon does not hot-reload SolverNet config; the operator must follow
+  // up with /api/admin/restart for the change to take effect (same posture as
+  // /v1/setup/solvernets/:name).
+  app.post('/v1/operator/join/:cid', async (c) => {
+    const cid = c.req.param('cid');
+    if (!cid) {
+      return c.json({ error: 'invalid_invocation', detail: 'missing manifest cid' }, 400);
+    }
+
+    let body: {
+      name?: unknown;
+      roles?: unknown;
+      harness?: unknown;
+      model?: unknown;
+      plugins?: unknown;
+    };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_body', detail: 'expected JSON body' }, 400);
+    }
+
+    const KNOWN_ROLES = ['solver', 'evaluator'];
+    if (!Array.isArray(body.roles) || body.roles.length === 0) {
+      return c.json({
+        error: 'invalid_body',
+        detail: '`roles` must be a non-empty array',
+      }, 400);
+    }
+    if (!body.roles.every((r): r is string => typeof r === 'string' && KNOWN_ROLES.includes(r))) {
+      return c.json({
+        error: 'invalid_body',
+        detail: '`roles` entries must each be `solver` or `evaluator`',
+      }, 400);
+    }
+    const roles = Array.from(new Set(body.roles as string[]));
+
+    if (body.name !== undefined && typeof body.name !== 'string') {
+      return c.json({ error: 'invalid_body', detail: '`name` must be a string' }, 400);
+    }
+    if (body.harness !== undefined && typeof body.harness !== 'string') {
+      return c.json({ error: 'invalid_body', detail: '`harness` must be a string' }, 400);
+    }
+    if (body.model !== undefined && typeof body.model !== 'string') {
+      return c.json({ error: 'invalid_body', detail: '`model` must be a string' }, 400);
+    }
+    if (body.plugins !== undefined) {
+      if (!Array.isArray(body.plugins) || !body.plugins.every((p): p is string => typeof p === 'string')) {
+        return c.json({
+          error: 'invalid_body',
+          detail: '`plugins` must be an array of plugin names',
+        }, 400);
+      }
+    }
+
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    let current: Record<string, unknown> = {};
+    try {
+      if (existsSync(cfgPath)) {
+        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+      }
+    } catch (err) {
+      return c.json({
+        error: 'config_unreadable',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+
+    const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
+    const joinedSolverNets: Record<string, Record<string, unknown>> = {};
+    for (const [k, v] of Object.entries(rawJoined)) {
+      if (isRecord(v)) joinedSolverNets[k] = { ...v };
+    }
+
+    const entry: Record<string, unknown> = {
+      manifestCid: cid,
+      roles,
+    };
+    if (typeof body.name === 'string') entry['name'] = body.name;
+    // `harness` / `model` / `plugins` are solver-side. Persist whatever the
+    // SPA sent; the daemon-side runtime ignores them when only the
+    // `evaluator` role is selected (evaluator harness comes from
+    // `manifest.contract.evaluationFunction.implementation`).
+    if (typeof body.harness === 'string') entry['harness'] = body.harness;
+    if (typeof body.model === 'string') entry['model'] = body.model;
+    if (Array.isArray(body.plugins)) entry['plugins'] = body.plugins;
+
+    joinedSolverNets[cid] = entry;
+
+    try {
+      persistConfigValue('joinedSolverNets', joinedSolverNets, cfgPath);
+    } catch (err) {
+      return c.json({
+        error: 'config_write_failed',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+
+    return c.json({
+      ok: true,
+      restartRequired: true,
+      manifestCid: cid,
+      config: entry,
+    });
+  });
+
+  // DELETE /v1/operator/join/:cid — operator leaves a joined SolverNet.
+  // Removes the manifest-keyed entry from `config.joinedSolverNets`. Returns
+  // 404 if no such entry exists so the SPA can distinguish "I left
+  // successfully" from "this entry was already gone" — useful for stale-tab
+  // detection.
+  app.delete('/v1/operator/join/:cid', async (c) => {
+    const cid = c.req.param('cid');
+    if (!cid) {
+      return c.json({ error: 'invalid_invocation', detail: 'missing manifest cid' }, 400);
+    }
+
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    let current: Record<string, unknown> = {};
+    try {
+      if (existsSync(cfgPath)) {
+        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+      }
+    } catch (err) {
+      return c.json({
+        error: 'config_unreadable',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+
+    const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
+    if (!isRecord(rawJoined[cid])) {
+      return c.json({ error: 'join_not_found', manifestCid: cid }, 404);
+    }
+    const joinedSolverNets: Record<string, Record<string, unknown>> = {};
+    for (const [k, v] of Object.entries(rawJoined)) {
+      if (k === cid) continue;
+      if (isRecord(v)) joinedSolverNets[k] = { ...v };
+    }
+
+    try {
+      persistConfigValue('joinedSolverNets', joinedSolverNets, cfgPath);
+    } catch (err) {
+      return c.json({
+        error: 'config_write_failed',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+
+    return c.json({ ok: true, restartRequired: true, manifestCid: cid });
+  });
+
+  // GET /v1/operator/joined — list the operator's joined SolverNets.
+  //
+  // Returns the manifest-keyed `joinedSolverNets` dict from the operator
+  // config so the SPA's catalog cards (RegistryCatalog) can render a
+  // "JOINED" indicator alongside the Join CTA. Without this the SPA cannot
+  // distinguish a joined SolverNet from one the operator hasn't joined yet
+  // and operators see a stale "Join" CTA even after a successful join.
+  // (jinn-mono follow-up to dogfood walk.)
+  app.get('/v1/operator/joined', async (c) => {
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    let current: Record<string, unknown> = {};
+    try {
+      if (existsSync(cfgPath)) {
+        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+      }
+    } catch (err) {
+      return c.json({
+        error: 'config_unreadable',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+    const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
+    const joinedSolverNets: Record<string, Record<string, unknown>> = {};
+    for (const [k, v] of Object.entries(rawJoined)) {
+      if (isRecord(v)) joinedSolverNets[k] = { ...v };
+    }
+    return c.json({ joinedSolverNets });
   });
 
   // Edit the chain's RPC URL from the SPA's Configuration > Network section.

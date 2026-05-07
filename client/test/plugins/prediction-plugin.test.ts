@@ -137,9 +137,9 @@ describe('jinn prediction plugin manifests', () => {
   it('keeps prediction.v1 schemas in the SolverNet contract registry', () => {
     const contract = SOLVER_NET_CONTRACTS['prediction.v1'];
     expect(contract).toBeDefined();
-    contract!.schemas.task.parse(sampleTask());
-    contract!.schemas.solution.parse(sampleSolution);
-    contract!.schemas.verdict.parse(sampleVerdict);
+    contract!.schemas.task.zod.parse(sampleTask());
+    contract!.schemas.solution.zod.parse(sampleSolution);
+    contract!.schemas.verdict.zod.parse(sampleVerdict);
     expect(contract!.evaluationFunction.id).toBe('prediction.brier-loss.v1');
   });
 

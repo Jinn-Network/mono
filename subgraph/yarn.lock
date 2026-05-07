@@ -406,6 +406,7 @@ __metadata:
   dependencies:
     "@graphprotocol/graph-cli": "npm:0.98.1"
     "@graphprotocol/graph-ts": "npm:0.38.2"
+    matchstick-as: "npm:^0.6.0"
   languageName: unknown
   linkType: soft
 
@@ -2913,6 +2914,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"matchstick-as@npm:^0.6.0":
+  version: 0.6.0
+  resolution: "matchstick-as@npm:0.6.0"
+  dependencies:
+    wabt: "npm:1.0.24"
+  checksum: 10c0/ada0c5039d4b5b85c60600b19338f8b8dd2e566d3afac4da12c0cf612f3ae97d5e0db8ac0ca501975b3e815b1d9a8d8a028a8cc2be24a6c87241242050f64204
+  languageName: node
+  linkType: hard
+
 "math-intrinsics@npm:^1.1.0":
   version: 1.1.0
   resolution: "math-intrinsics@npm:1.1.0"
@@ -3922,6 +3932,23 @@ __metadata:
   bin:
     uuid: dist/bin/uuid
   checksum: 10c0/bcbb807a917d374a49f475fae2e87fdca7da5e5530820ef53f65ba1d12131bd81a92ecf259cc7ce317cbe0f289e7d79fdfebcef9bfa3087c8c8a2fa304c9be54
+  languageName: node
+  linkType: hard
+
+"wabt@npm:1.0.24":
+  version: 1.0.24
+  resolution: "wabt@npm:1.0.24"
+  bin:
+    wasm-decompile: bin/wasm-decompile
+    wasm-interp: bin/wasm-interp
+    wasm-objdump: bin/wasm-objdump
+    wasm-opcodecnt: bin/wasm-opcodecnt
+    wasm-strip: bin/wasm-strip
+    wasm-validate: bin/wasm-validate
+    wasm2c: bin/wasm2c
+    wasm2wat: bin/wasm2wat
+    wat2wasm: bin/wat2wasm
+  checksum: 10c0/d3fa20e3c783a3f0d0c293ffb98fab9047ee941cb00ba71922802d2acc8a1f8c5d133fb0e966f21ebc92a72ae5cb4b65b986566de0b1eac184e14fba6a5b0cdc
   languageName: node
   linkType: hard
 

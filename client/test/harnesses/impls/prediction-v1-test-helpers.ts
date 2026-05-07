@@ -8,11 +8,33 @@ import {
   RESTORATION_TASK_CID_CONTEXT_KEY,
 } from '../../../src/harnesses/impls/evaluation-context.js';
 
-export function makePredictionV1Task(overrides: Partial<PredictionV1Task> = {}): PredictionV1Task {
+/** A deterministic test CID stand-in. Real CIDs are 46+ chars; this is fine
+ *  for unit tests that mock the registry client. */
+export const TEST_PREDICTION_V1_MANIFEST_CID = 'bafy-prediction-v1-test-manifest';
+
+/**
+ * Test task type — `PredictionV1Task` plus the manifest-binding fields the
+ * spec §14 validation pipeline reads (`solverNetManifestCid`,
+ * `contractId`, `contractVersion`). The SDK's `PredictionV1TaskSchema` is a
+ * pre-Task-24 shape and doesn't carry these fields; adding them here keeps
+ * tests aligned with the post-Task-24 runtime `Task`.
+ */
+export type PredictionV1TestTask = PredictionV1Task & {
+  contractId: 'prediction';
+  contractVersion: 'v1';
+  solverNetManifestCid: string;
+};
+
+export function makePredictionV1Task(
+  overrides: Partial<PredictionV1TestTask> = {},
+): PredictionV1TestTask {
   return {
     id: 'prediction-v1-polymarket-abc',
     description: 'Forecast a binary externally resolved prediction market.',
     solverType: 'prediction.v1',
+    contractId: 'prediction',
+    contractVersion: 'v1',
+    solverNetManifestCid: TEST_PREDICTION_V1_MANIFEST_CID,
     role: 'restoration',
     window: {
       startTs: Date.parse('2026-05-02T00:00:00.000Z'),

@@ -13,14 +13,14 @@ describe('AlertBand', () => {
           lead="Needs attention"
           body="Prediction is disabled"
           ctaLabel="Configure prediction"
-          ctaHref="/configuration#solvernets/prediction"
+          ctaHref="/operator#solvernets/prediction"
         />
       </Router>,
     );
     expect(screen.getByText(/needs attention/i)).toBeTruthy();
     expect(screen.getByText(/prediction is disabled/i)).toBeTruthy();
     const cta = screen.getByText(/configure prediction/i).closest('a');
-    expect(cta?.getAttribute('href')).toBe('/configuration#solvernets/prediction');
+    expect(cta?.getAttribute('href')).toBe('/operator#solvernets/prediction');
   });
 
   it('renders nothing when not active', () => {

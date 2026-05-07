@@ -22,6 +22,12 @@ export interface PredictionApyV0AutoConfig {
   safeAddress?: `0x${string}`;
   /** Agent private key — used to sign the TaskV1. */
   agentPrivateKey?: `0x${string}`;
+  /**
+   * Spec §14 (Task 24): IPFS CID of the launched SolverNet manifest. Becomes
+   * `manifestDigest = keccak256(manifestCid)` on-chain. Required for signed
+   * tasks that hit the production adapter.
+   */
+  solverNetManifestCid?: string;
 }
 
 export type PredictionApyV0Generator = () => Promise<Task | null>;
@@ -73,14 +79,24 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
         eligibility: { maxSubmissionDelayMs: windowDurationMs },
       });
 
-      // When signing credentials are available, produce a SignedTaskV1 and
-      // embed it in the Task's `task` field so MechAdapter's
-      // `state.signedTask ?? buildTaskPayload(...)` path picks it up.
-      if (config.agentEoa && config.safeAddress && config.agentPrivateKey) {
+      // When signing credentials AND a SolverNet manifest CID are available,
+      // produce a SignedTaskV1 and embed it in the Task's `task` field so
+      // MechAdapter's `state.signedTask ?? buildTaskPayload(...)` path picks
+      // it up. Without a `solverNetManifestCid` we cannot derive the on-chain
+      // `manifestDigest` (spec §14, Task 24) — fall back to the unsigned shape.
+      if (
+        config.agentEoa &&
+        config.safeAddress &&
+        config.agentPrivateKey &&
+        config.solverNetManifestCid
+      ) {
         const taskDoc: TaskV1 = {
           schemaVersion: 'task.v1',
           id: resolved.id ?? randomUUID(),
           solverType: 'prediction.apy.v0',
+          contractId: 'prediction.apy',
+          contractVersion: 'v0',
+          solverNetManifestCid: config.solverNetManifestCid,
           role: 'restoration',
           description: resolved.description,
           window: resolved.window,
@@ -97,6 +113,9 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
         const task: Task = {
           ...(resolved as unknown as Task),
           solverType: 'prediction.apy.v0',
+          contractId: 'prediction.apy',
+          contractVersion: 'v0',
+          solverNetManifestCid: config.solverNetManifestCid,
           claimPolicy,
           spec: Object.fromEntries(
             Object.entries((resolved.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),
@@ -105,10 +124,16 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
         return { ...task, signedTask: signed };
       }
 
-      // No signing credentials — return the resolved shape without a signed task.
+      // No signing credentials (or no manifest CID) — return the resolved
+      // shape without a signed task.
       return {
         ...(resolved as unknown as Task),
         solverType: 'prediction.apy.v0',
+        contractId: 'prediction.apy',
+        contractVersion: 'v0',
+        ...(config.solverNetManifestCid
+          ? { solverNetManifestCid: config.solverNetManifestCid }
+          : {}),
         claimPolicy,
         spec: Object.fromEntries(
           Object.entries((resolved.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),

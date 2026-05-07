@@ -3,6 +3,21 @@ import type {
   ClaudeAuthState,
   StructuredEvent,
   SolverNetsCatalogResponse,
+  LauncherStatusResponse,
+  LauncherTasksResponse,
+  LauncherSolverNetPatch,
+  LauncherSolverNetPatchResponse,
+  DraftListResponse,
+  DraftSolverNetRecord,
+  DraftSolverNetRecordPatch,
+  GeneratorConfig,
+  LaunchAction,
+  LaunchedSolverNetRecord,
+  LaunchedStatus,
+  LifecycleTarget,
+  OwnedLaunchedListResponse,
+  RegistryListResponse,
+  RegistryManifestResponse,
 } from './types.js';
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -75,7 +90,7 @@ export const api = {
     name: string,
     patch: {
       enabled?: boolean;
-      role?: 'solving' | 'evaluating';
+      roles?: Array<'solving' | 'evaluating'>;
       harness?: string;
       model?: string;
       plugins?: string[];
@@ -88,7 +103,7 @@ export const api = {
       name: string;
       config: {
         enabled?: boolean;
-        role?: 'solving' | 'evaluating';
+        roles?: Array<'solving' | 'evaluating'>;
         harness?: string;
         model?: string;
         plugins?: string[];
@@ -125,6 +140,181 @@ export const api = {
         body: JSON.stringify({ mode }),
       },
     ),
+
+  // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----
+  // Operator mode never calls these — Operator-mode UI shows zero launcher
+  // state per §6.3 strict separation.
+  fetchLauncherStatus: () =>
+    jfetch<LauncherStatusResponse>('/v1/launcher/status'),
+  fetchLauncherTasks: (opts: { cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.cursor) q.set('cursor', opts.cursor);
+    if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return jfetch<LauncherTasksResponse>(
+      `/v1/launcher/tasks${qs ? `?${qs}` : ''}`,
+    );
+  },
+  patchLauncherSolverNet: (name: string, patch: LauncherSolverNetPatch) =>
+    jfetch<LauncherSolverNetPatchResponse>(
+      `/v1/launcher/solvernets/${encodeURIComponent(name)}`,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      },
+    ),
+
+  // ---- SolverNet creation + launch (spec/2026-05-05-solvernet-creation-and-launch.md) ----
+  // The new shape that supersedes the predecessor `fetchLauncher*` methods.
+  // The predecessor methods remain available above for components not yet
+  // migrated; the new pages (Tasks 17-19) will call only `api.solvernets.*`.
+  solvernets: {
+    // ── Drafts CRUD (Task 13) ──
+    listDrafts: () =>
+      jfetch<DraftListResponse>('/v1/solvernets/drafts'),
+    getDraft: (id: string) =>
+      jfetch<DraftSolverNetRecord>(
+        `/v1/solvernets/drafts/${encodeURIComponent(id)}`,
+      ),
+    createDraft: (body?: DraftSolverNetRecordPatch) =>
+      jfetch<DraftSolverNetRecord>('/v1/solvernets/drafts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body ?? {}),
+      }),
+    updateDraft: (id: string, patch: DraftSolverNetRecordPatch) =>
+      jfetch<DraftSolverNetRecord>(
+        `/v1/solvernets/drafts/${encodeURIComponent(id)}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+      ),
+    deleteDraft: (id: string) =>
+      jfetch<{ ok: true }>(
+        `/v1/solvernets/drafts/${encodeURIComponent(id)}`,
+        { method: 'DELETE' },
+      ),
+
+    // ── Launch (Task 14) ──
+    launch: (draftId: string) =>
+      jfetch<LaunchAction>(
+        `/v1/solvernets/drafts/${encodeURIComponent(draftId)}/launch`,
+        { method: 'POST' },
+      ),
+
+    // ── Lifecycle (Task 14) ──
+    transitionLifecycle: (solverNetId: string, target: LifecycleTarget) =>
+      jfetch<LaunchedSolverNetRecord>(
+        `/v1/solvernets/launched/${encodeURIComponent(solverNetId)}/lifecycle`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ target }),
+        },
+      ),
+
+    // ── Generator config hot-apply (Task 14) ──
+    updateGeneratorConfig: (
+      solverNetId: string,
+      patch: Partial<GeneratorConfig>,
+    ) =>
+      jfetch<GeneratorConfig>(
+        `/v1/solvernets/launched/${encodeURIComponent(solverNetId)}/generator-config`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+      ),
+
+    // ── Owned launched records (Task 15) ──
+    get: (solverNetId: string) =>
+      jfetch<LaunchedSolverNetRecord>(
+        `/v1/solvernets/launched/${encodeURIComponent(solverNetId)}`,
+      ),
+    listLaunched: (filter?: { status?: LaunchedStatus }) => {
+      const q = new URLSearchParams();
+      if (filter?.status) q.set('status', filter.status);
+      const qs = q.toString();
+      return jfetch<OwnedLaunchedListResponse>(
+        `/v1/solvernets/launched${qs ? `?${qs}` : ''}`,
+      );
+    },
+
+    // ── Global registry (Task 15) ──
+    listRegistry: (opts?: {
+      status?: 'launched' | 'paused' | 'retired';
+      refresh?: boolean;
+    }) => {
+      const q = new URLSearchParams();
+      if (opts?.status) q.set('status', opts.status);
+      if (opts?.refresh) q.set('refresh', '1');
+      const qs = q.toString();
+      return jfetch<RegistryListResponse>(
+        `/v1/solvernets/registry${qs ? `?${qs}` : ''}`,
+      );
+    },
+    getManifest: (cid: string) =>
+      jfetch<RegistryManifestResponse>(
+        `/v1/solvernets/registry/${encodeURIComponent(cid)}`,
+      ),
+  },
+
+  // ---- Operator participation flow (Task 21) ----
+  // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12. Writes a
+  // manifest-keyed entry to `config.solverNets[<cid>]`; restart-required
+  // — the daemon does not hot-reload SolverNet config.
+  operator: {
+    join: (
+      manifestCid: string,
+      body: {
+        name?: string;
+        roles: Array<'solver' | 'evaluator'>;
+        harness?: string;
+        model?: string;
+        plugins?: string[];
+      },
+    ) =>
+      jfetch<{
+        ok: boolean;
+        restartRequired: boolean;
+        manifestCid: string;
+        config: {
+          manifestCid: string;
+          name?: string;
+          roles: Array<'solver' | 'evaluator'>;
+          harness?: string;
+          model?: string;
+          plugins?: string[];
+        };
+      }>(`/v1/operator/join/${encodeURIComponent(manifestCid)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    leave: (manifestCid: string) =>
+      jfetch<{ ok: boolean; restartRequired: boolean; manifestCid: string }>(
+        `/v1/operator/join/${encodeURIComponent(manifestCid)}`,
+        { method: 'DELETE' },
+      ),
+    listJoined: () =>
+      jfetch<{
+        joinedSolverNets: Record<
+          string,
+          {
+            manifestCid: string;
+            name?: string;
+            roles: Array<'solver' | 'evaluator'>;
+            harness?: string;
+            model?: string;
+            plugins?: string[];
+          }
+        >;
+      }>('/v1/operator/joined'),
+  },
 };
 
 /**

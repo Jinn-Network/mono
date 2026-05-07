@@ -20,6 +20,7 @@ import {
   loadSolverNets as defaultLoadSolverNets,
   type LoadedSolverNet,
   type SolverNetConfig,
+  type SolverNetOperatorRole,
 } from './registry.js';
 
 export type PredictionOperatorDiagnosticSeverity = 'error' | 'warning' | 'info';
@@ -44,6 +45,13 @@ export interface PredictionOperatorStatus {
     name: string;
     enabled: boolean;
     solverType: string;
+    /**
+     * Active operator roles for this SolverNet. Reflects the operator's
+     * current configuration, not the catalog of supported roles. Both
+     * `'solving'` and `'evaluating'` may be present concurrently — the
+     * Overview surface renders them additively.
+     */
+    roles: SolverNetOperatorRole[];
     harness?: string;
     taskGeneratorEnabled: boolean;
   };
@@ -198,6 +206,7 @@ function missingSolverNetStatus(
       name,
       enabled: false,
       solverType: 'prediction.v1',
+      roles: [],
       taskGeneratorEnabled: false,
     },
     runtimePlugins: [],
@@ -394,6 +403,24 @@ export async function buildPredictionOperatorStatus({
     });
   }
 
+  // Resolve roles from the (potentially partial) net config. The zod
+  // preprocessor already migrated legacy `role` → `roles` at config-load
+  // time; this fallback handles handcrafted configs that bypass the loader
+  // or set `roles: []` (treated as a config error elsewhere — surface it
+  // explicitly on the operator-status payload).
+  const resolvedRoles: SolverNetOperatorRole[] = (() => {
+    const candidate = (net as { roles?: unknown }).roles;
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      return Array.from(new Set(candidate.filter(
+        (r): r is SolverNetOperatorRole =>
+          r === 'solving' || r === 'evaluating',
+      )));
+    }
+    const legacy = (net as { role?: unknown }).role;
+    if (legacy === 'solving' || legacy === 'evaluating') return [legacy];
+    return ['solving'];
+  })();
+
   const status: PredictionOperatorStatus = {
     kind: 'prediction.v1.operatorStatus',
     ok: diagnostics.every((diagnostic) => diagnostic.severity !== 'error'),
@@ -402,6 +429,7 @@ export async function buildPredictionOperatorStatus({
       name,
       enabled: net.enabled,
       solverType: net.solverType,
+      roles: resolvedRoles,
       harness: net.harness,
       taskGeneratorEnabled: net.taskGenerator.enabled,
     },

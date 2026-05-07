@@ -1,75 +1,52 @@
-import { useQuery } from '@tanstack/react-query';
 import { SectionCard } from '../../components/SectionCard.js';
-import { api } from '../../api/client.js';
-import type { SolverNetCatalogEntry, SolverNetsCatalogResponse } from '../../api/types.js';
-import { NetCard, type NetCardConfig } from './NetCard.js';
-
-const STATE_RANK: Record<string, number> = { live: 0, available: 1, coming_soon: 2 };
+import { RegistryCatalog } from '../operator-catalog/RegistryCatalog.js';
+import type { NetCardConfig } from './NetCard.js';
 
 /**
- * The bootstrap response can return per-SolverNet config that's missing
- * any combination of fields (enabled, role, harness, model, plugins) —
- * older configs predate role, third-party configs may omit model, etc.
- * Merge into a fully-populated NetCardConfig so the card renders sensibly
- * even on partially-shaped input.
+ * Operator > SolverNets section. Wraps the registry-driven discovery
+ * surface (`RegistryCatalog`) inside the standard `SectionCard` shell so the
+ * header / collapse / hash-deep-link behaviour stays consistent with the other
+ * sections.
+ *
+ * Spec: `spec/2026-05-05-solvernet-creation-and-launch.md` §12.
+ *
+ * History: previously rendered a hardcoded one-row "Prediction" catalog from
+ * `/v1/setup/solvernets`. That hardcoded path is gone — operators now discover
+ * launched SolverNets through the registry. Joined-SolverNets management
+ * (per-manifestCid `roles` / `harness` / `model` / `plugins`) is implemented in
+ * Task 21; for Task 20 this section only renders the discovery catalog.
+ *
+ * The legacy `configByName` / `onSaved` / `onRestartPending` props are retained
+ * for the duration of the Task 21/22 migration so the predecessor
+ * `Configuration.tsx` keeps compiling without churn. They are not consumed
+ * here — the operator's joined-roles config will be plumbed through
+ * `RegistryCatalog`'s join CTA in Task 21, and Task 22 drops the legacy
+ * solver-nets schema entirely.
  */
-function resolveConfig(
-  catalog: SolverNetCatalogEntry,
-  stored: Partial<NetCardConfig> | undefined,
-): NetCardConfig {
-  return {
-    enabled: stored?.enabled ?? false,
-    role: stored?.role ?? (catalog.supportedRoles[0] ?? 'solving'),
-    harness: stored?.harness ?? (catalog.compatibleHarnesses[0]?.name ?? ''),
-    model: stored?.model ?? 'claude-haiku-4-5-20251001',
-    modelExplicit: stored?.model !== undefined,
-    plugins: stored?.plugins ?? [],
-  };
-}
 
 export interface SolverNetsSectionProps {
-  /** Stored per-net config from /v1/bootstrap. May be partially-shaped;
-   *  resolveConfig fills missing fields with catalog-derived defaults. */
-  configByName: Record<string, Partial<NetCardConfig>>;
-  onSaved: () => void;
-  onRestartPending: () => void;
+  /** @deprecated — drained to nothing in Task 22. Retained for compat. */
+  configByName?: Record<
+    string,
+    Partial<NetCardConfig> & { role?: 'solving' | 'evaluating' }
+  >;
+  /** @deprecated — kept for prop-compat; no-op in Task 20. */
+  onSaved?: () => void;
+  /** @deprecated — kept for prop-compat; no-op in Task 20. */
+  onRestartPending?: () => void;
   defaultExpanded?: boolean;
 }
 
 export function SolverNetsSection({
-  configByName,
-  onSaved,
-  onRestartPending,
   defaultExpanded = true,
-}: SolverNetsSectionProps): JSX.Element {
-  const { data, isLoading } = useQuery<SolverNetsCatalogResponse>({
-    queryKey: ['solvernets-catalog'],
-    queryFn: () => api.getSolverNets(),
-    staleTime: 60_000,
-  });
-
-  const nets = (data?.nets ?? []).slice().sort((a, b) => (STATE_RANK[a.state] ?? 99) - (STATE_RANK[b.state] ?? 99));
-  const enabledCount = nets.filter((n) => configByName[n.name]?.enabled).length;
-  const summary = isLoading
-    ? 'Loading catalog…'
-    : `${nets.length} available · ${enabledCount} enabled · pick what your node participates in`;
-
+}: SolverNetsSectionProps = {}): JSX.Element {
   return (
     <SectionCard
       title="SolverNets"
-      summary={summary}
+      summary="Discover launched SolverNets and join one to participate."
       defaultExpanded={defaultExpanded}
-      metaChip={enabledCount > 0 ? { label: `${enabledCount} live`, tone: 'live' } : undefined}
     >
-      {nets.map((catalog) => (
-        <NetCard
-          key={catalog.name}
-          catalog={catalog}
-          config={resolveConfig(catalog, configByName[catalog.name])}
-          onSaved={onSaved}
-          onRestartPending={onRestartPending}
-        />
-      ))}
+      <RegistryCatalog />
     </SectionCard>
   );
 }

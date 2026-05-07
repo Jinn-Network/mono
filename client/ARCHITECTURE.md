@@ -155,7 +155,7 @@ The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises a fixed s
 |---|---|---|
 | `recoverInFlight` (one-shot) | `harnesses/engine/engine.ts` | On startup, walks SQLite for tasks left mid-state by a previous crash and re-enters their state machines. |
 | Creator | `daemon/creator.ts` | Pulls Tasks from configured `TaskSource`s and posts each via `JinnRouter.createTask`. Idempotent per `(creatorMultisig, desiredStateId)`. |
-| Engine-watcher | `daemon/daemon.ts` (`_runEngineWatcherLoop`) | Consumes `adapter.watchForTasks()` async iterator, calls `engine.canAcceptTask`, claims via `adapter.claimTask`, then `engine.observe` + fire-and-forget `engine.process`. |
+| Engine-watcher | `daemon/daemon.ts` (`_runEngineWatcherLoop`) | Consumes `adapter.watchForTasks()` async iterator, calls `engine.canAcceptTask`, claims via `adapter.claimTask`, then `engine.observe` + fire-and-forget `engine.process`. Claim eligibility is gated by `joinedSolverNets[<manifestCid>]` — see §6.1 below. |
 | Engine-tick | `harnesses/engine/engine.ts` (`runTickLoop`) | Every `pollIntervalMs`, drives in-flight Tasks whose state transitions are time-based rather than event-driven. |
 | Delivery-watcher | `daemon/delivery-watcher.ts` | Watches for delivered Solutions, calls `JinnRouter.claimDelivery` to settle them, and (for restoration role) creates the paired evaluation job. |
 | Reward-claim | `daemon/reward-claim-loop.ts` | Periodically pulls pending stOLAS distributor rewards for the master EOA. Disabled when `rewardClaimIntervalMs <= 0`. |
@@ -164,6 +164,27 @@ The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises a fixed s
 | Peer-sync | `api/peers.ts` (`PeerSync`) | When peers are configured, periodically syncs artifacts and node metadata from peer endpoints. Optional. |
 
 Each loop runs as a background Promise; failures emit a structured error event but do not crash the process. `daemon.stop()` signals each loop, drains in-flight work with a configurable timeout, and closes resources.
+
+### 6.1 Generator ownership and the launched-record subsystem
+
+A SolverNet's **generator** (the Creator-loop input that synthesizes new Tasks for that SolverNet — e.g. `prediction-v1-auto.ts` polling Polymarket) is gated by **launched-record ownership**, not by a config flag. The semantic-level gate is canonical at [`spec/2026-05-05-solvernet-creation-and-launch.md`](../spec/2026-05-05-solvernet-creation-and-launch.md) §11; below is how the daemon implements it.
+
+On startup, `src/main.ts` walks the launched-record store at `~/.jinn-client/solvernets/launched/` for records this operator owns. For each record where `status === 'launched'` and `generatorEnabled === true`, the daemon constructs the matching SolverType-specific generator and wires it as a `TaskSource` on the Creator loop. Generator-config edits (cadence / allowlist / blocklist) hot-apply: the launcher SPA's PATCH writes both the on-disk record *and* an in-memory mirror inside the running generator's closure, so cadence changes take effect within one generator tick (no daemon restart). This was a P0 bug in the predecessor Launcher mode (`jinn-mono-p1t4.2`) and is regression-tested.
+
+Operator-side participation is the dual surface: writing a `joinedSolverNets[<manifestCid>]` config entry (via the SPA's Operator · Join flow at `/operator/join/:cid`) opts the operator into claiming Tasks for that launched SolverNet. The engine-watcher's `canAcceptTask` filters on these entries — a daemon with no joined SolverNets claims *no* tasks, and tasks whose `solverNetManifestCid` is not in `joinedSolverNets` are ignored regardless of contract type. Joining never starts a generator; that's launcher-only.
+
+The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone. Internal harness dispatch may still alias `solverType = `${contractId}.${contractVersion}`` for one migration cycle (per spec §15); new code does not introduce dependencies on it.
+
+### 6.2 SolverNet registry — IdentityRegistry-anchored manifests over IPFS
+
+Launched SolverNet manifests are discovered and resolved through a `SolverNetRegistryClient` (canonical interface in [`spec/2026-05-05-solvernet-creation-and-launch.md`](../spec/2026-05-05-solvernet-creation-and-launch.md) §13). The day-1 implementation is `IdentityRegistryBackedSolverNetRegistryClient`:
+
+- **Publish** — `publishManifest` canonicalizes the manifest (RFC 8785 JCS), pins the JSON to IPFS via `client/src/adapters/mech/ipfs.ts`, then calls `IdentityRegistry.setMetadata(launcherAgentId, "solvernet-manifest:<cid>", { schemaVersion: 'solvernet.lifecycle.v1', status, at, hash })`. This piggybacks the existing `IdentityPublisher` pattern (`client/src/erc8004/identity.ts`) and the network-trust v0 attestation pattern (`client/src/network-trust/attestation.ts`) — no new contract.
+- **Lifecycle transitions** (`publishLifecycleTransition`) are additional `setMetadata` writes against the same `solvernet-manifest:<cid>` key with updated `status` (`launched | paused | retired`). The manifest itself is signed once at launch and never re-signed; lifecycle authenticity flows from `msg.sender == launcher's agent wallet` (enforced on-chain by IdentityRegistry's access control on `setMetadata`).
+- **Discover** (`listLaunched`) — subgraph query for `Registered` events `WHERE key LIKE 'solvernet-manifest:%'` (no agentId filter — the registry is global per spec principle 6). The most-recent-wins resolver (`client/src/network-trust/most-recent-wins.ts`) picks the latest event per `(agentId, cid)` tuple to compute current status.
+- **Resolve** (`getManifest`) — IPFS fetch via the Autonolas gateway (or any configured gateway). Trust chain: signature recovers the agent EOA → `IdentityRegistry.getAgentByWallet(signer, atBlock: anchorBlock)` → `IdentityRegistry.getSafeForAgent(agentId, atBlock: anchorBlock)` MUST equal `manifest.launcher.safeAddress`. A stolen agent EOA can publish fake manifests but cannot redirect funding away from the legitimate launcher's Safe.
+
+There is no hosted index, no dedicated SolverNet registry contract, and no launcher follow-list. The subgraph is the discovery substrate. The interface in spec §13 lets us swap backings (gas optimisation, alternative gateway, on-chain registry) without touching the manifest schema or operator flow.
 
 ## 7. Task lifecycle, end-to-end
 
@@ -216,6 +237,8 @@ A few non-obvious points:
 - **The agent EOA private key never leaves the daemon process.** The runner subprocess (Claude CLI) and the operator MCP both reach signing operations through the daemon's HTTP API, which holds the key in memory.
 - **Artifact bytes live in the operator's SQLite + HTTP server**, not on IPFS; only the manifest envelope goes to IPFS. Evaluators fetch artifacts from the operator's `publicEndpoint` under x402 payment gating per [`spec/2026-04-30-phase-a-umbrella.md`](../spec/2026-04-30-phase-a-umbrella.md) §1.
 - **ERC-8004 anchoring is gated** on the bootstrap having minted an agent NFT for the active service. When `agent_id` is null on the active service, `IdentityPublisher` and `ReputationFeedback` are disabled with a clear log line.
+- **Tasks carry `solverNetManifestCid` as a BINDING field** (per [`spec/2026-05-05-solvernet-creation-and-launch.md`](../spec/2026-05-05-solvernet-creation-and-launch.md) §14). The on-chain `TaskCoordinator` task digest is `manifestDigest = keccak256(manifestCid)` — manifest-bound, not solverType-bound. This makes operator eligibility per-launch, not per-protocol: an operator participating in launcher A's Prediction is not automatically eligible to claim launcher B's Prediction tasks even though both share the same SolverNet contract. The Task document also carries `contractId` + `contractVersion` (e.g. `prediction` + `v1`) for harness dispatch; daemon-internal code may still use a derived `solverType = `${contractId}.${contractVersion}`` alias for one migration cycle but new code resolves the contract by `{ id, version }`.
+- **Manifest resolution is registry-mediated.** `operator.validateTask(taskDoc)` calls `registry.getManifest({ manifestCid: taskDoc.solverNetManifestCid })`, validates the task against `manifest.contract.schemas.task`, then dispatches via `manifest.contract.id + manifest.contract.version`. The day-1 registry is `IdentityRegistryBackedSolverNetRegistryClient` (see §6.2 below); the abstraction lets the backing be swapped without touching the manifest schema or operator flow.
 
 ## 8. Extension points
 
@@ -276,9 +299,13 @@ A short pointer table for engineers diving in:
 | Engine state machine | `src/harnesses/engine/engine.ts` |
 | Marketplace adapter calls | `src/adapters/mech/contracts.ts`, `src/adapters/mech/adapter.ts` |
 | Storage schema | `src/store/store.ts` |
+| Launched-record store + draft store | `src/solvernets/store.ts`, `src/solvernets/launch-state-machine.ts`, `src/solvernets/lifecycle-transitions.ts` |
+| SolverNet registry client | `src/solvernets/registry-client.ts` (interface) + `src/solvernets/registry-client-erc8004.ts` (IdentityRegistry-backed impl) |
 | Operator MCP tools | `src/mcp/operator-server.ts` |
 | Runner-scoped MCP tools | `src/mcp/server.ts` |
 | Operator SPA | `src/dashboard/spa/` (see its [README](src/dashboard/spa/README.md)) |
+| Launcher pages | `src/dashboard/spa/src/pages/Launcher.tsx`, `LauncherCreate.tsx`, `LauncherLaunched.tsx` |
+| Operator join flow | `src/dashboard/spa/src/pages/operator-catalog/JoinFlow.tsx` |
 | Tests | `client/test/` (see [`docs/runbooks/testing.md`](../docs/runbooks/testing.md)) |
 
 ## 10. Canonical references
@@ -290,6 +317,7 @@ This doc integrates and links into:
 - [`spec/2026-04-28-restorer-architecture.md`](../spec/2026-04-28-restorer-architecture.md) — substrate-first vs specialists-first ADR
 - [`spec/2026-05-01-harness-pack-architecture.md`](../spec/2026-05-01-harness-pack-architecture.md) — Harness / SolverNet / SolverPlugin extension architecture
 - [`spec/2026-05-02-task-coordinator-one-to-many.md`](../spec/2026-05-02-task-coordinator-one-to-many.md) — Task lifecycle semantics
+- [`spec/2026-05-05-solvernet-creation-and-launch.md`](../spec/2026-05-05-solvernet-creation-and-launch.md) v0.2 — **canonical authority** for SolverNet creation + launch flow, manifest shape, generator ownership (§11), operator join (§12), registry interface (§13), and manifest-bound task attribution (§14)
 - [`spec/2026-04-30-phase-a-umbrella.md`](../spec/2026-04-30-phase-a-umbrella.md) — corpus library, manifest hygiene, x402 gating
 - [`docs/superpowers/specs/2026-05-01-operator-local-app-design.md`](../docs/superpowers/specs/2026-05-01-operator-local-app-design.md) — operator app design
 - [`docs/superpowers/specs/2026-04-09-hd-wallet-fleet-design.md`](../docs/superpowers/specs/2026-04-09-hd-wallet-fleet-design.md) — fleet bootstrap state machine

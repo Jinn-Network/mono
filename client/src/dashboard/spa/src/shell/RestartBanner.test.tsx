@@ -11,7 +11,7 @@ describe('RestartBanner', () => {
   it('renders message and Restart button when pending', () => {
     const onRestart = vi.fn();
     render(<RestartBanner restartPending={true} onRestart={onRestart} />);
-    expect(screen.getByText(/configuration saved/i)).toBeTruthy();
+    expect(screen.getByText(/operator settings saved/i)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /restart node/i }));
     expect(onRestart).toHaveBeenCalledOnce();
   });

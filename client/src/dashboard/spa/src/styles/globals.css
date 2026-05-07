@@ -94,3 +94,16 @@ textarea:focus-visible {
 .xterm-screen {
   width: 100% !important;
 }
+
+.agent-rail .xterm {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.agent-rail .xterm-viewport {
+  overflow-x: hidden;
+}
+
+.agent-rail .xterm-accessibility-tree {
+  display: none;
+}

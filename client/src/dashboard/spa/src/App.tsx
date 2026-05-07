@@ -11,8 +11,12 @@ import { TopTabs } from './shell/TopTabs.js';
 import { AgentRail } from './shell/AgentRail.js';
 import { RestartBanner } from './shell/RestartBanner.js';
 import { OverviewPage } from './pages/Overview.js';
-import { ConfigurationPage } from './pages/Configuration.js';
 import { LeaderboardPage } from './pages/leaderboard/Leaderboard.js';
+import { OperatorPage } from './pages/Operator.js';
+import { LauncherPage } from './pages/Launcher.js';
+import { LauncherCreatePage } from './pages/LauncherCreate.js';
+import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
+import { JoinFlow } from './pages/operator-catalog/JoinFlow.js';
 
 /**
  * App routes between two distinct phases of operator life:
@@ -20,9 +24,9 @@ import { LeaderboardPage } from './pages/leaderboard/Leaderboard.js';
  *   Onboarding — bootstrap not yet 'running'. A focused, full-screen flow.
  *
  *   Operating  — bootstrap complete. A persistent shell (header, top tabs,
- *                agent rail) wraps two routed pages: /overview and
- *                /configuration. The operator's relationship with the agent
- *                stays continuous across both pages.
+ *                agent rail) wraps top-level workspaces: /overview,
+ *                /operator, and /launcher. The operator's relationship with
+ *                the agent stays continuous across all pages.
  */
 export default function App(): JSX.Element {
   const { data, isLoading } = useQuery<BootstrapState>({
@@ -64,9 +68,16 @@ export default function App(): JSX.Element {
       >
         <Switch>
           <Route path="/overview" component={OverviewPage} />
-          <Route path="/configuration">
-            <ConfigurationPage onRestartPending={() => setRestartPending(true)} />
+          <Route path="/operator/join/:cid"><JoinFlow /></Route>
+          <Route path="/operator">
+            <OperatorPage onRestartPending={() => setRestartPending(true)} />
           </Route>
+          <Route path="/configuration"><ConfigurationRedirect /></Route>
+          <Route path="/launcher/create"><LauncherCreatePage /></Route>
+          <Route path="/launcher/launched/:solverNetId">
+            <LauncherLaunchedPage />
+          </Route>
+          <Route path="/launcher"><LauncherPage /></Route>
           <Route path="/leaderboard/:solverNet">
             {(params: { solverNet: string }) => (
               <LeaderboardPage solverNet={params.solverNet} />
@@ -80,4 +91,9 @@ export default function App(): JSX.Element {
       </AppShell>
     </Router>
   );
+}
+
+function ConfigurationRedirect(): JSX.Element {
+  const hash = typeof window === 'undefined' ? '' : window.location.hash;
+  return <Redirect to={`/operator${hash}`} />;
 }

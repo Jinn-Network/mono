@@ -2,7 +2,7 @@ import { Link } from 'wouter';
 
 /**
  * Gold-bordered band that surfaces "needs attention" state on Overview.
- * Single-line message + sky CTA that deep-links into the Configuration
+ * Single-line message + sky CTA that deep-links into the Operator
  * section that resolves the issue. Renders nothing when not active.
  *
  * The alert is the *one* gold element on the Overview page (gold-as-hint

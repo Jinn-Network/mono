@@ -10,6 +10,26 @@ import type { Store } from '../store/store.js';
 import { TaskRunPersistence, type PersistedTaskRun } from '../harnesses/engine/persistence.js';
 import type { PredictionOperatorStatus } from '../solver-nets/prediction-operator-ux.js';
 
+/**
+ * Operator-mode visible roles. The launcher is configured per-net but is
+ * intentionally omitted from operator-mode status payloads — strict mode
+ * separation per spec/2026-05-05-launcher-role-and-mode.md §6.3. Filtering
+ * happens at the gather-status API boundary so this narrow type is the one
+ * the SPA reads.
+ */
+export type OperatorVisibleRole = 'solving' | 'evaluating';
+
+/**
+ * API-facing variant of {@link PredictionOperatorStatus} with `solverNet.roles`
+ * narrowed to operator-visible roles only (no `'launching'`). Built from the
+ * full operator status by gather-status before being exposed via /v1/status.
+ */
+export type PredictionOperatorStatusForApi = Omit<PredictionOperatorStatus, 'solverNet'> & {
+  solverNet: Omit<PredictionOperatorStatus['solverNet'], 'roles'> & {
+    roles: OperatorVisibleRole[];
+  };
+};
+
 const RECENT_LIMIT = 5;
 
 export interface PredictionV1TaskRunSummary {
@@ -28,7 +48,7 @@ export interface PredictionV1TaskRunSummary {
 }
 
 export interface PredictionV1Status {
-  operator: PredictionOperatorStatus | null;
+  operator: PredictionOperatorStatusForApi | null;
   operatorError?: string;
   totals: {
     observedTasks: number;
@@ -48,7 +68,7 @@ export interface PredictionV1Status {
 }
 
 export interface GatherPredictionV1StatusOptions {
-  operator?: PredictionOperatorStatus | null;
+  operator?: PredictionOperatorStatusForApi | null;
   operatorError?: string;
 }
 

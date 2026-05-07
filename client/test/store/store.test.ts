@@ -133,4 +133,79 @@ describe('Store', () => {
       postCount: 1,
     });
   });
+
+  it('lists posted tasks by creator with solverType denormalised from activity_events', () => {
+    const creator = '0x00112233445566778899AABbCCdDeeFf00112233';
+    // Insert two posts at different timestamps. The accessor returns rows in
+    // last_posted_at DESC order so the most recent should be first.
+    store.upsertTaskPostRecord({
+      creatorSafeAddress: creator,
+      sourceKey: 'auto:prediction.v1:0xa',
+      policyType: 'once_per_bucket',
+      scopeKey: 'a',
+      taskId: 'task-a',
+      taskCid: 'Qma',
+      requestId: 'req-a',
+      firstPostedAt: '2026-05-05T10:00:00.000Z',
+      lastPostedAt: '2026-05-05T10:00:00.000Z',
+      postCount: 1,
+    });
+    store.upsertTaskPostRecord({
+      creatorSafeAddress: creator,
+      sourceKey: 'auto:prediction.v1:0xb',
+      policyType: 'once_per_bucket',
+      scopeKey: 'b',
+      taskId: 'task-b',
+      taskCid: 'Qmb',
+      requestId: 'req-b',
+      firstPostedAt: '2026-05-05T11:00:00.000Z',
+      lastPostedAt: '2026-05-05T11:00:00.000Z',
+      postCount: 1,
+    });
+    // Mirror the daemon's `task_posted` event so the JOIN populates solver_type.
+    store.recordActivityEvent({
+      ts: '2026-05-05T10:00:00.000Z',
+      kind: 'task_posted',
+      requestId: 'req-a',
+      solverType: 'prediction.v1',
+    });
+    store.recordActivityEvent({
+      ts: '2026-05-05T11:00:00.000Z',
+      kind: 'task_posted',
+      requestId: 'req-b',
+      solverType: 'prediction.v1',
+    });
+
+    const all = store.listPostedTasksByCreator({ creatorSafeAddress: creator, limit: 10 });
+    expect(all).toHaveLength(2);
+    expect(all[0]?.taskId).toBe('task-b');
+    expect(all[0]?.solverType).toBe('prediction.v1');
+    expect(all[1]?.taskId).toBe('task-a');
+
+    const paged = store.listPostedTasksByCreator({
+      creatorSafeAddress: creator,
+      limit: 10,
+      before: '2026-05-05T11:00:00.000Z',
+    });
+    expect(paged).toHaveLength(1);
+    expect(paged[0]?.taskId).toBe('task-a');
+
+    const wrongCreator = store.listPostedTasksByCreator({
+      creatorSafeAddress: '0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead',
+      limit: 10,
+    });
+    expect(wrongCreator).toEqual([]);
+
+    const count = store.countPostedTasksByCreatorAndSolverType({
+      creatorSafeAddress: creator,
+      solverType: 'prediction.v1',
+    });
+    expect(count).toBe(2);
+
+    const otherSolverType = store.countPostedTasksByCreatorAndSolverType({
+      creatorSafeAddress: creator,
+      solverType: 'mystery.v1',
+    });
+    expect(otherSolverType).toBe(0);
+  });
 });

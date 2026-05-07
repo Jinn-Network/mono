@@ -11,7 +11,13 @@ export type SolverNetTaskRole = 'restoration' | 'evaluation';
 export interface SolverNetConfig {
   enabled: boolean;
   solverType: string;
-  role?: SolverNetOperatorRole;
+  /**
+   * Non-empty subset of operator roles this SolverNet runs concurrently.
+   * Optional only because legacy callers (pre-migration helpers) may omit it;
+   * the config loader normalises absence to `['solving']` and migrates any
+   * legacy singular `role` to `[role]`.
+   */
+  roles?: SolverNetOperatorRole[];
   harness: string;
   model?: string;
   plugins: SolverPluginEntry[];
@@ -22,7 +28,8 @@ export interface LoadedSolverNet {
   name: string;
   enabled: boolean;
   solverType: string;
-  role: SolverNetOperatorRole;
+  /** Active operator roles (non-empty after load). */
+  roles: SolverNetOperatorRole[];
   contract: SolverNetContract;
   harness: string;
   model?: string;
@@ -30,8 +37,21 @@ export interface LoadedSolverNet {
   taskGenerator: { enabled: boolean };
 }
 
-function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetTaskRole {
-  return role === 'evaluating' ? 'evaluation' : 'restoration';
+export function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetTaskRole | undefined {
+  if (role === 'solving') return 'restoration';
+  if (role === 'evaluating') return 'evaluation';
+  return undefined;
+}
+
+/**
+ * Resolve a non-empty roles array from a config entry. Falls back to
+ * `['solving']` for shapes that omit `roles` entirely (e.g. a stub used by
+ * unit tests or a legacy migration helper that hasn't run through the zod
+ * preprocessor). Deduplicates to keep set semantics simple.
+ */
+function rolesFromConfig(net: SolverNetConfig): SolverNetOperatorRole[] {
+  if (net.roles && net.roles.length > 0) return Array.from(new Set(net.roles));
+  return ['solving'];
 }
 
 function runtimePluginFrom(
@@ -79,7 +99,11 @@ export class SolverNetRegistry {
     return [...this.nets.values()].find((net) =>
       net.enabled &&
       net.solverType === solverType &&
-      (taskRole === undefined || taskRoleForOperatorRole(net.role) === taskRole),
+      (taskRole === undefined ||
+        net.roles.some((r) => {
+          const tr = taskRoleForOperatorRole(r);
+          return tr !== undefined && tr === taskRole;
+        })),
     );
   }
 
@@ -104,13 +128,28 @@ export class SolverNetRegistry {
   }
 }
 
+/**
+ * Parse the legacy operator-config `solverType` string (`'<id>.<version>'`)
+ * into a `{ id, version }` ref so we can call the contract registry's
+ * non-deprecated lookup signature. The operator config field itself is
+ * carried forward for now (Task 8 of
+ * `spec/2026-05-05-solvernet-creation-and-launch.md` — internal dispatch
+ * keeps `solverType` as a routing alias; Task 30 removes it).
+ */
+function parseSolverTypeRef(solverType: string): { id: string; version: string } | undefined {
+  const dot = solverType.lastIndexOf('.');
+  if (dot <= 0 || dot === solverType.length - 1) return undefined;
+  return { id: solverType.slice(0, dot), version: solverType.slice(dot + 1) };
+}
+
 export async function loadSolverNets(
   config: { solverNets: Record<string, SolverNetConfig> },
 ): Promise<SolverNetRegistry> {
   const registry = new SolverNetRegistry();
   for (const [name, net] of Object.entries(config.solverNets)) {
     if (!net.enabled) continue;
-    const contract = getSolverNetContract(net.solverType);
+    const ref = parseSolverTypeRef(net.solverType);
+    const contract = ref ? getSolverNetContract(ref) : undefined;
     if (!contract) {
       throw new Error(`SolverNet ${name} has no registered SolverNetContract for ${net.solverType}`);
     }
@@ -134,7 +173,15 @@ export async function loadSolverNets(
       seenNames.add(plugin.name);
     }
 
-    for (const entry of [JINN_NETWORK_TOOLS_PLUGIN, ...contract.defaultRuntimePlugins]) {
+    // Per `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9, runtime
+    // plugins are operator-configured — the SolverNet contract no longer
+    // carries `defaultRuntimePlugins`. Network Tools is the one runtime-
+    // scoped default (`supports: ['jinn.runtime']`) auto-loaded so every
+    // operator's daemon can talk to the Jinn MCP surface. SolverType-bound
+    // plugins (e.g. the bundled prediction plugin) flow through
+    // `net.plugins`; the launcher seeds quick-start defaults into operator
+    // config rather than binding them to the contract.
+    for (const entry of [JINN_NETWORK_TOOLS_PLUGIN]) {
       await addRuntimePlugin(entry, 'default');
     }
     for (const entry of net.plugins ?? []) {
@@ -144,7 +191,7 @@ export async function loadSolverNets(
       name,
       enabled: net.enabled,
       solverType: net.solverType,
-      role: net.role ?? 'solving',
+      roles: rolesFromConfig(net),
       contract,
       harness: net.harness,
       ...(net.model ? { model: net.model } : {}),

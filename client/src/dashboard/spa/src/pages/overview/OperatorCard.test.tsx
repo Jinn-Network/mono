@@ -5,23 +5,41 @@ import { memoryLocation } from 'wouter/memory-location';
 import { OperatorCard } from './OperatorCard.js';
 
 describe('OperatorCard', () => {
-  it('renders operator-side state and a deep-link, no public counters', () => {
+  it('renders operator-side state with a single Solver role and a deep-link', () => {
     const { hook } = memoryLocation({ path: '/overview' });
     render(
       <Router hook={hook}>
         <OperatorCard
           name="prediction"
-          role="solving"
+          roles={['solving']}
           state="live"
           waitingMessage="Waiting for Tasks. SolverNet active, Harness loaded."
         />
       </Router>,
     );
     expect(screen.getByText(/your prediction/i)).toBeTruthy();
-    expect(screen.getByText(/solving/i)).toBeTruthy();
+    expect(screen.getByText(/^solver$/i)).toBeTruthy();
+    expect(screen.queryByText(/^evaluator$/i)).toBeNull();
     expect(screen.getByText(/live/i)).toBeTruthy();
     expect(screen.getByText(/waiting for tasks/i)).toBeTruthy();
     const link = screen.getByText(/configure/i).closest('a');
-    expect(link?.getAttribute('href')).toBe('/configuration#solvernets/prediction');
+    expect(link?.getAttribute('href')).toBe('/operator#solvernets/prediction');
+  });
+
+  it('renders both Solver and Evaluator pills when both roles are active', () => {
+    const { hook } = memoryLocation({ path: '/overview' });
+    render(
+      <Router hook={hook}>
+        <OperatorCard
+          name="prediction"
+          roles={['solving', 'evaluating']}
+          state="live"
+        />
+      </Router>,
+    );
+    expect(screen.getByText(/^solver$/i)).toBeTruthy();
+    expect(screen.getByText(/^evaluator$/i)).toBeTruthy();
+    // Plural label when more than one role is active.
+    expect(screen.getByText(/^roles$/i)).toBeTruthy();
   });
 });

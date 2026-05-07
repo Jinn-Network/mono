@@ -112,8 +112,9 @@ const verdictPayload = {
 
 describe('payload helpers', () => {
   it('exposes the prediction.v1 SolverNet contract', () => {
-    const contract = getSolverNetContract('prediction.v1');
-    expect(contract?.solverType).toBe('prediction.v1');
+    const contract = getSolverNetContract({ id: 'prediction', version: 'v1' });
+    expect(contract?.id).toBe('prediction');
+    expect(contract?.version).toBe('v1');
     expect(contract?.evaluationFunction.id).toBe('prediction.brier-loss.v1');
     expect(contract?.aggregationFunction.windowDays).toBe(84);
   });

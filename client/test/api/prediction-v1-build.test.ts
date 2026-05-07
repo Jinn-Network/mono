@@ -121,6 +121,7 @@ describe('gatherPredictionV1Status', () => {
             name: 'prediction',
             enabled: true,
             solverType: 'prediction.v1',
+            roles: ['solving'],
             harness: 'prediction-v1-baseline',
             taskGeneratorEnabled: true,
           },

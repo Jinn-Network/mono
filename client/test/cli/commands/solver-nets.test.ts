@@ -25,8 +25,12 @@ function predictionConfig(overrides: Record<string, unknown> = {}): Record<strin
       prediction: {
         enabled: true,
         solverType: 'prediction.v1',
-        harness: 'claude-code-learner',
-        plugins: [],
+        harness: 'prediction-v1-baseline',
+        // Mirrors the launcher's quick-start defaults: the bundled
+        // prediction plugin is operator-configured per
+        // `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9 (Task 6
+        // dropped contract-default runtime plugins).
+        plugins: ['bundled:jinn-prediction-plugin'],
         taskGenerator: { enabled: true },
         ...overrides,
       },
@@ -133,12 +137,14 @@ describe('solver-nets command', () => {
       name: 'prediction',
       enabled: true,
       solverType: 'prediction.v1',
-      harness: 'claude-code-learner',
+      harness: 'prediction-v1-baseline',
       taskGeneratorEnabled: true,
     });
     expect(envelope['runtimePlugins']).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        provenance: 'default',
+        // Operator-configured (no longer a contract default — see Task 6 of
+        // `spec/2026-05-05-solvernet-creation-and-launch.md`).
+        provenance: 'configured',
         source: 'bundled:jinn-prediction-plugin',
         name: '@jinn-network/prediction-plugin',
         version: '0.2.0',
@@ -146,9 +152,9 @@ describe('solver-nets command', () => {
       }),
     ]));
     expect(envelope['harness']).toMatchObject({
-      name: 'claude-code-learner',
+      name: 'prediction-v1-baseline',
       supportsPredictionV1Restoration: true,
-      readiness: { ready: true },
+      readiness: { ready: false, reason: 'requires live daemon' },
     });
   });
 

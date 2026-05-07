@@ -7,7 +7,7 @@ import {
 
 describe('JinnRouter contract encoding', () => {
   const taskCidDigest = ('0x' + '11'.repeat(32)) as `0x${string}`;
-  const solverTypeDigest = ('0x' + '22'.repeat(32)) as `0x${string}`;
+  const manifestDigest = ('0x' + '22'.repeat(32)) as `0x${string}`;
   const policy = {
     claimWindowStart: 1n,
     claimWindowEnd: 2n,
@@ -29,7 +29,7 @@ describe('JinnRouter contract encoding', () => {
     const calldata = encodeFunctionData({
       abi: JINN_ROUTER_ABI,
       functionName: 'createTask',
-      args: [taskCidDigest, solverTypeDigest, policy, 1000000n, 1000000n, 300n],
+      args: [taskCidDigest, manifestDigest, policy, 1000000n, 1000000n, 300n],
     });
     expect(calldata).toMatch(/^0x/);
 
@@ -39,7 +39,7 @@ describe('JinnRouter contract encoding', () => {
     });
     expect(decoded.functionName).toBe('createTask');
     expect((decoded.args as unknown[])[0]).toBe(taskCidDigest);
-    expect((decoded.args as unknown[])[1]).toBe(solverTypeDigest);
+    expect((decoded.args as unknown[])[1]).toBe(manifestDigest);
   });
 
   it('encodes claimTask calldata', () => {
@@ -121,7 +121,7 @@ describe('JinnRouter contract encoding', () => {
       args: {
         creator: '0x1234567890123456789012345678901234567890',
         taskId: 1n,
-        solverTypeDigest,
+        manifestDigest,
       },
     });
     const data = encodeAbiParameters(

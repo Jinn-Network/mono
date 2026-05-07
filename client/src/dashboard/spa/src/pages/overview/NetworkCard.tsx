@@ -11,7 +11,7 @@ export interface NetworkCardProps {
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: 'warn' }): JSX.Element {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
       <span
         style={{
           fontFamily: "'JetBrains Mono', monospace",
@@ -63,7 +63,13 @@ export function NetworkCard({ name, totals }: NetworkCardProps): JSX.Element {
       >
         Network · {name}
       </span>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '24px' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(72px, 1fr))',
+          gap: '16px 24px',
+        }}
+      >
         <Stat label="tasks" value={totals.tasks} />
         <Stat label="active" value={totals.active} />
         <Stat label="solutions" value={totals.solutions} />

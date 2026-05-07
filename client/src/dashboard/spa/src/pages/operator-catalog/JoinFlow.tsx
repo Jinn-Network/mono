@@ -1,0 +1,692 @@
+import { useState } from 'react';
+import { useLocation, useParams } from 'wouter';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '../../api/client.js';
+import type {
+  RegistryManifestResponse,
+  SolverNetCatalogEntry,
+  SolverNetsCatalogResponse,
+} from '../../api/types.js';
+import { CLAUDE_MODELS, resolveModelOption } from '../configuration/claudeModels.js';
+
+/**
+ * Operator participation flow keyed by `manifestCid`.
+ *
+ * Route: `/operator/join/:cid`. Reached from `RegistryCatalog`'s [Join] CTA.
+ *
+ * Spec: `spec/2026-05-05-solvernet-creation-and-launch.md` §12.
+ *
+ * Loads the manifest body via the registry endpoint, lets the operator pick
+ * which open roles to take + (for the solver role only) harness / plugins /
+ * model, and writes the manifest-keyed entry to `config.solverNets[<cid>]`
+ * via `POST /v1/operator/join/:cid`. The evaluator role binds harness from
+ * the manifest's `contract.evaluationFunction.implementation` — the harness
+ * picker is hidden when only `evaluator` is selected.
+ */
+
+const DEFAULT_HARNESS = 'claude-code-learner';
+
+export interface JoinFlowProps {
+  /** Override the manifest cid for tests (skips wouter route param lookup). */
+  manifestCid?: string;
+  /** Override navigation hook for tests. */
+  navigateTo?: (path: string) => void;
+}
+
+type Role = 'solver' | 'evaluator';
+
+interface JoinFormState {
+  roles: Role[];
+  harness: string;
+  plugins: string[];
+  model: string;
+}
+
+function deriveIntrinsicSolverType(manifest: {
+  contract: { id: string; version: string };
+}): string {
+  return `${manifest.contract.id}.${manifest.contract.version}`;
+}
+
+function findCatalogEntry(
+  catalog: SolverNetsCatalogResponse | undefined,
+  intrinsicSolverType: string,
+): SolverNetCatalogEntry | undefined {
+  return catalog?.nets.find((n) => n.intrinsicSolverType === intrinsicSolverType);
+}
+
+function formatEthFromWei(wei: string | undefined): string {
+  if (!wei || !/^\d+$/.test(wei)) return '—';
+  try {
+    const n = BigInt(wei);
+    const eth = Number(n) / 1e18;
+    if (eth === 0) return '0 ETH';
+    if (eth < 0.0001) return `${eth.toExponential(3)} ETH`;
+    return `${eth.toFixed(eth < 1 ? 6 : 4)} ETH`;
+  } catch {
+    return '—';
+  }
+}
+
+function truncateAddress(address: string): string {
+  if (!address) return '';
+  if (address.length <= 13) return address;
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+export function JoinFlow({
+  manifestCid: manifestCidOverride,
+  navigateTo,
+}: JoinFlowProps = {}): JSX.Element {
+  const params = useParams<{ cid: string }>();
+  const [, navigateHook] = useLocation();
+  const navigate = navigateTo ?? navigateHook;
+  const queryClient = useQueryClient();
+  const cid = manifestCidOverride ?? params.cid;
+
+  const manifestQuery = useQuery<RegistryManifestResponse>({
+    queryKey: ['solvernets', 'manifest', cid],
+    queryFn: () => api.solvernets.getManifest(cid!),
+    enabled: Boolean(cid),
+    retry: false,
+  });
+
+  const catalogQuery = useQuery<SolverNetsCatalogResponse>({
+    queryKey: ['solvernets', 'catalog'],
+    queryFn: () => api.getSolverNets(),
+  });
+
+  // Default form state seeds Solver if available, otherwise Evaluator. Harness
+  // / plugins / model default to the catalog's first compatible option.
+  const manifest = manifestQuery.data?.manifest;
+  const catalogEntry = manifest
+    ? findCatalogEntry(catalogQuery.data, deriveIntrinsicSolverType(manifest))
+    : undefined;
+  const defaultHarness =
+    catalogEntry?.compatibleHarnesses[0]?.name ?? DEFAULT_HARNESS;
+  const defaultModel = CLAUDE_MODELS[0]!.id;
+
+  const [form, setForm] = useState<JoinFormState>({
+    roles: [],
+    harness: defaultHarness,
+    plugins: [],
+    model: defaultModel,
+  });
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // The catalog loads independently of the manifest — when it arrives, if
+  // the operator hasn't picked a harness yet (`form.harness` still equal to
+  // the seed default) and the catalog's first compatible option differs,
+  // shift to that. This is render-time-safe because we only call setForm
+  // when the values are unequal — React queues the re-render and bails out
+  // from infinite loops automatically.
+  const catalogPreferredHarness = catalogEntry?.compatibleHarnesses[0]?.name;
+  if (
+    catalogPreferredHarness &&
+    form.harness === DEFAULT_HARNESS &&
+    catalogPreferredHarness !== DEFAULT_HARNESS &&
+    !catalogEntry?.compatibleHarnesses.some((h) => h.name === DEFAULT_HARNESS)
+  ) {
+    setForm({ ...form, harness: catalogPreferredHarness });
+  }
+
+  const submitMutation = useMutation({
+    mutationFn: () =>
+      api.operator.join(cid!, {
+        ...(manifest?.name !== undefined ? { name: manifest.name } : {}),
+        roles: form.roles,
+        ...(form.roles.includes('solver')
+          ? {
+              harness: form.harness,
+              plugins: form.plugins,
+              model: form.model,
+            }
+          : {}),
+      }),
+    onSuccess: () => {
+      // Invalidate so the catalog's joined-indicator badge appears on the
+      // next tick instead of waiting up to 30s for the next refetch.
+      void queryClient.invalidateQueries({ queryKey: ['operator', 'joined'] });
+      navigate('/operator#solvernets');
+    },
+    onError: (err) => {
+      setSubmitError(err instanceof Error ? err.message : String(err));
+    },
+  });
+
+  if (!cid) {
+    return (
+      <main data-testid="join-flow-missing-cid" style={pageStyle}>
+        <ErrorBanner
+          message="No manifest cid supplied."
+          onBack={() => navigate('/operator#solvernets')}
+        />
+      </main>
+    );
+  }
+
+  if (manifestQuery.isLoading) {
+    return (
+      <main data-testid="join-flow-loading" style={pageStyle}>
+        <p style={mutedTextStyle}>Loading manifest…</p>
+      </main>
+    );
+  }
+
+  if (manifestQuery.isError || !manifest) {
+    const message =
+      manifestQuery.error instanceof Error
+        ? manifestQuery.error.message
+        : 'Unknown error';
+    return (
+      <main data-testid="join-flow-error" style={pageStyle}>
+        <ErrorBanner
+          message={`Failed to load manifest: ${message}`}
+          onBack={() => navigate('/operator#solvernets')}
+          onRetry={() => {
+            void manifestQuery.refetch();
+          }}
+        />
+      </main>
+    );
+  }
+
+  const { openRoles } = manifest;
+  const toggleRole = (role: Role): void => {
+    if (!openRoles.includes(role)) return;
+    setForm((prev) => {
+      const has = prev.roles.includes(role);
+      const nextRoles = has
+        ? prev.roles.filter((r) => r !== role)
+        : openRoles.filter((r) => r === role || prev.roles.includes(r));
+      return { ...prev, roles: nextRoles };
+    });
+  };
+
+  const togglePlugin = (name: string): void => {
+    setForm((prev) => {
+      const has = prev.plugins.includes(name);
+      return {
+        ...prev,
+        plugins: has
+          ? prev.plugins.filter((p) => p !== name)
+          : [...prev.plugins, name],
+      };
+    });
+  };
+
+  const showSolverFields = form.roles.includes('solver');
+  const showEvaluatorInfo = form.roles.includes('evaluator');
+  const canSubmit = form.roles.length > 0 && !submitMutation.isPending;
+
+  return (
+    <main data-testid="join-flow" data-manifest-cid={cid} style={pageStyle}>
+      <header style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <span
+          data-testid="join-flow-title"
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '20px',
+            fontWeight: 500,
+            color: 'var(--fg)',
+          }}
+        >
+          Join {manifest.name}
+        </span>
+        <span
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+            color: 'var(--fg-muted)',
+          }}
+        >
+          {manifest.description}
+        </span>
+      </header>
+
+      <section
+        data-testid="join-flow-summary"
+        style={cardStyle}
+      >
+        <span style={cardLabelStyle}>Manifest</span>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr',
+            gap: '6px 12px',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+            color: 'var(--fg-muted)',
+          }}
+        >
+          <span>Contract</span>
+          <span style={{ color: 'var(--fg)' }}>
+            {manifest.contract.id} · {manifest.contract.version}
+          </span>
+          <span>Solution price</span>
+          <span style={{ color: 'var(--fg)' }}>
+            {formatEthFromWei(manifest.solutionPriceWei)}
+          </span>
+          <span>Verdict price</span>
+          <span style={{ color: 'var(--fg)' }}>
+            {formatEthFromWei(manifest.verdictPriceWei)}
+          </span>
+          <span>Open roles</span>
+          <span data-testid="join-flow-open-roles" style={{ color: 'var(--fg)' }}>
+            {openRoles.join(', ') || 'none'}
+          </span>
+          <span>Launcher</span>
+          <span style={{ color: 'var(--fg)' }}>
+            {truncateAddress(manifest.launcher.safeAddress)} · agentId{' '}
+            {manifest.launcher.agentId}
+          </span>
+          <span>Manifest CID</span>
+          <span
+            data-testid="join-flow-manifest-cid"
+            style={{
+              color: 'var(--fg-dim)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {cid}
+          </span>
+        </div>
+      </section>
+
+      <section style={cardStyle}>
+        <span style={cardLabelStyle}>Roles</span>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${openRoles.length || 1}, 1fr)`,
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-2)',
+            overflow: 'hidden',
+          }}
+        >
+          {openRoles.map((role, idx) => {
+            const active = form.roles.includes(role);
+            const checkboxId = `join-role-${role}`;
+            return (
+              <label
+                key={role}
+                htmlFor={checkboxId}
+                data-testid="join-role-option"
+                data-role={role}
+                data-role-active={active ? 'true' : 'false'}
+                style={{
+                  padding: '12px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  background: active ? 'var(--bg)' : 'transparent',
+                  color: active ? 'var(--fg)' : 'var(--fg-muted)',
+                  borderRight:
+                    idx < openRoles.length - 1
+                      ? '1px solid var(--border)'
+                      : 'none',
+                  cursor: 'pointer',
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    id={checkboxId}
+                    type="checkbox"
+                    checked={active}
+                    onChange={() => toggleRole(role)}
+                    aria-label={role === 'solver' ? 'Solver' : 'Evaluator'}
+                    style={{ accentColor: 'var(--accent-sky)', width: '14px', height: '14px' }}
+                  />
+                  <span style={{ fontSize: '14px', fontWeight: 500 }}>
+                    {role === 'solver' ? 'Solver' : 'Evaluator'}
+                  </span>
+                </span>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    color: active ? 'var(--fg-muted)' : 'var(--fg-dim)',
+                    paddingLeft: '22px',
+                  }}
+                >
+                  {role === 'solver'
+                    ? 'attempt tasks; submit solutions'
+                    : 'verify solutions submitted by other operators'}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      {showSolverFields && (
+        <section data-testid="join-flow-solver-fields" style={cardStyle}>
+          <span style={cardLabelStyle}>Solver configuration</span>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '16px',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={fieldLabelStyle}>Harness</span>
+              <select
+                aria-label="Harness"
+                data-testid="join-harness-select"
+                value={form.harness}
+                onChange={(e) => setForm({ ...form, harness: e.target.value })}
+                style={selectStyle}
+              >
+                {(catalogEntry?.compatibleHarnesses ?? []).map((h) => (
+                  <option key={h.name} value={h.name}>
+                    {h.name}@{h.version}
+                  </option>
+                ))}
+                {(!catalogEntry || catalogEntry.compatibleHarnesses.length === 0) && (
+                  <option value={form.harness}>{form.harness}</option>
+                )}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={fieldLabelStyle}>Claude model</span>
+              <select
+                aria-label="Claude model"
+                data-testid="join-model-select"
+                value={form.model}
+                onChange={(e) => setForm({ ...form, model: e.target.value })}
+                style={selectStyle}
+              >
+                {CLAUDE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+                {(() => {
+                  const resolved = resolveModelOption(form.model);
+                  if (resolved.isCustom) {
+                    return (
+                      <option key={form.model} value={form.model}>
+                        {resolved.label}
+                      </option>
+                    );
+                  }
+                  return null;
+                })()}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={fieldLabelStyle}>Plugins</span>
+            {(catalogEntry?.compatiblePlugins ?? []).length === 0 ? (
+              <span
+                data-testid="join-plugins-empty"
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '12px',
+                  color: 'var(--fg-dim)',
+                }}
+              >
+                No plugins available for this SolverNet
+              </span>
+            ) : (
+              (catalogEntry?.compatiblePlugins ?? []).map((p) => {
+                const checked = form.plugins.includes(p.name);
+                const checkboxId = `join-plugin-${p.name}`;
+                return (
+                  <label
+                    key={p.name}
+                    htmlFor={checkboxId}
+                    data-testid="join-plugin-option"
+                    data-plugin={p.name}
+                    data-plugin-active={checked ? 'true' : 'false'}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 14px',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-2)',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      id={checkboxId}
+                      type="checkbox"
+                      aria-label={`Plugin: ${p.name}`}
+                      checked={checked}
+                      onChange={() => togglePlugin(p.name)}
+                      style={{ accentColor: 'var(--accent-sky)' }}
+                    />
+                    <span style={{ fontSize: '14px', color: 'var(--fg)', flex: 1 }}>
+                      {p.name}
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
+                      {p.source} · {p.version}
+                    </span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </section>
+      )}
+
+      {showEvaluatorInfo && !showSolverFields && (
+        <section data-testid="join-flow-evaluator-info" style={cardStyle}>
+          <span style={cardLabelStyle}>Evaluator configuration</span>
+          <p
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '12px',
+              color: 'var(--fg-muted)',
+              margin: 0,
+            }}
+          >
+            The evaluator harness is bound to{' '}
+            <code style={{ color: 'var(--fg)' }}>
+              {manifest.contract.evaluationFunction.implementation}
+            </code>{' '}
+            by the manifest's contract; no operator selection required.
+          </p>
+        </section>
+      )}
+
+      {showEvaluatorInfo && showSolverFields && (
+        <section data-testid="join-flow-evaluator-info" style={cardStyle}>
+          <span style={cardLabelStyle}>Evaluator binding</span>
+          <p
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '12px',
+              color: 'var(--fg-muted)',
+              margin: 0,
+            }}
+          >
+            Evaluator harness is bound to{' '}
+            <code style={{ color: 'var(--fg)' }}>
+              {manifest.contract.evaluationFunction.implementation}
+            </code>{' '}
+            by the manifest. The fields above only configure the solver role.
+          </p>
+        </section>
+      )}
+
+      {submitError && (
+        <p
+          data-testid="join-flow-submit-error"
+          role="alert"
+          style={{
+            color: 'var(--break-red)',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '13px',
+            margin: 0,
+          }}
+        >
+          {submitError}
+        </p>
+      )}
+
+      <footer
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: '12px',
+        }}
+      >
+        <button
+          type="button"
+          data-testid="join-flow-cancel"
+          onClick={() => navigate('/operator#solvernets')}
+          style={ghostButtonStyle}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          data-testid="join-flow-submit"
+          disabled={!canSubmit}
+          onClick={() => {
+            setSubmitError(null);
+            submitMutation.mutate();
+          }}
+          style={{
+            ...ghostButtonStyle,
+            background: canSubmit ? 'var(--accent-sky)' : 'transparent',
+            color: canSubmit ? 'var(--bg-sunken)' : 'var(--fg-dim)',
+            border: `1px solid ${canSubmit ? 'var(--accent-sky)' : 'var(--border)'}`,
+            cursor: canSubmit ? 'pointer' : 'not-allowed',
+          }}
+        >
+          {submitMutation.isPending ? 'Joining…' : 'Join SolverNet'}
+        </button>
+      </footer>
+    </main>
+  );
+}
+
+function ErrorBanner({
+  message,
+  onBack,
+  onRetry,
+}: {
+  message: string;
+  onBack: () => void;
+  onRetry?: () => void;
+}): JSX.Element {
+  return (
+    <div
+      style={{
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--break-red)',
+        borderRadius: 'var(--radius-2)',
+        padding: '16px 20px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: '16px',
+      }}
+    >
+      <span
+        style={{
+          color: 'var(--break-red)',
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '13px',
+        }}
+      >
+        {message}
+      </span>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        {onRetry && (
+          <button
+            type="button"
+            data-testid="join-flow-retry"
+            onClick={onRetry}
+            style={ghostButtonStyle}
+          >
+            Retry
+          </button>
+        )}
+        <button
+          type="button"
+          data-testid="join-flow-back"
+          onClick={onBack}
+          style={ghostButtonStyle}
+        >
+          Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const pageStyle: React.CSSProperties = {
+  padding: '24px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '16px',
+  maxWidth: '880px',
+  margin: '0 auto',
+};
+
+const mutedTextStyle: React.CSSProperties = {
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: '13px',
+  color: 'var(--fg-muted)',
+  margin: 0,
+};
+
+const cardStyle: React.CSSProperties = {
+  background: 'var(--bg-elevated)',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-2)',
+  padding: '16px 20px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '12px',
+};
+
+const cardLabelStyle: React.CSSProperties = {
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: '11px',
+  fontWeight: 500,
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+  color: 'var(--fg-muted)',
+};
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: '11px',
+  fontWeight: 500,
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+  color: 'var(--fg-muted)',
+};
+
+const selectStyle: React.CSSProperties = {
+  background: 'var(--bg)',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-2)',
+  padding: '10px 12px',
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: '14px',
+  color: 'var(--fg)',
+};
+
+const ghostButtonStyle: React.CSSProperties = {
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: '13px',
+  padding: '8px 16px',
+  background: 'transparent',
+  color: 'var(--fg)',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-2)',
+  cursor: 'pointer',
+};

@@ -554,6 +554,110 @@ export class Store {
     };
   }
 
+  /**
+   * Posted Tasks for the launcher mode (`GET /v1/launcher/tasks`,
+   * spec/2026-05-05-launcher-role-and-mode.md §5.3). Returns rows from
+   * `task_posts` filtered by creator Safe address, sorted by `last_posted_at
+   * DESC` (most recent first). The `solverType` is denormalised in by joining
+   * `activity_events` on `request_id` for the `task_posted` kind — that's
+   * where `posting-service.ts` writes the SolverType when the post lands.
+   *
+   * `before` filters to rows with `last_posted_at < before` (ISO-8601). When
+   * `before` is undefined, returns the most recent `limit` rows.
+   *
+   * Caller-side: `gatherLauncherTasks` (`api/launcher-tasks.ts`) maps the
+   * solver_type back to the operator's SolverNet name via config lookup.
+   */
+  listPostedTasksByCreator(args: {
+    creatorSafeAddress: string;
+    limit: number;
+    before?: string;
+  }): Array<{
+    taskId: string;
+    taskCid: string;
+    solverType: string | null;
+    requestId: string;
+    postedAt: string;
+  }> {
+    const limit = Math.max(0, Math.min(args.limit, 1000));
+    if (limit === 0) return [];
+    const params: Record<string, unknown> = {
+      creator: args.creatorSafeAddress,
+      limit,
+    };
+    let beforeClause = '';
+    if (args.before) {
+      beforeClause = ' AND tp.last_posted_at < @before';
+      params['before'] = args.before;
+    }
+    // LEFT JOIN: a stale `task_posts` row from before activity_events backfill
+    // (or one whose event was lost to `recordActivityEvent` failure) still
+    // surfaces with a NULL solver_type — the gather function falls back to
+    // `solverNet: 'unknown'` rather than dropping the row, because the
+    // operator should still see the Task they posted.
+    const rows = this.db.prepare(
+      `SELECT
+         tp.task_id,
+         tp.task_cid,
+         tp.protocol_task_id,
+         tp.request_id,
+         tp.last_posted_at,
+         (
+           SELECT ae.solver_type
+           FROM activity_events ae
+           WHERE ae.request_id = tp.request_id
+             AND ae.kind = 'task_posted'
+             AND ae.solver_type IS NOT NULL
+           ORDER BY ae.id DESC
+           LIMIT 1
+         ) AS solver_type
+       FROM task_posts tp
+       WHERE tp.creator_safe_address = @creator${beforeClause}
+       ORDER BY tp.last_posted_at DESC
+       LIMIT @limit`,
+    ).all(params) as Array<{
+      task_id: string | null;
+      task_cid: string | null;
+      protocol_task_id: string | null;
+      request_id: string;
+      last_posted_at: string;
+      solver_type: string | null;
+    }>;
+    return rows.map((r) => ({
+      // task_id was added by an additive migration; the column exists on every
+      // post-migration insert (posting-service.ts always writes it). Older
+      // rows fall back to protocol_task_id (chain Task ID) and finally
+      // request_id so the response shape's `taskId` is always populated.
+      taskId: r.task_id ?? r.protocol_task_id ?? r.request_id,
+      taskCid: r.task_cid ?? '',
+      solverType: r.solver_type,
+      requestId: r.request_id,
+      postedAt: r.last_posted_at,
+    }));
+  }
+
+  /** Count of posted Tasks for this creator with the given solver_type. v1
+   *  treats every posted Task as in-flight (state derivation lands with
+   *  router-watcher hardening, jinn-mono-l2zl.12). */
+  countPostedTasksByCreatorAndSolverType(args: {
+    creatorSafeAddress: string;
+    solverType: string;
+  }): number {
+    const row = this.db.prepare(
+      `SELECT COUNT(DISTINCT tp.task_id) AS c
+       FROM task_posts tp
+       INNER JOIN activity_events ae
+         ON ae.request_id = tp.request_id
+         AND ae.kind = 'task_posted'
+       WHERE tp.creator_safe_address = @creator
+         AND ae.solver_type = @solverType`,
+    ).get({
+      creator: args.creatorSafeAddress,
+      solverType: args.solverType,
+    }) as { c: number } | undefined;
+    return row?.c ?? 0;
+  }
+
   upsertTaskPostRecord(record: TaskPostRecord): void {
     const params = {
       ...record,
