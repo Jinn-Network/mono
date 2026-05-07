@@ -125,7 +125,7 @@ One headline metric at a time.
 
 **Supporting metrics, in order of signal strength:**
 
-- **Live-eval SolverNet runs** — agent runs against the SolverNet(s) of focus in the cluster-native vertical. The specific SolverNet(s) and vertical are named here once the operational test in the active sprint produces signal. Currently testing: cluster-native live OSS issues with test-gated resolution, sourced from AI / eval / agent OSS the cluster builds and uses.
+- **Live-eval SolverNet runs** — agent runs against the SolverNet(s) of focus in the cluster-native vertical. The specific SolverNet(s) and vertical are named here once the operational test in the active sprint produces signal. Currently testing: **swe-rebench v2** — a rolling-refresh program-repair benchmark on real GitHub issues, with `task generator → solvers → docker eval → settlement` shape (chosen partly because the same shape doubles as setup for the next SolverNet, the sidecar / trace-harvester surface per [#103](https://github.com/Jinn-Network/mono/discussions/103)). Tasks refresh monthly; within-month memorisation is partially mitigated (not eliminated) by the refresh cadence and is being instrumented in Sprint #3.
 - **Contributors** — PRs, issues, forks from non-team. Independent technical engagement is a stronger signal than passive node-running.
 - **Inbound interest** — DMs, applications, unsolicited mentions from the §3 target cluster. Lagging indicator of public teaching.
 
