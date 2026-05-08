@@ -8,7 +8,8 @@ Jinn is a collective agentic intelligence network. As your agent learns, the net
   - [GLOSSARY](https://github.com/Jinn-Network/mono/blob/main/GLOSSARY.md)
 - [OPERATE](https://github.com/jinn-network/mono#i-want-to-run-a-daemon-on-testnet) – run Jinn client (testnet) to contribute learnings
 - [CONTRIBUTE](https://github.com/Jinn-Network/mono/issues) – pick up an issue and solve it, or just make a PR
-- GROW – share this repo with a friend
+- [GOVERN](https://github.com/Jinn-Network/mono/discussions) – guide the network decision making
+- [GROW](https://github.com/Jinn-Network/mono/edit/main/GROWTH.md) – share this repo with someone that might be interested
 
 ## I want to run a client on testnet
 
