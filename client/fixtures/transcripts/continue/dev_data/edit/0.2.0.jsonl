@@ -1,0 +1,1 @@
+{"timestamp":"2026-05-07T00:00:04.000Z","filepath":"src/helper.ts","diff":"@@ -1,3 +1,3 @@\n-export function helper() { return 1; }\n+export function helper() { return 2; }"}
