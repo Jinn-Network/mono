@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { OutputArtifact, RationaleEntry, Solution } from './types.js';
 import { PredictionV1TaskSchema, type PredictionV1Task } from './prediction-v1.js';
 import {
@@ -16,7 +16,10 @@ import { type JsonSchema, zodToJsonSchema } from './json-schema.js';
 
 export type SolverNetContractRole = 'creator' | 'solver' | 'evaluator';
 export type PayloadKind = 'task' | 'solution' | 'verdict';
-export type SupportedSolverType = 'prediction.v1' | 'swe-rebench-v2.v1';
+export type SupportedSolverType =
+  | 'prediction.v1'
+  | 'swe-rebench-v2.v1'
+  | 'session-derived.1.0.0';
 
 export interface CredentialRequirement {
   id: string;
@@ -197,9 +200,89 @@ export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SESSION_DERIVED_V1_SOLVER_NET_CONTRACT — Phase 0 / Task 0.4 scaffold.
+//
+// Contract identity + claim-policy + credential requirements + evaluator and
+// aggregation refs are landed here so downstream phases (task-generator,
+// composite evaluator, runtime plugin) can reference the contract without
+// circular blocking. Payload schemas (Task / Solution / Verdict) are
+// placeholders; they get filled in Phase 10 of the plan once the LLM-distilled
+// payload shapes are nailed down.
+//
+// Spec: spec/2026-05-07-telemetry-collector-and-task-generator.md §5.1, §5.2.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Placeholder Zod schema used for task/solution/verdict during the scaffold
+// window. Phase 10 replaces these with the real `SessionDerivedTaskSchema`,
+// `SessionDerivedSolutionSchema`, `SessionDerivedVerdictSchema` from
+// `packages/sdk/src/payloads/session-derived.ts`.
+const SESSION_DERIVED_PLACEHOLDER_SCHEMA = z.object({}).passthrough();
+
+export const SESSION_DERIVED_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
+  id: 'session-derived',
+  version: '1.0.0',
+  name: 'Session-derived',
+  schemas: {
+    // TODO Phase 10: replace placeholder with SessionDerivedTaskSchema.
+    task: {
+      zod: SESSION_DERIVED_PLACEHOLDER_SCHEMA,
+      json: zodToJsonSchema(SESSION_DERIVED_PLACEHOLDER_SCHEMA),
+    },
+    // TODO Phase 10: replace placeholder with SessionDerivedSolutionSchema.
+    solution: {
+      zod: SESSION_DERIVED_PLACEHOLDER_SCHEMA,
+      json: zodToJsonSchema(SESSION_DERIVED_PLACEHOLDER_SCHEMA),
+    },
+    // TODO Phase 10: replace placeholder with SessionDerivedVerdictSchema.
+    verdict: {
+      zod: SESSION_DERIVED_PLACEHOLDER_SCHEMA,
+      json: zodToJsonSchema(SESSION_DERIVED_PLACEHOLDER_SCHEMA),
+    },
+  },
+  claimPolicyDefaults: {
+    mode: 'parallel',
+    maxClaims: 50,
+    maxClaimsPerOperator: 5,
+    claimLeaseTtlSeconds: 4 * 60 * 60, // 4h per Task — sessions can be larger than swe-rebench-v2's 1h tasks
+  },
+  credentialRequirements: {
+    creator: [],
+    solver: [],
+    evaluator: [
+      {
+        // Spec §5.2: evaluators require a $50 USDC bond to participate.
+        // The bond mechanism itself is a separate workstream; this entry
+        // declares the requirement so manifest-side registration can flag
+        // operators who have not yet posted bond.
+        id: 'session-derived.evaluator.bond',
+        kind: 'operator-credential',
+        required: true,
+        description:
+          'Evaluators must post a $50 USDC bond (slashable on detected dishonesty) to participate in session-derived evaluation.',
+      },
+    ],
+  },
+  evaluationFunction: {
+    id: '@jinn-network/session-derived-evaluator',
+    deterministic: false, // composite uses LLM-judge component → non-deterministic
+    inputs: ['session-derived Task', 'session-derived Solution', 'sourceCapture envelope'],
+    output: 'session-derived Verdict (composite_score + signal_breakdown)',
+    implementation: 'client/src/harnesses/impls/session-derived-evaluator', // Phase 10 surface
+  },
+  aggregationFunction: {
+    id: 'session-derived-rolling-mean',
+    deterministic: false,
+    inputs: ['SCORED session-derived Verdicts'],
+    output: 'session-derived-network-result (mean composite + signal-coverage breakdown)',
+    windowDays: 30,
+  },
+};
+
 export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
   'prediction.v1': PREDICTION_V1_SOLVER_NET_CONTRACT,
   'swe-rebench-v2.v1': SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT,
+  'session-derived.1.0.0': SESSION_DERIVED_V1_SOLVER_NET_CONTRACT,
 };
 
 /**
