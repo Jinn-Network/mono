@@ -31,7 +31,7 @@ const LegacyPassthroughSchema = z.record(z.unknown());
  * Registry mapping (solverType, role) → payload schema.
  * Update when adding a new solverType.
  */
-export const SOLVER_TYPE_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
+export const SOLVER_TYPE_PAYLOADS: Record<string, Partial<Record<Role, z.ZodSchema>>> = {
   'portfolio.v0': {
     restoration: PortfolioV0RestorationPayloadSchema,
     verdict: PortfolioV0VerdictPayloadSchema,

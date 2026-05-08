@@ -209,9 +209,9 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 function manifestMatchesArgs(preview: ManifestPreview, args: SearchRecordsArgs): boolean {
   const envelope = preview.envelope;
   if (args.solverType && envelope.solverType !== args.solverType) return false;
-  if (args.taskCid && envelope.task.cid !== args.taskCid) return false;
+  if (args.taskCid && envelope.task?.cid !== args.taskCid) return false;
   if (args.taskId) return false;
-  if (args.requestId && envelope.task.requestId !== args.requestId) return false;
+  if (args.requestId && envelope.task?.requestId !== args.requestId) return false;
   if (args.role && envelope.role !== args.role) return false;
   if (args.evidenceTier && preview.ref.evidenceTier !== args.evidenceTier) return false;
   if (args.generatedAfter !== undefined && envelope.generatedAt < args.generatedAfter) return false;
@@ -245,10 +245,9 @@ function manifestRecord(preview: ManifestPreview, args: SearchRecordsArgs): Reco
       publishedAt: preview.ref.publishedAt,
       operator: preview.ref.operator,
     },
-    taskRef: {
-      cid: envelope.task.cid,
-      requestId: envelope.task.requestId,
-    },
+    taskRef: envelope.task
+      ? { cid: envelope.task.cid, requestId: envelope.task.requestId }
+      : null,
     solverType: envelope.solverType,
     role: envelope.role,
     generatedAt: envelope.generatedAt,

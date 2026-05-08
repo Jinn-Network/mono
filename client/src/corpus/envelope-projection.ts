@@ -42,7 +42,7 @@ export function projectEnvelope(
   const projectedTaskCid = resolveProjectedTaskCid(envelope, options);
   const projectedTaskId = options.taskId ?? options.task?.id ?? null;
   setMetadata(metadata, 'taskCid', projectedTaskCid);
-  setMetadata(metadata, 'requestId', envelope.task.requestId);
+  setMetadata(metadata, 'requestId', envelope.task!.requestId);
   setMetadata(metadata, 'taskId', projectedTaskId);
 
   if (envelope.solverType === 'prediction.v1') {
@@ -71,7 +71,7 @@ export function projectEnvelope(
     role: envelope.role,
     taskCid: projectedTaskCid,
     taskId: projectedTaskId,
-    requestId: envelope.task.requestId,
+    requestId: envelope.task!.requestId,
     generatedAt: envelope.generatedAt,
     evidenceTier: envelope.evidenceTier,
     participantSafeAddress: envelope.participant.safeAddress,
@@ -132,7 +132,7 @@ function resolveProjectedTaskCid(
   }
   const payloadTask = record(record(envelope.payload)?.task);
   const payloadTaskCid = stringValue(payloadTask?.cid);
-  return payloadTaskCid ?? envelope.task.cid ?? null;
+  return payloadTaskCid ?? envelope.task?.cid ?? null;
 }
 
 function setMetadata(

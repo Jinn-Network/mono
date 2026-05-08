@@ -210,7 +210,7 @@ export class PredictionApyV0Evaluator implements Harness {
     if (expectedRef.kind === 'missing') {
       checks.push(checkTaskRefMissingExpected());
     } else {
-      checks.push(checkTaskRef(submissionEnvelope.task.cid, expectedRef.cid));
+      checks.push(checkTaskRef(submissionEnvelope.task!.cid, expectedRef.cid));
     }
 
     if (task.spec.metric.toleranceBps > 0) {

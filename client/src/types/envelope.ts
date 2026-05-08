@@ -11,6 +11,7 @@
 
 import { z } from 'zod';
 import { WindowSchema } from './window.js';
+import { SessionProvenanceSchema } from './session-provenance.js';
 
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/);
 
@@ -21,7 +22,7 @@ export const EvidenceTierSchema = z.enum([
 ]);
 export type EvidenceTier = z.infer<typeof EvidenceTierSchema>;
 
-export const RoleSchema = z.enum(['restoration', 'verdict']);
+export const RoleSchema = z.enum(['restoration', 'verdict', 'capture']);
 export type Role = z.infer<typeof RoleSchema>;
 
 const TaskProvenanceSchema = z.object({
@@ -130,7 +131,8 @@ const BaseEnvelopeFields = {
   solverType: z.string().min(1),
   role: RoleSchema,
   generatedAt: z.number().int(),
-  task: TaskProvenanceSchema,
+  task: TaskProvenanceSchema.optional(),
+  sessionProvenance: SessionProvenanceSchema.optional(),
   participant: ParticipantSchema,
   window: WindowSchema,
   executor: ExecutorSchema,
@@ -150,6 +152,12 @@ export const UnsignedEnvelopeSchema = z
   .refine(
     (e) => e.evidenceTier !== 'attested' || e.attestation !== null,
     { message: 'attested tier requires attestation', path: ['attestation'] },
+  )
+  .refine(
+    (e) => (e.role === 'capture'
+      ? e.sessionProvenance !== undefined && e.task === undefined
+      : e.task !== undefined && e.sessionProvenance === undefined),
+    { message: 'role=capture requires sessionProvenance and no task; other roles require task and no sessionProvenance' },
   );
 
 export type UnsignedEnvelope = z.infer<typeof UnsignedEnvelopeSchema>;
@@ -163,6 +171,12 @@ export const SignedEnvelopeSchema = z
   .refine(
     (e) => e.evidenceTier !== 'attested' || e.attestation !== null,
     { message: 'attested tier requires attestation', path: ['attestation'] },
+  )
+  .refine(
+    (e) => (e.role === 'capture'
+      ? e.sessionProvenance !== undefined && e.task === undefined
+      : e.task !== undefined && e.sessionProvenance === undefined),
+    { message: 'role=capture requires sessionProvenance and no task; other roles require task and no sessionProvenance' },
   );
 
 export type SignedEnvelope = z.infer<typeof SignedEnvelopeSchema>;

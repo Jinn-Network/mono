@@ -352,9 +352,9 @@ export class PortfolioV0Evaluator implements Harness {
     }
 
     // Extract provenance fields from the parsed envelope + task
-    const taskCid = targetEnvelope.task.cid;
-    const onchainCreationTx = targetEnvelope.task.onchainCreationTx;
-    const onchainCreationBlock = targetEnvelope.task.onchainCreationBlock;
+    const taskCid = targetEnvelope.task!.cid;
+    const onchainCreationTx = targetEnvelope.task!.onchainCreationTx;
+    const onchainCreationBlock = targetEnvelope.task!.onchainCreationBlock;
     const restorationRequestId = task.restorationRequestId!;
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: starting evaluation', data: { taskCid, restorationRequestId } });

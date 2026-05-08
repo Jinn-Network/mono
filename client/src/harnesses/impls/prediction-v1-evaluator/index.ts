@@ -101,7 +101,7 @@ export class PredictionV1Evaluator implements Harness {
       checks.push(await checkManifestSignature(recomputeTopLevelSignatureHash(rawEnvelope), envelope.signature));
       const expectedTaskCid = ctx.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] as string | undefined;
       if (expectedTaskCid) {
-        checks.push(checkTaskRef(envelope.task.cid, expectedTaskCid));
+        checks.push(checkTaskRef(envelope.task!.cid, expectedTaskCid));
       } else {
         checks.push(checkTaskRefMissingExpected());
       }
