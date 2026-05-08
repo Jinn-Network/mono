@@ -384,6 +384,25 @@ CREATE TABLE IF NOT EXISTS task_post_locks (
   PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
 );
 
+CREATE TABLE IF NOT EXISTS pending_captures (
+  session_id TEXT PRIMARY KEY,
+  captured_at TEXT NOT NULL,
+  originating_tool_name TEXT NOT NULL,
+  originating_tool_version TEXT,
+  capture_path TEXT NOT NULL CHECK (capture_path IN ('A','B','C','D')),
+  status TEXT NOT NULL CHECK (status IN ('pending','approved','skipped')),
+  span_count INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  redacted_span_count INTEGER NOT NULL,
+  repo_remote_url TEXT,
+  repo_commit_hash TEXT,
+  envelope_cid TEXT,
+  published_at TEXT,
+  skipped_at TEXT
+);
+CREATE INDEX IF NOT EXISTS pending_captures_status_capturedat
+  ON pending_captures (status, captured_at DESC);
+
 `;
 
 export class Store {
