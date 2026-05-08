@@ -317,7 +317,14 @@ async function startHttpServer(
   const addr = server.address() as AddressInfo;
   return {
     port: addr.port,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () =>
+      new Promise<void>((resolve) => {
+        // `server.close()` stops accepting new connections but lets keep-alive
+        // sockets idle on. Without `closeIdleConnections()` shutdown can hang
+        // for the full keep-alive timeout. Available since Node 18.2.
+        server.closeIdleConnections();
+        server.close(() => resolve());
+      }),
   };
 }
 
@@ -493,9 +500,13 @@ function otlpSpanToReadableSpan(
   resource: Resource,
   scope: InstrumentationScope,
 ): ReadableSpan {
-  const traceId = bytesToHex(sp.traceId);
-  const spanId = bytesToHex(sp.spanId);
-  const parentHex = sp.parentSpanId ? bytesToHex(sp.parentSpanId) : undefined;
+  const traceId = idHexFromAny(sp.traceId, 32);
+  const spanId = idHexFromAny(sp.spanId, 16);
+  // OTel spec: an all-zero span_id is reserved as the "invalid" sentinel.
+  // Protobuf-decoded `parent_span_id` defaults to an 8-byte zero-filled Buffer
+  // (not absent); treat that as "no parent" rather than emitting '0000…'.
+  const parentHexRaw = sp.parentSpanId ? idHexFromAny(sp.parentSpanId, 16) : undefined;
+  const parentHex = parentHexRaw && !/^0+$/.test(parentHexRaw) ? parentHexRaw : undefined;
   const startTime = nanosToHrTime(sp.startTimeUnixNano);
   const endTime = nanosToHrTime(sp.endTimeUnixNano);
   const duration = subtractHrTime(endTime, startTime);
@@ -523,7 +534,9 @@ function otlpSpanToReadableSpan(
           traceId,
           spanId: parentHex,
           traceFlags: spanContext.traceFlags,
-          isRemote: ((sp.flags ?? 0) & 0x200) !== 0,
+          // See link `isRemote` comment below — must check 0x100 (HAS_IS_REMOTE)
+          // guard bit before reading 0x200 (IS_REMOTE) value.
+          isRemote: ((sp.flags ?? 0) & 0x100) !== 0 ? ((sp.flags ?? 0) & 0x200) !== 0 : false,
         }
       : undefined,
     startTime,
@@ -535,10 +548,14 @@ function otlpSpanToReadableSpan(
     attributes: kvListToAttributes(sp.attributes ?? []),
     links: (sp.links ?? []).map((l) => ({
       context: {
-        traceId: bytesToHex(l.traceId),
-        spanId: bytesToHex(l.spanId),
+        traceId: idHexFromAny(l.traceId, 32),
+        spanId: idHexFromAny(l.spanId, 16),
         traceFlags: (l.flags ?? 0) & 0xff,
-        isRemote: ((l.flags ?? 0) & 0x200) !== 0,
+        // OTLP `flags` carries two related bits for parent/link `isRemote`:
+        //   0x100 (HAS_IS_REMOTE) — set when the sender knows isRemote
+        //   0x200 (IS_REMOTE)     — the value, only meaningful if 0x100 is set
+        // If HAS_IS_REMOTE is unset the value is unknown; default to false.
+        isRemote: ((l.flags ?? 0) & 0x100) !== 0 ? ((l.flags ?? 0) & 0x200) !== 0 : false,
       },
       attributes: kvListToAttributes(l.attributes ?? []),
       droppedAttributesCount: l.droppedAttributesCount ?? 0,
@@ -600,15 +617,55 @@ function anyValueToPrimitive(v: OtlpAnyValue | undefined): string | number | boo
   return undefined;
 }
 
-function bytesToHex(input: string | Buffer | Uint8Array | undefined): string {
+/**
+ * Convert raw protobuf-decoded bytes (Buffer/Uint8Array) to a lowercase hex
+ * string. Used for the gRPC + HTTP-protobuf paths where the wire encoding is
+ * always raw bytes. JSON-string OTLP IDs are NOT routed through here — they
+ * use {@link idHexFromString} which handles base64 decoding correctly.
+ */
+function bytesToHex(input: Buffer | Uint8Array | undefined): string {
   if (!input) return '';
-  if (typeof input === 'string') {
-    // JSON OTLP encodes trace_id/span_id as hex strings (older spec) or base64
-    // (newer spec). Detect: hex chars only and length divisible by 2 → hex.
-    if (/^[0-9a-fA-F]+$/.test(input)) return input.toLowerCase();
-    return Buffer.from(input, 'base64').toString('hex');
-  }
   return Buffer.from(input).toString('hex');
+}
+
+/**
+ * Convert a JSON-encoded OTLP id (`trace_id` / `span_id` / `parent_span_id`)
+ * into a lowercase hex string of the expected length.
+ *
+ * Per OTLP JSON spec §4.3.3 these fields are base64-encoded. However, some
+ * older Node-SDK encoders emit hex passthroughs, and a non-trivial number of
+ * exporters in the wild still do this. The heuristic in the previous
+ * implementation (`/^[0-9a-fA-F]+$/.test(input)`) silently corrupted IDs from
+ * other-language SDKs (Go/Java/Python) when the base64 string happened to
+ * contain only hex characters — e.g. `'deadbeefcafebabe0102030405060708'`
+ * decodes one way as base64, another as hex.
+ *
+ * We disambiguate by demanding an *exact* length+charset match for the hex
+ * fast-path: a 16-byte trace_id is exactly 32 hex chars, a 8-byte span_id is
+ * exactly 16. Anything else is base64-decoded. If the resulting hex doesn't
+ * match the expected length, the input is malformed; return '' so the caller
+ * treats it as missing.
+ */
+function idHexFromString(input: string, expectedHexChars: 16 | 32): string {
+  if (input.length === expectedHexChars && /^[0-9a-fA-F]+$/.test(input)) {
+    return input.toLowerCase();
+  }
+  const hex = Buffer.from(input, 'base64').toString('hex');
+  return hex.length === expectedHexChars ? hex : '';
+}
+
+/**
+ * Bridge helper used by the OTLP-decoder call sites that may receive either
+ * a Buffer (protobuf) or a string (JSON). Routes to the right helper so the
+ * base64-vs-hex disambiguation only fires when the source is JSON.
+ */
+function idHexFromAny(
+  input: string | Buffer | Uint8Array | undefined,
+  expectedHexChars: 16 | 32,
+): string {
+  if (input === undefined || input === null) return '';
+  if (typeof input === 'string') return idHexFromString(input, expectedHexChars);
+  return bytesToHex(input);
 }
 
 function nanosToHrTime(nanos: string | number | undefined): HrTime {

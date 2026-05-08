@@ -4,6 +4,7 @@ import { trace, SpanKind } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter as HttpExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { OTLPTraceExporter as GrpcExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
 describe('embedded OTLP receiver', () => {
   let receiver: Receiver;
@@ -69,5 +70,60 @@ describe('embedded OTLP receiver', () => {
     const matched = receiver.testSink.spans.find((s) => s.name === 'test-grpc-span');
     expect(matched).toBeDefined();
     expect(matched?.attributes['test.key']).toBe('test-value-grpc');
+  });
+
+  it('isolates per-processor exceptions in dispatch chain', async () => {
+    // A misbehaving processor must not block subsequent processors. Wire up a
+    // throwing processor before a downstream sink and confirm the downstream
+    // still observes the span.
+    await receiver.shutdown();
+
+    const downstreamSink = { spans: [] as ReadableSpan[] };
+    const throwing: SpanProcessor = {
+      onStart() {},
+      onEnd() {
+        throw new Error('intentional');
+      },
+      forceFlush() {
+        return Promise.resolve();
+      },
+      shutdown() {
+        return Promise.resolve();
+      },
+    };
+    const downstream: SpanProcessor = {
+      onStart() {},
+      onEnd(span) {
+        downstreamSink.spans.push(span);
+      },
+      forceFlush() {
+        return Promise.resolve();
+      },
+      shutdown() {
+        return Promise.resolve();
+      },
+    };
+
+    receiver = await startReceiver({
+      grpcPort: 0,
+      httpPort: 0,
+      processors: [throwing, downstream],
+    });
+
+    const sdk = new NodeSDK({
+      traceExporter: new HttpExporter({
+        url: `http://localhost:${receiver.httpPort}/v1/traces`,
+      }),
+    });
+    sdk.start();
+
+    const tracer = trace.getTracer('test-isolation');
+    const span = tracer.startSpan('test-isolation-span', { kind: SpanKind.INTERNAL });
+    span.end();
+
+    await sdk.shutdown();
+    await waitForSpan('test-isolation-span');
+
+    expect(downstreamSink.spans.some((s) => s.name === 'test-isolation-span')).toBe(true);
   });
 });
