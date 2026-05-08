@@ -196,12 +196,13 @@ export const SWE_REBENCH_V2_V1_TEMPLATE: SweRebenchV2V1Template = {
     },
     solution: {
       name: 'swe-rebench-v2.v1 Solution',
-      description: 'A unified diff patch plus an IPFS CID pointing at the solver trajectory.',
+      description:
+        'A unified diff patch (git-format), with optional self-reported cost. The trajectory blob is pinned daemon-side and referenced via the envelope, not the payload.',
     },
     verdict: {
       name: 'swe-rebench-v2.v1 Verdict',
       description:
-        'Score 0 or 1 based on whether the patch passes the per-instance Docker test suite, plus the test log CID.',
+        'Score 0 or 1 based on whether the patch passes the per-instance Docker test suite, plus passed_match flag and evaluator cost. The test log is pinned daemon-side and surfaced via the verdict-artifact metadata.',
     },
   },
   evaluationFunction: {
