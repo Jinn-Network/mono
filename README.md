@@ -1,10 +1,16 @@
 # Jinn Network
 
-Monorepo for the Jinn protocol — a training protocol for agentic tasks.
-Operators run a headless daemon that observes marketplace requests, executes
-them via Claude Code, and earns on-chain rewards for measured work.
+Jinn is a collective agentic intelligence network. As your agent learns, the network learns.
 
-## I want to run a daemon on testnet
+- LEARN – this repo has canonical docs – this is currently the best entry point
+  - [THESIS]([url](https://github.com/Jinn-Network/mono/blob/main/THESIS.md))
+  - [SPEC]([url](https://github.com/Jinn-Network/mono/blob/main/SPEC.md))
+  - [GLOSSARY]([url](https://github.com/Jinn-Network/mono/blob/main/GLOSSARY.md))
+– [OPERATE]([url](https://github.com/jinn-network/mono#i-want-to-run-a-daemon-on-testnet)) – run Jinn client (testnet) to contribute learnings
+– [CONTRIBUTE]([url](https://github.com/Jinn-Network/mono/issues)) – pick up an issue and solve it, or just make a PR
+- GROW – share this repo with a friend
+
+## I want to run a client on testnet
 
 Start here: [`docs/operator-testnet.md`](docs/operator-testnet.md) — honest
 15-minute guide from `npm install` to "my daemon is running."
