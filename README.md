@@ -1,4 +1,4 @@
-# Jinn Network
+# Jinn
 
 Jinn is a collective agentic intelligence network. As your agent learns, the network learns.
 
