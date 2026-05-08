@@ -18,6 +18,7 @@ import {
   ClaudeCodeLearnerImpl,
 } from './claude-code-learner/index.js';
 import { ClaudeCodeHarnessAdapter } from './claude-code-learner/index.js';
+import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 
 /**
  * Environment passed to {@link buildHarnesses} — same shape for daemon
@@ -62,6 +63,12 @@ export interface HarnessEnv {
    * `~/.jinn-client/engine/impl-state` when unset — wired from `config.engine` in main.
    */
   implStateDirRoot?: string;
+  /**
+   * IPFS registry URL used by Harnesses that need to pin verdict-side
+   * artifacts (e.g. swe-rebench-v2 test logs). Optional — Harnesses that
+   * don't need IPFS leave this unused.
+   */
+  ipfsRegistryUrl?: string;
   /**
    * Pre-loaded external (operator-supplied) Harnesses — produced by
    * `loadExternalImpl()` in `client/src/harnesses/external-impls/`. Appended to
@@ -171,6 +178,15 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
           rpcUrl: env.rpcUrl,
           archiveRpcUrl: env.archiveRpcUrl,
         }),
+  );
+  out.push(
+    new SweRebenchV2EvaluatorHarness({
+      stub: isStub,
+      implStateDir: env.implStateDirRoot
+        ? `${env.implStateDirRoot}/swe-rebench-v2-evaluator`
+        : undefined,
+      ipfsRegistryUrl: env.ipfsRegistryUrl,
+    }),
   );
 
   // Operator-supplied external Harnesses are appended before the default learner

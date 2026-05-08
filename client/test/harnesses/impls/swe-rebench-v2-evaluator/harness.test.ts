@@ -1,0 +1,415 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SweRebenchV2EvaluatorHarness } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
+import type { Task } from '../../../../src/types/task.js';
+import type { HarnessContext } from '../../../../src/harnesses/types.js';
+
+function makeImplStateDir(): string {
+  return mkdtempSync(join(tmpdir(), 'swe-rebench-v2-evaluator-test-'));
+}
+
+function makeEnabledMarker(implStateDir: string, upstreamRepoDir: string): void {
+  mkdirSync(upstreamRepoDir, { recursive: true });
+  writeFileSync(
+    join(implStateDir, 'state.json'),
+    JSON.stringify({
+      schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
+      enabled: true,
+      enabledAt: '2026-05-07T00:00:00Z',
+      upstreamRepoDir,
+    }),
+  );
+}
+
+function buildEvaluationTask(restorationEnvelopeJson: string): Task {
+  return {
+    id: 'eval-task-1',
+    description: 'evaluate swe-rebench-v2',
+    solverType: 'swe-rebench-v2.v1',
+    role: 'evaluation',
+    spec: {
+      schemaVersion: 'swe-rebench-v2.v1',
+      instance_id: 'unidata__netcdf-c-1925',
+      repo: 'Unidata/netcdf-c',
+      base_commit: 'ad6bff35c39a0600fb8f2e176be4269e768e4e22',
+      language: 'c',
+      problem_statement: 'tst_filter does not handle quoted filter args correctly',
+      interface: '',
+      hf_dataset: 'nebius/SWE-rebench-leaderboard',
+      hf_split: '2026_02',
+      deadline_unix: 1746547200,
+      round_month: '2026-05',
+    },
+    context: { restorationResult: restorationEnvelopeJson },
+  };
+}
+
+function buildSolverEnvelope(overrides: Record<string, unknown> = {}): string {
+  // Syntactically-valid SignedEnvelope (jinn.execution.v1) for a swe-rebench-v2
+  // restoration. The harness does not verify signature integrity in v1 — it
+  // parses the envelope, asserts solverType+role, and passes the payload to
+  // the grading library. We hand-roll a fixed-shape signed envelope here.
+  const base = {
+    schemaVersion: 'jinn.execution.v1',
+    solverType: 'swe-rebench-v2.v1',
+    role: 'restoration',
+    generatedAt: Date.parse('2026-05-08T00:00:00.000Z'),
+    task: {
+      cid: 'bafy-task',
+      onchainCreationTx: `0x${'0'.repeat(64)}`,
+      onchainCreationBlock: 1,
+      requestId: `0x${'1'.repeat(64)}`,
+    },
+    participant: {
+      safeAddress: `0x${'2'.repeat(40)}`,
+      agentEoa: `0x${'3'.repeat(40)}`,
+    },
+    window: { startTs: Date.parse('2026-05-08T00:00:00.000Z'), endTs: Date.parse('2026-05-15T00:00:00.000Z') },
+    executor: {
+      implName: 'claude-code-learner',
+      implVersion: '1.0.0',
+      clientGitSha: 'dev',
+      codeDigest: `sha256:${'0'.repeat(64)}`,
+      runtimeBundleDigest: `sha256:${'1'.repeat(64)}`,
+      plugins: [],
+      signingKey: { kind: 'agent-eoa' as const, pubkey: `0x${'3'.repeat(40)}` },
+      mode: 'train' as const,
+    },
+    evidenceTier: 'self-signed' as const,
+    attestation: null,
+    trajectory: null,
+    artifacts: [],
+    payload: {
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+      patch: 'diff --git a/foo b/foo\n@@ -1 +1 @@\n-hello\n+world\n',
+      trajectory_cid: 'bafy-traj',
+    },
+    signature: {
+      algo: 'secp256k1' as const,
+      signer: `0x${'3'.repeat(40)}`,
+      hash: `0x${'4'.repeat(64)}`,
+      sig: `0x${'5'.repeat(130)}`,
+    },
+    ...overrides,
+  };
+  return JSON.stringify(base);
+}
+
+function buildHarnessContext(implStateDir: string, task: Task): HarnessContext {
+  return {
+    task,
+    implStateDir,
+    workingDir: implStateDir,
+    log: () => undefined,
+    abort: new AbortController().signal,
+    msUntilEndTs: () => 60_000,
+    trajectory: { addSpan: () => undefined } as unknown as HarnessContext['trajectory'],
+    mode: 'train',
+  };
+}
+
+describe('SweRebenchV2EvaluatorHarness — supports + canAttempt', () => {
+  it('claims solverType=swe-rebench-v2.v1 with role=evaluation only', () => {
+    const h = new SweRebenchV2EvaluatorHarness();
+    expect(h.supports({ solverType: 'swe-rebench-v2.v1', role: 'evaluation' })).toBe(true);
+    expect(h.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(false);
+    expect(h.supports({ solverType: 'prediction.v1', role: 'evaluation' })).toBe(false);
+  });
+
+  it('canAttempt rejects non-evaluation tasks', async () => {
+    const h = new SweRebenchV2EvaluatorHarness();
+    const task = buildEvaluationTask('{}');
+    task.role = 'restoration';
+    const r = await h.canAttempt(task);
+    expect(r).toEqual({ ok: false, reason: 'role is not evaluation' });
+  });
+
+  it('canAttempt rejects tasks missing context.restorationResult', async () => {
+    const h = new SweRebenchV2EvaluatorHarness();
+    const task = buildEvaluationTask('{}');
+    delete (task.context as Record<string, unknown>)['restorationResult'];
+    const r = await h.canAttempt(task);
+    expect(r).toEqual({ ok: false, reason: 'context.restorationResult required' });
+  });
+});
+
+describe('SweRebenchV2EvaluatorHarness — isReady', () => {
+  let implStateDir: string;
+  beforeEach(() => {
+    implStateDir = makeImplStateDir();
+  });
+  afterEach(() => {
+    rmSync(implStateDir, { recursive: true, force: true });
+  });
+
+  it('reports requires-live-daemon in stub mode', async () => {
+    const h = new SweRebenchV2EvaluatorHarness({ stub: true });
+    const r = await h.isReady();
+    expect(r.ready).toBe(false);
+    expect(r.reason).toBe('requires live daemon');
+  });
+
+  it('reports not-enabled when state file is absent', async () => {
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
+    const r = await h.isReady();
+    expect(r.ready).toBe(false);
+    expect(r.nextStep?.cli).toBe('jinn solver-nets enable swe-rebench-v2-evaluator');
+  });
+
+  it('reports not-enabled when implStateDir not configured', async () => {
+    const h = new SweRebenchV2EvaluatorHarness({});
+    const r = await h.isReady();
+    expect(r.ready).toBe(false);
+    expect(r.reason).toBe('implStateDir not configured');
+  });
+
+  it('reports ready when state file + upstream repo are present', async () => {
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
+    const r = await h.isReady();
+    expect(r.ready).toBe(true);
+  });
+
+  it('reports not-ready when upstream repo dir is missing despite a marker', async () => {
+    // Marker pointing at a non-existent dir.
+    writeFileSync(
+      join(implStateDir, 'state.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
+        enabled: true,
+        enabledAt: '2026-05-07T00:00:00Z',
+        upstreamRepoDir: join(implStateDir, 'does-not-exist'),
+      }),
+    );
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
+    const r = await h.isReady();
+    expect(r.ready).toBe(false);
+    expect(r.reason).toMatch(/upstream repo missing/);
+  });
+});
+
+describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
+  let implStateDir: string;
+  beforeEach(() => {
+    implStateDir = makeImplStateDir();
+  });
+  afterEach(() => {
+    rmSync(implStateDir, { recursive: true, force: true });
+  });
+
+  function makeRunCommand(impl: (bin: string, args: string[]) => { exitCode: number; stdout?: string; stderr?: string }) {
+    return vi.fn(async (bin: string, args: string[]) => {
+      const r = impl(bin, args);
+      return { exitCode: r.exitCode, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+    });
+  }
+
+  it('fails fast when implStateDir is not configured', async () => {
+    const h = new SweRebenchV2EvaluatorHarness();
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+    expect(r.status).toBe('error');
+  });
+
+  it('returns waiting_for_external_action when Docker is unreachable', async () => {
+    const runCommand = makeRunCommand((bin) => {
+      if (bin === 'docker') return { exitCode: 1, stderr: 'cannot connect' };
+      return { exitCode: 0 };
+    });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+    expect(r.status).toBe('waiting_for_external_action');
+    if (r.status === 'waiting_for_external_action') {
+      expect(r.action.description).toMatch(/Docker daemon/);
+    }
+    expect(runCommand).toHaveBeenCalledWith('docker', ['info']);
+  });
+
+  it('returns waiting_for_external_action when Python is missing', async () => {
+    const runCommand = makeRunCommand((bin) => {
+      if (bin === 'docker') return { exitCode: 0 };
+      if (bin === 'python3') return { exitCode: 127, stderr: 'not found' };
+      return { exitCode: 0 };
+    });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+    expect(r.status).toBe('waiting_for_external_action');
+    if (r.status === 'waiting_for_external_action') {
+      expect(r.action.description).toMatch(/Python 3/);
+    }
+  });
+
+  it('clones the upstream repo + writes a state marker on first successful enable', async () => {
+    const runCommand = makeRunCommand((bin, args) => {
+      if (bin === 'docker') return { exitCode: 0 };
+      if (bin === 'python3') return { exitCode: 0, stdout: 'Python 3.12.0' };
+      if (bin === 'git' && args[0] === 'clone') {
+        // Simulate clone by creating the target dir.
+        mkdirSync(args[args.length - 1]!, { recursive: true });
+        return { exitCode: 0 };
+      }
+      return { exitCode: 0 };
+    });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+    expect(r.status).toBe('ready');
+    if (r.status === 'ready') {
+      expect(r.details?.['upstreamRepoDir']).toBe(join(implStateDir, 'upstream'));
+    }
+    expect(existsSync(join(implStateDir, 'state.json'))).toBe(true);
+    const state = JSON.parse(readFileSync(join(implStateDir, 'state.json'), 'utf8'));
+    expect(state.enabled).toBe(true);
+    expect(state.upstreamRepoDir).toBe(join(implStateDir, 'upstream'));
+    // Idempotent: a second invocation does not re-clone.
+    runCommand.mockClear();
+    const r2 = await h.onEnable({ args: {}, runtimePlugins: [] });
+    expect(r2.status).toBe('ready');
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a clone failure as status=error', async () => {
+    const runCommand = makeRunCommand((bin, args) => {
+      if (bin === 'docker' || bin === 'python3') return { exitCode: 0 };
+      if (bin === 'git' && args[0] === 'clone') {
+        return { exitCode: 128, stderr: 'fatal: unable to access repository' };
+      }
+      return { exitCode: 0 };
+    });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+    expect(r.status).toBe('error');
+    if (r.status === 'error') {
+      expect(r.message).toMatch(/git clone failed/);
+    }
+  });
+});
+
+describe('SweRebenchV2EvaluatorHarness — run', () => {
+  let implStateDir: string;
+  beforeEach(() => {
+    implStateDir = makeImplStateDir();
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+  });
+  afterEach(() => {
+    rmSync(implStateDir, { recursive: true, force: true });
+  });
+
+  function makeFakeFetcher(image_name = 'docker.io/swerebenchv2/test:latest') {
+    return {
+      fetchTaskRow: vi.fn().mockResolvedValue({
+        instance_id: 'unidata__netcdf-c-1925',
+        image_name,
+        FAIL_TO_PASS: ['test_a'],
+        PASS_TO_PASS: ['test_b'],
+        test_patch: 'diff --git ...',
+        install_config: { test_cmd: 'make test', log_parser: 'pytest' },
+      }),
+    };
+  }
+
+  it('returns score=1 + passed_match=true and pins test_log to IPFS on a passing run', async () => {
+    const uploadToIpfs = vi
+      .fn()
+      .mockResolvedValue('bafy-test-log-cid');
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a', 'test_b'],
+        failed: [],
+        log: 'all green',
+        exitCode: 0,
+      }),
+    };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { fetcher: makeFakeFetcher(), runner, uploadToIpfs },
+    });
+    const ctx = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+
+    const sol = await harness.run(ctx);
+
+    expect(sol.gating).toEqual({ score: 1, passed_match: true });
+    expect(sol.verdictPayload).toMatchObject({
+      schemaVersion: 'swe-rebench-v2-verdict.v1',
+      score: 1,
+      passed_match: true,
+      test_log_cid: 'bafy-test-log-cid',
+      evaluator_cost_usd: 0,
+    });
+    // Pinned blob includes the log + instance_id.
+    expect(uploadToIpfs).toHaveBeenCalledTimes(1);
+    const [, pinned] = uploadToIpfs.mock.calls[0]!;
+    expect(pinned).toMatchObject({
+      kind: 'swe-rebench-v2-test-log.v1',
+      instance_id: 'unidata__netcdf-c-1925',
+      log: 'all green',
+    });
+  });
+
+  it('returns score=0 when the test suite fails', async () => {
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: false,
+        passed: [],
+        failed: ['test_a'],
+        log: 'test_a failed',
+        exitCode: 1,
+      }),
+    };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        fetcher: makeFakeFetcher(),
+        runner,
+        uploadToIpfs: vi.fn().mockResolvedValue('bafy-fail-log'),
+      },
+    });
+    const ctx = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    const sol = await harness.run(ctx);
+    expect((sol.verdictPayload as Record<string, unknown>)['score']).toBe(0);
+    expect((sol.verdictPayload as Record<string, unknown>)['passed_match']).toBe(false);
+  });
+
+  it('throws when the envelope is not swe-rebench-v2.v1/restoration', async () => {
+    const wrongEnvelope = buildSolverEnvelope({ solverType: 'prediction.v1' });
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        fetcher: makeFakeFetcher(),
+        runner: { runEval: vi.fn() },
+        uploadToIpfs: vi.fn(),
+      },
+    });
+    const ctx = buildHarnessContext(implStateDir, buildEvaluationTask(wrongEnvelope));
+    await expect(harness.run(ctx)).rejects.toThrow(/expected swe-rebench-v2\.v1\/restoration/);
+  });
+
+  it('throws when the harness is not enabled', async () => {
+    rmSync(join(implStateDir, 'state.json'));
+    const harness = new SweRebenchV2EvaluatorHarness({ implStateDir });
+    const ctx = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    await expect(harness.run(ctx)).rejects.toThrow(/not enabled/);
+  });
+});

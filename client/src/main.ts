@@ -1324,6 +1324,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
     daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
     externalImpls,
     disabledNames: config.harnesses?.disabled,
     corpusEnv,
