@@ -403,6 +403,20 @@ CREATE TABLE IF NOT EXISTS pending_captures (
 CREATE INDEX IF NOT EXISTS pending_captures_status_capturedat
   ON pending_captures (status, captured_at DESC);
 
+CREATE TABLE IF NOT EXISTS capture_spans (
+  session_id TEXT NOT NULL,
+  span_id TEXT NOT NULL,
+  trace_id TEXT NOT NULL,
+  parent_span_id TEXT,
+  name TEXT NOT NULL,
+  start_time_unix_nano TEXT NOT NULL,
+  end_time_unix_nano TEXT NOT NULL,
+  attributes_json TEXT NOT NULL,
+  redacted_keys_json TEXT NOT NULL,
+  PRIMARY KEY (session_id, span_id)
+);
+CREATE INDEX IF NOT EXISTS capture_spans_session ON capture_spans (session_id);
+
 `;
 
 export class Store {

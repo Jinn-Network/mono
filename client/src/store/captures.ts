@@ -47,6 +47,32 @@ export interface PendingCaptureRow {
   skippedAt?: string;
 }
 
+export interface SpanInput {
+  sessionId: string;
+  spanId: string;
+  traceId: string;
+  parentSpanId: string | null;
+  name: string;
+  startTimeUnixNano: string;
+  endTimeUnixNano: string;
+  attributes: Record<string, unknown>;
+  redactedKeys: string[];
+}
+
+export interface SpanRow extends SpanInput {}
+
+interface CaptureSpansDbRow {
+  session_id: string;
+  span_id: string;
+  trace_id: string;
+  parent_span_id: string | null;
+  name: string;
+  start_time_unix_nano: string;
+  end_time_unix_nano: string;
+  attributes_json: string;
+  redacted_keys_json: string;
+}
+
 interface PendingCapturesDbRow {
   session_id: string;
   captured_at: string;
@@ -180,5 +206,72 @@ export class CapturesStore {
       )
       .get(sessionId) as PendingCapturesDbRow | undefined;
     return row ? rowFromDb(row) : null;
+  }
+
+  appendSpan(input: SpanInput): void {
+    this.store.db
+      .prepare(
+        `INSERT INTO capture_spans (
+          session_id, span_id, trace_id, parent_span_id,
+          name, start_time_unix_nano, end_time_unix_nano,
+          attributes_json, redacted_keys_json
+        ) VALUES (
+          @sessionId, @spanId, @traceId, @parentSpanId,
+          @name, @startTimeUnixNano, @endTimeUnixNano,
+          @attributesJson, @redactedKeysJson
+        )`,
+      )
+      .run({
+        sessionId: input.sessionId,
+        spanId: input.spanId,
+        traceId: input.traceId,
+        parentSpanId: input.parentSpanId,
+        name: input.name,
+        startTimeUnixNano: input.startTimeUnixNano,
+        endTimeUnixNano: input.endTimeUnixNano,
+        attributesJson: JSON.stringify(input.attributes),
+        redactedKeysJson: JSON.stringify(input.redactedKeys),
+      });
+  }
+
+  getSpansBySession(sessionId: string): SpanRow[] {
+    const rows = this.store.db
+      .prepare(
+        `SELECT * FROM capture_spans
+         WHERE session_id = ?
+         ORDER BY start_time_unix_nano ASC, span_id ASC`,
+      )
+      .all(sessionId) as CaptureSpansDbRow[];
+    return rows.map((r) => ({
+      sessionId: r.session_id,
+      spanId: r.span_id,
+      traceId: r.trace_id,
+      parentSpanId: r.parent_span_id,
+      name: r.name,
+      startTimeUnixNano: r.start_time_unix_nano,
+      endTimeUnixNano: r.end_time_unix_nano,
+      attributes: JSON.parse(r.attributes_json) as Record<string, unknown>,
+      redactedKeys: JSON.parse(r.redacted_keys_json) as string[],
+    }));
+  }
+
+  incrementSpanCounts(
+    sessionId: string,
+    delta: { spans: number; redactedSpans: number; durationMsDelta: number },
+  ): void {
+    this.store.db
+      .prepare(
+        `UPDATE pending_captures
+         SET span_count = span_count + @spans,
+             redacted_span_count = redacted_span_count + @redactedSpans,
+             duration_ms = duration_ms + @durationMsDelta
+         WHERE session_id = @sessionId`,
+      )
+      .run({
+        sessionId,
+        spans: delta.spans,
+        redactedSpans: delta.redactedSpans,
+        durationMsDelta: delta.durationMsDelta,
+      });
   }
 }
