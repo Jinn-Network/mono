@@ -381,7 +381,15 @@ export class MechAdapter implements ExecutionAdapter {
         passThreshold: 1,
         evaluationDeadline: submissionDeadline + BigInt(claimPolicy.claimLeaseTtlSeconds),
         maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: true,
+        // Allow the same operator to evaluate its own Solution on Base Sepolia
+        // (84532) so a single dogfood daemon can close the full
+        // post→claim→solve→grade→settle loop without standing up a second
+        // operator. Mainnet (8453) keeps the protocol-level protection.
+        // TODO: revert to unconditional `true` before mainnet launch, OR move
+        // this to a per-SolverNet manifest field so individual launchers can
+        // opt in to single-operator dogfood while the protocol default stays
+        // strict.
+        disallowSolverSelfEvaluation: this.config.chainId !== 84532,
       },
     };
   }
