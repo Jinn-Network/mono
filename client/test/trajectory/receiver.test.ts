@@ -72,6 +72,30 @@ describe('embedded OTLP receiver', () => {
     expect(matched?.attributes['test.key']).toBe('test-value-grpc');
   });
 
+  it('rejects gRPC port collisions loudly (does not silently remap)', async () => {
+    // The receiver's runtime posture (spec §4.1, §4.2 path A) is to bind the
+    // canonical OTel ports 4317 (gRPC) / 4318 (HTTP). If another collector is
+    // already on those ports, startReceiver MUST throw rather than picking a
+    // different port — exporters configured against the canonical address
+    // would otherwise silently route into a void.
+    const occupiedGrpcPort = receiver.grpcPort;
+
+    let collidingReceiver: Receiver | null = null;
+    let collisionError: Error | null = null;
+    try {
+      collidingReceiver = await startReceiver({
+        grpcPort: occupiedGrpcPort,
+        httpPort: 0,
+      });
+    } catch (e) {
+      collisionError = e as Error;
+    }
+
+    expect(collidingReceiver).toBeNull();
+    expect(collisionError).not.toBeNull();
+    expect(collisionError!.message).toMatch(/EADDRINUSE|address already in use/i);
+  });
+
   it('isolates per-processor exceptions in dispatch chain', async () => {
     // A misbehaving processor must not block subsequent processors. Wire up a
     // throwing processor before a downstream sink and confirm the downstream
