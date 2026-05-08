@@ -44,6 +44,7 @@ import harnessesCommand from './commands/harnesses.js';
 import solverPluginsCommand from './commands/solver-plugins.js';
 import integrationsCommand from './commands/integrations.js';
 import predictionScoreboardCommand from './commands/prediction-scoreboard.js';
+import captureCommand from './commands/capture.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -74,6 +75,7 @@ const COMMANDS: CommandModule[] = [
   tasksCommand,
   solverNetsCommand,
   predictionScoreboardCommand,
+  captureCommand,
   harnessesCommand,
   solverPluginsCommand,
   integrationsCommand,

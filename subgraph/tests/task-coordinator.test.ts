@@ -984,4 +984,26 @@ describe("TaskCoordinator V3 handlers", () => {
       assert.fieldEquals("TaskAttempt", "42-0", "operator", OPERATOR_HEX);
     },
   );
+
+  test("handleMetadataSet with capture:<cid> indexes CaptureEnvelope aggregates", () => {
+    let agentId = BigInt.fromI32(5474);
+    let cid = "bafkreicapture1234567890";
+    let key = "capture:" + cid;
+    let payload = Bytes.fromHexString(METADATA_PAYLOAD_HEX) as Bytes;
+    let txHash = Bytes.fromHexString(TX_HASH_HEX) as Bytes;
+    let logIndex = BigInt.fromI32(8);
+
+    let event = buildMetadataSetEvent(agentId, key, payload, txHash, logIndex);
+    handleMetadataSet(event);
+
+    assert.fieldEquals("CaptureEnvelope", cid, "operator", "5474");
+    assert.fieldEquals("CaptureEnvelope", cid, "manifestCid", cid);
+    assert.fieldEquals("CaptureEnvelope", cid, "repoKey", "unknown");
+    assert.fieldEquals("CaptureEnvelope", cid, "tier", "UNKNOWN");
+    assert.fieldEquals("CaptureEnvelope", cid, "publishCount", "1");
+    assert.fieldEquals("CapturesByOperator", "5474", "operator", "5474");
+    assert.fieldEquals("CapturesByOperator", "5474", "captureCount", "1");
+    assert.fieldEquals("CapturesByRepo", "unknown", "repoKey", "unknown");
+    assert.fieldEquals("CapturesByRepo", "unknown", "captureCount", "1");
+  });
 });

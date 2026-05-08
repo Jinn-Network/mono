@@ -12,6 +12,11 @@ import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
 } from './payloads/swe-rebench-v2.js';
+import {
+  SessionDerivedSolutionSchema,
+  SessionDerivedTaskSchema,
+  SessionDerivedVerdictSchema,
+} from './payloads/session-derived.js';
 import { type JsonSchema, zodToJsonSchema } from './json-schema.js';
 
 export type SolverNetContractRole = 'creator' | 'solver' | 'evaluator';
@@ -213,31 +218,22 @@ export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
 // Spec: spec/2026-05-07-telemetry-collector-and-task-generator.md §5.1, §5.2.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Placeholder Zod schema used for task/solution/verdict during the scaffold
-// window. Phase 10 replaces these with the real `SessionDerivedTaskSchema`,
-// `SessionDerivedSolutionSchema`, `SessionDerivedVerdictSchema` from
-// `packages/sdk/src/payloads/session-derived.ts`.
-const SESSION_DERIVED_PLACEHOLDER_SCHEMA = z.object({}).passthrough();
-
 export const SESSION_DERIVED_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
   id: 'session-derived',
   version: 'v1',
   name: 'Session-derived',
   schemas: {
-    // TODO Phase 10: replace placeholder with SessionDerivedTaskSchema.
     task: {
-      zod: SESSION_DERIVED_PLACEHOLDER_SCHEMA,
-      json: zodToJsonSchema(SESSION_DERIVED_PLACEHOLDER_SCHEMA),
+      zod: SessionDerivedTaskSchema,
+      json: zodToJsonSchema(SessionDerivedTaskSchema),
     },
-    // TODO Phase 10: replace placeholder with SessionDerivedSolutionSchema.
     solution: {
-      zod: SESSION_DERIVED_PLACEHOLDER_SCHEMA,
-      json: zodToJsonSchema(SESSION_DERIVED_PLACEHOLDER_SCHEMA),
+      zod: SessionDerivedSolutionSchema,
+      json: zodToJsonSchema(SessionDerivedSolutionSchema),
     },
-    // TODO Phase 10: replace placeholder with SessionDerivedVerdictSchema.
     verdict: {
-      zod: SESSION_DERIVED_PLACEHOLDER_SCHEMA,
-      json: zodToJsonSchema(SESSION_DERIVED_PLACEHOLDER_SCHEMA),
+      zod: SessionDerivedVerdictSchema,
+      json: zodToJsonSchema(SessionDerivedVerdictSchema),
     },
   },
   claimPolicyDefaults: {

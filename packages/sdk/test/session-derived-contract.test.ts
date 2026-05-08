@@ -1,11 +1,3 @@
-// Scaffold test for `SESSION_DERIVED_V1_SOLVER_NET_CONTRACT`.
-//
-// Phase 0 / Task 0.4 of `spec/2026-05-07-telemetry-collector-and-task-generator.md`.
-// The scaffold registers the contract identity + claim-policy + credential
-// requirements + evaluator/aggregation refs so downstream tasks can reference
-// `session-derived` without circular blocking. Payload schemas (Task /
-// Solution / Verdict) are placeholders here and are filled in Phase 10 of the
-// plan.
 import { describe, expect, it } from 'vitest';
 import {
   SESSION_DERIVED_V1_SOLVER_NET_CONTRACT,
@@ -56,7 +48,7 @@ describe('SESSION_DERIVED_V1_SOLVER_NET_CONTRACT (scaffold)', () => {
     expect(c.aggregationFunction.windowDays).toBe(30);
   });
 
-  it('schemas block exposes Zod + JSON Schema for task / solution / verdict (placeholder shape)', () => {
+  it('schemas block exposes concrete Zod + JSON Schema for task / solution / verdict', () => {
     const { task, solution, verdict } = SESSION_DERIVED_V1_SOLVER_NET_CONTRACT.schemas;
     for (const block of [task, solution, verdict]) {
       expect(block).toHaveProperty('zod');
@@ -65,5 +57,8 @@ describe('SESSION_DERIVED_V1_SOLVER_NET_CONTRACT (scaffold)', () => {
       expect(typeof block.json).toBe('object');
       expect(block.json).not.toBeNull();
     }
+    expect(task.zod.safeParse({}).success).toBe(false);
+    expect(solution.zod.safeParse({ schemaVersion: 'session-derived-solution.v1' }).success).toBe(false);
+    expect(verdict.zod.safeParse({}).success).toBe(false);
   });
 });

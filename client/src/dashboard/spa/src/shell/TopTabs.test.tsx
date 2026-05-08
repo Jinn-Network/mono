@@ -41,4 +41,15 @@ describe('TopTabs', () => {
     const launcher = screen.getByText('Launcher');
     expect(launcher.getAttribute('data-active')).toBe('true');
   });
+
+  it('marks Captures active for capture routes', () => {
+    const { hook } = memoryLocation({ path: '/captures' });
+    render(
+      <Router hook={hook}>
+        <TopTabs />
+      </Router>,
+    );
+    const captures = screen.getByText('Captures');
+    expect(captures.getAttribute('data-active')).toBe('true');
+  });
 });

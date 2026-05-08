@@ -46,6 +46,8 @@ import {
   addOperatorArtifactsRoutes,
   type OperatorArtifactsRoutesConfig,
 } from './operator-artifacts-endpoint.js';
+import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
+import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -125,6 +127,10 @@ export interface ApiServerConfig {
   harnessStatus?: HarnessStatusDeps;
   /** Operator-local artifact inventory + future-artifact pricing controls. */
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
+  /** Path D local session-end hook endpoint. */
+  stopHook?: StopHookRoutesDeps;
+  /** Operator review API for pending captures. */
+  captures?: CapturesRoutesDeps;
 }
 
 export interface ApiServer {
@@ -299,9 +305,18 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/launcher/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
+    app.use('/api/captures/*', requireUiToken(config.ui.token));
   }
 
   addEventsRoutes(app);
+
+  if (config.stopHook) {
+    addStopHookRoutes(app, config.stopHook);
+  }
+
+  if (config.captures) {
+    addCapturesRoutes(app, config.captures);
+  }
 
   if (config.bootstrap) {
     addBootstrapRoutes(app, config.bootstrap);

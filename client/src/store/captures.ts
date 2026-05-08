@@ -208,6 +208,16 @@ export class CapturesStore {
     return row ? rowFromDb(row) : null;
   }
 
+  getBySession(sessionId: string): PendingCaptureRow | null {
+    const row = this.store.db
+      .prepare(
+        `SELECT * FROM pending_captures
+         WHERE session_id = ?`,
+      )
+      .get(sessionId) as PendingCapturesDbRow | undefined;
+    return row ? rowFromDb(row) : null;
+  }
+
   appendSpan(input: SpanInput): void {
     this.store.db
       .prepare(

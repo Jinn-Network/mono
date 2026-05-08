@@ -18,7 +18,8 @@
   },
   "bin": {
     "client": "./dist/bin/jinn.js",
-    "jinn": "./dist/bin/jinn.js"
+    "jinn": "./dist/bin/jinn.js",
+    "jinn-stop-hook": "./dist/bin/jinn-stop-hook.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -69,6 +70,7 @@
     "e2e:freeze-mode": "tsx test/e2e/freeze-mode.test.ts",
     "e2e:checkpoint-flow": "tsx test/e2e/checkpoint-flow.test.ts",
     "e2e:swe-rebench-v2": "tsx test/e2e/swe-rebench-v2.test.ts",
+    "e2e:capture": "tsx scripts/e2e-capture-validate.ts",
     "staking": "tsx test/e2e/staking.ts",
     "stolas": "tsx test/e2e/stolas.ts",
     "withdraw": "tsx scripts/withdraw.ts",

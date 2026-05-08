@@ -9,6 +9,9 @@ import {
 import {
   Operator,
   Execution,
+  CaptureEnvelope,
+  CapturesByOperator,
+  CapturesByRepo,
   MetadataEntry,
   URIUpdate,
   SolverNetManifestEvent,
@@ -205,6 +208,10 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
   exec.save();
   op.save();
 
+  if (metadataKey.startsWith("capture:")) {
+    upsertCaptureEnvelope(op.id, exec, event);
+  }
+
   // ── HarnessRollup aggregation ────────────────────────────────────────────
   // Called for every Execution save, but the handler short-circuits early for
   // ENVELOPE kind and for any execution where implName/codeDigest are absent
@@ -262,4 +269,56 @@ function isAllZero(b: Bytes): bool {
     if (b[i] != 0) return false;
   }
   return true;
+}
+
+function upsertCaptureEnvelope(
+  operatorId: string,
+  exec: Execution,
+  event: MetadataSetEvent,
+): void {
+  let row = CaptureEnvelope.load(exec.manifestCid);
+  let isNewCapture = row == null;
+
+  let repoKey = "unknown";
+  let repoAgg = CapturesByRepo.load(repoKey);
+  if (repoAgg == null) {
+    repoAgg = new CapturesByRepo(repoKey);
+    repoAgg.repoKey = repoKey;
+    repoAgg.captureCount = 0;
+    repoAgg.lastCaptureAt = BigInt.zero();
+  }
+  if (isNewCapture) repoAgg.captureCount = repoAgg.captureCount + 1;
+  repoAgg.lastCaptureAt = event.block.timestamp;
+  repoAgg.save();
+
+  let operatorAgg = CapturesByOperator.load(operatorId);
+  if (operatorAgg == null) {
+    operatorAgg = new CapturesByOperator(operatorId);
+    operatorAgg.operator = operatorId;
+    operatorAgg.captureCount = 0;
+    operatorAgg.lastCaptureAt = BigInt.zero();
+  }
+  if (isNewCapture) operatorAgg.captureCount = operatorAgg.captureCount + 1;
+  operatorAgg.lastCaptureAt = event.block.timestamp;
+  operatorAgg.save();
+
+  if (row == null) {
+    row = new CaptureEnvelope(exec.manifestCid);
+    row.operator = operatorId;
+    row.manifestCid = exec.manifestCid;
+    row.repoKey = repoKey;
+    row.publishCount = 0;
+    row.repoAggregate = repoAgg.id;
+    row.operatorAggregate = operatorAgg.id;
+  }
+  row.execution = exec.id;
+  row.manifestHash = exec.manifestHash;
+  row.tier = exec.tier;
+  row.implName = exec.implName;
+  row.codeDigest = exec.codeDigest;
+  row.publishedAt = event.block.timestamp;
+  row.publishedBlock = event.block.number;
+  row.publishedTx = event.transaction.hash;
+  row.publishCount = row.publishCount + 1;
+  row.save();
 }

@@ -53,7 +53,7 @@ export function loadOrCreateOperator(
 // Metadata-key parsing
 //
 // Recognised execution kinds map to ExecutionKind enum values in the schema.
-// Per the payload schema spec (jinn-mono-g7h §6), ONLY `envelope` and
+// Per the payload schema spec (jinn-mono-g7h §6), `envelope`, `capture`, and
 // `evaluation` produce Execution rows in v1. `intent:` and `license:` are
 // RESERVED prefixes — operators publishing under those keys today fall through
 // to the MetadataEntry catch-all (so the rows stay visible) but do NOT get an
@@ -82,7 +82,7 @@ export function parseMetadataKey(metadataKey: string): ParsedKey {
   let suffix = metadataKey.substr(idx + 1);
   result.cid = suffix;
 
-  if (prefix == "envelope") {
+  if (prefix == "envelope" || prefix == "capture") {
     result.kind = "ENVELOPE";
     result.recognised = true;
   } else if (prefix == "evaluation") {
