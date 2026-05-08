@@ -35,6 +35,13 @@ export type {
   CaptureManifest,
 } from './schema.js';
 
+// Harness bundle manifest (artifact-type harness-bundle.v1)
+export {
+  HarnessBundleManifestSchema,
+  HARNESS_BUNDLE_ARTIFACT_TYPE,
+} from './harness-bundle-schema.js';
+export type { HarnessBundleManifest } from './harness-bundle-schema.js';
+
 // Secret scrub helpers
 export {
   SECRET_NAME_PATTERNS,
