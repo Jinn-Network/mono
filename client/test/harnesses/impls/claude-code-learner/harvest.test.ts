@@ -458,3 +458,88 @@ describe('harvestOutput', () => {
     ]);
   });
 });
+
+// ── Generic typed-payload path (submit_typed_payload MCP tool) ───────────────
+
+describe('harvestOutput — generic typed-payload path', () => {
+  let workingDir: string;
+
+  beforeEach(() => {
+    workingDir = mkdtempSync(join(tmpdir(), 'jinn-harvest-typed-'));
+    writeFullPipeline(workingDir);
+  });
+  afterEach(() => {
+    rmSync(workingDir, { recursive: true, force: true });
+  });
+
+  function writeTypedPayload(payload: Record<string, unknown>): void {
+    const dir = join(workingDir, '.execute');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'solution-payload.json'), JSON.stringify(payload, null, 2));
+  }
+
+  it('reads .execute/solution-payload.json when solverType is not prediction.v1 (restoration role)', () => {
+    const swePayload = {
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+      patch: 'diff --git a/foo b/foo\n@@ -1 +1 @@\n-old\n+new\n',
+    };
+    writeTypedPayload(swePayload);
+
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    expect(out.solutionPayload).toEqual(swePayload);
+    expect(out.verdictPayload).toBeUndefined();
+    const swArtifact = out.artifacts?.find(
+      (a) => a.path === '.execute/solution-payload.json',
+    );
+    expect(swArtifact?.artifactType).toBe('swe-rebench-v2_v1_solution');
+    expect(swArtifact?.metadata).toMatchObject({
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+      source: 'agent-authored',
+      solverType: 'swe-rebench-v2.v1',
+    });
+  });
+
+  it('reads typed payload as verdictPayload for evaluation role', () => {
+    const verdict = {
+      schemaVersion: 'swe-rebench-v2-verdict.v1',
+      score: 1,
+      passed_match: true,
+      evaluator_cost_usd: 0,
+    };
+    writeTypedPayload(verdict);
+
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'evaluation',
+    } as never);
+
+    expect(out.verdictPayload).toEqual(verdict);
+    expect(out.solutionPayload).toBeUndefined();
+    const swArtifact = out.artifacts?.find(
+      (a) => a.path === '.execute/solution-payload.json',
+    );
+    expect(swArtifact?.artifactType).toBe('swe-rebench-v2_v1_verdict');
+  });
+
+  it('falls through to legacy portfolio shape when no typed payload was submitted', () => {
+    // No .execute/solution-payload.json written.
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    expect(out.solutionPayload).toBeUndefined();
+    expect(out.verdictPayload).toBeUndefined();
+    expect(out.gating).toBeDefined();
+  });
+});

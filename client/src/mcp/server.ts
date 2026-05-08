@@ -13,6 +13,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -20,6 +22,7 @@ import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
 import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
+import { SOLVER_TYPE_PAYLOADS } from '../types/payloads/index.js';
 
 const server = new McpServer({
   name: 'jinn-client',
@@ -36,8 +39,11 @@ const task = {
     ? JSON.parse(process.env['DESIRED_STATE_CONTEXT']) as Record<string, unknown>
     : undefined,
   role: process.env['DESIRED_STATE_ROLE'] ?? '',
+  solverType: process.env['DESIRED_STATE_SOLVER_TYPE'] ?? '',
   restorationRequestId: process.env['RESTORATION_REQUEST_ID'] ?? '',
 };
+
+const workingDir = process.env['JINN_WORKING_DIR'] ?? process.env['WORKING_DIR'] ?? '';
 
 const requestId = process.env['REQUEST_ID'] ?? '';
 const storePath = process.env['STORE_PATH'] ?? '';
@@ -79,6 +85,24 @@ function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
   };
 }
 const corpus = buildReadOnlyCorpus();
+
+/**
+ * Format a structured error response for an MCP tool call. The body is a
+ * JSON-encoded object so callers can mechanically detect failure and
+ * inspect the kind / details, rather than parsing free-form prose.
+ */
+function mcpError(detail: Record<string, unknown>): {
+  content: Array<{ type: 'text'; text: string }>;
+} {
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({ ok: false, error: detail }),
+      },
+    ],
+  };
+}
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -170,6 +194,84 @@ server.tool(
     console.error(`[mcp] Result published as artifact: ${id} [${resultTag}]`);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify({ submitted: true, id, tag: resultTag }) }],
+    };
+  },
+);
+
+server.tool(
+  'submit_typed_payload',
+  'Submit the result of the active Task as a typed structured payload. Validated against the SolverNet contract\'s schema for this task\'s (solverType, role) pair before being persisted; on validation failure, the Zod error tree is returned so the agent can correct and retry. On success, the validated payload is persisted to <WORKING_DIR>/.execute/solution-payload.json for the daemon harness to read post-execution. Use this for all SolverNets with typed payload schemas (prediction.v1, swe-rebench-v2.v1, etc.); use submit_restoration_result for free-form text artifacts.',
+  {
+    payload: z
+      .record(z.unknown())
+      .describe(
+        'Typed payload object. The required shape is defined by the active SolverNet contract — check the contract\'s solution / verdict schema for the field set.',
+      ),
+  },
+  async ({ payload }) => {
+    const role = task.role === 'evaluation' ? 'verdict' : 'restoration';
+    if (!task.solverType) {
+      return mcpError({
+        kind: 'missing_solver_type',
+        message:
+          'DESIRED_STATE_SOLVER_TYPE not set in env. The harness adapter spawning this MCP server must inject it; submit_typed_payload cannot validate without knowing the SolverNet contract.',
+      });
+    }
+    const bucket = SOLVER_TYPE_PAYLOADS[task.solverType];
+    if (!bucket) {
+      return mcpError({
+        kind: 'unknown_solver_type',
+        message: `No typed payload schema registered for solverType=${task.solverType}. submit_restoration_result still works for free-form artifacts.`,
+        solverType: task.solverType,
+      });
+    }
+    const schema = bucket[role];
+    if (!schema) {
+      return mcpError({
+        kind: 'unknown_role',
+        message: `No ${role} schema registered for solverType=${task.solverType}.`,
+        solverType: task.solverType,
+        role,
+      });
+    }
+    const parsed = schema.safeParse(payload);
+    if (!parsed.success) {
+      return mcpError({
+        kind: 'schema_validation_failed',
+        message: `Payload failed validation against ${task.solverType}/${role} schema. Inspect issues[] and retry.`,
+        solverType: task.solverType,
+        role,
+        issues: parsed.error.issues,
+      });
+    }
+
+    if (!workingDir) {
+      return mcpError({
+        kind: 'missing_working_dir',
+        message:
+          'JINN_WORKING_DIR / WORKING_DIR not set in env. Cannot persist the validated payload.',
+      });
+    }
+
+    const dir = join(workingDir, '.execute');
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, 'solution-payload.json');
+    await writeFile(path, JSON.stringify(parsed.data, null, 2));
+    console.error(
+      `[mcp] submit_typed_payload accepted ${task.solverType}/${role} payload → ${path}`,
+    );
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify({
+            accepted: true,
+            solverType: task.solverType,
+            role,
+            persistedTo: path,
+          }),
+        },
+      ],
     };
   },
 );

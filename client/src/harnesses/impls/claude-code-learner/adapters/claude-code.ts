@@ -190,6 +190,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       DESIRED_STATE_DESCRIPTION: stringField(inputs.taskBody?.description),
       DESIRED_STATE_CONTEXT: taskContextJson(inputs),
       DESIRED_STATE_ROLE: stringField(inputs.taskBody?.role),
+      DESIRED_STATE_SOLVER_TYPE: stringField(inputs.taskBody?.solverType ?? inputs.solverType),
       RESTORATION_REQUEST_ID: stringField(inputs.taskBody?.restorationRequestId),
       REQUEST_ID: inputs.requestId ?? inputs.taskId,
       STORE_PATH: this.storePath ?? '',

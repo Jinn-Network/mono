@@ -395,6 +395,10 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
   const artifacts = [...learnerArtifacts];
   const solverType = typeof task?.solverType === 'string' ? task.solverType : undefined;
 
+  // Legacy prediction.v1 path — reads .execute/prediction-v1-solution.json
+  // directly (predates the submit_typed_payload MCP tool). To be migrated to
+  // the generic path below in a follow-up; until then, prediction.v1 keeps
+  // its rich gating/informational shape via buildSolutionOutput.
   if (solverType === 'prediction.v1') {
     const predictionSolution = findPredictionV1Solution(workingDir);
     if (!predictionSolution) {
@@ -439,20 +443,60 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
     }) as Solution;
   }
 
-  const informational = learnerArtifacts.length > 0
-    ? {
-        learnerFeedbackArtifacts: learnerArtifacts.map((artifact) => ({
-          path: artifact.path,
-          artifactType: artifact.artifactType,
-          metadata: artifact.metadata,
-        })),
-      }
-    : undefined;
+  // Generic typed-payload path. The agent calls the MCP tool
+  // `submit_typed_payload` which validates against the active SolverNet's
+  // schema and persists to .execute/solution-payload.json. Harvest reads it
+  // back generically — no per-solverType branching here.
+  const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
+  const typedPayload = safeReadJson(typedPayloadPath);
+  const informationalEntries: Record<string, unknown> = {};
+  if (learnerArtifacts.length > 0) {
+    informationalEntries['learnerFeedbackArtifacts'] = learnerArtifacts.map((artifact) => ({
+      path: artifact.path,
+      artifactType: artifact.artifactType,
+      metadata: artifact.metadata,
+    }));
+  }
 
+  if (typedPayload) {
+    const role = task?.role === 'evaluation' ? 'verdict' : 'solution';
+    const artifactType = solverType
+      ? `${solverType.replace(/\./g, '_')}_${role}`
+      : `learner_${role}`;
+    artifacts.push({
+      path: '.execute/solution-payload.json',
+      artifactType,
+      tags: [role, 'learner-output'],
+      metadata: {
+        schemaVersion:
+          typeof typedPayload['schemaVersion'] === 'string'
+            ? typedPayload['schemaVersion']
+            : undefined,
+        source: 'agent-authored',
+        solverType,
+      },
+      access: { priceUsdc: '0' },
+    });
+    return {
+      venueRef: { name: 'claude-code-learner' },
+      gating,
+      ...(Object.keys(informationalEntries).length > 0
+        ? { informational: informationalEntries }
+        : {}),
+      [role === 'verdict' ? 'verdictPayload' : 'solutionPayload']: typedPayload,
+      artifacts,
+    } as Solution;
+  }
+
+  // No typed payload submitted — fall through to the legacy portfolio shape.
+  // Tasks without a typed payload schema (or where the model didn't call
+  // submit_typed_payload) still return the gating-only Solution.
   return {
     venueRef: { name: 'claude-code-learner' },
     gating,
-    ...(informational ? { informational } : {}),
+    ...(Object.keys(informationalEntries).length > 0
+      ? { informational: informationalEntries }
+      : {}),
     ...(artifacts.length > 0 ? { artifacts } : {}),
   };
 }
