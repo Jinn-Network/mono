@@ -88,19 +88,20 @@ const AttestationSchema = z.object({
   measurement: HexStringSchema,
 });
 
+export const ArtifactSourceSchema = z.object({
+  kind: z.literal('ipfs'),
+  cid: z.string().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  encoding: z.literal('jinn.artifact.donation.v1'),
+});
+
 const TrajectoryRefSchema = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   access: z.object({
     endpoint: z.string().url(),
     priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
   }),
-});
-
-export const ArtifactSourceSchema = z.object({
-  kind: z.literal('ipfs'),
-  cid: z.string().min(1),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  encoding: z.literal('jinn.artifact.donation.v1'),
+  sources: z.array(ArtifactSourceSchema).optional(),
 });
 
 const ArtifactSchema = z.object({

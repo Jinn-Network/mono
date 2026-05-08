@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { keccak256, type Hex } from 'viem';
-import type { Artifact, SignedEnvelope, UnsignedEnvelope } from '../types/envelope.js';
+import type { Artifact, ArtifactSource, SignedEnvelope, UnsignedEnvelope } from '../types/envelope.js';
 import { SignedEnvelopeSchema, UnsignedEnvelopeSchema } from '../types/envelope.js';
 import type { SessionProvenance } from '../types/session-provenance.js';
 import type { CapturesStore, PendingCaptureRow, SpanRow } from '../store/captures.js';
@@ -15,6 +15,7 @@ import {
 
 const ZERO_MEASUREMENT = `0x${'0'.repeat(64)}` as const;
 const DEFAULT_PRICE_USDC = '0';
+const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1' as const;
 
 export interface CapturePublishedBlob {
   cid: string;
@@ -77,6 +78,7 @@ export interface PublishCaptureResult {
     sha256: string;
     endpoint: string;
     priceUsdc: string;
+    sources: ArtifactSource[];
   };
   artifacts: Artifact[];
   anchor: CaptureEnvelopeAnchorResult;
@@ -104,7 +106,7 @@ export async function publishCaptureEnvelope(
   const trajectory = blobToAccess(trajectoryBlob, deps);
 
   const harnessBundle = await deps.resolveHarnessBundle?.(capture) ?? null;
-  const artifacts: Artifact[] = [];
+  const artifacts: Artifact[] = [trajectoryToArtifact(trajectory)];
   let harnessBundleSha = EMPTY_BUNDLE_SHA256;
   if (harnessBundle) {
     const manifest = HarnessBundleManifestSchema.parse(harnessBundle.manifest);
@@ -235,6 +237,7 @@ export function buildUnsignedCaptureEnvelope(args: BuildUnsignedCaptureEnvelopeA
     trajectory: {
       sha256: trajectory.sha256,
       access: { endpoint: trajectory.endpoint, priceUsdc: trajectory.priceUsdc },
+      sources: trajectory.sources,
     },
     artifacts,
     payload: {
@@ -297,7 +300,7 @@ async function signUnsignedCaptureEnvelope(
 function blobToAccess(blob: CapturePublishedBlob, deps: Pick<
   CapturePublishDeps,
   'defaultArtifactEndpoint' | 'defaultPriceUsdc'
->): { cid: string; sha256: string; endpoint: string; priceUsdc: string } {
+>): { cid: string; sha256: string; endpoint: string; priceUsdc: string; sources: ArtifactSource[] } {
   const endpoint = blob.endpoint ?? deps.defaultArtifactEndpoint;
   if (!endpoint) {
     throw new Error(`published artifact ${blob.cid} did not provide an access endpoint`);
@@ -310,6 +313,22 @@ function blobToAccess(blob: CapturePublishedBlob, deps: Pick<
     sha256: blob.sha256,
     endpoint,
     priceUsdc: blob.priceUsdc ?? deps.defaultPriceUsdc ?? DEFAULT_PRICE_USDC,
+    sources: [{
+      kind: 'ipfs',
+      cid: blob.cid,
+      sha256: blob.sha256,
+      encoding: DONATION_ARTIFACT_ENCODING,
+    }],
+  };
+}
+
+function trajectoryToArtifact(trajectory: ReturnType<typeof blobToAccess>): Artifact {
+  return {
+    artifactType: 'jinn.trajectory.v1',
+    sha256: trajectory.sha256,
+    metadata: { description: 'Redacted local-session capture trajectory' },
+    access: { endpoint: trajectory.endpoint, priceUsdc: trajectory.priceUsdc },
+    sources: trajectory.sources,
   };
 }
 

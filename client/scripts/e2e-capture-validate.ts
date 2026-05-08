@@ -23,6 +23,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -49,11 +50,33 @@ interface StepResult {
   detail?: Record<string, unknown>;
 }
 
+interface DonationSource {
+  kind: 'ipfs';
+  cid: string;
+  sha256: string;
+  encoding: 'jinn.artifact.donation.v1';
+}
+
+interface CaptureEnvelopeArtifact {
+  artifactType: string;
+  sha256: string;
+  sources?: DonationSource[];
+}
+
+interface CaptureEnvelopeForReadability {
+  trajectory?: {
+    sha256: string;
+    sources?: DonationSource[];
+  } | null;
+  artifacts?: CaptureEnvelopeArtifact[];
+}
+
 const steps: StepResult[] = [];
 const JINN_HOME = join(homedir(), '.jinn-client');
 const DEFAULT_LOCAL_ENV_PATH = join(JINN_HOME, '.env.testnet');
 const DEFAULT_CONFIG_PATH = join(JINN_HOME, 'config.json');
 const DEFAULT_UI_TOKEN_PATH = join(JINN_HOME, 'ui-token');
+const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 
 loadLocalEnvFile(DEFAULT_LOCAL_ENV_PATH);
 
@@ -68,7 +91,10 @@ async function main(): Promise<void> {
   if (!subgraphUrl) {
     throw new Error(`JINN_SUBGRAPH_URL is required for live capture acceptance; set it or add subgraphUrl to ${DEFAULT_CONFIG_PATH}`);
   }
-  const ipfsGatewayUrl = optionalEnv('JINN_IPFS_GATEWAY_URL') ?? stringConfig(localConfig, 'ipfsGatewayUrl');
+  const ipfsGatewayUrl =
+    optionalEnv('JINN_IPFS_GATEWAY_URL') ??
+    stringConfig(localConfig, 'ipfsGatewayUrl') ??
+    DEFAULT_IPFS_GATEWAY_URL;
 
   if (process.env['JINN_CAPTURE_DEPLOY_SUBGRAPH'] === '1') {
     deploySubgraph();
@@ -122,6 +148,23 @@ async function main(): Promise<void> {
       step: 'ipfs.envelope_fetch',
       ok: typeof envelope === 'object' && envelope !== null,
       detail: { envelopeCid: approved.envelopeCid },
+    });
+    const trajectory = await fetchReadableCaptureTrajectory(ipfsGatewayUrl, envelope);
+    if (trajectory.spans !== detail.spans.length || trajectory.redactionSpans !== detail.spans.length) {
+      throw new Error(
+        `published trajectory span count mismatch: expected ${detail.spans.length}, got ` +
+        `${trajectory.spans} spans and ${trajectory.redactionSpans} redaction entries`,
+      );
+    }
+    steps.push({
+      step: 'ipfs.trajectory_fetch',
+      ok: true,
+      detail: {
+        cid: trajectory.cid,
+        sha256: trajectory.sha256,
+        spans: trajectory.spans,
+        redactionSpans: trajectory.redactionSpans,
+      },
     });
   }
 
@@ -284,6 +327,97 @@ async function fetchIpfsJson(gatewayUrl: string, cid: string): Promise<unknown> 
   const response = await fetch(new URL(cid, normalizeIpfsGatewayBase(gatewayUrl)));
   if (!response.ok) throw new Error(`IPFS fetch ${cid} HTTP ${response.status}`);
   return response.json();
+}
+
+async function fetchReadableCaptureTrajectory(
+  gatewayUrl: string,
+  envelopeRaw: unknown,
+): Promise<{ cid: string; sha256: string; spans: number; redactionSpans: number }> {
+  const envelope = parseCaptureEnvelopeForReadability(envelopeRaw);
+  const source = findTrajectorySource(envelope);
+  const wrapper = await fetchIpfsJson(gatewayUrl, source.cid);
+  const trajectoryBytes = decodeDonationWrapper(wrapper, source.sha256);
+  const actualSha256 = sha256Hex(trajectoryBytes);
+  if (actualSha256 !== source.sha256) {
+    throw new Error(`trajectory source sha256 mismatch: expected ${source.sha256}, got ${actualSha256}`);
+  }
+  const trajectory = JSON.parse(trajectoryBytes.toString('utf8')) as {
+    schemaVersion?: unknown;
+    spans?: unknown;
+    redactionManifest?: { spans?: unknown };
+  };
+  if (trajectory.schemaVersion !== 'jinn.capture-trajectory.v1') {
+    throw new Error(`trajectory has unexpected schemaVersion: ${String(trajectory.schemaVersion)}`);
+  }
+  if (!Array.isArray(trajectory.spans)) {
+    throw new Error('trajectory is missing spans[]');
+  }
+  const redactionSpans = trajectory.redactionManifest && Array.isArray(trajectory.redactionManifest.spans)
+    ? trajectory.redactionManifest.spans.length
+    : 0;
+  return {
+    cid: source.cid,
+    sha256: source.sha256,
+    spans: trajectory.spans.length,
+    redactionSpans,
+  };
+}
+
+function parseCaptureEnvelopeForReadability(raw: unknown): CaptureEnvelopeForReadability {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('published envelope is not an object');
+  }
+  return raw as CaptureEnvelopeForReadability;
+}
+
+function findTrajectorySource(envelope: CaptureEnvelopeForReadability): DonationSource {
+  const trajectorySha = envelope.trajectory?.sha256;
+  const direct = envelope.trajectory?.sources?.find((source) => source.kind === 'ipfs');
+  if (direct) return validateTrajectorySource(direct, trajectorySha);
+
+  const artifact = envelope.artifacts?.find((candidate) =>
+    candidate.artifactType === 'jinn.trajectory.v1' &&
+    (!trajectorySha || candidate.sha256 === trajectorySha)
+  );
+  const source = artifact?.sources?.find((candidate) => candidate.kind === 'ipfs');
+  if (!source) {
+    throw new Error('published capture envelope does not expose a readable IPFS trajectory source');
+  }
+  return validateTrajectorySource(source, trajectorySha);
+}
+
+function validateTrajectorySource(source: DonationSource, trajectorySha?: string): DonationSource {
+  if (source.encoding !== 'jinn.artifact.donation.v1') {
+    throw new Error(`trajectory source has unexpected encoding: ${source.encoding}`);
+  }
+  if (trajectorySha && source.sha256 !== trajectorySha) {
+    throw new Error(`trajectory source sha256 ${source.sha256} does not match envelope trajectory ${trajectorySha}`);
+  }
+  return source;
+}
+
+function decodeDonationWrapper(raw: unknown, expectedSha256: string): Buffer {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('trajectory donation wrapper is not an object');
+  }
+  const wrapper = raw as Record<string, unknown>;
+  if (
+    wrapper['schemaVersion'] !== 'jinn.artifact.donation.v1' ||
+    wrapper['encoding'] !== 'jinn.artifact.donation.v1'
+  ) {
+    throw new Error('trajectory donation wrapper has unexpected encoding');
+  }
+  if (wrapper['sha256'] !== expectedSha256) {
+    throw new Error('trajectory donation wrapper sha256 does not match envelope source');
+  }
+  if (typeof wrapper['data'] !== 'string') {
+    throw new Error('trajectory donation wrapper is missing base64 data');
+  }
+  return Buffer.from(wrapper['data'], 'base64');
+}
+
+function sha256Hex(input: Uint8Array): string {
+  return createHash('sha256').update(input).digest('hex');
 }
 
 async function waitForCaptureIndex(

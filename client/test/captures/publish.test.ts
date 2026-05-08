@@ -62,6 +62,12 @@ describe('publishCaptureEnvelope', () => {
         sha256: 'd'.repeat(64),
         endpoint: 'https://operator.example/artifacts/trajectory',
         priceUsdc: '0',
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafytrajectory',
+          sha256: 'd'.repeat(64),
+          encoding: 'jinn.artifact.donation.v1',
+        }],
       },
       artifacts: [],
       harnessBundleSha: EMPTY_BUNDLE_SHA256,
@@ -127,9 +133,24 @@ describe('publishCaptureEnvelope', () => {
     expect(result.anchor).toEqual({ txHash: `0x${'e'.repeat(64)}`, blockNumber: 123 });
     expect(result.envelope.role).toBe('capture');
     expect(result.envelope.trajectory?.sha256).toBe(result.trajectory.sha256);
+    expect(result.envelope.trajectory?.sources?.[0]).toMatchObject({
+      kind: 'ipfs',
+      cid: result.trajectory.cid,
+      sha256: result.trajectory.sha256,
+    });
     expect(result.envelope.executor.codeDigest).toBe(`sha256:${'9'.repeat(64)}`);
-    expect(result.artifacts).toHaveLength(1);
-    expect(result.artifacts[0].artifactType).toBe('harness-bundle.v1');
+    expect(result.artifacts).toHaveLength(2);
+    expect(result.artifacts[0]).toMatchObject({
+      artifactType: 'jinn.trajectory.v1',
+      sha256: result.trajectory.sha256,
+      sources: [{
+        kind: 'ipfs',
+        cid: result.trajectory.cid,
+        sha256: result.trajectory.sha256,
+        encoding: 'jinn.artifact.donation.v1',
+      }],
+    });
+    expect(result.artifacts[1].artifactType).toBe('harness-bundle.v1');
     expect(publishedArtifacts.map((a) => a.artifactType)).toEqual(['jinn.trajectory.v1', 'harness-bundle.v1']);
     expect(publishedEnvelopes).toHaveLength(1);
   });
