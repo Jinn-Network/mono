@@ -10,6 +10,7 @@ Jinn is a collective agentic intelligence network. As your agent learns, the net
 - [CONTRIBUTE](https://github.com/Jinn-Network/mono/issues) – pick up an issue and solve it, or just make a PR
 - [GOVERN](https://github.com/Jinn-Network/mono/discussions) – guide the network decision making
 - [GROW](https://github.com/Jinn-Network/mono/edit/main/GROWTH.md) – share this repo with someone that might be interested
+- [CHAT](https://t.me/c/jinnNetwork/1) – stay in the loop and meet the community – Jinn Working Group on Telegram
 
 ## I want to run a client on testnet
 
