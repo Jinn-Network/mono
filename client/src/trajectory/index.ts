@@ -23,6 +23,8 @@ export {
   RedactionManifestSchema,
   JinnTrajectoryV1Schema,
   UnsignedTrajectorySchema,
+  CaptureManifestSchema,
+  EMPTY_BUNDLE_SHA256,
 } from './schema.js';
 export type {
   JinnSpanKind,
@@ -30,6 +32,7 @@ export type {
   RedactionManifest,
   JinnTrajectoryV1,
   UnsignedTrajectory,
+  CaptureManifest,
 } from './schema.js';
 
 // Secret scrub helpers

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CaptureManifestSchema } from '../../src/trajectory/schema.js';
+import { CaptureManifestSchema, EMPTY_BUNDLE_SHA256 } from '../../src/trajectory/schema.js';
 
 describe('CaptureManifestSchema', () => {
   it('accepts a complete capture manifest', () => {
@@ -65,8 +65,7 @@ describe('CaptureManifestSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('exports EMPTY_BUNDLE_SHA256 sentinel', async () => {
-    const { EMPTY_BUNDLE_SHA256 } = await import('../../src/trajectory/schema.js');
+  it('exports EMPTY_BUNDLE_SHA256 sentinel', () => {
     expect(EMPTY_BUNDLE_SHA256).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
   });
 });
