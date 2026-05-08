@@ -3,10 +3,15 @@
 /**
  * Live capture acceptance runner.
  *
- * Required environment:
- *   JINN_DAEMON_URL        default http://127.0.0.1:7331
- *   JINN_UI_TOKEN          UI token accepted by /api/captures/*
- *   JINN_SUBGRAPH_URL      GraphQL endpoint indexing capture:<cid>
+ * Defaults are loaded from the same local operator state used by the UI:
+ *   ~/.jinn-client/.env.testnet   deploy slug/key + optional env overrides
+ *   ~/.jinn-client/config.json    apiPort, subgraphUrl, ipfsGatewayUrl
+ *   ~/.jinn-client/ui-token       UI token accepted by /api/captures/*
+ *
+ * Environment overrides:
+ *   JINN_DAEMON_URL        default http://127.0.0.1:<config.apiPort || 7331>
+ *   JINN_UI_TOKEN          default ~/.jinn-client/ui-token
+ *   JINN_SUBGRAPH_URL      default config.subgraphUrl
  *
  * Optional:
  *   JINN_CAPTURE_SESSION_ID     approve this pending session; otherwise first pending row
@@ -18,7 +23,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeIpfsGatewayBase } from '../src/adapters/mech/ipfs.js';
 import { distillCaptureToTasks } from '../src/solver-types/_session-derived-distill.js';
@@ -43,11 +50,25 @@ interface StepResult {
 }
 
 const steps: StepResult[] = [];
+const JINN_HOME = join(homedir(), '.jinn-client');
+const DEFAULT_LOCAL_ENV_PATH = join(JINN_HOME, '.env.testnet');
+const DEFAULT_CONFIG_PATH = join(JINN_HOME, 'config.json');
+const DEFAULT_UI_TOKEN_PATH = join(JINN_HOME, 'ui-token');
+
+loadLocalEnvFile(DEFAULT_LOCAL_ENV_PATH);
 
 async function main(): Promise<void> {
-  const daemonUrl = process.env['JINN_DAEMON_URL'] ?? 'http://127.0.0.1:7331';
-  const uiToken = requiredEnv('JINN_UI_TOKEN');
-  const subgraphUrl = requiredEnv('JINN_SUBGRAPH_URL');
+  const localConfig = readLocalConfig();
+  const daemonUrl = optionalEnv('JINN_DAEMON_URL') ?? defaultDaemonUrl(localConfig);
+  const uiToken = optionalEnv('JINN_UI_TOKEN') ?? readUiToken();
+  if (!uiToken) {
+    throw new Error(`JINN_UI_TOKEN is required for live capture acceptance; set it or start the daemon so ${DEFAULT_UI_TOKEN_PATH} exists`);
+  }
+  const subgraphUrl = optionalEnv('JINN_SUBGRAPH_URL') ?? stringConfig(localConfig, 'subgraphUrl');
+  if (!subgraphUrl) {
+    throw new Error(`JINN_SUBGRAPH_URL is required for live capture acceptance; set it or add subgraphUrl to ${DEFAULT_CONFIG_PATH}`);
+  }
+  const ipfsGatewayUrl = optionalEnv('JINN_IPFS_GATEWAY_URL') ?? stringConfig(localConfig, 'ipfsGatewayUrl');
 
   if (process.env['JINN_CAPTURE_DEPLOY_SUBGRAPH'] === '1') {
     deploySubgraph();
@@ -95,8 +116,8 @@ async function main(): Promise<void> {
     detail: { envelopeCid: approved.envelopeCid, publishedAt: approved.publishedAt },
   });
 
-  if (process.env['JINN_IPFS_GATEWAY_URL']) {
-    const envelope = await fetchIpfsJson(process.env['JINN_IPFS_GATEWAY_URL'], approved.envelopeCid);
+  if (ipfsGatewayUrl) {
+    const envelope = await fetchIpfsJson(ipfsGatewayUrl, approved.envelopeCid);
     steps.push({
       step: 'ipfs.envelope_fetch',
       ok: typeof envelope === 'object' && envelope !== null,
@@ -169,10 +190,68 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ ok: true, steps }, null, 2));
 }
 
-function requiredEnv(name: string): string {
+function optionalEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required for live capture acceptance`);
+  return value || undefined;
+}
+
+function requiredSetting(name: string): string {
+  const value = optionalEnv(name);
+  if (!value) throw new Error(`${name} is required for this live capture acceptance step`);
   return value;
+}
+
+function loadLocalEnvFile(path: string): void {
+  if (!existsSync(path)) return;
+  for (const rawLine of readFileSync(path, 'utf8').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    if (process.env[key] !== undefined) continue;
+    process.env[key] = unquoteEnvValue(rawValue.trim());
+  }
+}
+
+function unquoteEnvValue(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function readLocalConfig(): Record<string, unknown> {
+  if (!existsSync(DEFAULT_CONFIG_PATH)) return {};
+  try {
+    return JSON.parse(readFileSync(DEFAULT_CONFIG_PATH, 'utf8')) as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(`Failed to parse ${DEFAULT_CONFIG_PATH}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function stringConfig(config: Record<string, unknown>, key: string): string | undefined {
+  const value = config[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function defaultDaemonUrl(config: Record<string, unknown>): string {
+  const rawPort = config['apiPort'];
+  const port = typeof rawPort === 'number'
+    ? rawPort
+    : typeof rawPort === 'string'
+      ? Number(rawPort)
+      : 7331;
+  return `http://127.0.0.1:${Number.isFinite(port) && port > 0 ? port : 7331}`;
+}
+
+function readUiToken(): string | undefined {
+  if (!existsSync(DEFAULT_UI_TOKEN_PATH)) return undefined;
+  const token = readFileSync(DEFAULT_UI_TOKEN_PATH, 'utf8').trim();
+  return token || undefined;
 }
 
 async function daemonJson<T>(
@@ -181,13 +260,19 @@ async function daemonJson<T>(
   uiToken: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(new URL(path, daemonUrl), {
-    ...init,
-    headers: {
-      'x-jinn-ui-token': uiToken,
-      ...(init.headers ?? {}),
-    },
-  });
+  const url = new URL(path, daemonUrl);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers: {
+        'x-jinn-ui-token': uiToken,
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch (err) {
+    throw new Error(`Daemon ${url.href} fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
   const body = await response.text();
   if (!response.ok) {
     throw new Error(`Daemon ${path} HTTP ${response.status}: ${body}`);
@@ -238,7 +323,7 @@ async function waitForCaptureIndex(
 function deploySubgraph(): void {
   const here = dirname(fileURLToPath(import.meta.url));
   const subgraphDir = resolve(here, '..', '..', 'subgraph');
-  const slug = requiredEnv('JINN_SUBGRAPH_STUDIO_SLUG');
+  const slug = requiredSetting('JINN_SUBGRAPH_STUDIO_SLUG');
   const args = [
     'exec',
     'graph',
