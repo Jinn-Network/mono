@@ -5,6 +5,10 @@ import {
   validatePricing,
   projectTasks,
 } from './Step4ConfigurePricing.js';
+import {
+  PREDICTION_V1_TEMPLATE,
+  SWE_REBENCH_V2_V1_TEMPLATE,
+} from './templates.js';
 import type { DraftSolverNetRecord } from '../../api/types.js';
 
 function buildDraft(overrides: Partial<DraftSolverNetRecord> = {}): DraftSolverNetRecord {
@@ -92,6 +96,7 @@ describe('Step4ConfigurePricing component', () => {
     render(
       <Step4ConfigurePricing
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={() => undefined}
         fundingSafeAddress="0xSAFE"
@@ -106,6 +111,7 @@ describe('Step4ConfigurePricing component', () => {
     render(
       <Step4ConfigurePricing
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={() => undefined}
         fundingSafeAddress={null}
@@ -118,6 +124,7 @@ describe('Step4ConfigurePricing component', () => {
     render(
       <Step4ConfigurePricing
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={() => undefined}
         fundingSafeAddress="0xSAFE"
@@ -138,6 +145,7 @@ describe('Step4ConfigurePricing component', () => {
     render(
       <Step4ConfigurePricing
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={onAdvance}
         onBack={() => undefined}
         fundingSafeAddress="0xSAFE"
@@ -161,6 +169,7 @@ describe('Step4ConfigurePricing component', () => {
     render(
       <Step4ConfigurePricing
         draft={buildDraft({ completedSteps: ['define', 'reviewContract', 'configureGenerator'] })}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={onAdvance}
         onBack={() => undefined}
         fundingSafeAddress="0xSAFE"
@@ -178,5 +187,32 @@ describe('Step4ConfigurePricing component', () => {
       verdictPriceWei: '500',
       completedSteps: ['define', 'reviewContract', 'configureGenerator', 'configurePricing'],
     });
+  });
+
+  it('uses the active template claimPolicyDefaults.maxClaimsPerOperator (swe-rebench-v2 = 5)', () => {
+    render(
+      <Step4ConfigurePricing
+        draft={buildDraft({
+          templateContractId: 'swe-rebench-v2',
+          templateContractVersion: 'v1',
+        })}
+        template={SWE_REBENCH_V2_V1_TEMPLATE}
+        onAdvance={() => undefined}
+        onBack={() => undefined}
+        fundingSafeAddress="0xSAFE"
+        fundingSafeBalanceWei="11000"
+      />,
+    );
+    fireEvent.change(screen.getByTestId('launcher-create-solutionPriceWei'), {
+      target: { value: '100' },
+    });
+    fireEvent.change(screen.getByTestId('launcher-create-verdictPriceWei'), {
+      target: { value: '200' },
+    });
+    // perTaskWei = 100 + 200 * 5 = 1100; 11000 / 1100 = 10 tasks
+    expect(screen.getByTestId('launcher-create-projected-tasks').textContent).toContain('~10');
+    // hint references 5
+    const projection = screen.getByTestId('launcher-create-projection');
+    expect(projection.textContent).toMatch(/maxClaimsPerOperator \(5\)/);
   });
 });

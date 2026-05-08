@@ -9,27 +9,31 @@ import { PREDICTION_V1_TEMPLATE, type CreateWizardTemplate } from './templates.j
 /**
  * Step 2 — Review the contract template the SolverNet will pin.
  *
- * Day-1 there is one template (`prediction.v1`); this step is read-only.
- * Forward-only: the operator just confirms by clicking Next, and we
- * persist `templateContractId` + `templateContractVersion` onto the draft.
- *
- * The template body comes from `templates.ts` (a static mirror of the
- * SDK's `PREDICTION_V1_SOLVER_NET_CONTRACT`); see that file for the
- * drift policy.
+ * Read-only: the operator confirms by clicking Next, and we persist
+ * `templateContractId` + `templateContractVersion` onto the draft. The
+ * active template is chosen by the wizard parent via the `?template=`
+ * URL parameter (see `LauncherCreate.tsx`); each template ships in
+ * `templates.ts` as a static mirror of the SDK's canonical contract.
+ * See `templates.ts` for the drift policy.
  */
 
 export interface Step2ReviewContractProps {
   draft: DraftSolverNetRecord;
+  /**
+   * Active template. Defaults to {@link PREDICTION_V1_TEMPLATE} so existing
+   * tests render without explicitly threading a template through; the wizard
+   * always passes the URL-selected template explicitly.
+   */
+  template?: CreateWizardTemplate;
   onAdvance: (patch: DraftSolverNetRecordPatch) => Promise<void> | void;
   onBack: () => void;
   busy?: boolean;
   error?: string | null;
 }
 
-const TEMPLATE: CreateWizardTemplate = PREDICTION_V1_TEMPLATE;
-
 export function Step2ReviewContract({
   draft,
+  template = PREDICTION_V1_TEMPLATE,
   onAdvance,
   onBack,
   busy,
@@ -37,8 +41,8 @@ export function Step2ReviewContract({
 }: Step2ReviewContractProps): JSX.Element {
   const advance = (): void => {
     void onAdvance({
-      templateContractId: TEMPLATE.id,
-      templateContractVersion: TEMPLATE.version,
+      templateContractId: template.id,
+      templateContractVersion: template.version,
       completedSteps: ensureCompletedStep(draft.completedSteps, 'reviewContract'),
     });
   };
@@ -47,13 +51,13 @@ export function Step2ReviewContract({
     <StepShell
       step={2}
       title="Review contract"
-      blurb="The contract defines the schemas, evaluation, and aggregation that this SolverNet will pin to its manifest. Day-1 only one template ships."
+      blurb="The contract defines the schemas, evaluation, and aggregation that this SolverNet will pin to its manifest."
       error={error}
       footer={<StepNav onBack={onBack} onNext={advance} busy={busy} />}
     >
       <article
         data-testid="launcher-create-template"
-        data-template-id={`${TEMPLATE.id}.${TEMPLATE.version}`}
+        data-template-id={`${template.id}.${template.version}`}
         style={{
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border)',
@@ -74,7 +78,7 @@ export function Step2ReviewContract({
               color: 'var(--fg-dim)',
             }}
           >
-            {TEMPLATE.id}.{TEMPLATE.version}
+            {template.id}.{template.version}
           </span>
           <h2
             style={{
@@ -85,70 +89,70 @@ export function Step2ReviewContract({
               color: 'var(--fg)',
             }}
           >
-            {TEMPLATE.name}
+            {template.name}
           </h2>
           <p style={{ margin: 0, color: 'var(--fg-muted)', fontSize: '13px', lineHeight: 1.5 }}>
-            {TEMPLATE.description}
+            {template.description}
           </p>
         </header>
 
         <SectionBlock title="Schemas">
-          <ReadonlyRow label="Task" value={TEMPLATE.schemas.task.name} hint={TEMPLATE.schemas.task.description} />
+          <ReadonlyRow label="Task" value={template.schemas.task.name} hint={template.schemas.task.description} />
           <ReadonlyRow
             label="Solution"
-            value={TEMPLATE.schemas.solution.name}
-            hint={TEMPLATE.schemas.solution.description}
+            value={template.schemas.solution.name}
+            hint={template.schemas.solution.description}
           />
           <ReadonlyRow
             label="Verdict"
-            value={TEMPLATE.schemas.verdict.name}
-            hint={TEMPLATE.schemas.verdict.description}
+            value={template.schemas.verdict.name}
+            hint={template.schemas.verdict.description}
           />
         </SectionBlock>
 
         <SectionBlock title="Evaluation function">
-          <ReadonlyRow label="Id" value={TEMPLATE.evaluationFunction.id} mono />
+          <ReadonlyRow label="Id" value={template.evaluationFunction.id} mono />
           <ReadonlyRow
             label="Deterministic"
-            value={TEMPLATE.evaluationFunction.deterministic ? 'yes' : 'no'}
+            value={template.evaluationFunction.deterministic ? 'yes' : 'no'}
           />
-          <ReadonlyRow label="Inputs" value={TEMPLATE.evaluationFunction.inputs.join(', ')} />
-          <ReadonlyRow label="Output" value={TEMPLATE.evaluationFunction.output} />
+          <ReadonlyRow label="Inputs" value={template.evaluationFunction.inputs.join(', ')} />
+          <ReadonlyRow label="Output" value={template.evaluationFunction.output} />
         </SectionBlock>
 
         <SectionBlock title="Aggregation function">
-          <ReadonlyRow label="Id" value={TEMPLATE.aggregationFunction.id} mono />
+          <ReadonlyRow label="Id" value={template.aggregationFunction.id} mono />
           <ReadonlyRow
             label="Window"
             value={
-              TEMPLATE.aggregationFunction.windowDays !== undefined
-                ? `${TEMPLATE.aggregationFunction.windowDays} days`
+              template.aggregationFunction.windowDays !== undefined
+                ? `${template.aggregationFunction.windowDays} days`
                 : '—'
             }
           />
-          <ReadonlyRow label="Output" value={TEMPLATE.aggregationFunction.output} />
+          <ReadonlyRow label="Output" value={template.aggregationFunction.output} />
         </SectionBlock>
 
         <SectionBlock title="Claim policy defaults">
-          <ReadonlyRow label="Mode" value={TEMPLATE.claimPolicyDefaults.mode} />
+          <ReadonlyRow label="Mode" value={template.claimPolicyDefaults.mode} />
           <ReadonlyRow
             label="Max claims"
-            value={String(TEMPLATE.claimPolicyDefaults.maxClaims)}
+            value={String(template.claimPolicyDefaults.maxClaims)}
           />
           <ReadonlyRow
             label="Per operator"
-            value={String(TEMPLATE.claimPolicyDefaults.maxClaimsPerOperator)}
+            value={String(template.claimPolicyDefaults.maxClaimsPerOperator)}
           />
           <ReadonlyRow
             label="Lease TTL"
-            value={`${TEMPLATE.claimPolicyDefaults.claimLeaseTtlSeconds}s`}
+            value={`${template.claimPolicyDefaults.claimLeaseTtlSeconds}s`}
           />
         </SectionBlock>
 
         <SectionBlock title="Credential requirements">
-          <CredentialList role="creator" creds={TEMPLATE.credentialRequirements.creator} />
-          <CredentialList role="solver" creds={TEMPLATE.credentialRequirements.solver} />
-          <CredentialList role="evaluator" creds={TEMPLATE.credentialRequirements.evaluator} />
+          <CredentialList role="creator" creds={template.credentialRequirements.creator} />
+          <CredentialList role="solver" creds={template.credentialRequirements.solver} />
+          <CredentialList role="evaluator" creds={template.credentialRequirements.evaluator} />
         </SectionBlock>
       </article>
     </StepShell>

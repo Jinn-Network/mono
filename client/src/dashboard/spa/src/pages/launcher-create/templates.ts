@@ -1,29 +1,32 @@
 /**
- * Static mirror of the prediction.v1 SolverNet contract template +
- * generator defaults consumed by the Create wizard.
+ * Static mirror of SolverNet contract templates + generator defaults
+ * consumed by the Create wizard.
  *
  * Why a mirror? The SPA's tsconfig only includes
- * `client/src/dashboard/spa/src/**`, so the daemon-side `prediction-v1-auto.ts`
- * defaults and the SDK's `PREDICTION_V1_SOLVER_NET_CONTRACT` are not in scope
- * here. Day-1 the wizard supports a single template; rather than ship the SPA
- * with the full SDK type graph for a single template, we copy the minimal
- * shape needed to render Steps 2 + 3 and pin it with shape tests on the
- * SDK-side.
+ * `client/src/dashboard/spa/src/**`, so the daemon-side `*-auto.ts`
+ * defaults and the SDK's `*_SOLVER_NET_CONTRACT` are not in scope here.
+ * Rather than ship the SPA with the full SDK type graph, we copy the
+ * minimal shape needed to render Steps 2 + 3 and rely on the daemon's
+ * launch endpoint to validate draft completeness against the canonical
+ * contract before launch (mismatches surface as a 400, not silent
+ * corruption).
  *
  * Drift policy: this file mirrors the daemon-side authoritative values:
  *   - `PREDICTION_V1_SOLVER_NET_CONTRACT`         in `packages/sdk/src/contracts.ts`
  *   - `PredictionV1AutoConfig` `DEFAULTS` block   in `client/src/solver-types/prediction-v1-auto.ts`
+ *   - `SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT`     in `packages/sdk/src/contracts.ts`
+ *   - `DEFAULT_GENERATOR_CONFIG`                  in `client/src/solver-types/swe-rebench-v2-auto.ts`
  *
- * If those change, update this file. The daemon's launch endpoint validates
- * draft completeness against the canonical contract before launch, so a
- * mismatch surfaces as a 400 rather than a silent corruption.
+ * Adding a new template:
+ *   1. Add a matching entry to the `CreateWizardTemplate` discriminated
+ *      union below (each variant binds `id` + `version` + a shape for
+ *      `generatorDefaults`).
+ *   2. Export the template constant.
+ *   3. Add it to `TEMPLATES_BY_KEY` keyed by `${id}.${version}`.
+ *   4. Teach Step 3 to render its generator-config form.
  */
 
-export interface CreateWizardTemplate {
-  /** Stable contract identity, e.g. `'prediction'`. */
-  id: string;
-  /** Contract version, e.g. `'v1'`. */
-  version: string;
+interface CreateWizardTemplateBase {
   /** Human label, e.g. `'Prediction'`. */
   name: string;
   /** Descriptive blurb shown in Step 2's header. */
@@ -57,23 +60,54 @@ export interface CreateWizardTemplate {
     solver: ReadonlyArray<{ id: string; kind: string; required: boolean; description: string }>;
     evaluator: ReadonlyArray<{ id: string; kind: string; required: boolean; description: string }>;
   };
-  /** Default generator-config values pre-filled in Step 3. */
-  generatorDefaults: {
-    cadenceMs: number;
-    submissionWindowMs: number;
-    maxNewRoundsPerPoll: number;
-    maxNewRoundsPerDay: number;
-    maxOpenRounds: number;
-    minTimeToResolutionHours: number;
-    maxTimeToResolutionHours: number;
-    minLiquidityUsd: string;
-    minVolume24hUsd: string;
-    maxYesSpread: string;
-    maxOrderbookAgeSeconds: number;
-  };
 }
 
-export const PREDICTION_V1_TEMPLATE: CreateWizardTemplate = {
+export interface PredictionV1GeneratorDefaults {
+  cadenceMs: number;
+  submissionWindowMs: number;
+  maxNewRoundsPerPoll: number;
+  maxNewRoundsPerDay: number;
+  maxOpenRounds: number;
+  minTimeToResolutionHours: number;
+  maxTimeToResolutionHours: number;
+  minLiquidityUsd: string;
+  minVolume24hUsd: string;
+  maxYesSpread: string;
+  maxOrderbookAgeSeconds: number;
+}
+
+export interface SweRebenchV2V1GeneratorDefaults {
+  /** How many score=1 Verdicts must accumulate before a Task saturates. */
+  N_target_successes: number;
+  /** Hard cap on postings per Task to prevent runaway costs. */
+  N_max_postings_per_task: number;
+  /** Minimum gap between consecutive postings of the same Task (ms). */
+  cooldown_ms: number;
+}
+
+/**
+ * Discriminated union over `${id}.${version}`. Step 3 narrows on `id`
+ * to render the correct generator-config form.
+ */
+export type CreateWizardTemplate =
+  | PredictionV1Template
+  | SweRebenchV2V1Template;
+
+/** Narrow variant for `prediction.v1`. Used as the type of `PREDICTION_V1_TEMPLATE`. */
+export type PredictionV1Template = CreateWizardTemplateBase & {
+  id: 'prediction';
+  version: 'v1';
+  generatorDefaults: PredictionV1GeneratorDefaults;
+};
+
+/** Narrow variant for `swe-rebench-v2.v1`. Used as the type of `SWE_REBENCH_V2_V1_TEMPLATE`. */
+export type SweRebenchV2V1Template = CreateWizardTemplateBase & {
+  id: 'swe-rebench-v2';
+  version: 'v1';
+  generatorDefaults: SweRebenchV2V1GeneratorDefaults;
+};
+
+export const PREDICTION_V1_TEMPLATE: PredictionV1Template = {
   id: 'prediction',
   version: 'v1',
   name: 'Prediction',
@@ -147,3 +181,93 @@ export const PREDICTION_V1_TEMPLATE: CreateWizardTemplate = {
     maxOrderbookAgeSeconds: 60,
   },
 };
+
+export const SWE_REBENCH_V2_V1_TEMPLATE: SweRebenchV2V1Template = {
+  id: 'swe-rebench-v2',
+  version: 'v1',
+  name: 'SWE-rebench v2',
+  description:
+    'Code-issue benchmark sourced from the nebius/SWE-rebench-leaderboard HuggingFace dataset. Solvers submit a patch; evaluators run the upstream eval.py harness inside the per-instance Docker image and emit a 0/1 Verdict against the FAIL_TO_PASS / PASS_TO_PASS tests.',
+  schemas: {
+    task: {
+      name: 'swe-rebench-v2.v1 Task',
+      description:
+        'A reference to a HuggingFace dataset row by (hf_dataset, hf_split, instance_id), plus repo + base_commit + language + problem statement.',
+    },
+    solution: {
+      name: 'swe-rebench-v2.v1 Solution',
+      description: 'A unified diff patch plus an IPFS CID pointing at the solver trajectory.',
+    },
+    verdict: {
+      name: 'swe-rebench-v2.v1 Verdict',
+      description:
+        'Score 0 or 1 based on whether the patch passes the per-instance Docker test suite, plus the test log CID.',
+    },
+  },
+  evaluationFunction: {
+    id: 'swe-rebench-v2.docker-test-suite.v1',
+    deterministic: true,
+    inputs: ['swe-rebench-v2.v1 Task', 'swe-rebench-v2.v1 Solution', 'per-instance Docker image'],
+    output: 'swe-rebench-v2.v1 Verdict',
+  },
+  aggregationFunction: {
+    id: 'swe-rebench-v2.multi-winrate.v1',
+    deterministic: true,
+    inputs: ['SCORED swe-rebench-v2.v1 Verdicts'],
+    output: 'mean / complexityWeighted / byLanguage / frontierResolved / parityTripRate',
+    windowDays: 30,
+  },
+  claimPolicyDefaults: {
+    mode: 'parallel',
+    maxClaims: 50,
+    maxClaimsPerOperator: 5,
+    claimLeaseTtlSeconds: 60 * 60,
+  },
+  credentialRequirements: {
+    creator: [
+      {
+        id: 'huggingface.public.datasets-server.read',
+        kind: 'public-api',
+        required: true,
+        description:
+          'Read public HuggingFace dataset rows from the nebius/SWE-rebench-leaderboard splits.',
+      },
+    ],
+    solver: [],
+    evaluator: [
+      {
+        id: 'docker.local.run',
+        kind: 'local-runtime',
+        required: true,
+        description:
+          'Run per-instance Docker images that ship with the upstream eval.py harness.',
+      },
+      {
+        id: 'huggingface.public.datasets-server.read',
+        kind: 'public-api',
+        required: true,
+        description:
+          'Read the HF dataset row referenced by the Task to recover test_patch + FAIL_TO_PASS / PASS_TO_PASS.',
+      },
+    ],
+  },
+  generatorDefaults: {
+    N_target_successes: 3,
+    N_max_postings_per_task: 10,
+    cooldown_ms: 24 * 60 * 60 * 1000, // 24h
+  },
+};
+
+/**
+ * Lookup table keyed by `${id}.${version}`. The wizard reads
+ * `?template=<key>` from the URL and looks the active template up here.
+ * If the key is not present the wizard renders an inline error rather
+ * than falling back silently.
+ */
+export const TEMPLATES_BY_KEY: Readonly<Record<string, CreateWizardTemplate>> = {
+  'prediction.v1': PREDICTION_V1_TEMPLATE,
+  'swe-rebench-v2.v1': SWE_REBENCH_V2_V1_TEMPLATE,
+};
+
+/** Default template when no `?template=` URL parameter is supplied. */
+export const DEFAULT_TEMPLATE_KEY = 'prediction.v1';

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Step5ReviewLaunch } from './Step5ReviewLaunch.js';
+import {
+  PREDICTION_V1_TEMPLATE,
+  SWE_REBENCH_V2_V1_TEMPLATE,
+} from './templates.js';
 import type {
   DraftSolverNetRecord,
   LaunchedSolverNetRecord,
@@ -72,6 +76,7 @@ describe('Step5ReviewLaunch', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onUpdateDraft={() => undefined}
         onBack={() => undefined}
       />,
@@ -89,6 +94,7 @@ describe('Step5ReviewLaunch', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft({ openRoles: undefined })}
+        template={PREDICTION_V1_TEMPLATE}
         onUpdateDraft={() => undefined}
         onBack={() => undefined}
       />,
@@ -105,6 +111,7 @@ describe('Step5ReviewLaunch', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onUpdateDraft={() => undefined}
         onBack={() => undefined}
       />,
@@ -153,6 +160,7 @@ describe('Step5ReviewLaunch', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onUpdateDraft={onUpdateDraft}
         onBack={() => undefined}
         navigateTo={navigate}
@@ -194,6 +202,7 @@ describe('Step5ReviewLaunch', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onUpdateDraft={() => undefined}
         onBack={() => undefined}
         navigateTo={navigate}
@@ -225,6 +234,7 @@ describe('Step5ReviewLaunch', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onUpdateDraft={() => undefined}
         onBack={() => undefined}
         navigateTo={navigate}
@@ -244,6 +254,7 @@ describe('Step5ReviewLaunch', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onUpdateDraft={() => undefined}
         onBack={() => undefined}
         navigateTo={() => undefined}
@@ -260,11 +271,39 @@ describe('Step5ReviewLaunch', () => {
     render(
       <Step5ReviewLaunch
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onUpdateDraft={() => undefined}
         onBack={onBack}
       />,
     );
     fireEvent.click(screen.getByTestId('launcher-create-back'));
     expect(onBack).toHaveBeenCalled();
+  });
+
+  it('renders the swe-rebench-v2 manifest summary with target/cooldown fields', () => {
+    render(
+      <Step5ReviewLaunch
+        draft={buildDraft({
+          templateContractId: 'swe-rebench-v2',
+          templateContractVersion: 'v1',
+          generatorConfig: {
+            N_target_successes: 5,
+            N_max_postings_per_task: 10,
+            cooldown_ms: 86_400_000,
+          },
+        })}
+        template={SWE_REBENCH_V2_V1_TEMPLATE}
+        onUpdateDraft={() => undefined}
+        onBack={() => undefined}
+      />,
+    );
+    const summary = screen.getByTestId('launcher-create-manifest-summary');
+    expect(summary.textContent).toContain('swe-rebench-v2.v1');
+    expect(summary.textContent).toContain('Target successes');
+    expect(summary.textContent).toContain('5');
+    expect(summary.textContent).toContain('86400000 ms');
+    // No prediction-only labels
+    expect(summary.textContent).not.toContain('Cadence');
+    expect(summary.textContent).not.toContain('Allowlist');
   });
 });

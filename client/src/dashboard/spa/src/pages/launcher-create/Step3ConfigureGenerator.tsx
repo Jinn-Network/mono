@@ -11,20 +11,81 @@ import {
   inputErrorStyle,
   inputStyle,
 } from './StepShell.js';
-import { PREDICTION_V1_TEMPLATE } from './templates.js';
+import {
+  PREDICTION_V1_TEMPLATE,
+  SWE_REBENCH_V2_V1_TEMPLATE,
+  type CreateWizardTemplate,
+} from './templates.js';
 
 /**
  * Step 3 — Configure the auto-generator that posts Tasks while this
- * SolverNet is launched. Defaults come from `PREDICTION_V1_TEMPLATE`
- * (mirrored from `client/src/solver-types/prediction-v1-auto.ts`).
+ * SolverNet is launched.
  *
- * Validation:
- *   - cadence ≥ 60s
- *   - all numeric fields finite, positive integers
- *   - allowlist / blocklist accept comma-separated condition ids; entries
- *     starting with `0x` are passed through verbatim, anything else is
- *     stripped of whitespace.
+ * Each template has its own generator-config shape. The form branches
+ * on `template.id`:
+ *   - `prediction`     — Polymarket polling cadence + market filters
+ *                        (mirrors `prediction-v1-auto.ts` defaults).
+ *   - `swe-rebench-v2` — Three counters: `N_target_successes`,
+ *                        `N_max_postings_per_task`, `cooldown_ms`
+ *                        (mirrors `swe-rebench-v2-auto.ts` defaults).
+ *
+ * Adding a new template means adding a new branch here. The validated
+ * `generatorConfig` object is forward-only persisted onto the draft;
+ * the daemon's runtime falls back to its own DEFAULT_GENERATOR_CONFIG
+ * for any keys it doesn't recognise.
  */
+
+export interface Step3ConfigureGeneratorProps {
+  draft: DraftSolverNetRecord;
+  /**
+   * Active template. Defaults to {@link PREDICTION_V1_TEMPLATE} so existing
+   * tests render without explicitly threading a template through; the wizard
+   * always passes the URL-selected template explicitly.
+   */
+  template?: CreateWizardTemplate;
+  onAdvance: (patch: DraftSolverNetRecordPatch) => Promise<void> | void;
+  onBack: () => void;
+  busy?: boolean;
+  error?: string | null;
+}
+
+export function Step3ConfigureGenerator(
+  props: Step3ConfigureGeneratorProps,
+): JSX.Element {
+  const template = props.template ?? PREDICTION_V1_TEMPLATE;
+  switch (template.id) {
+    case 'prediction':
+      return <PredictionGeneratorForm {...props} template={template} />;
+    case 'swe-rebench-v2':
+      return <SweRebenchV2GeneratorForm {...props} template={template} />;
+    default: {
+      // Exhaustive guard — TS will flag unhandled template ids if a new
+      // variant is added to the discriminated union.
+      const _exhaustive: never = template;
+      void _exhaustive;
+      return (
+        <StepShell
+          step={3}
+          title="Configure generator"
+          blurb="No generator form is registered for this template."
+          error={props.error ?? null}
+          footer={<StepNav onBack={props.onBack} onNext={() => {}} nextDisabled busy={props.busy} />}
+        >
+          <div data-testid="launcher-create-generator-unsupported" />
+        </StepShell>
+      );
+    }
+  }
+}
+
+// The narrowed-template forms accept a required `template` from the
+// dispatcher above (where narrowing has already happened); the dispatcher
+// strips the optional/defaulted shape before forwarding.
+type Step3FormProps = Omit<Step3ConfigureGeneratorProps, 'template'> & {
+  template: CreateWizardTemplate;
+};
+
+// ─── prediction.v1 ──────────────────────────────────────────────────────────
 
 const MIN_CADENCE_MS = 60_000;
 
@@ -39,14 +100,6 @@ export interface GeneratorConfigDraft {
   blocklistConditionIds: string;
 }
 
-export interface Step3ConfigureGeneratorProps {
-  draft: DraftSolverNetRecord;
-  onAdvance: (patch: DraftSolverNetRecordPatch) => Promise<void> | void;
-  onBack: () => void;
-  busy?: boolean;
-  error?: string | null;
-}
-
 function asString(v: unknown, fallback: number): string {
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   if (typeof v === 'string' && v.trim().length > 0) return v.trim();
@@ -58,7 +111,7 @@ function asListString(v: unknown): string {
   return '';
 }
 
-function buildInitial(
+function buildPredictionInitial(
   existing: Record<string, unknown> | undefined,
 ): GeneratorConfigDraft {
   const d = PREDICTION_V1_TEMPLATE.generatorDefaults;
@@ -79,7 +132,7 @@ function buildInitial(
   };
 }
 
-interface ValidationResult {
+interface PredictionValidationResult {
   ok: boolean;
   errors: Partial<Record<keyof GeneratorConfigDraft, string>>;
   /** When `ok`, the patch shape to send to the daemon. */
@@ -88,7 +141,7 @@ interface ValidationResult {
 
 export function validateGeneratorConfig(
   draft: GeneratorConfigDraft,
-): ValidationResult {
+): PredictionValidationResult {
   const errors: Partial<Record<keyof GeneratorConfigDraft, string>> = {};
 
   const cadenceMs = parsePositiveInt(draft.cadenceMs);
@@ -150,14 +203,14 @@ function parseList(v: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-export function Step3ConfigureGenerator({
+function PredictionGeneratorForm({
   draft,
   onAdvance,
   onBack,
   busy,
   error,
-}: Step3ConfigureGeneratorProps): JSX.Element {
-  const initial = useMemo(() => buildInitial(draft.generatorConfig), [draft.generatorConfig]);
+}: Step3FormProps): JSX.Element {
+  const initial = useMemo(() => buildPredictionInitial(draft.generatorConfig), [draft.generatorConfig]);
   const [form, setForm] = useState<GeneratorConfigDraft>(initial);
   const [touched, setTouched] = useState(false);
 
@@ -314,6 +367,178 @@ export function Step3ConfigureGenerator({
           disabled={busy}
         />
       </FieldShell>
+    </StepShell>
+  );
+}
+
+// ─── swe-rebench-v2.v1 ──────────────────────────────────────────────────────
+
+export interface SweRebenchV2GeneratorConfigDraft {
+  N_target_successes: string;
+  N_max_postings_per_task: string;
+  cooldown_ms: string;
+}
+
+interface SweRebenchV2ValidationResult {
+  ok: boolean;
+  errors: Partial<Record<keyof SweRebenchV2GeneratorConfigDraft, string>>;
+  generatorConfig?: Record<string, unknown>;
+}
+
+const SWE_REBENCH_V2_MIN_COOLDOWN_MS = 60_000;
+
+function buildSweRebenchV2Initial(
+  existing: Record<string, unknown> | undefined,
+): SweRebenchV2GeneratorConfigDraft {
+  const d = SWE_REBENCH_V2_V1_TEMPLATE.generatorDefaults;
+  return {
+    N_target_successes: asString(existing?.N_target_successes, d.N_target_successes),
+    N_max_postings_per_task: asString(
+      existing?.N_max_postings_per_task,
+      d.N_max_postings_per_task,
+    ),
+    cooldown_ms: asString(existing?.cooldown_ms, d.cooldown_ms),
+  };
+}
+
+export function validateSweRebenchV2GeneratorConfig(
+  draft: SweRebenchV2GeneratorConfigDraft,
+): SweRebenchV2ValidationResult {
+  const errors: Partial<Record<keyof SweRebenchV2GeneratorConfigDraft, string>> = {};
+
+  const N_target_successes = parsePositiveInt(draft.N_target_successes);
+  if (N_target_successes === null)
+    errors.N_target_successes = 'Must be a positive integer.';
+
+  const N_max_postings_per_task = parsePositiveInt(draft.N_max_postings_per_task);
+  if (N_max_postings_per_task === null)
+    errors.N_max_postings_per_task = 'Must be a positive integer.';
+  else if (
+    N_target_successes !== null &&
+    N_max_postings_per_task < N_target_successes
+  ) {
+    errors.N_max_postings_per_task =
+      'Max postings must be ≥ target successes — otherwise saturation is unreachable.';
+  }
+
+  const cooldown_ms = parsePositiveInt(draft.cooldown_ms);
+  if (cooldown_ms === null) errors.cooldown_ms = 'Must be a positive integer (ms).';
+  else if (cooldown_ms < SWE_REBENCH_V2_MIN_COOLDOWN_MS)
+    errors.cooldown_ms = `Cooldown must be at least ${SWE_REBENCH_V2_MIN_COOLDOWN_MS / 1000}s.`;
+
+  if (Object.keys(errors).length > 0) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    errors: {},
+    generatorConfig: {
+      N_target_successes,
+      N_max_postings_per_task,
+      cooldown_ms,
+    },
+  };
+}
+
+function SweRebenchV2GeneratorForm({
+  draft,
+  onAdvance,
+  onBack,
+  busy,
+  error,
+}: Step3FormProps): JSX.Element {
+  const initial = useMemo(
+    () => buildSweRebenchV2Initial(draft.generatorConfig),
+    [draft.generatorConfig],
+  );
+  const [form, setForm] = useState<SweRebenchV2GeneratorConfigDraft>(initial);
+  const [touched, setTouched] = useState(false);
+
+  const validation = touched
+    ? validateSweRebenchV2GeneratorConfig(form)
+    : { ok: true, errors: {} };
+  const fieldErrors = touched ? validation.errors : {};
+
+  const submit = (): void => {
+    setTouched(true);
+    const v = validateSweRebenchV2GeneratorConfig(form);
+    if (!v.ok || !v.generatorConfig) return;
+    void onAdvance({
+      generatorConfig: v.generatorConfig,
+      completedSteps: ensureCompletedStep(draft.completedSteps, 'configureGenerator'),
+    });
+  };
+
+  const set = <K extends keyof SweRebenchV2GeneratorConfigDraft>(
+    key: K,
+    value: string,
+  ): void => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  return (
+    <StepShell
+      step={3}
+      title="Configure generator"
+      blurb="The generator pulls instances from the SWE-rebench v2 HuggingFace pool and posts each Task until enough score=1 Verdicts accumulate or the per-Task posting cap is hit."
+      error={error}
+      footer={
+        <StepNav
+          onBack={onBack}
+          onNext={submit}
+          busy={busy}
+          nextDisabled={touched && !validation.ok}
+        />
+      }
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+        <FieldShell
+          label="Target successes per Task"
+          helperText="How many score=1 Verdicts saturate a Task and stop further reposting."
+          error={fieldErrors.N_target_successes ?? null}
+        >
+          <input
+            data-testid="launcher-create-N_target_successes"
+            type="text"
+            inputMode="numeric"
+            value={form.N_target_successes}
+            onChange={(e) => set('N_target_successes', e.target.value)}
+            style={fieldErrors.N_target_successes ? inputErrorStyle : inputStyle}
+            disabled={busy}
+          />
+        </FieldShell>
+        <FieldShell
+          label="Max postings per Task"
+          helperText="Hard ceiling on repostings to bound spend on impossible tasks."
+          error={fieldErrors.N_max_postings_per_task ?? null}
+        >
+          <input
+            data-testid="launcher-create-N_max_postings_per_task"
+            type="text"
+            inputMode="numeric"
+            value={form.N_max_postings_per_task}
+            onChange={(e) => set('N_max_postings_per_task', e.target.value)}
+            style={fieldErrors.N_max_postings_per_task ? inputErrorStyle : inputStyle}
+            disabled={busy}
+          />
+        </FieldShell>
+        <FieldShell
+          label="Cooldown between repostings (ms)"
+          helperText="Minimum gap before reposting the same Task. Minimum 60s."
+          error={fieldErrors.cooldown_ms ?? null}
+        >
+          <input
+            data-testid="launcher-create-cooldown_ms"
+            type="text"
+            inputMode="numeric"
+            value={form.cooldown_ms}
+            onChange={(e) => set('cooldown_ms', e.target.value)}
+            style={fieldErrors.cooldown_ms ? inputErrorStyle : inputStyle}
+            disabled={busy}
+          />
+        </FieldShell>
+      </div>
     </StepShell>
   );
 }

@@ -11,7 +11,7 @@ import {
   inputErrorStyle,
   inputStyle,
 } from './StepShell.js';
-import { PREDICTION_V1_TEMPLATE } from './templates.js';
+import { PREDICTION_V1_TEMPLATE, type CreateWizardTemplate } from './templates.js';
 
 /**
  * Step 4 — Configure pricing.
@@ -38,6 +38,12 @@ import { PREDICTION_V1_TEMPLATE } from './templates.js';
 
 export interface Step4ConfigurePricingProps {
   draft: DraftSolverNetRecord;
+  /**
+   * Active template. Defaults to {@link PREDICTION_V1_TEMPLATE} so existing
+   * tests render without explicitly threading a template through; the wizard
+   * always passes the URL-selected template explicitly.
+   */
+  template?: CreateWizardTemplate;
   onAdvance: (patch: DraftSolverNetRecordPatch) => Promise<void> | void;
   onBack: () => void;
   /**
@@ -105,8 +111,8 @@ export function validatePricing(
 
 /**
  * Rough Tasks-projection: how many Tasks the Safe can fund at the chosen
- * prices, assuming the prediction-v1 default `maxClaimsPerOperator=1` so
- * each Task pays out once for solution + once for verdict.
+ * prices, assuming the active template's claim-policy `maxClaimsPerOperator`
+ * (so each Task pays out once for solution + N times for verdict).
  *
  * If the Safe balance is unknown, returns `null`. If both prices are
  * zero, also returns `null` (validator catches that).
@@ -139,6 +145,7 @@ export function projectTasks(
 
 export function Step4ConfigurePricing({
   draft,
+  template = PREDICTION_V1_TEMPLATE,
   onAdvance,
   onBack,
   fundingSafeAddress,
@@ -155,15 +162,16 @@ export function Step4ConfigurePricing({
     [solutionPriceWei, verdictPriceWei],
   );
 
+  const maxClaimsPerOperator = template.claimPolicyDefaults.maxClaimsPerOperator;
   const projection = useMemo(
     () =>
       projectTasks(
         fundingSafeBalanceWei ?? null,
         validation.solutionWei,
         validation.verdictWei,
-        PREDICTION_V1_TEMPLATE.claimPolicyDefaults.maxClaimsPerOperator,
+        maxClaimsPerOperator,
       ),
-    [fundingSafeBalanceWei, validation.solutionWei, validation.verdictWei],
+    [fundingSafeBalanceWei, validation.solutionWei, validation.verdictWei, maxClaimsPerOperator],
   );
 
   const submit = (): void => {
@@ -301,7 +309,7 @@ export function Step4ConfigurePricing({
               ? `${formatEthFromWei(projection.perTaskWei.toString())} (${projection.perTaskWei} wei)`
               : '—'
           }
-          hint={`solution + verdict × maxClaimsPerOperator (${PREDICTION_V1_TEMPLATE.claimPolicyDefaults.maxClaimsPerOperator})`}
+          hint={`solution + verdict × maxClaimsPerOperator (${maxClaimsPerOperator})`}
         />
         <SummaryRow
           label="Projected Tasks"

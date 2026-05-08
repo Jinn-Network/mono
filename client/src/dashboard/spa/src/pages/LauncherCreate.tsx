@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import type {
@@ -11,6 +11,11 @@ import { Step2ReviewContract } from './launcher-create/Step2ReviewContract.js';
 import { Step3ConfigureGenerator } from './launcher-create/Step3ConfigureGenerator.js';
 import { Step4ConfigurePricing } from './launcher-create/Step4ConfigurePricing.js';
 import { Step5ReviewLaunch } from './launcher-create/Step5ReviewLaunch.js';
+import {
+  DEFAULT_TEMPLATE_KEY,
+  TEMPLATES_BY_KEY,
+  type CreateWizardTemplate,
+} from './launcher-create/templates.js';
 
 /**
  * 5-step Create wizard at `/launcher/create`.
@@ -25,6 +30,12 @@ import { Step5ReviewLaunch } from './launcher-create/Step5ReviewLaunch.js';
  *   - The URL stays `/launcher/create` — step is local state, not a route
  *     param. Per-step deep-linking is a follow-up if / when the operator
  *     ever needs it.
+ *   - The active SolverNet template is selected via the
+ *     `?template=<id>.<version>` query parameter (default
+ *     `prediction.v1`). Unknown keys render an inline error rather than
+ *     silently falling back. Each future SolverNet ships its own
+ *     template entry in `templates.ts` and the team navigates to the
+ *     corresponding URL — there is no community-discoverable picker UI.
  *   - The draftId is persisted to `localStorage` under
  *     `STORAGE_KEY` so a refresh resumes the same draft. If the stored
  *     draft has been deleted server-side (404), we drop the stale id and
@@ -57,7 +68,40 @@ interface FundingSafeQuery {
   masterGas?: { balanceWei?: string };
 }
 
-export function LauncherCreatePage(): JSX.Element {
+/**
+ * Read `?template=<id>.<version>` from the current URL. Returns the
+ * template lookup key, or `null` when there is no `?template=` param
+ * (the caller falls back to {@link DEFAULT_TEMPLATE_KEY}). Returns the
+ * raw value even when unknown — the caller is responsible for surfacing
+ * the unknown-template error.
+ *
+ * Hand-rolled rather than wouter's `useLocation` because wouter's hook
+ * strips query strings; we need raw access via `window.location.search`.
+ */
+function readTemplateKey(): string | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get('template');
+  return raw && raw.length > 0 ? raw : null;
+}
+
+export interface LauncherCreatePageProps {
+  /**
+   * Override the active template lookup key. Tests use this to drive
+   * the wizard against a specific template without manipulating
+   * `window.location`. Production renders without a prop and reads from
+   * the URL.
+   */
+  templateKey?: string;
+}
+
+export function LauncherCreatePage({ templateKey }: LauncherCreatePageProps = {}): JSX.Element {
+  const resolvedTemplateKey = templateKey ?? readTemplateKey() ?? DEFAULT_TEMPLATE_KEY;
+  const template = useMemo<CreateWizardTemplate | null>(
+    () => TEMPLATES_BY_KEY[resolvedTemplateKey] ?? null,
+    [resolvedTemplateKey],
+  );
+
   const [draft, setDraft] = useState<DraftSolverNetRecord | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
@@ -159,6 +203,39 @@ export function LauncherCreatePage(): JSX.Element {
     setStepError(null);
   };
 
+  if (template === null) {
+    return (
+      <main
+        data-testid="launcher-create-unknown-template"
+        data-template-key={resolvedTemplateKey}
+        style={{
+          padding: '24px',
+          color: 'var(--fg)',
+          fontFamily: "'JetBrains Mono', monospace",
+        }}
+      >
+        <h1
+          style={{
+            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
+            fontSize: '28px',
+            margin: 0,
+            color: 'var(--fg)',
+            fontWeight: 400,
+          }}
+        >
+          Unknown SolverNet template
+        </h1>
+        <p style={{ marginTop: '12px', color: 'var(--break-red)', fontSize: '13px' }}>
+          No template registered for <code>{resolvedTemplateKey}</code>. Available keys:{' '}
+          {Object.keys(TEMPLATES_BY_KEY)
+            .map((k) => `?template=${k}`)
+            .join(', ')}
+          .
+        </p>
+      </main>
+    );
+  }
+
   if (bootstrapError) {
     return (
       <main
@@ -217,6 +294,7 @@ export function LauncherCreatePage(): JSX.Element {
       return (
         <Step2ReviewContract
           draft={draft}
+          template={template}
           onAdvance={advance}
           onBack={back}
           busy={busy}
@@ -227,6 +305,7 @@ export function LauncherCreatePage(): JSX.Element {
       return (
         <Step3ConfigureGenerator
           draft={draft}
+          template={template}
           onAdvance={advance}
           onBack={back}
           busy={busy}
@@ -237,6 +316,7 @@ export function LauncherCreatePage(): JSX.Element {
       return (
         <Step4ConfigurePricing
           draft={draft}
+          template={template}
           onAdvance={advance}
           onBack={back}
           fundingSafeAddress={fundingSafeAddress}
@@ -249,6 +329,7 @@ export function LauncherCreatePage(): JSX.Element {
       return (
         <Step5ReviewLaunch
           draft={draft}
+          template={template}
           onUpdateDraft={updateInPlace}
           onBack={back}
           onLaunchFailure={onLaunchFailure}

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Step2ReviewContract } from './Step2ReviewContract.js';
+import {
+  PREDICTION_V1_TEMPLATE,
+  SWE_REBENCH_V2_V1_TEMPLATE,
+} from './templates.js';
 import type { DraftSolverNetRecord } from '../../api/types.js';
 
 function buildDraft(overrides: Partial<DraftSolverNetRecord> = {}): DraftSolverNetRecord {
@@ -29,6 +33,7 @@ describe('Step2ReviewContract', () => {
     render(
       <Step2ReviewContract
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={() => undefined}
       />,
@@ -47,6 +52,7 @@ describe('Step2ReviewContract', () => {
     render(
       <Step2ReviewContract
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={() => undefined}
       />,
@@ -59,11 +65,12 @@ describe('Step2ReviewContract', () => {
     expect(solverPanel.textContent).toMatch(/None\./);
   });
 
-  it('Next records template id+version + reviewContract step', () => {
+  it('Next records template id+version + reviewContract step (prediction.v1)', () => {
     const onAdvance = vi.fn();
     render(
       <Step2ReviewContract
         draft={buildDraft({ completedSteps: ['define'] })}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={onAdvance}
         onBack={() => undefined}
       />,
@@ -76,11 +83,37 @@ describe('Step2ReviewContract', () => {
     });
   });
 
+  it('renders the swe-rebench-v2.v1 template details + persists its id+version on Next', () => {
+    const onAdvance = vi.fn();
+    render(
+      <Step2ReviewContract
+        draft={buildDraft({ completedSteps: ['define'] })}
+        template={SWE_REBENCH_V2_V1_TEMPLATE}
+        onAdvance={onAdvance}
+        onBack={() => undefined}
+      />,
+    );
+    const card = screen.getByTestId('launcher-create-template');
+    expect(card.getAttribute('data-template-id')).toBe('swe-rebench-v2.v1');
+    expect(screen.getByText(/SWE-rebench v2/)).toBeTruthy();
+    expect(screen.getByText(/swe-rebench-v2\.docker-test-suite\.v1/)).toBeTruthy();
+    expect(screen.getByText(/swe-rebench-v2\.multi-winrate\.v1/)).toBeTruthy();
+    // claim policy: parallel mode + 50 max claims
+    expect(screen.getByText('50')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('launcher-create-next'));
+    expect(onAdvance).toHaveBeenCalledWith({
+      templateContractId: 'swe-rebench-v2',
+      templateContractVersion: 'v1',
+      completedSteps: ['define', 'reviewContract'],
+    });
+  });
+
   it('Back invokes onBack', () => {
     const onBack = vi.fn();
     render(
       <Step2ReviewContract
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={onBack}
       />,

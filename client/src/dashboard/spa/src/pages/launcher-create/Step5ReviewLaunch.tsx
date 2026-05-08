@@ -9,7 +9,7 @@ import type {
 } from '../../api/types.js';
 import { ensureCompletedStep, formatEthFromWei } from './draft-helpers.js';
 import { FieldShell, StepNav, StepShell } from './StepShell.js';
-import { PREDICTION_V1_TEMPLATE } from './templates.js';
+import { PREDICTION_V1_TEMPLATE, type CreateWizardTemplate } from './templates.js';
 
 /**
  * Step 5 — Review the manifest summary, pick `openRoles`, and Launch.
@@ -47,6 +47,12 @@ const PHASE_LABELS: Record<LaunchActionPhase, string> = {
 
 export interface Step5ReviewLaunchProps {
   draft: DraftSolverNetRecord;
+  /**
+   * Active template. Defaults to {@link PREDICTION_V1_TEMPLATE} so existing
+   * tests render without explicitly threading a template through; the wizard
+   * always passes the URL-selected template explicitly.
+   */
+  template?: CreateWizardTemplate;
   /** Used to update `openRoles` on the draft as the operator toggles checkboxes. */
   onUpdateDraft: (patch: DraftSolverNetRecordPatch) => Promise<void> | void;
   onBack: () => void;
@@ -74,6 +80,7 @@ type LaunchUiState =
 
 export function Step5ReviewLaunch({
   draft,
+  template = PREDICTION_V1_TEMPLATE,
   onUpdateDraft,
   onBack,
   onLaunchFailure,
@@ -203,7 +210,7 @@ export function Step5ReviewLaunch({
         />
       }
     >
-      <ManifestSummary draft={draft} />
+      <ManifestSummary draft={draft} template={template} />
 
       <FieldShell
         label="Open roles"
@@ -350,11 +357,18 @@ function PhaseStrip({ current }: { current: LaunchActionPhase }): JSX.Element {
   );
 }
 
-function ManifestSummary({ draft }: { draft: DraftSolverNetRecord }): JSX.Element {
+function ManifestSummary({
+  draft,
+  template,
+}: {
+  draft: DraftSolverNetRecord;
+  template: CreateWizardTemplate;
+}): JSX.Element {
   const generator = (draft.generatorConfig ?? {}) as Record<string, unknown>;
-  const cadence = numericString(generator.cadenceMs);
-  const window = numericString(generator.windowMs ?? generator.submissionWindowMs);
-  const maxOpenRounds = numericString(generator.maxOpenRounds);
+  // Prefer the active template's id/version for display; the draft fields
+  // are only set after Step 2 advances. Both should agree once persisted.
+  const displayId = draft.templateContractId ?? template.id;
+  const displayVersion = draft.templateContractVersion ?? template.version;
 
   return (
     <article
@@ -379,8 +393,7 @@ function ManifestSummary({ draft }: { draft: DraftSolverNetRecord }): JSX.Elemen
             color: 'var(--fg-dim)',
           }}
         >
-          {draft.templateContractId ?? PREDICTION_V1_TEMPLATE.id}.
-          {draft.templateContractVersion ?? PREDICTION_V1_TEMPLATE.version}
+          {displayId}.{displayVersion}
         </span>
         <h2
           style={{
@@ -402,19 +415,55 @@ function ManifestSummary({ draft }: { draft: DraftSolverNetRecord }): JSX.Elemen
       <SummaryGrid>
         <SummaryItem label="Solution price" value={priceString(draft.solutionPriceWei)} />
         <SummaryItem label="Verdict price" value={priceString(draft.verdictPriceWei)} />
-        <SummaryItem label="Cadence" value={cadence ? `${cadence} ms` : '—'} />
-        <SummaryItem label="Window" value={window ? `${window} ms` : '—'} />
-        <SummaryItem label="Max open rounds" value={maxOpenRounds ?? '—'} />
-        <SummaryItem
-          label="Allowlist"
-          value={lengthDescriptor(generator.allowlistConditionIds)}
-        />
-        <SummaryItem
-          label="Blocklist"
-          value={lengthDescriptor(generator.blocklistConditionIds)}
-        />
+        {template.id === 'prediction' ? (
+          <PredictionGeneratorSummary generator={generator} />
+        ) : (
+          <SweRebenchV2GeneratorSummary generator={generator} />
+        )}
       </SummaryGrid>
     </article>
+  );
+}
+
+function PredictionGeneratorSummary({
+  generator,
+}: {
+  generator: Record<string, unknown>;
+}): JSX.Element {
+  const cadence = numericString(generator.cadenceMs);
+  const window = numericString(generator.windowMs ?? generator.submissionWindowMs);
+  const maxOpenRounds = numericString(generator.maxOpenRounds);
+  return (
+    <>
+      <SummaryItem label="Cadence" value={cadence ? `${cadence} ms` : '—'} />
+      <SummaryItem label="Window" value={window ? `${window} ms` : '—'} />
+      <SummaryItem label="Max open rounds" value={maxOpenRounds ?? '—'} />
+      <SummaryItem
+        label="Allowlist"
+        value={lengthDescriptor(generator.allowlistConditionIds)}
+      />
+      <SummaryItem
+        label="Blocklist"
+        value={lengthDescriptor(generator.blocklistConditionIds)}
+      />
+    </>
+  );
+}
+
+function SweRebenchV2GeneratorSummary({
+  generator,
+}: {
+  generator: Record<string, unknown>;
+}): JSX.Element {
+  const targetSuccesses = numericString(generator.N_target_successes);
+  const maxPostings = numericString(generator.N_max_postings_per_task);
+  const cooldown = numericString(generator.cooldown_ms);
+  return (
+    <>
+      <SummaryItem label="Target successes" value={targetSuccesses ?? '—'} />
+      <SummaryItem label="Max postings / Task" value={maxPostings ?? '—'} />
+      <SummaryItem label="Cooldown" value={cooldown ? `${cooldown} ms` : '—'} />
+    </>
   );
 }
 

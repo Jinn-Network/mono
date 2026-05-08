@@ -3,7 +3,12 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   Step3ConfigureGenerator,
   validateGeneratorConfig,
+  validateSweRebenchV2GeneratorConfig,
 } from './Step3ConfigureGenerator.js';
+import {
+  PREDICTION_V1_TEMPLATE,
+  SWE_REBENCH_V2_V1_TEMPLATE,
+} from './templates.js';
 import type { DraftSolverNetRecord } from '../../api/types.js';
 
 function buildDraft(overrides: Partial<DraftSolverNetRecord> = {}): DraftSolverNetRecord {
@@ -29,11 +34,12 @@ afterEach(() => {
   cleanup();
 });
 
-describe('Step3ConfigureGenerator', () => {
+describe('Step3ConfigureGenerator (prediction.v1)', () => {
   it('pre-fills template defaults when no generatorConfig is set', () => {
     render(
       <Step3ConfigureGenerator
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={() => undefined}
       />,
@@ -60,6 +66,7 @@ describe('Step3ConfigureGenerator', () => {
             blocklistConditionIds: [],
           },
         })}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={() => undefined}
       />,
@@ -80,6 +87,7 @@ describe('Step3ConfigureGenerator', () => {
     render(
       <Step3ConfigureGenerator
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={onAdvance}
         onBack={() => undefined}
       />,
@@ -97,6 +105,7 @@ describe('Step3ConfigureGenerator', () => {
     render(
       <Step3ConfigureGenerator
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={onAdvance}
         onBack={() => undefined}
       />,
@@ -114,6 +123,7 @@ describe('Step3ConfigureGenerator', () => {
     render(
       <Step3ConfigureGenerator
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={onAdvance}
         onBack={() => undefined}
       />,
@@ -138,6 +148,7 @@ describe('Step3ConfigureGenerator', () => {
     render(
       <Step3ConfigureGenerator
         draft={buildDraft()}
+        template={PREDICTION_V1_TEMPLATE}
         onAdvance={() => undefined}
         onBack={onBack}
       />,
@@ -147,7 +158,133 @@ describe('Step3ConfigureGenerator', () => {
   });
 });
 
-describe('validateGeneratorConfig', () => {
+describe('Step3ConfigureGenerator (swe-rebench-v2.v1)', () => {
+  function buildSweDraft(
+    overrides: Partial<DraftSolverNetRecord> = {},
+  ): DraftSolverNetRecord {
+    return buildDraft({
+      templateContractId: 'swe-rebench-v2',
+      templateContractVersion: 'v1',
+      ...overrides,
+    });
+  }
+
+  it('renders three numeric inputs and pre-fills swe-rebench defaults', () => {
+    render(
+      <Step3ConfigureGenerator
+        draft={buildSweDraft()}
+        template={SWE_REBENCH_V2_V1_TEMPLATE}
+        onAdvance={() => undefined}
+        onBack={() => undefined}
+      />,
+    );
+    expect(
+      (screen.getByTestId('launcher-create-N_target_successes') as HTMLInputElement).value,
+    ).toBe('3');
+    expect(
+      (screen.getByTestId('launcher-create-N_max_postings_per_task') as HTMLInputElement).value,
+    ).toBe('10');
+    expect(
+      (screen.getByTestId('launcher-create-cooldown_ms') as HTMLInputElement).value,
+    ).toBe(String(24 * 60 * 60 * 1000));
+    // Prediction-only fields must not appear
+    expect(screen.queryByTestId('launcher-create-cadenceMs')).toBeNull();
+    expect(screen.queryByTestId('launcher-create-allowlistConditionIds')).toBeNull();
+  });
+
+  it('pre-fills from existing generatorConfig when present', () => {
+    render(
+      <Step3ConfigureGenerator
+        draft={buildSweDraft({
+          generatorConfig: {
+            N_target_successes: 5,
+            N_max_postings_per_task: 20,
+            cooldown_ms: 60_000,
+          },
+        })}
+        template={SWE_REBENCH_V2_V1_TEMPLATE}
+        onAdvance={() => undefined}
+        onBack={() => undefined}
+      />,
+    );
+    expect(
+      (screen.getByTestId('launcher-create-N_target_successes') as HTMLInputElement).value,
+    ).toBe('5');
+    expect(
+      (screen.getByTestId('launcher-create-N_max_postings_per_task') as HTMLInputElement).value,
+    ).toBe('20');
+    expect(
+      (screen.getByTestId('launcher-create-cooldown_ms') as HTMLInputElement).value,
+    ).toBe('60000');
+  });
+
+  it('rejects sub-60s cooldown', () => {
+    const onAdvance = vi.fn();
+    render(
+      <Step3ConfigureGenerator
+        draft={buildSweDraft()}
+        template={SWE_REBENCH_V2_V1_TEMPLATE}
+        onAdvance={onAdvance}
+        onBack={() => undefined}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('launcher-create-cooldown_ms'), {
+      target: { value: '5000' },
+    });
+    fireEvent.click(screen.getByTestId('launcher-create-next'));
+    expect(onAdvance).not.toHaveBeenCalled();
+    expect(screen.getByText(/Cooldown must be at least 60s/)).toBeTruthy();
+  });
+
+  it('rejects max-postings < target-successes', () => {
+    const onAdvance = vi.fn();
+    render(
+      <Step3ConfigureGenerator
+        draft={buildSweDraft()}
+        template={SWE_REBENCH_V2_V1_TEMPLATE}
+        onAdvance={onAdvance}
+        onBack={() => undefined}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('launcher-create-N_target_successes'), {
+      target: { value: '5' },
+    });
+    fireEvent.change(screen.getByTestId('launcher-create-N_max_postings_per_task'), {
+      target: { value: '3' },
+    });
+    fireEvent.click(screen.getByTestId('launcher-create-next'));
+    expect(onAdvance).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/Max postings must be ≥ target successes/),
+    ).toBeTruthy();
+  });
+
+  it('persists parsed numeric values on Next', () => {
+    const onAdvance = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Step3ConfigureGenerator
+        draft={buildSweDraft()}
+        template={SWE_REBENCH_V2_V1_TEMPLATE}
+        onAdvance={onAdvance}
+        onBack={() => undefined}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('launcher-create-cooldown_ms'), {
+      target: { value: '60000' },
+    });
+    fireEvent.click(screen.getByTestId('launcher-create-next'));
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+    const patch = onAdvance.mock.calls[0]![0]!;
+    expect(patch.completedSteps).toEqual(['define', 'reviewContract', 'configureGenerator']);
+    expect(patch.generatorConfig).toEqual({
+      N_target_successes: 3,
+      N_max_postings_per_task: 10,
+      cooldown_ms: 60_000,
+    });
+  });
+});
+
+describe('validateGeneratorConfig (prediction.v1)', () => {
   it('accepts the prediction.v1 defaults', () => {
     const r = validateGeneratorConfig({
       cadenceMs: '21600000',
@@ -177,5 +314,41 @@ describe('validateGeneratorConfig', () => {
     });
     expect(r.ok).toBe(false);
     expect(r.errors.cadenceMs).toBeTruthy();
+  });
+});
+
+describe('validateSweRebenchV2GeneratorConfig', () => {
+  it('accepts the swe-rebench-v2 defaults', () => {
+    const r = validateSweRebenchV2GeneratorConfig({
+      N_target_successes: '3',
+      N_max_postings_per_task: '10',
+      cooldown_ms: String(24 * 60 * 60 * 1000),
+    });
+    expect(r.ok).toBe(true);
+    expect(r.generatorConfig).toEqual({
+      N_target_successes: 3,
+      N_max_postings_per_task: 10,
+      cooldown_ms: 24 * 60 * 60 * 1000,
+    });
+  });
+
+  it('rejects max-postings < target-successes', () => {
+    const r = validateSweRebenchV2GeneratorConfig({
+      N_target_successes: '5',
+      N_max_postings_per_task: '3',
+      cooldown_ms: '60000',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errors.N_max_postings_per_task).toBeTruthy();
+  });
+
+  it('rejects empty cooldown', () => {
+    const r = validateSweRebenchV2GeneratorConfig({
+      N_target_successes: '3',
+      N_max_postings_per_task: '10',
+      cooldown_ms: '',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errors.cooldown_ms).toBeTruthy();
   });
 });
