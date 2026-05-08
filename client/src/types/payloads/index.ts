@@ -64,6 +64,7 @@ export const SOLVER_TYPE_PAYLOADS: Record<string, Partial<Record<Role, z.ZodSche
 };
 
 export function validatePayload(solverType: string, role: Role, payload: unknown): void {
+  if (role === 'capture') return;  // capture payloads are free-form; no structural validation in v0
   const bucket = SOLVER_TYPE_PAYLOADS[solverType];
   if (!bucket) throw new Error(`Unknown solverType: ${solverType}`);
   const schema = bucket[role];
