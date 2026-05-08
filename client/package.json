@@ -77,7 +77,7 @@
     "dev:spa": "yarn workspace @jinn-network/operator-spa dev",
     "e2e:spa": "yarn build && playwright test --config=playwright.config.ts test/dashboard/spa.e2e.test.ts",
     "e2e:solvernet-flow": "yarn build && playwright test --config=playwright.config.ts test/dashboard/solvernet-flow.e2e.test.ts",
-    "e2e:donation": "vitest run test/smoke/donation-mode-smoke.test.ts"
+    "e2e:donation": "vitest run test/smoke/donation-mode-smoke.test.ts test/smoke/donation-ipfs-http-smoke.test.ts"
   },
   "dependencies": {
     "@ethereumjs/wallet": "^10.0.0",
