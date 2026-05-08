@@ -74,7 +74,6 @@ export class SweRebenchV2Evaluator {
       schemaVersion: 'swe-rebench-v2-verdict.v1',
       score: result.passed_match ? 1 : 0,
       passed_match: result.passed_match,
-      test_log_cid: '',  // populated by caller after IPFS pin
       evaluator_cost_usd: 0,  // populated by caller from runtime metrics
       test_log: result.log,
     };

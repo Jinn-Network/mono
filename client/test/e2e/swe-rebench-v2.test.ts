@@ -69,7 +69,6 @@ const MOCK_TASK = {
 
 const MOCK_SOLUTION_PAYLOAD = {
   patch: '--- a/nc_test.c\n+++ b/nc_test.c\n@@ -1 +1 @@\n-broken\n+fixed',
-  trajectory_cid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
 };
 
 // ── Evaluator mock factory ─────────────────────────────────────────────────────

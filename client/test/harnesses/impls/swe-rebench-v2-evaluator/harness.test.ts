@@ -84,7 +84,6 @@ function buildSolverEnvelope(overrides: Record<string, unknown> = {}): string {
     payload: {
       schemaVersion: 'swe-rebench-v2-solution.v1',
       patch: 'diff --git a/foo b/foo\n@@ -1 +1 @@\n-hello\n+world\n',
-      trajectory_cid: 'bafy-traj',
     },
     signature: {
       algo: 'secp256k1' as const,
@@ -349,9 +348,18 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
       schemaVersion: 'swe-rebench-v2-verdict.v1',
       score: 1,
       passed_match: true,
-      test_log_cid: 'bafy-test-log-cid',
       evaluator_cost_usd: 0,
     });
+    expect(sol.verdictPayload).not.toHaveProperty('test_log_cid');
+    // The pinned-blob CID is surfaced as artifact metadata, not as a typed
+    // payload field — preserves the solver/daemon boundary in the schema.
+    const verdictArtifact = sol.artifacts?.[0];
+    expect(verdictArtifact?.metadata).toMatchObject({
+      score: 1,
+      passed_match: true,
+      test_log_cid: 'bafy-test-log-cid',
+    });
+    expect(sol.informational).toMatchObject({ test_log_cid: 'bafy-test-log-cid' });
     // Pinned blob includes the log + instance_id.
     expect(uploadToIpfs).toHaveBeenCalledTimes(1);
     const [, pinned] = uploadToIpfs.mock.calls[0]!;

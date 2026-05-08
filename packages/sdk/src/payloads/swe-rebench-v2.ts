@@ -2,10 +2,21 @@
  * SWE-rebench v2 Solution + Verdict payload schemas.
  *
  * Solution: the unified-diff patch the Solver's harness produced for the
- * benchmark instance, plus a pointer to the trajectory blob in the corpus.
+ * benchmark instance. The Solver does not pin or reference its own
+ * trajectory — the daemon's envelope-assembly path pins the trajectory
+ * to IPFS and references it via the envelope-level
+ * `SignedEnvelope.trajectory: TrajectoryRefSchema`. Keeping
+ * trajectory-pinning out of the Solution payload preserves the
+ * solver/daemon boundary (the Solver only knows what it can derive
+ * from its own work).
+ *
  * Cost (operator-self-reported) is generalisable across SolverNets.
  *
- * Verdict: deterministic test-suite pass/fail + grading provenance.
+ * Verdict: deterministic test-suite pass/fail + grading provenance. The
+ * test log is surfaced via the envelope's `artifacts[]` (with the
+ * pinned-blob CID in the artifact's metadata) rather than as a typed
+ * payload field, so daemon-derived IPFS provenance does not leak into
+ * the Verdict schema.
  *
  * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §3.2
  */
@@ -16,8 +27,6 @@ export const SweRebenchV2SolutionPayloadSchema = z.object({
   schemaVersion: z.literal('swe-rebench-v2-solution.v1'),
   /** Unified diff patch (git-format). */
   patch: z.string().min(1),
-  /** IPFS CID of the trajectory blob (operator-side reasoning + tool calls). */
-  trajectory_cid: z.string().min(1),
   /**
    * Operator-self-reported cost of producing this Solution. Optional; when
    * present, contributes to the per-harness cost rollups. Generalisable
@@ -49,8 +58,6 @@ export const SweRebenchV2VerdictPayloadSchema = z.object({
    * or expected tests failed unexpectedly.
    */
   passed_match: z.boolean(),
-  /** IPFS CID of the test execution log. */
-  test_log_cid: z.string().min(1),
   /** Cost of running the evaluator on this Solution (USDC-equivalent). */
   evaluator_cost_usd: z.number().nonnegative(),
 });

@@ -280,7 +280,10 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
 
     const graded = await evaluator.grade({ task, solutionPayload });
 
-    // Pin the test log to IPFS and patch the CID into the verdict payload.
+    // Pin the test log to IPFS so anyone (evaluator dispute, audit, model
+    // training) can fetch it anonymously by CID. The CID is surfaced via the
+    // verdict-artifact's metadata, not the typed Verdict payload — the
+    // schema does not couple Verdicts to daemon-derived IPFS provenance.
     const upload = this.deps.uploadToIpfs ?? uploadToIpfs;
     const test_log_cid = await upload(this.ipfsRegistryUrl, {
       kind: 'swe-rebench-v2-test-log.v1',
@@ -293,7 +296,6 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       schemaVersion: 'swe-rebench-v2-verdict.v1',
       score: graded.score,
       passed_match: graded.passed_match,
-      test_log_cid,
       evaluator_cost_usd: 0,
     };
 
@@ -306,6 +308,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       informational: {
         instance_id: task.instance_id,
         round_month: task.round_month,
+        test_log_cid,
       },
       verdictPayload: verdictPayload as unknown as Record<string, unknown>,
       artifacts: [

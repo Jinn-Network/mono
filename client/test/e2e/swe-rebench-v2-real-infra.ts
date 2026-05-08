@@ -674,7 +674,6 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       schemaVersion: 'swe-rebench-v2-solution.v1',
       patch:
         '--- a/src/example.c\n+++ b/src/example.c\n@@ -1,1 +1,1 @@\n-/* before */\n+/* after */\n',
-      trajectory_cid: 'bafy-stub-swe-rebench-v2-trajectory',
       cost: { totalUsd: 0.42, breakdown: { llm: 0.4, tools: 0.02 } },
     });
 
@@ -753,7 +752,6 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       schemaVersion: 'swe-rebench-v2-verdict.v1',
       score: 1,
       passed_match: true,
-      test_log_cid: 'bafy-stub-swe-rebench-v2-test-log',
       evaluator_cost_usd: 0.05,
     });
 

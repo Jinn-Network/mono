@@ -26,13 +26,11 @@ describe('validatePayload — swe-rebench-v2.v1', () => {
   const validSolution = {
     schemaVersion: 'swe-rebench-v2-solution.v1',
     patch: '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n',
-    trajectory_cid: 'bafkreigh2akiscaildc7c4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4',
   };
   const validVerdict = {
     schemaVersion: 'swe-rebench-v2-verdict.v1',
     score: 1,
     passed_match: true,
-    test_log_cid: 'bafkreigh2akiscaildc7c4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4',
     evaluator_cost_usd: 0.01,
   };
 

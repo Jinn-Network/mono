@@ -29,7 +29,7 @@ describe('SweRebenchV2Evaluator', () => {
         hf_dataset: 'nebius/SWE-rebench-leaderboard',
         hf_split: '2026_02',
       } as any,
-      solutionPayload: { patch: 'diff ...', trajectory_cid: 'bafy' },
+      solutionPayload: { patch: 'diff ...' },
     });
     expect(verdict.score).toBe(1);
     expect(verdict.passed_match).toBe(true);
@@ -58,7 +58,7 @@ describe('SweRebenchV2Evaluator', () => {
     const evaluator = new SweRebenchV2Evaluator({ fetcher: fakeFetcher, runner: fakeRunner });
     const verdict = await evaluator.grade({
       task: { instance_id: 'unidata__netcdf-c-1925', hf_dataset: 'nebius/SWE-rebench-leaderboard', hf_split: '2026_02' } as any,
-      solutionPayload: { patch: 'diff ...', trajectory_cid: 'bafy' },
+      solutionPayload: { patch: 'diff ...' },
     });
     expect(verdict.score).toBe(0);
   });
@@ -74,7 +74,7 @@ describe('SweRebenchV2Evaluator', () => {
     const evaluator = new SweRebenchV2Evaluator({ fetcher: fakeFetcher, runner: fakeRunner });
     await expect(evaluator.grade({
       task: { instance_id: 'X', hf_dataset: 'd', hf_split: '2026_02' } as any,
-      solutionPayload: { patch: '...', trajectory_cid: 'bafy' },
+      solutionPayload: { patch: '...' },
     })).rejects.toThrow(/image_name/);
   });
 });
