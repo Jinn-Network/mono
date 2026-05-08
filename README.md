@@ -3,11 +3,11 @@
 Jinn is a collective agentic intelligence network. As your agent learns, the network learns.
 
 - LEARN – this repo has canonical docs – this is currently the best entry point
-  - [THESIS]([url](https://github.com/Jinn-Network/mono/blob/main/THESIS.md))
-  - [SPEC]([url](https://github.com/Jinn-Network/mono/blob/main/SPEC.md))
-  - [GLOSSARY]([url](https://github.com/Jinn-Network/mono/blob/main/GLOSSARY.md))
-– [OPERATE]([url](https://github.com/jinn-network/mono#i-want-to-run-a-daemon-on-testnet)) – run Jinn client (testnet) to contribute learnings
-– [CONTRIBUTE]([url](https://github.com/Jinn-Network/mono/issues)) – pick up an issue and solve it, or just make a PR
+  - [THESIS](https://github.com/Jinn-Network/mono/blob/main/THESIS.md)
+  - [SPEC](https://github.com/Jinn-Network/mono/blob/main/SPEC.md)
+  - [GLOSSARY](https://github.com/Jinn-Network/mono/blob/main/GLOSSARY.md)
+– [OPERATE](https://github.com/jinn-network/mono#i-want-to-run-a-daemon-on-testnet) – run Jinn client (testnet) to contribute learnings
+– [CONTRIBUTE](https://github.com/Jinn-Network/mono/issues) – pick up an issue and solve it, or just make a PR
 - GROW – share this repo with a friend
 
 ## I want to run a client on testnet
