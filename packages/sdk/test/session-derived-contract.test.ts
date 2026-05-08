@@ -14,16 +14,16 @@ import {
 } from '../src/contracts.js';
 
 describe('SESSION_DERIVED_V1_SOLVER_NET_CONTRACT (scaffold)', () => {
-  it('has the expected identity per spec §5.2', () => {
+  it('has the expected identity (aligned to existing v1 convention; spec §5.2 uses 1.0.0 and will be updated separately)', () => {
     expect(SESSION_DERIVED_V1_SOLVER_NET_CONTRACT.id).toBe('session-derived');
-    expect(SESSION_DERIVED_V1_SOLVER_NET_CONTRACT.version).toBe('1.0.0');
+    expect(SESSION_DERIVED_V1_SOLVER_NET_CONTRACT.version).toBe('v1');
   });
 
-  it('is registered under "session-derived.1.0.0" in SOLVER_NET_CONTRACTS', () => {
-    expect(SOLVER_NET_CONTRACTS['session-derived.1.0.0']).toBe(
+  it('is registered under "session-derived.v1" in SOLVER_NET_CONTRACTS', () => {
+    expect(SOLVER_NET_CONTRACTS['session-derived.v1']).toBe(
       SESSION_DERIVED_V1_SOLVER_NET_CONTRACT,
     );
-    expect(getSolverNetContract({ id: 'session-derived', version: '1.0.0' })).toBe(
+    expect(getSolverNetContract({ id: 'session-derived', version: 'v1' })).toBe(
       SESSION_DERIVED_V1_SOLVER_NET_CONTRACT,
     );
   });

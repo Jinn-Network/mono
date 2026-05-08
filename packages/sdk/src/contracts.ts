@@ -19,7 +19,7 @@ export type PayloadKind = 'task' | 'solution' | 'verdict';
 export type SupportedSolverType =
   | 'prediction.v1'
   | 'swe-rebench-v2.v1'
-  | 'session-derived.1.0.0';
+  | 'session-derived.v1';
 
 export interface CredentialRequirement {
   id: string;
@@ -221,7 +221,7 @@ const SESSION_DERIVED_PLACEHOLDER_SCHEMA = z.object({}).passthrough();
 
 export const SESSION_DERIVED_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
   id: 'session-derived',
-  version: '1.0.0',
+  version: 'v1',
   name: 'Session-derived',
   schemas: {
     // TODO Phase 10: replace placeholder with SessionDerivedTaskSchema.
@@ -282,7 +282,7 @@ export const SESSION_DERIVED_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
 export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
   'prediction.v1': PREDICTION_V1_SOLVER_NET_CONTRACT,
   'swe-rebench-v2.v1': SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT,
-  'session-derived.1.0.0': SESSION_DERIVED_V1_SOLVER_NET_CONTRACT,
+  'session-derived.v1': SESSION_DERIVED_V1_SOLVER_NET_CONTRACT,
 };
 
 /**
