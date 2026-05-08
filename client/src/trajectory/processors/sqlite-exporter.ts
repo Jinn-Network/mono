@@ -18,14 +18,13 @@
  */
 import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import type { CapturesStore } from '../../store/captures.js';
+import { SENTINEL_PATTERN } from './sentinel.js';
 
 export const SQLITE_EXPORTER_VERSION = '1.0.0';
 
 export interface SqliteExporterConfig {
   captures: CapturesStore;
 }
-
-const SENTINEL_PATTERN = /^<[A-Z0-9_]+>$/;
 
 export class SqliteExporterProcessor implements SpanProcessor {
   constructor(private readonly cfg: SqliteExporterConfig) {}

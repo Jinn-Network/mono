@@ -1,4 +1,5 @@
 import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { SENTINEL_PATTERN } from './sentinel.js';
 
 export const MANIFEST_BUILDER_VERSION = '1.0.0';
 
@@ -10,8 +11,6 @@ export interface SpanRedactionRecord {
 export interface RedactionManifest {
   spans: SpanRedactionRecord[];
 }
-
-const SENTINEL_PATTERN = /^<[A-Z0-9_]+>$/;
 
 export class ManifestBuilderProcessor implements SpanProcessor {
   private readonly records: SpanRedactionRecord[] = [];
