@@ -194,6 +194,7 @@ export interface OperatorPricingConfig {
   publicEndpoint: string;
   defaultPriceUsdc: string;
   perArtifactTypePrice: Record<string, string>;
+  donation: { enabled: boolean };
 }
 
 export interface OperatorArtifactTypeSummary {

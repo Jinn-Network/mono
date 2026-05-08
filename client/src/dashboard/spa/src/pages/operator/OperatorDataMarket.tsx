@@ -56,7 +56,8 @@ function samePricing(a: OperatorPricingConfig, b: OperatorPricingConfig): boolea
   return (
     a.publicEndpoint === b.publicEndpoint &&
     a.defaultPriceUsdc === b.defaultPriceUsdc &&
-    JSON.stringify(sortedRecord(a.perArtifactTypePrice)) === JSON.stringify(sortedRecord(b.perArtifactTypePrice))
+    JSON.stringify(sortedRecord(a.perArtifactTypePrice)) === JSON.stringify(sortedRecord(b.perArtifactTypePrice)) &&
+    a.donation.enabled === b.donation.enabled
   );
 }
 
@@ -125,6 +126,7 @@ function PricingEditor({
   const [publicEndpoint, setPublicEndpoint] = useState(pricing.publicEndpoint);
   const [defaultPriceUsdc, setDefaultPriceUsdc] = useState(pricing.defaultPriceUsdc);
   const [perArtifactTypePrice, setPerArtifactTypePrice] = useState(pricing.perArtifactTypePrice);
+  const [donationEnabled, setDonationEnabled] = useState(pricing.donation.enabled);
   const [newArtifactType, setNewArtifactType] = useState('');
   const [newPrice, setNewPrice] = useState('');
 
@@ -132,7 +134,8 @@ function PricingEditor({
     publicEndpoint,
     defaultPriceUsdc,
     perArtifactTypePrice,
-  }), [defaultPriceUsdc, perArtifactTypePrice, publicEndpoint]);
+    donation: { enabled: donationEnabled },
+  }), [defaultPriceUsdc, donationEnabled, perArtifactTypePrice, publicEndpoint]);
 
   const dirty = !samePricing(pricing, draft);
   const displayedTypes = useMemo(() => {
@@ -225,6 +228,34 @@ function PricingEditor({
           </span>
         </label>
       </div>
+
+      <label
+        data-testid="operator-donation-toggle"
+        style={{
+          border: '1px solid var(--border)',
+          borderRadius: '6px',
+          padding: '12px',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: '12px',
+        }}
+      >
+        <span style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <span className="j-label">Testnet donation mode</span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', lineHeight: 1.5 }}>
+            When enabled on testnet, produced task artifacts are scrubbed and
+            pinned publicly to IPFS. This is separate from x402 pricing.
+          </span>
+        </span>
+        <input
+          aria-label="Enable testnet donation mode"
+          type="checkbox"
+          checked={donationEnabled}
+          onChange={(event) => setDonationEnabled(event.target.checked)}
+          style={{ marginTop: '2px' }}
+        />
+      </label>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <span className="j-label">Per-artifact-type pricing</span>
@@ -375,7 +406,7 @@ function PricingEditor({
             color: error ? 'var(--break-red)' : dirty ? 'var(--accent-sky)' : 'var(--fg-dim)',
           }}
         >
-          {error ?? (dirty ? 'Pricing changed' : 'Pricing current')}
+          {error ?? (dirty ? 'Settings changed' : 'Settings current')}
         </span>
         <button
           type="button"
@@ -388,6 +419,7 @@ function PricingEditor({
                 .filter(([key]) => key.trim().length > 0)
                 .map(([key, price]) => [key.trim(), price.trim()]),
             ),
+            donation: { enabled: donationEnabled },
           })}
           style={{
             border: '1px solid var(--accent-sky)',
@@ -400,7 +432,7 @@ function PricingEditor({
             cursor: !dirty || saving ? 'not-allowed' : 'pointer',
           }}
         >
-          {saving ? 'Saving…' : 'Save pricing'}
+          {saving ? 'Saving…' : 'Save settings'}
         </button>
       </div>
     </div>
@@ -698,7 +730,7 @@ export function OperatorDataMarket({
           </div>
 
           <PricingEditor
-            key={`${data.pricing.publicEndpoint}|${data.pricing.defaultPriceUsdc}|${JSON.stringify(sortedRecord(data.pricing.perArtifactTypePrice))}`}
+            key={`${data.pricing.publicEndpoint}|${data.pricing.defaultPriceUsdc}|${data.pricing.donation.enabled}|${JSON.stringify(sortedRecord(data.pricing.perArtifactTypePrice))}`}
             pricing={data.pricing}
             knownArtifactTypes={knownArtifactTypes}
             saving={pricingMutation.isPending}

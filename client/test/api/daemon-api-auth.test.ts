@@ -227,6 +227,7 @@ describe('daemon-api-auth (bearer middleware)', () => {
           publicEndpoint: 'https://op.example.com',
           defaultPriceUsdc: '0',
           perArtifactTypePrice: {},
+          donation: { enabled: false },
         },
       },
       solverNets: {

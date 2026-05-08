@@ -96,6 +96,13 @@ const TrajectoryRefSchema = z.object({
   }),
 });
 
+export const ArtifactSourceSchema = z.object({
+  kind: z.literal('ipfs'),
+  cid: z.string().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  encoding: z.literal('jinn.artifact.donation.v1'),
+});
+
 const ArtifactSchema = z.object({
   artifactType: z.string().min(1),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -115,8 +122,10 @@ const ArtifactSchema = z.object({
     endpoint: z.string().url(),
     priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
   }),
+  sources: z.array(ArtifactSourceSchema).optional(),
 });
 
+export type ArtifactSource = z.infer<typeof ArtifactSourceSchema>;
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
 const SignatureSchema = z.object({

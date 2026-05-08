@@ -28,6 +28,7 @@ vi.mock('./api/client.js', () => ({
           publicEndpoint: 'https://op.example.com',
           defaultPriceUsdc: '0',
           perArtifactTypePrice: {},
+          donation: { enabled: false },
         },
         summary: {
           served: {

@@ -16,10 +16,15 @@ const SENSITIVE_KEY_PATTERNS = [
   /privatekey/,
 ];
 
-const REDACTED = '<REDACTED>';
+export const CREDENTIAL_REDACTED = '<REDACTED>';
 
-function normalizeKey(key: string): string {
+export function normalizeCredentialKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+export function isSensitiveCredentialKey(key: string): boolean {
+  const normalized = normalizeCredentialKey(key);
+  return SENSITIVE_KEY_PATTERNS.some((p) => p.test(normalized));
 }
 
 export class CredentialScrubProcessor implements SpanProcessor {
@@ -34,9 +39,8 @@ export class CredentialScrubProcessor implements SpanProcessor {
   onEnd(span: ReadableSpan): void {
     const attrs = span.attributes as Record<string, unknown>;
     for (const key of Object.keys(attrs)) {
-      const normalized = normalizeKey(key);
-      if (SENSITIVE_KEY_PATTERNS.some((p) => p.test(normalized))) {
-        attrs[key] = REDACTED;
+      if (isSensitiveCredentialKey(key)) {
+        attrs[key] = CREDENTIAL_REDACTED;
       }
     }
   }

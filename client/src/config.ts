@@ -499,6 +499,7 @@ export const JinnConfigSchema = z.object({
    * Env overrides:
    *   JINN_OPERATOR_PUBLIC_ENDPOINT
    *   JINN_OPERATOR_DEFAULT_PRICE_USDC
+   *   JINN_OPERATOR_DONATION_ENABLED
    */
   operator: z
     .object({
@@ -513,6 +514,11 @@ export const JinnConfigSchema = z.object({
           z.string().regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string'),
         )
         .default({}),
+      donation: z
+        .object({
+          enabled: z.boolean().default(false),
+        })
+        .default({ enabled: false }),
     })
     .optional(),
 
@@ -713,11 +719,18 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   if (
     env['JINN_OPERATOR_PUBLIC_ENDPOINT'] ||
-    env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
+    env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] ||
+    env['JINN_OPERATOR_DONATION_ENABLED'] !== undefined
   ) {
     const prevOp = typeof merged['operator'] === 'object' && merged['operator'] !== null
       ? (merged['operator'] as Record<string, unknown>)
       : {};
+    const prevDonation = typeof prevOp['donation'] === 'object' && prevOp['donation'] !== null
+      ? (prevOp['donation'] as Record<string, unknown>)
+      : {};
+    const donationEnabled = env['JINN_OPERATOR_DONATION_ENABLED'] !== undefined
+      ? ['1', 'true', 'yes'].includes(env['JINN_OPERATOR_DONATION_ENABLED'].trim().toLowerCase())
+      : undefined;
     merged['operator'] = {
       ...prevOp,
       ...(env['JINN_OPERATOR_PUBLIC_ENDPOINT']
@@ -725,6 +738,9 @@ export function loadConfig(configPath?: string): JinnConfig {
         : {}),
       ...(env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
         ? { defaultPriceUsdc: env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] }
+        : {}),
+      ...(donationEnabled !== undefined
+        ? { donation: { ...prevDonation, enabled: donationEnabled } }
         : {}),
     };
   }
@@ -902,6 +918,7 @@ const TRACKED_ENV_VARS = [
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',
   'JINN_OPERATOR_DEFAULT_PRICE_USDC',
+  'JINN_OPERATOR_DONATION_ENABLED',
   'JINN_BUILD_COMMIT',
 ] as const;
 

@@ -13,6 +13,7 @@ describe('loadConfig RPC override handling', () => {
   const originalJinnL2ProofRpcUrl = process.env['JINN_L2_PROOF_RPC_URL'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
+  const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
 
   afterEach(async () => {
     if (originalBaseRpcUrl === undefined) {
@@ -55,6 +56,12 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
     } else {
       process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = originalTestnetTokenDeployment;
+    }
+
+    if (originalOperatorDonationEnabled === undefined) {
+      delete process.env['JINN_OPERATOR_DONATION_ENABLED'];
+    } else {
+      process.env['JINN_OPERATOR_DONATION_ENABLED'] = originalOperatorDonationEnabled;
     }
 
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -153,6 +160,27 @@ describe('loadConfig RPC override handling', () => {
     const config = loadConfig(configPath);
 
     expect(config.rpcUrl).toBe('https://sepolia.base.org');
+  });
+
+  it('defaults operator donation to disabled when operator config exists', async () => {
+    const configPath = await writeConfigFile({
+      operator: { publicEndpoint: 'https://op.example.com' },
+    });
+
+    const config = loadConfig(configPath);
+
+    expect(config.operator?.donation.enabled).toBe(false);
+  });
+
+  it('allows env to enable operator donation', async () => {
+    const configPath = await writeConfigFile({
+      operator: { publicEndpoint: 'https://op.example.com' },
+    });
+    process.env['JINN_OPERATOR_DONATION_ENABLED'] = 'true';
+
+    const config = loadConfig(configPath);
+
+    expect(config.operator?.donation.enabled).toBe(true);
   });
 
   it('accepts self-bond stakingMode from env', () => {

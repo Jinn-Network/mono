@@ -46,5 +46,19 @@ export function validateManifestForPublish(env: SignedEnvelope): void {
     if (!a.sha256 || !/^[0-9a-f]{64}$/.test(a.sha256)) {
       throw new ManifestValidationError(i, 'sha256 must be a 64-char hex string');
     }
+    for (const source of a.sources ?? []) {
+      if (source.kind !== 'ipfs') {
+        throw new ManifestValidationError(i, 'sources[].kind must be ipfs');
+      }
+      if (!source.cid || typeof source.cid !== 'string') {
+        throw new ManifestValidationError(i, 'sources[].cid must be a non-empty string');
+      }
+      if (source.encoding !== 'jinn.artifact.donation.v1') {
+        throw new ManifestValidationError(i, 'sources[].encoding must be jinn.artifact.donation.v1');
+      }
+      if (source.sha256 !== a.sha256) {
+        throw new ManifestValidationError(i, 'sources[].sha256 must match artifact sha256');
+      }
+    }
   }
 }

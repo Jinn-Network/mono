@@ -21,7 +21,7 @@
 
 import { config as dotenvConfig } from 'dotenv';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync as writeFileSyncMain } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname, userInfo } from 'node:os';
 import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -687,6 +687,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     publicEndpoint: config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`,
     defaultPriceUsdc: config.operator?.defaultPriceUsdc ?? '0',
     perArtifactTypePrice: config.operator?.perArtifactTypePrice ?? {},
+    donation: {
+      enabled: config.network === 'testnet' && config.operator?.donation?.enabled === true,
+    },
   };
   let corpusForApi: ReturnType<typeof createCorpus> | undefined;
   // Launcher mode wiring (Task 6 of spec/2026-05-05-launcher-role-and-mode.md).
@@ -1347,6 +1350,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
   const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
   const operatorPerTypePrice = config.operator?.perArtifactTypePrice ?? {};
+  const donationRequested = config.operator?.donation?.enabled === true;
+  const donationEnabled = donationRequested && config.network === 'testnet';
+  if (donationRequested && !donationEnabled) {
+    console.warn('[main] operator.donation.enabled is testnet-only; donation disabled on mainnet.');
+  }
   if (!config.operator?.publicEndpoint) {
     console.warn(
       '[main] config.operator.publicEndpoint not set; defaulting to local API port. ' +
@@ -1358,11 +1366,23 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     operatorEndpoint: operatorPublicEndpoint,
     defaultPriceUsdc: operatorDefaultPrice,
     perArtifactTypePrice: operatorPerTypePrice,
+    donation: {
+      enabled: donationEnabled,
+      ipfsRegistryUrl: config.ipfsRegistryUrl,
+      scrub: {
+        identity: {
+          username: userInfo().username,
+          hostname: hostname(),
+        },
+        path: { home: homedir() },
+      },
+    },
   };
   const operatorConfig = {
     publicEndpoint: operatorPublicEndpoint,
     defaultPriceUsdc: operatorDefaultPrice,
     perArtifactTypePrice: operatorPerTypePrice,
+    donation: { enabled: donationEnabled },
   };
 
   // Envelope assembly deps: sign envelopes with agent EOA private key

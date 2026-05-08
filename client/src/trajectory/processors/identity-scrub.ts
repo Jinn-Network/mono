@@ -15,6 +15,22 @@ export interface IdentityScrubConfig {
 const IPV4_PATTERN =
   /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\b/g;
 
+export function scrubIdentityString(s: string, cfg: IdentityScrubConfig): string {
+  // Order matters: email and full git-author name resolve first as
+  // composite identifiers. Email-before-username avoids mangling addresses
+  // whose local-part matches a username; gitAuthorName-before-hostname/
+  // machineId avoids the symmetric trap where a name fragment is masked
+  // by an earlier scrub.
+  let out = s;
+  if (cfg.gitAuthorEmail) out = out.split(cfg.gitAuthorEmail).join('<EMAIL>');
+  if (cfg.gitAuthorName) out = out.split(cfg.gitAuthorName).join('<AUTHOR>');
+  if (cfg.username) out = out.split(cfg.username).join('<USER>');
+  if (cfg.hostname) out = out.split(cfg.hostname).join('<HOST>');
+  if (cfg.machineId) out = out.split(cfg.machineId).join('<MACHINE>');
+  out = out.replace(IPV4_PATTERN, '<IPV4>');
+  return out;
+}
+
 export class IdentityScrubProcessor implements SpanProcessor {
   constructor(private readonly cfg: IdentityScrubConfig) {}
 
@@ -27,24 +43,8 @@ export class IdentityScrubProcessor implements SpanProcessor {
     for (const key of Object.keys(attrs)) {
       const v = attrs[key];
       if (typeof v === 'string') {
-        attrs[key] = this.scrub(v);
+        attrs[key] = scrubIdentityString(v, this.cfg);
       }
     }
-  }
-
-  private scrub(s: string): string {
-    // Order matters: email and full git-author name resolve first as
-    // composite identifiers. Email-before-username avoids mangling addresses
-    // whose local-part matches a username; gitAuthorName-before-hostname/
-    // machineId avoids the symmetric trap where a name fragment is masked
-    // by an earlier scrub.
-    let out = s;
-    if (this.cfg.gitAuthorEmail) out = out.split(this.cfg.gitAuthorEmail).join('<EMAIL>');
-    if (this.cfg.gitAuthorName) out = out.split(this.cfg.gitAuthorName).join('<AUTHOR>');
-    if (this.cfg.username) out = out.split(this.cfg.username).join('<USER>');
-    if (this.cfg.hostname) out = out.split(this.cfg.hostname).join('<HOST>');
-    if (this.cfg.machineId) out = out.split(this.cfg.machineId).join('<MACHINE>');
-    out = out.replace(IPV4_PATTERN, '<IPV4>');
-    return out;
   }
 }

@@ -16,6 +16,7 @@ export interface OperatorPricingConfig {
   publicEndpoint: string;
   defaultPriceUsdc: string;
   perArtifactTypePrice: Record<string, string>;
+  donation: { enabled: boolean };
 }
 
 export interface OperatorArtifactsRoutesConfig {
@@ -58,6 +59,7 @@ const PricingPatchSchema = z.object({
   publicEndpoint: z.string().min(1).optional(),
   defaultPriceUsdc: DecimalString.optional(),
   perArtifactTypePrice: z.record(z.string(), DecimalString).optional(),
+  donation: z.object({ enabled: z.boolean() }).optional(),
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -99,6 +101,11 @@ function resolvePricingConfig(
       ...(fallback?.perArtifactTypePrice ?? {}),
       ...decimalRecord(rawOperator.perArtifactTypePrice),
     },
+    donation: {
+      enabled: isRecord(rawOperator.donation) && typeof rawOperator.donation.enabled === 'boolean'
+        ? rawOperator.donation.enabled
+        : fallback?.donation?.enabled ?? false,
+    },
   };
 }
 
@@ -117,7 +124,7 @@ function normalizePricingPatch(
 ): { ok: true; value: OperatorPricingConfig } | { ok: false; detail: string } {
   const parsed = PricingPatchSchema.safeParse(rawBody);
   if (!parsed.success) {
-    return { ok: false, detail: 'publicEndpoint, defaultPriceUsdc, or perArtifactTypePrice is malformed' };
+    return { ok: false, detail: 'publicEndpoint, defaultPriceUsdc, perArtifactTypePrice, or donation is malformed' };
   }
   const patch = parsed.data;
   const publicEndpoint = patch.publicEndpoint?.trim() ?? current.publicEndpoint;
@@ -142,6 +149,7 @@ function normalizePricingPatch(
       publicEndpoint,
       defaultPriceUsdc: patch.defaultPriceUsdc?.trim() ?? current.defaultPriceUsdc,
       perArtifactTypePrice,
+      donation: patch.donation ?? current.donation,
     },
   };
 }

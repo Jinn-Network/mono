@@ -7,18 +7,27 @@ export interface PathScrubConfig {
   repoRoot?: string;  // e.g. '/Users/adrianobradley/harbor/jinn-mono'
 }
 
-export class PathScrubProcessor implements SpanProcessor {
-  private readonly homePrefix: string;
-  private readonly repoExact?: string;
-  private readonly repoPrefix?: string;
+export function scrubPathString(s: string, cfg: PathScrubConfig): string {
+  const homePrefix = cfg.home.endsWith('/') ? cfg.home : cfg.home + '/';
+  const repoExact = cfg.repoRoot;
+  const repoPrefix = cfg.repoRoot
+    ? (cfg.repoRoot.endsWith('/') ? cfg.repoRoot : cfg.repoRoot + '/')
+    : undefined;
 
-  constructor(cfg: PathScrubConfig) {
-    this.homePrefix = cfg.home.endsWith('/') ? cfg.home : cfg.home + '/';
-    if (cfg.repoRoot) {
-      this.repoExact = cfg.repoRoot;
-      this.repoPrefix = cfg.repoRoot.endsWith('/') ? cfg.repoRoot : cfg.repoRoot + '/';
-    }
+  // repoRoot match wins over home match: a path under the repo is more
+  // useful as a repo-relative reference than as a /users/anon/... blob.
+  if (repoExact !== undefined && s === repoExact) return '.';
+  if (repoPrefix !== undefined && s.startsWith(repoPrefix)) {
+    return s.slice(repoPrefix.length);
   }
+  if (s.startsWith(homePrefix)) {
+    return '/users/anon/' + s.slice(homePrefix.length);
+  }
+  return s;
+}
+
+export class PathScrubProcessor implements SpanProcessor {
+  constructor(private readonly cfg: PathScrubConfig) {}
 
   forceFlush() { return Promise.resolve(); }
   shutdown() { return Promise.resolve(); }
@@ -29,21 +38,8 @@ export class PathScrubProcessor implements SpanProcessor {
     for (const key of Object.keys(attrs)) {
       const v = attrs[key];
       if (typeof v === 'string') {
-        attrs[key] = this.scrub(v);
+        attrs[key] = scrubPathString(v, this.cfg);
       }
     }
-  }
-
-  private scrub(s: string): string {
-    // repoRoot match wins over home match: a path under the repo is more
-    // useful as a repo-relative reference than as a /users/anon/... blob.
-    if (this.repoExact !== undefined && s === this.repoExact) return '.';
-    if (this.repoPrefix !== undefined && s.startsWith(this.repoPrefix)) {
-      return s.slice(this.repoPrefix.length);
-    }
-    if (s.startsWith(this.homePrefix)) {
-      return '/users/anon/' + s.slice(this.homePrefix.length);
-    }
-    return s;
   }
 }

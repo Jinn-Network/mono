@@ -87,6 +87,44 @@ describe('acquireArtifactContent', () => {
     expect(store.getNetworkArtifact(realSha)).not.toBeNull();
   });
 
+  it('prefers donated IPFS source and caches verified bytes without x402 fetch', async () => {
+    const realSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
+    const acquireFn = vi.fn();
+    const fetchFromIpfs = vi.fn(async () => ({
+      schemaVersion: 'jinn.artifact.donation.v1',
+      artifactType: 'design_document',
+      sha256: realSha,
+      encoding: 'jinn.artifact.donation.v1',
+      data: realBytes.toString('base64'),
+    }));
+
+    const result = await acquireArtifactContent({
+      sha256: realSha,
+      artifactType: 'design_document',
+      access,
+      store,
+      selfSafeAddress: '0x' + 'f'.repeat(40),
+      privateKey: TEST_KEY,
+      acquireFn,
+      fetchFromIpfs,
+      ipfsGatewayUrl: 'https://gateway.example.com',
+      ownerSafe: '0x' + 'a'.repeat(40),
+      sources: [{
+        kind: 'ipfs',
+        cid: 'bafy-donated',
+        sha256: realSha,
+        encoding: 'jinn.artifact.donation.v1',
+      }],
+    });
+
+    expect(result.source).toBe('ipfs');
+    expect(result.paidAmountUsdc).toBe('0');
+    expect(result.bytes.equals(realBytes)).toBe(true);
+    expect(fetchFromIpfs).toHaveBeenCalledWith('https://gateway.example.com', 'bafy-donated');
+    expect(acquireFn).not.toHaveBeenCalled();
+    expect(store.getNetworkArtifact(realSha)?.content.equals(realBytes)).toBe(true);
+  });
+
   it('origin fetch with hash mismatch throws and does not cache', async () => {
     const acquireFn = vi.fn(async () => Buffer.from('wrong bytes'));
     const declaredSha = 'a'.repeat(64);

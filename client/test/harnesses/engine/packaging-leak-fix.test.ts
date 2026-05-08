@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { Store } from '../../../src/store/store.js';
 import { uploadArtifacts } from '../../../src/harnesses/engine/packaging.js';
 
-const uploadToIpfsMock = vi.fn(async () => {
-  throw new Error('uploadArtifacts should NOT call uploadToIpfs in v0');
-});
+const { uploadToIpfsMock } = vi.hoisted(() => ({
+  uploadToIpfsMock: vi.fn(async () => {
+    throw new Error('uploadArtifacts should NOT call uploadToIpfs in v0');
+  }),
+}));
 
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: uploadToIpfsMock,
