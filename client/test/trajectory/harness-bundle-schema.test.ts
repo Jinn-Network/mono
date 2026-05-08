@@ -56,4 +56,16 @@ describe('harness-bundle.v1', () => {
     const result = HarnessBundleManifestSchema.safeParse(manifest);
     expect(result.success).toBe(false);
   });
+
+  it('rejects wrong schemaVersion (discriminator)', () => {
+    const manifest = {
+      schemaVersion: 'harness-bundle.v0',
+      bundleSha256: 'a'.repeat(64),
+      capturePath: 'A',
+      tool: { name: 'claude-code' },
+      files: [{ path: 'x', sha256: 'b'.repeat(64), bytes: 0 }],
+    };
+    const result = HarnessBundleManifestSchema.safeParse(manifest);
+    expect(result.success).toBe(false);
+  });
 });
