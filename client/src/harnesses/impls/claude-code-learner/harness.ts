@@ -65,6 +65,6 @@ export class ClaudeCodeLearnerImpl implements Harness {
 
     await this.adapter.runTask(inputs, this.pluginRoot);
 
-    return harvestOutput(ctx.workingDir);
+    return harvestOutput(ctx.workingDir, undefined, ctx.task);
   }
 }
