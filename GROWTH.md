@@ -82,7 +82,7 @@ Take the bridge model in §3 and produce content — threads, essays, replies, r
 
 Create funnel paths that progressively pull people down: first contact → reply → DM → call → operator → contributor. The four-rung warm-contacts ladder (cold / touched / warm / hot, plus parking) holds the funnel state per individual. Public offer cadence can be more frequent than direct offers; direct offers to the named warm list are weekly, not daily.
 
-The closing structure when an operator is engaged: objective → why important → blockers → three ways in (full operator, light operator, advisory steward) → walk through plan. Read the specs, run the client, open a PR or an issue.
+The closing structure when an operator is engaged: objective → why important → blockers → four ways in (full operator, light operator, contributor, advisory steward) → walk through plan. Read the specs, run the client, open a PR or an issue. *Contributor* names the maintainer-route path explicitly (per `spec/2026-05-08-growth-engage-fourth-way-in-contributor.md`): pick up or file a `good-first-issue` against `Jinn-Network/mono` without necessarily running a client. Friction-to-first-merged-PR is the load-bearing property; the path is intentionally Claude-pickable so a recruit can act in the same conversation that closes the engagement.
 
 ### Refine — `growth-refine`
 
