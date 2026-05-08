@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
+import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
@@ -73,6 +74,9 @@ import type { Harness } from './harnesses/types.js';
 import { createClients } from './adapters/mech/safe.js';
 import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
+import { CapturesStore } from './store/captures.js';
+import { createLiveCapturePublisher } from './captures/live-publisher.js';
+import { buildInfo } from './build-info.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
@@ -670,6 +674,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // /v1/bootstrap + /v1/events + /v1/status here. The same Store instance is
   // later passed into Daemon so we don't double-open the SQLite file.
   const sharedStore = new Store(config.dbPath);
+  const capturesStore = new CapturesStore(sharedStore);
+  const capturePublishRef: {
+    current: ((sessionId: string) => Promise<{ envelopeCid: string }>) | undefined;
+  } = { current: undefined };
   const earningStateStore = new FleetStateStore(config.earningDir);
   const initialFleet = await earningStateStore.tryLoadExisting();
   const initialServices = initialFleet?.services ?? [];
@@ -751,6 +759,21 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         operatorConfig: operatorArtifactsConfig,
         onOperatorConfigUpdated: (operator) => {
           config.operator = operator;
+        },
+      },
+      captures: {
+        captures: capturesStore,
+        publishCapture: async (sessionId) => {
+          const publish = capturePublishRef.current;
+          if (!publish) {
+            throw new CapturePublishUnavailableError(
+              'Capture publisher is waiting for bootstrap to finish.',
+            );
+          }
+          return publish(sessionId);
+        },
+        setTrustedRepo: (repoRemoteUrl, trusted) => {
+          console.log(`[main] captures trust-repo ${trusted ? 'enabled' : 'disabled'} for ${repoRemoteUrl}`);
         },
       },
       bootstrap: {
@@ -1120,6 +1143,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // mode endpoint so `/v1/launcher/status.budget.safeAddress` is accurate
   // on the very first SPA poll. (Task 6 of the launcher plan.)
   safeAddressForLauncher = safeAddress;
+  const agentEoaAddress = privateKeyToAccount(agentPrivateKey).address as `0x${string}`;
 
   if (!mechAddress) {
     emitEnvelope({
@@ -1428,6 +1452,21 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     );
   }
 
+  const liveCapturePublisher = createLiveCapturePublisher({
+    store: sharedStore,
+    captures: capturesStore,
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    operatorEndpoint: operatorPublicEndpoint,
+    defaultPriceUsdc: operatorDefaultPrice,
+    perArtifactTypePrice: operatorPerTypePrice,
+    participant: { safeAddress, agentEoa: agentEoaAddress },
+    signer: { address: agentEoaAddress, privateKey: agentPrivateKey },
+    clientGitSha: buildInfo.clientGitSha,
+    identityPublisher,
+    harnessMode: config.harness.mode,
+  });
+  capturePublishRef.current = liveCapturePublisher.publishCapture;
+
   // ── Reputation feedback hook (jinn-mono-yg4) ──────────────────────────────
   //
   // After the evaluator's claimDelivery succeeds, the engine fires
@@ -1639,8 +1678,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // is determined by which launched records the daemon owns, not by the
   // operator-config role enum.
   const autoTasksDisabled = process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
-  const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
-  const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
   // ── SolverNet launched-record generators (Task 12 of
   //     spec/2026-05-05-solvernet-creation-and-launch.md §11) ────────────────
   //

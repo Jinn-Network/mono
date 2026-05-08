@@ -12,6 +12,25 @@ export interface CapturesRoutesDeps {
   setTrustedRepo?: (repoRemoteUrl: string, trusted: boolean) => Promise<void> | void;
 }
 
+export class CapturePublishUnavailableError extends Error {
+  constructor(message = 'Capture publishing is not available yet') {
+    super(message);
+    this.name = 'CapturePublishUnavailableError';
+  }
+}
+
+export class CapturePublishRateLimitError extends Error {
+  readonly retryAfterMs?: number;
+  readonly reason: string;
+
+  constructor(reason: string, retryAfterMs?: number) {
+    super(`Capture publish rate limit exceeded: ${reason}`);
+    this.name = 'CapturePublishRateLimitError';
+    this.reason = reason;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
 export function addCapturesRoutes(app: Hono, deps: CapturesRoutesDeps): void {
   app.get('/api/captures/pending', (c) => {
     return c.json({ captures: deps.captures.listPending() });
@@ -33,9 +52,25 @@ export function addCapturesRoutes(app: Hono, deps: CapturesRoutesDeps): void {
     if (!capture || capture.status !== 'pending') {
       return c.json({ error: 'capture_not_found' }, 404);
     }
-    const published = deps.publishCapture
-      ? await deps.publishCapture(sessionId)
-      : { envelopeCid: `pending:${sessionId}` };
+    if (!deps.publishCapture) {
+      return c.json({ error: 'capture_publish_unavailable' }, 503);
+    }
+    let published: { envelopeCid: string };
+    try {
+      published = await deps.publishCapture(sessionId);
+    } catch (err) {
+      if (err instanceof CapturePublishRateLimitError) {
+        return c.json({
+          error: 'capture_publish_rate_limited',
+          reason: err.reason,
+          retryAfterMs: err.retryAfterMs,
+        }, 429);
+      }
+      if (err instanceof CapturePublishUnavailableError) {
+        return c.json({ error: 'capture_publish_unavailable', message: err.message }, 503);
+      }
+      throw err;
+    }
     const publishedAt = new Date().toISOString();
     deps.captures.markApproved(sessionId, {
       envelopeCid: published.envelopeCid,

@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
 import { Store } from '../../src/store/store.js';
 import { CapturesStore } from '../../src/store/captures.js';
-import { addCapturesRoutes } from '../../src/api/captures.js';
+import {
+  CapturePublishRateLimitError,
+  addCapturesRoutes,
+} from '../../src/api/captures.js';
 
 describe('captures API', () => {
   let store: Store;
@@ -68,6 +71,30 @@ describe('captures API', () => {
     expect(body.envelopeCid).toBe('bafy-sess-1');
     expect(captures.listPending()).toEqual([]);
     expect(captures.getApproved('sess-1')?.envelopeCid).toBe('bafy-sess-1');
+  });
+
+  it('does not approve when no publisher is wired', async () => {
+    addCapturesRoutes(app, { captures });
+
+    const res = await app.request('/api/captures/sess-1/approve', { method: 'POST' });
+    expect(res.status).toBe(503);
+    expect(captures.getBySession('sess-1')?.status).toBe('pending');
+  });
+
+  it('returns 429 and keeps the capture pending when publish is rate-limited', async () => {
+    addCapturesRoutes(app, {
+      captures,
+      publishCapture: async () => {
+        throw new CapturePublishRateLimitError('repo_rate_limit', 1000);
+      },
+    });
+
+    const res = await app.request('/api/captures/sess-1/approve', { method: 'POST' });
+    expect(res.status).toBe(429);
+    const body = await res.json() as { reason: string; retryAfterMs: number };
+    expect(body.reason).toBe('repo_rate_limit');
+    expect(body.retryAfterMs).toBe(1000);
+    expect(captures.getBySession('sess-1')?.status).toBe('pending');
   });
 
   it('skips pending captures and records trusted repo changes', async () => {

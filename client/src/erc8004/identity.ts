@@ -75,7 +75,7 @@ export { IDENTITY_REGISTRY_SET_METADATA_ABI, PAYLOAD_TUPLE, PAYLOAD_TUPLE_V2 };
 export type ExecutionTier = 0 | 1 | 3;
 
 /** Metadata key prefix. See payload-schema §6.1. */
-export type ContentKind = 'envelope' | 'evaluation';
+export type ContentKind = 'envelope' | 'evaluation' | 'capture';
 
 /**
  * v1 payload as caller-friendly hex strings. The encoder validates and
