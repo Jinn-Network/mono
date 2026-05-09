@@ -76,12 +76,26 @@ import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
 import { CapturesStore } from './store/captures.js';
 import { createLiveCapturePublisher } from './captures/live-publisher.js';
+import { startReceiver, type Receiver } from './trajectory/receiver.js';
+import { startSyntheticSpanProvider, emitSyntheticSpan } from './trajectory/synthetic-span-builder.js';
+import { CredentialScrubProcessor } from './trajectory/processors/credential-scrub.js';
+import { TranscriptContentScrubProcessor } from './trajectory/processors/transcript-content-scrub.js';
+import { IdentityScrubProcessor } from './trajectory/processors/identity-scrub.js';
+import { PathScrubProcessor } from './trajectory/processors/path-scrub.js';
+import { SqliteExporterProcessor } from './trajectory/processors/sqlite-exporter.js';
+import { ClaudeCodeJsonlParser } from './trajectory/transcript-parsers/claude-code-jsonl.js';
+import { CodexSessionParser } from './trajectory/transcript-parsers/codex-session.js';
+import { GeminiSessionParser } from './trajectory/transcript-parsers/gemini-session.js';
+import { CursorSqliteParser } from './trajectory/transcript-parsers/cursor-sqlite.js';
+import type { TranscriptParser } from './trajectory/transcript-parsers/types.js';
+import type { StopHookPayload, StopHookTool } from './api/stop-hook.js';
 import { buildInfo } from './build-info.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
   dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -193,6 +207,140 @@ function configFileHasTopLevelKey(configPath: string | undefined, key: string): 
     return !!raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key);
   } catch {
     return false;
+  }
+}
+
+class EnsurePendingCaptureProcessor implements SpanProcessor {
+  constructor(private readonly captures: CapturesStore) {}
+
+  forceFlush() { return Promise.resolve(); }
+  shutdown() { return Promise.resolve(); }
+  onStart() {}
+
+  onEnd(span: ReadableSpan): void {
+    const sessionId = stringAttribute(span.attributes['jinn.session.id']);
+    if (!sessionId || this.captures.getBySession(sessionId)) return;
+
+    try {
+      this.captures.savePending({
+        sessionId,
+        capturedAt: hrTimeToIso(span.startTime),
+        originatingTool: { name: inferCaptureTool(span) },
+        capturePath: 'A',
+        status: 'pending',
+        spanCount: 0,
+        durationMs: 0,
+        redactedSpanCount: 0,
+        ...repoMetadataFromSpan(span),
+      });
+    } catch (err) {
+      if (!this.captures.getBySession(sessionId)) throw err;
+    }
+  }
+}
+
+function stringAttribute(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}
+
+function hrTimeToIso(time: ReadableSpan['startTime']): string {
+  const millis = (time[0] * 1000) + Math.floor(time[1] / 1_000_000);
+  return new Date(millis).toISOString();
+}
+
+function inferCaptureTool(span: ReadableSpan): string {
+  return stringAttribute(span.attributes['transcript.tool'])
+    ?? stringAttribute(span.resource.attributes['service.name'])
+    ?? 'otel';
+}
+
+function repoMetadataFromSpan(span: ReadableSpan): { repoRemoteUrl?: string; repoCommitHash?: string } {
+  const attrs = span.attributes;
+  const repoRemoteUrl = stringAttribute(attrs['repo.remote_url'])
+    ?? stringAttribute(attrs['vcs.repository.url'])
+    ?? stringAttribute(attrs['git.remote_url']);
+  const repoCommitHash = stringAttribute(attrs['repo.commit_hash'])
+    ?? stringAttribute(attrs['vcs.ref.head.revision'])
+    ?? stringAttribute(attrs['git.commit']);
+  return {
+    ...(repoRemoteUrl ? { repoRemoteUrl } : {}),
+    ...(repoCommitHash ? { repoCommitHash } : {}),
+  };
+}
+
+function parserForStopHookTool(tool: StopHookTool): TranscriptParser {
+  switch (tool) {
+    case 'claude-code':
+      return new ClaudeCodeJsonlParser();
+    case 'codex':
+      return new CodexSessionParser();
+    case 'gemini-cli':
+      return new GeminiSessionParser();
+    case 'cursor':
+      return new CursorSqliteParser();
+    default: {
+      const exhaustive: never = tool;
+      throw new Error(`No transcript parser for stop-hook tool: ${String(exhaustive)}`);
+    }
+  }
+}
+
+function ensurePendingStopHookCapture(
+  captures: CapturesStore,
+  payload: StopHookPayload,
+): void {
+  if (captures.getBySession(payload.sessionId)) return;
+  try {
+    captures.savePending({
+      sessionId: payload.sessionId,
+      capturedAt: payload.stoppedAt,
+      originatingTool: { name: payload.tool },
+      capturePath: 'D',
+      status: 'pending',
+      spanCount: 0,
+      durationMs: 0,
+      redactedSpanCount: 0,
+    });
+  } catch (err) {
+    if (!captures.getBySession(payload.sessionId)) throw err;
+  }
+}
+
+async function ingestStopHookCapture(
+  captures: CapturesStore,
+  receiver: Receiver | undefined,
+  payload: StopHookPayload,
+): Promise<void> {
+  ensurePendingStopHookCapture(captures, payload);
+  if (!payload.transcriptPath) return;
+  if (!receiver) {
+    console.warn('[main] stop-hook capture received but OTLP receiver is unavailable; pending capture has no transcript spans.');
+    return;
+  }
+
+  const parser = parserForStopHookTool(payload.tool);
+  let events;
+  try {
+    events = await parser.parseFull({ sessionId: payload.sessionId, path: payload.transcriptPath });
+  } catch (err) {
+    console.warn(
+      `[main] stop-hook transcript import failed for ${payload.transcriptPath}: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+  if (events.length === 0) return;
+
+  const provider = startSyntheticSpanProvider({
+    otlpHttpEndpoint: `http://127.0.0.1:${receiver.httpPort}/v1/traces`,
+  });
+  try {
+    for (const event of events) {
+      emitSyntheticSpan(provider, { tool: parser.tool, sessionId: payload.sessionId, event });
+    }
+    await provider.flush();
+  } finally {
+    await provider.shutdown();
   }
 }
 
@@ -675,6 +823,37 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // later passed into Daemon so we don't double-open the SQLite file.
   const sharedStore = new Store(config.dbPath);
   const capturesStore = new CapturesStore(sharedStore);
+  let captureReceiver: Receiver | undefined;
+  try {
+    captureReceiver = await startReceiver({
+      grpcPort: 4317,
+      httpPort: 4318,
+      processors: [
+        new CredentialScrubProcessor(),
+        new TranscriptContentScrubProcessor(),
+        new IdentityScrubProcessor({
+          username: userInfo().username,
+          hostname: hostname(),
+        }),
+        new PathScrubProcessor({ home: homedir() }),
+        new EnsurePendingCaptureProcessor(capturesStore),
+        new SqliteExporterProcessor({ captures: capturesStore }),
+      ],
+    });
+    console.log(
+      `[main] Capture OTLP receiver listening on grpc=:${captureReceiver.grpcPort} http=:${captureReceiver.httpPort}`,
+    );
+  } catch (err) {
+    console.warn(
+      '[main] Capture OTLP receiver disabled; path-A telemetry capture unavailable: ' +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const closeCaptureReceiver = async () => {
+    const receiver = captureReceiver;
+    captureReceiver = undefined;
+    await receiver?.shutdown().catch(() => undefined);
+  };
   const capturePublishRef: {
     current: ((sessionId: string) => Promise<{ envelopeCid: string }>) | undefined;
   } = { current: undefined };
@@ -774,6 +953,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         },
         setTrustedRepo: (repoRemoteUrl, trusted) => {
           console.log(`[main] captures trust-repo ${trusted ? 'enabled' : 'disabled'} for ${repoRemoteUrl}`);
+        },
+      },
+      stopHook: {
+        onStopHook: async (payload) => {
+          await ingestStopHookCapture(capturesStore, captureReceiver, payload);
         },
       },
       bootstrap: {
@@ -968,6 +1152,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       },
     });
   } catch (error) {
+    await closeCaptureReceiver();
     sharedStore.close();
     const err = error as NodeJS.ErrnoException;
     if (err?.code === 'EADDRINUSE') {
@@ -1068,6 +1253,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     if (initExitCode !== 0) {
       console.error('[main] init failed; cannot continue.');
       await setupApiServer.close().catch(() => undefined);
+      await closeCaptureReceiver();
       sharedStore.close();
       process.exit(initExitCode);
     }
@@ -1097,6 +1283,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // If bootstrap throws (vs. emitEnvelope-exits), tear down the API we
     // just started so we don't leave a dangling listener on the port.
     await setupApiServer.close().catch(() => undefined);
+    await closeCaptureReceiver();
     sharedStore.close();
     throw err;
   }
@@ -1115,6 +1302,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   if (process.env['JINN_NO_DAEMON'] === '1') {
     console.log('[main] --no-daemon: bootstrap complete, exiting before daemon loops.');
     await setupApiServer.close().catch(() => undefined);
+    await closeCaptureReceiver();
     sharedStore.close();
     const summary = {
       schemaVersion: 1,
@@ -1881,6 +2069,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     console.log(`\n[main] Received ${signal}, shutting down...`);
     await daemon.stop();
     await setupApiServer.close().catch(() => undefined);
+    await closeCaptureReceiver();
     sharedStore.close();
     console.log('[main] Shutdown complete.');
     process.exit(0);

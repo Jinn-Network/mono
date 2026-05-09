@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Store } from '../../../src/store/store.js';
 import { CapturesStore } from '../../../src/store/captures.js';
 import { SqliteExporterProcessor } from '../../../src/trajectory/processors/sqlite-exporter.js';
+import { TranscriptContentScrubProcessor } from '../../../src/trajectory/processors/transcript-content-scrub.js';
 import { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 function fakeSpan(opts: {
@@ -64,6 +65,26 @@ describe('SqliteExporterProcessor', () => {
     const pending = captures.listPending();
     expect(pending[0].spanCount).toBe(2);
     expect(pending[0].redactedSpanCount).toBe(1);  // only first span had a redaction
+  });
+
+  it('persists transcript content redactions from the scrub processor', () => {
+    const scrub = new TranscriptContentScrubProcessor();
+    const exporter = new SqliteExporterProcessor({ captures });
+    const span = fakeSpan({
+      spanId: 'd'.repeat(16),
+      attrs: {
+        'jinn.session.id': 'sess-1',
+        'message.content': 'please use api_key=sk-aaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    });
+
+    scrub.onEnd(span);
+    exporter.onEnd(span);
+
+    const [row] = captures.getSpansBySession('sess-1');
+    expect(row.attributes['message.content']).toBe('<REDACTED>');
+    expect(row.redactedKeys).toEqual(['message.content']);
+    expect(captures.getBySession('sess-1')?.redactedSpanCount).toBe(1);
   });
 
   it('skips spans that have no jinn.session.id (out of scope: solver flows)', () => {

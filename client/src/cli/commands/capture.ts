@@ -3,6 +3,7 @@ import { basename, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
+import { homedir, hostname, userInfo } from 'node:os';
 import type { CommandContext, CommandModule } from '../command.js';
 import { loadConfig, getConfigPathFromArgs } from '../../config.js';
 import { Store } from '../../store/store.js';
@@ -13,6 +14,18 @@ import { CodexSessionParser } from '../../trajectory/transcript-parsers/codex-se
 import { GeminiSessionParser } from '../../trajectory/transcript-parsers/gemini-session.js';
 import { AiderHistoryParser } from '../../trajectory/transcript-parsers/aider-history.js';
 import { ContinueDevDataParser } from '../../trajectory/transcript-parsers/continue-devdata.js';
+import {
+  CREDENTIAL_REDACTED,
+  isSensitiveCredentialKey,
+} from '../../trajectory/processors/credential-scrub.js';
+import {
+  type IdentityScrubConfig,
+  scrubIdentityString,
+} from '../../trajectory/processors/identity-scrub.js';
+import {
+  type PathScrubConfig,
+  scrubPathString,
+} from '../../trajectory/processors/path-scrub.js';
 
 export interface CaptureImportResult {
   ok: true;
@@ -56,7 +69,7 @@ interface CaptureImportStoreInput {
   dbPath: string;
 }
 
-async function importCaptureToStore(input: CaptureImportStoreInput): Promise<{
+export async function importCaptureToStore(input: CaptureImportStoreInput): Promise<{
   sessionId: string;
   spans: number;
 }> {
@@ -74,9 +87,30 @@ async function importCaptureToStore(input: CaptureImportStoreInput): Promise<{
   try {
     const captures = new CapturesStore(store);
     const repo = input.repo ? repoMetadata(input.repo) : {};
+    const scrubConfig = importScrubConfig(input.repo);
     const times = events.map((event) => Date.parse(event.timestamp)).filter(Number.isFinite);
     const firstMs = times.length > 0 ? Math.min(...times) : Date.now();
     const lastMs = times.length > 0 ? Math.max(...times) : firstMs;
+    const traceId = sha256(`${sessionId}:${file}`).slice(0, 32);
+    const spanRows = events.map((event, index) => {
+      const startMs = Date.parse(event.timestamp);
+      const startNs = BigInt(Number.isFinite(startMs) ? startMs : firstMs) * 1_000_000n;
+      const { attributes, redactedKeys } = scrubImportedAttributes(
+        eventAttributes(event),
+        scrubConfig,
+      );
+      return {
+        sessionId,
+        spanId: sha256(`${sessionId}:${index}:${event.kind}`).slice(0, 16),
+        traceId,
+        parentSpanId: null,
+        name: `jinn.transcript.${event.kind}`,
+        startTimeUnixNano: startNs.toString(),
+        endTimeUnixNano: (startNs + 1_000_000n).toString(),
+        attributes,
+        redactedKeys,
+      };
+    });
     captures.savePending({
       sessionId,
       capturedAt: new Date(firstMs).toISOString(),
@@ -85,31 +119,157 @@ async function importCaptureToStore(input: CaptureImportStoreInput): Promise<{
       status: 'pending',
       spanCount: events.length,
       durationMs: Math.max(1, lastMs - firstMs),
-      redactedSpanCount: 0,
+      redactedSpanCount: spanRows.filter((span) => span.redactedKeys.length > 0).length,
       ...repo,
     });
 
-    const traceId = sha256(`${sessionId}:${file}`).slice(0, 32);
-    events.forEach((event, index) => {
-      const startMs = Date.parse(event.timestamp);
-      const startNs = BigInt(Number.isFinite(startMs) ? startMs : firstMs) * 1_000_000n;
-      captures.appendSpan({
-        sessionId,
-        spanId: sha256(`${sessionId}:${index}:${event.kind}`).slice(0, 16),
-        traceId,
-        parentSpanId: null,
-        name: `jinn.transcript.${event.kind}`,
-        startTimeUnixNano: startNs.toString(),
-        endTimeUnixNano: (startNs + 1_000_000n).toString(),
-        attributes: eventAttributes(event),
-        redactedKeys: [],
-      });
-    });
+    spanRows.forEach((span) => captures.appendSpan(span));
   } finally {
     store.close();
   }
 
   return { sessionId, spans: events.length };
+}
+
+interface ImportScrubConfig {
+  identity: IdentityScrubConfig;
+  path: PathScrubConfig;
+}
+
+const RAW_CREDENTIAL_PATTERNS: readonly RegExp[] = [
+  /\bBearer\s+[A-Za-z0-9._-]{10,}/gi,
+  /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g,
+  /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g,
+  /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
+];
+
+function importScrubConfig(repo?: string): ImportScrubConfig {
+  const repoRoot = repo ? resolve(repo) : undefined;
+  const identity: IdentityScrubConfig = {
+    username: safeUsername(),
+    hostname: hostname(),
+    gitAuthorName: repoRoot ? gitOutput(repoRoot, ['config', '--get', 'user.name']) : undefined,
+    gitAuthorEmail: repoRoot ? gitOutput(repoRoot, ['config', '--get', 'user.email']) : undefined,
+  };
+  return {
+    identity,
+    path: {
+      home: homedir(),
+      ...(repoRoot ? { repoRoot } : {}),
+    },
+  };
+}
+
+function safeUsername(): string | undefined {
+  try {
+    return userInfo().username || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function scrubImportedAttributes(
+  attrs: Record<string, unknown>,
+  cfg: ImportScrubConfig,
+): { attributes: Record<string, unknown>; redactedKeys: string[] } {
+  const redactedKeys = new Set<string>();
+  const attributes: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    if (isSensitiveCredentialKey(key)) {
+      attributes[key] = CREDENTIAL_REDACTED;
+      redactedKeys.add(key);
+      continue;
+    }
+    attributes[key] = scrubImportedValue(value, key, cfg, redactedKeys);
+  }
+  return { attributes, redactedKeys: Array.from(redactedKeys).sort() };
+}
+
+function scrubImportedValue(
+  value: unknown,
+  redactionKey: string,
+  cfg: ImportScrubConfig,
+  redactedKeys: Set<string>,
+): unknown {
+  if (typeof value === 'string') {
+    const jsonScrubbed = scrubJsonAttributeValue(value, redactionKey, cfg, redactedKeys);
+    if (jsonScrubbed !== null) return jsonScrubbed;
+    return scrubTextAttributeValue(value, redactionKey, cfg, redactedKeys);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry, index) =>
+      scrubImportedValue(entry, `${redactionKey}[${index}]`, cfg, redactedKeys),
+    );
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, raw] of Object.entries(value)) {
+      const childKey = `${redactionKey}.${key}`;
+      if (isSensitiveCredentialKey(key)) {
+        out[key] = CREDENTIAL_REDACTED;
+        redactedKeys.add(childKey);
+      } else {
+        out[key] = scrubImportedValue(raw, childKey, cfg, redactedKeys);
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
+function scrubJsonAttributeValue(
+  value: string,
+  redactionKey: string,
+  cfg: ImportScrubConfig,
+  redactedKeys: Set<string>,
+): string | null {
+  const trimmed = value.trimStart();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const before = JSON.stringify(parsed);
+    const scrubbed = scrubImportedValue(parsed, redactionKey, cfg, redactedKeys);
+    const after = JSON.stringify(scrubbed);
+    return after === before ? value : after;
+  } catch {
+    return null;
+  }
+}
+
+function scrubTextAttributeValue(
+  value: string,
+  redactionKey: string,
+  cfg: ImportScrubConfig,
+  redactedKeys: Set<string>,
+): string {
+  let out = value;
+  out = out.replace(
+    /(^|\n)(\s*[+-]?\s*["']?)([A-Za-z0-9_.-]*(?:authorization|api[_-]?key|apikey|bearer|password|secret|token|private[_-]?key|privatekey)[A-Za-z0-9_.-]*)(["']?\s*[:=]\s*)([^\n]*)/gi,
+    (_match, lineStart: string, prefix: string, key: string, sep: string) => {
+      redactedKeys.add(`${redactionKey}.${key}`);
+      return `${lineStart}${prefix}${key}${sep}${CREDENTIAL_REDACTED}`;
+    },
+  );
+  out = out.replace(
+    /\b([A-Za-z0-9_.-]*(?:authorization|api[_-]?key|apikey|bearer|password|secret|token|private[_-]?key|privatekey)[A-Za-z0-9_.-]*)\s*=\s*("[^"]*"|'[^']*'|[^\s,;&]+)/gi,
+    (_match, key: string) => {
+      redactedKeys.add(`${redactionKey}.${key}`);
+      return `${key}=${CREDENTIAL_REDACTED}`;
+    },
+  );
+  for (const pattern of RAW_CREDENTIAL_PATTERNS) {
+    out = out.replace(pattern, () => {
+      redactedKeys.add(redactionKey);
+      return CREDENTIAL_REDACTED;
+    });
+  }
+
+  const credentialScrubbed = out;
+  out = scrubPathString(out, cfg.path);
+  out = scrubIdentityString(out, cfg.identity);
+  if (out !== credentialScrubbed) redactedKeys.add(redactionKey);
+  return out;
 }
 
 function inferTool(file: string): string {

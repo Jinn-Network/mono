@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { keccak256, type Hex } from 'viem';
 import type { Artifact, ArtifactSource, SignedEnvelope, UnsignedEnvelope } from '../types/envelope.js';
 import { SignedEnvelopeSchema, UnsignedEnvelopeSchema } from '../types/envelope.js';
 import type { SessionProvenance } from '../types/session-provenance.js';
@@ -16,6 +15,7 @@ import {
 const ZERO_MEASUREMENT = `0x${'0'.repeat(64)}` as const;
 const DEFAULT_PRICE_USDC = '0';
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1' as const;
+const CAPTURE_TRAJECTORY_ARTIFACT_TYPE = 'jinn.capture-trajectory.v1' as const;
 
 export interface CapturePublishedBlob {
   cid: string;
@@ -96,10 +96,10 @@ export async function publishCaptureEnvelope(
 
   const spans = deps.captures.getSpansBySession(sessionId);
   const now = deps.now?.() ?? new Date();
-  const trajectoryPayload = buildCaptureTrajectoryPayload(capture, spans, now, deps.signer.address);
+  const trajectoryPayload = buildCaptureTrajectoryPayload(capture, spans, now);
   const trajectoryBlob = await deps.publishArtifact({
     sessionId,
-    artifactType: 'jinn.trajectory.v1',
+    artifactType: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
     payload: trajectoryPayload,
     metadata: { description: 'Redacted local-session capture trajectory' },
   });
@@ -145,7 +145,6 @@ export async function publishCaptureEnvelope(
     participant: deps.participant,
     signerAddress: deps.signer.address,
     clientGitSha: deps.clientGitSha,
-    trajectory,
     artifacts,
     harnessBundleSha,
     executorOverrides: deps.executor,
@@ -184,14 +183,13 @@ interface BuildUnsignedCaptureEnvelopeArgs {
   participant: CapturePublishDeps['participant'];
   signerAddress: `0x${string}`;
   clientGitSha: string;
-  trajectory: ReturnType<typeof blobToAccess>;
   artifacts: Artifact[];
   harnessBundleSha: string;
   executorOverrides?: Partial<UnsignedEnvelope['executor']>;
 }
 
 export function buildUnsignedCaptureEnvelope(args: BuildUnsignedCaptureEnvelopeArgs): UnsignedEnvelope {
-  const { capture, now, participant, signerAddress, trajectory, artifacts, harnessBundleSha } = args;
+  const { capture, now, participant, signerAddress, artifacts, harnessBundleSha } = args;
   const sessionProvenance: SessionProvenance = {
     sessionId: capture.sessionId,
     capturedAt: capture.capturedAt,
@@ -234,11 +232,7 @@ export function buildUnsignedCaptureEnvelope(args: BuildUnsignedCaptureEnvelopeA
     executor,
     evidenceTier: 'self-signed',
     attestation: null,
-    trajectory: {
-      sha256: trajectory.sha256,
-      access: { endpoint: trajectory.endpoint, priceUsdc: trajectory.priceUsdc },
-      sources: trajectory.sources,
-    },
+    trajectory: null,
     artifacts,
     payload: {
       capture: {
@@ -256,10 +250,9 @@ function buildCaptureTrajectoryPayload(
   capture: PendingCaptureRow,
   spans: SpanRow[],
   now: Date,
-  signer: `0x${string}`,
 ): Record<string, unknown> {
   const unsigned = {
-    schemaVersion: 'jinn.capture-trajectory.v1',
+    schemaVersion: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
     sessionId: capture.sessionId,
     capturedAt: capture.capturedAt,
     exportedAt: now.toISOString(),
@@ -269,16 +262,7 @@ function buildCaptureTrajectoryPayload(
       totalRedactions: spans.reduce((sum, span) => sum + span.redactedKeys.length, 0),
     },
   };
-  const canonical = canonicalJson(unsigned);
-  return {
-    ...unsigned,
-    signature: {
-      algo: 'secp256k1',
-      signer,
-      hash: keccak256(new TextEncoder().encode(canonical)),
-      sig: '0x',
-    },
-  };
+  return unsigned;
 }
 
 async function signUnsignedCaptureEnvelope(
@@ -324,7 +308,7 @@ function blobToAccess(blob: CapturePublishedBlob, deps: Pick<
 
 function trajectoryToArtifact(trajectory: ReturnType<typeof blobToAccess>): Artifact {
   return {
-    artifactType: 'jinn.trajectory.v1',
+    artifactType: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
     sha256: trajectory.sha256,
     metadata: { description: 'Redacted local-session capture trajectory' },
     access: { endpoint: trajectory.endpoint, priceUsdc: trajectory.priceUsdc },

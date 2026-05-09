@@ -797,6 +797,7 @@ __metadata:
   bin:
     client: ./dist/bin/jinn.js
     jinn: ./dist/bin/jinn.js
+    jinn-stop-hook: ./dist/bin/jinn-stop-hook.js
   languageName: unknown
   linkType: soft
 

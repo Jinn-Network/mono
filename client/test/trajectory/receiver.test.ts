@@ -1,3 +1,4 @@
+import { createServer } from 'node:net';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { startReceiver, type Receiver } from '../../src/trajectory/receiver.js';
 import { trace, SpanKind } from '@opentelemetry/api';
@@ -27,6 +28,16 @@ describe('embedded OTLP receiver', () => {
       await new Promise((r) => setTimeout(r, 25));
     }
     throw new Error(`Timed out waiting for span '${name}'`);
+  }
+
+  async function freeTcpPort(): Promise<number> {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('failed to allocate tcp port');
+    const port = address.port;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    return port;
   }
 
   it('receives a span from a remote OTLP/HTTP exporter', async () => {
@@ -94,6 +105,22 @@ describe('embedded OTLP receiver', () => {
     expect(collidingReceiver).toBeNull();
     expect(collisionError).not.toBeNull();
     expect(collisionError!.message).toMatch(/EADDRINUSE|address already in use/i);
+  });
+
+  it('closes HTTP listener when gRPC bind fails during startup', async () => {
+    const occupiedGrpcPort = receiver.grpcPort;
+    const explicitHttpPort = await freeTcpPort();
+
+    await expect(startReceiver({
+      grpcPort: occupiedGrpcPort,
+      httpPort: explicitHttpPort,
+    })).rejects.toThrow(/EADDRINUSE|address already in use/i);
+
+    const recovered = await startReceiver({
+      grpcPort: 0,
+      httpPort: explicitHttpPort,
+    });
+    await recovered.shutdown();
   });
 
   it('isolates per-processor exceptions in dispatch chain', async () => {

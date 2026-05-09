@@ -57,24 +57,13 @@ describe('publishCaptureEnvelope', () => {
       participant: { safeAddress: SAFE, agentEoa: AGENT },
       signerAddress: AGENT,
       clientGitSha: 'abc1234',
-      trajectory: {
-        cid: 'bafytrajectory',
-        sha256: 'd'.repeat(64),
-        endpoint: 'https://operator.example/artifacts/trajectory',
-        priceUsdc: '0',
-        sources: [{
-          kind: 'ipfs',
-          cid: 'bafytrajectory',
-          sha256: 'd'.repeat(64),
-          encoding: 'jinn.artifact.donation.v1',
-        }],
-      },
       artifacts: [],
       harnessBundleSha: EMPTY_BUNDLE_SHA256,
     });
 
     expect(unsigned.role).toBe('capture');
     expect(unsigned.task).toBeUndefined();
+    expect(unsigned.trajectory).toBeNull();
     expect(unsigned.sessionProvenance?.repo?.commitHash).toBe('a'.repeat(40));
     expect(unsigned.executor.codeDigest).toBe(`sha256:${EMPTY_BUNDLE_SHA256}`);
   });
@@ -132,16 +121,11 @@ describe('publishCaptureEnvelope', () => {
     expect(result.envelopeCid).toBe('bafyenvelope');
     expect(result.anchor).toEqual({ txHash: `0x${'e'.repeat(64)}`, blockNumber: 123 });
     expect(result.envelope.role).toBe('capture');
-    expect(result.envelope.trajectory?.sha256).toBe(result.trajectory.sha256);
-    expect(result.envelope.trajectory?.sources?.[0]).toMatchObject({
-      kind: 'ipfs',
-      cid: result.trajectory.cid,
-      sha256: result.trajectory.sha256,
-    });
+    expect(result.envelope.trajectory).toBeNull();
     expect(result.envelope.executor.codeDigest).toBe(`sha256:${'9'.repeat(64)}`);
     expect(result.artifacts).toHaveLength(2);
     expect(result.artifacts[0]).toMatchObject({
-      artifactType: 'jinn.trajectory.v1',
+      artifactType: 'jinn.capture-trajectory.v1',
       sha256: result.trajectory.sha256,
       sources: [{
         kind: 'ipfs',
@@ -151,7 +135,9 @@ describe('publishCaptureEnvelope', () => {
       }],
     });
     expect(result.artifacts[1].artifactType).toBe('harness-bundle.v1');
-    expect(publishedArtifacts.map((a) => a.artifactType)).toEqual(['jinn.trajectory.v1', 'harness-bundle.v1']);
+    expect(publishedArtifacts.map((a) => a.artifactType)).toEqual(['jinn.capture-trajectory.v1', 'harness-bundle.v1']);
+    expect(publishedArtifacts[0].payload).toMatchObject({ schemaVersion: 'jinn.capture-trajectory.v1' });
+    expect(publishedArtifacts[0].payload).not.toHaveProperty('signature');
     expect(publishedEnvelopes).toHaveLength(1);
   });
 

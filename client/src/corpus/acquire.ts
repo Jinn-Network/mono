@@ -132,7 +132,9 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
       };
     } catch (err) {
       if (err instanceof HashMismatchError) throw err;
-      throw new AcquireError(sha256, `ipfs donation source failed: ${ipfsSource.cid}`, err);
+      // Donated IPFS is an opportunistic fast path. Gateway failures and
+      // malformed donation payloads should not block the paid acquisition
+      // chain; only verified byte hash mismatches remain fatal.
     }
   }
 

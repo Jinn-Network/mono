@@ -232,7 +232,13 @@ export async function startReceiver(opts: ReceiverOptions): Promise<Receiver> {
   };
 
   const httpServer = await startHttpServer(opts.httpPort, dispatch);
-  const grpcServer = await startGrpcServer(opts.grpcPort, dispatch);
+  let grpcServer: ServerHandle;
+  try {
+    grpcServer = await startGrpcServer(opts.grpcPort, dispatch);
+  } catch (err) {
+    await httpServer.close().catch(() => undefined);
+    throw err;
+  }
 
   return {
     grpcPort: grpcServer.port,
