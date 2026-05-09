@@ -91,3 +91,37 @@ export type JinnTrajectoryV1 = z.infer<typeof JinnTrajectoryV1Schema>;
 /** Unsigned form — what we hash + sign. */
 export const UnsignedTrajectorySchema = JinnTrajectoryV1Schema.omit({ signature: true });
 export type UnsignedTrajectory = z.infer<typeof UnsignedTrajectorySchema>;
+
+/**
+ * Per-run capture manifest — records the operator's authorisation and
+ * coarse harness-bundle metadata for telemetry capture. v0 deliberately
+ * keeps operator control at the bundle level (no per-file curation) per
+ * DR-2026-05-07-g; the audit surface is "what did the operator authorise
+ * the daemon to read?" not "what did the daemon ultimately read?"
+ *
+ * Spec: spec/2026-05-07-telemetry-collector-and-task-generator.md §3.3
+ */
+export const CaptureManifestSchema = z.object({
+  scrubProcessors: z.array(z.object({
+    name: z.string(),
+    version: z.string(),
+    config: z.record(z.unknown()).optional(),
+  })),
+  reviewedBy: z.object({
+    safeAddress: z.string(),
+    reviewedAt: z.string().datetime(),
+  }),
+  trustedRepoToggle: z.boolean(),
+  harnessBundle: z.object({
+    included: z.boolean(),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    allowedDirectoriesHash: z.string().regex(/^[0-9a-f]{64}$/),
+    capturePath: z.enum(['A', 'B', 'C', 'D']),
+  }),
+});
+
+export type CaptureManifest = z.infer<typeof CaptureManifestSchema>;
+
+/** sha256 of an empty (no-files) bundle. Used when the operator opts out of harness-bundle capture. */
+export const EMPTY_BUNDLE_SHA256 =
+  'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';

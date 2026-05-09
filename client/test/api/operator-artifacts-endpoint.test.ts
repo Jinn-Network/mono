@@ -60,6 +60,7 @@ describe('GET /v1/operator/artifacts', () => {
         publicEndpoint: 'https://op.example.com',
         defaultPriceUsdc: '0',
         perArtifactTypePrice: {},
+        donation: { enabled: false },
       },
     });
 
@@ -151,6 +152,7 @@ describe('POST /v1/operator/pricing', () => {
         publicEndpoint: 'https://op.example.com',
         defaultPriceUsdc: '0.001',
         perArtifactTypePrice: { design_document: '0.01' },
+        donation: { enabled: true },
       }),
     });
 
@@ -167,6 +169,7 @@ describe('POST /v1/operator/pricing', () => {
       publicEndpoint: 'https://op.example.com',
       defaultPriceUsdc: '0.001',
       perArtifactTypePrice: { design_document: '0.01' },
+      donation: { enabled: true },
     });
   });
 
@@ -179,6 +182,7 @@ describe('POST /v1/operator/pricing', () => {
         publicEndpoint: 'https://op.example.com',
         defaultPriceUsdc: '0',
         perArtifactTypePrice: {},
+        donation: { enabled: false },
       },
     });
 

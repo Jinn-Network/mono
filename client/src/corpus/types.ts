@@ -6,7 +6,7 @@
  */
 
 import type { Store } from '../store/store.js';
-import type { EvidenceTier, Role, SignedEnvelope } from '../types/envelope.js';
+import type { ArtifactSource, EvidenceTier, Role, SignedEnvelope } from '../types/envelope.js';
 
 export interface CorpusOptions {
   subgraphUrl: string;
@@ -92,7 +92,7 @@ export interface ArtifactContent {
   sha256: string;
   bytes: Buffer;
   artifactType: string;
-  source: 'cache' | 'self-store' | 'origin' | 'route-resolver';
+  source: 'cache' | 'self-store' | 'origin' | 'route-resolver' | 'ipfs';
   paidAmountUsdc: string;
   fetchedAt: string;
   sourceOperator?: string;
@@ -118,7 +118,7 @@ export interface Corpus {
   acquireBySha256(
     sha256: string,
     access: { endpoint: string; priceUsdc: string },
-    hint?: { artifactType?: string; envelopeCid?: string },
+    hint?: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[] },
   ): Promise<ArtifactContent>;
 }
 

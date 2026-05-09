@@ -13,6 +13,7 @@ describe('loadConfig RPC override handling', () => {
   const originalJinnL2ProofRpcUrl = process.env['JINN_L2_PROOF_RPC_URL'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
+  const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
 
   afterEach(async () => {
     if (originalBaseRpcUrl === undefined) {
@@ -55,6 +56,12 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
     } else {
       process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = originalTestnetTokenDeployment;
+    }
+
+    if (originalOperatorDonationEnabled === undefined) {
+      delete process.env['JINN_OPERATOR_DONATION_ENABLED'];
+    } else {
+      process.env['JINN_OPERATOR_DONATION_ENABLED'] = originalOperatorDonationEnabled;
     }
 
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -153,6 +160,27 @@ describe('loadConfig RPC override handling', () => {
     const config = loadConfig(configPath);
 
     expect(config.rpcUrl).toBe('https://sepolia.base.org');
+  });
+
+  it('defaults operator donation to disabled when operator config exists', async () => {
+    const configPath = await writeConfigFile({
+      operator: { publicEndpoint: 'https://op.example.com' },
+    });
+
+    const config = loadConfig(configPath);
+
+    expect(config.operator?.donation.enabled).toBe(false);
+  });
+
+  it('allows env to enable operator donation', async () => {
+    const configPath = await writeConfigFile({
+      operator: { publicEndpoint: 'https://op.example.com' },
+    });
+    process.env['JINN_OPERATOR_DONATION_ENABLED'] = 'true';
+
+    const config = loadConfig(configPath);
+
+    expect(config.operator?.donation.enabled).toBe(true);
   });
 
   it('accepts self-bond stakingMode from env', () => {
@@ -811,5 +839,58 @@ describe('operator config (jinn-mono-vy37.1.3)', () => {
       operator: { publicEndpoint: 'not-a-url' },
     });
     expect(() => loadConfig(configPath)).toThrow();
+  });
+});
+
+describe('capture config', () => {
+  const dirs: string[] = [];
+  const ENV_KEYS = [
+    'JINN_CAPTURES_LLM_PROXY_ENABLED',
+    'JINN_CAPTURES_LLM_PROXY_PORT',
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  for (const k of ENV_KEYS) saved[k] = process.env[k];
+
+  afterEach(async () => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeCaptureConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('defaults the LLM proxy off', () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const cfg = loadConfig();
+    expect(cfg.captures.llmProxy).toEqual({ enabled: false, port: 7342 });
+  });
+
+  it('loads LLM proxy config from file', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeCaptureConfigFile({
+      captures: { llmProxy: { enabled: true, port: 7450 } },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.captures.llmProxy).toEqual({ enabled: true, port: 7450 });
+  });
+
+  it('overrides LLM proxy config from env', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeCaptureConfigFile({
+      captures: { llmProxy: { enabled: false, port: 7450 } },
+    });
+    process.env['JINN_CAPTURES_LLM_PROXY_ENABLED'] = 'yes';
+    process.env['JINN_CAPTURES_LLM_PROXY_PORT'] = '7451';
+    const cfg = loadConfig(configPath);
+    expect(cfg.captures.llmProxy).toEqual({ enabled: true, port: 7451 });
   });
 });

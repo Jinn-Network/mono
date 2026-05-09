@@ -24,6 +24,7 @@ const servedResponse = {
     publicEndpoint: 'https://op.example.com',
     defaultPriceUsdc: '0',
     perArtifactTypePrice: { design_document: '0.002' },
+    donation: { enabled: false },
   },
   summary: {
     served: {
@@ -93,6 +94,7 @@ beforeEach(() => {
       publicEndpoint: 'https://op.example.com',
       defaultPriceUsdc: '0.001',
       perArtifactTypePrice: { design_document: '0.002' },
+      donation: { enabled: true },
     },
   });
 });
@@ -127,13 +129,15 @@ describe('OperatorDataMarket', () => {
     fireEvent.change(screen.getByLabelText(/default price/i), {
       target: { value: '0.001' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save pricing' }));
+    fireEvent.click(screen.getByLabelText(/enable testnet donation mode/i));
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
 
     await waitFor(() => expect(updatePricingMock).toHaveBeenCalled());
     expect(updatePricingMock).toHaveBeenCalledWith({
       publicEndpoint: 'https://op.example.com',
       defaultPriceUsdc: '0.001',
       perArtifactTypePrice: { design_document: '0.002' },
+      donation: { enabled: true },
     });
     await waitFor(() => expect(onRestartPending).toHaveBeenCalled());
   });

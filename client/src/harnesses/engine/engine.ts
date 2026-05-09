@@ -283,6 +283,7 @@ export interface TaskEngineOptions {
     publicEndpoint: string;
     defaultPriceUsdc: string;
     perArtifactTypePrice: Record<string, string>;
+    donation?: { enabled: boolean };
   };
   /**
    * Harness execution mode from operator config (JinnConfig.harness.mode).
@@ -1124,7 +1125,13 @@ export class TaskEngine {
       requestId: task.requestId,
       ...(collector ? { collector } : {}),
     };
-    const rawArtifacts = await walkArtifacts(workingDir, implArtifacts);
+    const rawArtifacts = await walkArtifacts(
+      workingDir,
+      implArtifacts,
+      packagingDepsWithReq.donation?.enabled
+        ? { scrub: packagingDepsWithReq.donation.scrub }
+        : {},
+    );
     const uploadedArtifacts = await uploadArtifacts(rawArtifacts, packagingDepsWithReq);
 
     // 1b. Emit trajectory to IPFS now that all artifact spans have been added.

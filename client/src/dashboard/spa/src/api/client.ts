@@ -21,6 +21,9 @@ import type {
   OperatorArtifactSource,
   OperatorArtifactsResponse,
   OperatorPricingConfig,
+  CapturesListResponse,
+  CaptureDetailResponse,
+  Iso8601,
 } from './types.js';
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -336,6 +339,30 @@ export const api = {
           }
         >;
       }>('/v1/operator/joined'),
+  },
+  captures: {
+    listPending: () => jfetch<CapturesListResponse>('/api/captures/pending'),
+    get: (sessionId: string) =>
+      jfetch<CaptureDetailResponse>(`/api/captures/${encodeURIComponent(sessionId)}`),
+    approve: (sessionId: string) =>
+      jfetch<{ ok: boolean; sessionId: string; envelopeCid: string; publishedAt: Iso8601 }>(
+        `/api/captures/${encodeURIComponent(sessionId)}/approve`,
+        { method: 'POST' },
+      ),
+    skip: (sessionId: string) =>
+      jfetch<{ ok: boolean; sessionId: string; skippedAt: Iso8601 }>(
+        `/api/captures/${encodeURIComponent(sessionId)}/skip`,
+        { method: 'POST' },
+      ),
+    trustRepo: (repoRemoteUrl: string, trusted: boolean) =>
+      jfetch<{ ok: boolean; repoRemoteUrl: string; trusted: boolean }>(
+        '/api/captures/trust-repos',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repoRemoteUrl, trusted }),
+        },
+      ),
   },
 };
 

@@ -31,7 +31,7 @@ const LegacyPassthroughSchema = z.record(z.unknown());
  * Registry mapping (solverType, role) → payload schema.
  * Update when adding a new solverType.
  */
-export const SOLVER_TYPE_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
+export const SOLVER_TYPE_PAYLOADS: Record<string, Partial<Record<Role, z.ZodSchema>>> = {
   'portfolio.v0': {
     restoration: PortfolioV0RestorationPayloadSchema,
     verdict: PortfolioV0VerdictPayloadSchema,
@@ -64,6 +64,7 @@ export const SOLVER_TYPE_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
 };
 
 export function validatePayload(solverType: string, role: Role, payload: unknown): void {
+  if (role === 'capture') return;  // capture payloads are free-form; no structural validation in v0
   const bucket = SOLVER_TYPE_PAYLOADS[solverType];
   if (!bucket) throw new Error(`Unknown solverType: ${solverType}`);
   const schema = bucket[role];

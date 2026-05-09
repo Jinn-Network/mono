@@ -211,7 +211,7 @@ export class PredictionV1Evaluator implements Harness {
     if (expectedRef.kind === 'missing') {
       checks.push(checkTaskRefMissingExpected());
     } else {
-      checks.push(checkTaskRef(envelope.task.cid, expectedRef.cid));
+      checks.push(checkTaskRef(envelope.task!.cid, expectedRef.cid));
     }
 
     // spec

@@ -194,6 +194,7 @@ export interface OperatorPricingConfig {
   publicEndpoint: string;
   defaultPriceUsdc: string;
   perArtifactTypePrice: Record<string, string>;
+  donation: { enabled: boolean };
 }
 
 export interface OperatorArtifactTypeSummary {
@@ -622,4 +623,41 @@ export interface OwnedLaunchedListResponse {
 
 export interface DraftListResponse {
   drafts: DraftSolverNetRecord[];
+}
+
+export interface CaptureSummary {
+  sessionId: string;
+  capturedAt: Iso8601;
+  originatingTool: { name: string; version?: string };
+  capturePath: 'A' | 'B' | 'C' | 'D';
+  status: 'pending' | 'approved' | 'skipped';
+  spanCount: number;
+  durationMs: number;
+  redactedSpanCount: number;
+  repoRemoteUrl?: string;
+  repoCommitHash?: string;
+  envelopeCid?: string;
+  publishedAt?: Iso8601;
+  skippedAt?: Iso8601;
+}
+
+export interface CaptureSpan {
+  sessionId: string;
+  spanId: string;
+  traceId: string;
+  parentSpanId: string | null;
+  name: string;
+  startTimeUnixNano: string;
+  endTimeUnixNano: string;
+  attributes: Record<string, unknown>;
+  redactedKeys: string[];
+}
+
+export interface CapturesListResponse {
+  captures: CaptureSummary[];
+}
+
+export interface CaptureDetailResponse {
+  capture: CaptureSummary;
+  spans: CaptureSpan[];
 }

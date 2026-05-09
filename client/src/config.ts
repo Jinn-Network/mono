@@ -499,6 +499,7 @@ export const JinnConfigSchema = z.object({
    * Env overrides:
    *   JINN_OPERATOR_PUBLIC_ENDPOINT
    *   JINN_OPERATOR_DEFAULT_PRICE_USDC
+   *   JINN_OPERATOR_DONATION_ENABLED
    */
   operator: z
     .object({
@@ -513,8 +514,35 @@ export const JinnConfigSchema = z.object({
           z.string().regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string'),
         )
         .default({}),
+      donation: z
+        .object({
+          enabled: z.boolean().default(false),
+        })
+        .default({ enabled: false }),
     })
     .optional(),
+
+  /**
+   * Operator-local capture configuration.
+   *
+   * Path C (LLM API proxy) is disabled by default. Operators opt in by
+   * enabling this block and pointing ANTHROPIC_BASE_URL / OPENAI_BASE_URL at
+   * the local proxy port.
+   *
+   * Env:
+   *   JINN_CAPTURES_LLM_PROXY_ENABLED=1|true|yes
+   *   JINN_CAPTURES_LLM_PROXY_PORT=7342
+   */
+  captures: z
+    .object({
+      llmProxy: z
+        .object({
+          enabled: z.boolean().default(false),
+          port: z.number().int().positive().default(7342),
+        })
+        .default({ enabled: false, port: 7342 }),
+    })
+    .default({ llmProxy: { enabled: false, port: 7342 } }),
 
   /**
    * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
@@ -713,11 +741,18 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   if (
     env['JINN_OPERATOR_PUBLIC_ENDPOINT'] ||
-    env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
+    env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] ||
+    env['JINN_OPERATOR_DONATION_ENABLED'] !== undefined
   ) {
     const prevOp = typeof merged['operator'] === 'object' && merged['operator'] !== null
       ? (merged['operator'] as Record<string, unknown>)
       : {};
+    const prevDonation = typeof prevOp['donation'] === 'object' && prevOp['donation'] !== null
+      ? (prevOp['donation'] as Record<string, unknown>)
+      : {};
+    const donationEnabled = env['JINN_OPERATOR_DONATION_ENABLED'] !== undefined
+      ? ['1', 'true', 'yes'].includes(env['JINN_OPERATOR_DONATION_ENABLED'].trim().toLowerCase())
+      : undefined;
     merged['operator'] = {
       ...prevOp,
       ...(env['JINN_OPERATOR_PUBLIC_ENDPOINT']
@@ -726,6 +761,34 @@ export function loadConfig(configPath?: string): JinnConfig {
       ...(env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
         ? { defaultPriceUsdc: env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] }
         : {}),
+      ...(donationEnabled !== undefined
+        ? { donation: { ...prevDonation, enabled: donationEnabled } }
+        : {}),
+    };
+  }
+
+  if (
+    env['JINN_CAPTURES_LLM_PROXY_ENABLED'] !== undefined ||
+    env['JINN_CAPTURES_LLM_PROXY_PORT'] !== undefined
+  ) {
+    const prevCaptures = typeof merged['captures'] === 'object' && merged['captures'] !== null
+      ? (merged['captures'] as Record<string, unknown>)
+      : {};
+    const prevProxy = typeof prevCaptures['llmProxy'] === 'object' && prevCaptures['llmProxy'] !== null
+      ? (prevCaptures['llmProxy'] as Record<string, unknown>)
+      : {};
+    const enabled = env['JINN_CAPTURES_LLM_PROXY_ENABLED'] !== undefined
+      ? ['1', 'true', 'yes'].includes(env['JINN_CAPTURES_LLM_PROXY_ENABLED'].trim().toLowerCase())
+      : undefined;
+    merged['captures'] = {
+      ...prevCaptures,
+      llmProxy: {
+        ...prevProxy,
+        ...(enabled !== undefined ? { enabled } : {}),
+        ...(env['JINN_CAPTURES_LLM_PROXY_PORT']
+          ? { port: Number.parseInt(env['JINN_CAPTURES_LLM_PROXY_PORT'], 10) }
+          : {}),
+      },
     };
   }
 
@@ -902,6 +965,9 @@ const TRACKED_ENV_VARS = [
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',
   'JINN_OPERATOR_DEFAULT_PRICE_USDC',
+  'JINN_OPERATOR_DONATION_ENABLED',
+  'JINN_CAPTURES_LLM_PROXY_ENABLED',
+  'JINN_CAPTURES_LLM_PROXY_PORT',
   'JINN_BUILD_COMMIT',
 ] as const;
 

@@ -18,6 +18,7 @@ import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { JoinFlow } from './pages/operator-catalog/JoinFlow.js';
+import { CapturesTab } from './captures/CapturesTab.js';
 
 /**
  * App routes between two distinct phases of operator life:
@@ -74,6 +75,7 @@ export default function App(): JSX.Element {
           <Route path="/operator">
             <OperatorPage onRestartPending={() => setRestartPending(true)} />
           </Route>
+          <Route path="/captures"><CapturesTab /></Route>
           <Route path="/configuration"><ConfigurationRedirect /></Route>
           <Route path="/launcher/create"><LauncherCreatePage /></Route>
           <Route path="/launcher/launched/:solverNetId">

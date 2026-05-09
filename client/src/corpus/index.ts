@@ -17,6 +17,7 @@ import type {
 import { runCorpusQuery } from './query.js';
 import { fetchManifest } from './fetch.js';
 import { acquireArtifactContent } from './acquire.js';
+import type { ArtifactSource } from '../types/envelope.js';
 
 export type {
   Corpus,
@@ -90,8 +91,11 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
         privateKey: opts.signer.privateKey,
         routeResolver: opts.routeResolver,
         envelopeCid: manifest.ref.manifestCid,
+        sources: a.sources,
+        ipfsGatewayUrl: opts.ipfsGatewayUrl,
         ownerSafe: manifest.envelope.participant.safeAddress,
         acquireFn,
+        fetchFromIpfs: fetchFromIpfsImpl,
       });
       contents.set(a.sha256, ac);
     }
@@ -101,7 +105,7 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
   async function acquireBySha256(
     sha256: string,
     access: { endpoint: string; priceUsdc: string },
-    hint?: { artifactType?: string; envelopeCid?: string },
+    hint?: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[] },
   ): Promise<ArtifactContent> {
     return acquireArtifactContent({
       sha256,
@@ -112,7 +116,10 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
       privateKey: opts.signer.privateKey,
       routeResolver: opts.routeResolver,
       envelopeCid: hint?.envelopeCid,
+      sources: hint?.sources,
+      ipfsGatewayUrl: opts.ipfsGatewayUrl,
       acquireFn,
+      fetchFromIpfs: fetchFromIpfsImpl,
     });
   }
 

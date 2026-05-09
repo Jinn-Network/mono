@@ -1,5 +1,5 @@
 /**
- * Harness engine — workingDir provisioning + artifact walking + IPFS upload.
+ * Harness engine — workingDir provisioning + artifact walking + artifact storage.
  *
  * §6.6 workdir layout, §5.3 artifact artifactType conventions.
  *
@@ -7,7 +7,7 @@
  *   1. Provision workingDir at PRE_SNAPSHOT time: write task.json, env/ files,
  *      sessions/ dir.
  *   2. After impl returns: walk workingDir, read OUTPUTS.json (if present),
- *      compute sha256, upload each artifact to IPFS, return structured list.
+ *      compute sha256, persist each artifact, return structured list.
  */
 
 import { createHash } from 'node:crypto';
@@ -29,6 +29,12 @@ import type { OutputArtifact } from '../../types/portfolio.js';
 import type { Artifact } from '../../types/envelope.js';
 import type { Store } from '../../store/store.js';
 import type { TrajectoryCollector } from '../../trajectory/collector.js';
+import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
+import {
+  type ArtifactScrubConfig,
+  DONATION_ARTIFACT_ENCODING,
+  scrubArtifactBytes,
+} from './artifact-scrub.js';
 
 // ── OUTPUTS.json schema ───────────────────────────────────────────────────────
 //
@@ -83,6 +89,7 @@ export interface PackagingDeps {
   perArtifactTypePrice: Record<string, string>;
   /** Restoration / evaluation request id (links served_artifacts row to envelope). */
   requestId: string;
+  donation?: ArtifactDonationConfig;
   /**
    * Optional trajectory collector. When provided, a `jinn.artifact.emit` span
    * is added to the trajectory for each successfully written artifact, and
@@ -90,6 +97,16 @@ export interface PackagingDeps {
    * The engine backfills `trajectoryCid` after `emitTrajectory` completes.
    */
   collector?: TrajectoryCollector;
+}
+
+export interface ArtifactDonationConfig {
+  enabled: boolean;
+  ipfsRegistryUrl: string;
+  scrub?: ArtifactScrubConfig;
+}
+
+export interface WalkArtifactsOptions {
+  scrub?: ArtifactScrubConfig;
 }
 
 // ── WorkingDir provisioning ───────────────────────────────────────────────────
@@ -148,6 +165,7 @@ async function createWorkdirTarball(
   workingDir: string,
   outputPath: string,
   excludeName?: string,
+  scrub?: ArtifactScrubConfig,
 ): Promise<string> {
   // Build a simple tar manually using Buffer operations to avoid spawning
   // external processes. For correctness and portability we use a pure-JS
@@ -174,7 +192,8 @@ async function createWorkdirTarball(
         if (excludeName && relPath === excludeName) continue;
         // Exclude anything inside env/ (belt-and-suspenders guard)
         if (relPath.startsWith('env/') || relPath.startsWith('env\\')) continue;
-        const content = readFileSync(full);
+        const rawContent = readFileSync(full);
+        const content = scrub ? scrubArtifactBytes(rawContent, scrub).bytes : rawContent;
         entries.push({ relPath, content });
       }
     }
@@ -266,6 +285,12 @@ function sha256Hex(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
 }
 
+function donationEnabled(deps: PackagingDeps): deps is PackagingDeps & {
+  donation: ArtifactDonationConfig & { enabled: true };
+} {
+  return deps.donation?.enabled === true;
+}
+
 // ── Artifact walking ──────────────────────────────────────────────────────────
 
 /**
@@ -277,6 +302,7 @@ function sha256Hex(buf: Buffer): string {
 export async function walkArtifacts(
   workingDir: string,
   implArtifacts: OutputArtifact[] = [],
+  options: WalkArtifactsOptions = {},
 ): Promise<Array<{ localPath: string; artifactType: string; metadata?: Record<string, unknown>; tags?: string[]; access?: { endpoint?: string; priceUsdc?: string } }>> {
   const result: Array<{
     localPath: string;
@@ -382,7 +408,7 @@ export async function walkArtifacts(
   const SNAPSHOT_FILENAME = 'system_snapshot.tar.gz';
   const tarballPath = join(workingDir, SNAPSHOT_FILENAME);
   try {
-    await createWorkdirTarball(workingDir, tarballPath, SNAPSHOT_FILENAME);
+    await createWorkdirTarball(workingDir, tarballPath, SNAPSHOT_FILENAME, options.scrub);
     result.push({
       localPath: tarballPath,
       artifactType: 'system_snapshot',
@@ -401,10 +427,10 @@ export async function walkArtifacts(
 /**
  * Write all collected artifacts to the operator-local served_artifacts store.
  *
- * Per spec/2026-04-30-phase-a-umbrella.md §1: artifact bytes are NEVER pinned
- * to IPFS — they live behind the operator's HTTP server, gated by x402 when
- * priceUsdc > 0. IPFS only holds the manifest envelope as a public discovery
- * anchor (handled by the engine's envelope-assembly step).
+ * Default behavior follows spec/2026-04-30-phase-a-umbrella.md §1: artifact
+ * bytes live behind the operator's HTTP server, gated by x402 when priceUsdc
+ * > 0. Testnet donation mode is an explicit opt-in exception: scrubbed bytes
+ * are also pinned publicly to IPFS and recorded in artifact.sources[].
  *
  * Returns an array of `UploadedArtifact` (= Artifact + localPath).
  */
@@ -426,10 +452,14 @@ export async function uploadArtifacts(
 
   const results: UploadedArtifact[] = [];
   const now = new Date().toISOString();
+  const donate = donationEnabled(deps) ? deps.donation : null;
 
   for (const art of artifacts) {
     try {
-      const content = readFileSync(art.localPath);
+      const rawContent = readFileSync(art.localPath);
+      const content = donate
+        ? scrubArtifactBytes(rawContent, donate.scrub).bytes
+        : rawContent;
       const hash = sha256Hex(content);
 
       const priceUsdc =
@@ -439,6 +469,32 @@ export async function uploadArtifacts(
 
       const endpoint = art.access?.endpoint ?? deps.operatorEndpoint;
 
+      const sources: UploadedArtifact['sources'] = [];
+      if (donate) {
+        const cid = await uploadToIpfs(donate.ipfsRegistryUrl, {
+          schemaVersion: DONATION_ARTIFACT_ENCODING,
+          artifactType: art.artifactType,
+          sha256: hash,
+          encoding: DONATION_ARTIFACT_ENCODING,
+          data: content.toString('base64'),
+        });
+        sources.push({
+          kind: 'ipfs',
+          cid,
+          sha256: hash,
+          encoding: DONATION_ARTIFACT_ENCODING,
+        });
+      }
+
+      const uploaded: UploadedArtifact = {
+        sha256: hash,
+        artifactType: art.artifactType,
+        metadata: art.metadata as UploadedArtifact['metadata'],
+        access: { endpoint, priceUsdc },
+        ...(sources.length > 0 ? { sources } : {}),
+        localPath: art.localPath,
+      };
+
       deps.store.saveServedArtifact({
         sha256: hash,
         artifactType: art.artifactType,
@@ -447,14 +503,6 @@ export async function uploadArtifacts(
         priceUsdc,
         createdAt: now,
       });
-
-      const uploaded: UploadedArtifact = {
-        sha256: hash,
-        artifactType: art.artifactType,
-        metadata: art.metadata as UploadedArtifact['metadata'],
-        access: { endpoint, priceUsdc },
-        localPath: art.localPath,
-      };
 
       // Forward linkage: emit a jinn.artifact.emit span and attach a producedBy
       // back-reference so readers can look up which span produced this artifact.
@@ -484,10 +532,10 @@ export async function uploadArtifacts(
       results.push(uploaded);
     } catch (err) {
       console.error(`[harness-engine] artifact write failed for ${art.localPath}: ${err instanceof Error ? err.message : err}`);
+      if (donate) throw err;
       // Non-fatal: continue with remaining artifacts
     }
   }
 
   return results;
 }
-

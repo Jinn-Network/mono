@@ -147,6 +147,7 @@ describe('api.operator — artifact store', () => {
       publicEndpoint: 'https://op.example.com',
       defaultPriceUsdc: '0.001',
       perArtifactTypePrice: { design_document: '0.01' },
+      donation: { enabled: true },
     });
     const c = lastCall();
     expect(c.url).toBe('/v1/operator/pricing');
@@ -155,6 +156,7 @@ describe('api.operator — artifact store', () => {
       publicEndpoint: 'https://op.example.com',
       defaultPriceUsdc: '0.001',
       perArtifactTypePrice: { design_document: '0.01' },
+      donation: { enabled: true },
     });
   });
 });
