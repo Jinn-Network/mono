@@ -25,6 +25,12 @@ export interface GatheredStatusRaw {
   /** sqlite_only: only SQLite-backed fields (e2e / API without fleet context). */
   hintsScope?: StatusHintsScope;
   shutdownState: string | null;
+  daemonRuntime?: {
+    pidPath: string;
+    pid: number | null;
+    alive: boolean;
+    stale: boolean;
+  };
   daemonStartedAt?: string | null;
   dbPath: string;
   earningDir?: string;

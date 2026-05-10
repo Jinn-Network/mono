@@ -69,8 +69,11 @@ export interface StatusDetailV1 {
   nextActions: string[];
 }
 
-function daemonState(shutdown: string | null): 'running' | 'stopped' | 'starting' {
-  if (shutdown === 'running') return 'running';
+function daemonState(raw: GatheredStatusRaw): 'running' | 'stopped' | 'starting' {
+  if (raw.shutdownState === 'running' && raw.daemonRuntime) {
+    return raw.daemonRuntime.alive ? 'running' : 'stopped';
+  }
+  if (raw.shutdownState === 'running') return 'running';
   return 'stopped';
 }
 
@@ -305,7 +308,7 @@ export function assembleStatusRollupV1(
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     daemon: {
-      state: daemonState(raw.shutdownState),
+      state: daemonState(raw),
       startedAt: raw.daemonStartedAt ?? null,
       phase,
       network,

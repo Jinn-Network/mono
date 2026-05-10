@@ -20,7 +20,7 @@ import type { Corpus, ArtifactContent } from '../../src/corpus/index.js';
 const TEST_TOKEN = 'test-token-123';
 
 let store: Store;
-let server: ApiServer;
+let server: ApiServer | undefined;
 let baseUrl: string;
 
 /**
@@ -73,6 +73,18 @@ afterEach(async () => {
 });
 
 describe('daemon-api-auth (bearer middleware)', () => {
+  it('closes promptly with a live events stream', async () => {
+    const res = await fetch(`${baseUrl}/v1/events`);
+    expect(res.status).toBe(200);
+
+    await expect(Promise.race([
+      server!.close().then(() => 'closed'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('timeout'), 1_000)),
+    ])).resolves.toBe('closed');
+    server = undefined;
+    await res.body?.cancel().catch(() => undefined);
+  });
+
   it('rejects POST /v1/artifacts/acquire with no Authorization header → 401', async () => {
     const res = await fetch(`${baseUrl}/v1/artifacts/acquire`, {
       method: 'POST',

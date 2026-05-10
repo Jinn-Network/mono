@@ -19,6 +19,7 @@ import {
 import { STAKING_ABI, STOLAS_DISTRIBUTOR_ABI } from '../../earning/contracts.js';
 import { isUnauthorizedAccountError } from '../../errors/unauthorized-account.js';
 import { executeSafeTransaction } from './safe.js';
+import { formatKnownRevert } from './safe-revert.js';
 import {
   flattenErrorMessage,
   isRecoverableTransactionError,
@@ -376,7 +377,7 @@ export async function canClaimTask(
     });
     return { ok: true };
   } catch (err) {
-    return { ok: false, reason: flattenErrorMessage(err) };
+    return { ok: false, reason: formatKnownRevert(err) ?? flattenErrorMessage(err) };
   }
 }
 
@@ -403,7 +404,7 @@ export async function canClaimEvaluation(
     });
     return { ok: true };
   } catch (err) {
-    return { ok: false, reason: flattenErrorMessage(err) };
+    return { ok: false, reason: formatKnownRevert(err) ?? flattenErrorMessage(err) };
   }
 }
 

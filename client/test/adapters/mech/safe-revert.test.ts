@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { encodeErrorResult, parseAbi } from 'viem';
 import {
   decodeSafeInnerRevert,
+  formatKnownRevert,
   isNonRecoverableInnerRevert,
 } from '../../../src/adapters/mech/safe-revert.js';
 
@@ -104,5 +105,13 @@ describe('Safe inner revert decoding', () => {
     expect(decoded.decodedArgs?.[0]).toBe(92n);
     expect(decoded.decodedArgs?.[1]).toBe(0);
     expect(isNonRecoverableInnerRevert(decoded.decodedName)).toBe(true);
+  });
+
+  it('formats known selectors from viem simulation errors without full revert data', () => {
+    const error = new Error(
+      'The contract function "claimEvaluation" reverted with the following signature:\n0xbe465de7\n\nUnable to decode signature "0xbe465de7" as it was not found on the provided ABI.',
+    );
+
+    expect(formatKnownRevert(error)).toBe('TCAttemptAlreadyFinalized');
   });
 });

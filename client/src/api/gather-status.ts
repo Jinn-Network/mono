@@ -3,6 +3,8 @@
  */
 
 import { createPublicClient, http, type PublicClient } from 'viem';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
@@ -47,6 +49,24 @@ const ERC20_BALANCE_OF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
+
+function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['daemonRuntime'] | undefined {
+  if (!earningDir) return undefined;
+  const pidPath = join(earningDir, 'daemon.pid');
+  if (!existsSync(pidPath)) {
+    return { pidPath, pid: null, alive: false, stale: true };
+  }
+  const pid = Number.parseInt(readFileSync(pidPath, 'utf8').trim(), 10);
+  if (!Number.isFinite(pid)) {
+    return { pidPath, pid: null, alive: false, stale: true };
+  }
+  try {
+    process.kill(pid, 0);
+    return { pidPath, pid, alive: true, stale: false };
+  } catch {
+    return { pidPath, pid, alive: false, stale: true };
+  }
+}
 
 const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
@@ -492,6 +512,7 @@ export async function gatherGatheredStatusRaw(
 
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
+    daemonRuntime: readDaemonRuntime(status?.earningDir),
     daemonStartedAt,
     dbPath: store.path,
     earningDir: status?.earningDir,

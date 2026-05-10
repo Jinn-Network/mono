@@ -1,0 +1,11 @@
+.acceptance/
+acceptance-runs/
+.local/
+.env
+.env.*
+release-runs/
+test-results/
+current-e2e-run.log
+e2e-output.log
+e2e-test-output.log
+jinn-client.tgz

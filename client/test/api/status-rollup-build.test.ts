@@ -63,6 +63,20 @@ describe('assembleStatusRollupV1', () => {
     expect(parsed.exit.hint).toContain('fleet');
   });
 
+  it('does not report running when persisted state is stale and the pid is dead', () => {
+    const raw = makeRaw();
+    raw.daemonRuntime = {
+      pidPath: '/tmp/earning/daemon.pid',
+      pid: 99999,
+      alive: false,
+      stale: true,
+    };
+
+    const parsed = assembleStatusRollupV1(raw);
+
+    expect(parsed.daemon.state).toBe('stopped');
+  });
+
   it('exit.blocking when rpc is not ok', () => {
     const raw = makeRaw();
     raw.rpc = { ok: false, error: 'rpc down' };

@@ -128,6 +128,30 @@ function extractRevertData(error: unknown): Hex | null {
   return match ? (match[0] as Hex) : null;
 }
 
+function extractErrorSelector(error: unknown): Hex | null {
+  const data = extractRevertData(error);
+  if (data && data.length >= 10) return data.slice(0, 10).toLowerCase() as Hex;
+
+  const msg = error instanceof Error ? error.message : String(error);
+  const match = msg.match(/(?:signature|selector)\s*(?::|")?\s*(0x[a-fA-F0-9]{8})/i);
+  return match?.[1] ? match[1].toLowerCase() as Hex : null;
+}
+
+export function formatKnownRevert(error: unknown): string | null {
+  const data = extractRevertData(error);
+  const selector = extractErrorSelector(error);
+  if (!selector) return null;
+  const known = KNOWN_INNER_ERRORS[selector];
+  if (!known) return null;
+  if (!data || data.length <= 10) return known.name;
+  try {
+    const args = decodeAbiParameters(parseAbiParameters(known.params), `0x${data.slice(10)}` as Hex);
+    return formatDecodedRevert(known.name, args);
+  } catch {
+    return known.name;
+  }
+}
+
 /**
  * Re-simulate the inner Safe call as an `eth_call` from the Safe address.
  * If the call reverts, decode the revert into a known selector + args.

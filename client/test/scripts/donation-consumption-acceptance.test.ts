@@ -8,7 +8,9 @@ import {
   buildConsumerConfig,
   ensureConsumerSweEvaluatorState,
   resolveConsumerCodexHome,
-} from '../../scripts/donation-consumption-acceptance.js';
+  waitForConsumerSolveAndEvaluatorProof,
+} from '../../src/scripts/donation-consumption-acceptance.js';
+import { Store } from '../../src/store/store.js';
 
 describe('donation consumption acceptance config', () => {
   it('builds an isolated Codex consumer that can run without Claude auth', () => {
@@ -109,5 +111,78 @@ describe('donation consumption acceptance config', () => {
       enabled: true,
       upstreamRepoDir,
     });
+  });
+
+  it('accepts cache usage written during acquire_artifact before the call returns', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-donation-consumption-timestamps-'));
+    const dbPath = join(root, 'jinn.db');
+    const store = new Store(dbPath);
+    const startedAt = new Date('2026-05-10T17:15:00.000Z');
+    const acquisitionStartedAt = new Date('2026-05-10T17:15:37.000Z');
+    const cacheTouchedAt = '2026-05-10T17:15:37.050Z';
+    const acquisitionFinishedAt = new Date('2026-05-10T17:15:37.200Z');
+    try {
+      store.saveNetworkArtifact({
+        sha256: 'donated-sha',
+        artifactType: 'swe-rebench-v2_v1_solution',
+        envelopeCid: 'bafk-envelope',
+        content: Buffer.from('donated'),
+        source: 'origin',
+        sourceOperator: 'operator-a',
+        sourceEndpoint: 'ipfs://bafk-source',
+        paidAmountUsdc: '0',
+        fetchedAt: cacheTouchedAt,
+      });
+      store.saveServedArtifact({
+        sha256: 'consumer-solution-sha',
+        artifactType: 'swe-rebench-v2_v1_solution',
+        requestId: 'consumer-request',
+        envelopeCid: 'bafk-consumer-solution',
+        content: Buffer.from('solution'),
+        priceUsdc: '0',
+        createdAt: '2026-05-10T17:15:38.000Z',
+      });
+      store.saveServedArtifact({
+        sha256: 'consumer-verdict-sha',
+        artifactType: 'swe-rebench-v2_v1_verdict',
+        requestId: 'consumer-verdict',
+        envelopeCid: 'bafk-consumer-verdict',
+        content: Buffer.from('verdict'),
+        priceUsdc: '0',
+        createdAt: '2026-05-10T17:15:39.000Z',
+      });
+    } finally {
+      store.close();
+    }
+
+    const proof = {
+      artifact: {
+        sha256: 'donated-sha',
+        artifactType: 'swe-rebench-v2_v1_solution',
+        requestId: 'producer-request',
+        envelopeCid: 'bafk-envelope',
+        createdAt: startedAt.toISOString(),
+      },
+      sourceCid: 'bafk-source',
+      trajectorySourceCid: 'bafk-trajectory',
+      envelope: {},
+      redactedEnvelope: {},
+      subgraphExecution: {},
+    };
+
+    const result = await waitForConsumerSolveAndEvaluatorProof({
+      storePath: dbPath,
+      proof,
+      startedAt,
+      acquisitionStartedAt,
+      acquisitionFinishedAt,
+      reuseExisting: false,
+      deadline: Date.now() + 100,
+      pollMs: 1,
+    });
+
+    expect(result.networkRow.lastUsedAt).toBe(cacheTouchedAt);
+    expect(result.solution.sha256).toBe('consumer-solution-sha');
+    expect(result.verdict.sha256).toBe('consumer-verdict-sha');
   });
 });

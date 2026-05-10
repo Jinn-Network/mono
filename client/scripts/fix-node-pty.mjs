@@ -14,34 +14,46 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
-async function fixSpawnHelper() {
-  if (process.platform !== 'darwin') return;
+function unique(values) {
+  return [...new Set(values)];
+}
 
+function candidateRoots() {
   // The script ships in two places depending on context:
-  //   - dev: client/scripts/fix-node-pty.mjs    (uses ../node_modules)
-  //   - published: client/dist/scripts/         (uses ../../node_modules)
-  // Try both upward paths.
-  const candidateRoots = [
+  //   - dev: client/scripts/fix-node-pty.mjs
+  //   - published: client/dist/scripts/
+  // npm/npx may hoist node-pty to an ancestor node_modules, so use normal
+  // Node resolution with several package-root candidates instead of assuming
+  // @jinn-network/client/node_modules exists.
+  return unique([
+    __dirname,
     path.join(__dirname, '..'),
     path.join(__dirname, '..', '..'),
-  ];
+    process.cwd(),
+  ]);
+}
 
-  let prebuildsDir = null;
-  for (const root of candidateRoots) {
-    const candidate = path.join(root, 'node_modules', 'node-pty', 'prebuilds');
-    try {
-      await fs.access(candidate);
-      prebuildsDir = candidate;
-      break;
-    } catch {
-      // try next
-    }
+function resolveNodePtyPackageDir(required) {
+  try {
+    return path.dirname(require.resolve('node-pty/package.json', { paths: candidateRoots() }));
+  } catch (err) {
+    if (required) throw err;
+    return null;
   }
-  if (!prebuildsDir) return; // node-pty not installed; nothing to fix
+}
+
+async function fixSpawnHelper({ required = false } = {}) {
+  const packageDir = resolveNodePtyPackageDir(required);
+  if (!packageDir) return;
+  if (process.platform !== 'darwin') return;
+
+  const prebuildsDir = path.join(packageDir, 'prebuilds');
 
   for (const dir of ['darwin-arm64', 'darwin-x64']) {
     const helper = path.join(prebuildsDir, dir, 'spawn-helper');
@@ -57,6 +69,45 @@ async function fixSpawnHelper() {
   }
 }
 
-fixSpawnHelper().catch((err) => {
-  console.warn('[postinstall] fix-node-pty failed (non-fatal):', err.message);
-});
+async function verifyNodePty() {
+  const ptyModule = await import('node-pty');
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('node-pty verification timed out'));
+    }, 5000);
+    try {
+      const pty = ptyModule.spawn(process.execPath, ['-e', 'process.exit(0)'], {
+        name: 'xterm-256color',
+        cols: 10,
+        rows: 4,
+        cwd: process.cwd(),
+        env: process.env,
+      });
+      pty.onExit(({ exitCode }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (exitCode === 0) resolve();
+        else reject(new Error(`node-pty verification exited with ${exitCode}`));
+      });
+    } catch (err) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    }
+  });
+  console.log('[postinstall] node-pty verification ok');
+}
+
+const verify = process.argv.includes('--verify');
+
+fixSpawnHelper({ required: verify })
+  .then(() => verify ? verifyNodePty() : undefined)
+  .catch((err) => {
+    console.warn('[postinstall] fix-node-pty failed:', err instanceof Error ? err.message : String(err));
+    if (verify) process.exit(1);
+  });

@@ -2121,22 +2121,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         : undefined,
   });
 
-  // Graceful shutdown — Daemon doesn't own the API server or Store in this
-  // flow (they were created in setup-mode before bootstrap), so we close
-  // them explicitly after Daemon.stop() completes.
-  const shutdown = async (signal: string) => {
-    console.log(`\n[main] Received ${signal}, shutting down...`);
-    await daemon.stop();
-    await setupApiServer.close().catch(() => undefined);
-    await closeCaptureReceiver();
-    sharedStore.close();
-    console.log('[main] Shutdown complete.');
-    process.exit(0);
-  };
-
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-
   // Write pidfile so `jinn stop` can find us.
   const pidPath = join(config.earningDir, 'daemon.pid');
   const { writeFileSync, unlinkSync } = await import('node:fs');
@@ -2149,6 +2133,39 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
   };
   process.on('exit', removePidfile);
+
+  // Graceful shutdown — Daemon doesn't own the API server or Store in this
+  // flow (they were created in setup-mode before bootstrap), so we close
+  // them explicitly after Daemon.stop() completes.
+  let shutdownPromise: Promise<void> | null = null;
+  const shutdown = async (signal: string) => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      let exitCode = 0;
+      console.log(`\n[main] Received ${signal}, shutting down...`);
+      try {
+        await daemon.stop();
+        await setupApiServer.close().catch(() => undefined);
+        await closeCaptureReceiver();
+      } catch (err) {
+        exitCode = 1;
+        console.error('[main] Shutdown failed:', err instanceof Error ? err.message : String(err));
+      } finally {
+        removePidfile();
+        try {
+          sharedStore.close();
+        } catch {
+          /* ignore */
+        }
+      }
+      console.log('[main] Shutdown complete.');
+      process.exit(exitCode);
+    })();
+    return shutdownPromise;
+  };
+
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 
   emitProgress({
     type: 'progress',

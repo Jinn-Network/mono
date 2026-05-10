@@ -668,12 +668,21 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         const handshakeUrl = `http://127.0.0.1:${actualPort}/?k=${config.ui.handshakeKey}`;
         console.log(`[api] UI handshake URL: ${handshakeUrl}`);
       }
+      const httpServer = server as HttpServer;
       resolve({
         port: actualPort,
-        close: () => new Promise<void>((res) => server.close(() => res())),
+        close: () =>
+          new Promise<void>((res) => {
+            httpServer.close(() => res());
+            // Shutdown should not wait for dashboard keep-alive/SSE clients.
+            // Once the daemon is stopping, close existing sockets after the
+            // listener has stopped accepting new connections.
+            httpServer.closeIdleConnections();
+            httpServer.closeAllConnections();
+          }),
         // serve() returns Server | Http2Server | Http2SecureServer; we never
         // pass http2/https opts so it's always a node http.Server at runtime.
-        server: server as HttpServer,
+        server: httpServer,
         app,
       });
     });

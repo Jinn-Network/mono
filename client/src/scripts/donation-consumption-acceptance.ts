@@ -9,19 +9,31 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { Store } from '../src/store/store.js';
-import { DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_SUBGRAPH_URL } from '../src/config.js';
+import { Store } from '../store/store.js';
+import { DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_SUBGRAPH_URL } from '../config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const clientRoot = resolve(__dirname, '..');
+function findPackageRoot(startDir: string): string {
+  let current = startDir;
+  while (true) {
+    if (existsSync(join(current, 'package.json'))) return current;
+    const parent = dirname(current);
+    if (parent === current) return resolve(startDir, '..', '..');
+    current = parent;
+  }
+}
+
+const clientRoot = findPackageRoot(__dirname);
+const jinnBinPath = join(clientRoot, 'dist', 'bin', 'jinn.js');
+const mcpServerPath = join(clientRoot, 'dist', 'mcp', 'server.js');
 const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 const SWE_SOLUTION_ARTIFACT_TYPE = 'swe-rebench-v2_v1_solution';
 const CONSUMER_CLAUDE_DISABLED_HARNESSES = [
@@ -721,7 +733,7 @@ function assertConsumerCodexAuthAvailable(codexHome: string | undefined): void {
 
 export function buildConsumerChildEnv(home: string, apiToken: string, codexHome?: string): NodeJS.ProcessEnv {
   const corepackHome = process.env['COREPACK_HOME'] ?? join(homedir(), '.cache', 'node', 'corepack');
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
     XDG_CONFIG_HOME: join(home, '.config'),
@@ -737,7 +749,7 @@ export function buildConsumerChildEnv(home: string, apiToken: string, codexHome?
 }
 
 function runFundingPreflight(configPath: string, home: string, apiToken: string, evidenceDir: string, codexHome?: string): void {
-  const result = spawnSync('yarn', ['jinn', 'fund-requirements', '--json', '--config', configPath], {
+  const result = spawnSync(process.execPath, [jinnBinPath, 'fund-requirements', '--json', '--config', configPath], {
     cwd: clientRoot,
     env: buildConsumerChildEnv(home, apiToken, codexHome),
     encoding: 'utf8',
@@ -749,7 +761,7 @@ function runFundingPreflight(configPath: string, home: string, apiToken: string,
     fail('consumer_funding_preflight_failed', 'Consumer funding preflight failed.', {
       status: result.status,
       configPath,
-      remedy: `Run: HOME=${home} yarn jinn fund-requirements --json --config ${configPath}`,
+      remedy: `Run: HOME=${home} node ${jinnBinPath} fund-requirements --json --config ${configPath}`,
     });
   }
   const lines = (result.stdout ?? '').split('\n').map((line) => line.trim()).filter(Boolean);
@@ -759,7 +771,7 @@ function runFundingPreflight(configPath: string, home: string, apiToken: string,
   if (payload.satisfied === false) {
     fail('consumer_funding_required', 'Consumer operator is not funded enough for the live donation gate.', {
       fundRequirements: payload,
-      remedy: `Fund the listed addresses, then run: HOME=${home} yarn jinn bootstrap --json --config ${configPath}`,
+      remedy: `Fund the listed addresses, then run: HOME=${home} node ${jinnBinPath} bootstrap --json --config ${configPath}`,
     });
   }
 }
@@ -770,9 +782,9 @@ function startConsumerDaemon(opts: {
   apiToken: string;
   evidenceDir: string;
   codexHome?: string;
-}): ChildProcessWithoutNullStreams {
-  const child = spawn('yarn', [
-    'jinn',
+}): ChildProcess {
+  const child = spawn(process.execPath, [
+    jinnBinPath,
     'run',
     '--no-ui',
     '--funding-timeout',
@@ -798,7 +810,7 @@ async function waitForStatus(opts: {
   baseUrl: string;
   deadline: number;
   pollMs: number;
-  consumerProcess?: ChildProcessWithoutNullStreams | null;
+  consumerProcess?: ChildProcess | null;
   evidenceDir?: string;
 }): Promise<void> {
   while (Date.now() < opts.deadline) {
@@ -834,7 +846,7 @@ async function callMcpTool(opts: {
   const client = new Client({ name: 'donation-consumption-acceptance', version: '1.0.0' });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ['--import', 'tsx', join(clientRoot, 'src', 'mcp', 'server.ts')],
+    args: [mcpServerPath],
     cwd: clientRoot,
     env: {
       ...process.env,
@@ -914,11 +926,12 @@ function parseMaybeJson(bytes: Buffer): JsonRecord | null {
   }
 }
 
-async function waitForConsumerSolveAndEvaluatorProof(opts: {
+export async function waitForConsumerSolveAndEvaluatorProof(opts: {
   storePath: string;
   proof: VerifiedDonation;
   startedAt: Date;
-  acquiredAt: Date;
+  acquisitionStartedAt: Date;
+  acquisitionFinishedAt: Date;
   reuseExisting: boolean;
   deadline: number;
   pollMs: number;
@@ -932,11 +945,11 @@ async function waitForConsumerSolveAndEvaluatorProof(opts: {
         limit: 50,
       }).find((row) => (
         opts.reuseExisting ||
-        Date.parse(row.createdAt) >= opts.acquiredAt.getTime()
+        Date.parse(row.createdAt) >= opts.acquisitionFinishedAt.getTime()
       ));
       const verdictRow = store.listServedArtifactMetadata({ limit: 100 }).find((row) => {
         if (!VERDICT_ARTIFACT_TYPES.has(row.artifactType)) return false;
-        return opts.reuseExisting || Date.parse(row.createdAt) >= opts.acquiredAt.getTime();
+        return opts.reuseExisting || Date.parse(row.createdAt) >= opts.acquisitionFinishedAt.getTime();
       });
       if (
         networkRow &&
@@ -944,7 +957,7 @@ async function waitForConsumerSolveAndEvaluatorProof(opts: {
         networkRow.sourceEndpoint === `ipfs://${opts.proof.sourceCid}` &&
         networkRow.paidAmountUsdc === '0' &&
         (opts.reuseExisting || Date.parse(networkRow.fetchedAt) >= opts.startedAt.getTime()) &&
-        (opts.reuseExisting || Date.parse(networkRow.lastUsedAt) >= opts.acquiredAt.getTime()) &&
+        (opts.reuseExisting || Date.parse(networkRow.lastUsedAt) >= opts.acquisitionStartedAt.getTime()) &&
         solutionRow &&
         verdictRow
       ) {
@@ -983,6 +996,8 @@ async function waitForConsumerSolveAndEvaluatorProof(opts: {
     sha256: opts.proof.artifact.sha256,
     envelopeCid: opts.proof.artifact.envelopeCid,
     sourceCid: opts.proof.sourceCid,
+    acquisitionStartedAt: opts.acquisitionStartedAt.toISOString(),
+    acquisitionFinishedAt: opts.acquisitionFinishedAt.toISOString(),
     requiredArtifacts: [SWE_SOLUTION_ARTIFACT_TYPE, ...VERDICT_ARTIFACT_TYPES],
   });
 }
@@ -1043,6 +1058,16 @@ async function main(): Promise<void> {
   if (parsed.values.help) {
     printHelp();
     return;
+  }
+
+  if (!existsSync(jinnBinPath) || !existsSync(mcpServerPath)) {
+    fail('release_gate_not_built', 'Donation consumption gate must run from a built client package.', {
+      missing: [
+        ...(!existsSync(jinnBinPath) ? [jinnBinPath] : []),
+        ...(!existsSync(mcpServerPath) ? [mcpServerPath] : []),
+      ],
+      remedy: 'Run `yarn build` before `yarn release:donation-consumption`, or run this command from the published package.',
+    });
   }
 
   const startedAt = new Date();
@@ -1153,7 +1178,7 @@ async function main(): Promise<void> {
   });
   writeJson(join(evidenceDir, 'producer-envelope-redacted.json'), donationProof.redactedEnvelope);
 
-  let consumerProcess: ChildProcessWithoutNullStreams | null = null;
+  let consumerProcess: ChildProcess | null = null;
   if (!attachConsumerUrl) {
     console.log('[donation-consumption] running consumer funding preflight');
     runFundingPreflight(consumerConfigPath, consumerHome, consumerApiToken, evidenceDir, consumerCodexHome);
@@ -1196,6 +1221,7 @@ async function main(): Promise<void> {
     writeJson(join(evidenceDir, 'consumer-discovered-artifact.json'), discoveredArtifact);
 
     console.log('[donation-consumption] acquiring donated artifact through consumer MCP');
+    const acquisitionStartedAt = new Date();
     const acquireResult = await callMcpTool({
       name: 'acquire_artifact',
       args: acquisitionArgs,
@@ -1205,9 +1231,12 @@ async function main(): Promise<void> {
       subgraphUrl,
       ipfsGatewayUrl,
     });
+    const acquisitionFinishedAt = new Date();
     writeJson(join(evidenceDir, 'consumer-acquire-artifact.json'), {
       ...acquireResult,
       bytes: '<redacted>',
+      acquisitionStartedAt: acquisitionStartedAt.toISOString(),
+      acquisitionFinishedAt: acquisitionFinishedAt.toISOString(),
     });
     if (acquireResult.error) {
       fail('consumer_acquire_failed', 'Consumer MCP acquire_artifact failed.', acquireResult);
@@ -1229,14 +1258,14 @@ async function main(): Promise<void> {
         paidAmountUsdc: acquireResult.paidAmountUsdc,
       });
     }
-    const acquiredAt = new Date();
 
     console.log('[donation-consumption] waiting for consumer solve/evaluator evidence after acquisition');
     const liveProof = await waitForConsumerSolveAndEvaluatorProof({
       storePath: consumerDbPath,
       proof: donationProof,
       startedAt,
-      acquiredAt,
+      acquisitionStartedAt,
+      acquisitionFinishedAt,
       reuseExisting,
       deadline,
       pollMs,
@@ -1252,6 +1281,8 @@ async function main(): Promise<void> {
       producerArtifact: donationProof.artifact,
       sourceCid: donationProof.sourceCid,
       trajectorySourceCid: donationProof.trajectorySourceCid,
+      acquisitionStartedAt: acquisitionStartedAt.toISOString(),
+      acquisitionFinishedAt: acquisitionFinishedAt.toISOString(),
       consumerNetworkArtifact: liveProof.networkRow,
       consumerSolution: liveProof.solution,
       consumerVerdict: liveProof.verdict,
@@ -1265,7 +1296,18 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+function isMainModule(): boolean {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) return false;
+  const current = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(entrypoint) === realpathSync(current);
+  } catch {
+    return resolve(entrypoint) === current;
+  }
+}
+
+if (isMainModule()) {
   main().catch((err) => {
     if (err instanceof GateFailure) {
       console.error(`[donation-consumption] FAILED ${err.code}: ${err.message}`);
