@@ -1,4 +1,4 @@
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import {
@@ -56,7 +56,7 @@ const EMPTY_ACCESS_STATS: ArtifactAccessStats = {
 const DecimalString = z.string().regex(/^\d+(\.\d+)?$/);
 
 const PricingPatchSchema = z.object({
-  publicEndpoint: z.string().min(1).optional(),
+  publicEndpoint: z.string().optional(),
   defaultPriceUsdc: DecimalString.optional(),
   perArtifactTypePrice: z.record(z.string(), DecimalString).optional(),
   donation: z.object({ enabled: z.boolean() }).optional(),
@@ -127,9 +127,11 @@ function normalizePricingPatch(
     return { ok: false, detail: 'publicEndpoint, defaultPriceUsdc, perArtifactTypePrice, or donation is malformed' };
   }
   const patch = parsed.data;
-  const publicEndpoint = patch.publicEndpoint?.trim() ?? current.publicEndpoint;
-  if (!publicEndpoint || !validatePublicEndpoint(publicEndpoint)) {
-    return { ok: false, detail: '`publicEndpoint` must be an http(s) URL' };
+  const publicEndpoint = patch.publicEndpoint !== undefined
+    ? patch.publicEndpoint.trim()
+    : current.publicEndpoint;
+  if (publicEndpoint && !validatePublicEndpoint(publicEndpoint)) {
+    return { ok: false, detail: '`publicEndpoint`, when set, must be an http(s) URL' };
   }
 
   const perArtifactTypePrice =
@@ -279,7 +281,7 @@ export function addOperatorArtifactsRoutes(app: Hono, config: OperatorArtifactsR
   const configPath = config.configPath ?? DEFAULT_CONFIG_PATH;
   const persistConfigValue = config.persistConfigValue ?? persistTopLevelConfigValue;
 
-  app.get('/v1/operator/artifacts', (c) => {
+  const listExecutionData = (c: Context) => {
     const sourceRaw = c.req.query('source') ?? 'served';
     if (sourceRaw !== 'served' && sourceRaw !== 'network') {
       return c.json({ error: 'invalid_query', detail: '`source` must be `served` or `network`' }, 400);
@@ -323,7 +325,10 @@ export function addOperatorArtifactsRoutes(app: Hono, config: OperatorArtifactsR
       recentAccesses: config.store.listArtifactAccessEvents({ limit: 20 }),
       artifacts: rows,
     });
-  });
+  };
+
+  app.get('/v1/operator/artifacts', listExecutionData);
+  app.get('/v1/operator/execution-data', listExecutionData);
 
   app.post('/v1/operator/pricing', async (c) => {
     let body: unknown;

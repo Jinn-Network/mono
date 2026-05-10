@@ -154,7 +154,7 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
     const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
     const r = await h.isReady();
     expect(r.ready).toBe(false);
-    expect(r.nextStep?.cli).toBe('jinn solver-nets enable swe-rebench-v2-evaluator');
+    expect(r.nextStep?.cli).toBe('jinn harnesses enable swe-rebench-v2-evaluator');
   });
 
   it('reports not-enabled when implStateDir not configured', async () => {
@@ -310,6 +310,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     return {
       fetchTaskRow: vi.fn().mockResolvedValue({
         instance_id: 'unidata__netcdf-c-1925',
+        repo: 'Unidata/netcdf-c',
         image_name,
         FAIL_TO_PASS: ['test_a'],
         PASS_TO_PASS: ['test_b'],
@@ -354,6 +355,22 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     // The pinned-blob CID is surfaced as artifact metadata, not as a typed
     // payload field — preserves the solver/daemon boundary in the schema.
     const verdictArtifact = sol.artifacts?.[0];
+    expect(verdictArtifact?.path).toBe('swe-rebench-v2-verdict.json');
+    const verdictArtifactPayload = JSON.parse(
+      readFileSync(join(ctx.workingDir, 'swe-rebench-v2-verdict.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(verdictArtifactPayload).toMatchObject({
+      schemaVersion: 'swe-rebench-v2-verdict-artifact.v1',
+      verdict: {
+        schemaVersion: 'swe-rebench-v2-verdict.v1',
+        score: 1,
+        passed_match: true,
+      },
+      informational: {
+        instance_id: 'unidata__netcdf-c-1925',
+        test_log_cid: 'bafy-test-log-cid',
+      },
+    });
     expect(verdictArtifact?.metadata).toMatchObject({
       score: 1,
       passed_match: true,

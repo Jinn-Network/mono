@@ -17,19 +17,44 @@ export function ensureCompletedStep(
 
 /**
  * Format wei → ETH (decimal) for helper text. Non-numeric strings render
- * as `—`.
+ * as `—`. Never use scientific notation for user-facing amounts.
  */
 export function formatEthFromWei(wei: string | undefined): string {
   if (!wei || !/^\d+$/.test(wei)) return '—';
   try {
     const n = BigInt(wei);
-    const eth = Number(n) / 1e18;
-    if (eth === 0) return '0 ETH';
-    if (eth < 0.0001) return `${eth.toExponential(3)} ETH`;
-    return `${eth.toFixed(eth < 1 ? 6 : 4)} ETH`;
+    if (n === 0n) return '0 ETH';
+    const oneEth = 1_000_000_000_000_000_000n;
+    const oneTenThousandthEth = 100_000_000_000_000n;
+    const oneGwei = 1_000_000_000n;
+
+    if (n >= oneTenThousandthEth) {
+      return `${formatDecimalUnits(n, 18, n >= oneEth ? 4 : 6)} ETH`;
+    }
+    if (n >= oneGwei) {
+      return `${formatDecimalUnits(n, 9, 4)} gwei`;
+    }
+    return `${n.toLocaleString()} wei`;
   } catch {
     return '—';
   }
+}
+
+function formatDecimalUnits(
+  value: bigint,
+  decimals: number,
+  maxFractionDigits: number,
+): string {
+  const scale = 10n ** BigInt(decimals);
+  const whole = value / scale;
+  const fraction = value % scale;
+  if (fraction === 0n || maxFractionDigits === 0) return whole.toString();
+
+  const rawFraction = fraction.toString().padStart(decimals, '0');
+  const trimmed = rawFraction
+    .slice(0, maxFractionDigits)
+    .replace(/0+$/, '');
+  return trimmed ? `${whole}.${trimmed}` : whole.toString();
 }
 
 /**

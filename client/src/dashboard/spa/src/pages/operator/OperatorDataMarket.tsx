@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'wouter';
 import { SectionCard } from '../../components/SectionCard.js';
 import { api } from '../../api/client.js';
 import type {
-  OperatorArtifact,
-  OperatorArtifactSource,
   OperatorArtifactsResponse,
   OperatorPricingConfig,
 } from '../../api/types.js';
@@ -12,40 +11,6 @@ import type {
 interface OperatorDataMarketProps {
   defaultExpanded?: boolean;
   onRestartPending?: () => void;
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let value = bytes;
-  let idx = 0;
-  while (value >= 1024 && idx < units.length - 1) {
-    value /= 1024;
-    idx += 1;
-  }
-  return `${value >= 10 || idx === 0 ? Math.round(value) : value.toFixed(1)} ${units[idx]}`;
-}
-
-function formatTime(ts: string | null | undefined): string {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-}
-
-function shortSha(sha: string): string {
-  return sha.length > 14 ? `${sha.slice(0, 10)}…${sha.slice(-6)}` : sha;
-}
-
-function priceLabel(value: string | undefined): string {
-  if (value === undefined) return '—';
-  return value === '0' ? 'free' : `$${value}`;
-}
-
-function revenueLabel(value: string): string {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return '$0';
-  return `$${n.toFixed(n >= 1 ? 2 : 4).replace(/0+$/, '').replace(/\.$/, '')}`;
 }
 
 function sortedRecord(record: Record<string, string>): Record<string, string> {
@@ -61,7 +26,7 @@ function samePricing(a: OperatorPricingConfig, b: OperatorPricingConfig): boolea
   );
 }
 
-function Stat({
+function DecisionFact({
   label,
   value,
   meta,
@@ -72,10 +37,10 @@ function Stat({
 }): JSX.Element {
   return (
     <div
-      data-testid="operator-data-market-stat"
+      data-testid="operator-donation-fact"
       style={{
         border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-2)',
+        borderRadius: '8px',
         padding: '12px 14px',
         minWidth: 0,
         display: 'flex',
@@ -110,282 +75,182 @@ function Stat({
   );
 }
 
-function PricingEditor({
+function DonationStatusPanel({
   pricing,
-  knownArtifactTypes,
+  eligibleRuns,
+  peerDatasetsUsed,
   saving,
   error,
   onSave,
 }: {
   pricing: OperatorPricingConfig;
-  knownArtifactTypes: string[];
+  eligibleRuns: number;
+  peerDatasetsUsed: number;
   saving: boolean;
   error: string | null;
   onSave: (pricing: OperatorPricingConfig) => void;
 }): JSX.Element {
-  const [publicEndpoint, setPublicEndpoint] = useState(pricing.publicEndpoint);
-  const [defaultPriceUsdc, setDefaultPriceUsdc] = useState(pricing.defaultPriceUsdc);
-  const [perArtifactTypePrice, setPerArtifactTypePrice] = useState(pricing.perArtifactTypePrice);
   const [donationEnabled, setDonationEnabled] = useState(pricing.donation.enabled);
-  const [newArtifactType, setNewArtifactType] = useState('');
-  const [newPrice, setNewPrice] = useState('');
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
 
   const draft = useMemo<OperatorPricingConfig>(() => ({
-    publicEndpoint,
-    defaultPriceUsdc,
-    perArtifactTypePrice,
+    publicEndpoint: pricing.publicEndpoint,
+    defaultPriceUsdc: pricing.defaultPriceUsdc,
+    perArtifactTypePrice: pricing.perArtifactTypePrice,
     donation: { enabled: donationEnabled },
-  }), [defaultPriceUsdc, donationEnabled, perArtifactTypePrice, publicEndpoint]);
+  }), [donationEnabled, pricing.defaultPriceUsdc, pricing.perArtifactTypePrice, pricing.publicEndpoint]);
 
   const dirty = !samePricing(pricing, draft);
-  const displayedTypes = useMemo(() => {
-    return Array.from(new Set([
-      ...knownArtifactTypes,
-      ...Object.keys(perArtifactTypePrice),
-    ])).sort((a, b) => a.localeCompare(b));
-  }, [knownArtifactTypes, perArtifactTypePrice]);
-
-  const setTypePrice = (artifactType: string, price: string): void => {
-    setPerArtifactTypePrice((prev) => ({
-      ...prev,
-      [artifactType]: price,
-    }));
-  };
-
-  const removeTypePrice = (artifactType: string): void => {
-    setPerArtifactTypePrice((prev) => {
-      const next = { ...prev };
-      delete next[artifactType];
-      return next;
-    });
-  };
-
-  const addTypePrice = (): void => {
-    const artifactType = newArtifactType.trim();
-    const price = newPrice.trim();
-    if (!artifactType || !price) return;
-    setTypePrice(artifactType, price);
-    setNewArtifactType('');
-    setNewPrice('');
+  const requestDonationChange = (enabled: boolean): void => {
+    if (enabled && !donationEnabled && !pricing.donation.enabled) {
+      setConfirmationOpen(true);
+      return;
+    }
+    setDonationEnabled(enabled);
   };
 
   return (
     <div
-      data-testid="operator-pricing-editor"
+      data-testid="operator-donation-status"
       style={{
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-2)',
-        padding: '16px',
+        padding: '18px',
         display: 'flex',
         flexDirection: 'column',
         gap: '14px',
       }}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(120px, 0.5fr)', gap: '12px' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span className="j-label">Public endpoint</span>
-          <input
-            type="url"
-            value={publicEndpoint}
-            onChange={(event) => setPublicEndpoint(event.target.value)}
-            style={{
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: '6px',
-              padding: '10px 12px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              color: 'var(--fg)',
-              minWidth: 0,
-            }}
-          />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', lineHeight: 1.5 }}>
-            Where evaluators reach this operator over HTTPS. Must be reachable
-            from the public internet — set a tunnel or reverse proxy that forwards
-            here.
-          </span>
-        </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span className="j-label">Default price (USDC)</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={defaultPriceUsdc}
-            onChange={(event) => setDefaultPriceUsdc(event.target.value)}
-            style={{
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: '6px',
-              padding: '10px 12px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px',
-              color: 'var(--fg)',
-              minWidth: 0,
-            }}
-          />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', lineHeight: 1.5 }}>
-            Charged per artifact served. <code>0</code> = free.
-          </span>
-        </label>
-      </div>
-
-      <label
-        data-testid="operator-donation-toggle"
+      <div
         style={{
-          border: '1px solid var(--border)',
-          borderRadius: '6px',
-          padding: '12px',
           display: 'flex',
-          alignItems: 'flex-start',
           justifyContent: 'space-between',
-          gap: '12px',
+          alignItems: 'center',
+          gap: '16px',
+          flexWrap: 'wrap',
         }}
       >
-        <span style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <span className="j-label">Testnet donation mode</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', lineHeight: 1.5 }}>
-            When enabled on testnet, produced task artifacts are scrubbed and
-            pinned publicly to IPFS. This is separate from x402 pricing.
-          </span>
-        </span>
-        <input
-          aria-label="Enable testnet donation mode"
-          type="checkbox"
-          checked={donationEnabled}
-          onChange={(event) => setDonationEnabled(event.target.checked)}
-          style={{ marginTop: '2px' }}
-        />
-      </label>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <span className="j-label">Per-artifact-type pricing</span>
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: 'var(--fg-dim)', lineHeight: 1.5, marginTop: '-4px' }}>
-          Override the default for specific artifact types you serve. Types
-          shown below are auto-discovered from your local store.
-        </span>
-        {displayedTypes.length === 0 && (
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: 'var(--fg-muted)' }}>
-            No artifact types recorded yet.
-          </span>
-        )}
-        {displayedTypes.map((artifactType) => (
-          <div
-            key={artifactType}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', minWidth: '260px', flex: '1 1 360px' }}>
+          <span className="j-label">Donate execution data</span>
+          <strong
+            data-testid="operator-donation-mode"
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) 140px auto',
-              gap: '8px',
-              alignItems: 'center',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '18px',
+              color: donationEnabled ? 'var(--vow-green)' : 'var(--fg)',
+              fontWeight: 500,
+            }}
+          >
+            {donationEnabled ? 'Donation is on' : 'Donation is off'}
+          </strong>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: 'var(--fg-dim)', lineHeight: 1.45 }}>
+            Share scrubbed and anonymized solver/evaluator data from future
+            runs with other operators. This lets the network learn from real
+            executions and improve itself. Public testnet donations are free
+            and published to IPFS.
+          </span>
+        </div>
+
+        <label
+          data-testid="operator-donation-toggle"
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: '999px',
+            padding: '5px',
+            display: 'inline-grid',
+            gridTemplateColumns: 'minmax(72px, auto) 42px',
+            alignItems: 'center',
+            gap: '8px',
+            cursor: 'pointer',
+            background: 'var(--bg-sunken)',
+            position: 'relative',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '11px',
+              color: donationEnabled ? 'var(--vow-green)' : 'var(--fg-muted)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+              paddingLeft: '8px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {donationEnabled ? 'On' : 'Off'}
+          </span>
+          <span
+            aria-hidden="true"
+            style={{
+              width: '38px',
+              height: '22px',
+              borderRadius: '999px',
+              background: donationEnabled ? 'var(--vow-green)' : 'var(--border)',
+              position: 'relative',
+              display: 'inline-block',
             }}
           >
             <span
               style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                color: 'var(--fg)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {artifactType}
-            </span>
-            <input
-              aria-label={`Price for ${artifactType}`}
-              type="text"
-              inputMode="decimal"
-              placeholder={defaultPriceUsdc}
-              value={perArtifactTypePrice[artifactType] ?? ''}
-              onChange={(event) => setTypePrice(artifactType, event.target.value)}
-              style={{
+                position: 'absolute',
+                top: '3px',
+                left: donationEnabled ? '19px' : '3px',
+                width: '16px',
+                height: '16px',
+                borderRadius: '999px',
                 background: 'var(--bg)',
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                padding: '8px 10px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                color: 'var(--fg)',
-                minWidth: 0,
+                transition: 'left 120ms ease',
               }}
             />
-            <button
-              type="button"
-              onClick={() => removeTypePrice(artifactType)}
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                background: 'transparent',
-                color: 'var(--fg)',
-                padding: '8px 10px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                cursor: 'pointer',
-              }}
-            >
-              Clear
-            </button>
-          </div>
-        ))}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) 140px auto',
-            gap: '8px',
-            alignItems: 'center',
-          }}
-        >
+          </span>
           <input
-            aria-label="New artifact type"
-            type="text"
-            value={newArtifactType}
-            placeholder="artifact.type"
-            onChange={(event) => setNewArtifactType(event.target.value)}
+            aria-label="Donate produced data"
+            type="checkbox"
+            checked={donationEnabled}
+            onChange={(event) => requestDonationChange(event.target.checked)}
             style={{
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: '6px',
-              padding: '8px 10px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg)',
-              minWidth: 0,
+              position: 'absolute',
+              opacity: 0,
+              pointerEvents: 'none',
             }}
           />
-          <input
-            aria-label="New artifact price"
-            type="text"
-            inputMode="decimal"
-            value={newPrice}
-            placeholder="0"
-            onChange={(event) => setNewPrice(event.target.value)}
-            style={{
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: '6px',
-              padding: '8px 10px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              color: 'var(--fg)',
-              minWidth: 0,
-            }}
-          />
-          <button
-            type="button"
-            onClick={addTypePrice}
-            style={{
-              border: '1px solid var(--accent-sky)',
-              borderRadius: '6px',
-              background: 'transparent',
-              color: 'var(--accent-sky)',
-              padding: '8px 10px',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '12px',
-              cursor: 'pointer',
-            }}
-          >
-            Add
-          </button>
-        </div>
+        </label>
+      </div>
+
+      <div
+        data-testid="operator-donation-facts"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+          gap: '10px',
+        }}
+      >
+        <DecisionFact
+          label="Eligible runs"
+          value={String(eligibleRuns)}
+          meta="local history"
+        />
+        <DecisionFact
+          label="Peer datasets used"
+          value={String(peerDatasetsUsed)}
+          meta="from other operators"
+        />
+      </div>
+
+      <div
+        data-testid="operator-donation-caveat"
+        style={{
+          border: '1px solid var(--border)',
+          borderRadius: '8px',
+          padding: '11px 13px',
+          color: 'var(--fg-muted)',
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '12px',
+          lineHeight: 1.45,
+        }}
+      >
+        Turning donation off stops future publishing. Data already published to
+        IPFS may remain available.
       </div>
 
       <div
@@ -396,174 +261,144 @@ function PricingEditor({
           justifyContent: 'space-between',
           alignItems: 'center',
           gap: '12px',
+          flexWrap: 'wrap',
         }}
       >
-        <span
-          data-testid="operator-pricing-state"
+        <Link
+          href="/operator/execution-data"
           style={{
+            color: 'var(--accent-sky)',
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '12px',
-            color: error ? 'var(--break-red)' : dirty ? 'var(--accent-sky)' : 'var(--fg-dim)',
+            textDecoration: 'none',
           }}
         >
-          {error ?? (dirty ? 'Settings changed' : 'Settings current')}
-        </span>
-        <button
-          type="button"
-          disabled={!dirty || saving}
-          onClick={() => onSave({
-            publicEndpoint: publicEndpoint.trim(),
-            defaultPriceUsdc: defaultPriceUsdc.trim(),
-            perArtifactTypePrice: Object.fromEntries(
-              Object.entries(perArtifactTypePrice)
-                .filter(([key]) => key.trim().length > 0)
-                .map(([key, price]) => [key.trim(), price.trim()]),
-            ),
-            donation: { enabled: donationEnabled },
-          })}
-          style={{
-            border: '1px solid var(--accent-sky)',
-            background: dirty ? 'var(--accent-sky)' : 'transparent',
-            color: dirty ? 'var(--bg-sunken)' : 'var(--fg-dim)',
-            borderRadius: '6px',
-            padding: '9px 14px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '13px',
-            cursor: !dirty || saving ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {saving ? 'Saving…' : 'Save settings'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ArtifactRow({
-  artifact,
-  expanded,
-  onToggle,
-}: {
-  artifact: OperatorArtifact;
-  expanded: boolean;
-  onToggle: () => void;
-}): JSX.Element {
-  const when = artifact.source === 'served' ? artifact.createdAt : artifact.fetchedAt;
-  const price = artifact.source === 'served' ? artifact.priceUsdc : artifact.paidAmountUsdc;
-  const access = artifact.source === 'served' ? artifact.access : null;
-  return (
-    <li
-      data-testid="operator-artifact-row"
-      style={{
-        borderTop: '1px solid var(--border)',
-        padding: '12px 0',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-      }}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '24px minmax(0, 1fr)',
-          gap: '10px',
-          alignItems: 'start',
-          background: 'transparent',
-          border: 'none',
-          padding: 0,
-          color: 'inherit',
-          textAlign: 'left',
-          cursor: 'pointer',
-          fontFamily: "'JetBrains Mono', monospace",
-        }}
-      >
-        <span style={{ color: 'var(--fg-dim)', fontSize: '13px' }}>{expanded ? '▾' : '▸'}</span>
-        <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          Review execution data →
+        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: 'auto' }}>
           <span
+            data-testid="operator-donation-settings-state"
             style={{
-              display: 'block',
-              color: 'var(--fg)',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '12px',
+              color: error ? 'var(--break-red)' : dirty ? 'var(--accent-sky)' : 'var(--fg-dim)',
+            }}
+          >
+            {error ?? (dirty ? 'Donation changed' : 'Current')}
+          </span>
+          <button
+            type="button"
+            disabled={!dirty || saving}
+            onClick={() => onSave(draft)}
+            style={{
+              border: '1px solid var(--accent-sky)',
+              background: dirty ? 'var(--accent-sky)' : 'transparent',
+              color: dirty ? 'var(--bg-sunken)' : 'var(--fg-dim)',
+              borderRadius: '6px',
+              padding: '9px 14px',
+              fontFamily: "'JetBrains Mono', monospace",
               fontSize: '13px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              cursor: !dirty || saving ? 'not-allowed' : 'pointer',
             }}
           >
-            {artifact.artifactType}
-          </span>
-          <span
-            style={{
-              display: 'flex',
-              gap: '12px',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              color: 'var(--fg-dim)',
-              fontSize: '11px',
-            }}
-          >
-            <span>{shortSha(artifact.sha256)}</span>
-            <span style={{ color: price === '0' ? 'var(--fg-dim)' : 'var(--accent-gold)' }}>
-              {artifact.source === 'served' ? priceLabel(price) : `paid ${priceLabel(price)}`}
-            </span>
-            <span style={{ color: 'var(--fg-muted)' }}>{formatBytes(artifact.contentSize)}</span>
-            <span style={{ color: 'var(--fg-muted)' }}>{formatTime(when)}</span>
-            {access && access.accessCount > 0 && (
-              <span style={{ color: 'var(--accent-sky)' }}>{access.accessCount} accesses</span>
-            )}
-          </span>
-        </span>
-      </button>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
 
-      {expanded && (
-        <dl
-          data-testid="operator-artifact-details"
+      {confirmationOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="operator-donation-confirm-title"
+          data-testid="operator-donation-confirm"
           style={{
-            margin: 0,
-            padding: '12px 14px',
-            background: 'var(--bg-sunken)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-2)',
+            position: 'fixed',
+            inset: 0,
+            zIndex: 40,
+            background: 'rgba(0, 0, 0, 0.55)',
             display: 'grid',
-            gridTemplateColumns: '140px minmax(0, 1fr)',
-            gap: '8px 12px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
+            placeItems: 'center',
+            padding: '24px',
           }}
         >
-          <dt style={{ color: 'var(--fg-dim)' }}>sha256</dt>
-          <dd style={{ margin: 0, color: 'var(--fg)', overflowWrap: 'anywhere' }}>{artifact.sha256}</dd>
-          <dt style={{ color: 'var(--fg-dim)' }}>envelope</dt>
-          <dd style={{ margin: 0, color: 'var(--fg)', overflowWrap: 'anywhere' }}>{artifact.envelopeCid ?? '—'}</dd>
-          {artifact.source === 'served' ? (
-            <>
-              <dt style={{ color: 'var(--fg-dim)' }}>request</dt>
-              <dd style={{ margin: 0, color: 'var(--fg)', overflowWrap: 'anywhere' }}>{artifact.requestId ?? '—'}</dd>
-              <dt style={{ color: 'var(--fg-dim)' }}>endpoint</dt>
-              <dd style={{ margin: 0, color: 'var(--fg)', overflowWrap: 'anywhere' }}>{artifact.endpoint ?? '—'}</dd>
-              <dt style={{ color: 'var(--fg-dim)' }}>accesses</dt>
-              <dd style={{ margin: 0, color: 'var(--fg)' }}>
-                {artifact.access.accessCount} total · {artifact.access.paidServeCount} paid · {artifact.access.failedPaymentCount} failed
-              </dd>
-              <dt style={{ color: 'var(--fg-dim)' }}>revenue</dt>
-              <dd style={{ margin: 0, color: 'var(--fg)' }}>{revenueLabel(artifact.access.revenueUsdc)}</dd>
-              <dt style={{ color: 'var(--fg-dim)' }}>last access</dt>
-              <dd style={{ margin: 0, color: 'var(--fg)' }}>{formatTime(artifact.access.lastAccessAt)}</dd>
-            </>
-          ) : (
-            <>
-              <dt style={{ color: 'var(--fg-dim)' }}>origin</dt>
-              <dd style={{ margin: 0, color: 'var(--fg)' }}>{artifact.origin}</dd>
-              <dt style={{ color: 'var(--fg-dim)' }}>operator</dt>
-              <dd style={{ margin: 0, color: 'var(--fg)', overflowWrap: 'anywhere' }}>{artifact.sourceOperator ?? '—'}</dd>
-              <dt style={{ color: 'var(--fg-dim)' }}>endpoint</dt>
-              <dd style={{ margin: 0, color: 'var(--fg)', overflowWrap: 'anywhere' }}>{artifact.sourceEndpoint ?? '—'}</dd>
-            </>
-          )}
-        </dl>
+          <div
+            style={{
+              width: 'min(460px, 100%)',
+              border: '1px solid var(--border)',
+              borderRadius: '10px',
+              background: 'var(--bg-elevated)',
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              boxShadow: '0 22px 70px rgba(0, 0, 0, 0.36)',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+              <span className="j-label">Enable donation</span>
+              <strong
+                id="operator-donation-confirm-title"
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '18px',
+                  color: 'var(--fg)',
+                  fontWeight: 500,
+                }}
+              >
+                Share future execution data
+              </strong>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: 'var(--fg-dim)', lineHeight: 1.5 }}>
+                Future solver/evaluator runs will be scrubbed, anonymized, and
+                published to IPFS so other operators can use them. This helps
+                the network learn from real executions and improve itself.
+              </span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                Turning donation off later stops future publishing, but data
+                already published to IPFS may remain available.
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmationOpen(false)}
+                style={{
+                  border: '1px solid var(--border)',
+                  background: 'transparent',
+                  color: 'var(--fg)',
+                  borderRadius: '6px',
+                  padding: '9px 14px',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDonationEnabled(true);
+                  setConfirmationOpen(false);
+                }}
+                style={{
+                  border: '1px solid var(--accent-sky)',
+                  background: 'var(--accent-sky)',
+                  color: 'var(--bg-sunken)',
+                  borderRadius: '6px',
+                  padding: '9px 14px',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Enable donation
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    </li>
+    </div>
   );
 }
 
@@ -571,13 +406,11 @@ export function OperatorDataMarket({
   defaultExpanded = false,
   onRestartPending = () => undefined,
 }: OperatorDataMarketProps): JSX.Element {
-  const [source, setSource] = useState<OperatorArtifactSource>('served');
-  const [expandedSha, setExpandedSha] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data, isLoading, isError, error, refetch } = useQuery<OperatorArtifactsResponse>({
-    queryKey: ['operator-artifacts', source],
-    queryFn: () => api.operator.listArtifacts({ source, limit: 100 }),
+    queryKey: ['operator-artifacts', 'served'],
+    queryFn: () => api.operator.listArtifacts({ source: 'served', limit: 100 }),
     refetchInterval: 10_000,
   });
 
@@ -589,39 +422,26 @@ export function OperatorDataMarket({
     },
   });
 
-  const knownArtifactTypes = useMemo(() => {
-    const servedTypes = data?.summary.served.artifactTypes.map((row) => row.artifactType) ?? [];
-    const networkTypes = data?.summary.network.artifactTypes.map((row) => row.artifactType) ?? [];
-    return Array.from(new Set([...servedTypes, ...networkTypes])).sort((a, b) => a.localeCompare(b));
-  }, [data?.summary.network.artifactTypes, data?.summary.served.artifactTypes]);
-
   const summary = data?.summary;
   const sectionSummary = summary
-    ? `${summary.served.totalCount} served · ${summary.served.gatedCount} gated · ${summary.network.totalCount} cached`
-    : 'Earn USDC by serving the artifacts you produce.';
-
-  // Public endpoint defaults to `http://localhost:<apiPort>` when the operator
-  // hasn't set one. The daemon logs a warning at startup; surface the same
-  // signal in the UI so operators don't ship behind a localhost URL.
-  const endpointNotPublic = isLocalhostEndpoint(data?.pricing.publicEndpoint);
+    ? `${summary.served.totalCount} eligible runs · donation ${data?.pricing.donation.enabled ? 'on' : 'off'} · ${summary.network.totalCount} peer datasets used`
+    : 'Donate scrubbed and anonymized run data to IPFS so other operators can use it.';
 
   return (
     <SectionCard
-      title="Data market"
+      title="Data donation"
       summary={sectionSummary}
       defaultExpanded={defaultExpanded}
       metaChip={
-        endpointNotPublic
-          ? { label: 'Endpoint not set', tone: 'attention' }
-          : {
-              label: summary && summary.served.gatedCount > 0 ? 'Gated' : 'Free',
-              tone: summary && summary.served.gatedCount > 0 ? 'attention' : 'default',
-            }
+        {
+          label: data?.pricing.donation.enabled ? 'IPFS donation on' : 'Donation off',
+          tone: data?.pricing.donation.enabled ? 'live' : 'default',
+        }
       }
     >
       {isLoading && (
         <p data-testid="operator-data-market-loading" style={{ margin: 0, color: 'var(--fg-muted)', fontSize: '13px' }}>
-          Loading artifact store…
+          Loading execution data…
         </p>
       )}
 
@@ -640,7 +460,7 @@ export function OperatorDataMarket({
           }}
         >
           <span style={{ color: 'var(--break-red)', fontSize: '13px' }}>
-            {error instanceof Error ? error.message : 'Failed to load artifact store.'}
+            {error instanceof Error ? error.message : 'Failed to load execution data.'}
           </span>
           <button
             type="button"
@@ -661,168 +481,19 @@ export function OperatorDataMarket({
         </div>
       )}
 
-      {data && endpointNotPublic && (
-        <div
-          data-testid="operator-data-market-endpoint-warning"
-          style={{
-            border: '1px solid var(--wane)',
-            borderRadius: 'var(--radius-2)',
-            padding: '12px 14px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '12px',
-            color: 'var(--fg)',
-          }}
-        >
-          <span style={{ color: 'var(--wane)', textTransform: 'uppercase', letterSpacing: '0.14em', fontSize: '10px' }}>
-            ⚠ Public endpoint not set
-          </span>
-          <span style={{ color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-            Currently <code style={{ color: 'var(--fg)' }}>{data.pricing.publicEndpoint}</code> — external
-            evaluators can't reach this operator. Set a public hostname below
-            (or via <code>JINN_OPERATOR_PUBLIC_ENDPOINT</code>) before going live.
-          </span>
-        </div>
-      )}
-
       {data && (
         <>
-          <div
-            data-testid="operator-data-market"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-              gap: '10px',
-            }}
-          >
-            <Stat
-              label="Served"
-              value={String(data.summary.served.totalCount)}
-              meta={formatBytes(data.summary.served.totalBytes)}
-            />
-            <Stat
-              label="Gated"
-              value={String(data.summary.served.gatedCount)}
-              meta={`${data.summary.served.freeCount} free`}
-            />
-            <Stat
-              label="Accesses"
-              value={String(data.summary.access.accessCount)}
-              meta={`${data.summary.access.paidServeCount} paid · ${data.summary.access.failedPaymentCount} failed`}
-            />
-            <Stat
-              label="Revenue"
-              value={revenueLabel(data.summary.access.revenueUsdc)}
-              meta={data.summary.access.lastPaidAt ? `last paid ${formatTime(data.summary.access.lastPaidAt)}` : 'no paid serves'}
-            />
-            <Stat
-              label="Default price"
-              value={priceLabel(data.pricing.defaultPriceUsdc)}
-              meta={`${Object.keys(data.pricing.perArtifactTypePrice).length} per-type prices`}
-            />
-            <Stat
-              label="Cached"
-              value={String(data.summary.network.totalCount)}
-              meta={formatBytes(data.summary.network.totalBytes)}
-            />
-          </div>
-
-          <PricingEditor
+          <DonationStatusPanel
             key={`${data.pricing.publicEndpoint}|${data.pricing.defaultPriceUsdc}|${data.pricing.donation.enabled}|${JSON.stringify(sortedRecord(data.pricing.perArtifactTypePrice))}`}
             pricing={data.pricing}
-            knownArtifactTypes={knownArtifactTypes}
+            eligibleRuns={data.summary.served.totalCount}
+            peerDatasetsUsed={data.summary.network.totalCount}
             saving={pricingMutation.isPending}
             error={pricingMutation.error instanceof Error ? pricingMutation.error.message : null}
             onSave={(pricing) => pricingMutation.mutate(pricing)}
           />
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-            <div
-              role="tablist"
-              aria-label="Artifact source"
-              style={{
-                display: 'inline-flex',
-                border: '1px solid var(--border)',
-                borderRadius: '6px',
-                overflow: 'hidden',
-              }}
-            >
-              {(['served', 'network'] as const).map((nextSource) => (
-                <button
-                  key={nextSource}
-                  type="button"
-                  role="tab"
-                  aria-selected={source === nextSource}
-                  onClick={() => {
-                    setSource(nextSource);
-                    setExpandedSha(null);
-                  }}
-                  style={{
-                    border: 'none',
-                    borderRight: nextSource === 'served' ? '1px solid var(--border)' : 'none',
-                    background: source === nextSource ? 'var(--accent-sky)' : 'transparent',
-                    color: source === nextSource ? 'var(--bg-sunken)' : 'var(--fg)',
-                    padding: '8px 12px',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    textTransform: 'capitalize',
-                  }}
-                >
-                  {nextSource}
-                </button>
-              ))}
-            </div>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: 'var(--fg-dim)' }}>
-              {formatTime(data.generatedAt)}
-            </span>
-          </div>
-
-          {data.artifacts.length === 0 ? (
-            <p data-testid="operator-artifacts-empty" style={{ margin: 0, color: 'var(--fg-muted)', fontSize: '13px' }}>
-              No {source} artifacts recorded yet.
-            </p>
-          ) : (
-            <ul
-              data-testid="operator-artifact-list"
-              style={{
-                listStyle: 'none',
-                padding: 0,
-                margin: 0,
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              {data.artifacts.map((artifact) => (
-                <ArtifactRow
-                  key={`${artifact.source}:${artifact.sha256}`}
-                  artifact={artifact}
-                  expanded={expandedSha === artifact.sha256}
-                  onToggle={() => setExpandedSha((prev) => prev === artifact.sha256 ? null : artifact.sha256)}
-                />
-              ))}
-            </ul>
-          )}
         </>
       )}
     </SectionCard>
   );
-}
-
-/**
- * Heuristic for the "you haven't set a real public endpoint" state. Mirrors
- * the daemon's startup-warning condition: if the URL hostname is localhost
- * or 127.0.0.1, the operator is on the default fallback and external
- * evaluators won't be able to reach them.
- */
-function isLocalhostEndpoint(url: string | undefined): boolean {
-  if (!url) return true;
-  try {
-    const host = new URL(url).hostname;
-    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
-  } catch {
-    return false;
-  }
 }

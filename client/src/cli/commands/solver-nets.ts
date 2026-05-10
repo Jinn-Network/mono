@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { loadConfig } from '../../config.js';
 import { buildHarnesses } from '../../harnesses/impls/index.js';
+import { canonicalHarnessName, CLAUDE_CODE_HARNESS, harnessNameMatches } from '../../harnesses/names.js';
 import { loadSolverNets } from '../../solver-nets/registry.js';
 import {
   buildPredictionOperatorStatus,
@@ -56,7 +57,7 @@ function predictionDefault(): SolverNetConfig {
   return {
     enabled: true,
     solverType: 'prediction.v1',
-    harness: 'claude-code-learner',
+    harness: CLAUDE_CODE_HARNESS,
     plugins: [],
     taskGenerator: { enabled: true },
   };
@@ -188,7 +189,7 @@ const command: CommandModule = {
 
     if (subverb === 'enable') {
       net.enabled = true;
-      if (typeof parsed.values.harness === 'string') net.harness = parsed.values.harness;
+      if (typeof parsed.values.harness === 'string') net.harness = canonicalHarnessName(parsed.values.harness);
       writeConfig(configPath, cfg);
       const loaded = loadConfig(configPath);
       const registry = await loadSolverNets(loaded);
@@ -203,7 +204,7 @@ const command: CommandModule = {
           claudePath: loaded.claudePath,
           claudeModel: loaded.claudeModel,
           implStateDirRoot: loaded.engine.implStateDirRoot,
-        }).find((candidate) => candidate.name === selectedHarness);
+        }).find((candidate) => harnessNameMatches(candidate.name, selectedHarness));
         if (harness?.onEnable) {
           enableResult = await harness.onEnable({
             solverNet: { name: loadedNet.name, solverType: loadedNet.solverType },
@@ -228,9 +229,10 @@ const command: CommandModule = {
         fail(ctx, 'solver-nets set-harness requires <harness>');
         return;
       }
-      net.harness = arg2;
+      const harness = canonicalHarnessName(arg2);
+      net.harness = harness;
       writeConfig(configPath, cfg);
-      writeJson(ctx, { verb: 'solver-nets set-harness', configPath, name, harness: arg2 });
+      writeJson(ctx, { verb: 'solver-nets set-harness', configPath, name, harness });
       return;
     }
 

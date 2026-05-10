@@ -23,17 +23,34 @@ export interface ArtifactScrubResult {
   redactedKeys: string[];
 }
 
+const CREDENTIAL_VALUE_PATTERNS: readonly RegExp[] = [
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
+  /\bsk-[A-Za-z0-9_-]{16,}\b/g,
+  /\bsk-ant-[A-Za-z0-9_-]{16,}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9_]{16,}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{16,}\b/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+];
+
 function isUtf8Text(bytes: Buffer): boolean {
   if (bytes.includes(0)) return false;
   const text = bytes.toString('utf8');
   return Buffer.from(text, 'utf8').equals(bytes);
 }
 
+function scrubCredentialValues(value: string): string {
+  let out = value;
+  for (const pattern of CREDENTIAL_VALUE_PATTERNS) {
+    out = out.replace(pattern, CREDENTIAL_REDACTED);
+  }
+  return out;
+}
+
 function scrubTextValue(value: string, cfg: ArtifactScrubConfig): string {
   let out = value;
   if (cfg.path) out = scrubPathString(out, cfg.path);
   if (cfg.identity) out = scrubIdentityString(out, cfg.identity);
-  return out;
+  return scrubCredentialValues(out);
 }
 
 function scrubJsonValue(

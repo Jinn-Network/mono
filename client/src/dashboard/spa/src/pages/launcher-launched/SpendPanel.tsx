@@ -5,7 +5,7 @@ import type {
   LaunchedSolverNetRecord,
   SolverNetManifestV1,
 } from '../../api/types.js';
-import { formatEthFromWei, projectRunwayTasks, truncateAddress } from './helpers.js';
+import { formatWeiAmount, projectRunwayTasks, truncateAddress } from './helpers.js';
 
 /**
  * Safe-funded budget overview for the launched SolverNet.
@@ -43,8 +43,13 @@ export function SpendPanel({
     refetchInterval: 30_000,
   });
 
+  const manifestSolverType = manifest
+    ? `${manifest.contract.id}.${manifest.contract.version}`
+    : undefined;
   const matchedEntry = manifest
-    ? status?.nets.find((n) => n.name === manifest.name)
+    ? status?.nets.find((n) =>
+        n.solverType === manifestSolverType || n.name === manifest.name,
+      )
     : undefined;
 
   const safeBalanceWei = matchedEntry?.budget.safeBalanceWei;
@@ -79,36 +84,40 @@ export function SpendPanel({
             isLoading
               ? '—'
               : safeBalanceWei
-                ? `${formatEthFromWei(safeBalanceWei)} (${safeBalanceWei} wei)`
+                ? formatWeiAmount(safeBalanceWei)
                 : 'unavailable'
           }
+          title={safeBalanceWei ? `${safeBalanceWei} wei` : undefined}
           testid="launcher-launched-spend-safe-balance"
         />
         <Field
           label="Solution price"
           value={
             solutionPriceWei
-              ? `${solutionPriceWei} wei (${formatEthFromWei(solutionPriceWei)})`
+              ? formatWeiAmount(solutionPriceWei)
               : '—'
           }
+          title={solutionPriceWei ? `${solutionPriceWei} wei` : undefined}
           testid="launcher-launched-spend-solution-price"
         />
         <Field
           label="Verdict price"
           value={
             verdictPriceWei
-              ? `${verdictPriceWei} wei (${formatEthFromWei(verdictPriceWei)})`
+              ? formatWeiAmount(verdictPriceWei)
               : '—'
           }
+          title={verdictPriceWei ? `${verdictPriceWei} wei` : undefined}
           testid="launcher-launched-spend-verdict-price"
         />
         <Field
           label="Per-Task cost"
           value={
             projection
-              ? `${projection.perTaskWei.toString()} wei (${formatEthFromWei(projection.perTaskWei.toString())})`
+              ? formatWeiAmount(projection.perTaskWei.toString())
               : '—'
           }
+          title={projection ? `${projection.perTaskWei.toString()} wei` : undefined}
           testid="launcher-launched-spend-per-task"
         />
         <Field

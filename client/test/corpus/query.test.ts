@@ -8,12 +8,37 @@ describe('buildSubgraphQuery', () => {
     expect(variables.first).toBe(10);
     // solverType isn't directly indexed (Execution.kind is ENVELOPE/EVALUATION/OTHER per spec §10 Q6),
     // so build a server-side filter on metadataKey or post-fetch filter — for v0, post-fetch.
-    expect(variables.solverType ?? null).toBeNull();
+    expect('solverType' in variables).toBe(false);
   });
 
   it('translates evidenceTier into Execution.tier filter', () => {
-    const { variables } = buildSubgraphQuery({ evidenceTier: 'attested', limit: 5 });
+    const { query, variables } = buildSubgraphQuery({ evidenceTier: 'attested', limit: 5 });
+    expect(query).toContain('tier: $tier');
     expect(variables.tier).toBe('ATTESTED');
+  });
+
+  it('omits unset comparison filters instead of sending null values to the subgraph', () => {
+    const { query, variables } = buildSubgraphQuery({});
+    expect(query).not.toContain('publishedAt_gte');
+    expect(query).not.toContain('publishedAt_lte');
+    expect(query).not.toContain('operator_:');
+    expect('publishedAfter' in variables).toBe(false);
+    expect('publishedBefore' in variables).toBe(false);
+    expect('operatorWallet' in variables).toBe(false);
+  });
+
+  it('includes comparison and operator filters only when set', () => {
+    const { query, variables } = buildSubgraphQuery({
+      generatedAfter: 10,
+      generatedBefore: 20,
+      participant: { safeAddress: '0xabc' },
+    });
+    expect(query).toContain('publishedAt_gte: $publishedAfter');
+    expect(query).toContain('publishedAt_lte: $publishedBefore');
+    expect(query).toContain('operator_: { agentWallet: $operatorWallet }');
+    expect(variables.publishedAfter).toBe('10');
+    expect(variables.publishedBefore).toBe('20');
+    expect(variables.operatorWallet).toBe('0xabc');
   });
 
   it('clamps limit to 500 when caller passes more', () => {

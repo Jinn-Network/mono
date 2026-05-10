@@ -159,6 +159,41 @@ describe('acquireArtifactContent', () => {
     expect(store.getNetworkArtifact(realSha)?.content.equals(realBytes)).toBe(true);
   });
 
+  it('treats donated IPFS sha mismatch as fatal and does not cache', async () => {
+    const declaredSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
+    const wrongBytes = Buffer.from('wrong donated bytes');
+    const acquireFn = vi.fn(async () => realBytes);
+    const fetchFromIpfs = vi.fn(async () => ({
+      schemaVersion: 'jinn.artifact.donation.v1',
+      sha256: declaredSha,
+      encoding: 'jinn.artifact.donation.v1',
+      data: wrongBytes.toString('base64'),
+    }));
+
+    await expect(
+      acquireArtifactContent({
+        sha256: declaredSha,
+        artifactType: 'design_document',
+        access,
+        store,
+        selfSafeAddress: '0x' + 'f'.repeat(40),
+        privateKey: TEST_KEY,
+        acquireFn,
+        fetchFromIpfs,
+        ipfsGatewayUrl: 'https://gateway.example.com',
+        ownerSafe: '0x' + 'a'.repeat(40),
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-donated',
+          sha256: declaredSha,
+          encoding: 'jinn.artifact.donation.v1',
+        }],
+      }),
+    ).rejects.toThrow(/HashMismatch|hash mismatch/);
+    expect(acquireFn).not.toHaveBeenCalled();
+    expect(store.getNetworkArtifact(declaredSha)).toBeNull();
+  });
+
   it('origin fetch with hash mismatch throws and does not cache', async () => {
     const acquireFn = vi.fn(async () => Buffer.from('wrong bytes'));
     const declaredSha = 'a'.repeat(64);

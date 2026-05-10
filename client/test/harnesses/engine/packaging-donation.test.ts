@@ -146,13 +146,21 @@ describe('walkArtifacts donation scrub', () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
-  it('scrubs system_snapshot members and still excludes env/', async () => {
+  it('scrubs system_snapshot members and excludes env, task checkouts, VCS data, dependencies, and caches', async () => {
     writeFileSync(join(workDir, 'notes.md'), 'hello adriano');
     writeFileSync(join(workDir, 'config.json'), JSON.stringify({ token: 'secret-value' }));
     writeFileSync(join(workDir, 'OUTPUTS.json'), JSON.stringify({ outputs: [] }));
     const envDir = join(workDir, 'env');
     mkdirSync(envDir);
     writeFileSync(join(envDir, 'API_TOKEN'), 'must-not-appear');
+    mkdirSync(join(workDir, 'repo', '.git', 'objects'), { recursive: true });
+    writeFileSync(join(workDir, 'repo', '.git', 'objects', 'pack'), 'git-object-pack');
+    mkdirSync(join(workDir, 'repo', 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(workDir, 'repo', 'node_modules', 'pkg', 'index.js'), 'dependency');
+    mkdirSync(join(workDir, 'repo', '.pytest_cache'), { recursive: true });
+    writeFileSync(join(workDir, 'repo', '.pytest_cache', 'state'), 'cache');
+    mkdirSync(join(workDir, 'repo', 'src'), { recursive: true });
+    writeFileSync(join(workDir, 'repo', 'src', 'task-source.py'), 'print("task checkout")');
 
     const artifacts = await walkArtifacts(workDir, [], {
       scrub: { identity: { username: 'adriano' } },
@@ -162,9 +170,16 @@ describe('walkArtifacts donation scrub', () => {
 
     const entries = tarEntries(readFileSync(snapshot!.localPath));
     expect(entries['env/API_TOKEN']).toBeUndefined();
+    expect(entries['repo/.git/objects/pack']).toBeUndefined();
+    expect(entries['repo/node_modules/pkg/index.js']).toBeUndefined();
+    expect(entries['repo/.pytest_cache/state']).toBeUndefined();
+    expect(entries['repo/src/task-source.py']).toBeUndefined();
+    expect(Object.keys(entries).some((entry) => entry.startsWith('repo/'))).toBe(false);
     expect(entries['notes.md']!.toString('utf8')).toBe('hello <USER>');
     expect(entries['config.json']!.toString('utf8')).toContain('<REDACTED>');
     expect(Buffer.concat(Object.values(entries)).toString('utf8')).not.toContain('must-not-appear');
+    expect(Buffer.concat(Object.values(entries)).toString('utf8')).not.toContain('git-object-pack');
+    expect(Buffer.concat(Object.values(entries)).toString('utf8')).not.toContain('dependency');
     expect(Buffer.concat(Object.values(entries)).toString('utf8')).not.toContain('secret-value');
   });
 });

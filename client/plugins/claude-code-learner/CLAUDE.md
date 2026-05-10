@@ -4,7 +4,7 @@ This plugin provides a generic learning-agent loop.
 
 ## Entry point
 
-When a session starts, the harness adapter's initial prompt directs the model to use the `claude-code-learner:learn` skill. That skill drives the full seven-phase pipeline.
+When a session starts, the harness adapter provides the task payload and paths. The harness/plugin projection makes this skill available to the model; this skill drives the full seven-phase pipeline when selected by the runtime.
 
 ## Components
 

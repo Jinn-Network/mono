@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -146,6 +146,42 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });
     }
+  });
+
+  it('documents the harness-neutral fallback payload file and schema shape', () => {
+    const skill = readFileSync(
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'plan', 'SKILL.md'),
+      'utf8',
+    );
+    expect(skill).toContain('submit_typed_payload');
+    expect(skill).toContain('.execute/solution-payload.json');
+
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-swe-rebench-fallback-'));
+    try {
+      const payload = {
+        schemaVersion: 'swe-rebench-v2-solution.v1',
+        patch: '--- a/src/example.c\n+++ b/src/example.c\n@@ -1 +1 @@\n-old\n+new\n',
+      };
+      writeTypedPayload(workingDir, payload);
+      const parsed = JSON.parse(readFileSync(join(workingDir, '.execute', 'solution-payload.json'), 'utf8')) as unknown;
+
+      expect(SweRebenchV2SolutionPayloadSchema.parse(parsed)).toEqual(payload);
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+    }
+  });
+
+  it('documents SWE execution data retrieval through Network Tools', () => {
+    const skill = readFileSync(
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
+      'utf8',
+    );
+    expect(skill).toContain('search_records');
+    expect(skill).toContain('inspect_record');
+    expect(skill).toContain('acquire_artifact');
+    expect(skill).not.toContain('.execute/execution-data-retrieval.json');
+    expect(skill).not.toContain('jinn.execution_data_retrieval.v1');
+    expect(skill).not.toContain('corpus.read');
   });
 
   it('emits a Solution.verdictPayload (validates against SDK) when role=evaluation', async () => {

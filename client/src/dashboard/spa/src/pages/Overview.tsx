@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
+import { useLocation } from 'wouter';
 import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
 import { AlertBand } from './overview/AlertBand.js';
-import { LiveNowBand } from './overview/LiveNowBand.js';
+import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/LiveNowBand.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard, type OperatorCardRole } from './overview/OperatorCard.js';
 import { QuickActions } from './overview/QuickActions.js';
@@ -36,6 +37,11 @@ interface OverviewStatusV1 {
       txHash: string | null;
     }>;
   };
+  taskRuns?: {
+    totals?: { activeTaskRuns?: number };
+    inFlight?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
+    recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
+  };
   predictionV1?: {
     /**
      * Mirror of the daemon-side `PredictionOperatorStatus`. Only a subset
@@ -58,6 +64,7 @@ interface OverviewStatusV1 {
     };
     operatorError?: string;
     totals?: { observedTasks?: number; activeTaskRuns?: number; solutions?: number; verdicts?: number; failed?: number };
+    recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
   };
 }
 
@@ -79,28 +86,54 @@ interface BootstrapWithSolverNets {
       roles?: string[];
     }
   >;
+  joinedSolverNets?: Record<
+    string,
+    {
+      name?: string;
+      manifestCid?: string;
+      roles?: string[];
+    }
+  >;
 }
 
 interface JoinedSolverNet {
   /** Display name for the OperatorCard. */
   name: string;
+  /** Manifest CID / config key used for deep-linking into the joined config. */
+  configId?: string;
   /** Roles narrowed to OperatorCard's `solving` / `evaluating` vocabulary. */
   roles: OperatorCardRole[];
 }
 
 /**
  * Detect whether the operator has joined any SolverNet. Returns the first
- * joined entry projected into OperatorCard's prop shape. The new
+ * joined entry projected into OperatorCard's prop shape. The explicit
+ * `joinedSolverNets` config block wins over the legacy `solverNets` map. The new
  * manifestCid-keyed shape (any entry with non-empty `roles`) wins over the
  * legacy `enabled` flag; both are accepted during the Tasks 21/22 migration
  * (spec §12). The predictionV1 status payload is a final-fallback signal
  * for daemons that haven't been restarted since this migration landed.
  */
 function detectJoinedSolverNet(
+  joinedSolverNets: BootstrapWithSolverNets['joinedSolverNets'] | undefined,
   bootstrapSolverNets: BootstrapWithSolverNets['solverNets'] | undefined,
   predictionEnabled: boolean,
   predictionRoles: string[] | undefined,
 ): JoinedSolverNet | null {
+  if (joinedSolverNets) {
+    for (const [key, entry] of Object.entries(joinedSolverNets)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const rawRoles = Array.isArray(entry.roles) ? entry.roles : [];
+      if (rawRoles.length === 0) continue;
+      const roles = mapRolesToOperatorVocab(rawRoles);
+      return {
+        name: entry.name ?? entry.manifestCid ?? key,
+        configId: entry.manifestCid ?? key,
+        roles: roles.length > 0 ? roles : ['solving'],
+      };
+    }
+  }
+
   if (bootstrapSolverNets) {
     // Pass 1: new shape — entries keyed by manifestCid (heuristic: starts
     // with 'baf' / 'Qm', or has a `manifestCid` field) with non-empty roles.
@@ -116,6 +149,7 @@ function detectJoinedSolverNet(
       const roles = mapRolesToOperatorVocab(rawRoles);
       return {
         name: entry.name ?? key,
+        configId: entry.manifestCid ?? key,
         roles: roles.length > 0 ? roles : ['solving'],
       };
     }
@@ -127,6 +161,7 @@ function detectJoinedSolverNet(
       if (entry.enabled !== true && roles.length === 0) continue;
       return {
         name: entry.name ?? key,
+        configId: entry.manifestCid ?? key,
         roles: roles.length > 0 ? roles : ['solving'],
       };
     }
@@ -138,6 +173,7 @@ function detectJoinedSolverNet(
   if (predictionEnabled || mappedPredictionRoles.length > 0) {
     return {
       name: 'prediction',
+      configId: 'prediction',
       roles: mappedPredictionRoles.length > 0 ? mappedPredictionRoles : ['solving'],
     };
   }
@@ -168,6 +204,7 @@ function formatEth(wei?: string): string {
 }
 
 export function OverviewPage(): JSX.Element {
+  const [, navigate] = useLocation();
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
@@ -187,6 +224,7 @@ export function OverviewPage(): JSX.Element {
   // covers the current Phase-1 single-net world where the daemon writes
   // `solverNets.prediction.enabled` rather than a manifestCid entry.
   const joined = detectJoinedSolverNet(
+    bootstrap?.joinedSolverNets,
     bootstrap?.solverNets,
     operator?.solverNet?.enabled === true,
     operator?.solverNet?.roles,
@@ -208,6 +246,7 @@ export function OverviewPage(): JSX.Element {
   const tasksDelivered = totals.solutions;
   const jinnEarned = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
+  const liveNow = deriveLiveNow(status);
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -215,12 +254,13 @@ export function OverviewPage(): JSX.Element {
         tasksDelivered={tasksDelivered}
         jinnEarned={jinnEarned}
         gasRunwayDays={gasRunwayDays}
+        statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
+        statusState={liveNow.state}
+        statusDot={LIVE_NOW_TONE[liveNow.state].dot}
       />
 
-      <LiveNowBand />
-
-      {/* Public counters — always shown when the catalog has prediction. */}
-      <NetworkCard name="prediction" totals={totals} />
+      {/* Public counters for the active SolverNet surfaced by this operator. */}
+      <NetworkCard name={joined?.name ?? 'SolverNet'} totals={totals} />
 
       {/*
        * Operator-side state vs. empty-state — strictly mutually exclusive.
@@ -229,12 +269,14 @@ export function OverviewPage(): JSX.Element {
        * deep-links to `/operator#solvernets` where the registry catalog
        * is rendered. `detectJoinedSolverNet` accepts the legacy short-name
        * shape and the new manifestCid-keyed shape during the Tasks 21/22
-       * migration window. The diagnostic-attention AlertBand has moved
-       * into <LiveNowBand />; this Get-Started AlertBand stays.
+       * migration window. The diagnostic-attention state is represented in
+       * the compact status tile above and the full live card on /operator;
+       * this Get-Started AlertBand stays.
        */}
       {joined ? (
         <OperatorCard
           name={joined.name}
+          configId={joined.configId}
           roles={joined.roles}
           state="live"
           waitingMessage={operator?.nextAction?.description}
@@ -251,10 +293,38 @@ export function OverviewPage(): JSX.Element {
       <QuickActions
         claimableJinn={formatEth(status?.rewards?.pendingStakingRewardsWei)}
         gasEth={formatEth(status?.masterGas?.balanceWei)}
-        onClaim={() => { void api.claimRewards(); }}
-        onTopUp={() => undefined}
-        onManage={() => undefined}
-        onRestart={() => { void api.restartDaemon(); }}
+        onClaim={async () => {
+          const res = await api.claimRewards();
+          if (!res.ok) {
+            throw new Error(res.error ?? 'Reward claim failed.');
+          }
+          return { message: 'JINN claim command completed.' };
+        }}
+        onTopUp={async () => {
+          const res = await api.triggerDrip();
+          if (!res.ok) {
+            throw new Error(res.reason ?? 'Gas top-up failed.');
+          }
+          const txCount = res.txHashes?.length ?? (res.txHash ? 1 : 0);
+          if (txCount > 0) {
+            return { message: `Gas top-up requested (${txCount} ${txCount === 1 ? 'transaction' : 'transactions'}).` };
+          }
+          if (res.attempts === 0) {
+            return { message: 'Gas balance is already above the testnet top-up target.' };
+          }
+          return { message: 'Gas top-up checked; no additional funding was needed.' };
+        }}
+        onManage={() => {
+          navigate('/operator#security');
+          return { message: 'Opening wallet settings.' };
+        }}
+        onRestart={async () => {
+          const res = await api.restartDaemon();
+          if (!res.ok) {
+            throw new Error('Restart request failed.');
+          }
+          return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
+        }}
       />
       <AdvancedDetails>
         <IdentityCard

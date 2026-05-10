@@ -33,6 +33,8 @@ These are the runtime primitives the plugin assumes the harness exposes (Claude 
 - `Read`, `Write`, `Edit`, `Glob`, `Grep` — filesystem.
 - A wait primitive — block until duration / deadline / condition (Claude Code: `Monitor`).
 
+The harness adapter is responsible for projecting the generic subagent lifecycle onto its own tool surface: dispatch a fresh-context role worker, wait for required artifacts, and release completed workers. Subagent inputs should use absolute paths so workers do not depend on inheriting the coordinator's current working directory.
+
 If the harness lacks `Skill`, generic `Task`-style subagent dispatch, `Bash`, or filesystem read/write/edit, the plugin will not run. The wait primitive gates time-anchored plans only — the plugin can run for `early-return` postures without it.
 
 ## Inputs the harness adapter passes

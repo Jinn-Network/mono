@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildSolverNetsCatalog } from '../../src/api/solvernets-catalog-build.js';
 
 describe('buildSolverNetsCatalog', () => {
-  it('emits one entry per registered SolverNet with name, description, state, supported roles, and intrinsic solverType', () => {
+  it('emits one entry per registered SolverNet with name, description, state, supported roles, and compatible harnesses', () => {
     const catalog = buildSolverNetsCatalog({
       registered: [
         {
@@ -11,7 +11,7 @@ describe('buildSolverNetsCatalog', () => {
           contract: { id: 'prediction', version: 'v1' },
           state: 'live',
           supportedRoles: ['solving', 'evaluating'],
-          compatibleHarnesses: [{ name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving'] }],
+          compatibleHarnesses: [{ name: 'claude-code', version: '0.1.0', supportsRoles: ['solving'] }],
           compatiblePlugins: [{ name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' }],
         },
       ],

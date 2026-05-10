@@ -7,7 +7,7 @@ description: Plan the patch for a SWE-rebench v2 task — given the Orient summa
 
 Inputs:
 - The Orient summary from the previous phase.
-- The repo at `task.base_commit`.
+- The repo at `goal.spec.base_commit`.
 - The `FAIL_TO_PASS` test names (must pass after your patch).
 - The `PASS_TO_PASS` test names (must continue passing — don't break them).
 
@@ -26,6 +26,8 @@ Pass this plan forward to the Execute phase, which produces the actual patch.
 ## Submitting the final patch
 
 Once Execute has produced the unified diff, call the **`submit_typed_payload`** MCP tool exposed by the daemon to register the Solution. The daemon validates the payload against the SolverNet contract's solution schema before persisting it; if validation fails, the tool returns the Zod error tree under `error.issues` and you can retry.
+
+If `submit_typed_payload` is not available in the current harness, write the same payload object directly to `<workingDir>/.execute/solution-payload.json`. Create the `.execute` directory if needed. The daemon's harvester reads that file after the harness exits and applies the same SolverNet payload schema during envelope assembly.
 
 Required payload shape for `swe-rebench-v2.v1`:
 

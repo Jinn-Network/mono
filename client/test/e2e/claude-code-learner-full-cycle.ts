@@ -4,13 +4,17 @@
  * Verifies the load-bearing claim: between cycle 1 and cycle 2, `implStateDir`
  * HEAD sha advances AND cycle 2's learn skill's boot reads the new sha.
  *
- * This script invokes the `claude` CLI directly with the plugin loaded
- * (--plugin-dir) — it does NOT go through the engine. The daemon-path
- * verification (engine → wrapper → shim → adapter → claude) is a separate
- * concern; this script focuses on the loop semantics.
+ * This script runs through the configured learner Harness, so it exercises the
+ * daemon adapter path (shim → adapter → configured CLI) while still focusing on
+ * learner loop semantics.
  *
- * Gates on `claude` availability — skips cleanly with a clear message when
- * the CLI isn't in PATH (e.g. CI without Claude Code installed).
+ * Configure with:
+ *   JINN_E2E_LEARNER_HARNESS=claude-code | codex
+ *   JINN_E2E_LEARNER_CLI_PATH=/path/to/claude-or-codex
+ *   JINN_E2E_LEARNER_MODEL=...
+ *
+ * Gates on configured CLI availability — skips cleanly with a clear message
+ * when the CLI isn't in PATH (e.g. CI without Claude Code / Codex installed).
  *
  * Runtime budget: each cycle takes ~5-10 min as the agent walks through
  * Orient → Strategize → Plan → Execute → Debrief → Improve → Memory
@@ -21,16 +25,19 @@
  *
  * Plan 4 T3 / bd jinn-mono-iee.
  */
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_ROOT = resolve(HERE, '..', '..');
-const PLUGIN_PATH = join(PACKAGE_ROOT, 'plugins', 'claude-code-learner');
+import { join } from 'node:path';
+import { buildHarnesses } from '../../src/harnesses/impls/index.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../src/harnesses/names.js';
+import type { Harness, HarnessContext } from '../../src/harnesses/types.js';
+import type { Task } from '../../src/types/task.js';
+import {
+  checkLearnerCli,
+  readLearnerHarnessE2EConfig,
+  type LearnerHarnessE2EConfig,
+} from './learner-harness-config.js';
 
 const PHASES = [
   'orient',
@@ -49,6 +56,8 @@ interface CycleParams {
   fieldValue: string;
   workingDir: string;
   implStateDir: string;
+  harness: Harness;
+  config: LearnerHarnessE2EConfig;
 }
 
 interface CycleResult {
@@ -58,6 +67,7 @@ interface CycleResult {
   bootJson: BootJson | null;
   outputJson: unknown | null;
   implStateDirHeadAfter: string;
+  errorMessage?: string;
 }
 
 interface BootJson {
@@ -68,22 +78,32 @@ interface BootJson {
 }
 
 async function main(): Promise<void> {
-  // Pre-flight: skip cleanly if claude not available.
-  const claudeCheck = spawnSync('claude', ['--version'], { encoding: 'utf8' });
-  if (claudeCheck.status !== 0) {
-    console.log('SKIP: claude CLI not in PATH; install Claude Code to run this e2e');
+  const config = readLearnerHarnessE2EConfig();
+
+  // Pre-flight: skip cleanly if configured learner CLI is not available.
+  const cliCheck = checkLearnerCli(config);
+  if (!cliCheck.ok) {
+    console.log(`SKIP: ${cliCheck.reason}`);
     process.exit(0);
   }
-  console.log(`claude CLI: ${claudeCheck.stdout.trim()}`);
+  console.log(`learner harness: ${config.harnessName}`);
+  console.log(`learner CLI:     ${config.cliPath} (${cliCheck.version})`);
+  console.log(`learner model:   ${config.model}`);
 
-  // Pre-flight: confirm plugin exists.
-  if (!existsSync(PLUGIN_PATH)) {
-    console.error(`FAIL: plugin not found at ${PLUGIN_PATH}`);
+  const harness = buildHarnesses({
+    stub: true,
+    rpcUrl: 'http://stub',
+    claudePath: config.harnessName === CLAUDE_CODE_HARNESS ? config.cliPath : 'claude',
+    claudeModel: config.model,
+    codexPath: config.harnessName === CODEX_HARNESS ? config.cliPath : 'codex',
+    codexModel: config.model,
+  }).find((impl) => impl.name === config.harnessName);
+  if (!harness) {
+    console.error(`FAIL: configured learner harness not registered: ${config.harnessName}`);
     process.exit(1);
   }
-  console.log(`plugin: ${PLUGIN_PATH}`);
 
-  console.log('=== claude-code-learner full-cycle e2e ===\n');
+  console.log('=== learner full-cycle e2e ===\n');
 
   const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-fullcycle-state-'));
   const cycle1WorkingDir = mkdtempSync(join(tmpdir(), 'jinn-fullcycle-c1-'));
@@ -105,6 +125,8 @@ async function main(): Promise<void> {
       fieldValue: 'hello',
       workingDir: cycle1WorkingDir,
       implStateDir,
+      harness,
+      config,
     });
 
     assertCycle(cycle1, {
@@ -126,6 +148,8 @@ async function main(): Promise<void> {
       fieldValue: 'world',
       workingDir: cycle2WorkingDir,
       implStateDir,
+      harness,
+      config,
     });
 
     assertCycle(cycle2, {
@@ -209,56 +233,42 @@ async function runCycle(params: CycleParams): Promise<CycleResult> {
     spec: { fieldNames: ['foo', 'bar', 'baz'], fieldValue: params.fieldValue },
   };
 
-  const prompt = [
-    'You are running a task. Use the Skill tool to invoke',
-    "'claude-code-learner:learn' and run the FULL seven-phase pipeline",
-    '(Orient → Strategize → Plan → Execute → Debrief → Improve → Memory consolidation).',
-    '',
-    'Session inputs:',
-    `- goal = ${JSON.stringify(goal)}`,
-    `- workingDir = ${params.workingDir}`,
-    `- implStateDir = ${params.implStateDir}`,
-    `- msUntilDeadline = ${endTs - startTs}`,
-    '',
-    'Run all phases. For Improve: even if Debrief found no major issues, write at',
-    'least one trivial improvement (e.g. a note in implStateDir/notes/) so the',
-    'cross-cycle test can verify Improve actually mutates implStateDir.',
-    '',
-    'Exit cleanly when all phases are done.',
-  ].join('\n');
+  const task = buildTaskForCycle(params, goal, startTs, endTs);
+  const abort = new AbortController();
+  const endTimer = setTimeout(() => abort.abort(), endTs - Date.now());
+  let exitCode = 0;
+  let errorMessage: string | undefined;
 
-  const env = { ...process.env, IMPL_STATE_DIR: params.implStateDir };
-  const args = ['--plugin-dir', PLUGIN_PATH, '-p', prompt];
-
-  console.log(`  spawning claude (cycle window 10min)...`);
-  const exitCode = await new Promise<number>((resolveSpawn, rejectSpawn) => {
-    const child: ChildProcess = spawn('claude', args, {
-      env,
-      cwd: params.workingDir,
-      stdio: ['ignore', 'pipe', 'pipe'],
+  console.log(`  running ${params.config.harnessName} via ${params.config.cliPath} (cycle window 10min)...`);
+  try {
+    await params.harness.run({
+      task,
+      requestId: `${params.goalId}-request`,
+      solverNet: {
+        name: 'learner-full-cycle-e2e',
+        solverType: task.solverType,
+        model: params.config.model,
+      },
+      implStateDir: params.implStateDir,
+      workingDir: params.workingDir,
+      log: (event) => {
+        console.log(`    [${params.cycleLabel}:${event.level}] ${event.msg}`);
+      },
+      abort: abort.signal,
+      msUntilEndTs: () => Math.max(0, endTs - Date.now()),
+      trajectory: { addSpan: () => undefined } as unknown as HarnessContext['trajectory'],
+      mode: 'train',
     });
-
-    child.stdout?.on('data', (d: Buffer) => {
-      // Stream brief progress lines as they arrive.
-      const txt = d.toString().trim();
-      if (txt) {
-        // Truncate to keep output readable.
-        for (const line of txt.split('\n').slice(0, 3)) {
-          console.log(`    [${params.cycleLabel}] ${line.slice(0, 180)}`);
-        }
-      }
-    });
-    child.stderr?.on('data', (d: Buffer) => {
-      const txt = d.toString().trim();
-      if (txt) console.error(`    [${params.cycleLabel}:err] ${txt.slice(0, 200)}`);
-    });
-
-    child.on('exit', (code) => resolveSpawn(code ?? -1));
-    child.on('error', rejectSpawn);
-  });
+  } catch (err) {
+    exitCode = 1;
+    errorMessage = err instanceof Error ? err.message : String(err);
+    console.error(`    [${params.cycleLabel}:err] ${errorMessage.slice(0, 500)}`);
+  } finally {
+    clearTimeout(endTimer);
+  }
 
   const durationMs = Date.now() - startedAt;
-  console.log(`  claude exited ${exitCode} after ${Math.round(durationMs / 1000)}s`);
+  console.log(`  ${params.config.harnessName} exited ${exitCode} after ${Math.round(durationMs / 1000)}s`);
 
   // Capture phase presence + boot.json + output.json + final implStateDir HEAD.
   const phasesPresent = PHASES.filter((p) => existsSync(join(params.workingDir, `.${p}`)));
@@ -270,11 +280,40 @@ async function runCycle(params: CycleParams): Promise<CycleResult> {
   const outputJson: unknown | null = existsSync(outputJsonPath)
     ? JSON.parse(readFileSync(outputJsonPath, 'utf8'))
     : null;
-  const implStateDirHeadAfter = execFileSync('git', ['-C', params.implStateDir, 'rev-parse', 'HEAD'], {
-    encoding: 'utf8',
-  }).trim();
+  const implStateDirHeadAfter = existsSync(join(params.implStateDir, '.git'))
+    ? execFileSync('git', ['-C', params.implStateDir, 'rev-parse', 'HEAD'], {
+        encoding: 'utf8',
+      }).trim()
+    : '';
 
-  return { exitCode, durationMs, phasesPresent, bootJson, outputJson, implStateDirHeadAfter };
+  return { exitCode, durationMs, phasesPresent, bootJson, outputJson, implStateDirHeadAfter, errorMessage };
+}
+
+function buildTaskForCycle(
+  params: CycleParams,
+  goal: { id: string; description: string; kind: string; deadline: number; spec: Record<string, unknown> },
+  startTs: number,
+  endTs: number,
+): Task {
+  return {
+    id: params.goalId,
+    solverType: 'portfolio.v0',
+    role: 'restoration',
+    description: [
+      params.goalDescription,
+      '',
+      'Run the FULL seven-phase learner pipeline:',
+      'Orient -> Strategize -> Plan -> Execute -> Debrief -> Improve -> Memory consolidation.',
+      'For Improve: even if Debrief found no major issues, write at least one trivial improvement',
+      'such as a note in implStateDir/notes/ so the cross-cycle test can verify learning state mutation.',
+      'Exit cleanly when all phases are done.',
+    ].join('\n'),
+    window: { startTs, endTs },
+    spec: {
+      ...goal.spec,
+      goal,
+    },
+  };
 }
 
 interface AssertOptions {
@@ -285,7 +324,7 @@ interface AssertOptions {
 
 function assertCycle(result: CycleResult, opts: AssertOptions): void {
   if (result.exitCode !== 0) {
-    throw new Error(`${opts.label}: claude exited with code ${result.exitCode}`);
+    throw new Error(`${opts.label}: learner harness exited with code ${result.exitCode}: ${result.errorMessage ?? ''}`);
   }
   for (const phase of PHASES) {
     if (!result.phasesPresent.includes(phase)) {

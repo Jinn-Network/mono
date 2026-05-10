@@ -165,7 +165,7 @@ export interface HarnessEnableMetadata {
 }
 
 /**
- * Outcome of a single `jinn solver-nets enable <name>` invocation.
+ * Outcome of a single Harness/SolverNet enable invocation.
  *
  * The flow is idempotent: the agent reruns the same command until
  * `status === 'ready'`. Each intermediate state carries enough info for
@@ -252,7 +252,9 @@ export interface Harness {
   enableMetadata?(): HarnessEnableMetadata;
 
   /**
-   * Idempotent enable-state machine. Called by `jinn solver-nets enable <name>`.
+   * Idempotent enable-state machine. Called by `jinn harnesses enable <name>`
+   * for direct Harness setup, or by SolverNet-specific enable flows when a
+   * SolverNet's selected Harness also needs setup.
    *
    * Contract:
    *   - Zero-dep impls return `{ status: 'ready' }` on every call.

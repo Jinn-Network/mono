@@ -25,16 +25,26 @@ export class PythonEvalRunner implements EvalRunner {
 
   async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
     const tmp = await mkdtemp(join(tmpdir(), 'swerebench-eval-'));
-    // Single-task runner: we use the placeholder instance_id "task" in both
-    // the task spec and the patches override; eval.py matches them by id.
-    const INSTANCE_ID = 'task';
+    // Single-task runner: eval.py matches the patch override by instance_id.
+    const INSTANCE_ID = args.instance_id;
     const taskJson = [{
       instance_id: INSTANCE_ID,
+      // SWE-rebench Docker images place the checked-out repository at
+      // /testbed. The upstream eval.py derives its docker workdir from the
+      // repo slug, so use a synthetic slug that resolves to /testbed while
+      // preserving the real repo separately in the Jinn task/HF row.
+      repo: 'jinn/testbed',
       image_name: args.image,
       FAIL_TO_PASS: args.fail_to_pass,
       PASS_TO_PASS: args.pass_to_pass,
       test_patch: args.test_patch,
-      install_config: { test_cmd: args.test_cmd, log_parser: args.log_parser },
+      install_config: {
+        test_cmd: [
+          ...normalizeCommands(args.install),
+          ...normalizeCommands(args.test_cmd),
+        ],
+        log_parser: args.log_parser,
+      },
     }];
     // Upstream eval.py expects --patches to be a JSON list of
     // `{instance_id, patch, test_patch?}` overrides keyed by instance_id.
@@ -98,4 +108,14 @@ export class PythonEvalRunner implements EvalRunner {
       exitCode,
     };
   }
+}
+
+function normalizeCommands(value: string | string[] | undefined): string[] {
+  if (typeof value === 'string') {
+    return value.trim() ? [value] : [];
+  }
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 }

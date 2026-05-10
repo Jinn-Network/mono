@@ -108,6 +108,13 @@ The subagent reads the prompt, follows it, writes `outputPath`, and returns a on
 
 Do not reference any registered-subagent registry by name. There is no `subagent_type:` argument and no `claude-code-learner:<role>` identifier. The mechanism is: read prompt file → spawn fresh-context subagent → pass prompt as instructions.
 
+Use the dispatch, wait, and release primitives exposed by the current harness. The harness is responsible for projecting those generic operations onto its native tool surface. Keep these lifecycle rules independent of harness:
+
+- Keep the returned handle/id for each dispatched subagent.
+- Wait until every required artifact for the current phase exists; if a multi-wait returns only some completed subagents, keep waiting on the remaining handles.
+- Release/close completed subagents once their outputs have been verified and their summaries have been captured, especially before spawning a later phase.
+- Pass absolute filesystem paths in subagent inputs. Subagents must use those absolute paths for reads and writes rather than assuming they inherited the coordinator's current working directory.
+
 For sections that dispatch multiple subagents in parallel (Orient, optional Debrief probes), spawn one subagent per topic with its own `topic` and `outputPath`. If your harness supports it, run them concurrently; otherwise dispatch sequentially. Subagents do not spawn further subagents — they are one level deep.
 
 ## 3. Orient

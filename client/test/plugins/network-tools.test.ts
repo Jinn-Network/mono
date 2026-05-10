@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  MANIFEST_LOOKUP_ORDER,
   loadSolverPluginManifest,
   resolveSolverPlugin,
 } from '../../src/plugins/index.js';
@@ -57,6 +58,28 @@ describe('Network Tools plugin manifest', () => {
       cwd: '${CLAUDE_PLUGIN_ROOT}',
     });
     expect(existsSync(join(pluginRoot, 'mcp/jinn-client-server.mjs'))).toBe(true);
+  });
+
+  it('declares Codex host metadata without entering Jinn manifest lookup', () => {
+    const codexManifest = readJson('.codex-plugin/plugin.json');
+    const mcpManifest = readJson('.mcp.json');
+
+    expect(MANIFEST_LOOKUP_ORDER).not.toContain('.codex-plugin/plugin.json');
+    expect(loadSolverPluginManifest(pluginRoot).path.endsWith('jinn.plugin.json')).toBe(true);
+    expect(codexManifest).not.toHaveProperty('jinn');
+    expect(codexManifest).toMatchObject({
+      name: 'network-tools',
+      mcpServers: './.mcp.json',
+    });
+    expect(mcpManifest).toMatchObject({
+      mcpServers: {
+        'jinn-client': {
+          command: 'node',
+          args: ['mcp/jinn-client-server.mjs'],
+          cwd: '.',
+        },
+      },
+    });
   });
 
   it('resolves the plugin-local MCP wrapper to the existing client MCP server', async () => {

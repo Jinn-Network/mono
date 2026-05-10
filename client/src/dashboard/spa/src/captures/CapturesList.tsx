@@ -10,7 +10,7 @@ export function CapturesList({ captures, selectedSessionId, onSelect }: Captures
   if (captures.length === 0) {
     return (
       <div style={{ padding: 24, color: 'var(--fg-muted)' }}>
-        No pending captures.
+        No pending execution data.
       </div>
     );
   }

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadConfig, buildConfigProvenance } from '../src/config.js';
+import { DEFAULT_TESTNET_SUBGRAPH_URL, loadConfig, buildConfigProvenance } from '../src/config.js';
 
 describe('loadConfig RPC override handling', () => {
   const dirs: string[] = [];
@@ -11,6 +11,7 @@ describe('loadConfig RPC override handling', () => {
   const originalJinnRpcUrl = process.env['JINN_RPC_URL'];
   const originalJinnNetwork = process.env['JINN_NETWORK'];
   const originalJinnL2ProofRpcUrl = process.env['JINN_L2_PROOF_RPC_URL'];
+  const originalJinnSubgraphUrl = process.env['JINN_SUBGRAPH_URL'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
@@ -44,6 +45,12 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_L2_PROOF_RPC_URL'];
     } else {
       process.env['JINN_L2_PROOF_RPC_URL'] = originalJinnL2ProofRpcUrl;
+    }
+
+    if (originalJinnSubgraphUrl === undefined) {
+      delete process.env['JINN_SUBGRAPH_URL'];
+    } else {
+      process.env['JINN_SUBGRAPH_URL'] = originalJinnSubgraphUrl;
     }
 
     if (originalTestnetL2Deployment === undefined) {
@@ -160,6 +167,36 @@ describe('loadConfig RPC override handling', () => {
     const config = loadConfig(configPath);
 
     expect(config.rpcUrl).toBe('https://sepolia.base.org');
+  });
+
+  it('defaults testnet to the public task subgraph URL', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.subgraphUrl).toBe(DEFAULT_TESTNET_SUBGRAPH_URL);
+  });
+
+  it('does not default the testnet task subgraph on mainnet', async () => {
+    const configPath = await writeConfigFile({ network: 'mainnet' });
+    delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.subgraphUrl).toBeUndefined();
+  });
+
+  it('lets JINN_SUBGRAPH_URL override the public task subgraph default', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    process.env['JINN_SUBGRAPH_URL'] = 'https://subgraph.override.example/graphql';
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.subgraphUrl).toBe('https://subgraph.override.example/graphql');
   });
 
   it('defaults operator donation to disabled when operator config exists', async () => {
@@ -442,6 +479,7 @@ describe('loadConfig solverNets roles migration', () => {
     });
     const cfg = loadConfig(configPath);
     expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+    expect(cfg.solverNets['prediction']?.harness).toBe('claude-code');
     // Loader output is the canonical shape — the singular `role` does not
     // re-appear after migration.
     expect((cfg.solverNets['prediction'] as Record<string, unknown>)?.['role']).toBeUndefined();
@@ -783,6 +821,17 @@ describe('operator config (jinn-mono-vy37.1.3)', () => {
     expect(cfg.operator?.publicEndpoint).toBe('https://op.example.com');
     expect(cfg.operator?.defaultPriceUsdc).toBe('0');
     expect(cfg.operator?.perArtifactTypePrice).toEqual({});
+  });
+
+  it('accepts donation-mode operator config without publicEndpoint', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: { donation: { enabled: true } },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.operator?.publicEndpoint).toBeUndefined();
+    expect(cfg.operator?.defaultPriceUsdc).toBe('0');
+    expect(cfg.operator?.donation.enabled).toBe(true);
   });
 
   it('honours per-artifact-type prices from the file', async () => {

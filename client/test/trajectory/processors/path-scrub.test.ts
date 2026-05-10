@@ -36,6 +36,16 @@ describe('PathScrubProcessor', () => {
     expect(span.attributes['file.path']).toBe('x.ts');
   });
 
+  it('scrubs paths embedded inside longer strings', () => {
+    const span = fakeSpan({
+      message: 'read /Users/adrianobradley/harbor/jinn-mono/cargo/client/src/main.ts from /Users/adrianobradley/.jinn-client/config.json',
+    });
+    proc.onEnd(span);
+    expect(span.attributes['message']).toBe(
+      'read cargo/client/src/main.ts from /users/anon/.jinn-client/config.json',
+    );
+  });
+
   it('leaves system paths alone', () => {
     const span = fakeSpan({ 'file.path': '/usr/local/bin/node' });
     proc.onEnd(span);

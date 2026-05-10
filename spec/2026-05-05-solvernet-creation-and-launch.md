@@ -561,13 +561,15 @@ Operator participation flow:
 Operator local config after participation:
 
 ```ts
-solverNets: {
-  '<manifestCid or solverNetId>': {
+joinedSolverNets: {
+  '<manifestCid>': {
     name: 'Prediction',                      // cached for display
     manifestCid: '<cid>',
+    contract: { id: 'prediction', version: 'v1' },
     roles: ['solver'],                       // operator's chosen roles within openRoles
     harness: 'claude-code-learner',          // operator-side, only for solver role
-    plugins: [...],                          // operator-side
+    plugins: [...],                          // operator-side additions; defaults are implicit
+    disabledDefaultPlugins: [...],           // explicit opt-outs from default runtime plugins
     model: 'claude-haiku-4-5-20251001',      // operator-side
     // evaluator-role harness comes from manifest.contract.evaluationFunction.implementation
   };

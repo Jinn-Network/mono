@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSolutionOutput } from '@jinn-network/sdk/solvernets/prediction-v1';
 import type { OutputArtifact } from '../../../types/portfolio.js';
@@ -143,6 +144,47 @@ function findPredictionV1Solution(workingDir: string): { path: string; payload: 
     if (payload) return { path: relPath, payload };
   }
   return null;
+}
+
+function maybeMaterializeSweRebenchPatchPayload(
+  workingDir: string,
+  task?: Task,
+): Record<string, unknown> | null {
+  if (task?.solverType !== 'swe-rebench-v2.v1' || task.role === 'evaluation') {
+    return null;
+  }
+  const repoDir = join(workingDir, 'repo');
+  if (!existsSync(join(repoDir, '.git'))) {
+    return null;
+  }
+
+  let patch = '';
+  try {
+    patch = execFileSync('git', ['-C', repoDir, 'diff', '--binary'], {
+      encoding: 'utf8',
+      maxBuffer: 50 * 1024 * 1024,
+    });
+  } catch (err) {
+    console.warn(
+      `[claude-code-learner] harvestOutput: unable to derive swe-rebench-v2 patch from git diff: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+  if (!patch.trim()) {
+    return null;
+  }
+
+  const payload = {
+    schemaVersion: 'swe-rebench-v2-solution.v1',
+    patch,
+  };
+  const executeDir = join(workingDir, '.execute');
+  mkdirSync(executeDir, { recursive: true });
+  writeFileSync(
+    join(executeDir, 'solution-payload.json'),
+    JSON.stringify(payload, null, 2),
+  );
+  return payload;
 }
 
 function normalizePredictionV1SolutionPayload(
@@ -345,12 +387,24 @@ function collectLearnerArtifacts(workingDir: string): OutputArtifact[] {
 export function harvestOutput(workingDir: string, phaseRange?: string, task?: Task): Solution {
   const range = resolvePhaseRange(phaseRange);
   const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
+  const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
+  const typedPayload =
+    safeReadJson(typedPayloadPath) ??
+    maybeMaterializeSweRebenchPatchPayload(workingDir, task);
 
-  // Hard-fail on missing or corrupt primary artifacts for all required phases.
+  // Hard-fail on missing or corrupt primary artifacts for all required phases
+  // unless a typed SolverNet payload is already present. In the typed-payload
+  // path, phase artifacts are useful learner telemetry, but the payload is the
+  // delivery contract the engine needs to package and settle.
   const validated = new Map<Phase, Record<string, unknown>>();
   for (const phase of REQUIRED_PHASES[range]) {
     const path = join(workingDir, `.${phase}`, PHASE_PRIMARY_ARTIFACT[phase]);
-    validated.set(phase, requiredReadJson(path));
+    if (!typedPayload) {
+      validated.set(phase, requiredReadJson(path));
+      continue;
+    }
+    const artifact = safeReadJson(path);
+    if (artifact) validated.set(phase, artifact);
   }
 
   const phasesCompleted = detectCompletedPhases(workingDir);
@@ -395,7 +449,7 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
   const artifacts = [...learnerArtifacts];
   const solverType = typeof task?.solverType === 'string' ? task.solverType : undefined;
 
-  // Legacy prediction.v1 path — reads .execute/prediction-v1-solution.json
+  // Prediction.v1 path — reads .execute/prediction-v1-solution.json
   // directly (predates the submit_typed_payload MCP tool). To be migrated to
   // the generic path below in a follow-up; until then, prediction.v1 keeps
   // its rich gating/informational shape via buildSolutionOutput.
@@ -447,8 +501,6 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
   // `submit_typed_payload` which validates against the active SolverNet's
   // schema and persists to .execute/solution-payload.json. Harvest reads it
   // back generically — no per-solverType branching here.
-  const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
-  const typedPayload = safeReadJson(typedPayloadPath);
   const informationalEntries: Record<string, unknown> = {};
   if (learnerArtifacts.length > 0) {
     informationalEntries['learnerFeedbackArtifacts'] = learnerArtifacts.map((artifact) => ({
@@ -488,7 +540,7 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
     } as Solution;
   }
 
-  // No typed payload submitted — fall through to the legacy portfolio shape.
+  // No typed payload submitted — fall through to the phase-artifact-only shape.
   // Tasks without a typed payload schema (or where the model didn't call
   // submit_typed_payload) still return the gating-only Solution.
   return {

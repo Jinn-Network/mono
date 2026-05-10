@@ -20,6 +20,16 @@ describe('TopTabs', () => {
     expect(launcher.getAttribute('data-active')).toBe('false');
   });
 
+  it('does not render the Leaderboard tab while the leaderboard surface is disabled', () => {
+    const { hook } = memoryLocation({ path: '/overview' });
+    render(
+      <Router hook={hook}>
+        <TopTabs />
+      </Router>,
+    );
+    expect(screen.queryByText('Leaderboard')).toBeNull();
+  });
+
   it('marks Operator active for operator routes', () => {
     const { hook } = memoryLocation({ path: '/operator/join/bafybeiaaa' });
     render(
@@ -42,14 +52,24 @@ describe('TopTabs', () => {
     expect(launcher.getAttribute('data-active')).toBe('true');
   });
 
-  it('marks Captures active for capture routes', () => {
-    const { hook } = memoryLocation({ path: '/captures' });
+  it('does not expose captures as a top-level tab', () => {
+    const { hook } = memoryLocation({ path: '/overview' });
     render(
       <Router hook={hook}>
         <TopTabs />
       </Router>,
     );
-    const captures = screen.getByText('Captures');
-    expect(captures.getAttribute('data-active')).toBe('true');
+    expect(screen.queryByText('Captures')).toBeNull();
+  });
+
+  it('marks Operator active for execution data routes', () => {
+    const { hook } = memoryLocation({ path: '/operator/execution-data' });
+    render(
+      <Router hook={hook}>
+        <TopTabs />
+      </Router>,
+    );
+    const operator = screen.getByText('Operator');
+    expect(operator.getAttribute('data-active')).toBe('true');
   });
 });

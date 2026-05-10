@@ -27,13 +27,20 @@ let baseUrl: string;
  * Minimal corpus stub — only acquireBySha256 is exercised by the API
  * route, so the other methods throw to flag accidental wider use.
  */
-function makeFakeCorpus(): Corpus {
+function makeFakeCorpus(): Corpus & { readonly lastHint: unknown } {
+  let lastHint: unknown;
   return {
+    get lastHint() { return lastHint; },
     async read() { throw new Error('not implemented in test'); },
     async query() { return []; },
     async fetchManifest() { throw new Error('not implemented in test'); },
     async acquire() { throw new Error('not implemented in test'); },
-    async acquireBySha256(sha256: string): Promise<ArtifactContent> {
+    async acquireBySha256(
+      sha256: string,
+      _access: Parameters<Corpus['acquireBySha256']>[1],
+      hint?: Parameters<Corpus['acquireBySha256']>[2],
+    ): Promise<ArtifactContent> {
+      lastHint = hint;
       return {
         sha256,
         bytes: Buffer.from('fake-bytes'),
@@ -114,6 +121,102 @@ describe('daemon-api-auth (bearer middleware)', () => {
       }),
     });
     expect(res.status).not.toBe(401);
+  });
+
+  it('passes donated IPFS sources through to corpus.acquireBySha256', async () => {
+    const fakeCorpus = makeFakeCorpus() as Corpus & { lastHint?: unknown };
+    await server.close();
+    store.close();
+    store = new Store(':memory:');
+    server = await startApiServer({
+      port: 0,
+      store,
+      apiToken: TEST_TOKEN,
+      corpus: fakeCorpus,
+    });
+    baseUrl = `http://127.0.0.1:${server.port}`;
+
+    const sha256 = 'b'.repeat(64);
+    const sources = [{
+      kind: 'ipfs',
+      cid: 'bafy-donated',
+      sha256,
+      encoding: 'jinn.artifact.donation.v1',
+    }];
+    const res = await fetch(`${baseUrl}/v1/artifacts/acquire`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${TEST_TOKEN}`,
+      },
+      body: JSON.stringify({
+        sha256,
+        access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+        artifactType: 'design_document',
+        envelopeCid: 'bafyEnv',
+        sources,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(fakeCorpus.lastHint).toMatchObject({
+      artifactType: 'design_document',
+      envelopeCid: 'bafyEnv',
+      sources,
+    });
+  });
+
+  it('rejects donated IPFS sources that point at a different sha256', async () => {
+    const sha256 = 'b'.repeat(64);
+    const res = await fetch(`${baseUrl}/v1/artifacts/acquire`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${TEST_TOKEN}`,
+      },
+      body: JSON.stringify({
+        sha256,
+        access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-donated',
+          sha256: 'c'.repeat(64),
+          encoding: 'jinn.artifact.donation.v1',
+        }],
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { reason?: string; error?: string };
+    expect(body.reason).toBe('invalid_args');
+    expect(body.error).toMatch(/source sha256/i);
+  });
+
+  it('rejects malformed donated IPFS sources with actionable invalid_args response', async () => {
+    const sha256 = 'b'.repeat(64);
+    const res = await fetch(`${baseUrl}/v1/artifacts/acquire`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${TEST_TOKEN}`,
+      },
+      body: JSON.stringify({
+        sha256,
+        access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+        sources: [{
+          kind: 'http',
+          cid: 'https://example.com/not-ipfs',
+          sha256,
+          encoding: 'plain',
+        }],
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { reason?: string; error?: string; retryable?: boolean };
+    expect(body.reason).toBe('invalid_args');
+    expect(body.retryable).toBe(false);
+    expect(body.error).toMatch(/sources must be donation IPFS artifact source objects/i);
   });
 
   it('rejects POST /artifacts with no Authorization header → 401', async () => {

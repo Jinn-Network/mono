@@ -177,6 +177,30 @@ describe('JoinFlow — manifest fetch', () => {
     );
   });
 
+  it('formats tiny manifest prices as gwei', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        solutionPriceWei: '10000000000',
+        verdictPriceWei: '5000000000',
+      },
+      lifecycle: {
+        status: 'launched' as const,
+        statusUpdatedAt: '2026-05-05T00:00:00Z',
+        sourceBlock: 1,
+      },
+    });
+
+    wrap(<JoinFlow />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+    expect(screen.getByText('10 gwei')).toBeTruthy();
+    expect(screen.getByText('5 gwei')).toBeTruthy();
+    expect(screen.queryByText(/e-/i)).toBeNull();
+  });
+
   it('shows a loading state while the manifest is in flight', () => {
     apiMock.getManifest.mockReturnValue(new Promise(() => undefined));
     wrap(<JoinFlow />);
@@ -224,6 +248,114 @@ describe('JoinFlow — role selection', () => {
     expect(screen.queryByTestId('join-flow-evaluator-info')).toBeNull();
   });
 
+  it('defaults SWE solver joins to Claude Code and default-includes the SWE runtime', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        name: 'SWE-rebench v2',
+        contract: {
+          ...baseManifest.contract,
+          id: 'swe-rebench-v2',
+          version: 'v1',
+        },
+      },
+      lifecycle: {
+        status: 'launched' as const,
+        statusUpdatedAt: '2026-05-05T00:00:00Z',
+        sourceBlock: 1,
+      },
+    });
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          name: 'swe-rebench-v2',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          compatibleHarnesses: [
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+          compatiblePlugins: [
+            { name: 'swe-rebench-v2-runtime', version: '0.1.0', source: 'bundled' },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() => expect(harnessSelect.value).toBe('claude-code'));
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toEqual([
+      'Claude Code 0.1.0',
+      'Codex 0.1.0',
+    ]);
+
+    const modelSelect = screen.getByTestId('join-model-select') as HTMLSelectElement;
+    const optionValues = Array.from(modelSelect.options).map((o) => o.value);
+    expect(modelSelect.value).toBe('claude-haiku-4-5-20251001');
+    expect(optionValues).toContain('claude-sonnet-4-6');
+    expect(optionValues).not.toContain('gpt-5.4-mini');
+
+    const chips = screen.getAllByTestId('join-plugin-option-chip');
+    expect(chips.some((chip) => chip.textContent?.match(/network tools/i))).toBe(true);
+    expect(chips.some((chip) => chip.textContent?.match(/learner/i))).toBe(true);
+    expect(
+      chips.some(
+        (chip) =>
+          chip.getAttribute('data-plugin') === 'swe-rebench-v2-runtime' &&
+          chip.textContent?.match(/default/i),
+      ),
+    ).toBe(true);
+    expect(screen.queryByTestId('join-plugin-option')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('join-plugin-option-trigger'));
+    let pluginRows = screen.queryAllByTestId('join-plugin-option');
+    expect(pluginRows.some((row) => row.getAttribute('data-plugin') === 'network-tools')).toBe(false);
+    expect(pluginRows.some((row) => row.getAttribute('data-plugin') === 'claude-code-learner')).toBe(false);
+    expect(pluginRows.some((row) => row.getAttribute('data-plugin') === 'swe-rebench-v2-runtime')).toBe(false);
+
+    fireEvent.change(screen.getByTestId('join-plugin-search'), {
+      target: { value: 'swe' },
+    });
+    pluginRows = screen.queryAllByTestId('join-plugin-option');
+    expect(pluginRows).toHaveLength(0);
+  });
+
+  it('allows removing a default plugin after warning and keeps it available to re-add', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const removeNetwork = screen
+      .getAllByTestId('join-plugin-option-remove')
+      .find((button) => button.getAttribute('data-plugin') === 'network-tools')!;
+    fireEvent.click(removeNetwork);
+    expect(screen.getByTestId('join-plugin-option-default-warning').textContent).toMatch(
+      /default operator baseline/i,
+    );
+    fireEvent.click(screen.getByTestId('join-plugin-option-default-warning-confirm'));
+
+    expect(
+      screen
+        .getAllByTestId('join-plugin-option-chip')
+        .some((chip) => chip.getAttribute('data-plugin') === 'network-tools'),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByTestId('join-plugin-option-trigger'));
+    const pluginRows = screen.getAllByTestId('join-plugin-option');
+    expect(pluginRows.find((row) => row.getAttribute('data-plugin') === 'network-tools')).toBeTruthy();
+  });
+
   it('shows both the harness picker and an evaluator binding note when both roles are selected', async () => {
     wrap(<JoinFlow />);
     await waitFor(() =>
@@ -258,8 +390,13 @@ describe('JoinFlow — submission', () => {
     // Wait for the catalog query to populate the harness select default.
     await waitFor(() => expect(apiMock.getSolverNets).toHaveBeenCalled());
 
-    // Toggle the bundled plugin on.
-    fireEvent.click(screen.getByLabelText(/plugin: jinn-prediction-plugin/i));
+    // Add the recommended SolverNet plugin from the searchable picker.
+    fireEvent.click(screen.getByTestId('join-plugin-option-trigger'));
+    fireEvent.click(
+      screen
+        .getAllByTestId('join-plugin-option')
+        .find((row) => row.getAttribute('data-plugin') === 'jinn-prediction-plugin')!,
+    );
 
     fireEvent.click(screen.getByTestId('join-flow-submit'));
 
@@ -268,9 +405,11 @@ describe('JoinFlow — submission', () => {
       'bafybeiaaa',
       expect.objectContaining({
         name: 'Prediction Markets',
+        contract: { id: 'prediction', version: 'v1' },
         roles: ['solver'],
-        harness: 'claude-code-learner',
-        plugins: ['jinn-prediction-plugin'],
+        harness: 'claude-code',
+        plugins: ['bundled:jinn-prediction-plugin'],
+        disabledDefaultPlugins: [],
       }),
     );
     await waitFor(() =>
@@ -289,6 +428,7 @@ describe('JoinFlow — submission', () => {
 
     await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
     const callArgs = apiMock.operatorJoin.mock.calls[0]![1] as Record<string, unknown>;
+    expect(callArgs.contract).toEqual({ id: 'prediction', version: 'v1' });
     expect(callArgs.roles).toEqual(['evaluator']);
     expect(callArgs.harness).toBeUndefined();
     expect(callArgs.model).toBeUndefined();

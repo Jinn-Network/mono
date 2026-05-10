@@ -119,6 +119,64 @@ describe('TaskEngine.claim — impl gate', () => {
     expect(after.state).toBe(TaskRunState.CLAIMED);
   });
 
+  it('refuses to accept another task for the same solver type and role while one is in flight', async () => {
+    const readyImpl = stubImpl({ isReady: async () => ({ ready: true }) });
+    const engine = new TestEngine({
+      store,
+      paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+      implRegistry: { findFor: () => readyImpl },
+    });
+    const active = makeInput('active-task');
+    engine.db.insertDiscovered(active);
+
+    const accept = await engine.canAcceptTask({
+      solverType: 'portfolio.v0',
+      taskRole: 'restoration',
+      task: { id: 'next-task', description: 'test', solverType: 'portfolio.v0', role: 'restoration' },
+    });
+
+    expect(accept).toEqual({
+      ok: false,
+      reason: 'another portfolio.v0/restoration task is already in flight',
+    });
+  });
+
+  it('allows claiming the current discovered row despite the single-flight gate', async () => {
+    const readyImpl = stubImpl({ isReady: async () => ({ ready: true }) });
+    const engine = new TestEngine({
+      store,
+      paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+      implRegistry: { findFor: () => readyImpl },
+    });
+    const input = makeInput('current-task');
+    engine.db.insertDiscovered(input);
+
+    await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+    const after = engine.db.getByRequestId(input.requestId)!;
+    expect(after.state).toBe(TaskRunState.CLAIMED);
+  });
+
+  it('refuses to claim a discovered row when another run for the same solver type and role is active', async () => {
+    const readyImpl = stubImpl({ isReady: async () => ({ ready: true }) });
+    const engine = new TestEngine({
+      store,
+      paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+      implRegistry: { findFor: () => readyImpl },
+    });
+    const active = makeInput('active-task');
+    engine.db.insertDiscovered(active);
+    await engine.callClaim(engine.db.getByRequestId(active.requestId)!);
+
+    const next = makeInput('next-task');
+    engine.db.insertDiscovered(next);
+
+    await expect(engine.callClaim(engine.db.getByRequestId(next.requestId)!)).rejects.toThrow(
+      /another portfolio\.v0\/restoration task is already in flight/,
+    );
+    expect(engine.db.getByRequestId(next.requestId)!.state).toBe(TaskRunState.FAILED);
+  });
+
   it('does not gate when implRegistry is absent (legacy test-mode path)', async () => {
     const engine = new TestEngine({
       store,

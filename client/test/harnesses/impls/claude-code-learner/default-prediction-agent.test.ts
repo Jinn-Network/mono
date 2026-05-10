@@ -168,7 +168,9 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
         '-p',
       ]));
       const promptArg = calls[0]!.args[calls[0]!.args.indexOf('-p') + 1]!;
-      expect(promptArg).toContain('claude-code-learner:learn');
+      expect(promptArg).toContain('You are executing a Jinn task');
+      expect(promptArg).toContain('Use the available skills, plugins, tools, and runtime context exposed by this harness');
+      expect(promptArg).not.toContain('claude-code-learner:learn');
       expect(promptArg).toContain('- mode = train');
       expect(calls[0]!.args).toEqual(expect.arrayContaining([
         '--plugin-dir',

@@ -1,6 +1,7 @@
 import { resolveSolverPlugin } from '../plugins/index.js';
 import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
+import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from '../harnesses/names.js';
 import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
 export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
@@ -22,6 +23,17 @@ export interface SolverNetConfig {
   model?: string;
   plugins: SolverPluginEntry[];
   taskGenerator: { enabled: boolean };
+}
+
+export interface JoinedSolverNetConfig {
+  manifestCid: string;
+  name?: string;
+  contract?: { id: string; version: string };
+  roles: Array<'solver' | 'evaluator'>;
+  harness?: string;
+  model?: string;
+  plugins?: SolverPluginEntry[];
+  disabledDefaultPlugins?: string[];
 }
 
 export interface LoadedSolverNet {
@@ -52,6 +64,38 @@ export function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetT
 function rolesFromConfig(net: SolverNetConfig): SolverNetOperatorRole[] {
   if (net.roles && net.roles.length > 0) return Array.from(new Set(net.roles));
   return ['solving'];
+}
+
+function rolesFromJoinedConfig(net: JoinedSolverNetConfig): SolverNetOperatorRole[] {
+  const roles: SolverNetOperatorRole[] = [];
+  for (const role of net.roles) {
+    if (role === 'solver') roles.push('solving');
+    if (role === 'evaluator') roles.push('evaluating');
+  }
+  return Array.from(new Set(roles));
+}
+
+function defaultRuntimePluginsForSolverType(solverType: string): SolverPluginEntry[] {
+  if (solverType === 'swe-rebench-v2.v1') {
+    return ['bundled:swe-rebench-v2-runtime'];
+  }
+  return [];
+}
+
+function defaultPluginDisabled(plugin: SolverPluginEntry, disabled: string[]): boolean {
+  if (typeof plugin !== 'string') {
+    const name = plugin.name ?? plugin.source;
+    return disabled.includes(name) || disabled.includes(plugin.source);
+  }
+  const bare = plugin.startsWith('bundled:') ? plugin.slice('bundled:'.length) : plugin;
+  return disabled.includes(plugin) || disabled.includes(bare);
+}
+
+function evaluatorHarnessNameForContract(contract: SolverNetContract): string | undefined {
+  const implementation = contract.evaluationFunction.implementation;
+  if (implementation.includes('swe-rebench-v2-evaluator')) return 'swe-rebench-v2-evaluator';
+  if (implementation.includes('prediction-v1-evaluator')) return 'prediction-v1-evaluator';
+  return undefined;
 }
 
 function runtimePluginFrom(
@@ -88,7 +132,13 @@ export class SolverNetRegistry {
   private readonly nets = new Map<string, LoadedSolverNet>();
 
   register(net: LoadedSolverNet): void {
-    this.nets.set(net.name, net);
+    let key = net.name;
+    let suffix = 2;
+    while (this.nets.has(key)) {
+      key = `${net.name}#${suffix}`;
+      suffix += 1;
+    }
+    this.nets.set(key, net);
   }
 
   get(name: string): LoadedSolverNet | undefined {
@@ -114,7 +164,7 @@ export class SolverNetRegistry {
   harnessSelections(): Record<string, string> {
     const out: Record<string, string> = {};
     for (const net of this.nets.values()) {
-      if (net.enabled) out[net.solverType] = net.harness;
+      if (net.enabled && out[net.solverType] === undefined) out[net.solverType] = net.harness;
     }
     return out;
   }
@@ -122,7 +172,7 @@ export class SolverNetRegistry {
   claudeModelSelections(): Record<string, string> {
     const out: Record<string, string> = {};
     for (const net of this.nets.values()) {
-      if (net.enabled && net.model) out[net.solverType] = net.model;
+      if (net.enabled && net.model && out[net.solverType] === undefined) out[net.solverType] = net.model;
     }
     return out;
   }
@@ -143,11 +193,14 @@ function parseSolverTypeRef(solverType: string): { id: string; version: string }
 }
 
 export async function loadSolverNets(
-  config: { solverNets: Record<string, SolverNetConfig> },
+  config: {
+    solverNets: Record<string, SolverNetConfig>;
+    joinedSolverNets?: Record<string, JoinedSolverNetConfig>;
+  },
 ): Promise<SolverNetRegistry> {
   const registry = new SolverNetRegistry();
-  for (const [name, net] of Object.entries(config.solverNets)) {
-    if (!net.enabled) continue;
+  async function registerFromConfig(name: string, net: SolverNetConfig): Promise<void> {
+    if (!net.enabled) return;
     const ref = parseSolverTypeRef(net.solverType);
     const contract = ref ? getSolverNetContract(ref) : undefined;
     if (!contract) {
@@ -193,11 +246,39 @@ export async function loadSolverNets(
       solverType: net.solverType,
       roles: rolesFromConfig(net),
       contract,
-      harness: net.harness,
+      harness: canonicalHarnessName(net.harness),
       ...(net.model ? { model: net.model } : {}),
       runtimePlugins,
       taskGenerator: net.taskGenerator,
     });
+  }
+
+  for (const [cid, joined] of Object.entries(config.joinedSolverNets ?? {})) {
+    if (!joined.contract) continue;
+    const solverType = `${joined.contract.id}.${joined.contract.version}`;
+    const contract = getSolverNetContract(joined.contract);
+    if (!contract) continue;
+    const roles = rolesFromJoinedConfig(joined);
+    if (roles.length === 0) continue;
+    const disabledDefaults = joined.disabledDefaultPlugins ?? [];
+    const defaultPlugins = defaultRuntimePluginsForSolverType(solverType)
+      .filter((plugin) => !defaultPluginDisabled(plugin, disabledDefaults));
+    const harness = joined.roles.includes('solver')
+      ? joined.harness ?? CLAUDE_CODE_HARNESS
+      : evaluatorHarnessNameForContract(contract) ?? joined.harness ?? CLAUDE_CODE_HARNESS;
+    await registerFromConfig(joined.name ?? cid, {
+      enabled: true,
+      solverType,
+      roles,
+      harness,
+      ...(joined.model ? { model: joined.model } : {}),
+      plugins: [...defaultPlugins, ...(joined.plugins ?? [])],
+      taskGenerator: { enabled: false },
+    });
+  }
+
+  for (const [name, net] of Object.entries(config.solverNets)) {
+    await registerFromConfig(name, net);
   }
   return registry;
 }

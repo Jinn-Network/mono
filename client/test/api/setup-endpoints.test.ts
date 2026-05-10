@@ -670,7 +670,7 @@ describe('POST /v1/setup/solvernets/:name', () => {
 
     expect(res.status).toBe(200);
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(persisted.solverNets.prediction.harness).toBe('claude-code-learner');
+    expect(persisted.solverNets.prediction.harness).toBe('claude-code');
     expect(persisted.solverNets.prediction.model).toBe('claude-haiku-4-5-20251001');
     expect(persisted.solverNets.prediction.plugins).toEqual(['jinn-prediction-plugin']);
   });
@@ -818,6 +818,7 @@ describe('POST /v1/operator/join/:cid', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: 'Prediction',
+        contract: { id: 'prediction', version: 'v1' },
         roles: ['solver'],
         harness: 'claude-code-learner',
         model: 'claude-haiku-4-5-20251001',
@@ -840,8 +841,9 @@ describe('POST /v1/operator/join/:cid', () => {
     expect(persisted.joinedSolverNets.bafybeiaaa).toEqual({
       manifestCid: 'bafybeiaaa',
       name: 'Prediction',
+      contract: { id: 'prediction', version: 'v1' },
       roles: ['solver'],
-      harness: 'claude-code-learner',
+      harness: 'claude-code',
       model: 'claude-haiku-4-5-20251001',
       plugins: ['jinn-prediction-plugin'],
     });
@@ -862,6 +864,7 @@ describe('POST /v1/operator/join/:cid', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: 'Prediction',
+        contract: { id: 'prediction', version: 'v1' },
         roles: ['evaluator'],
       }),
     });
@@ -871,6 +874,7 @@ describe('POST /v1/operator/join/:cid', () => {
     expect(persisted.joinedSolverNets.bafybeibbb).toEqual({
       manifestCid: 'bafybeibbb',
       name: 'Prediction',
+      contract: { id: 'prediction', version: 'v1' },
       roles: ['evaluator'],
     });
   });
@@ -950,7 +954,11 @@ describe('POST /v1/operator/join/:cid', () => {
     const configPath = join(dir, 'config.json');
     writeConfig(configPath, {
       joinedSolverNets: {
-        bafybeiggg: { manifestCid: 'bafybeiggg', roles: ['solver'] },
+        bafybeiggg: {
+          manifestCid: 'bafybeiggg',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          roles: ['solver'],
+        },
       },
     });
 
@@ -966,6 +974,10 @@ describe('POST /v1/operator/join/:cid', () => {
     expect(res.status).toBe(200);
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(persisted.joinedSolverNets.bafybeiggg.roles).toEqual(['solver', 'evaluator']);
+    expect(persisted.joinedSolverNets.bafybeiggg.contract).toEqual({
+      id: 'swe-rebench-v2',
+      version: 'v1',
+    });
   });
 });
 

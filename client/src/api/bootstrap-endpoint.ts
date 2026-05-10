@@ -17,12 +17,13 @@ import { readBootstrapError } from '../errors/persisted-bootstrap-error.js';
 export interface BootstrapEndpointConfig {
   earningDir: string;
   /** Reads operator-tunable runtime fields (rpcUrl, defaultRpcUrl,
-   *  solverNets) and merges them into the response so the SPA's
+   *  solverNets, joinedSolverNets) and merges them into the response so the SPA's
    *  Configuration page can render them without a separate fetch. */
   configReader?: () => {
     rpcUrl?: string;
     defaultRpcUrl?: string;
     solverNets?: Record<string, unknown>;
+    joinedSolverNets?: Record<string, unknown>;
   };
 }
 
@@ -138,6 +139,7 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       ...(cfg.rpcUrl !== undefined ? { rpcUrl: cfg.rpcUrl } : {}),
       ...(cfg.defaultRpcUrl !== undefined ? { defaultRpcUrl: cfg.defaultRpcUrl } : {}),
       ...(cfg.solverNets !== undefined ? { solverNets: cfg.solverNets } : {}),
+      ...(cfg.joinedSolverNets !== undefined ? { joinedSolverNets: cfg.joinedSolverNets } : {}),
       ...(fundingGateActive && fundingGate ? {
         funding: {
           master_address: fundingGate.master_address,

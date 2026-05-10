@@ -21,6 +21,7 @@ import {
   uploadArtifacts,
   type PackagingDeps,
 } from './packaging.js';
+import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
 import {
   assembleAndSignEnvelope,
   type EnvelopeAssemblyDeps,
@@ -47,9 +48,10 @@ import {
   codeDigestSha256ToBytes32,
   modeStringToFlag,
 } from '../../erc8004/index.js';
-import type { Role } from '../../types/envelope.js';
+import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
+import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 import { buildInfo } from '../../build-info.js';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
@@ -57,6 +59,7 @@ import {
   runHarnessWithFreezeFence,
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
+import { harnessStateDirName } from '../names.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -356,7 +359,7 @@ export class TaskEngine {
 
   // Transient storage for trajectory CID+sha256 refs produced by runImpl.
   // Keyed by requestId; cleared after successful pack.
-  private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string } | null>();
+  private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string; sources?: ArtifactSource[] } | null>();
   private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
@@ -594,6 +597,7 @@ export class TaskEngine {
       task.solverType ?? undefined,
       task.taskRole ?? 'restoration',
       task.task as Task | undefined,
+      task.requestId,
     );
     if (reason) {
       this.persistence.markFailed(task.requestId, reason);
@@ -701,10 +705,23 @@ export class TaskEngine {
     }
     const parsed = sdkContract.schemas.task.zod.safeParse(task);
     if (!parsed.success) {
-      const issues = parsed.error.issues
+      const parsedSpec = task.spec !== undefined
+        ? sdkContract.schemas.task.zod.safeParse(task.spec)
+        : undefined;
+      if (parsedSpec?.success) return null;
+
+      const specIssuesLookLikeWholeTask =
+        parsedSpec !== undefined &&
+        parsedSpec.error.issues.some((issue: ZodIssue) => {
+          const head = issue.path[0];
+          return typeof head === 'string' && ['id', 'description', 'solverType', 'window', 'claimPolicy', 'spec'].includes(head);
+        });
+      const selected = parsedSpec !== undefined && !specIssuesLookLikeWholeTask ? parsedSpec : parsed;
+      const issues = selected.error.issues
         .map((issue: ZodIssue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
         .join('; ');
-      return `${ref.id}.${ref.version} task failed validation: ${issues}`;
+      const scope = selected === parsedSpec ? 'task.spec' : 'task';
+      return `${ref.id}.${ref.version} ${scope} failed validation: ${issues}`;
     }
     return null;
   }
@@ -789,6 +806,7 @@ export class TaskEngine {
     solverType: string | undefined,
     role: 'restoration' | 'evaluation',
     task?: Task,
+    currentRequestId?: string,
   ): Promise<string | null> {
     // Per-launch operator-eligibility filter (Task 28 of
     // `spec/2026-05-05-solvernet-creation-and-launch.md` §14). When the
@@ -810,6 +828,13 @@ export class TaskEngine {
     // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
     // rows that pre-date `contractId`. See `routingKeyForTask`.
     const routingKey = this.routingKeyForTask(task, solverType);
+    if (routingKey && this.persistence.hasInFlightFor({
+      solverType: routingKey,
+      taskRole: role,
+      excludeRequestId: currentRequestId,
+    })) {
+      return `another ${routingKey}/${role} task is already in flight`;
+    }
     const solverNet = this.solverNetRegistry && routingKey
       ? this.solverNetRegistry.forSolverType(routingKey, role)
       : undefined;
@@ -870,7 +895,7 @@ export class TaskEngine {
     const resolvedImpl = run.solverType
       ? this.implRegistry?.findFor({ solverType: run.solverType, role: run.taskRole ?? 'restoration' }) ?? null
       : null;
-    const implStateName = run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default';
+    const implStateName = harnessStateDirName(run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default');
     const kindSeg = (run.solverType ?? '').replace(/[.:]/g, '_');
     const implStateDir = kindSeg
       ? join(this.paths.implStateDirRoot, implStateName, kindSeg)
@@ -933,8 +958,8 @@ export class TaskEngine {
     const kindSeg = solverType.replace(/[.:]/g, '_');
     const implStateDir = task.implStateDir ?? (
       kindSeg
-        ? join(this.paths.implStateDirRoot, impl.name, kindSeg)
-        : join(this.paths.implStateDirRoot, impl.name)
+        ? join(this.paths.implStateDirRoot, harnessStateDirName(impl.name), kindSeg)
+        : join(this.paths.implStateDirRoot, harnessStateDirName(impl.name))
     );
     const windowEndTs = task.windowEndTs;
 
@@ -1136,20 +1161,37 @@ export class TaskEngine {
 
     // 1b. Emit trajectory to IPFS now that all artifact spans have been added.
     // Non-fatal — envelope assembly continues with envelope.trajectory = null if upload fails.
-    let trajectoryRef: { cid: string; sha256: string } | null =
+    let trajectoryRef: { cid: string; sha256: string; sources?: ArtifactSource[] } | null =
       this.trajectoryRefs.get(task.requestId) ?? null;
     if (!trajectoryRef && collector && this.envelopeDeps) {
       try {
         const { privateKeyToAccount } = await import('viem/accounts');
         const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
-        const { cid, sha256 } = await emitTrajectory({
+        const { cid, sha256, signed } = await emitTrajectory({
           collector,
           runId: collector.runId,
           signerPrivateKey: this.envelopeDeps.agentEoaPrivateKey,
           signerAddress: account.address as `0x${string}`,
           ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
+          scrub: packagingDepsWithReq.donation?.scrub,
         });
-        trajectoryRef = { cid, sha256 };
+        const sources: ArtifactSource[] = [];
+        if (packagingDepsWithReq.donation?.enabled) {
+          const sourceCid = await uploadToIpfs(packagingDepsWithReq.donation.ipfsRegistryUrl, {
+            schemaVersion: DONATION_ARTIFACT_ENCODING,
+            artifactType: 'jinn.trajectory.v1',
+            sha256,
+            encoding: DONATION_ARTIFACT_ENCODING,
+            data: Buffer.from(JSON.stringify(signed), 'utf8').toString('base64'),
+          });
+          sources.push({
+            kind: 'ipfs',
+            cid: sourceCid,
+            sha256,
+            encoding: DONATION_ARTIFACT_ENCODING,
+          });
+        }
+        trajectoryRef = { cid, sha256, ...(sources.length > 0 ? { sources } : {}) };
         console.log(`[harness-engine] ${task.requestId}: trajectory emitted cid=${cid}`);
       } catch (err) {
         console.warn(
@@ -1296,6 +1338,9 @@ export class TaskEngine {
       ? {
           sha256: trajectoryRef.sha256,
           access: { endpoint: operatorEndpointForTraj, priceUsdc: '0' },
+          ...(trajectoryRef.sources && trajectoryRef.sources.length > 0
+            ? { sources: trajectoryRef.sources }
+            : {}),
         }
       : null;
 

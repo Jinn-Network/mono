@@ -9,13 +9,14 @@ This package is published from the monorepo, but operators consume it as a stand
 
 The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `client-vX.Y.Z`.
 
-The release flow has four layers:
+The release flow has six layers:
 
 1. fast CI in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 2. the fork-based local operator gate (`yarn release:operator-gate`)
-3. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
-4. the manual real testnet Docker acceptance gate (`yarn release:testnet-acceptance`; first-time setup: `yarn setup:testnet-acceptance-operator`, see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
-5. the GitHub Release workflows for npm `latest` and GHCR
+3. the cross-operator donated SWE execution-data gate (`yarn release:donation-consumption`)
+4. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
+5. the manual app-first SWE-rebench v2 and data-donation testnet acceptance gate, with Docker diagnostics retained as supporting evidence (see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
+6. the GitHub Release workflows for npm `latest` and GHCR
 
 The old host-installed full acceptance run remains available only as a secondary debug path:
 
@@ -37,6 +38,7 @@ Do this once because the package did not exist on npm initially.
    yarn build
    yarn pack:smoke
    yarn release:operator-gate
+   yarn release:donation-consumption
    cd ../contracts
    yarn test
    forge install foundry-rs/forge-std --no-git
@@ -89,8 +91,10 @@ npx @jinn-network/client@canary --help
    yarn release:client --prepare
    ```
    This runs the local client gates, contract gates, Docker testnet acceptance
-   setup with bootstrap, the Docker acceptance gate itself, and writes a report
-   under `client/release-runs/<version>-<timestamp>/`.
+   setup with bootstrap, the Docker diagnostic gate, and writes a report under
+   `client/release-runs/<version>-<timestamp>/`. The app-first SWE-rebench v2
+   and donated-data proof in [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md)
+   must be attached to the release evidence before publishing.
 4. Publish from that report:
    ```bash
    yarn release:client --publish --resume release-runs/<version>-<timestamp>
@@ -105,7 +109,7 @@ yarn release:client --prepare --skip-acceptance
 ```
 
 `--skip-acceptance` is not a stable-release gate; it exists to test the runner
-itself. The Docker acceptance gate is documented in
+itself. The current app-first testnet acceptance gate is documented in
 [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md).
 
 Release workflow contract:

@@ -11,6 +11,8 @@ export type OperatorCardRole = 'solving' | 'evaluating';
 
 export interface OperatorCardProps {
   name: string;
+  /** Stable config key for the joined SolverNet, preferably its manifest CID. */
+  configId?: string;
   /** Active operator roles. Empty array renders a placeholder rather than
    *  inventing a role — that situation indicates a misconfigured net. */
   roles: OperatorCardRole[];
@@ -23,9 +25,10 @@ function roleLabel(role: OperatorCardRole): string {
   return role === 'solving' ? 'Solver' : 'Evaluator';
 }
 
-export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCardProps): JSX.Element {
+export function OperatorCard({ name, configId, roles, state, waitingMessage }: OperatorCardProps): JSX.Element {
   const stateColor =
     state === 'live' ? 'var(--vow-green)' : state === 'available' ? 'var(--fg-muted)' : 'var(--fg-dim)';
+  const configTarget = encodeURIComponent(configId ?? name);
   return (
     <section
       style={{
@@ -90,7 +93,7 @@ export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCar
           )}
         </span>
         <Link
-          href={`/operator#solvernets/${name}`}
+          href={`/operator#solvernets/${configTarget}`}
           style={{
             color: 'var(--accent-sky)',
             fontSize: '11px',

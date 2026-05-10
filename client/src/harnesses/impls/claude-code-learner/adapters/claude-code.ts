@@ -97,13 +97,16 @@ function captureLogError(err: unknown): Error {
 }
 
 /**
- * Construct the initial prompt that invokes the learn skill with
- * the task context.
+ * Construct the initial task prompt. Harness/plugin-specific operating details
+ * live in the projected runtime instructions, not in this daemon handoff.
  */
 function buildInitialPrompt(inputs: TaskSessionInputs): string {
   return [
-    'You are running a task through the claude-code-learner harness.',
-    'Use the `claude-code-learner:learn` skill end-to-end. The skill defines the seven-phase learning loop; follow it.',
+    'You are executing a Jinn task.',
+    'Complete the task described by the task payload below.',
+    'Use the available skills, plugins, tools, and runtime context exposed by this harness.',
+    'Keep all task work inside `workingDir`.',
+    'When the task requires a typed SolverNet payload, submit it through an available submission tool or write the expected payload file for the harness harvester.',
     '',
     'Session inputs:',
     `- goal.id = ${inputs.taskId}`,
@@ -124,8 +127,8 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
 /**
  * Real Claude Code adapter. Spawns the `claude` CLI with the plugin
  * loaded via Claude Code's plugin install directory, sets IMPL_STATE_DIR
- * so the session-start hook fires correctly, and hands the learn skill
- * an initial prompt with task context.
+ * so the session-start hook fires correctly, and hands the task context to
+ * the session.
  *
  * Output collection is delegated to the shim's harvester — this adapter
  * only owns the spawn lifecycle.
@@ -174,7 +177,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       '-p',
       prompt,
     ];
-    const claudeModel = inputs.claudeModel ?? this.claudeModel;
+    const claudeModel = inputs.model ?? inputs.claudeModel ?? this.claudeModel;
     if (claudeModel) args.push('--model', claudeModel);
 
     for (const dir of [pluginRoot, ...(inputs.pluginRoots ?? [])]) {

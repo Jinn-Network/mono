@@ -137,9 +137,9 @@ describe('api.solvernets — owned launched + registry', () => {
 });
 
 describe('api.operator — artifact store', () => {
-  it('listArtifacts: GET /v1/operator/artifacts with source and limit', async () => {
+  it('listArtifacts: GET /v1/operator/execution-data with source and limit', async () => {
     await api.operator.listArtifacts({ source: 'network', limit: 25 });
-    expect(lastCall().url).toBe('/v1/operator/artifacts?source=network&limit=25');
+    expect(lastCall().url).toBe('/v1/operator/execution-data?source=network&limit=25');
   });
 
   it('updatePricing: POST /v1/operator/pricing with full pricing config', async () => {

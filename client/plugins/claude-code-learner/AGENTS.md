@@ -17,9 +17,18 @@ The `learn` skill and the sibling prompt files use Claude Code tool names by def
 | `Glob`/`Grep` | `glob`/`grep` | `fs` search | "filesystem search by pattern / content" |
 | `Monitor` (wait) | (bespoke) | (built-in) | "block until duration/deadline/condition" |
 
+## Subagent dispatch contract
+
+The learner workflow is written against generic harness capabilities, not a specific subagent API. The harness projects these operations onto its native tools:
+
+- Dispatch a fresh-context subagent with an inline role prompt body plus explicit inputs.
+- Wait on returned subagent handles until every required phase artifact exists.
+- Release/close completed subagents after their outputs are verified and their summaries are captured.
+- Pass absolute filesystem paths in subagent inputs; subagents should not rely on inheriting the coordinator's current working directory.
+
 ## Entry point
 
-The harness adapter directs the model to use the `claude-code-learner:learn` skill at session start.
+The harness adapter provides the task payload and paths at session start. The harness/plugin projection makes this skill available to the model; this skill drives the full seven-phase pipeline when selected by the runtime.
 
 ## Components
 

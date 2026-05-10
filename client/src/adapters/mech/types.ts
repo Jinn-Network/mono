@@ -19,6 +19,17 @@ export interface MechAdapterConfig {
   pollIntervalMs: number;
   /** Optional cap for delivery-log scans; omit for full-history recovery. */
   mechDeliverBackfillLookbackBlocks?: bigint;
+  /**
+   * Optional task-discovery index. The subgraph is a candidate source only:
+   * the adapter still verifies claimability on-chain before yielding work.
+   */
+  taskDiscovery?: {
+    subgraphUrl?: string;
+    solverNetManifestCids?: string[];
+    pageSize?: number;
+    maxPages?: number;
+    fetchImpl?: typeof fetch;
+  };
   chainId: number;
   /** Base mainnet V1, Phase 1b V2, or Task-native V3 delivery claim ABI. */
   routerClaimDeliveryVariant: 'v1' | 'v2' | 'v3';

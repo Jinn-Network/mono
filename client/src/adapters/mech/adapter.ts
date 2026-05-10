@@ -39,9 +39,15 @@ import {
   getMarketplaceRequestDeliveryMech,
   getTaskCidDigest,
   callDeliverToMarketplace,
+  canClaimTask,
+  canClaimEvaluation,
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
+import {
+  queryClaimableTaskCandidates,
+  type SubgraphTaskCandidate,
+} from './task-subgraph.js';
 import type { Store } from '../../store/store.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
@@ -63,6 +69,7 @@ interface PendingEvaluationSolution {
 
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
+const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
 const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {
   mode: 'exclusive',
   maxClaims: 1,
@@ -113,6 +120,7 @@ export class MechAdapter implements ExecutionAdapter {
   private pendingEvaluations = new Map<string, import('../../types/index.js').Task>();
   private observedTasks = new Map<string, TaskAnnouncement>();
   private requestKinds = new Map<string, 'solution' | 'verdict'>();
+  private claimedRestorationTaskIds = new Set<string>();
   private evaluationOpportunities = new Map<string, {
     taskId: string;
     attemptIndex: number;
@@ -441,6 +449,89 @@ export class MechAdapter implements ExecutionAdapter {
     return announcement;
   }
 
+  private async restorationAnnouncementFromDigest(params: {
+    taskId: string;
+    taskCidDigest: string;
+    transactionHash?: Hex;
+    blockNumber?: number;
+  }): Promise<TaskAnnouncement> {
+    const digest = params.taskCidDigest.startsWith('0x')
+      ? params.taskCidDigest.slice(2)
+      : params.taskCidDigest;
+    const taskCid = `f01551220${digest}`;
+    const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+    const task = parseTask({ signedTask: signed });
+    const announcement: TaskAnnouncement = {
+      taskId: params.taskId,
+      task,
+      taskCid,
+      onchainCreationTx: params.transactionHash,
+      onchainCreationBlock: params.blockNumber,
+    };
+    this.observedTasks.set(params.taskId, announcement);
+    return announcement;
+  }
+
+  private async *discoverSubgraphRestorationTasks(): AsyncIterable<TaskAnnouncement> {
+    const discovery = this.config.taskDiscovery;
+    const subgraphUrl = discovery?.subgraphUrl;
+    const solverNetManifestCids = discovery?.solverNetManifestCids ?? [];
+    if (!subgraphUrl || solverNetManifestCids.length === 0) return;
+
+    let candidates: SubgraphTaskCandidate[];
+    try {
+      candidates = await queryClaimableTaskCandidates({
+        url: subgraphUrl,
+        solverNetManifestCids,
+        operatorAddress: this.config.safeAddress,
+        pageSize: discovery.pageSize,
+        maxPages: discovery.maxPages,
+        fetchImpl: discovery.fetchImpl,
+      });
+    } catch (err) {
+      console.error(
+        '[mech] task subgraph discovery failed:',
+        err instanceof Error ? err.message : err,
+      );
+      return;
+    }
+
+    for (const candidate of candidates) {
+      if (this.claimedRestorationTaskIds.has(candidate.taskId)) continue;
+
+      const claimable = await canClaimTask(
+        this.publicClient,
+        this.config.safeAddress,
+        this.config.routerAddress,
+        candidate.taskId,
+        this.config.mechContractAddress,
+      );
+      if (!claimable.ok) {
+        continue;
+      }
+
+      try {
+        yield await this.restorationAnnouncementFromDigest({
+          taskId: candidate.taskId,
+          taskCidDigest: candidate.taskCidDigest,
+          transactionHash: candidate.createdAtTx,
+          blockNumber: candidate.createdAtBlock,
+        });
+        return;
+      } catch (err) {
+        console.error(
+          `[mech] failed to hydrate subgraph task ${candidate.taskId}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
+  private hasSubgraphTaskDiscovery(): boolean {
+    const discovery = this.config.taskDiscovery;
+    return Boolean(discovery?.subgraphUrl && (discovery.solverNetManifestCids?.length ?? 0) > 0);
+  }
+
   private async deliveryEnvelopeCidForSolution(solution: {
     requestId: string;
     blockNumber?: number;
@@ -453,12 +544,10 @@ export class MechAdapter implements ExecutionAdapter {
     const toBlock = solution.blockNumber != null
       ? BigInt(solution.blockNumber)
       : await this.publicClient.getBlockNumber();
-    const configuredLookback = this.config.mechDeliverBackfillLookbackBlocks;
-    const fromBlock = configuredLookback == null
-      ? 0n
-      : toBlock > configuredLookback
-      ? toBlock - configuredLookback
-      : 0n;
+    const lookback =
+      this.config.mechDeliverBackfillLookbackBlocks ??
+      DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS;
+    const fromBlock = toBlock > lookback ? toBlock - lookback : 0n;
     const deliveryDataHex = await findLatestDeliveryDataHexForRequest(
       this.publicClient,
       deliveryMech,
@@ -479,11 +568,23 @@ export class MechAdapter implements ExecutionAdapter {
   private async evaluationAnnouncementForSolution(
     solution: PendingEvaluationSolution,
   ): Promise<TaskAnnouncement | undefined> {
-    if (solution.operator.toLowerCase() === this.config.safeAddress.toLowerCase()) {
+    const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
+    const claimable = await canClaimEvaluation(
+      this.publicClient,
+      this.config.safeAddress,
+      this.config.routerAddress,
+      solution.taskId,
+      solution.attemptIndex,
+      this.config.mechContractAddress,
+    );
+    if (!claimable.ok) {
+      console.log(
+        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}`,
+      );
+      this.forgetPendingEvaluationSolution(solution.requestId);
       return undefined;
     }
 
-    const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
     const restorationEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,
@@ -540,6 +641,10 @@ export class MechAdapter implements ExecutionAdapter {
           yield announcement;
         }
 
+        for await (const announcement of this.discoverSubgraphRestorationTasks()) {
+          yield announcement;
+        }
+
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.requestBlockCursor) {
           const fromBlock = this.requestBlockCursor + 1n;
@@ -558,29 +663,20 @@ export class MechAdapter implements ExecutionAdapter {
             this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
           }
 
-          const createdTasks = decodeTaskCreatedLogs(logs);
-          for (const { taskId, taskCidDigest, transactionHash, blockNumber } of createdTasks) {
-            try {
-              const digest = taskCidDigest.startsWith('0x') ? taskCidDigest.slice(2) : taskCidDigest;
-              // CIDv1 hex with raw codec (0x55) + sha2-256 (0x12) + 32-byte length (0x20).
-              // The Autonolas registry returns raw-codec CIDs when uploading files with
-              // cid-version=1 (Kubo default for files). This is confirmed by the existing
-              // IPFS_GATEWAY_PREFIX constant (f01551220) which has worked in production.
-              // If the gateway ever switches to dag-pb (0x70) the prefix would be f01701220.
-              const taskCid = `f01551220${digest}`;
-              const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
-              const task = parseTask({ signedTask: signed });
-              const announcement: TaskAnnouncement = {
-                taskId,
-                task,
-                taskCid,
-                onchainCreationTx: transactionHash,
-                onchainCreationBlock: blockNumber,
-              };
-              this.observedTasks.set(taskId, announcement);
-              yield announcement;
-            } catch (err) {
-              console.error(`[mech] Failed to parse task ${taskId}:`, err);
+          if (!this.hasSubgraphTaskDiscovery()) {
+            const createdTasks = decodeTaskCreatedLogs(logs);
+            for (const { taskId, taskCidDigest, transactionHash, blockNumber } of createdTasks) {
+              try {
+                const announcement = await this.restorationAnnouncementFromDigest({
+                  taskId,
+                  taskCidDigest,
+                  transactionHash,
+                  blockNumber,
+                });
+                yield announcement;
+              } catch (err) {
+                console.error(`[mech] Failed to parse task ${taskId}:`, err);
+              }
             }
           }
 
@@ -649,6 +745,7 @@ export class MechAdapter implements ExecutionAdapter {
     );
 
     const task = announcement.task;
+    this.claimedRestorationTaskIds.add(claimed.taskId);
     this.pendingEvaluations.set(claimed.requestId, task);
     this.originalStates.set(claimed.requestId, { ...task, role: task.role ?? 'restoration' });
     this.requestKinds.set(claimed.requestId, 'solution');
@@ -743,7 +840,13 @@ export class MechAdapter implements ExecutionAdapter {
     );
     const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
     // Strip signature to recompute the hash over the unsigned body.
-    const { signature, ...unsignedBody } = parsed;
+    //
+    // Important: compute over the fetched wire object, not over the parsed
+    // schema result. The schema normalizes some nested objects and may strip
+    // extension metadata that was present when the envelope was signed.
+    const rawSigned = rawEnvelope as Record<string, unknown>;
+    const { signature: _rawSignature, ...unsignedBody } = rawSigned;
+    const signature = parsed.signature;
     const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
     const recomputed = keccak256(jcsBytes);
     if (recomputed !== signature.hash) {

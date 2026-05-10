@@ -16,11 +16,12 @@ describe('HttpHfFetcher', () => {
           {
             row: {
               instance_id: 'unidata__netcdf-c-1925',
+              repo: 'Unidata/netcdf-c',
               image_name: 'docker.io/swerebenchv2/netcdf-c:1925',
               FAIL_TO_PASS: ['test_a'],
               PASS_TO_PASS: ['test_b'],
               test_patch: 'diff --git ...',
-              install_config: { test_cmd: 'make test', log_parser: 'pytest' },
+              install_config: { install: 'pip install -e .', test_cmd: 'make test', log_parser: 'pytest' },
             },
           },
         ],
@@ -33,8 +34,10 @@ describe('HttpHfFetcher', () => {
       instance_id: 'unidata__netcdf-c-1925',
     });
     expect(row.instance_id).toBe('unidata__netcdf-c-1925');
+    expect(row.repo).toBe('Unidata/netcdf-c');
     expect(row.image_name).toBe('docker.io/swerebenchv2/netcdf-c:1925');
     expect(row.FAIL_TO_PASS).toEqual(['test_a']);
+    expect(row.install_config.install).toBe('pip install -e .');
     expect(row.install_config.test_cmd).toBe('make test');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
@@ -63,6 +66,7 @@ describe('HttpHfFetcher', () => {
           {
             row: {
               instance_id: 'target-instance',
+              repo: 'owner/target',
               image_name: 'img-target',
               FAIL_TO_PASS: [],
               PASS_TO_PASS: [],
@@ -91,6 +95,7 @@ describe('HttpHfFetcher', () => {
         rows: Array.from({ length: 50 }, (_, i) => ({
           row: {
             instance_id: `mismatch-${i}`,
+            repo: 'owner/repo',
             image_name: 'img',
             FAIL_TO_PASS: [],
             PASS_TO_PASS: [],

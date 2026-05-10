@@ -29,6 +29,7 @@ import {
 import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
+import type { ArtifactSource } from '../types/envelope.js';
 import { addEventsRoutes } from './events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
 import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
@@ -215,6 +216,32 @@ const ASSET_MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
 };
+
+function parseArtifactSources(value: unknown): ArtifactSource[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const sources: ArtifactSource[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+    const source = raw as Record<string, unknown>;
+    if (
+      source['kind'] !== 'ipfs' ||
+      typeof source['cid'] !== 'string' ||
+      typeof source['sha256'] !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(source['sha256']) ||
+      source['encoding'] !== 'jinn.artifact.donation.v1'
+    ) {
+      return undefined;
+    }
+    sources.push({
+      kind: 'ipfs',
+      cid: source['cid'],
+      sha256: source['sha256'],
+      encoding: 'jinn.artifact.donation.v1',
+    });
+  }
+  return sources;
+}
 
 export async function startApiServer(config: ApiServerConfig): Promise<ApiServer> {
   const { store } = config;
@@ -523,6 +550,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       const access = body['access'] as { endpoint?: unknown; priceUsdc?: unknown } | undefined;
       const envelopeCid = body['envelopeCid'];
       const artifactType = body['artifactType'];
+      const sources = parseArtifactSources(body['sources']);
 
       if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) {
         return c.json(
@@ -540,11 +568,24 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
           400,
         );
       }
+      if (body['sources'] !== undefined && sources === undefined) {
+        return c.json(
+          { ok: false, reason: 'invalid_args', error: 'sources must be donation IPFS artifact source objects', sha256, retryable: false },
+          400,
+        );
+      }
+      if (sources?.some((source) => source.sha256 !== sha256)) {
+        return c.json(
+          { ok: false, reason: 'invalid_args', error: 'source sha256 must match requested artifact sha256', sha256, retryable: false },
+          400,
+        );
+      }
 
       const accessNormalized = { endpoint: access.endpoint, priceUsdc: access.priceUsdc };
-      const hint: { artifactType?: string; envelopeCid?: string } = {};
+      const hint: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[] } = {};
       if (typeof artifactType === 'string') hint.artifactType = artifactType;
       if (typeof envelopeCid === 'string') hint.envelopeCid = envelopeCid;
+      if (sources && sources.length > 0) hint.sources = sources;
 
       const existing = inFlight.get(sha256);
       const acquirePromise = existing ?? corpus.acquireBySha256(sha256, accessNormalized, hint);

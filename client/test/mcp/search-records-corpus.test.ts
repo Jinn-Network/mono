@@ -199,6 +199,80 @@ describe('search_records (corpus-backed)', () => {
     store.close();
   });
 
+  it('includes donated IPFS sources in acquire_artifact arguments', async () => {
+    const store = new Store(':memory:');
+    const donatedSha = '1'.repeat(64);
+    const corpus = makeReadOnlyCorpus(makePreview(envelopeRef, makeEnvelope({
+      artifacts: [{
+        artifactType: 'output.prediction.v1',
+        sha256: donatedSha,
+        access: { endpoint: 'https://operator.example.com/artifacts/donated', priceUsdc: '0' },
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-donated',
+          sha256: donatedSha,
+          encoding: 'jinn.artifact.donation.v1',
+        }],
+      }],
+    })));
+
+    const out = await handleSearchRecords(corpus, store, { solverType: 'prediction.v1', limit: 10 });
+
+    expect(out.records[0]?.artifactRefs[0]?.acquisition?.arguments.sources).toEqual([{
+      kind: 'ipfs',
+      cid: 'bafy-donated',
+      sha256: donatedSha,
+      encoding: 'jinn.artifact.donation.v1',
+    }]);
+    store.close();
+  });
+
+  it('returns SWE donated execution data with IPFS acquisition arguments', async () => {
+    const store = new Store(':memory:');
+    const donatedSha = '2'.repeat(64);
+    const corpus = makeReadOnlyCorpus(makePreview(envelopeRef, makeEnvelope({
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+      artifacts: [{
+        artifactType: 'swe-rebench-v2_v1_solution',
+        sha256: donatedSha,
+        access: { endpoint: 'http://localhost:7332/v1/artifacts/content', priceUsdc: '0' },
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-swe-donated',
+          sha256: donatedSha,
+          encoding: 'jinn.artifact.donation.v1',
+        }],
+      }],
+    })));
+
+    const out = await handleSearchRecords(corpus, store, {
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+      artifactType: 'swe-rebench-v2_v1_solution',
+      limit: 10,
+    });
+
+    expect(out.records).toHaveLength(1);
+    expect(out.records[0]?.solverType).toBe('swe-rebench-v2.v1');
+    expect(out.records[0]?.artifactRefs[0]?.acquisition).toEqual({
+      tool: 'acquire_artifact',
+      arguments: {
+        sha256: donatedSha,
+        access: { endpoint: 'http://localhost:7332/v1/artifacts/content', priceUsdc: '0' },
+        envelopeCid: envelopeRef.manifestCid,
+        artifactType: 'swe-rebench-v2_v1_solution',
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-swe-donated',
+          sha256: donatedSha,
+          encoding: 'jinn.artifact.donation.v1',
+        }],
+      },
+    });
+    store.close();
+  });
+
   it('post-filters network records after fetching manifests', async () => {
     const store = new Store(':memory:');
     const matchingRef = { ...envelopeRef, manifestCid: 'bafyVerdict' };

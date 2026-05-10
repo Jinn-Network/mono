@@ -5,6 +5,7 @@ import {
   withRecoverableRetry,
   viemFeeOverridesForAttempt,
 } from '../src/tx-retry.js';
+import { SafeInnerRevertError } from '../src/adapters/mech/safe-revert.js';
 
 describe('tx-retry', () => {
   describe('flattenErrorMessage', () => {
@@ -51,6 +52,60 @@ describe('tx-retry', () => {
 
     it('returns false for insufficient funds', () => {
       expect(isRecoverableTransactionError(new Error('insufficient funds for gas'))).toBe(false);
+    });
+
+    it('returns false for terminal JinnRouterV3 Safe inner reverts', () => {
+      const requestId = `0x${'11'.repeat(32)}` as `0x${string}`;
+      const error = new SafeInnerRevertError(
+        'Safe execTransaction inner revert (estimate): RouterWrongRequestKind',
+        '0x51cba8b3',
+        null,
+        'RouterWrongRequestKind',
+        [requestId, 1, 2],
+        null,
+      );
+
+      expect(isRecoverableTransactionError(error)).toBe(false);
+    });
+
+    it('returns false for expired TaskCoordinator attempt claims', () => {
+      const error = new SafeInnerRevertError(
+        'Safe execTransaction inner revert (estimate): TCAttemptClaimExpired',
+        '0x1c48587f',
+        null,
+        'TCAttemptClaimExpired',
+        [37n, 0],
+        null,
+      );
+
+      expect(isRecoverableTransactionError(error)).toBe(false);
+    });
+
+    it('returns false for finalized TaskCoordinator attempts', () => {
+      const error = new SafeInnerRevertError(
+        'Safe execTransaction inner revert (estimate): TCAttemptAlreadyFinalized',
+        '0xbe465de7',
+        null,
+        'TCAttemptAlreadyFinalized',
+        [92n, 0],
+        null,
+      );
+
+      expect(isRecoverableTransactionError(error)).toBe(false);
+    });
+
+    it('returns true for RouterNotDelivered because delivery indexing can lag claim retry', () => {
+      const requestId = `0x${'22'.repeat(32)}` as `0x${string}`;
+      const error = new SafeInnerRevertError(
+        'Safe execTransaction inner revert (estimate): RouterNotDelivered',
+        '0xe5a88624',
+        null,
+        'RouterNotDelivered',
+        [requestId],
+        null,
+      );
+
+      expect(isRecoverableTransactionError(error)).toBe(true);
     });
 
     it('returns true for "returned no data" — multi-node RPC eventual consistency', () => {

@@ -141,6 +141,7 @@ describe('App routes', () => {
       ),
     );
     expect(screen.getByTestId('operator-page')).toBeTruthy();
+    expect(screen.getByTestId('live-now-band')).toBeTruthy();
     // Operator is the configuration surface (SolverNets / Harness / Network /
     // Security). The SolverNets head is the most stable assertion since it
     // never collapses to nothing.

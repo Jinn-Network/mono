@@ -11,6 +11,7 @@ describe('OperatorCard', () => {
       <Router hook={hook}>
         <OperatorCard
           name="prediction"
+          configId="prediction"
           roles={['solving']}
           state="live"
           waitingMessage="Waiting for Tasks. SolverNet active, Harness loaded."
@@ -41,5 +42,21 @@ describe('OperatorCard', () => {
     expect(screen.getByText(/^evaluator$/i)).toBeTruthy();
     // Plural label when more than one role is active.
     expect(screen.getByText(/^roles$/i)).toBeTruthy();
+  });
+
+  it('uses the stable config id for joined SolverNet deep-links', () => {
+    const { hook } = memoryLocation({ path: '/overview' });
+    render(
+      <Router hook={hook}>
+        <OperatorCard
+          name="SWE-rebench v2"
+          configId="bafkreiswe"
+          roles={['solving', 'evaluating']}
+          state="live"
+        />
+      </Router>,
+    );
+    const link = screen.getByText(/configure/i).closest('a');
+    expect(link?.getAttribute('href')).toBe('/operator#solvernets/bafkreiswe');
   });
 });

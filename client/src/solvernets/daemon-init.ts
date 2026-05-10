@@ -23,7 +23,7 @@
  *   2. Resume any record with `lifecycleProgress` set →
  *      `recoverInFlightLifecycleTransitions`. Same safety property.
  *   3. Load owned records → identify which ones have
- *      `status === 'launched' && generatorEnabled`; those are the
+ *      `status in {'launched','paused'} && generatorEnabled`; those are the
  *      "ready-to-spawn" set the next-task generator wiring will iterate.
  *   4. Start the operator catalog refresher loop (interval-driven) so the
  *      daemon API can hand SPA reads without a synchronous subgraph round
@@ -77,7 +77,6 @@ import {
 } from './lifecycle-transitions.js';
 import type { SolverNetRegistryClient, SolverNetManifestSummary } from './registry-client.js';
 import type { LaunchedSolverNetRecord, SolverNetStore } from './store.js';
-import type { PredictionV1GeneratorRuntimeConfig } from '../solver-types/prediction-v1-auto.js';
 
 // Import viem types lazily-named — keep the runtime import scoped so unit
 // tests don't pay viem startup cost when they pass mocked publishers.
@@ -144,9 +143,9 @@ export interface PendingGeneratorSpawn {
    * Live mirror of the hot-applyable runtime generator config. The
    * subsystem seeds it with the record's last-saved config (or all-default
    * empty config when no per-record overrides are set yet). Task 14 mutates
-   * this when the operator edits cadence / allow-block-lists / caps.
+   * this when the operator edits the generator config.
    */
-  configRef: { current: PredictionV1GeneratorRuntimeConfig };
+  configRef: { current: unknown };
 }
 
 /**
@@ -159,9 +158,10 @@ export interface SolverNetSubsystem {
   /** All launched records currently on disk (post-recovery). */
   records: LaunchedSolverNetRecord[];
   /**
-   * Subset of `records` where `status === 'launched'` and
+   * Subset of `records` where `status` is `launched` or `paused` and
    * `generatorEnabled === true`, paired with the live refs the generator
-   * factory and the API endpoints share.
+   * factory and the API endpoints share. Paused records are intentionally
+   * wired so a lifecycle resume only has to mutate `recordRef.current`.
    */
   pendingGenerators: PendingGeneratorSpawn[];
   /** Operator catalog cache, populated on first refresh. */
@@ -304,15 +304,15 @@ export async function initSolverNetSubsystem(
 
   // Step 3 — load post-recovery records and split into the spawn-ready set.
   // Each spawn-ready entry carries a `recordRef` and a `configRef` that the
-  // generator factory (`makePredictionV1GeneratorForLaunchedRecord`) closes
+  // generator factories close
   // over. Lifecycle transitions and the SolverNet config API endpoint mutate
   // these refs at runtime so the per-tick gate and runtime config update
   // within one cadence — no daemon restart. Defaults for the runtime config
   // are an empty object: the generator falls back to its built-in defaults
-  // until the operator edits cadence / allowlist / caps via Task 14.
+  // until the operator edits config via Task 14.
   const records = await deps.store.loadOwnedRecords();
   const pendingGenerators: PendingGeneratorSpawn[] = records
-    .filter((r) => r.status === 'launched' && r.generatorEnabled)
+    .filter((r) => (r.status === 'launched' || r.status === 'paused') && r.generatorEnabled)
     .map((record) => ({
       record,
       recordRef: { current: record },
@@ -321,7 +321,7 @@ export async function initSolverNetSubsystem(
       // endpoint), otherwise use an empty config so the generator falls back
       // to its built-in defaults.
       configRef: {
-        current: ((record.generatorConfig ?? {}) as PredictionV1GeneratorRuntimeConfig),
+        current: record.generatorConfig ?? {},
       },
     }));
   logger.info(

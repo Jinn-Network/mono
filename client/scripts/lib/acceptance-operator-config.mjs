@@ -62,11 +62,13 @@ export function buildAcceptanceTasks(_runIdSuffix) {
  * @param {NodeJS.ProcessEnv} opts.env
  */
 export function buildOperatorClientConfig({ rpcUrl, clientHome, runIdSuffix, env }) {
+  const apiPort = toInt(env['JINN_TESTNET_ACCEPTANCE_API_PORT'] ?? env['JINN_API_PORT'], 7331);
   const config = {
     network: env['JINN_TESTNET_ACCEPTANCE_NETWORK'] ?? 'testnet',
     rpcUrl,
     earningDir: join(clientHome, 'earning'),
     dbPath: join(clientHome, 'jinn.db'),
+    apiPort,
     rewardClaimIntervalMs: 0,
     pollIntervalMs: toInt(env['JINN_TESTNET_ACCEPTANCE_POLL_INTERVAL_MS'], 5000),
     targetServices: toInt(env['JINN_TESTNET_ACCEPTANCE_TARGET_SERVICES'], 1),
@@ -79,9 +81,30 @@ export function buildOperatorClientConfig({ rpcUrl, clientHome, runIdSuffix, env
     // Keep harness selection on the deterministic prediction.v0 defaults for
     // the gate. SolverPlugins still load through the normal daemon defaults.
     tasks: buildAcceptanceTasks(runIdSuffix),
+    operator: {
+      publicEndpoint: env['JINN_TESTNET_ACCEPTANCE_OPERATOR_PUBLIC_ENDPOINT']
+        ?? env['JINN_OPERATOR_PUBLIC_ENDPOINT']
+        ?? `http://localhost:${apiPort}`,
+      defaultPriceUsdc: env['JINN_TESTNET_ACCEPTANCE_OPERATOR_DEFAULT_PRICE_USDC']
+        ?? env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
+        ?? '0',
+      perArtifactTypePrice: {},
+      donation: {
+        enabled: !['0', 'false', 'no'].includes(
+          String(
+            env['JINN_TESTNET_ACCEPTANCE_OPERATOR_DONATION_ENABLED']
+              ?? env['JINN_OPERATOR_DONATION_ENABLED']
+              ?? 'true',
+          ).trim().toLowerCase(),
+        ),
+      },
+    },
   };
 
   const optionalMap = [
+    ['JINN_TESTNET_ACCEPTANCE_SUBGRAPH_URL', 'subgraphUrl'],
+    ['JINN_TESTNET_ACCEPTANCE_IPFS_GATEWAY_URL', 'ipfsGatewayUrl'],
+    ['JINN_TESTNET_ACCEPTANCE_IPFS_REGISTRY_URL', 'ipfsRegistryUrl'],
     ['JINN_TESTNET_ACCEPTANCE_CLAUDE_PATH', 'claudePath'],
     ['JINN_TESTNET_ACCEPTANCE_CLAUDE_MODEL', 'claudeModel'],
     ['JINN_TESTNET_ACCEPTANCE_NODE_ENDPOINT', 'nodeEndpoint'],

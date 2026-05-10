@@ -45,6 +45,7 @@ import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
 import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
+import { configRequiresClaudeAuth } from './preflight/claude-required.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
@@ -62,6 +63,7 @@ import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getAddress, type Address } from 'viem';
 import {
   DEFAULT_DISABLED_HARNESSES,
   DEFAULT_HARNESS,
@@ -70,6 +72,7 @@ import {
 import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, harnessStateDirName } from './harnesses/names.js';
 import type { Harness } from './harnesses/types.js';
 import { createClients } from './adapters/mech/safe.js';
 import { loadSolverNets } from './solver-nets/registry.js';
@@ -887,7 +890,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   let predictionGeneratorRef:
     | { getState(): import('./solver-types/prediction-v1-auto.js').PredictionV1GeneratorStateSnapshot }
     | undefined;
+  const launchedGeneratorStateBySolverType = new Map<
+    string,
+    () => import('./api/launcher-status.js').LauncherGeneratorStateSnapshot | undefined
+  >();
   let safeAddressForLauncher: `0x${string}` | undefined;
+  let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
 
   // jinn-mono-hqz0: holder for SolverNet creation/launch endpoint deps.
   // The routes register eagerly in startApiServer (Hono freezes its matcher
@@ -916,7 +924,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         getStatus: async () => {
           const mode = config.harness.mode;
           const defaultHarness = config.harnesses?.default ?? DEFAULT_HARNESS;
-          const implStateDir = join(config.engine.implStateDirRoot, defaultHarness);
+          const implStateDir = join(config.engine.implStateDirRoot, harnessStateDirName(defaultHarness));
           let codeDigest = '';
           try {
             codeDigest = await hashImplStateDir(implStateDir);
@@ -966,6 +974,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           rpcUrl: config.rpcUrl,
           defaultRpcUrl: CHAIN_CONFIG.rpcUrl,
           solverNets: config.solverNets as Record<string, unknown> | undefined,
+          joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
         }),
       },
       // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
@@ -981,10 +990,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               state: 'live' as const,
               supportedRoles: ['solving' as const, 'evaluating' as const],
               compatibleHarnesses: [
-                { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
               ],
               compatiblePlugins: [
                 { name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' },
+              ],
+            },
+            {
+              name: 'swe-rebench-v2',
+              description: 'Code-issue benchmark tasks from SWE-rebench v2. Solvers submit unified-diff patches; evaluators run the per-instance Docker harness.',
+              contract: { id: 'swe-rebench-v2', version: 'v1' },
+              state: 'live' as const,
+              supportedRoles: ['solving' as const, 'evaluating' as const],
+              compatibleHarnesses: [
+                { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: CODEX_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: 'swe-rebench-v2-evaluator', version: '0.1.0', supportsRoles: ['evaluating' as const] },
+              ],
+              compatiblePlugins: [
+                { name: 'swe-rebench-v2-runtime', version: '0.1.0', source: 'bundled' },
               ],
             },
           ],
@@ -1084,16 +1108,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // the creator Safe with the SolverNet's solver_type. The result is a
       // strict superset of the in-flight count (we don't yet drop settled or
       // failed Tasks; that lifecycle tracking lands with the router-watcher
-      // hardening lane, jinn-mono-l2zl.12). Reserved-budget and Safe-balance
-      // remain stubbed and are tracked for Task 8+.
+      // hardening lane, jinn-mono-l2zl.12). Safe balance is read live through
+      // the daemon's viem public client once bootstrap has created it.
+      // Reserved-budget remains unavailable until per-Task payment lifecycle
+      // state is persisted; return an empty string rather than a fake zero so
+      // the UI does not project runway from placeholder data.
       //
       // TODO(jinn-mono-l2zl.12): once Task lifecycle events are persisted,
       // narrow `getOpenTaskCount` to states in
       // ('open', 'claims-in-flight', 'fully-claimed') so the operator's
       // "open Tasks" stat doesn't drift upward across the daemon's lifetime.
       // TODO(jinn-mono launcher Task 8): real `getReservedBudgetWei`
-      // (sum of unconsumed claim payments across open Tasks) and
-      // `getSafeBalanceWei` (live `eth_getBalance` against the creator Safe).
+      // (sum of unconsumed claim payments across open Tasks).
       launcher: {
         getConfig: () => ({ solverNets: config.solverNets }),
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
@@ -1106,8 +1132,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           invalidatePredictionOperatorStatusCache(config);
         },
         getGeneratorState: (netName) => {
-          if (netName !== 'prediction') return undefined;
-          return predictionGeneratorRef?.getState();
+          if (netName === 'prediction') {
+            return predictionGeneratorRef?.getState();
+          }
+          const solverType = config.solverNets?.[netName]?.solverType;
+          if (!solverType) return undefined;
+          return launchedGeneratorStateBySolverType.get(solverType)?.();
         },
         getOpenTaskCount: (netName) => {
           const net = config.solverNets?.[netName];
@@ -1118,8 +1148,24 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             solverType,
           });
         },
-        getReservedBudgetWei: () => '0',
-        getSafeBalanceWei: () => '0',
+        getReservedBudgetWei: () => '',
+        getSafeBalanceWei: async () => {
+          const safeAddress = safeAddressForLauncher;
+          const publicClient = publicClientForLauncher;
+          if (!safeAddress || !publicClient) return '';
+          try {
+            return (await publicClient.getBalance({
+              address: getAddress(safeAddress) as Address,
+            })).toString();
+          } catch (err) {
+            console.warn(
+              `[main] launcher status Safe balance read failed for ${safeAddress}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+            return '';
+          }
+        },
         safeAddress: () =>
           safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000',
         tasksDeps: {
@@ -1146,6 +1192,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               taskCid: r.taskCid,
               solverType: r.solverType ?? undefined,
               postedAt: r.postedAt,
+              ...(r.state ? { state: r.state } : {}),
+              ...(r.claims ? { claims: r.claims } : {}),
             }));
           },
         },
@@ -1346,29 +1394,34 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     });
   }
 
-  const preflight = await checkClaudeBinary(activeClaudePath);
-  if (!preflight.ok) {
-    emitClaudeBinaryPreflightFailure(preflight.detail, activeClaudePath);
-  }
+  const claudeAuthRequired = configRequiresClaudeAuth(config);
+  if (claudeAuthRequired) {
+    const preflight = await checkClaudeBinary(activeClaudePath);
+    if (!preflight.ok) {
+      emitClaudeBinaryPreflightFailure(preflight.detail, activeClaudePath);
+    }
 
-  const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
-  const authProbe = probeClaudeAuth({
-    context: authContext,
-    cwd: process.cwd(),
-    claudePath: activeClaudePath,
-  });
-  if (!authProbe.authenticated) {
-    emitEnvelope({
-      code: 'invalid_invocation',
-      message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
-      hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
-      exampleCli: 'jinn auth',
-      details: {
-        field: 'claude_auth',
-        context: authContext,
-        authenticated: false,
-      },
+    const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
+    const authProbe = probeClaudeAuth({
+      context: authContext,
+      cwd: process.cwd(),
+      claudePath: activeClaudePath,
     });
+    if (!authProbe.authenticated) {
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
+        hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
+        exampleCli: 'jinn auth',
+        details: {
+          field: 'claude_auth',
+          context: authContext,
+          authenticated: false,
+        },
+      });
+    }
+  } else {
+    console.log('[main] Claude auth preflight skipped; Claude-backed harnesses are disabled.');
   }
 
   const runner = new ClaudeRunner({
@@ -1383,6 +1436,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   );
   const masterAccount = deriveMasterSigner(mnemonicForMaster);
   const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
+  publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
 
   const evictionRecovery =
@@ -1398,6 +1452,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         }
       : undefined;
 
+  const taskDiscoveryManifestCids = Object.values(config.joinedSolverNets ?? {})
+    .filter((entry) => entry.roles.includes('solver'))
+    .map((entry) => entry.manifestCid);
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrl,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1411,7 +1469,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
-  });
+    taskDiscovery: config.subgraphUrl && taskDiscoveryManifestCids.length > 0
+      ? {
+          subgraphUrl: config.subgraphUrl,
+          solverNetManifestCids: taskDiscoveryManifestCids,
+        }
+      : undefined,
+  }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
 
@@ -1551,14 +1615,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
-  // Packaging deps: artifact bytes are written to served_artifacts (operator-local
-  // SQLite) and served via the operator's HTTP server with x402 gating per
-  // spec/2026-04-30-phase-a-umbrella.md §1. IPFS only holds the manifest envelope.
-  // The `store` field is filled by Daemon (which owns the SQLite handle); here
-  // we just configure the endpoint + price defaults from `config.operator`
-  // (Phase 3, jinn-mono-vy37.1.3). Operators who don't declare an operator
-  // block fall back to the daemon's local API port so dev/test runs still work
-  // — but the resulting envelopes won't be reachable from outside the host.
+  // Packaging deps: artifacts are always written to served_artifacts
+  // (operator-local SQLite). In public-testnet donation mode, scrubbed artifact
+  // bytes are also pinned to IPFS and advertised as signed donation sources;
+  // that IPFS path is the canonical release path. The HTTP endpoint and price
+  // fields are kept as compatibility/future data-market fallback plumbing.
   const operatorPublicEndpoint =
     config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
   const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
@@ -1569,11 +1630,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     console.warn('[main] operator.donation.enabled is testnet-only; donation disabled on mainnet.');
   }
   if (!config.operator?.publicEndpoint) {
-    console.warn(
-      '[main] config.operator.publicEndpoint not set; defaulting to local API port. ' +
-        'External evaluators will not be able to fetch artifacts from this operator. ' +
-        'Set operator.publicEndpoint (or JINN_OPERATOR_PUBLIC_ENDPOINT) before going live.',
-    );
+    if (donationEnabled) {
+      console.log(
+        '[main] config.operator.publicEndpoint not set; using IPFS donation as the public artifact path. ' +
+          'Direct HTTP artifact fallback will remain local-only.',
+      );
+    } else {
+      console.warn(
+        '[main] operator donation is disabled and config.operator.publicEndpoint is not set; ' +
+          'new artifacts will remain local-only until donation mode is enabled.',
+      );
+    }
   }
   const packagingDeps = {
     operatorEndpoint: operatorPublicEndpoint,
@@ -1882,38 +1949,29 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     generator: import('./tasks/sources.js').TaskGenerator;
   }> = [];
   if (solverNetSubsystem && !autoTasksDisabled) {
-    const { makePredictionV1GeneratorForLaunchedRecord } = await import(
-      './solver-types/prediction-v1-auto.js'
+    const { wireLaunchedRecordGenerators } = await import(
+      './solvernets/launched-record-dispatcher.js'
     );
-    for (const pending of solverNetSubsystem.pendingGenerators) {
-      // Static deps (agent identity + Polymarket transport) are construction-
-      // time-fixed; runtime-editable settings flow through `configRef`.
-      const generator = makePredictionV1GeneratorForLaunchedRecord({
-        recordRef: pending.recordRef,
-        configRef: pending.configRef,
-        staticConfig: {
-          agentEoa: agentEoaAddress,
-          safeAddress,
-          agentPrivateKey,
-        },
-      });
-      launchedRecordGenerators.push({ solverType: 'prediction.v1', generator });
-      // First launched prediction.v1 generator becomes the legacy
-      // `predictionGeneratorRef` source for the launcher status endpoint
-      // (kept thin; multi-record launcher status lives in the launched-record
-      // surface — see spec §11/Task 14).
-      if (
-        !predictionGeneratorRef &&
-        typeof generator === 'function' &&
-        typeof (generator as { getState?: unknown }).getState === 'function'
-      ) {
-        predictionGeneratorRef =
-          generator as unknown as typeof predictionGeneratorRef;
-      }
-      console.log(
-        `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
-          `(prediction.v1, status=${pending.record.status})`,
-      );
+    const wired = await wireLaunchedRecordGenerators({
+      pendingGenerators: solverNetSubsystem.pendingGenerators,
+      launchedDir: join(config.earningDir, 'solvernets', 'launched'),
+      staticConfig: {
+        agentEoa: agentEoaAddress,
+        safeAddress,
+        agentPrivateKey,
+      },
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
+    });
+    launchedRecordGenerators.push(...wired.generators);
+    for (const [solverType, getState] of wired.generatorStatesBySolverType) {
+      launchedGeneratorStateBySolverType.set(solverType, getState);
+    }
+    if (!predictionGeneratorRef && wired.predictionGeneratorRef) {
+      predictionGeneratorRef =
+        wired.predictionGeneratorRef as unknown as typeof predictionGeneratorRef;
     }
   }
   if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {

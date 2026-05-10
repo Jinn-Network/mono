@@ -5,6 +5,7 @@ import { NetworkSection } from './configuration/NetworkSection.js';
 import { SecuritySection } from './configuration/SecuritySection.js';
 import { useHashSection } from './configuration/useHashSection.js';
 import { OperatorDataMarket } from './operator/OperatorDataMarket.js';
+import { LiveNowBand } from './overview/LiveNowBand.js';
 
 export interface OperatorPageProps {
   onRestartPending?: () => void;
@@ -41,6 +42,7 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
       data-testid="operator-page"
       style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}
     >
+      <LiveNowBand />
       <SolverNetsSection
         defaultExpanded={expandedSection === 'solvernets' || expandedSection === undefined}
         joinedHashFragment={joinedHashFragment}

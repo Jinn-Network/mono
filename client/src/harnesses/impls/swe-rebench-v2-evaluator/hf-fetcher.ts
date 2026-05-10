@@ -82,16 +82,28 @@ function rowToHfRow(row: Record<string, unknown>, instance_id: string): HfRow {
   if (!image_name) {
     throw new Error(`HF row for ${instance_id} missing image_name`);
   }
+  const repo = stringField(row['repo']);
+  if (!repo) {
+    throw new Error(`HF row for ${instance_id} missing repo`);
+  }
   const installConfig = (row['install_config'] ?? {}) as Record<string, unknown>;
+  const install = installConfig['install'];
   const test_cmd = installConfig['test_cmd'];
   const log_parser = installConfig['log_parser'];
   return {
     instance_id,
+    repo,
     image_name,
     FAIL_TO_PASS: arrayOfStrings(row['FAIL_TO_PASS']),
     PASS_TO_PASS: arrayOfStrings(row['PASS_TO_PASS']),
     test_patch: stringField(row['test_patch']) ?? '',
     install_config: {
+      install:
+        typeof install === 'string'
+          ? install
+          : Array.isArray(install)
+            ? (install as string[])
+            : undefined,
       test_cmd:
         typeof test_cmd === 'string'
           ? test_cmd

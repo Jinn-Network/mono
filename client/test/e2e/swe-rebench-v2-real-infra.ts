@@ -379,6 +379,7 @@ export async function runSweRebenchV2DockerEvalE2E(): Promise<DockerEvalE2EOutco
   const runner = new PythonEvalRunner({ upstreamRepoDir: upstreamRepo, maxWorkers: 1 });
   try {
     const result = await runner.runEval({
+      instance_id: instanceId,
       image: imageName,
       patch: '--- /dev/null\n+++ /dev/null\n',  // empty patch → must fail FAIL_TO_PASS
       test_patch: String(row['test_patch'] ?? ''),
@@ -491,9 +492,9 @@ export async function runSweRebenchV2SolverTypeRegistrationE2E(): Promise<Solver
 
 export interface SweRebenchV2AnvilSettlementResult {
   taskId: string;
-  solverTypeDigestExpected: string;
-  solverTypeDigestOnchain: string;
-  solverTypePreserved: boolean;
+  manifestDigestExpected: string;
+  manifestDigestOnchain: string;
+  manifestDigestPreserved: boolean;
   solutionSchemaVersion: string;
   verdictSchemaVersion: string;
   verdictScore: number;
@@ -522,9 +523,9 @@ export interface SweRebenchV2AnvilSettlementResult {
  * The point of this phase (vs. `runAnvilTaskFirstFullLoop`, which uses
  * prediction.v1) is to verify the swe-rebench-v2.v1 SolverType's distinctive
  * fields round-trip on-chain unmodified:
- *   • the on-chain Task's `solverTypeDigest` equals
- *     keccak256(utf8('swe-rebench-v2.v1')) — i.e. it is NOT silently re-encoded
- *     to prediction.v1 anywhere in the post path
+ *   • the on-chain Task's `manifestDigest` equals
+ *     keccak256(utf8(solverNetManifestCid)) — i.e. it is NOT silently re-encoded
+ *     to prediction.v1 or the legacy solverType digest anywhere in the post path
  *   • the Solution envelope's payload.schemaVersion is
  *     'swe-rebench-v2-solution.v1' after the SignedEnvelope round-trip
  *   • the Verdict envelope's payload.schemaVersion is
@@ -588,17 +589,21 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       startTs: nowMs - 1_000,
       endTs: nowMs + 7 * 24 * 60 * 60 * 1000,
     };
+    const solverNetManifestCid = 'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku';
     const task = {
       id: 'swe-rebench-v2-anvil-settle',
       description: `swe-rebench-v2 anvil settlement: ${sweTaskSpec.instance_id}`,
       solverType: 'swe-rebench-v2.v1' as const,
+      solverNetManifestCid,
+      contractId: 'swe-rebench-v2',
+      contractVersion: 'v1',
       window: taskWindow,
       spec: sweTaskSpec as unknown as Record<string, unknown>,
     };
 
     const taskCidDigest = keccak256(toBytes(JSON.stringify(task)));
     const taskCid = `f01551220${taskCidDigest.slice(2)}`;
-    const expectedSolverTypeDigest = keccak256(toBytes('swe-rebench-v2.v1'));
+    const expectedManifestDigest = keccak256(toBytes(solverNetManifestCid));
 
     const latestBlock = await publicClient.getBlock();
     const nowSec = Number(latestBlock.timestamp);
@@ -619,7 +624,7 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       },
     };
 
-    // ── createTask carries solverTypeDigest = keccak256('swe-rebench-v2.v1') ──
+    // ── createTask carries manifestDigest = keccak256(solverNetManifestCid) ──
     const created = await writeContractTx({
       publicClient,
       rpcUrl: anvil.rpcUrl,
@@ -627,14 +632,14 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       address: deployment.router,
       abi: artifacts.router.abi,
       functionName: 'createTask',
-      args: [taskCidDigest, expectedSolverTypeDigest, policy, rate, rate, 3600n],
+      args: [taskCidDigest, expectedManifestDigest, policy, rate, rate, 3600n],
       value: rate * 6n,
     });
     const taskCreated = decodeFirstEvent(created.receipt, artifacts.router.abi, 'TaskCreated');
     const taskId = String(taskCreated['taskId']);
     assert(taskId === '1', `expected first taskId=1, got ${taskId}`);
 
-    // Read back the on-chain Task — verify solverTypeDigest survives the
+    // Read back the on-chain Task — verify manifestDigest survives the
     // round-trip with NO downcast / re-encoding to prediction.v1.
     const taskRecordPostCreate = await publicClient.readContract({
       address: deployment.coordinator,
@@ -642,17 +647,22 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       functionName: 'getTask',
       args: [BigInt(taskId)],
     });
-    const onchainSolverTypeDigest = String(
-      tupleField<`0x${string}`>(taskRecordPostCreate, 'solverTypeDigest', 2),
+    const onchainManifestDigest = String(
+      tupleField<`0x${string}`>(taskRecordPostCreate, 'manifestDigest', 2),
     ).toLowerCase();
     const predictionDigest = keccak256(toBytes('prediction.v1')).toLowerCase();
+    const legacySweSolverTypeDigest = keccak256(toBytes('swe-rebench-v2.v1')).toLowerCase();
     assert(
-      onchainSolverTypeDigest === expectedSolverTypeDigest.toLowerCase(),
-      `on-chain solverTypeDigest=${onchainSolverTypeDigest} did not match keccak256('swe-rebench-v2.v1')=${expectedSolverTypeDigest.toLowerCase()}`,
+      onchainManifestDigest === expectedManifestDigest.toLowerCase(),
+      `on-chain manifestDigest=${onchainManifestDigest} did not match keccak256('${solverNetManifestCid}')=${expectedManifestDigest.toLowerCase()}`,
     );
     assert(
-      onchainSolverTypeDigest !== predictionDigest,
-      `on-chain solverTypeDigest collided with prediction.v1 digest — Task was downcast`,
+      onchainManifestDigest !== predictionDigest,
+      `on-chain manifestDigest collided with prediction.v1 digest — Task was downcast`,
+    );
+    assert(
+      onchainManifestDigest !== legacySweSolverTypeDigest,
+      `on-chain manifestDigest used legacy swe-rebench-v2.v1 solverType digest instead of launched manifest digest`,
     );
 
     // ── Solver claim + Solution submission ───────────────────────────────────
@@ -860,16 +870,16 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       `swe-rebench-v2 submittedCount=${submittedCount}, expected 1`,
     );
 
-    // The on-chain solverTypeDigest must STILL be the swe-rebench-v2.v1 digest
+    // The on-chain manifestDigest must STILL be the launched SolverNet digest
     // after settlement (defence-in-depth — earlier we asserted right after
     // createTask; this re-asserts it didn't get rewritten by any settlement
     // path that we don't expect to touch it).
-    const onchainSolverTypeDigestAfter = String(
-      tupleField<`0x${string}`>(taskRecord, 'solverTypeDigest', 2),
+    const onchainManifestDigestAfter = String(
+      tupleField<`0x${string}`>(taskRecord, 'manifestDigest', 2),
     ).toLowerCase();
     assert(
-      onchainSolverTypeDigestAfter === expectedSolverTypeDigest.toLowerCase(),
-      `solverTypeDigest after settlement=${onchainSolverTypeDigestAfter}, expected ${expectedSolverTypeDigest.toLowerCase()}`,
+      onchainManifestDigestAfter === expectedManifestDigest.toLowerCase(),
+      `manifestDigest after settlement=${onchainManifestDigestAfter}, expected ${expectedManifestDigest.toLowerCase()}`,
     );
 
     // Reward escrow consumption: solution + verdict each burn `rate` from
@@ -936,9 +946,9 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
 
     return {
       taskId,
-      solverTypeDigestExpected: expectedSolverTypeDigest.toLowerCase(),
-      solverTypeDigestOnchain: onchainSolverTypeDigest,
-      solverTypePreserved: onchainSolverTypeDigest === expectedSolverTypeDigest.toLowerCase(),
+      manifestDigestExpected: expectedManifestDigest.toLowerCase(),
+      manifestDigestOnchain: onchainManifestDigest,
+      manifestDigestPreserved: onchainManifestDigest === expectedManifestDigest.toLowerCase(),
       solutionSchemaVersion,
       verdictSchemaVersion,
       verdictScore: reparsedVerdictPayload.score,

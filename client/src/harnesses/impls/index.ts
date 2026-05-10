@@ -17,8 +17,13 @@ import { PredictionApyV0Evaluator } from './prediction-apy-v0-evaluator/index.js
 import {
   ClaudeCodeLearnerImpl,
 } from './claude-code-learner/index.js';
-import { ClaudeCodeHarnessAdapter } from './claude-code-learner/index.js';
+import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './claude-code-learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
+import {
+  canonicalHarnessName,
+  canonicalHarnessNameSet,
+  CODEX_HARNESS,
+} from '../names.js';
 
 /**
  * Environment passed to {@link buildHarnesses} — same shape for daemon
@@ -58,6 +63,10 @@ export interface HarnessEnv {
    * and artifact acquisition tools.
    */
   corpusEnv?: RunnerContext['corpusEnv'];
+  /** Path to the `codex` executable. Defaults to `codex`. */
+  codexPath?: string;
+  /** Default Codex model when a SolverNet does not specify one. */
+  codexModel?: string;
   /**
    * Root for impl-scoped state dirs (e.g. hyperliquid api-wallet). Defaults under
    * `~/.jinn-client/engine/impl-state` when unset — wired from `config.engine` in main.
@@ -92,7 +101,7 @@ export interface HarnessEnv {
  * Registration order is stable: it matches historical `main.ts` first-match
  * behavior for `HarnessRegistry`.
  *
- * The claude-code-learner Harness is registered as the default peer Harness;
+ * The claude-code Harness is registered as the default peer Harness;
  * it no longer wraps specialists.
  */
 export function buildHarnesses(env: HarnessEnv): Harness[] {
@@ -209,9 +218,25 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     adapter: learnerAdapter,
   }));
 
+  // Codex-backed peer Harness. It supports the same restoration surface as
+  // claude-code, but is selected only by explicit SolverNet harness config so
+  // historical first-match fallback stays unchanged.
+  const codexLearnerAdapter = new CodexCodeHarnessAdapter({
+    codexPath: env.codexPath,
+    codexModel: env.codexModel,
+    storePath: env.storePath,
+    daemonApiUrl: env.daemonApiUrl,
+    daemonApiToken: env.daemonApiToken,
+    corpusEnv: env.corpusEnv,
+  });
+  out.push(new ClaudeCodeLearnerImpl({
+    name: CODEX_HARNESS,
+    adapter: codexLearnerAdapter,
+  }));
+
   if (env.disabledNames && env.disabledNames.length > 0) {
-    const disabled = new Set(env.disabledNames);
-    return out.filter((impl) => !disabled.has(impl.name));
+    const disabled = canonicalHarnessNameSet(env.disabledNames);
+    return out.filter((impl) => !disabled.has(canonicalHarnessName(impl.name)));
   }
   return out;
 }

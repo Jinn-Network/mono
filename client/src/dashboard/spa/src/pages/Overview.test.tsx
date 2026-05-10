@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -11,24 +11,40 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
  * per-test so the page receives the shape we want to assert against.
  *
  * `detectJoinedSolverNet` accepts:
- *   1. the new manifestCid-keyed shape (`solverNets[<cid>].roles`) — wins
- *   2. the legacy short-name shape (`solverNets.prediction.enabled` or roles)
- *   3. the predictionV1 status flag/roles as a last-resort signal
+ *   1. the manifest-keyed `joinedSolverNets` shape — wins
+ *   2. the new manifestCid-keyed shape (`solverNets[<cid>].roles`)
+ *   3. the legacy short-name shape (`solverNets.prediction.enabled` or roles)
+ *   4. the predictionV1 status flag/roles as a last-resort signal
  */
 const getStatusMock = vi.fn();
 const getBootstrapMock = vi.fn();
+const claimRewardsMock = vi.fn();
+const triggerDripMock = vi.fn();
+const restartDaemonMock = vi.fn();
 
 vi.mock('../api/client.js', () => ({
   api: {
     getStatus: () => getStatusMock(),
     getBootstrap: () => getBootstrapMock(),
-    claimRewards: async () => ({ ok: true }),
-    restartDaemon: async () => ({ ok: true }),
+    claimRewards: () => claimRewardsMock(),
+    triggerDrip: () => triggerDripMock(),
+    restartDaemon: () => restartDaemonMock(),
   },
 }));
 
 // Import after the mock so the page picks up the mocked client.
 const { OverviewPage } = await import('./Overview.js');
+
+beforeEach(() => {
+  getStatusMock.mockReset();
+  getBootstrapMock.mockReset();
+  claimRewardsMock.mockReset();
+  triggerDripMock.mockReset();
+  restartDaemonMock.mockReset();
+  claimRewardsMock.mockResolvedValue({ ok: true });
+  triggerDripMock.mockResolvedValue({ ok: true, attempts: 0, txHashes: [] });
+  restartDaemonMock.mockResolvedValue({ ok: true });
+});
 
 function withProviders(node: JSX.Element): JSX.Element {
   const { hook } = memoryLocation({ path: '/overview' });
@@ -38,6 +54,17 @@ function withProviders(node: JSX.Element): JSX.Element {
       <Router hook={hook}>{node}</Router>
     </QueryClientProvider>
   );
+}
+
+function renderOverviewWithMemory(): { history: string[] } {
+  const memory = memoryLocation({ path: '/overview', record: true });
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <Router hook={memory.hook}><OverviewPage /></Router>
+    </QueryClientProvider>,
+  );
+  return { history: memory.history };
 }
 
 /** Match the OperatorCard's `<span>Your {name}</span>` eyebrow exactly. */
@@ -151,6 +178,41 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.getByText(/^solver$/i)).toBeTruthy();
   });
 
+  it('prefers joinedSolverNets over legacy prediction status for SWE-rebench v2', async () => {
+    getStatusMock.mockResolvedValue({
+      predictionV1: {
+        operator: {
+          ok: true,
+          solverNet: { name: 'prediction', enabled: false },
+          diagnostics: [],
+        },
+        totals: { observedTasks: 2, activeTaskRuns: 1, solutions: 1, verdicts: 1, failed: 0 },
+      },
+      fleet: { services: [] },
+    });
+    getBootstrapMock.mockResolvedValue({
+      joinedSolverNets: {
+        bafkreiswe: {
+          manifestCid: 'bafkreiswe',
+          name: 'SWE-rebench v2',
+          roles: ['solver', 'evaluator'],
+        },
+      },
+      solverNets: {
+        prediction: { enabled: true, roles: ['solving'] },
+      },
+    });
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByText(operatorEyebrow('SWE-rebench v2'))).toBeTruthy(),
+    );
+    expect(screen.getByText(/network · swe-rebench v2/i)).toBeTruthy();
+    expect(screen.queryByText(operatorEyebrow('prediction'))).toBeNull();
+    const configure = screen.getByText(/configure/i).closest('a');
+    expect(configure?.getAttribute('href')).toBe('/operator#solvernets/bafkreiswe');
+  });
+
   it('shows the OperatorCard from the predictionV1 status as a back-compat signal', async () => {
     // No bootstrap.solverNets at all; predictionV1.solverNet.enabled wins.
     getStatusMock.mockResolvedValue({
@@ -193,7 +255,7 @@ describe('OverviewPage empty-state gating', () => {
     );
   });
 
-  it('mounts the LiveNowBand below the HeroStats', async () => {
+  it('shows compact live status in the HeroStats row', async () => {
     getStatusMock.mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
       activity: { recent: [] },
@@ -206,7 +268,42 @@ describe('OverviewPage empty-state gating', () => {
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    await waitFor(() => expect(screen.getByTestId('live-now-band')).toBeTruthy());
-    expect(screen.getByTestId('live-now-band').getAttribute('data-state')).toBe('idle');
+    await waitFor(() => expect(screen.getByTestId('overview-status-stat')).toBeTruthy());
+    expect(screen.getByTestId('overview-status-stat').getAttribute('data-state')).toBe('idle');
+    expect(screen.queryByTestId('live-now-band')).toBeNull();
+  });
+
+  it('wires quick actions to their real dashboard actions', async () => {
+    getStatusMock.mockResolvedValue({
+      rewards: { pendingStakingRewardsWei: '1000000000000000000' },
+      masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
+      fleet: { services: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 1, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+    });
+    getBootstrapMock.mockResolvedValue({
+      joinedSolverNets: {
+        bafkreiswe: {
+          manifestCid: 'bafkreiswe',
+          name: 'SWE-rebench v2',
+          roles: ['solver', 'evaluator'],
+        },
+      },
+    });
+    const { history } = renderOverviewWithMemory();
+
+    fireEvent.click(await screen.findByRole('button', { name: /claim jinn/i }));
+    await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole('button', { name: /top up gas/i }));
+    await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole('button', { name: /restart node/i }));
+    await waitFor(() => expect(restartDaemonMock).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole('button', { name: /manage wallet/i }));
+    await waitFor(() => expect(history.at(-1)).toBe('/operator#security'));
   });
 });

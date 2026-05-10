@@ -62,6 +62,22 @@ describe('deriveLiveNow', () => {
     expect(result.meta).toMatch(/longest in flight/);
   });
 
+  it('returns working from generic taskRuns even when prediction status is idle', () => {
+    const now = Date.now();
+    const result = deriveLiveNow({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      taskRuns: {
+        totals: { activeTaskRuns: 1 },
+        inFlight: [
+          { state: 'RUNNING', taskRole: 'restoration', stateUpdatedAt: now - 45_000 },
+        ],
+      },
+      predictionV1: { totals: { activeTaskRuns: 0 }, recentTasks: [] },
+    });
+    expect(result.state).toBe('working');
+    expect(result.line).toBe('1 task restoring');
+  });
+
   it('returns working with mixed verb when both restoration and evaluation in flight', () => {
     const result = deriveLiveNow({
       fleet: { services: [{ index: 0, step: 'complete' }] },

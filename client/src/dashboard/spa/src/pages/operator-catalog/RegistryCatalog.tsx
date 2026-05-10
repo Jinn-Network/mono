@@ -5,6 +5,7 @@ import type {
   RegistryListResponse,
   SolverNetManifestSummary,
 } from '../../api/types.js';
+import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
  * Operator-side catalog of all launched SolverNets discoverable via the
@@ -28,20 +29,6 @@ const STATUS_TONE: Record<
   paused: { fg: 'var(--wane)', border: 'var(--wane)', label: 'Paused' },
   retired: { fg: 'var(--fg-dim)', border: 'var(--border)', label: 'Retired' },
 };
-
-/** Wei → ETH string; mirrors `pages/launcher-launched/helpers.ts`. */
-function formatEthFromWei(wei: string | undefined): string {
-  if (!wei || !/^\d+$/.test(wei)) return '—';
-  try {
-    const n = BigInt(wei);
-    const eth = Number(n) / 1e18;
-    if (eth === 0) return '0 ETH';
-    if (eth < 0.0001) return `${eth.toExponential(3)} ETH`;
-    return `${eth.toFixed(eth < 1 ? 6 : 4)} ETH`;
-  } catch {
-    return '—';
-  }
-}
 
 function truncateAddress(address: string): string {
   if (!address) return '';
@@ -197,11 +184,11 @@ function RegistryCard({ summary, joinedRoles }: RegistryCardProps): JSX.Element 
         <RoleChips openRoles={summary.openRoles} />
         <span>Solution price</span>
         <span style={{ color: 'var(--fg)' }}>
-          {formatEthFromWei(summary.solutionPriceWei)}
+          {formatWeiAmount(summary.solutionPriceWei)}
         </span>
         <span>Verdict price</span>
         <span style={{ color: 'var(--fg)' }}>
-          {formatEthFromWei(summary.verdictPriceWei)}
+          {formatWeiAmount(summary.verdictPriceWei)}
         </span>
       </div>
 
@@ -292,7 +279,7 @@ export function RegistryCatalog({
   });
   const joinedByCid = joinedQuery.data?.joinedSolverNets ?? {};
 
-  if (isLoading) {
+  if (isLoading || joinedQuery.isLoading) {
     return (
       <p
         data-testid="registry-catalog-loading"
@@ -308,7 +295,8 @@ export function RegistryCatalog({
     );
   }
 
-  if (isError) {
+  if (isError || joinedQuery.isError) {
+    const visibleError = isError ? error : joinedQuery.error;
     return (
       <div
         data-testid="registry-catalog-error"
@@ -335,7 +323,7 @@ export function RegistryCatalog({
             Failed to load registry catalog.
           </span>
           <span style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
-            {error instanceof Error ? error.message : 'Unknown error'}
+            {visibleError instanceof Error ? visibleError.message : 'Unknown error'}
           </span>
         </div>
         <button
@@ -361,7 +349,8 @@ export function RegistryCatalog({
     );
   }
 
-  const summaries = data?.summaries ?? [];
+  const allSummaries = data?.summaries ?? [];
+  const summaries = allSummaries.filter((summary) => joinedByCid[summary.manifestCid] === undefined);
   const lastRefreshed = formatTimestamp(data?.lastRefreshedAt ?? null);
   const lastError = data?.lastError ?? null;
 
@@ -383,7 +372,7 @@ export function RegistryCatalog({
         }}
       >
         <span data-testid="registry-catalog-meta">
-          {summaries.length} launched · last refreshed{' '}
+          {summaries.length} discoverable · last refreshed{' '}
           {lastRefreshed ?? 'never'}
         </span>
         {lastError && (
@@ -409,7 +398,7 @@ export function RegistryCatalog({
             fontSize: '13px',
           }}
         >
-          No launched SolverNets available.
+          No unjoined SolverNets available.
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

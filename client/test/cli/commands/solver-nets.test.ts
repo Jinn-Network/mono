@@ -456,6 +456,25 @@ describe('solver-nets command', () => {
     },
   );
 
+  it('does not validate Prediction harness compatibility when the SolverNet is disabled', async () => {
+    const { config, configPath } = loadPredictionTestConfig({
+      enabled: false,
+      harness: 'claude-code-learner',
+    });
+
+    const status = await buildPredictionOperatorStatus({
+      config,
+      configPath,
+      ...operatorStatusDeps,
+    });
+
+    expect(status.ok).toBe(false);
+    expect(status.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      'prediction_solvernet_disabled',
+    ]);
+    expect(status.harness).toBeUndefined();
+  });
+
   it('reports insufficient sample task windows with a complete non-config diagnostic', async () => {
     const sample = await runPredictionSample({ closedWindow: true });
     const diagnostic = sample.diagnostics.find((candidate) => candidate.code === 'prediction_sample_cannot_attempt');

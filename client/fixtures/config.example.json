@@ -1,24 +1,10 @@
 {
-  "rpcUrl": "https://mainnet.base.org",
+  "network": "testnet",
+  "rpcUrl": "https://sepolia.base.org",
   "claudeModel": "claude-haiku-4-5-20251001",
   "pollIntervalMs": 5000,
   "apiPort": 7331,
-  "tasks": [
-    {
-      "id": "health-check",
-      "description": "The service is running and participating in the Jinn protocol loop.",
-      "solverType": "prediction.v1",
-      "role": "restoration",
-      "spec": {}
-    }
-  ],
-  "solverNets": {
-    "prediction": {
-      "enabled": true,
-      "solverType": "prediction.v1",
-      "harness": "claude-code-learner",
-      "plugins": [],
-      "taskGenerator": { "enabled": true }
-    }
-  }
+  "tasks": [],
+  "solverNets": {},
+  "joinedSolverNets": {}
 }

@@ -74,7 +74,7 @@ The `files` field in `package.json` ensures only `dist/`, `deployments/`, `READM
 
 ## Releases
 
-Use [RELEASING.md](./RELEASING.md) for the package bootstrap publish, npm trusted-publishing setup, canary/stable release flow, the fork-based operator gate (`yarn release:operator-gate`), the contracts release gate (`cd ../contracts && yarn test && forge install foundry-rs/forge-std --no-git && forge test --match-contract Invariant`), and the manual Docker-first real testnet acceptance gate (`yarn release:testnet-acceptance`) that must pass on the exact stable release commit. The dedicated Docker acceptance environment and evidence expectations are documented in [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md).
+Use [RELEASING.md](./RELEASING.md) for the package bootstrap publish, npm trusted-publishing setup, canary/stable release flow, the fork-based operator gate (`yarn release:operator-gate`), the cross-operator donation consumption gate (`yarn release:donation-consumption`), the contracts release gate (`cd ../contracts && yarn test && forge install foundry-rs/forge-std --no-git && forge test --match-contract Invariant`), and the manual Docker-first real testnet acceptance gate (`yarn release:testnet-acceptance`) that must pass on the exact stable release commit. The dedicated Docker acceptance environment and evidence expectations are documented in [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md).
 
 ## Updating deployment artifacts
 
@@ -98,6 +98,7 @@ This copies the 4 deployment JSON files from `contracts/` into `client/deploymen
 | `yarn staking` | Earning bootstrap validation on Anvil fork |
 | `yarn pack:smoke` | Pack tarball and run smoke tests |
 | `yarn release:operator-gate` | Run the stable-release operator gate (`staking` then `e2e`) |
+| `yarn release:donation-consumption` | Prove two isolated operators can consume donated SWE execution data through real testnet IPFS/subgraph/MCP paths |
 | `cd ../contracts && yarn test && forge install foundry-rs/forge-std --no-git && forge test --match-contract Invariant` | Run the contracts release gate |
 | `yarn release:testnet-acceptance` | Run the manual Docker-first real testnet acceptance harness |
 | `yarn setup:testnet-acceptance-operator` | First-time Docker acceptance setup + bootstrap/funding helper (`TESTNET_ACCEPTANCE.md`) |

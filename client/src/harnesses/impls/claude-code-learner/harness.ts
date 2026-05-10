@@ -3,6 +3,7 @@ import type {
   HarnessContext,
   Solution,
 } from '../../types.js';
+import { CLAUDE_CODE_HARNESS } from '../../names.js';
 import type {
   HarnessAdapter,
   TaskSessionInputs,
@@ -27,7 +28,7 @@ export class ClaudeCodeLearnerImpl implements Harness {
 
   constructor(config: ClaudeCodeLearnerConfig) {
     this.adapter = config.adapter;
-    this.name = config.name ?? 'claude-code-learner';
+    this.name = config.name ?? CLAUDE_CODE_HARNESS;
     this.version = config.version ?? '0.1.0-shim';
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
   }
@@ -51,6 +52,7 @@ export class ClaudeCodeLearnerImpl implements Harness {
       requestId: ctx.requestId,
       taskCid: ctx.taskCid,
       solverType: ctx.task.solverType,
+      model: ctx.solverNet?.model,
       claudeModel: ctx.solverNet?.model,
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,
@@ -65,6 +67,10 @@ export class ClaudeCodeLearnerImpl implements Harness {
 
     await this.adapter.runTask(inputs, this.pluginRoot);
 
-    return harvestOutput(ctx.workingDir, undefined, ctx.task);
+    const solution = await harvestOutput(ctx.workingDir, undefined, ctx.task);
+    return {
+      ...solution,
+      venueRef: { ...solution.venueRef, name: this.name },
+    };
   }
 }

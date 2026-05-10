@@ -27,7 +27,7 @@ import { TasksPanel } from './launcher-launched/TasksPanel.js';
  *     display fields (name, description, prices). The manifest is cached
  *     forever once fetched — manifests are content-addressed.
  *   - Renders four panels stacked vertically: StatusHeader, GeneratorPanel,
- *     TasksPanel, SpendPanel. The lifecycle dialog is overlaid on top.
+ *     SpendPanel, TasksPanel. The lifecycle dialog is overlaid on top.
  *   - Exposes `pollIntervalMs` + `navigateTo` props so tests can inject
  *     deterministic state without standing up a wouter router.
  */
@@ -166,14 +166,15 @@ export function LauncherLaunchedPage({
 
       <GeneratorPanel
         record={record}
+        manifest={manifest}
         onSave={async (patch) => {
           await generatorMutation.mutateAsync(patch);
         }}
       />
 
-      <TasksPanel record={record} />
-
       <SpendPanel record={record} manifest={manifest} />
+
+      <TasksPanel record={record} />
 
       {manifestQuery.isError && (
         <p

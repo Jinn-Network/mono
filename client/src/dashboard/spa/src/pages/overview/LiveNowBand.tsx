@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { api } from '../../api/client.js';
 
 /**
- * Live-now pulse band on /overview. Replaces the static "Node Status" tile
+ * Live-now pulse band for operator activity surfaces. Replaces the static "Node Status" tile
  * and the conditional AlertBand with a single present-tense band that
  * classifies the daemon into one of four states:
  *
@@ -47,6 +47,11 @@ export interface LiveNowStatusInput {
   activity?: {
     recent?: Array<{ ts: string | null; kind: string }>;
   };
+  taskRuns?: {
+    totals?: { activeTaskRuns?: number };
+    inFlight?: LiveTaskRun[];
+    recentTasks?: LiveTaskRun[];
+  };
   predictionV1?: {
     operator?: {
       diagnostics?: Array<{
@@ -57,15 +62,17 @@ export interface LiveNowStatusInput {
       }>;
     };
     totals?: { activeTaskRuns?: number };
-    recentTasks?: Array<{
-      state: string;
-      taskRole: 'restoration' | 'evaluation' | null;
-      stateUpdatedAt: number;
-    }>;
+    recentTasks?: LiveTaskRun[];
   };
 }
 
 const SERVICE_COMPLETE_STEPS = new Set(['complete', 'safe_binding_pending']);
+
+interface LiveTaskRun {
+  state: string;
+  taskRole: 'restoration' | 'evaluation' | null;
+  stateUpdatedAt: number;
+}
 
 function diagnosticHref(diagnostic: { code: string; configField?: string }): string {
   // Harness-related diagnostics belong on /operator → SolverNets → Joined,
@@ -110,9 +117,7 @@ function formatTimeOfDay(iso: string): string {
   return d.toISOString().slice(11, 16);
 }
 
-function summarizeStages(
-  tasks: NonNullable<LiveNowStatusInput['predictionV1']>['recentTasks'],
-): { line: string; longestMs: number } {
+function summarizeStages(tasks: readonly LiveTaskRun[] | undefined): { line: string; longestMs: number } {
   const inFlight = (tasks ?? []).filter((t) => !TERMINAL_STATES.has(t.state));
   const restoring = inFlight.filter((t) => t.taskRole === 'restoration').length;
   const evaluating = inFlight.filter((t) => t.taskRole === 'evaluation').length;
@@ -172,10 +177,12 @@ export function deriveLiveNow(status: LiveNowStatusInput | undefined): LiveNowDe
     };
   }
 
-  // Working: any in-flight task runs.
-  const activeCount = status?.predictionV1?.totals?.activeTaskRuns ?? 0;
+  // Working: any in-flight task runs, regardless of SolverNet.
+  const taskRunStatus = status?.taskRuns;
+  const activeCount = taskRunStatus?.totals?.activeTaskRuns ?? status?.predictionV1?.totals?.activeTaskRuns ?? 0;
   if (activeCount > 0) {
-    const summary = summarizeStages(status?.predictionV1?.recentTasks);
+    const genericInFlight = taskRunStatus?.inFlight ?? taskRunStatus?.recentTasks;
+    const summary = summarizeStages(genericInFlight ?? status?.predictionV1?.recentTasks);
     return {
       state: 'working',
       line: summary.line,
@@ -198,14 +205,14 @@ export function deriveLiveNow(status: LiveNowStatusInput | undefined): LiveNowDe
   };
 }
 
-const TONE: Record<LiveNowState, { dot: string; eyebrow: string; border: string }> = {
+export const LIVE_NOW_TONE: Record<LiveNowState, { dot: string; eyebrow: string; border: string }> = {
   bootstrapping: { dot: 'var(--accent-sky)', eyebrow: 'Now · Bootstrapping', border: 'var(--border)' },
   attention: { dot: 'var(--break-red)', eyebrow: 'Now · Needs attention', border: 'var(--border-accent)' },
   working: { dot: 'var(--vow-green)', eyebrow: 'Now · Live', border: 'var(--border)' },
   idle: { dot: 'var(--fg-muted)', eyebrow: 'Now · Live', border: 'var(--border)' },
 };
 
-const STATE_LABEL: Record<LiveNowState, string> = {
+export const LIVE_NOW_STATE_LABEL: Record<LiveNowState, string> = {
   bootstrapping: 'BOOTSTRAPPING',
   attention: 'ATTENTION',
   working: 'WORKING',
@@ -219,8 +226,8 @@ export function LiveNowBand(): JSX.Element {
     refetchInterval: 5_000,
   });
   const derived = deriveLiveNow(data);
-  const tone = TONE[derived.state];
-  const stateLabel = STATE_LABEL[derived.state];
+  const tone = LIVE_NOW_TONE[derived.state];
+  const stateLabel = LIVE_NOW_STATE_LABEL[derived.state];
 
   return (
     <section

@@ -12,7 +12,6 @@ import { AgentRail } from './shell/AgentRail.js';
 import { RestartBanner } from './shell/RestartBanner.js';
 import { OverviewPage } from './pages/Overview.js';
 import { OverviewActivityPage } from './pages/OverviewActivity.js';
-import { LeaderboardPage } from './pages/leaderboard/Leaderboard.js';
 import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
@@ -72,24 +71,17 @@ export default function App(): JSX.Element {
           <Route path="/overview/activity"><OverviewActivityPage /></Route>
           <Route path="/overview" component={OverviewPage} />
           <Route path="/operator/join/:cid"><JoinFlow /></Route>
+          <Route path="/operator/execution-data"><CapturesTab /></Route>
           <Route path="/operator">
             <OperatorPage onRestartPending={() => setRestartPending(true)} />
           </Route>
-          <Route path="/captures"><CapturesTab /></Route>
+          <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
           <Route path="/configuration"><ConfigurationRedirect /></Route>
           <Route path="/launcher/create"><LauncherCreatePage /></Route>
           <Route path="/launcher/launched/:solverNetId">
             <LauncherLaunchedPage />
           </Route>
           <Route path="/launcher"><LauncherPage /></Route>
-          <Route path="/leaderboard/:solverNet">
-            {(params: { solverNet: string }) => (
-              <LeaderboardPage solverNet={params.solverNet} />
-            )}
-          </Route>
-          <Route path="/leaderboard">
-            <Redirect to="/leaderboard/prediction" />
-          </Route>
           <Route><Redirect to="/overview" /></Route>
         </Switch>
       </AppShell>

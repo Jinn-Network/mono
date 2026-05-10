@@ -44,6 +44,22 @@ export interface BootstrapState {
     eth_balance?: string;
     targetWei?: string;
   };
+  solverNets?: Record<string, {
+    name?: string;
+    manifestCid?: string;
+    enabled?: boolean;
+    roles?: string[];
+  }>;
+  joinedSolverNets?: Record<string, {
+    name?: string;
+    manifestCid?: string;
+    contract?: { id: string; version: string };
+    roles?: string[];
+    harness?: string;
+    model?: string;
+    plugins?: string[];
+    disabledDefaultPlugins?: string[];
+  }>;
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
 }
@@ -117,6 +133,7 @@ export interface LauncherStatusBudgetView {
 
 export interface LauncherStatusNetEntry {
   name: string;
+  solverType?: string;
   generator: LauncherStatusGeneratorView;
   openTasks: number;
   budget: LauncherStatusBudgetView;
@@ -145,6 +162,7 @@ export interface LauncherTaskEntry {
   taskId: string;
   taskCid: string;
   solverNet: string;
+  solverType?: string;
   postedAt: string;
   state: LauncherTaskState;
   claims: { current: number; max: number };
@@ -477,6 +495,14 @@ export interface GeneratorConfig {
   minVolume24hUsd?: string;
   maxYesSpread?: string;
   maxOrderbookAgeSeconds?: number;
+  N_target_successes?: number;
+  N_max_postings_per_task?: number;
+  cooldown_ms?: number;
+  claimPolicy?: {
+    maxClaims?: number;
+    maxClaimsPerOperator?: number;
+    claimLeaseTtlSeconds?: number;
+  };
 }
 
 /**

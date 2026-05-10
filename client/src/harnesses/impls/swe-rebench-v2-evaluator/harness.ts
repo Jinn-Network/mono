@@ -4,7 +4,7 @@
  * `swe-rebench-v2.v1` evaluation tasks to it.
  *
  * Operator setup is automated via {@link SweRebenchV2EvaluatorHarness.onEnable}:
- *   `jinn solver-nets enable swe-rebench-v2-evaluator`
+ *   `jinn harnesses enable swe-rebench-v2-evaluator`
  *   - Validates Docker + Python availability.
  *   - Clones the upstream `SWE-rebench/SWE-rebench-V2` repo into
  *     `<implStateDir>/upstream` (one-time; idempotent on rerun).
@@ -45,6 +45,7 @@ import { HttpHfFetcher } from './hf-fetcher.js';
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 const UPSTREAM_REPO_URL = 'https://github.com/SWE-rebench/SWE-rebench-V2.git';
 const STATE_FILE = 'state.json';
+const ENABLE_CLI = 'jinn harnesses enable swe-rebench-v2-evaluator';
 
 interface EnabledState {
   schemaVersion: 'swe-rebench-v2-evaluator-state.v1';
@@ -128,8 +129,8 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         reason: 'swe-rebench-v2 evaluator not enabled',
         nextStep: {
           description:
-            'Run `jinn solver-nets enable swe-rebench-v2-evaluator` to clone the upstream eval harness and validate Docker + Python.',
-          cli: 'jinn solver-nets enable swe-rebench-v2-evaluator',
+            `Run \`${ENABLE_CLI}\` to clone the upstream eval harness and validate Docker + Python.`,
+          cli: ENABLE_CLI,
         },
       };
     }
@@ -139,8 +140,8 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         reason: `upstream repo missing at ${state.upstreamRepoDir}`,
         nextStep: {
           description:
-            'Re-run `jinn solver-nets enable swe-rebench-v2-evaluator` to re-clone the upstream eval harness.',
-          cli: 'jinn solver-nets enable swe-rebench-v2-evaluator',
+            `Re-run \`${ENABLE_CLI}\` to re-clone the upstream eval harness.`,
+          cli: ENABLE_CLI,
         },
       };
     }
@@ -185,11 +186,11 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         status: 'waiting_for_external_action',
         action: {
           description:
-            'Docker daemon is not reachable. Install Docker Desktop (or start the daemon), then re-run `jinn solver-nets enable swe-rebench-v2-evaluator`.',
+            `Docker daemon is not reachable. Install Docker Desktop (or start the daemon), then re-run \`${ENABLE_CLI}\`.`,
           url: 'https://docs.docker.com/get-docker/',
         },
         nextInvocation: {
-          cli: 'jinn solver-nets enable swe-rebench-v2-evaluator',
+          cli: ENABLE_CLI,
           purpose: 'Re-validate Docker availability and continue setup.',
         },
       };
@@ -205,7 +206,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
             'Python 3 is required to run the upstream eval.py harness. Install python3 and ensure it is on PATH, then re-run.',
         },
         nextInvocation: {
-          cli: 'jinn solver-nets enable swe-rebench-v2-evaluator',
+          cli: ENABLE_CLI,
           purpose: 'Re-validate Python availability and continue setup.',
         },
       };
@@ -257,7 +258,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     const state = readEnabledState(this.implStateDir);
     if (!state) {
       throw new Error(
-        'swe-rebench-v2-evaluator: not enabled. Run `jinn solver-nets enable swe-rebench-v2-evaluator`.',
+        `swe-rebench-v2-evaluator: not enabled. Run \`${ENABLE_CLI}\`.`,
       );
     }
 
@@ -298,6 +299,20 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       passed_match: graded.passed_match,
       evaluator_cost_usd: 0,
     };
+    const verdictArtifactPayload = {
+      schemaVersion: 'swe-rebench-v2-verdict-artifact.v1',
+      verdict: verdictPayload,
+      informational: {
+        instance_id: task.instance_id,
+        round_month: task.round_month,
+        test_log_cid,
+      },
+    };
+    await writeFile(
+      join(ctx.workingDir, 'swe-rebench-v2-verdict.json'),
+      `${JSON.stringify(verdictArtifactPayload, null, 2)}\n`,
+      'utf8',
+    );
 
     return {
       venueRef: { name: 'swe-rebench-v2' },

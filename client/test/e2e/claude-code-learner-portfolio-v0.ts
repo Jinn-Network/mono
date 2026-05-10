@@ -4,20 +4,19 @@
  *
  * This script is intentionally a SKELETON per Plan 3 Task 5. It:
  *
- *  1. Skips cleanly if `anvil` or `claude` are not in PATH (desired CI behavior
- *     where neither tool is available).
- *  2. Verifies that {@link buildHarnesses} registers the
- *     {@link ClaudeCodeLearnerWrapper} at index 0 and that it claims support for
- *     `portfolio.v0` — this is the most important new behavior from Plan 3 T2
- *     and can be asserted without external dependencies.
+ *  1. Skips cleanly if `anvil` or the configured learner CLI is not in PATH
+ *     (desired CI behavior where neither tool is available).
+ *  2. Verifies that {@link buildHarnesses} registers the configured learner
+ *     harness and that a {@link HarnessRegistry} using that default dispatches
+ *     `portfolio.v0` restoration tasks to it.
  *  3. Spawns an Anvil fork of Base for parity with the existing
  *     `e2e-portfolio-v0` harness so a follow-up task can fill in the
  *     task-post + daemon-run + envelope-assertion sections by mirroring
  *     `client/test/e2e/portfolio-v0.ts`.
  *
  * Follow-up: the task-post + envelope-assertion details (executor.implName
- * === 'claude-code-learner', per-phase artifact assertions in workingDir) should
- * land once we have a known-working `claude` install in the Anvil environment.
+ * === configured learner harness, per-phase artifact assertions in workingDir)
+ * should land once we have a known-working CLI install in the Anvil environment.
  */
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
@@ -25,9 +24,14 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { buildHarnesses } from '../../src/harnesses/impls/index.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../src/harnesses/names.js';
+import { checkLearnerCli, readLearnerHarnessE2EConfig } from './learner-harness-config.js';
 
 async function main(): Promise<void> {
+  const learnerConfig = readLearnerHarnessE2EConfig();
+
   // Pre-flight: skip if Anvil not available.
   const anvilCheck = spawnSync('anvil', ['--version']);
   if (anvilCheck.status !== 0) {
@@ -35,14 +39,17 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Pre-flight: skip if `claude` not available.
-  const claudeCheck = spawnSync('claude', ['--version']);
-  if (claudeCheck.status !== 0) {
-    console.log('SKIP: claude CLI not in PATH; install Claude Code to run this e2e');
+  // Pre-flight: skip if configured learner CLI is unavailable.
+  const cliCheck = checkLearnerCli(learnerConfig);
+  if (!cliCheck.ok) {
+    console.log(`SKIP: ${cliCheck.reason}`);
     process.exit(0);
   }
 
-  console.log('=== claude-code-learner portfolio.v0 e2e ===');
+  console.log('=== learner portfolio.v0 e2e ===');
+  console.log(`harness: ${learnerConfig.harnessName}`);
+  console.log(`cli:     ${learnerConfig.cliPath} (${cliCheck.version})`);
+  console.log(`model:   ${learnerConfig.model}`);
 
   // Spawn Anvil fork of Base.
   console.log('Starting Anvil fork...');
@@ -57,30 +64,37 @@ async function main(): Promise<void> {
 
   let exitCode = 0;
   try {
-    // Verify wrapper is registered FIRST.
-    console.log('Verifying buildHarnesses wrapper registration...');
+    // Verify configured learner is registered and dispatchable as the default.
+    console.log('Verifying buildHarnesses learner registration...');
     const impls = buildHarnesses({
       stub: true,
       rpcUrl: 'http://127.0.0.1:8545',
-      claudePath: 'claude',
-      claudeModel: 'claude-haiku-4-5-20251001',
+      claudePath: learnerConfig.harnessName === CLAUDE_CODE_HARNESS ? learnerConfig.cliPath : 'claude',
+      claudeModel: learnerConfig.model,
+      codexPath: learnerConfig.harnessName === CODEX_HARNESS ? learnerConfig.cliPath : 'codex',
+      codexModel: learnerConfig.model,
     });
     if (impls.length === 0) {
       throw new Error('buildHarnesses returned empty array');
     }
-    const first = impls[0];
-    if (!first) {
-      throw new Error('buildHarnesses returned empty array');
+    const selected = impls.find((impl) => impl.name === learnerConfig.harnessName);
+    if (!selected) {
+      throw new Error(`${learnerConfig.harnessName} not registered by buildHarnesses`);
     }
-    if (first.name !== 'claude-code-learner') {
+    if (!selected.supports({ solverType: 'portfolio.v0', role: 'restoration' })) {
+      throw new Error(`${learnerConfig.harnessName}.supports(portfolio.v0/restoration) returned false`);
+    }
+
+    const registry = new HarnessRegistry({ default: learnerConfig.harnessName });
+    for (const impl of impls) registry.register(impl);
+    const dispatched = registry.findFor({ solverType: 'portfolio.v0', role: 'restoration' });
+    if (dispatched?.name !== learnerConfig.harnessName) {
       throw new Error(
-        `default harness not registered first: index 0 is "${first.name}" (expected "claude-code-learner")`,
+        `registry dispatched portfolio.v0/restoration to ${dispatched?.name ?? '<none>'}; ` +
+          `expected ${learnerConfig.harnessName}`,
       );
     }
-    if (!first.supports({ solverType: 'portfolio.v0' })) {
-      throw new Error('claude-code-learner.supports(portfolio.v0) returned false');
-    }
-    console.log('  ✓ claude-code-learner at index 0; supports portfolio.v0');
+    console.log(`  ✓ ${learnerConfig.harnessName} registered; registry dispatches portfolio.v0/restoration to it`);
 
     // Run one daemon cycle. (Reuse e2e-portfolio-v0's harness; here we
     // just inline the minimal version.)
@@ -91,7 +105,7 @@ async function main(): Promise<void> {
       // Mirror the harness in client/test/e2e/portfolio-v0.ts:
       //   - bootstrap fleet on Anvil-forked Base (FleetBootstrapper)
       //   - operator posts a portfolio.v0 Task on-chain
-      //   - daemon claims, runs the wrapper (claude-code-learner), packages + delivers
+      //   - daemon claims, runs the configured learner harness, packages + delivers
       //   - assert per-phase artifacts in workingDir:
       const phases = [
         'orient',
@@ -114,7 +128,7 @@ async function main(): Promise<void> {
         }
         console.log(`  ✓ ${phase} artifact present`);
       }
-      // TODO(plan-3-followup): assert envelope's executor.implName === 'claude-code-learner'
+      // TODO(plan-3-followup): assert envelope's executor.implName === configured learner harness
       // by reading the manifest the engine packaged (mirror e2e-portfolio-v0's
       // assembleAndSignManifest + executor field assertion).
       console.log('=== e2e PASSED (skeleton; task-post + envelope assertion deferred) ===');

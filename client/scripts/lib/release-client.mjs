@@ -487,6 +487,7 @@ export function releaseGateSteps(skipAcceptance = false) {
     steps.push(
       ['gate-acceptance-setup', 'yarn setup:testnet-acceptance-operator --bootstrap', 'yarn', ['setup:testnet-acceptance-operator', '--bootstrap'], 'clientRoot'],
       ['gate-acceptance', 'yarn release:testnet-acceptance', 'yarn', ['release:testnet-acceptance'], 'clientRoot'],
+      ['gate-donation-consumption', 'yarn release:donation-consumption', 'yarn', ['release:donation-consumption'], 'clientRoot'],
     );
   }
   return steps.map(([id, label, command, args, cwdKey]) => ({ id, label, command, args, cwdKey }));

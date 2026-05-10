@@ -301,6 +301,10 @@ describe('LauncherLaunchedPage', () => {
 
     wrap(<LauncherLaunchedPage solverNetId="sn-1" pollIntervalMs={10_000} />);
     await waitFor(() =>
+      expect(screen.getByTestId('launcher-launched-generator-toggle')).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByTestId('launcher-launched-generator-toggle'));
+    await waitFor(() =>
       expect(
         (screen.getByTestId('launcher-launched-generator-maxOpenRounds') as HTMLInputElement).value,
       ).toBe('250'),

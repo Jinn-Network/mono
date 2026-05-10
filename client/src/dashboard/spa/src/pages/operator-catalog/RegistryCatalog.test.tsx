@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -12,9 +12,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
  */
 
 const listRegistryMock = vi.fn();
+const listJoinedMock = vi.fn();
 
 vi.mock('../../api/client.js', () => ({
   api: {
+    operator: {
+      listJoined: () => listJoinedMock(),
+    },
     solvernets: {
       listRegistry: () => listRegistryMock(),
     },
@@ -34,6 +38,12 @@ function withProviders(node: JSX.Element, path = '/operator'): JSX.Element {
 }
 
 describe('RegistryCatalog', () => {
+  beforeEach(() => {
+    listRegistryMock.mockReset();
+    listJoinedMock.mockReset();
+    listJoinedMock.mockResolvedValue({ joinedSolverNets: {} });
+  });
+
   it('shows the spec §12 empty-state copy when no SolverNets are launched', async () => {
     listRegistryMock.mockResolvedValue({
       summaries: [],
@@ -45,7 +55,7 @@ describe('RegistryCatalog', () => {
       expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy(),
     );
     expect(
-      screen.getByText(/no launched solvernets available\./i),
+      screen.getByText(/no unjoined solvernets available\./i),
     ).toBeTruthy();
   });
 
@@ -124,6 +134,94 @@ describe('RegistryCatalog', () => {
     // Open-role chips render for the launched + paused entries.
     const roleChips = screen.getAllByTestId('registry-open-role');
     expect(roleChips.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('hides SolverNets that are already joined from Discover', async () => {
+    listJoinedMock.mockResolvedValue({
+      joinedSolverNets: {
+        bafybeiaaa: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
+      },
+    });
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        {
+          manifestCid: 'bafybeiaaa',
+          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
+          name: 'Already Joined',
+          network: 'base-sepolia',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '10000000000',
+          verdictPriceWei: '5000000000',
+          openRoles: ['solver'],
+          anchorBlock: 1,
+        },
+        {
+          manifestCid: 'bafybeibbb',
+          solverNetId: 'agent9999_prediction.v1-1_bbbbbbbb',
+          name: 'Not Joined',
+          network: 'base-sepolia',
+          launcherAgentId: '9999',
+          launcherSafeAddress: '0xAA112233445566778899AABBCCDDEEFF11223344',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '10000000000',
+          verdictPriceWei: '5000000000',
+          openRoles: ['solver'],
+          anchorBlock: 2,
+        },
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(1),
+    );
+    expect(screen.queryByText('Already Joined')).toBeNull();
+    expect(screen.getByText('Not Joined')).toBeTruthy();
+  });
+
+  it('formats tiny live prices as gwei instead of scientific ETH notation', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        {
+          manifestCid: 'bafybeiaaa',
+          solverNetId: 'agent5474_swe-rebench-v2-v1_aaaaaaaa',
+          name: 'SWE-rebench v2',
+          network: 'base-sepolia',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'swe-rebench-v2',
+          contractVersion: 'v1',
+          solutionPriceWei: '10000000000',
+          verdictPriceWei: '5000000000',
+          openRoles: ['solver', 'evaluator'],
+          anchorBlock: 1,
+        },
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByText('SWE-rebench v2')).toBeTruthy(),
+    );
+    expect(screen.getByText('10 gwei')).toBeTruthy();
+    expect(screen.getByText('5 gwei')).toBeTruthy();
+    expect(screen.queryByText(/\d\.\d+e-/i)).toBeNull();
   });
 
   it('routes the Join CTA to /operator/join/<manifestCid> for launched nets', async () => {

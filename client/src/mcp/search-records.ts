@@ -13,7 +13,7 @@ import type {
   ManifestPreview,
 } from '../corpus/index.js';
 import type { EnvelopeProjection, EnvelopeProjectionQuery } from '../corpus/types.js';
-import type { Artifact, SignedEnvelope } from '../types/envelope.js';
+import type { Artifact, ArtifactSource, SignedEnvelope } from '../types/envelope.js';
 import type { Store } from '../store/store.js';
 
 export type ReadOnlyCorpus = Pick<Corpus, 'query' | 'fetchManifest'>;
@@ -37,6 +37,7 @@ export interface ArtifactDescriptor {
       access: { endpoint: string; priceUsdc: string };
       envelopeCid?: string;
       artifactType?: string;
+      sources?: ArtifactSource[];
     };
   };
   paidAmountUsdc?: string;
@@ -174,6 +175,15 @@ function localArtifactDescriptor(row: ReturnType<Store['searchOwnAndCached']>[nu
 }
 
 function manifestArtifactDescriptor(ref: EnvelopeRef, artifact: Artifact): ArtifactDescriptor {
+  const acquisitionArguments: NonNullable<ArtifactDescriptor['acquisition']>['arguments'] = {
+    sha256: artifact.sha256,
+    access: artifact.access,
+    envelopeCid: ref.manifestCid,
+    artifactType: artifact.artifactType,
+  };
+  if (artifact.sources && artifact.sources.length > 0) {
+    acquisitionArguments.sources = artifact.sources;
+  }
   return {
     ref: `network:artifact:${artifact.sha256}@${ref.manifestCid}`,
     sha256: artifact.sha256,
@@ -183,12 +193,7 @@ function manifestArtifactDescriptor(ref: EnvelopeRef, artifact: Artifact): Artif
     access: artifact.access,
     acquisition: {
       tool: 'acquire_artifact',
-      arguments: {
-        sha256: artifact.sha256,
-        access: artifact.access,
-        envelopeCid: ref.manifestCid,
-        artifactType: artifact.artifactType,
-      },
+      arguments: acquisitionArguments,
     },
   };
 }

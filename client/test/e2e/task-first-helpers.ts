@@ -729,6 +729,9 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
       const solutionDelivery = await takeOne(adapter.watchForDeliveries(), 'watchForDeliveries');
       assert(solutionDelivery.requestId === request.requestId, 'delivery requestId mismatch');
       assert(solutionDelivery.task.solverType === 'prediction.v1', 'delivery task solverType mismatch');
+      persistence.transition(request.requestId, TaskRunState.PACKAGING);
+      persistence.transition(request.requestId, TaskRunState.DELIVERING);
+      persistence.transition(request.requestId, TaskRunState.COMPLETE);
 
       const evaluationTask: Task = {
         ...announcement.task,

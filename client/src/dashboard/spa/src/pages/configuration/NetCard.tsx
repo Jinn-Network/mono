@@ -6,7 +6,13 @@ import type {
 import { ConfigField } from '../../components/ConfigField.js';
 import { api } from '../../api/client.js';
 import { SolverNetSigil } from './solverNetSigils.js';
-import { CLAUDE_MODELS, resolveModelOption } from './claudeModels.js';
+import {
+  defaultModelForHarness,
+  modelOptionsForHarness,
+  resolveModelOption,
+} from './claudeModels.js';
+import { canonicalHarnessName, harnessDisplayName, harnessOptionLabel } from './harnessNames.js';
+import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
  * Per-SolverNet card inside the Operator > SolverNets section.
@@ -88,7 +94,10 @@ export function NetCard(props: NetCardProps): JSX.Element {
 }
 
 function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLegacyProps): JSX.Element {
-  const [draft, setDraft] = useState<NetCardConfig>(config);
+  const [draft, setDraft] = useState<NetCardConfig>({
+    ...config,
+    harness: canonicalHarnessName(config.harness),
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDisable, setConfirmDisable] = useState(false);
@@ -96,7 +105,7 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
   const dirty =
     draft.enabled !== config.enabled ||
     !rolesEqual(draft.roles, config.roles) ||
-    draft.harness !== config.harness ||
+    draft.harness !== canonicalHarnessName(config.harness) ||
     draft.model !== config.model ||
     draft.plugins.join(',') !== config.plugins.join(',');
 
@@ -122,7 +131,10 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
   };
 
   const cancel = (): void => {
-    setDraft(config);
+    setDraft({
+      ...config,
+      harness: canonicalHarnessName(config.harness),
+    });
     setError(null);
     setConfirmDisable(false);
   };
@@ -335,10 +347,17 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
           <ConfigField label="Harness" restartRequired>
             <select
               value={draft.harness}
-              onChange={(e) => setDraft({ ...draft, harness: e.target.value })}
+              onChange={(e) => {
+                const harness = e.target.value;
+                setDraft({
+                  ...draft,
+                  harness,
+                  model: defaultModelForHarness(harness),
+                });
+              }}
               style={{
                 background: 'var(--bg)',
-                border: `1px solid ${draft.harness !== config.harness ? 'var(--accent-sky)' : 'var(--border)'}`,
+                border: `1px solid ${draft.harness !== canonicalHarnessName(config.harness) ? 'var(--accent-sky)' : 'var(--border)'}`,
                 borderRadius: '6px',
                 padding: '10px 12px',
                 fontFamily: "'JetBrains Mono', monospace",
@@ -355,20 +374,23 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
                     ? true
                     : draft.roles.some((r) => h.supportsRoles.includes(r)),
                 )
+                .map((h) => ({ ...h, name: canonicalHarnessName(h.name) }))
+                .filter((h, index, all) => all.findIndex((candidate) => candidate.name === h.name) === index)
                 .map((h) => (
                   <option key={h.name} value={h.name}>
-                    {h.name}@{h.version}
+                    {harnessOptionLabel(h.name, h.version)}
                   </option>
                 ))}
             </select>
           </ConfigField>
 
-          <ConfigField label="Claude model" restartRequired>
+          <ConfigField label="Model" restartRequired>
             {(() => {
-              const resolved = resolveModelOption(draft.model);
+              const modelOptions = modelOptionsForHarness(draft.harness);
+              const resolved = resolveModelOption(draft.model, draft.harness);
               return (
                 <select
-                  aria-label="Claude model"
+                  aria-label="Model"
                   value={draft.model}
                   onChange={(e) => setDraft({ ...draft, model: e.target.value })}
                   style={{
@@ -381,7 +403,7 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
                     color: 'var(--fg)',
                   }}
                 >
-                  {CLAUDE_MODELS.map((m) => (
+                  {modelOptions.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.label}
                     </option>
@@ -591,19 +613,6 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
 
 // ── Manifest-keyed (joined) variant ─────────────────────────────────────────
 
-function formatEthFromWei(wei: string | undefined): string {
-  if (!wei || !/^\d+$/.test(wei)) return '—';
-  try {
-    const n = BigInt(wei);
-    const eth = Number(n) / 1e18;
-    if (eth === 0) return '0 ETH';
-    if (eth < 0.0001) return `${eth.toExponential(3)} ETH`;
-    return `${eth.toFixed(eth < 1 ? 6 : 4)} ETH`;
-  } catch {
-    return '—';
-  }
-}
-
 function JoinedNetCard({
   manifestCid,
   manifest,
@@ -705,11 +714,11 @@ function JoinedNetCard({
         </span>
         <span>Solution price</span>
         <span style={{ color: 'var(--fg)' }}>
-          {formatEthFromWei(manifest.solutionPriceWei)}
+          {formatWeiAmount(manifest.solutionPriceWei)}
         </span>
         <span>Verdict price</span>
         <span style={{ color: 'var(--fg)' }}>
-          {formatEthFromWei(manifest.verdictPriceWei)}
+          {formatWeiAmount(manifest.verdictPriceWei)}
         </span>
         {joined.roles.includes('solver') && joined.harness && (
           <>
@@ -718,7 +727,7 @@ function JoinedNetCard({
               data-testid="netcard-joined-harness"
               style={{ color: 'var(--fg)' }}
             >
-              {joined.harness}
+              {harnessDisplayName(joined.harness)}
             </span>
           </>
         )}

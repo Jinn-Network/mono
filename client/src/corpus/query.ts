@@ -15,40 +15,6 @@ import { CorpusQueryError } from './types.js';
 const HARD_LIMIT = 500;
 const DEFAULT_LIMIT = 50;
 
-const QUERY_GQL = `
-  query CorpusExecutions(
-    $first: Int!,
-    $tier: ExecutionTier,
-    $publishedAfter: BigInt,
-    $publishedBefore: BigInt,
-    $operatorWallet: Bytes,
-  ) {
-    executions(
-      first: $first,
-      where: {
-        tier: $tier,
-        publishedAt_gte: $publishedAfter,
-        publishedAt_lte: $publishedBefore,
-        operator_: { agentWallet: $operatorWallet },
-      },
-      orderBy: publishedAt,
-      orderDirection: desc,
-    ) {
-      id
-      manifestCid
-      manifestHash
-      tier
-      publishedAt
-      operator {
-        id
-        agentId
-        owner
-        agentWallet
-      }
-    }
-  }
-`;
-
 export interface BuiltQuery {
   query: string;
   variables: Record<string, unknown>;
@@ -69,15 +35,55 @@ const TIER_FROM_GQL: Record<string, EnvelopeRef['evidenceTier']> = {
 
 export function buildSubgraphQuery(q: CorpusQuery): BuiltQuery {
   const first = Math.min(Math.max(1, q.limit ?? DEFAULT_LIMIT), HARD_LIMIT);
-  const variables: Record<string, unknown> = {
-    first,
-    tier: q.evidenceTier ? TIER_TO_GQL[q.evidenceTier] : null,
-    publishedAfter: q.generatedAfter !== undefined ? String(q.generatedAfter) : null,
-    publishedBefore: q.generatedBefore !== undefined ? String(q.generatedBefore) : null,
-    operatorWallet: q.participant?.safeAddress ?? null,
-    solverType: null, // post-fetch filter; spec §10 Q6.
-  };
-  return { query: QUERY_GQL, variables };
+  const variables: Record<string, unknown> = { first };
+  const variableDefs = ['$first: Int!'];
+  const where: string[] = [];
+
+  if (q.evidenceTier) {
+    variableDefs.push('$tier: ExecutionTier');
+    variables.tier = TIER_TO_GQL[q.evidenceTier];
+    where.push('tier: $tier');
+  }
+  if (q.generatedAfter !== undefined) {
+    variableDefs.push('$publishedAfter: BigInt');
+    variables.publishedAfter = String(q.generatedAfter);
+    where.push('publishedAt_gte: $publishedAfter');
+  }
+  if (q.generatedBefore !== undefined) {
+    variableDefs.push('$publishedBefore: BigInt');
+    variables.publishedBefore = String(q.generatedBefore);
+    where.push('publishedAt_lte: $publishedBefore');
+  }
+  if (q.participant?.safeAddress) {
+    variableDefs.push('$operatorWallet: Bytes');
+    variables.operatorWallet = q.participant.safeAddress;
+    where.push('operator_: { agentWallet: $operatorWallet }');
+  }
+
+  const whereClause = where.length > 0 ? `where: { ${where.join(', ')} },` : '';
+  const query = `
+    query CorpusExecutions(${variableDefs.join(', ')}) {
+      executions(
+        first: $first,
+        ${whereClause}
+        orderBy: publishedAt,
+        orderDirection: desc
+      ) {
+        id
+        manifestCid
+        manifestHash
+        tier
+        publishedAt
+        operator {
+          id
+          agentId
+          owner
+          agentWallet
+        }
+      }
+    }
+  `;
+  return { query, variables };
 }
 
 interface SubgraphResponse {

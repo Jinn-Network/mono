@@ -64,6 +64,8 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
     txHash: TX_HASH,
     blockNumber: 124,
   }),
+  canClaimTask: vi.fn().mockResolvedValue({ ok: true }),
+  canClaimEvaluation: vi.fn().mockResolvedValue({ ok: true }),
   claimEvaluation: vi.fn().mockResolvedValue({
     taskId: '1',
     attemptIndex: 0,
@@ -93,6 +95,11 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   fetchSignedTaskFromIpfs: vi.fn().mockResolvedValue(signedTask()),
   fetchSignedEnvelopeFromIpfs: vi.fn().mockResolvedValue(null),
   digestHexToGatewayUrl: vi.fn(),
+}));
+
+// MOCK_JUSTIFICATION: task-subgraph.js is the GraphQL candidate-index boundary; adapter tests decide when candidates exist.
+vi.mock('../../../src/adapters/mech/task-subgraph.js', () => ({
+  queryClaimableTaskCandidates: vi.fn().mockResolvedValue([]),
 }));
 
 // MOCK_JUSTIFICATION: canonical-json is a pure transform; mocking it fixes the output for deterministic evidence hash assertions.
@@ -278,9 +285,126 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('watchForTasks yields subgraph-discovered claimable backlog tasks', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { queryClaimableTaskCandidates } = await import('../../../src/adapters/mech/task-subgraph.js');
+    const { canClaimTask, claimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(queryClaimableTaskCandidates).mockResolvedValueOnce([{
+      taskId: '42',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: ('0x' + '99'.repeat(32)) as `0x${string}`,
+      createdAtBlock: 80,
+      createdAtTx: TX_HASH,
+      attemptCount: 0,
+      operatorAttemptCount: 0,
+    }]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'subgraph-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        subgraphUrl: 'https://subgraph.example/graphql',
+        solverNetManifestCids: ['bafyfixturecid'],
+      },
+    });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(100n);
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(queryClaimableTaskCandidates).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://subgraph.example/graphql',
+      solverNetManifestCids: ['bafyfixturecid'],
+      operatorAddress: TEST_CONFIG.safeAddress,
+    }));
+    expect(canClaimTask).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '42',
+      TEST_CONFIG.mechContractAddress,
+    );
+    expect(value).toMatchObject({
+      taskId: '42',
+      taskCid: TASK_CID,
+      onchainCreationTx: TX_HASH,
+      onchainCreationBlock: 80,
+      task: { id: 'subgraph-task' },
+    });
+
+    await adapter.claimTask(value!.taskId);
+    expect(claimTask).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '42',
+      TEST_CONFIG.mechContractAddress,
+      undefined,
+    );
+
+    await adapter.stop();
+  });
+
+  it('subgraph discovery yields one backlog task per polling pass', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { queryClaimableTaskCandidates } = await import('../../../src/adapters/mech/task-subgraph.js');
+    const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(queryClaimableTaskCandidates).mockResolvedValueOnce([
+      {
+        taskId: '42',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: ('0x' + '99'.repeat(32)) as `0x${string}`,
+        createdAtBlock: 80,
+        createdAtTx: TX_HASH,
+        attemptCount: 0,
+        operatorAttemptCount: 0,
+      },
+      {
+        taskId: '43',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: ('0x' + '99'.repeat(32)) as `0x${string}`,
+        createdAtBlock: 81,
+        createdAtTx: TX_HASH,
+        attemptCount: 0,
+        operatorAttemptCount: 0,
+      },
+    ]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'first-subgraph-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        subgraphUrl: 'https://subgraph.example/graphql',
+        solverNetManifestCids: ['bafyfixturecid'],
+      },
+    });
+    await adapter.initialize();
+
+    const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const first = await iter.next();
+    const second = await iter.next();
+
+    expect(first.value).toMatchObject({
+      taskId: '42',
+      task: { id: 'first-subgraph-task' },
+    });
+    expect(second.done).toBe(true);
+    expect(canClaimTask).toHaveBeenCalledTimes(1);
+    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledTimes(1);
+
+    await adapter.stop();
+  });
+
   it('watchForTasks yields evaluation opportunities and claimTask claims them as evaluator work', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const {
+      canClaimEvaluation,
       claimEvaluation,
       decodeSolutionDeliveryClaimedLogs,
       findLatestDeliveryDataHexForRequest,
@@ -349,6 +473,14 @@ describe('MechAdapter TaskCoordinator flow', () => {
       TEST_CONFIG.ipfsGatewayUrl,
       TASK_CID,
     );
+    expect(canClaimEvaluation).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '1',
+      0,
+      TEST_CONFIG.mechContractAddress,
+    );
     expect(claimEvaluation).not.toHaveBeenCalled();
 
     const request = await adapter.claimTask(value!.taskId);
@@ -378,7 +510,52 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('uses a full delivery-log scan by default for delayed SolutionDeliveryClaimed events', async () => {
+  it('drops stale evaluation opportunities before yielding them to the daemon', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      canClaimEvaluation,
+      findLatestDeliveryDataHexForRequest,
+      getMarketplaceRequestDeliveryMech,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'TCAttemptAlreadyFinalized(1, 0)',
+    });
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    expect(canClaimEvaluation).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '1',
+      0,
+      TEST_CONFIG.mechContractAddress,
+    );
+    expect(getMarketplaceRequestDeliveryMech).not.toHaveBeenCalled();
+    expect(findLatestDeliveryDataHexForRequest).not.toHaveBeenCalled();
+    expect(fetchFromIpfs).not.toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
+  it('bounds the default delivery-log scan around delayed SolutionDeliveryClaimed events', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const {
       decodeSolutionDeliveryClaimedLogs,
@@ -394,16 +571,16 @@ describe('MechAdapter TaskCoordinator flow', () => {
       requestId: REQUEST_ID,
       operator: solverSafe,
       transactionHash: TX_HASH,
-      blockNumber: 25_000,
+      blockNumber: 125_000,
     }]);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
     vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
-    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(25_001n);
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(125_001n);
     (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
-    (adapter as any).requestBlockCursor = 24_999n;
+    (adapter as any).requestBlockCursor = 124_999n;
 
     const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
     const { value } = await gen.next();
@@ -413,8 +590,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
       expect.anything(),
       solverMech,
       REQUEST_ID,
-      0n,
       25_000n,
+      125_000n,
     );
 
     await adapter.stop();

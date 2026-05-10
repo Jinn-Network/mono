@@ -14,19 +14,19 @@
  *   ✓ solverNet — derived by mapping the `task_posted` event's `solver_type`
  *     back to the SolverNet name in config (the only solver-type → net mapping
  *     in v1 is 1:1, so the lookup is straightforward).
- *   ✗ state / claims.current / budget.remainingWei — require on-chain state
- *     tracking that the v1 daemon does not yet maintain. The router-watcher
- *     hardening lane (bd jinn-mono-l2zl.12) will add per-Task lifecycle
- *     events; until then we report `state: 'open'`, `claims.current: 0`, and
- *     `budget: { totalWei: '0', remainingWei: '0' }`. These defaults are
- *     accurate for the freshly-posted Task case, which is the one operators
- *     see most often in the day-1 launcher UI.
+ *   ✓ state / claims.current / claims.max — sourced from local task_posts and
+ *     matching task_runs when available. This is a pragmatic local projection,
+ *     not a full chain index; unresolved fields still use explicit unavailable
+ *     fallbacks.
+ *   ✗ budget.remainingWei — requires on-chain accounting that the v1 daemon
+ *     does not yet maintain.
  *   ✗ summary.title / summary.resolutionTime — would require persisting the
  *     full Task spec at post-time. Out of scope for v1; the SPA falls back
  *     to taskId/postedAt when summary is absent.
  *
  * Spec: spec/2026-05-05-launcher-role-and-mode.md §5.3.
  */
+import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { JinnConfig } from '../config.js';
 
 export type LauncherTaskState =
@@ -40,6 +40,7 @@ export interface LauncherTaskEntry {
   taskId: string;
   taskCid: string;
   solverNet: string;
+  solverType?: string;
   postedAt: string;
   state: LauncherTaskState;
   claims: { current: number; max: number };
@@ -96,7 +97,21 @@ export interface GatherLauncherTasksOptions {
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
-const DEFAULT_CLAIMS_MAX = 25;
+const CLAIMS_CURRENT_UNAVAILABLE_FALLBACK = 0;
+const CLAIMS_MAX_UNAVAILABLE_FALLBACK = 25;
+
+function claimMaxFallbackForSolverType(solverType: string | undefined): number {
+  if (!solverType) return CLAIMS_MAX_UNAVAILABLE_FALLBACK;
+  const splitAt = solverType.lastIndexOf('.');
+  if (splitAt <= 0 || splitAt === solverType.length - 1) {
+    return CLAIMS_MAX_UNAVAILABLE_FALLBACK;
+  }
+  const contract = getSolverNetContract({
+    id: solverType.slice(0, splitAt),
+    version: solverType.slice(splitAt + 1),
+  });
+  return contract?.claimPolicyDefaults?.maxClaims ?? CLAIMS_MAX_UNAVAILABLE_FALLBACK;
+}
 
 /**
  * Build a solverType → solverNet-name lookup from the live config. The v1
@@ -125,14 +140,15 @@ function mapRecordToEntry(
     record.solverNet
     ?? (record.solverType ? solverTypeIndex.get(record.solverType) : undefined)
     ?? 'unknown';
-  const claimsCurrent = record.claims?.current ?? 0;
-  const claimsMax = record.claims?.max ?? DEFAULT_CLAIMS_MAX;
+  const claimsCurrent = record.claims?.current ?? CLAIMS_CURRENT_UNAVAILABLE_FALLBACK;
+  const claimsMax = record.claims?.max ?? claimMaxFallbackForSolverType(record.solverType);
   const totalWei = record.budget?.totalWei ?? '0';
   const remainingWei = record.budget?.remainingWei ?? totalWei;
   const entry: LauncherTaskEntry = {
     taskId: record.taskId,
     taskCid: record.taskCid,
     solverNet,
+    ...(record.solverType ? { solverType: record.solverType } : {}),
     postedAt: record.postedAt,
     state: record.state ?? 'open',
     claims: { current: claimsCurrent, max: claimsMax },

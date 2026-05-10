@@ -61,4 +61,23 @@ describe('donation artifact scrubber', () => {
     expect(out.bytes).toBe(bytes);
     expect(out.redactedKeys).toEqual([]);
   });
+
+  it('redacts credential-looking values even when the field name is generic', () => {
+    const out = scrubArtifactBytes(
+      Buffer.from(JSON.stringify({
+        log: 'request failed with Authorization: Bearer sk-ant-oat01-abcdefghijklmnop and cwd /Users/adriano/repo',
+        note: 'github token ghp_abcdefghijklmnopqrstuvwxyz123456',
+      }), 'utf8'),
+      {
+        identity: { username: 'adriano' },
+        path: { home: '/Users/adriano', repoRoot: '/Users/adriano/repo' },
+      },
+    );
+
+    const parsed = JSON.parse(out.bytes.toString('utf8')) as Record<string, unknown>;
+    expect(String(parsed.log)).toContain('<REDACTED>');
+    expect(String(parsed.log)).toContain('.');
+    expect(String(parsed.log)).not.toContain('sk-ant-oat01');
+    expect(String(parsed.note)).toBe('github token <REDACTED>');
+  });
 });

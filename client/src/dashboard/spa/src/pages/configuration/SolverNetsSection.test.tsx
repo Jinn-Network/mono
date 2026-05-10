@@ -117,8 +117,8 @@ describe('SolverNetsSection', () => {
       expect(screen.getAllByTestId('joined-net-card')).toHaveLength(2),
     );
     expect(screen.getByText(/Joined · 2/i)).toBeTruthy();
-    // 'Prediction Markets' appears in both the joined card and the catalog
-    // — match by scoping to data-manifest-cid.
+    // Joined cards are keyed by manifest cid; Discover filters joined
+    // manifests out of the catalog.
     const cards = screen.getAllByTestId('joined-net-card');
     expect(cards.find((c) => c.getAttribute('data-manifest-cid') === 'bafybeiaaa')).toBeTruthy();
     expect(cards.find((c) => c.getAttribute('data-manifest-cid') === 'bafybeibbb')).toBeTruthy();

@@ -1,0 +1,39 @@
+{
+  "name": "claude-code-learner",
+  "version": "0.1.0",
+  "description": "Generic learning agent plugin - runs a goal through a seven-phase pipeline and self-improves between runs by mutating its own state directory.",
+  "author": {
+    "name": "Jinn Network",
+    "url": "https://github.com/Jinn-Network/mono"
+  },
+  "homepage": "https://github.com/Jinn-Network/mono",
+  "repository": "https://github.com/Jinn-Network/mono",
+  "license": "MIT",
+  "keywords": [
+    "jinn",
+    "learner",
+    "codex",
+    "skills"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Claude Code Learner",
+    "shortDescription": "Seven-phase learning loop for harness-driven goals",
+    "longDescription": "Runs a generic goal through orient, strategize, plan, execute, debrief, improve, and memory consolidation phases.",
+    "developerName": "Jinn Network",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/Jinn-Network/mono",
+    "privacyPolicyURL": "https://github.com/Jinn-Network/mono",
+    "termsOfServiceURL": "https://github.com/Jinn-Network/mono",
+    "defaultPrompt": [
+      "Run the learning loop for this goal."
+    ],
+    "brandColor": "#111111",
+    "screenshots": []
+  }
+}

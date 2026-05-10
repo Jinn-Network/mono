@@ -133,6 +133,14 @@ describe('release-client helpers', () => {
 
     expect(setup?.args).toEqual(['setup:testnet-acceptance-operator', '--bootstrap']);
   });
+
+  it('includes donation consumption as a non-skipped release gate', () => {
+    const steps = releaseGateSteps(false).map((step: { id: string; args: string[] }) => step);
+    const donation = steps.find((step) => step.id === 'gate-donation-consumption');
+
+    expect(donation?.args).toEqual(['release:donation-consumption']);
+    expect(releaseGateSteps(true).some((step: { id: string }) => step.id === 'gate-donation-consumption')).toBe(false);
+  });
 });
 
 describe('release-client runner', () => {
@@ -287,6 +295,7 @@ describe('release-client runner', () => {
 
     expect(report.status).toBe('completed');
     expect(calls.some((call) => call.command === 'yarn' && call.args.join(' ') === 'release:operator-gate')).toBe(true);
+    expect(calls.some((call) => call.command === 'yarn' && call.args.join(' ') === 'release:donation-consumption')).toBe(false);
   });
 
   it('resumes publish after local tag creation when the tag points at the release commit', async () => {

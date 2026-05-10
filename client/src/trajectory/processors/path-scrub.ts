@@ -7,6 +7,10 @@ export interface PathScrubConfig {
   repoRoot?: string;  // e.g. '/Users/adrianobradley/harbor/jinn-mono'
 }
 
+function replaceAllLiteral(value: string, search: string, replacement: string): string {
+  return search.length === 0 ? value : value.split(search).join(replacement);
+}
+
 export function scrubPathString(s: string, cfg: PathScrubConfig): string {
   const homePrefix = cfg.home.endsWith('/') ? cfg.home : cfg.home + '/';
   const repoExact = cfg.repoRoot;
@@ -17,13 +21,22 @@ export function scrubPathString(s: string, cfg: PathScrubConfig): string {
   // repoRoot match wins over home match: a path under the repo is more
   // useful as a repo-relative reference than as a /users/anon/... blob.
   if (repoExact !== undefined && s === repoExact) return '.';
-  if (repoPrefix !== undefined && s.startsWith(repoPrefix)) {
-    return s.slice(repoPrefix.length);
+  let out = s;
+  if (repoPrefix !== undefined) {
+    if (out.startsWith(repoPrefix)) {
+      out = out.slice(repoPrefix.length);
+    } else {
+      out = replaceAllLiteral(out, repoPrefix, '');
+    }
   }
-  if (s.startsWith(homePrefix)) {
-    return '/users/anon/' + s.slice(homePrefix.length);
+  if (repoExact !== undefined && out !== '.') {
+    out = replaceAllLiteral(out, repoExact, '.');
   }
-  return s;
+  if (out === cfg.home) return '/users/anon';
+  if (out.startsWith(homePrefix)) {
+    return '/users/anon/' + out.slice(homePrefix.length);
+  }
+  return replaceAllLiteral(out, homePrefix, '/users/anon/');
 }
 
 export class PathScrubProcessor implements SpanProcessor {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const listArtifactsMock = vi.fn();
@@ -92,7 +92,7 @@ beforeEach(() => {
     restartRequired: true,
     pricing: {
       publicEndpoint: 'https://op.example.com',
-      defaultPriceUsdc: '0.001',
+      defaultPriceUsdc: '0',
       perArtifactTypePrice: { design_document: '0.002' },
       donation: { enabled: true },
     },
@@ -100,45 +100,57 @@ beforeEach(() => {
 });
 
 describe('OperatorDataMarket', () => {
-  it('renders served artifact inventory and expanded row details', async () => {
+  it('renders a compact donation decision surface with a single execution data link', async () => {
     renderWithQueryClient(<OperatorDataMarket defaultExpanded />);
 
-    await waitFor(() => expect(screen.getByTestId('operator-data-market')).toBeTruthy());
-    const list = screen.getByTestId('operator-artifact-list');
-    expect(within(list).getByText('design_document')).toBeTruthy();
-    expect(screen.getAllByText('$0.002').length).toBeGreaterThan(0);
-    expect(screen.getByText(/3 accesses/i)).toBeTruthy();
-    expect(screen.getByText(/1 served/i)).toBeTruthy();
-
-    fireEvent.click(within(list).getByText('design_document'));
-
-    expect(screen.getByTestId('operator-artifact-details')).toBeTruthy();
-    expect(screen.getByText('bafy-envelope')).toBeTruthy();
-    expect(screen.getByText('req-1')).toBeTruthy();
-    expect(screen.getByText(/3 total · 1 paid · 1 failed/i)).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('operator-donation-status')).toBeTruthy());
+    expect(screen.getByText(/share scrubbed and anonymized solver\/evaluator data from future runs/i)).toBeTruthy();
+    expect(screen.getByText(/network learn from real executions and improve itself/i)).toBeTruthy();
+    expect(screen.getByText('Eligible runs')).toBeTruthy();
+    expect(screen.getByText('Peer datasets used')).toBeTruthy();
+    expect(screen.queryByText('Scope')).toBeNull();
+    expect(screen.getByText(/already published to IPFS may remain available/i)).toBeTruthy();
+    expect(screen.queryByText('Scrubber')).toBeNull();
+    expect(screen.queryByTestId('operator-artifact-list')).toBeNull();
+    expect(screen.getByRole('link', { name: /review execution data/i }).getAttribute('href')).toBe('/operator/execution-data');
+    expect(screen.queryByRole('button', { name: /show recent data/i })).toBeNull();
+    expect(screen.queryByText('Execution data')).toBeNull();
+    expect(screen.queryByText(/scrubbed execution artifacts become discoverable peer data/i)).toBeNull();
+    expect(screen.queryByTestId('operator-donation-flow')).toBeNull();
+    expect(screen.queryByTestId('operator-data-market-preview')).toBeNull();
+    expect(screen.queryByTestId('operator-pricing-editor')).toBeNull();
+    expect(screen.queryByLabelText(/default price/i)).toBeNull();
+    expect(screen.queryByLabelText(/public endpoint/i)).toBeNull();
   });
 
-  it('saves future-artifact pricing and signals restart', async () => {
+  it('saves donation settings without exposing full pricing controls', async () => {
     const onRestartPending = vi.fn();
     renderWithQueryClient(
       <OperatorDataMarket defaultExpanded onRestartPending={onRestartPending} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('operator-pricing-editor')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('operator-donation-status')).toBeTruthy());
 
-    fireEvent.change(screen.getByLabelText(/default price/i), {
-      target: { value: '0.001' },
-    });
-    fireEvent.click(screen.getByLabelText(/enable testnet donation mode/i));
-    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(screen.queryByLabelText(/price for design_document/i)).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: /donate produced data/i }));
+    expect(screen.getByRole('dialog', { name: /share future execution data/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: /share future execution data/i })).toBeNull();
+    expect(screen.getByTestId('operator-donation-mode').textContent).toBe('Donation is off');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /donate produced data/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Enable donation' }));
+    expect(screen.getByTestId('operator-donation-mode').textContent).toBe('Donation is on');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(updatePricingMock).toHaveBeenCalled());
     expect(updatePricingMock).toHaveBeenCalledWith({
       publicEndpoint: 'https://op.example.com',
-      defaultPriceUsdc: '0.001',
+      defaultPriceUsdc: '0',
       perArtifactTypePrice: { design_document: '0.002' },
       donation: { enabled: true },
     });
     await waitFor(() => expect(onRestartPending).toHaveBeenCalled());
   });
+
 });

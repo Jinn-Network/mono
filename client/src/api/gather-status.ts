@@ -31,6 +31,7 @@ import {
   type PredictionOperatorStatusForApi,
   type PredictionV1Status,
 } from './prediction-v1-build.js';
+import { gatherTaskRunsStatus } from './task-runs-build.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
   buildPredictionOperatorStatus,
@@ -451,6 +452,13 @@ export async function gatherGatheredStatusRaw(
     portfolioV0 = undefined;
   }
 
+  let taskRuns: ReturnType<typeof gatherTaskRunsStatus> | undefined;
+  try {
+    taskRuns = gatherTaskRunsStatus(store);
+  } catch {
+    taskRuns = undefined;
+  }
+
   let predictionOperator: PredictionOperatorStatusForApi | null = null;
   let predictionOperatorError: string | undefined;
   if (status?.config) {
@@ -498,6 +506,7 @@ export async function gatherGatheredStatusRaw(
     masterDailyEstimateWei: daily.toString(),
     portfolioV0,
     predictionV1,
+    taskRuns,
     serviceBalances: {},
     pendingByService: {},
     claimedByService: store.getClaimedRewardsByService(),

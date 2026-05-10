@@ -271,7 +271,7 @@ export const api = {
 
   // ---- Operator participation flow (Task 21) ----
   // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12. Writes a
-  // manifest-keyed entry to `config.solverNets[<cid>]`; restart-required
+  // manifest-keyed entry to `config.joinedSolverNets[<cid>]`; restart-required
   // — the daemon does not hot-reload SolverNet config.
   operator: {
     listArtifacts: (opts: { source?: OperatorArtifactSource; artifactType?: string; limit?: number } = {}) => {
@@ -281,7 +281,7 @@ export const api = {
       if (opts.limit !== undefined) q.set('limit', String(opts.limit));
       const qs = q.toString();
       return jfetch<OperatorArtifactsResponse>(
-        `/v1/operator/artifacts${qs ? `?${qs}` : ''}`,
+        `/v1/operator/execution-data${qs ? `?${qs}` : ''}`,
       );
     },
     updatePricing: (pricing: OperatorPricingConfig) =>
@@ -297,10 +297,12 @@ export const api = {
       manifestCid: string,
       body: {
         name?: string;
+        contract?: { id: string; version: string };
         roles: Array<'solver' | 'evaluator'>;
         harness?: string;
         model?: string;
         plugins?: string[];
+        disabledDefaultPlugins?: string[];
       },
     ) =>
       jfetch<{
@@ -310,10 +312,12 @@ export const api = {
         config: {
           manifestCid: string;
           name?: string;
+          contract?: { id: string; version: string };
           roles: Array<'solver' | 'evaluator'>;
           harness?: string;
           model?: string;
           plugins?: string[];
+          disabledDefaultPlugins?: string[];
         };
       }>(`/v1/operator/join/${encodeURIComponent(manifestCid)}`, {
         method: 'POST',
@@ -332,10 +336,12 @@ export const api = {
           {
             manifestCid: string;
             name?: string;
+            contract?: { id: string; version: string };
             roles: Array<'solver' | 'evaluator'>;
             harness?: string;
             model?: string;
             plugins?: string[];
+            disabledDefaultPlugins?: string[];
           }
         >;
       }>('/v1/operator/joined'),
