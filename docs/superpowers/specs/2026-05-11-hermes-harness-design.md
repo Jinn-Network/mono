@@ -25,7 +25,7 @@ version: 0.1
 
 Add **NousResearch hermes-agent** (https://github.com/NousResearch/hermes-agent) as a third harness option on SWE-rebench v2, alongside Claude Code (default) and Codex. Hermes is a self-improving AI agent with its own built-in learning loop — skill creation, agent-curated memory, FTS5 session search, agentskills.io-compatible skill system, MCP integration. It does not fit the existing claude-code-learner shell because it provides phase orchestration natively; forcing the Jinn seven-phase pipeline on top would fight Hermes against its design.
 
-The integration ships as a **sibling Harness package** at `client/src/harnesses/impls/hermes-agent/`, not as a third adapter on the existing learner shell. Hermes consumes the same **SolverPlugins** (`network-tools`, `swe-rebench-v2-runtime`) as Claude Code and Codex, but does *not* load the `claude-code-learner` orchestrator plugin — its built-in loop replaces it. The adapter translates each SolverPlugin's `jinn.plugin.json` manifest into Hermes's native config surface (`mcp_servers:`, `skills.external_dirs:`) and runs Hermes under a per-Task home dir so the freeze contract is honored via the daemon hash-fence already prescribed by the SWE-rebench v2 design.
+The integration ships as a **sibling Harness package** at `client/src/harnesses/impls/hermes-agent/`, not as a third adapter on the existing learner shell. Hermes consumes the same **SolverPlugins** (`network-tools`, `swe-rebench-v2-runtime`) as Claude Code and Codex, but does *not* load the `claude-code-learner` orchestrator plugin — its built-in loop replaces it. The adapter translates each SolverPlugin's standard `.mcp.json` config into Hermes's `mcp_servers:` block, mounts each plugin's `skills/` dir into `skills.external_dirs`, and writes an explicit `platform_toolsets:` allowlist into a per-Task `$HERMES_HOME/config.yaml` (Hermes defaults are a strict superset of Claude Code's surface and include footgun toolsets like `messaging`, `cronjob`, `browser`, `computer_use` that we explicitly disable). Hermes runs under `HERMES_HOME = ctx.implStateDir` so the freeze contract is honored via the daemon hash-fence already prescribed by the SWE-rebench v2 design.
 
 The naming refactor lands first: `client/src/harnesses/impls/claude-code-learner/` → `learner/`; `client/plugins/claude-code-learner/` → `client/plugins/learner/`. On-chain `Executor.implName` values (`claude-code`, `codex`, new `hermes-agent`) stay stable.
 
@@ -102,53 +102,99 @@ This is the load-bearing architectural decision (DR-2026-05-11-c below). Everyth
 
 ## 3. Hermes plug-in surface — config-driven, no manifest
 
-Hermes does not have a third-party plugin manifest model like Claude Code (which discovers plugins from package roots) or Gemini CLI (which discovers `gemini-extension.json`). Hermes is **config-driven**: every plug-in surface is registered in `~/.hermes/config.yaml`. Precedence is CLI args → config.yaml → `.env` → built-in defaults. No documented `--config <path>` flag or `HERMES_CONFIG` env var.
+Hermes does not have a third-party plugin manifest model like Claude Code (which discovers plugins from package roots) or Gemini CLI (which discovers `gemini-extension.json`). Hermes is **config-driven**: every plug-in surface is registered in `$HERMES_HOME/config.yaml`. Precedence is CLI args → config.yaml → `.env` → built-in defaults.
 
-The three surfaces our adapter wires:
+The adapter's job is to read each SolverPlugin's existing `.mcp.json` (the standard MCP config the plugin already ships for Claude Code and Codex), translate path templates, and emit the equivalent Hermes config. The three surfaces touched:
 
-### 3.1 MCP servers
+### 3.1 MCP servers — translated from `.mcp.json`
 
-`mcp_servers:` key in config.yaml. Stdio or HTTP. Discovered at startup; tools auto-prefixed `mcp_<server_name>_<tool_name>`. Per-server `tools.include` filter. `enabled: false` to disable. No per-session enablement.
+The SolverPlugin ships a standard `.mcp.json` alongside its `.claude-plugin/` and `.codex-plugin/` directories. Example, `client/plugins/network-tools/.mcp.json`:
 
-```yaml
-mcp_servers:
-  jinn_runtime:
-    url: "http://127.0.0.1:7331/mcp"
-    headers:
-      Authorization: "Bearer ${JINN_DAEMON_API_TOKEN}"
-    tools:
-      include: [search_records, inspect_record, acquire_artifact, get_task, submit_typed_payload]
+```json
+{
+  "mcpServers": {
+    "jinn-client": {
+      "command": "node",
+      "args": ["mcp/jinn-client-server.mjs"],
+      "cwd": "."
+    }
+  }
+}
 ```
 
-Stdio alternative if HTTP MCP is not available:
+The harness reads this and spawns `jinn-client-server.mjs` as a stdio MCP subprocess under itself. The MCP server handles its own backend calls (in our case, calls into the Jinn daemon's HTTP API for state); the harness sees only MCP protocol over stdio.
+
+The Hermes adapter does the same translation but emits Hermes's `mcp_servers:` shape into `$HERMES_HOME/config.yaml`:
 
 ```yaml
 mcp_servers:
-  jinn_runtime:
+  jinn-client:
     command: "node"
-    args: ["<daemon-installation-path>/dist/mcp/server.js"]
+    args: ["/abs/path/to/network-tools/mcp/jinn-client-server.mjs"]
+    cwd: "/abs/path/to/network-tools"
     env:
+      JINN_NETWORK_TOOLS_CLIENT_ROOT: "/abs/path/to/jinn-client"
+      STORE_PATH: "/path/to/jinn.db"
       DAEMON_API_URL: "http://127.0.0.1:7331"
-      DAEMON_API_TOKEN: "${JINN_DAEMON_API_TOKEN}"
+      DAEMON_API_TOKEN: "***"
+      JINN_CORPUS_SUBGRAPH_URL: "…"
+      JINN_CORPUS_IPFS_GATEWAY_URL: "…"
+      # … rest of corpus env
 ```
 
-HTTP is preferred when the daemon already exposes an HTTP MCP endpoint; stdio is the fallback. The selection is an implementation-plan detail, not a design commitment.
+Translation steps:
+
+1. Resolve template vars (`${CLAUDE_PLUGIN_ROOT}` if present) and relative paths against the SolverPlugin directory.
+2. Copy any `command` / `args` / `cwd` keys through unchanged (standard MCP shape).
+3. Layer in env vars the MCP server expects but the `.mcp.json` doesn't declare — `STORE_PATH`, `DAEMON_API_URL`, `DAEMON_API_TOKEN`, `JINN_CORPUS_*`. These come from the daemon's runtime, same as the codex adapter passes them today.
+
+The `jinn.plugin.json` sidecar (and its informational `mcpServers.<name>.providedBy: jinn-client-runtime` label) is not consulted for MCP wiring. It is Jinn-side metadata for the daemon's plugin loader and SolverNet contract resolution, orthogonal to the harness↔MCP path.
 
 ### 3.2 Skills
 
-`skills.external_dirs:` key in config.yaml. `~` and `${VAR}` expanded. Local `~/.hermes/skills/` shadows external on name collision. SKILL.md format is agentskills.io-compatible, which our SolverPlugin SKILL.md files already are.
+`skills.external_dirs:` key in `$HERMES_HOME/config.yaml`. `~` and `${VAR}` expanded. Local `$HERMES_HOME/skills/` shadows external on name collision. SKILL.md format is agentskills.io-compatible, which our SolverPlugin SKILL.md files already are.
 
 ```yaml
 skills:
   external_dirs:
-    - "${SOLVER_PLUGIN_ROOT_SWE_REBENCH_V2_RUNTIME}/skills"
+    - "/abs/path/to/swe-rebench-v2-runtime/skills"
 ```
 
-### 3.3 Toolsets
+### 3.3 Toolsets — explicit allowlist (Hermes defaults are broader than Claude Code's)
 
-Selected at launch via `--toolsets web,terminal,skills,mcp` or pre-configured in `tools:` in config.yaml. SolverPlugin MCP tools come in through the `mcp` toolset; SolverPlugin skills come in through the `skills` toolset.
+A toolset in Hermes is a named bundle of built-in Hermes tools (e.g., `terminal` contains `terminal` + `process`; `file` contains `read, write, patch, search`). Hermes ships ~25 of them; configured via `hermes tools` interactively or `platform_toolsets:` in config.yaml. Toolsets are Hermes-internal — there is no third-party file-manifest registration path (Python-plugin registration exists but is out of scope for v1).
 
-For SWE-rebench v2 the adapter passes `--toolsets terminal,skills,mcp` — `terminal` for code execution, `skills` for SolverPlugin orient/plan guidance, `mcp` for Jinn-runtime tool access. `web` is excluded by default (SolverNet-irrelevant; can be re-added per operator preference).
+**Crucially, Hermes default-ON toolsets are a strict superset of Claude Code's surface** (verified from `hermes_cli/tools_config.py` against `CONFIGURABLE_TOOLSETS` minus `_DEFAULT_OFF_TOOLSETS`):
+
+- Default ON: `web, browser, terminal, file, code_execution, vision, image_gen, tts, skills, todo, memory, session_search, clarify, delegation, cronjob, messaging, yuanbao, computer_use`
+- Default OFF: `moa, homeassistant, rl, spotify, discord, discord_admin, video`
+
+Several default-ON toolsets are footguns for unattended Solver Tasks — `messaging` would let the agent send messages, `cronjob` would let it schedule things, `computer_use` and `browser` are out of scope, `tts`/`vision`/`image_gen` are irrelevant for text-only code issues.
+
+The adapter writes an **explicit toolset allowlist** for SWE-rebench v2 Solver Tasks under `platform_toolsets.hermes-cli:` in the per-Task config.yaml:
+
+```yaml
+platform_toolsets:
+  hermes-cli:
+    - terminal        # shell exec — apply patches, run pytest
+    - file            # read/write/patch source files (Claude Code's Read/Write/Edit/MultiEdit/Grep/Glob equivalent)
+    - web             # doc lookup, error-message search
+    - skills          # SolverPlugin orient/plan skills + Hermes's own skill management
+    - memory          # Hermes's continuous learning (train mode); rolled back in frozen mode by hash-fence
+    - session_search  # Hermes's cross-session search; train/frozen treatment identical
+    - todo            # planning aid
+    - code_execution  # parallel to terminal; redundant in some configs, harmless to enable
+```
+
+Everything else is disabled by omission. Rationale per excluded category:
+
+- `browser, computer_use, homeassistant, spotify, discord*, messaging, cronjob, yuanbao` — irrelevant to code-issue tasks; several are active footguns under unattended automation.
+- `vision, image_gen, tts, video` — irrelevant for text-only code issues; cost without benefit.
+- `clarify` — the agent has no human to clarify with during automated Solver runs; dead surface.
+- `delegation` — token-cost implications of unbounded subagent spawning aren't understood for SWE-rebench v2 economics. Deferred to v1.x.
+- `moa, rl` — research-oriented; not productive for Solver Tasks.
+
+Operators can override the allowlist via per-SolverNet config (mirrors the existing `harness` selection pattern) — useful escape hatch for an operator who wants `browser` enabled for a task class where it genuinely helps. Override mechanism is filed as plan-time work.
 
 ---
 
@@ -182,8 +228,9 @@ Mirrors the `learner/` layout structurally without inheriting from it. The `Harn
 2. Freeze setup.
    - If `ctx.mode === 'frozen'`: snapshot `HERMES_HOME` to a sibling temp dir; record pre-Task hash via `hashImplStateDir` from §6.3 of the SWE-rebench v2 design.
 3. Spawn.
-   - `hermes chat -q "<prompt>" --model <inputs.model> --provider <inputs.provider> --toolsets terminal,skills,mcp -w <workingDir>`.
-   - Pass `HERMES_HOME` in env (or whichever env var Hermes uses for home redirection; see §4.4).
+   - `hermes chat -q "<prompt>" --model <inputs.model> --provider <inputs.provider> -w <workingDir>`.
+   - Toolset allowlist is in the config.yaml written in step 1; no `--toolsets` flag at the CLI (CLI flag would override saved config; we want config to be the source of truth so it's visible/auditable in the per-Task HERMES_HOME).
+   - Pass `HERMES_HOME` env var (confirmed canonical — see §4.4).
    - Pipe stdout/stderr to `<workingDir>/.hermes-agent/{stdout,stderr}.log`.
 4. Wait for exit. Forward `inputs.abort` to SIGTERM. Treat aborted-but-graceful as success (mirrors Codex adapter).
 5. Freeze enforcement.
@@ -191,9 +238,9 @@ Mirrors the `learner/` layout structurally without inheriting from it. The `Harn
 6. Harvest.
    - Read solution from `<workingDir>/.execute/solution-payload.json` (the canonical typed-payload path, same as Claude Code and Codex).
 
-### 4.3 SolverPlugin manifest translation
+### 4.3 SolverPlugin → Hermes config translation
 
-The pure function `hermesConfigFromSolverPlugins(roots, env)` reads each `jinn.plugin.json` in `ctx.solverPluginRoots` and emits the matching Hermes config sections:
+The pure function `hermesConfigFromSolverPlugins(roots, env)` walks `ctx.solverPluginRoots`, reads each plugin's standard `.mcp.json` and `skills/` directory, and emits the matching Hermes config sections:
 
 ```ts
 interface HermesConfigSnippet {
@@ -203,29 +250,37 @@ interface HermesConfigSnippet {
 
 function hermesConfigFromSolverPlugins(
   roots: readonly string[],
-  env: { daemonMcpUrl?: string; daemonApiToken: string; daemonMcpStdioBin?: string },
+  env: {
+    storePath?: string;
+    daemonApiUrl: string;
+    daemonApiToken: string;
+    corpusEnv: { subgraphUrl?: string; ipfsGatewayUrl?: string; rpcUrl?: string; chainId?: number; identityRegistryAddress?: string; fromBlock?: number };
+  },
 ): HermesConfigSnippet { /* ... */ }
 ```
 
 Translation rules:
 
-- `jinn.plugin.json` declares `jinn.mcpServers.<name>.providedBy: jinn-client-runtime` → emit one `mcp_servers.<name>` entry pointing at the daemon (HTTP url if provided; stdio bin fallback). Filter `tools.include` to the manifest's declared tool list.
-- `jinn.plugin.json` declares `jinn.skills: ["skills/<x>/SKILL.md", ...]` → append the plugin's `skills/` dir to `skills.external_dirs`.
-- `jinn.plugin.json` declares `jinn.supports: [...]` → adapter filters to only mount plugins matching the current Task's SolverNet identity (defensive; the daemon should pre-filter `ctx.solverPluginRoots` but the adapter rechecks).
+- For each plugin root, look for `.mcp.json`. If present:
+  - For each entry in `mcpServers`: emit `mcp_servers.<name>` with `command`, `args`, `cwd` resolved to absolute paths (relative `args` and `cwd` are anchored at the plugin root).
+  - Resolve any `${CLAUDE_PLUGIN_ROOT}` template var to the plugin root.
+  - Layer in env vars the MCP server expects from runtime context: `STORE_PATH`, `DAEMON_API_URL`, `DAEMON_API_TOKEN`, `JINN_CORPUS_*` (mirrors the env block the codex adapter passes today).
+- For each plugin root, if `skills/` exists, append its absolute path to `skills.external_dirs`.
+- `jinn.plugin.json` is **not consulted** for MCP wiring or skill mounting. It is daemon-side metadata (capability documentation, SolverType support list) and stays out of the harness↔Hermes config path.
 
-Unit tests verify each translation rule against fixtures of the existing manifests.
+Unit tests cover both SolverPlugin manifests we ship (`network-tools`, `swe-rebench-v2-runtime`) plus one fixture for a hypothetical Path 2 SolverPlugin that ships an HTTP MCP server (verifies `url`/`headers` keys pass through unchanged).
 
-### 4.4 Home-dir env var — implementation question
+### 4.4 Home-dir env var — resolved
 
-The freeze-mode story and the per-Task config story both depend on redirecting Hermes's home dir per Task. The Hermes docs describe `~/.hermes/` and platform conventions but do not document an env var override. Three candidates the implementation plan must confirm against the install script / source:
+`HERMES_HOME` is the canonical env var, confirmed against `scripts/install.sh:48`:
 
-1. `HERMES_HOME` (canonical guess; matches `CLAUDE_HOME` / `CODEX_HOME` conventions used by sibling CLIs).
-2. `XDG_CONFIG_HOME` (if Hermes uses XDG on Linux).
-3. `HOME` override (sledgehammer; works as a subprocess env override and is the universal fallback).
+```bash
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+```
 
-If all three fail, the fallback is to serialize Hermes-operator Tasks (no concurrent Hermes adapters on one daemon) and edit the user's actual `~/.hermes/config.yaml` per Task, restoring on completion. This degrades concurrency but does not block the design.
+Used throughout the Hermes install script and source — `sessions/`, `logs/`, `memories/`, `skills/`, `.env`, `config.yaml` all live under `$HERMES_HOME`. The adapter sets it on the spawned subprocess env per Task. No fallback shenanigans needed.
 
-This is flagged as an implementation-plan question, not a design commitment. The spec assumes redirection is possible.
+Hermes also ships a first-class `profile` mechanism (`hermes profile create <name>` + `hermes -p <name> chat`) that wraps HERMES_HOME redirection for multi-instance isolation. The adapter could use profiles instead of direct HERMES_HOME redirection, but direct redirection is simpler and matches how we anchor per-operator implStateDir state today. Profiles are a fallback if integration testing surfaces friction with raw HERMES_HOME isolation (e.g., concurrency hazards inside Hermes's session DB layer).
 
 ### 4.5 Prompt template
 
@@ -270,10 +325,20 @@ No new freeze mechanism is needed for Hermes. The existing one applies unchanged
 A Hermes checkpoint is structurally identical to a Claude Code / Codex checkpoint per the manifest in `agent-harness-solvernet-design` §7.1. The differences are scoped to the `harnessPackage` and `implStateDirCid` fields:
 
 - `harnessPackage.implName = 'hermes-agent'` (or a derivative like `'hermes-agent@team-xyz'`).
-- `harnessPackage.clientGitSha` references the Jinn-client commit that ships the adapter; the Hermes binary version is recorded in `harnessPackage.sourceBundleCid` (a tarball containing `hermes --version` output, the installed Hermes lockfile, and the adapter's git commit).
+- `harnessPackage.clientGitSha` references the Jinn-client commit that ships the adapter; `harnessPackage.sourceBundleCid` is a tarball that records `hermes --version`, the exact git SHA of `$HERMES_HOME/hermes-agent/` (Hermes is git-installed), and the adapter's git commit.
+- `harnessPackage.hermesGitSha` (added field) — the Hermes commit SHA the publishing operator was running. **Required**, because `hermes update` pulls `origin/main` without version-target support; we cannot rely on a release-tag handle for reproducibility.
 - `implStateDirCid` is the IPFS-pinned snapshot of HERMES_HOME at freeze time.
 
-A forking operator installs the Hermes binary at the recorded version (via `hermes update` to a pinned release tag — Hermes ships weekly named releases per their docs) and restores HERMES_HOME from the IPFS-pinned snapshot. Then `jinn checkpoint install <cid>` is identical mechanism.
+A forking operator's restore flow:
+
+1. `jinn checkpoint install <cid>` — fetches the source bundle and implStateDir snapshot.
+2. `cd $HERMES_HOME/hermes-agent && git fetch && git checkout <hermesGitSha>` — pins the Hermes binary to the publisher's commit. (The `hermes update` CLI does not expose a `--version` flag; direct git checkout is the workaround.)
+3. Restore HERMES_HOME from the snapshot.
+4. Run frozen against the canonical slate.
+
+This is heavier than the Claude Code / Codex path (where binary versions are versioned packages), but workable. The verified-frozen tier of the leaderboard publishes both the `clientGitSha` and the `hermesGitSha` for cross-operator forking validation.
+
+Future-proofing: if Hermes upstream adds `hermes update --version <tag>` (filed as an upstream request in the implementation plan's external-deps section), the manifest field changes to `hermesReleaseTag` and the restore flow simplifies.
 
 ---
 
@@ -502,11 +567,12 @@ The Hermes harness ships when:
 
 ## 12. Open implementation details
 
-Three items the design defers to the implementation plan; none gate the design.
+All design-blocking research items resolved (see commit history of this spec). Remaining plan-time items, none gating:
 
-1. **Home-dir env-var resolution.** Confirm `HERMES_HOME` / `XDG_CONFIG_HOME` / `HOME` precedence by reading the Hermes install script and source. Fallback to serialized Tasks if all three fail (§4.4).
-2. **HTTP vs stdio MCP transport.** Determine whether the daemon already exposes an HTTP MCP endpoint that Hermes can connect to over HTTP, or whether the adapter spawns the daemon's MCP server as a stdio subprocess per Task (§3.1). HTTP is cleaner; stdio is the fallback.
-3. **Hermes binary version pinning for HarnessCheckpoint reproducibility.** Hermes ships weekly named releases. Operators publishing checkpoints should pin a specific release tag; forking operators should be able to `hermes update --version <tag>`. Confirm Hermes supports targeted version installs.
+1. **`hermes doctor` exit-code semantics.** Source at `hermes_cli/doctor.py`; user docs are vague on per-check exit codes. Plan-time: read the source and confirm whether "no provider configured" returns non-zero. Fallback for the dashboard precheck is to run a tighter custom check (`which hermes` plus a config-presence check on `$HERMES_HOME/config.yaml`'s `model:` block).
+2. **Concurrent Hermes processes on isolated HERMES_HOMEs.** No global lockfile / fcntl flock matches in the Hermes source, suggesting per-HERMES_HOME isolation should be safe. Plan-time: run a multi-Hermes-process integration test on the e2e fixture to confirm. Fallback is `hermes profile` per-Task instead of direct HERMES_HOME redirection.
+3. **Upstream feature request: `hermes update --version <tag>`.** Hermes ships weekly named releases but `hermes update` only pulls `origin/main`. v1 ships with the git-checkout-by-SHA workaround (§5.4). File an upstream issue / PR to add `--version` flag; switch the HarnessCheckpoint manifest to `hermesReleaseTag` when it lands.
+4. **Operator override of the toolset allowlist.** §3.3 commits to an explicit toolset list with operator-override capability. The override surface (per-SolverNet config? per-operator env? both?) is plan-time.
 
 ---
 
@@ -520,6 +586,7 @@ The following DRs are filed alongside this spec at `log/decisions/2026-05-11-…
 - **DR-2026-05-11-f — Naming refactor preconditional to Hermes work.** Renaming `claude-code-learner/` to `learner/` (impl dir + plugin dir) is a precondition PR. Lands separately from the Hermes work; mechanical diff; no on-chain identity change (alias paths in `names.ts` already handle the canonical mapping).
 - **DR-2026-05-11-g — Default-swap held until data-driven.** Hermes ships opt-in for v1.x. Default-swap from Claude Code to Hermes on the canonical runbook requires ≥3 operators publishing verified Hermes HarnessCheckpoints with mean `meanResolved` ≥ Claude Code's on the same 30-day window, no language regressing > 5 percentage points, no outstanding P0/P1 bd issues. Filed as `jinn-mono-8psp.3` for separate ratification.
 - **DR-2026-05-11-h — Hermes self-modification orthogonal to `jnw9`.** Hermes's built-in skill self-improvement is its own self-modifying-learner mechanism. The Phase A.5+ Jinn-side self-modifying learner (`jinn-mono-jnw9`) applies to Claude Code / Codex via the `learner` plugin's Improve phase and does not need to special-case Hermes. The two epics are orthogonal.
+- **DR-2026-05-11-i — Explicit toolset allowlist; Hermes defaults are not trusted.** Verified from `hermes_cli/tools_config.py` that Hermes's default-ON toolsets are a strict superset of Claude Code's built-in surface and include footguns under unattended automation (`messaging` can send messages; `cronjob` can schedule things; `browser`, `computer_use`, `tts`, `vision`, `image_gen` are at best irrelevant to text-only code issues). The adapter writes an explicit `platform_toolsets.hermes-cli:` allowlist (`terminal, file, web, skills, memory, session_search, todo, code_execution`) into per-Task config; everything else is disabled by omission. Operators can override per-SolverNet. Rejects "trust Hermes defaults" (broader surface than Claude Code, with explicit footguns) and "match Claude Code exactly" (loses `memory` / `session_search` which are load-bearing for Hermes's continuous-learning value proposition).
 
 ---
 
