@@ -18,6 +18,34 @@ diagnostics, but the release path must be visible and operable through
    switch to Codex (`codex-code-learner`) when intentionally running a
    Codex-backed solver. Do not select disabled harnesses or models.
 
+Operators may also select Hermes Agent (`hermes-agent`) as the solver harness.
+Hermes is a self-improving agent by Nous Research with its own learning loop
+(skill self-improvement, MEMORY/USER curation, FTS5 session search), supporting
+200+ models via OpenRouter plus additional providers (Nous Portal, NVIDIA NIM,
+Xiaomi MiMo, GLM, Kimi, etc.). Install via the Hermes one-liner:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+hermes model     # interactive provider + model picker
+hermes doctor    # verify install
+```
+
+The daemon's `/operator` join flow runs a `hermes doctor` precheck before
+allowing the join to save. If `hermes doctor` reports issues, the dashboard
+surfaces the install one-liner or the missing-config diagnostic with retry.
+
+Hermes's own learning loop drives orchestration — the Jinn-side seven-phase
+`learner` plugin is not loaded for Hermes operators. SolverPlugins
+(`network-tools`, `swe-rebench-v2-runtime`) are mounted via Hermes's native
+MCP and skill loading. The freeze contract is enforced by daemon hash-fence
+on `HERMES_HOME = ctx.implStateDir`; no Hermes-internal changes required.
+
+For HarnessCheckpoint publication: Hermes operators must record the
+`hermesGitSha` of their `$HERMES_HOME/hermes-agent/` clone in the checkpoint
+manifest (the published version) because `hermes update` does not currently
+support a `--version` flag. Forking operators check out that SHA before
+restore.
+
 ## Join As Solver Or Evaluator
 
 1. Open `/operator`.
@@ -148,7 +176,9 @@ yarn vitest run \
   test/adapters/mech/contracts.test.ts \
   test/harnesses/impls/claude-code-learner/codex-code-adapter.test.ts \
   test/harnesses/impls/claude-code-learner/swe-rebench-v2-roundtrip.test.ts \
-  test/harnesses/impls/swe-rebench-v2-evaluator/harness.test.ts
+  test/harnesses/impls/swe-rebench-v2-evaluator/harness.test.ts \
+  test/harnesses/impls/hermes-agent \
+  test/api/hermes-doctor-endpoint.test.ts
 yarn build
 yarn release:donation-consumption --producer-handshake-key <daemon-handshake-key>
 ```
