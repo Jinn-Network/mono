@@ -19,6 +19,7 @@ import {
 } from './learner/index.js';
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
+import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
 import {
   canonicalHarnessName,
   canonicalHarnessNameSet,
@@ -94,6 +95,12 @@ export interface HarnessEnv {
    */
   disabledNames?: readonly string[];
   /** Resolved SolverPlugin package roots passed to plugin-aware Harnesses. */
+  /** Path to the `hermes` executable. Defaults to `hermes`. */
+  hermesPath?: string;
+  /** Default Hermes model when a SolverNet does not specify one. */
+  hermesModel?: string;
+  /** Hermes provider (e.g. 'anthropic'). */
+  hermesProvider?: string;
 }
 
 /**
@@ -233,6 +240,17 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     name: CODEX_HARNESS,
     adapter: codexLearnerAdapter,
   }));
+
+  const hermesAdapter = new HermesHarnessAdapter({
+    hermesPath: env.hermesPath,
+    hermesModel: env.hermesModel,
+    hermesProvider: env.hermesProvider,
+    daemonApiUrl: env.daemonApiUrl ?? 'http://127.0.0.1:7331',
+    daemonApiToken: env.daemonApiToken ?? '',
+    storePath: env.storePath,
+    corpusEnv: env.corpusEnv ?? {},
+  });
+  out.push(new HermesHarness({ adapter: hermesAdapter }));
 
   if (env.disabledNames && env.disabledNames.length > 0) {
     const disabled = canonicalHarnessNameSet(env.disabledNames);
