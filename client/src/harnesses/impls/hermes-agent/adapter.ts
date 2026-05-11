@@ -3,6 +3,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { finished } from 'node:stream/promises';
+import { HERMES_AGENT_HARNESS } from '../../names.js';
 import type { TaskSessionInputs } from '../learner/types.js';
 import { writePerTaskHermesConfig } from './bootstrap.js';
 import { buildInitialPrompt } from './prompt.js';
@@ -34,7 +35,7 @@ function buildAgentEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
 }
 
 export class HermesHarnessAdapter {
-  readonly name = 'hermes-agent';
+  readonly name = HERMES_AGENT_HARNESS;
 
   private readonly hermesPath: string;
   private readonly hermesModel: string | undefined;

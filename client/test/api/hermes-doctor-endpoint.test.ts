@@ -121,6 +121,26 @@ describe('GET /api/hermes/doctor', () => {
     );
   });
 
+  it('treats EACCES (binary exists but not executable) as installed:true so the panel surfaces a config-issue, not an install prompt', async () => {
+    // Realistic scenario: operator did `curl ... | bash` but the script
+    // didn't chmod +x the binary. The bare `hermes doctor` invocation fails
+    // with EACCES; the file IS on disk.
+    spawnSyncMock.mockReturnValue({
+      status: null,
+      signal: null,
+      error: Object.assign(new Error('spawn hermes EACCES'), { code: 'EACCES' }),
+      stdout: '',
+      stderr: '',
+    });
+
+    const app = buildApp();
+    const res = await app.request('/api/hermes/doctor');
+    const body = (await res.json()) as HermesDoctorBody;
+
+    expect(body.installed).toBe(true);
+    expect(body.exitCode).toBeNull();
+  });
+
   it('treats spawnSync timeout as installed:true with exitCode null (config-issue, not missing binary)', async () => {
     // Node's spawnSync sets result.signal when the child is killed by SIGTERM
     // on timeout; error.code is ETIMEDOUT. The binary did execute, it just

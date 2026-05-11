@@ -1,17 +1,19 @@
 // client/test/harnesses/impls/hermes-agent/freeze.test.ts
+//
+// Validates that the SHARED daemon hash-fence (the one the engine actually
+// invokes for every Harness) honors the freeze contract on HERMES_HOME when
+// the harness is a HermesHarness. The hermes-agent package no longer ships
+// a wrapper around the fence — the engine wires every Harness through
+// `runHarnessWithFreezeFence` directly, and we test that production path.
+
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { runHermesWithFreezeFence } from '../../../../src/harnesses/impls/hermes-agent/freeze.js';
+import { describe, expect, it, vi } from 'vitest';
 import { HermesHarness } from '../../../../src/harnesses/impls/hermes-agent/harness.js';
+import { runHarnessWithFreezeFence } from '../../../../src/daemon/freeze-fence.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 
-// vi.mock at module scope is hoisted by Vitest before imports resolve — so the
-// stubbed harvestOutput is in place when HermesHarness.run() calls it during
-// the train-mode test. Without this hoisting, the train-mode test would either
-// crash on a missing solution-payload.json or unstub-leak into other tests.
-import { vi } from 'vitest';
 vi.mock('../../../../src/harnesses/impls/learner/harvest.js', () => ({
   harvestOutput: () => ({
     schemaVersion: 'swe-rebench-v2-solution.v1',
@@ -20,8 +22,8 @@ vi.mock('../../../../src/harnesses/impls/learner/harvest.js', () => ({
   }),
 }));
 
-describe('runHermesWithFreezeFence', () => {
-  it('rolls back HERMES_HOME on frozen-mode mutation and rejects the envelope', async () => {
+describe('runHarnessWithFreezeFence on HermesHarness', () => {
+  it('rolls back HERMES_HOME on frozen-mode mutation and reports violation', async () => {
     const home = mkdtempSync(join(tmpdir(), 'hermes-frozen-'));
     const work = mkdtempSync(join(tmpdir(), 'hermes-frozen-wd-'));
     writeFileSync(join(home, 'before.txt'), 'snapshot');
@@ -36,7 +38,13 @@ describe('runHermesWithFreezeFence', () => {
       const harness = new HermesHarness({ adapter: fakeAdapter as any });
 
       const ctx = {
-        task: { id: 't', solverType: 'swe-rebench-v2.v1', role: 'restoration', window: { startTs: 0, endTs: Date.now() + 60_000 }, spec: {} },
+        task: {
+          id: 't',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+          window: { startTs: 0, endTs: Date.now() + 60_000 },
+          spec: {},
+        },
         requestId: 'r',
         implStateDir: home,
         workingDir: work,
@@ -46,7 +54,14 @@ describe('runHermesWithFreezeFence', () => {
         solverPluginRoots: [],
       } as unknown as HarnessContext;
 
-      await expect(runHermesWithFreezeFence(harness, ctx)).rejects.toThrow(/freeze contract violated/);
+      const result = await runHarnessWithFreezeFence(harness, ctx);
+
+      expect(result.ok).toBe(false);
+      if (result.ok === false) {
+        expect(result.violation.harnessName).toBe('hermes-agent');
+        expect(result.violation.stateHashBefore).not.toBe(result.violation.stateHashAfter);
+      }
+      // Rollback restored the snapshot: before.txt survives, violation.txt is gone.
       expect(() => readFileSync(join(home, 'violation.txt'))).toThrow();
       expect(readFileSync(join(home, 'before.txt'), 'utf8')).toBe('snapshot');
     } finally {
@@ -55,7 +70,7 @@ describe('runHermesWithFreezeFence', () => {
     }
   });
 
-  it('train mode is pass-through (writes are allowed)', async () => {
+  it('train mode lets HERMES_HOME mutations persist (Hermes continuous learning)', async () => {
     const home = mkdtempSync(join(tmpdir(), 'hermes-train-'));
     const work = mkdtempSync(join(tmpdir(), 'hermes-train-wd-'));
     try {
@@ -67,7 +82,13 @@ describe('runHermesWithFreezeFence', () => {
       };
       const harness = new HermesHarness({ adapter: fakeAdapter as any });
       const ctx = {
-        task: { id: 't', solverType: 'swe-rebench-v2.v1', role: 'restoration', window: { startTs: 0, endTs: Date.now() + 60_000 }, spec: {} },
+        task: {
+          id: 't',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+          window: { startTs: 0, endTs: Date.now() + 60_000 },
+          spec: {},
+        },
         requestId: 'r',
         implStateDir: home,
         workingDir: work,
@@ -77,8 +98,9 @@ describe('runHermesWithFreezeFence', () => {
         solverPluginRoots: [],
       } as unknown as HarnessContext;
 
-      const solution = await runHermesWithFreezeFence(harness, ctx);
-      expect(solution.schemaVersion).toBe('swe-rebench-v2-solution.v1');
+      const result = await runHarnessWithFreezeFence(harness, ctx);
+
+      expect(result.ok).toBe(true);
       expect(readFileSync(join(home, 'learned.txt'), 'utf8')).toBe('continuous learning');
     } finally {
       rmSync(home, { recursive: true, force: true });
