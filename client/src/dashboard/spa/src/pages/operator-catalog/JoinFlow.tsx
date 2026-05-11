@@ -15,9 +15,13 @@ import {
 import {
   canonicalHarnessName,
   CLAUDE_CODE_HARNESS,
+  HERMES_AGENT_HARNESS,
   harnessDisplayName,
   harnessOptionLabel,
 } from '../configuration/harnessNames.js';
+
+const HERMES_AGENT_DESCRIPTION =
+  'Self-improving agent by Nous Research. Built-in learning loop, 200+ models via OpenRouter plus Nous Portal, NVIDIA NIM, GLM, Kimi, and more.';
 import { PluginPicker } from '../configuration/PluginPicker.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
@@ -400,6 +404,19 @@ export function JoinFlow({
                   <option value={form.harness}>{harnessDisplayName(form.harness)}</option>
                 )}
               </select>
+              {form.harness === HERMES_AGENT_HARNESS && (
+                <span
+                  data-testid="join-harness-hermes-description"
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '11px',
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  {HERMES_AGENT_DESCRIPTION}{' '}
+                  <span style={{ color: 'var(--break-amber)' }}>(requires separate install)</span>
+                </span>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

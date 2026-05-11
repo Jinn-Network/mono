@@ -218,6 +218,75 @@ describe('JoinFlow — manifest fetch', () => {
   });
 });
 
+describe('JoinFlow — harness options', () => {
+  it('renders Hermes Agent as a selectable harness option when catalog includes it', async () => {
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          compatibleHarnesses: [
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Hermes Agent 0.1.0'),
+    );
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Claude Code 0.1.0');
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Codex 0.1.0');
+  });
+
+  it('shows the Hermes install description when Hermes Agent is selected', async () => {
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          compatibleHarnesses: [
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).some((o) => o.value === 'hermes-agent')).toBe(true),
+    );
+
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-harness-hermes-description')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('join-harness-hermes-description').textContent).toMatch(
+      /requires separate install/i,
+    );
+    expect(screen.getByTestId('join-harness-hermes-description').textContent).toMatch(
+      /Nous Research/,
+    );
+  });
+});
+
 describe('JoinFlow — role selection', () => {
   it('hides the harness picker when only the evaluator role is selected', async () => {
     wrap(<JoinFlow />);
