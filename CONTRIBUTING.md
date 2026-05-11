@@ -1,0 +1,103 @@
+# Contributing to Jinn
+
+Jinn is built in the open. This file is the entry point for contributors — humans and AI agents — opening PRs against `Jinn-Network/mono`.
+
+The long form lives at [`docs/engineering/handbook.md`](docs/engineering/handbook.md). Read it before opening anything non-trivial.
+
+## Quick start
+
+```
+git clone https://github.com/Jinn-Network/mono.git
+cd mono/client
+yarn install
+yarn typecheck
+yarn test
+```
+
+Per-package developer guides:
+- [`client/CONTRIBUTING.md`](client/CONTRIBUTING.md) — Jinn client (TypeScript daemon).
+- [`contracts/`](contracts/) — Solidity smart contracts (Hardhat).
+
+## What to read before you open a PR
+
+In rough order:
+
+1. **[`docs/engineering/handbook.md`](docs/engineering/handbook.md)** — cadence, dist-tags, work-shape taxonomy, AI workflow rules, doc ladder.
+2. **[`CLAUDE.md`](CLAUDE.md)** — agent-canonical project guide (architecture, conventions, design system pointers).
+3. **[`BRAND.md`](BRAND.md)** — voice, headless-brand posture, content non-negotiables. Read before any user-facing copy.
+4. Canonical docs as needed: [`SPEC.md`](SPEC.md), [`THESIS.md`](THESIS.md), [`GROWTH.md`](GROWTH.md), [`GLOSSARY.md`](GLOSSARY.md).
+
+## How work is shaped
+
+Jinn engineering recognises seven shapes of work plus one emergency sub-flow, keyed to Conventional Commits prefixes:
+
+| Shape | When | PR title prefix |
+|---|---|---|
+| `fix` | Bug fix | `fix:` or `fix(scope):` |
+| `feat` | Feature | `feat:` or `feat(scope):` |
+| `refactor` | Architecture / migration | `refactor:` |
+| `spike` | Research / exploration | `spike:` (does not merge to main) |
+| `chore` | Deps, CI, dev tooling | `chore:` or `chore(deps):` |
+| `docs` | Documentation | `docs:` |
+| `test` | Test-only | `test:` |
+| `fix(incident)` | Hotfix under pressure | `fix(incident):` (relaxed review, postmortem follow-up required) |
+
+Each shape has a distinct SOP — different skill chain, test discipline, design ceremony, stacking policy. The full table with v0 flows lives in [`docs/engineering/handbook.md`](docs/engineering/handbook.md#the-shapes-of-work).
+
+If a PR doesn't fit one of these shapes, it's mis-scoped. Split it.
+
+## PR expectations
+
+- **Title**: `<shape>: <one-line summary>` per Conventional Commits (e.g. `fix: SWE typed payload fallback validation`, `feat(uy6v): live verdict-success on Base Sepolia`).
+- **Body**: problem-not-solution framing (what's wrong / what gap / what need triggered this), test plan, agent identity if AI-authored.
+- **Linked bd issue**: `Closes jinn-mono-<id>` in the body so merge auto-closes the mirror.
+- **Co-Authored-By trailer** for AI commits, e.g.:
+  ```
+  Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+  Co-Authored-By: OpenAI Codex <noreply@openai.com>
+  ```
+- **Test discipline matches the shape** — see handbook §The shapes of work.
+- **Stacked PRs** encouraged for features > 300 LOC; aim for < 200 LOC per layer, "one logical thing per layer." `gh-stack` is the canonical tool; Graphite (`gt`) is allowed.
+
+## Review policy
+
+**Agent PR review parity** (handbook rule 4): Codex / Opus / Sonnet / Claude PRs go through the same review gate as human PRs. No agent self-merge. The one allowed relaxation is `fix(incident)` with documented reviewer justification.
+
+Canonical-doc changes (`SPEC.md`, `BRAND.md`, `THESIS.md`, `GROWTH.md`, `GLOSSARY.md`, `CLAUDE.md`, `README.md`) require:
+- A linked GitHub Discussion proposing the change.
+- CODEOWNERS approval (see [`.github/CODEOWNERS`](.github/CODEOWNERS)).
+- Downstream-doc review per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
+
+## Prediction-freeze guardrail
+
+**Prediction SolverNet is frozen** as of 2026-05-11 per [DR-2026-05-11-a](log/decisions/2026-05-11-freeze-prediction-solvernet.md). Reviewers reject Prediction-only PRs by default. Bug fixes against existing Prediction surfaces require explicit Captain approval citing why the fix is load-bearing for SWE-rebench v2 or shared infrastructure.
+
+If your PR touches Prediction-only surfaces (Polymarket task generator, `prediction.v0` / `prediction.v1` contracts, prediction-flavored plugins/harness pieces), check the corresponding box in the PR template and cite Captain approval.
+
+## AI workflow rules (summary)
+
+Full text in [`docs/engineering/handbook.md`](docs/engineering/handbook.md#ai-workflow-rules). The eight ratified rules (rule 5 deferred):
+
+1. Worktree-for-multi-agent — multi-agent or speculative subagent work uses `git worktree add cargo/.tasks/<id>`.
+2. Beads frame problems, not solutions — bd bodies = context + impact + acceptance criteria; solutions go in design sessions.
+3. bd-as-SoR, not `MEMORY.md` — use `bd remember` for persistent knowledge.
+4. Agent PR review parity — agent PRs reviewed like human PRs.
+5. _(Deferred — see [`jinn-mono-8qbc`](https://github.com/Jinn-Network/mono/issues?q=jinn-mono-8qbc))_
+6. Integration tests > mocks for migration / contract surfaces.
+7. TDD for new features, regression test for fixes.
+8. Auto-canary on main merge; Monday-only named minor.
+9. `canary` for rolling patches, `latest` for Monday named.
+
+## Issue tracker
+
+The internal SoR is **bd (beads)** — see [`CLAUDE.md`](CLAUDE.md) §Beads Issue Tracker for the workflow. External contributors interact via:
+
+- **Public GitHub Issues** — the sprint-scoped subset of bd, mirrored by the Friday triage automation. The Issue body ends with `Internal tracking: jinn-mono-<bd-id>`.
+- **GitHub Project (v2) "Jinn engineering"** — the public sprint board.
+- **GitHub Discussions** — RFCs / Q&A / governance prep.
+
+If you can't find a public Issue for what you want to work on, open a Discussion (RFC / question) or comment on the closest-matching Issue.
+
+## Building in public
+
+See [`docs/engineering/handbook.md`](docs/engineering/handbook.md#building-in-public--substrate). The substrate is intentional — GitHub Projects, Issues, Releases, repo-as-docs, Discussions. Every shipped artifact emits a knowledge artifact (Release notes / CHANGELOG / DR / spec / runbook).

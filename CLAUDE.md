@@ -18,6 +18,47 @@ Canonical docs are the repo's stable sources of truth. They change only via appr
 - `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
 - `GLOSSARY.md` — read whenever a Jinn-specific term appears; never redefine terms locally
 
+## Engineering handbook
+
+How this team ships — cadence, dist-tags, work-shape taxonomy, AI workflow rules. Full text at [`docs/engineering/handbook.md`](docs/engineering/handbook.md). Always read the handbook before doing non-trivial work; it ratifies the SOPs that apply to every shape.
+
+### Work shape (declare it before executing)
+
+Seven shapes plus one emergency sub-flow, keyed to Conventional Commits prefixes. Declare the shape in the bd issue's `Run-mode` field; replicate it as the PR title prefix.
+
+- **`fix`** — bug fix. Regression test first. Skill chain: `systematic-debugging` → `executing-plans` → `verification-before-completion` → `receiving-code-review`.
+- **`feat`** — feature. TDD. Skill chain: (`brainstorming` if ambiguous) → `writing-plans` → `test-driven-development` → `executing-plans` / `dispatching-parallel-agents` → `verification-before-completion` → `receiving-code-review`.
+- **`refactor`** — architecture / migration. TDD + integration tests; required design upfront; stacked PRs required (strangler-fig).
+- **`spike`** — research / exploration. Output is a finding, not code. Spike code does not merge.
+- **`chore`** — deps, CI, dev tooling. Integration tests if touches a dep.
+- **`docs`** — documentation. Canonical-doc changes need Discussion + CODEOWNERS approval.
+- **`test`** — test-only. Meta test discipline.
+- **`fix(incident)`** — hotfix sub-flow. Relaxed review; post-hoc regression test required as a follow-up bead before closing the incident.
+
+If a bd issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a bd under `jinn-mono-2cl` when friction surfaces).
+
+### Eight ratified AI workflow rules
+
+1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses `git worktree add cargo/.tasks/<id>`.
+2. **Beads frame problems, not solutions.** bd body = context + impact + acceptance criteria. Solutions go in design sessions.
+3. **bd-as-SoR, not `MEMORY.md`.** Use `bd remember` / `bd memories`.
+4. **Agent PR review parity.** Codex / Opus / Sonnet / Claude PRs reviewed like human PRs. No agent self-merge. Exception: `fix(incident)` with reviewer justification.
+5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open; see `jinn-mono-8qbc`.)_
+6. **Integration tests > mocks for migration / contract surfaces.**
+7. **TDD for new features, regression test for fixes.**
+8. **Auto-canary on main merge; Monday-only named minor.** Cadence policy.
+9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy.
+
+### Cadence
+
+- Every merge to main → npm `canary` (`<v>-canary.<sha>`).
+- Every Monday 09:00 UTC → GitHub Release draft (Hermes-style); Captain publishes; publish triggers npm `latest` + CHANGELOG auto-mirror.
+- Pre-v1: weekly minor (`v0.N.0 → v0.N+1.0`). `v1.0.0` = the Monday cut that ships `jinn-mono-uy6v`. Post-v1 epic close = major bump.
+
+### Daily entry point
+
+`eng-day` skill (in `cargo/.claude/skills/eng-day/`) is the canonical daily brief. Fallback when the GitHub Project board doesn't exist yet: `bd ready` + `gh pr list --search 'is:open draft:false'`.
+
 ## Repository Structure
 
 ```

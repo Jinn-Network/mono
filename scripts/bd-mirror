@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+#
+# bd-mirror — mirror a bd issue to a public GitHub Issue and add it to
+# the "Jinn engineering" GitHub Project (v2) board with the given Sprint
+# field value.
+#
+# Implements jinn-mono-2cl.12 per the engineering handbook (cargo/docs/engineering/handbook.md)
+# and DR-2026-05-11-b (cargo/log/decisions/2026-05-11-engineering-substrate.md).
+#
+# Usage:
+#   cargo/scripts/bd-mirror <bd-id> <sprint-yyyy-mm-dd> [--labels label1,label2,...] [--dry-run]
+#
+# Behaviour:
+# - Reads bd issue via `bd show <id> --json`.
+# - Strips internal-only content from the body (notes prefixed "captain-only:",
+#   exploratory "needs-design-session" framing).
+# - Opens a public GitHub Issue on Jinn-Network/mono with:
+#   - Title: bd title
+#   - Body: curated description + "Internal tracking: jinn-mono-<id>" footer
+#   - Labels: epic:<parent-epic-id> + sprint:<yyyy-mm-dd> + agent:<owner> + any --labels
+# - Adds the new Issue to the "Jinn engineering" Project (v2).
+# - Sets the Project item's Sprint field to <yyyy-mm-dd>.
+# - Writes the GitHub Issue URL back to the bd issue as an external-ref.
+# - Idempotent: if the bd issue already has an external-ref pointing at a Jinn-Network/mono
+#   Issue, the script is a no-op (prints the existing Issue URL).
+#
+# Dependencies:
+# - bd (beads CLI) configured for this repo.
+# - gh (GitHub CLI) authenticated with project scope (`gh auth refresh -s project`).
+# - jq.
+#
+# Status: v0. The Project board (jinn-mono-2cl.9) must exist for the Project-add steps to
+# succeed; until then this script falls back to "Issue created, Project add skipped" mode.
+
+set -euo pipefail
+
+REPO="Jinn-Network/mono"
+PROJECT_TITLE="Jinn engineering"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: bd-mirror <bd-id> <sprint-yyyy-mm-dd> [--labels label1,label2,...] [--dry-run]
+
+Mirrors a bd issue to a public GitHub Issue on Jinn-Network/mono and adds it
+to the "Jinn engineering" GitHub Project (v2) board with Sprint = <date>.
+
+Idempotent: re-running with the same <bd-id> is a no-op (detects existing
+GitHub Issue via the bd issue's external-ref).
+EOF
+  exit 2
+}
+
+if [[ $# -lt 2 ]]; then
+  usage
+fi
+
+BD_ID="$1"
+SPRINT_DATE="$2"
+shift 2
+
+EXTRA_LABELS=""
+DRY_RUN=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --labels)
+      EXTRA_LABELS="$2"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      usage
+      ;;
+  esac
+done
+
+# Validate the sprint date format.
+if ! [[ "$SPRINT_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  echo "error: sprint date must be yyyy-mm-dd, got: $SPRINT_DATE" >&2
+  exit 2
+fi
+
+# Read the bd issue.
+if ! BD_JSON="$(bd show "$BD_ID" --json 2>/dev/null)"; then
+  echo "error: bd show $BD_ID failed — does the bead exist?" >&2
+  exit 1
+fi
+
+BD_TITLE="$(echo "$BD_JSON" | jq -r '.title')"
+BD_DESCRIPTION="$(echo "$BD_JSON" | jq -r '.description // ""')"
+BD_PRIORITY="$(echo "$BD_JSON" | jq -r '.priority // "P2"')"
+BD_PARENT="$(echo "$BD_JSON" | jq -r '.parent_id // ""')"
+BD_OWNER="$(echo "$BD_JSON" | jq -r '.assignee // "human"')"
+BD_EXTERNAL_REF="$(echo "$BD_JSON" | jq -r '.external_ref // ""')"
+
+# Idempotency check: if external-ref points at a Jinn-Network/mono Issue, no-op.
+if [[ -n "$BD_EXTERNAL_REF" && "$BD_EXTERNAL_REF" == *"$REPO"* ]]; then
+  echo "$BD_ID already mirrored: $BD_EXTERNAL_REF"
+  exit 0
+fi
+
+# Curate the body: strip captain-only lines and "needs-design-session" framing.
+# Use grep -iv (BSD/GNU compatible) instead of sed /I (GNU-only) so this works on
+# macOS where this script is also run manually by Captain.
+CURATED_BODY="$(echo "$BD_DESCRIPTION" | grep -v '^captain-only:' | grep -iv 'needs-design-session')"
+
+# Compose the epic label from the parent id (if present).
+EPIC_LABEL=""
+if [[ -n "$BD_PARENT" ]]; then
+  # Strip the jinn-mono- prefix and any trailing .N to get the epic short id.
+  EPIC_SHORT="$(echo "$BD_PARENT" | sed -e 's|^jinn-mono-||' -e 's|\..*$||')"
+  EPIC_LABEL="epic:$EPIC_SHORT"
+fi
+
+# Compose labels.
+LABELS="sprint:$SPRINT_DATE,agent:$BD_OWNER"
+if [[ -n "$EPIC_LABEL" ]]; then
+  LABELS="$EPIC_LABEL,$LABELS"
+fi
+if [[ -n "$EXTRA_LABELS" ]]; then
+  LABELS="$LABELS,$EXTRA_LABELS"
+fi
+
+# Compose the public Issue body.
+ISSUE_BODY="$(cat <<EOF
+$CURATED_BODY
+
+---
+Internal tracking: $BD_ID
+EOF
+)"
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "DRY RUN — would create GitHub Issue:"
+  echo "  Repo:   $REPO"
+  echo "  Title:  $BD_TITLE"
+  echo "  Labels: $LABELS"
+  echo "  Body:"
+  echo "$ISSUE_BODY" | sed 's/^/    /'
+  exit 0
+fi
+
+# Create the GitHub Issue.
+ISSUE_URL="$(gh issue create \
+  --repo "$REPO" \
+  --title "$BD_TITLE" \
+  --body "$ISSUE_BODY" \
+  --label "$LABELS")"
+
+echo "Created Issue: $ISSUE_URL"
+
+# Best-effort: add to the Project board and set Sprint field.
+# If the Project doesn't exist yet (jinn-mono-2cl.9 not landed), skip gracefully.
+PROJECT_NUMBER="$(gh project list --owner "${REPO%%/*}" --format json 2>/dev/null | \
+  jq -r --arg title "$PROJECT_TITLE" '.projects[] | select(.title == $title) | .number' | head -1 || true)"
+
+if [[ -z "$PROJECT_NUMBER" ]]; then
+  echo "note: project '$PROJECT_TITLE' not found on ${REPO%%/*} — Issue created but Project add skipped. Create the Project per jinn-mono-2cl.9."
+else
+  ITEM_ID="$(gh project item-add "$PROJECT_NUMBER" --owner "${REPO%%/*}" --url "$ISSUE_URL" --format json 2>/dev/null | jq -r '.id' || true)"
+  if [[ -n "$ITEM_ID" && "$ITEM_ID" != "null" ]]; then
+    # Set the Sprint field. Field id lookup: gh project field-list <project> --owner <owner>.
+    SPRINT_FIELD_ID="$(gh project field-list "$PROJECT_NUMBER" --owner "${REPO%%/*}" --format json 2>/dev/null | \
+      jq -r '.fields[] | select(.name == "Sprint") | .id' | head -1 || true)"
+    if [[ -n "$SPRINT_FIELD_ID" ]]; then
+      gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_NUMBER" --field-id "$SPRINT_FIELD_ID" --date "$SPRINT_DATE" 2>/dev/null \
+        || echo "note: failed to set Sprint field on Project item — manual fix needed."
+    fi
+  fi
+fi
+
+# Write the Issue URL back to bd as external-ref.
+bd update "$BD_ID" --external-ref "$ISSUE_URL" >/dev/null || \
+  echo "warning: failed to write external-ref back to $BD_ID — bd may need manual update."
+
+echo "Done: $BD_ID → $ISSUE_URL (sprint=$SPRINT_DATE)"

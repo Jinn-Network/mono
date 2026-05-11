@@ -1,0 +1,202 @@
+# Monday release-notes scaffold cron — implements jinn-mono-2cl.2.
+#
+# Creates a GitHub Release **draft** every Monday at 09:00 UTC with the mechanical inputs for the
+# named-minor release (merged PRs since the previous `v0.N.0` tag with authors, closed bd issues,
+# contributor list, line-change stats, suggested semver bump = minor). Captain edits the draft in
+# the GitHub Release UI to fill in <build name>, ## Highlights, and ## Known issues, then clicks
+# Publish. Publish triggers npm `latest` (already wired in `npm-publish.yml` on release: published)
+# and the CHANGELOG auto-mirror (`changelog-mirror.yml`, jinn-mono-2cl.10).
+#
+# v0 status: shipped with `workflow_dispatch` only — cron schedule below is commented out.
+# Promote to scheduled cron after first manual run validates output.
+#
+# Reference:
+# - cargo/docs/engineering/handbook.md §The shipping machine
+# - cargo/docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md Threads 5 + 6
+# - Hermes v0.13.0 release notes for the shape reference
+
+name: Monday release-notes scaffold
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 9 * * 1'  # Monday 09:00 UTC — enable once a manual run validates the workflow.
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+jobs:
+  scaffold:
+    name: Build release-notes draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # need full history to walk tags + commits since last v0.N.0
+
+      - name: Resolve window
+        id: window
+        shell: bash
+        run: |
+          # Find the most recent v0.N.0 tag (handle pre-v1 minors; ignore canary tags / unrelated tags)
+          PREV_TAG="$(git tag --list 'v0.*.0' 'client-v0.*.0' --sort=-creatordate | head -1 || true)"
+          if [ -z "$PREV_TAG" ]; then
+            # Fall back to last tag of any shape if no v0.N.0 yet
+            PREV_TAG="$(git tag --list 'client-v*' --sort=-creatordate | head -1 || echo '')"
+          fi
+          if [ -z "$PREV_TAG" ]; then
+            # First release ever — use repo root commit.
+            PREV_SHA="$(git rev-list --max-parents=0 HEAD | head -1)"
+            PREV_TAG="(repo root)"
+          else
+            PREV_SHA="$(git rev-parse "$PREV_TAG")"
+          fi
+          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+          echo "prev_sha=$PREV_SHA" >> "$GITHUB_OUTPUT"
+          echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute current version + suggested bump
+        id: version
+        shell: bash
+        run: |
+          CURRENT_VERSION="$(node -e "console.log(JSON.parse(require('fs').readFileSync('client/package.json','utf8')).version)")"
+          # Suggested bump: minor by default (handbook §Cadence + pgjj Thread 5).
+          MAJOR="$(echo "$CURRENT_VERSION" | cut -d. -f1)"
+          MINOR="$(echo "$CURRENT_VERSION" | cut -d. -f2)"
+          NEXT_MINOR=$((MINOR + 1))
+          SUGGESTED="$MAJOR.$NEXT_MINOR.0"
+          echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "suggested=$SUGGESTED" >> "$GITHUB_OUTPUT"
+
+      - name: Gather merged PRs since last tag
+        id: prs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREV_SHA: ${{ steps.window.outputs.prev_sha }}
+        shell: bash
+        run: |
+          # List PRs merged on main since PREV_SHA. Group by Conventional Commits shape from PR title.
+          # `gh pr list --search 'is:merged base:main merged:>YYYY-MM-DD'` is the simplest path; using
+          # commit walk for robustness against rebased PRs.
+          PR_NUMBERS="$(git log "$PREV_SHA..HEAD" --merges --pretty=format:'%s' \
+            | grep -oE '#[0-9]+' | sort -u | tr -d '#' || true)"
+          : > /tmp/prs.txt
+          : > /tmp/contributors.txt
+          for n in $PR_NUMBERS; do
+            line="$(gh pr view "$n" --json number,title,author --jq '"\(.number)\t\(.title)\t\(.author.login)"' 2>/dev/null || true)"
+            if [ -n "$line" ]; then
+              echo "$line" >> /tmp/prs.txt
+              echo "$line" | cut -f3 >> /tmp/contributors.txt
+            fi
+          done
+          sort -u /tmp/contributors.txt -o /tmp/contributors.txt
+
+      - name: Gather closed bd issues since last tag
+        id: bd
+        shell: bash
+        run: |
+          # bd is the internal SoR; query if the CLI is available in CI. If not, fall back to "see internal tracker".
+          if command -v bd >/dev/null 2>&1; then
+            bd list --status=closed --json id,title 2>/dev/null \
+              | jq -r '.[] | "- \(.id) — \(.title)"' > /tmp/bd-closed.txt || echo "- (bd query failed)" > /tmp/bd-closed.txt
+          else
+            echo "- (bd CLI not installed in CI — see internal bd tracker for closed issues this week)" > /tmp/bd-closed.txt
+          fi
+
+      - name: Compute stats
+        id: stats
+        env:
+          PREV_SHA: ${{ steps.window.outputs.prev_sha }}
+        shell: bash
+        run: |
+          COMMITS="$(git rev-list --count "$PREV_SHA..HEAD")"
+          FILES="$(git diff --name-only "$PREV_SHA..HEAD" | wc -l | tr -d ' ')"
+          STATS="$(git diff --shortstat "$PREV_SHA..HEAD" || echo '0 insertions(+), 0 deletions(-)')"
+          PRS_COUNT="$(wc -l < /tmp/prs.txt | tr -d ' ')"
+          CONTRIBUTORS_COUNT="$(wc -l < /tmp/contributors.txt | tr -d ' ')"
+          echo "commits=$COMMITS" >> "$GITHUB_OUTPUT"
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          echo "prs_count=$PRS_COUNT" >> "$GITHUB_OUTPUT"
+          echo "contributors_count=$CONTRIBUTORS_COUNT" >> "$GITHUB_OUTPUT"
+          echo "stats=$STATS" >> "$GITHUB_OUTPUT"
+
+      - name: Build draft body
+        id: body
+        env:
+          TODAY: ${{ steps.window.outputs.today }}
+          PREV_TAG: ${{ steps.window.outputs.prev_tag }}
+          SUGGESTED: ${{ steps.version.outputs.suggested }}
+          COMMITS: ${{ steps.stats.outputs.commits }}
+          FILES: ${{ steps.stats.outputs.files }}
+          PRS_COUNT: ${{ steps.stats.outputs.prs_count }}
+          CONTRIBUTORS_COUNT: ${{ steps.stats.outputs.contributors_count }}
+          STATS: ${{ steps.stats.outputs.stats }}
+        shell: bash
+        run: |
+          BODY_FILE="/tmp/release-body.md"
+          {
+            echo "# v$SUGGESTED — \"<build name placeholder>\""
+            echo "$TODAY · Suggested bump: minor (Captain: override to vX.0.0 if an epic-major bd issue closed)"
+            echo ""
+            echo "## Highlights"
+            echo "- <placeholder — Captain edits>"
+            echo ""
+            echo "## Changes"
+            # Group by Conventional Commits shape prefix on the PR title.
+            for shape in feat fix refactor spike chore docs test; do
+              MATCHES="$(grep -E "	(${shape}[\(:])" /tmp/prs.txt || true)"
+              if [ -n "$MATCHES" ]; then
+                echo ""
+                echo "### ${shape}"
+                echo "$MATCHES" | awk -F'\t' '{printf "- (#%s) %s — @%s\n", $1, $2, $3}'
+              fi
+            done
+            UNGROUPED="$(grep -vE "	(feat[\(:]|fix[\(:]|refactor[\(:]|spike[\(:]|chore[\(:]|docs[\(:]|test[\(:])" /tmp/prs.txt || true)"
+            if [ -n "$UNGROUPED" ]; then
+              echo ""
+              echo "### other"
+              echo "$UNGROUPED" | awk -F'\t' '{printf "- (#%s) %s — @%s\n", $1, $2, $3}'
+            fi
+            echo ""
+            echo "## Closed this week"
+            cat /tmp/bd-closed.txt
+            echo ""
+            echo "## Stats"
+            echo "- Window: $PREV_TAG → HEAD ($TODAY)"
+            echo "- $COMMITS commits · $PRS_COUNT PRs · $FILES files · $STATS · $CONTRIBUTORS_COUNT contributors"
+            echo ""
+            echo "## Known issues"
+            echo "- <placeholder — Captain edits>"
+          } > "$BODY_FILE"
+          echo "body_file=$BODY_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update the Release draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUGGESTED: ${{ steps.version.outputs.suggested }}
+          BODY_FILE: ${{ steps.body.outputs.body_file }}
+        shell: bash
+        run: |
+          # The draft uses the eventual published tag directly. GitHub does not materialize the
+          # git tag until the draft is published, so multiple unpublished drafts with different
+          # tags (one per scheduled cut) coexist safely. When Captain clicks Publish, the tag
+          # `v<SUGGESTED>` is created in git, which is what npm-publish.yml (release: published)
+          # and the dual-tag policy (jinn-mono-2cl.6) expect.
+          TAG="v${SUGGESTED}"
+          EXISTING="$(gh release view "$TAG" --json id,isDraft --jq '.id' 2>/dev/null || true)"
+          if [ -n "$EXISTING" ]; then
+            gh release edit "$TAG" \
+              --title "v$SUGGESTED — Build Notes (draft)" \
+              --notes-file "$BODY_FILE"
+            echo "Updated existing draft: $TAG"
+          else
+            gh release create "$TAG" \
+              --draft \
+              --title "v$SUGGESTED — Build Notes (draft)" \
+              --notes-file "$BODY_FILE" \
+              --target main
+            echo "Created new draft: $TAG"
+          fi
+          echo "::notice::Release draft v$SUGGESTED ready for Captain review at https://github.com/${{ github.repository }}/releases"
