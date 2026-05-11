@@ -1,6 +1,6 @@
 /**
  * Smoke test for the solver-side round-trip: a swe-rebench-v2.v1 Task
- * dispatched to ClaudeCodeLearnerImpl, with the Claude subprocess
+ * dispatched to LearnerHarness, with the Claude subprocess
  * simulated by NoOpHarnessAdapter. The fake "model" writes the full
  * phase pipeline + a `.execute/solution-payload.json` (matching what
  * `submit_typed_payload` would persist), and we assert the resulting
@@ -21,9 +21,9 @@ import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
-import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/index.js';
-import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/noop-adapter.js';
-import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
+import { LearnerHarness } from '../../../../src/harnesses/impls/learner/index.js';
+import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/learner/test-utils/noop-adapter.js';
+import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/learner/test-utils/fake-plugin-outputs.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import type { Task } from '../../../../src/types/task.js';
 
@@ -71,10 +71,10 @@ function writeTypedPayload(workingDir: string, payload: Record<string, unknown>)
   writeFileSync(join(dir, 'solution-payload.json'), JSON.stringify(payload, null, 2));
 }
 
-describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
+describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
   it('claude-code-learner.supports() claims swe-rebench-v2.v1 restoration', () => {
     const adapter = new NoOpHarnessAdapter();
-    const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/plugin-root' });
+    const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
     expect(harness.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
     // Evaluation goes to the dedicated SweRebenchV2EvaluatorHarness, not the learner.
     expect(harness.supports({ solverType: 'swe-rebench-v2.v1', role: 'evaluation' })).toBe(false);
@@ -99,7 +99,7 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
           cost: { totalUsd: 0.21, breakdown: { llm: 0.2, tools: 0.01 } },
         });
       });
-      const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/plugin-root' });
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
       const task = buildTask('restoration');
       const sol = await harness.run(buildContext(workingDir, implStateDir, task));
 
@@ -136,7 +136,7 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
     try {
       // Default NoOp behaviour: write phase artifacts only, no typed payload.
       const adapter = new NoOpHarnessAdapter();
-      const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/plugin-root' });
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
       const task = buildTask('restoration');
       const sol = await harness.run(buildContext(workingDir, implStateDir, task));
 
@@ -209,7 +209,7 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
       });
       // Bypass `supports()` (which excludes evaluation) by invoking run()
       // directly — this is testing the harvest path, not the dispatch path.
-      const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/plugin-root' });
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
       const task = buildTask('evaluation');
       const sol = await harness.run(buildContext(workingDir, implStateDir, task));
 

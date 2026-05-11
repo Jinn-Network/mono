@@ -100,7 +100,7 @@ export interface HarnessAdapter {
 }
 
 /** Shim construction config. */
-export interface ClaudeCodeLearnerConfig {
+export interface LearnerHarnessConfig {
   /** Harness adapter (NoOp for tests; Claude Code adapter for production). */
   adapter: HarnessAdapter;
   /** Optional override for the impl name (defaults to 'claude-code-learner'). */

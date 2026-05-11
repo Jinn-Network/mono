@@ -7,7 +7,7 @@ import { CLAUDE_CODE_HARNESS } from '../../names.js';
 import type {
   HarnessAdapter,
   TaskSessionInputs,
-  ClaudeCodeLearnerConfig,
+  LearnerHarnessConfig,
 } from './types.js';
 import { resolvePluginRoot } from './plugin-path.js';
 import { harvestOutput } from './harvest.js';
@@ -20,13 +20,13 @@ import { harvestOutput } from './harvest.js';
  * keeps this Harness as the default, so explicit specialists can still claim
  * their SolverTypes without being wrapped.
  */
-export class ClaudeCodeLearnerImpl implements Harness {
+export class LearnerHarness implements Harness {
   readonly name: string;
   readonly version: string;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
 
-  constructor(config: ClaudeCodeLearnerConfig) {
+  constructor(config: LearnerHarnessConfig) {
     this.adapter = config.adapter;
     this.name = config.name ?? CLAUDE_CODE_HARNESS;
     this.version = config.version ?? '0.1.0-shim';

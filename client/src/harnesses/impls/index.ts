@@ -15,9 +15,9 @@ import { PredictionApyV0BaselineImpl } from './prediction-apy-v0-baseline/index.
 import { ClaudeMcpPredictionApyImpl } from './claude-mcp-prediction-apy/index.js';
 import { PredictionApyV0Evaluator } from './prediction-apy-v0-evaluator/index.js';
 import {
-  ClaudeCodeLearnerImpl,
-} from './claude-code-learner/index.js';
-import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './claude-code-learner/index.js';
+  LearnerHarness,
+} from './learner/index.js';
+import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 import {
   canonicalHarnessName,
@@ -214,7 +214,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     daemonApiToken: env.daemonApiToken,
     corpusEnv: env.corpusEnv,
   });
-  out.push(new ClaudeCodeLearnerImpl({
+  out.push(new LearnerHarness({
     adapter: learnerAdapter,
   }));
 
@@ -229,7 +229,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     daemonApiToken: env.daemonApiToken,
     corpusEnv: env.corpusEnv,
   });
-  out.push(new ClaudeCodeLearnerImpl({
+  out.push(new LearnerHarness({
     name: CODEX_HARNESS,
     adapter: codexLearnerAdapter,
   }));

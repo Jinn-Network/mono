@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { prepareCodexPluginWorkspace } from '../../../../src/harnesses/impls/claude-code-learner/adapters/codex-workspace.js';
+import { prepareCodexPluginWorkspace } from '../../../../src/harnesses/impls/learner/adapters/codex-workspace.js';
 
 function writeJson(path: string, value: unknown): void {
   mkdirSync(join(path, '..'), { recursive: true });

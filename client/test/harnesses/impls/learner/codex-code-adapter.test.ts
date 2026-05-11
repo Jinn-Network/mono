@@ -6,14 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { SweRebenchV2SolutionPayloadSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import {
-  ClaudeCodeLearnerImpl,
+  LearnerHarness,
   CodexCodeHarnessAdapter,
-} from '../../../../src/harnesses/impls/claude-code-learner/index.js';
-import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
+} from '../../../../src/harnesses/impls/learner/index.js';
+import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/learner/test-utils/fake-plugin-outputs.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import type { Task } from '../../../../src/types/task.js';
 
-const learnerPluginRoot = fileURLToPath(new URL('../../../../plugins/claude-code-learner/', import.meta.url));
+const learnerPluginRoot = fileURLToPath(new URL('../../../../plugins/learner/', import.meta.url));
 const sweRuntimePluginRoot = fileURLToPath(new URL('../../../../plugins/swe-rebench-v2-runtime/', import.meta.url));
 const networkToolsPluginRoot = fileURLToPath(new URL('../../../../plugins/network-tools/', import.meta.url));
 
@@ -289,7 +289,7 @@ describe('CodexCodeHarnessAdapter', () => {
         _spawnFn: spawnFn as never,
         _runSessionStartHook: false,
       });
-      const harness = new ClaudeCodeLearnerImpl({
+      const harness = new LearnerHarness({
         name: 'codex-code-learner',
         adapter,
         pluginRoot: learnerPluginRoot,

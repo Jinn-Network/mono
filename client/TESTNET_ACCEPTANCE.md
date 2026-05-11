@@ -38,8 +38,8 @@ yarn vitest run \
   test/adapters/mech/safe-revert.test.ts \
   test/tx-retry.test.ts \
   test/adapters/mech/contracts.test.ts \
-  test/harnesses/impls/claude-code-learner/codex-code-adapter.test.ts \
-  test/harnesses/impls/claude-code-learner/swe-rebench-v2-roundtrip.test.ts \
+  test/harnesses/impls/learner/codex-code-adapter.test.ts \
+  test/harnesses/impls/learner/swe-rebench-v2-roundtrip.test.ts \
   test/harnesses/impls/swe-rebench-v2-evaluator/harness.test.ts
 yarn build
 yarn release:donation-consumption --producer-handshake-key <daemon-handshake-key>

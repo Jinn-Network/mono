@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/index.js';
-import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/noop-adapter.js';
+import { LearnerHarness } from '../../../../src/harnesses/impls/learner/index.js';
+import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/learner/test-utils/noop-adapter.js';
 import {
   fakeOrientSummary,
   fakeStrategy,
@@ -11,7 +11,7 @@ import {
   fakeDebriefAnalysis,
   fakeImproveSummary,
   fakeMemoryConsolidationRecord,
-} from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
+} from '../../../../src/harnesses/impls/learner/test-utils/fake-plugin-outputs.js';
 import { makeHarnessCtx } from '@test/harness-ctx.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 
@@ -116,7 +116,7 @@ describe('claude-code-learner replan path', () => {
       fakeMemoryConsolidationRecord(wd);
     });
 
-    const impl = new ClaudeCodeLearnerImpl({ adapter });
+    const impl = new LearnerHarness({ adapter });
     const ctx = makeCtx(workingDir, implStateDir);
     const out = await impl.run(ctx);
 

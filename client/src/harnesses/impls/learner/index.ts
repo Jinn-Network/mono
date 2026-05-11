@@ -1,8 +1,8 @@
 /**
- * @jinn-network/client claude-code-learner harness impl.
+ * @jinn-network/client learner harness impl.
  *
- * Bridges the engine's Harness interface to the claude-code-learner
- * plugin shipped at client/plugins/claude-code-learner/.
+ * Bridges the engine's Harness interface to the learner
+ * plugin shipped at client/plugins/learner/.
  *
  * Spec: docs/superpowers/specs/2026-04-23-default-learning-harness-design.md (v1.1)
  */
@@ -10,9 +10,9 @@
 export type {
   HarnessAdapter,
   TaskSessionInputs,
-  ClaudeCodeLearnerConfig,
+  LearnerHarnessConfig,
 } from './types.js';
-export { ClaudeCodeLearnerImpl } from './harness.js';
+export { LearnerHarness } from './harness.js';
 export { resolvePluginRoot } from './plugin-path.js';
 export { harvestOutput } from './harvest.js';
 export { ClaudeCodeHarnessAdapter } from './adapters/claude-code.js';

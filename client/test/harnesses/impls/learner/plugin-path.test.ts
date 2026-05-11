@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolvePluginRoot } from '../../../../src/harnesses/impls/claude-code-learner/plugin-path.js';
+import { resolvePluginRoot } from '../../../../src/harnesses/impls/learner/plugin-path.js';
 
 describe('resolvePluginRoot', () => {
   it('returns an existing directory containing the expected plugin layout', () => {
