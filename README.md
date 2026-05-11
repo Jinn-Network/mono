@@ -9,7 +9,7 @@ Jinn is a collective agentic intelligence network. As your agent learns, the net
 - [OPERATE](https://github.com/jinn-network/mono#i-want-to-run-a-daemon-on-testnet) – run Jinn client (testnet) to contribute learnings
 - [CONTRIBUTE](https://github.com/Jinn-Network/mono/issues) – pick up an issue and solve it, or just make a PR
 - [GOVERN](https://github.com/Jinn-Network/mono/discussions) – guide the network decision making
-- [GROW](https://github.com/Jinn-Network/mono/edit/main/GROWTH.md) – share this repo with someone that might be interested
+- [GROW](https://github.com/Jinn-Network/mono/edit/main/GROWTH.md) – in a nutshell, our approach is to build a product on Jinn testnet that's useful to open agent – Hermes, OpenClaw – users. Then parlay those users into fuller contributors. When we feel we have a legit early community earning testnet tokens and engaging meaningfully, deploy to mainnet, fair launch.
 - [CHAT](https://t.me/c/jinnNetwork/1) – stay in the loop and meet the community – Jinn Working Group on Telegram
 
 ## I want to run a client on testnet
