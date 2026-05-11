@@ -1618,6 +1618,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     externalImpls,
     disabledNames: config.harnesses?.disabled,
     corpusEnv,
+    hermesPath: config.hermesPath,
+    hermesModel: config.hermesModel,
+    hermesProvider: config.hermesProvider,
   })) {
     implRegistry.register(impl);
   }
