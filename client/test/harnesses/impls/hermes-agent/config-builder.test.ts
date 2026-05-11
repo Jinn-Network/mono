@@ -69,4 +69,13 @@ describe('hermesConfigFromSolverPlugins', () => {
     // a providedBy branch.
     expect(true).toBe(true);
   });
+
+  it('passes HTTP MCP url/headers through unchanged', () => {
+    const httpRoot = fileURLToPath(new URL('./fixtures/http-mcp-plugin/', import.meta.url));
+    const out = hermesConfigFromSolverPlugins([httpRoot], fakeEnv());
+
+    const tp = out.mcp_servers!['third-party'] as { url: string; headers?: Record<string, string> };
+    expect(tp.url).toBe('https://third-party.example/mcp');
+    expect(tp.headers?.Authorization).toBe('Bearer hypothetical-token');
+  });
 });
