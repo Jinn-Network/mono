@@ -103,7 +103,7 @@ export interface HarnessAdapter {
 export interface LearnerHarnessConfig {
   /** Harness adapter (NoOp for tests; Claude Code adapter for production). */
   adapter: HarnessAdapter;
-  /** Optional override for the impl name (defaults to 'claude-code-learner'). */
+  /** Optional override for the impl name (defaults to CLAUDE_CODE_HARNESS = 'claude-code'). */
   name?: string;
   /** Semver string for envelope provenance (defaults to '0.1.0-shim'). */
   version?: string;
