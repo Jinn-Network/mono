@@ -41,7 +41,7 @@ function snippetToYaml(snippet: HermesConfigSnippet, opts: { model?: string; pro
   // Terminal block
   lines.push('terminal:');
   lines.push('  backend: local');
-  lines.push(`  cwd: ${opts.workingDir}`);
+  lines.push(`  cwd: "${opts.workingDir.replaceAll('"', '\\"')}"`);
   lines.push('  timeout: 180');
   lines.push('');
 

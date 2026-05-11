@@ -31,7 +31,7 @@ describe('writePerTaskHermesConfig', () => {
       expect(yaml).toContain('jinn-client');
       expect(yaml).toContain('terminal:');
       expect(yaml).toContain('backend: local');
-      expect(yaml).toContain('cwd: /work');
+      expect(yaml).toContain('cwd: "/work"');
       expect(yaml).toContain('platform_toolsets:');
       expect(yaml).toContain('hermes-cli:');
       expect(yaml).toContain('- terminal');

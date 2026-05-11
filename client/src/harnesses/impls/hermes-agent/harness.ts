@@ -42,7 +42,6 @@ export class HermesHarness implements Harness {
       taskCid: ctx.taskCid,
       solverType: ctx.task.solverType,
       model: ctx.solverNet?.model,
-      claudeModel: ctx.solverNet?.model,
       taskBody: ctx.task as any,
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,
