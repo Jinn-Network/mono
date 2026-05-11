@@ -683,4 +683,20 @@ describe('JoinFlow — Hermes Agent precheck panel', () => {
     // The harness select should still be visible.
     expect(screen.getByTestId('join-flow-solver-fields')).toBeTruthy();
   });
+
+  it('shows the network-error panel when hermesDoctor rejects (does NOT fall through to install)', async () => {
+    apiMock.hermesDoctor.mockRejectedValue(new Error('Network error: failed to fetch /api/hermes/doctor'));
+
+    await setupHermesSelected();
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-network-error')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('hermes-precheck-network-error').textContent).toMatch(/Could not reach the daemon/i);
+    // Critically, we must NOT show the install command (operator would otherwise
+    // reinstall a Hermes that is already there when the daemon is just down).
+    expect(screen.queryByTestId('hermes-precheck-not-installed')).toBeNull();
+    expect(apiMock.operatorJoin).not.toHaveBeenCalled();
+  });
 });

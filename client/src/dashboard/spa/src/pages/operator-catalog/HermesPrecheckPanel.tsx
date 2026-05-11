@@ -13,7 +13,7 @@ import { api } from '../../api/client.js';
  * `onCancel` returns the user to the harness selector.
  */
 
-export type HermesPrecheckState = 'checking' | 'not-installed' | 'config-issue' | 'ok';
+export type HermesPrecheckState = 'checking' | 'not-installed' | 'config-issue' | 'network-error' | 'ok';
 
 export interface HermesPrecheckPanelProps {
   onSuccess: () => void;
@@ -85,6 +85,7 @@ export function HermesPrecheckPanel({
 }: HermesPrecheckPanelProps): JSX.Element {
   const [state, setState] = useState<HermesPrecheckState>('checking');
   const [stderr, setStderr] = useState<string>('');
+  const [networkError, setNetworkError] = useState<string>('');
 
   const runPrecheck = (): void => {
     setState('checking');
@@ -103,9 +104,22 @@ export function HermesPrecheckPanel({
         setState('ok');
         onSuccess();
       })
-      .catch(() => {
-        setState('not-installed');
+      .catch((err: unknown) => {
+        // Distinguish network/transport errors from "Hermes not installed".
+        // Falling through to not-installed would tell operators to reinstall
+        // a Hermes that's already there when the daemon API is unreachable.
+        setNetworkError(err instanceof Error ? err.message : String(err));
+        setState('network-error');
       });
+  };
+
+  const copyInstallCommand = (): void => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(INSTALL_COMMAND).catch(() => {
+        // Clipboard write rejected (insecure context, permission denied).
+        // Silent — the operator can still manually select the text.
+      });
+    }
   };
 
   useEffect(() => {
@@ -130,7 +144,18 @@ export function HermesPrecheckPanel({
           Hermes Agent is not installed on this machine.
           Run this command in your terminal, then click Retry:
         </p>
-        <pre style={codeBlockStyle}>{INSTALL_COMMAND}</pre>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+          <pre style={{ ...codeBlockStyle, flex: 1 }}>{INSTALL_COMMAND}</pre>
+          <button
+            type="button"
+            data-testid="hermes-precheck-copy-install"
+            aria-label="Copy install command"
+            onClick={copyInstallCommand}
+            style={{ ...ghostButtonStyle, padding: '6px 10px', fontSize: '11px' }}
+          >
+            Copy
+          </button>
+        </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             type="button"
@@ -139,6 +164,37 @@ export function HermesPrecheckPanel({
             style={{ ...ghostButtonStyle, borderColor: 'var(--accent-sky)', color: 'var(--accent-sky)' }}
           >
             I&apos;ve installed Hermes — retry precheck
+          </button>
+          <button
+            type="button"
+            data-testid="hermes-precheck-cancel"
+            onClick={onCancel}
+            style={ghostButtonStyle}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (state === 'network-error') {
+    return (
+      <div data-testid="hermes-precheck-network-error" style={cardStyle}>
+        <span style={labelStyle}>Hermes precheck failed</span>
+        <p style={monoStyle}>
+          Could not reach the daemon API to run <code>hermes doctor</code>.
+          Check that the daemon is running and the UI token is valid.
+        </p>
+        {networkError ? <pre style={codeBlockStyle}>{networkError}</pre> : null}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            data-testid="hermes-precheck-retry"
+            onClick={runPrecheck}
+            style={{ ...ghostButtonStyle, borderColor: 'var(--accent-sky)', color: 'var(--accent-sky)' }}
+          >
+            Retry precheck
           </button>
           <button
             type="button"

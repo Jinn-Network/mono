@@ -121,6 +121,26 @@ describe('GET /api/hermes/doctor', () => {
     );
   });
 
+  it('treats spawnSync timeout as installed:true with exitCode null (config-issue, not missing binary)', async () => {
+    // Node's spawnSync sets result.signal when the child is killed by SIGTERM
+    // on timeout; error.code is ETIMEDOUT. The binary did execute, it just
+    // didn't finish — so installed must be true, not false.
+    spawnSyncMock.mockReturnValue({
+      status: null,
+      signal: 'SIGTERM',
+      error: Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+      stdout: '',
+      stderr: '',
+    });
+
+    const app = buildApp();
+    const res = await app.request('/api/hermes/doctor');
+    const body = (await res.json()) as HermesDoctorBody;
+
+    expect(body.installed).toBe(true);
+    expect(body.exitCode).toBeNull();
+  });
+
   it('truncates stdout and stderr to 4000 characters', async () => {
     const longOutput = 'x'.repeat(5000);
     spawnSyncMock.mockReturnValue({

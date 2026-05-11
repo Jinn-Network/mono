@@ -20,11 +20,11 @@ import {
   harnessDisplayName,
   harnessOptionLabel,
 } from '../configuration/harnessNames.js';
+import { PluginPicker } from '../configuration/PluginPicker.js';
+import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 const HERMES_AGENT_DESCRIPTION =
   'Self-improving agent by Nous Research. Built-in learning loop, 200+ models via OpenRouter plus Nous Portal, NVIDIA NIM, GLM, Kimi, and more.';
-import { PluginPicker } from '../configuration/PluginPicker.js';
-import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
  * Operator participation flow keyed by `manifestCid`.

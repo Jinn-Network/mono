@@ -38,7 +38,12 @@ export function addHermesDoctorRoutes(app: Hono, config: HermesDoctorConfig = {}
     });
 
     const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
-    const installed = errorCode !== 'ENOENT' && result.status !== null;
+    // installed=true means we found the binary. ENOENT is the only definitive
+    // not-installed signal. A timeout (ETIMEDOUT, result.signal set) means the
+    // binary did run but didn't finish in time — installed, but exitCode null;
+    // the panel surfaces this as a config-issue.
+    const notFound = errorCode === 'ENOENT';
+    const installed = !notFound && (result.status !== null || result.signal !== null);
     const body: HermesDoctorResponse = {
       installed,
       exitCode: result.status,
