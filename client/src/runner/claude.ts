@@ -78,6 +78,10 @@ export class ClaudeRunner implements Runner {
             // proxies through DAEMON_API_URL instead.
             JINN_CORPUS_SUBGRAPH_URL: context.corpusEnv?.subgraphUrl ?? '',
             JINN_CORPUS_IPFS_GATEWAY_URL: context.corpusEnv?.ipfsGatewayUrl ?? '',
+            JINN_CORPUS_RPC_URL: context.corpusEnv?.rpcUrl ?? '',
+            JINN_CORPUS_CHAIN_ID: context.corpusEnv?.chainId != null ? String(context.corpusEnv.chainId) : '',
+            JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS: context.corpusEnv?.identityRegistryAddress ?? '',
+            JINN_CORPUS_FROM_BLOCK: context.corpusEnv?.fromBlock != null ? String(context.corpusEnv.fromBlock) : '',
           },
         },
       },

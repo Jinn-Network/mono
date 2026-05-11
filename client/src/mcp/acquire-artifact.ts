@@ -24,6 +24,7 @@ export interface AcquireArtifactArgs {
   envelopeCid?: string;
   artifactType?: string;
   sources?: ArtifactSource[];
+  ownerSafe?: string;
 }
 
 export type AcquireArtifactResult =
@@ -103,6 +104,7 @@ export async function handleAcquireArtifact(
         envelopeCid: args.envelopeCid,
         artifactType: args.artifactType,
         sources: args.sources,
+        ownerSafe: args.ownerSafe,
       }),
     });
   } catch (err) {

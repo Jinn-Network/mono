@@ -24,6 +24,10 @@ export interface ClaudeCodeHarnessAdapterConfig {
   corpusEnv?: {
     subgraphUrl?: string;
     ipfsGatewayUrl?: string;
+    rpcUrl?: string;
+    chainId?: number;
+    identityRegistryAddress?: string;
+    fromBlock?: number;
   };
   /**
    * Plugin install directory for Claude Code. Defaults to
@@ -201,6 +205,10 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       DAEMON_API_TOKEN: this.daemonApiToken ?? '',
       JINN_CORPUS_SUBGRAPH_URL: this.corpusEnv?.subgraphUrl ?? '',
       JINN_CORPUS_IPFS_GATEWAY_URL: this.corpusEnv?.ipfsGatewayUrl ?? '',
+      JINN_CORPUS_RPC_URL: this.corpusEnv?.rpcUrl ?? '',
+      JINN_CORPUS_CHAIN_ID: this.corpusEnv?.chainId != null ? String(this.corpusEnv.chainId) : '',
+      JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS: this.corpusEnv?.identityRegistryAddress ?? '',
+      JINN_CORPUS_FROM_BLOCK: this.corpusEnv?.fromBlock != null ? String(this.corpusEnv.fromBlock) : '',
       ...(inputs.adapterEnv ?? {}),
     });
 

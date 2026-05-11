@@ -15,6 +15,7 @@ import type {
   ReadArgs,
 } from './types.js';
 import { runCorpusQuery } from './query.js';
+import { runOnchainCorpusQuery } from './onchain-query.js';
 import { fetchManifest } from './fetch.js';
 import { acquireArtifactContent } from './acquire.js';
 import type { ArtifactSource } from '../types/envelope.js';
@@ -72,7 +73,33 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
   const acquireFn = deps.acquireFn;
 
   async function query(q: CorpusQuery): Promise<EnvelopeRef[]> {
-    return runCorpusQuery(opts.subgraphUrl, q, fetchImpl);
+    const refs: EnvelopeRef[] = [];
+    const warnings: string[] = [];
+    let successfulSources = 0;
+    if (opts.subgraphUrl) {
+      try {
+        refs.push(...await runCorpusQuery(opts.subgraphUrl, q, fetchImpl));
+        successfulSources += 1;
+      } catch (err) {
+        warnings.push(`subgraph: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (opts.onchain) {
+      try {
+        refs.push(...await runOnchainCorpusQuery(q, opts.onchain));
+        successfulSources += 1;
+      } catch (err) {
+        warnings.push(`onchain: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const deduped = new Map<string, EnvelopeRef>();
+    for (const ref of refs) {
+      if (!deduped.has(ref.manifestCid)) deduped.set(ref.manifestCid, ref);
+    }
+    if (deduped.size === 0 && warnings.length > 0 && successfulSources === 0) {
+      throw new Error(`corpus query failed: ${warnings.join('; ')}`);
+    }
+    return [...deduped.values()];
   }
 
   async function fetchOne(ref: EnvelopeRef): Promise<ManifestPreview> {
@@ -105,7 +132,7 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
   async function acquireBySha256(
     sha256: string,
     access: { endpoint: string; priceUsdc: string },
-    hint?: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[] },
+    hint?: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[]; ownerSafe?: string },
   ): Promise<ArtifactContent> {
     return acquireArtifactContent({
       sha256,
@@ -118,6 +145,7 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
       envelopeCid: hint?.envelopeCid,
       sources: hint?.sources,
       ipfsGatewayUrl: opts.ipfsGatewayUrl,
+      ownerSafe: hint?.ownerSafe,
       acquireFn,
       fetchFromIpfs: fetchFromIpfsImpl,
     });

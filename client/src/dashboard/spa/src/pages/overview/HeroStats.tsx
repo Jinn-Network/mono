@@ -133,7 +133,7 @@ export function HeroStats({
         gap: '16px',
       }}
     >
-      <Stat label="Tasks delivered" value={tasksDelivered} />
+      <Stat label="Solutions delivered" value={tasksDelivered} />
       <Stat label="JINN earned" value={jinnEarned} unit="JINN" />
       <Stat label="Gas runway" value={gasRunwayDays} unit="days" />
       <StatusStat label={statusLabel} state={statusState} dot={statusDot} />

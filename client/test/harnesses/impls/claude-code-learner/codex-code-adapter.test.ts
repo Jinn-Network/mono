@@ -114,6 +114,48 @@ describe('CodexCodeHarnessAdapter', () => {
     expect(skill).not.toContain('do not call spawn_agent');
   });
 
+  it('uses JINN_CODEX_PATH when no codexPath is configured', async () => {
+    const previous = process.env['JINN_CODEX_PATH'];
+    process.env['JINN_CODEX_PATH'] = 'codex-env-test';
+    const calls: SpawnCall[] = [];
+    const spawnFn = vi.fn((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string }) => {
+      calls.push({ command, args, options });
+      return fakeCodexChild();
+    });
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-codex-env-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-codex-env-state-'));
+    try {
+      const adapter = new CodexCodeHarnessAdapter({
+        clientRoot: '/client/root',
+        _spawnFn: spawnFn as never,
+        _runSessionStartHook: false,
+      });
+
+      await adapter.runTask({
+        taskId: 'swe-rebench-task-restoration',
+        requestId: '0x' + '7'.repeat(64),
+        solverType: 'swe-rebench-v2.v1',
+        taskBody: sweTask() as never,
+        implStateDir,
+        workingDir,
+        pluginRoots: [sweRuntimePluginRoot, networkToolsPluginRoot],
+        windowStartTs: 1,
+        windowEndTs: 2,
+        msUntilEndTs: 1,
+        mode: 'train',
+        abort: new AbortController().signal,
+      }, learnerPluginRoot);
+
+      expect(calls[0]!.command).toBe('codex-env-test');
+      expect(calls[0]!.options.env?.JINN_CODEX_PATH).toBe('codex-env-test');
+    } finally {
+      if (previous === undefined) delete process.env['JINN_CODEX_PATH'];
+      else process.env['JINN_CODEX_PATH'] = previous;
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  });
+
   it('spawns codex exec with per-run plugin projection, MCP config, and cheap model', async () => {
     const calls: SpawnCall[] = [];
     const spawnFn = vi.fn((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string }) => {

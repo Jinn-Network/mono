@@ -312,6 +312,22 @@ export interface RecoveryReport {
   error?: string;
 }
 
+interface TickOptions {
+  /**
+   * When true, wait for newly scheduled task processing to settle before
+   * returning. Direct callers keep the historical behavior. The daemon's
+   * periodic loop uses wait=false so one long harness run cannot starve
+   * other in-flight tasks discovered later.
+   */
+  wait?: boolean;
+}
+
+interface ProcessReport {
+  requestId: string;
+  outcome: 'ok' | 'failed';
+  error?: string;
+}
+
 // ── TaskEngine ─────────────────────────────────────────────────────────
 
 export class TaskEngine {
@@ -361,9 +377,14 @@ export class TaskEngine {
   // Keyed by requestId; cleared after successful pack.
   private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string; sources?: ArtifactSource[] } | null>();
   private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
+  private readonly processingRequestIds = new Set<string>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
   private stopped = false;
+  private stopResolve?: () => void;
+  private readonly stopPromise = new Promise<void>((resolve) => {
+    this.stopResolve = resolve;
+  });
 
   constructor(opts: TaskEngineOptions) {
     this.persistence = new TaskRunPersistence(opts.store.db);
@@ -442,18 +463,24 @@ export class TaskEngine {
    *
    * Errors from individual tasks are logged but do not stop the loop.
    */
-  async tick(): Promise<void> {
+  async tick(options: TickOptions = {}): Promise<void> {
+    const wait = options.wait ?? true;
     const inflight = this.persistence.getInFlight();
-    const results = await Promise.allSettled(
-      inflight.map((task) => this.process(task.requestId)),
-    );
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i]!;
-      if (r.status === 'rejected') {
-        const requestId = inflight[i]!.requestId;
-        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
-        console.warn(`[harness-engine] tick: process(${requestId}) failed: ${reason}`);
+    const scheduled: Array<Promise<ProcessReport>> = [];
+    for (const task of inflight) {
+      const processPromise = this.scheduleProcess(task.requestId);
+      if (!processPromise) continue;
+      scheduled.push(processPromise);
+      if (!wait) {
+        void processPromise.then((report) => this.logProcessReport('tick', report));
       }
+    }
+
+    if (!wait) return;
+
+    const reports = await Promise.all(scheduled);
+    for (const report of reports) {
+      this.logProcessReport('tick', report);
     }
   }
 
@@ -464,18 +491,44 @@ export class TaskEngine {
   async runTickLoop(intervalMs: number): Promise<void> {
     while (!this.stopped) {
       try {
-        await this.tick();
+        await this.tick({ wait: false });
       } catch (err) {
         console.error('[harness-engine] tick loop error (continuing):', err instanceof Error ? err.message : err);
       }
       if (this.stopped) break;
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      await Promise.race([
+        new Promise((resolve) => setTimeout(resolve, intervalMs)),
+        this.stopPromise,
+      ]);
     }
   }
 
   /** Signal `runTickLoop` to exit at the next iteration. */
   stop(): void {
     this.stopped = true;
+    this.stopResolve?.();
+  }
+
+  private scheduleProcess(requestId: string): Promise<ProcessReport> | null {
+    if (this.processingRequestIds.has(requestId)) {
+      return null;
+    }
+    this.processingRequestIds.add(requestId);
+    return this.process(requestId)
+      .then((): ProcessReport => ({ requestId, outcome: 'ok' }))
+      .catch((err: unknown): ProcessReport => ({
+        requestId,
+        outcome: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      .finally(() => {
+        this.processingRequestIds.delete(requestId);
+      });
+  }
+
+  private logProcessReport(source: string, report: ProcessReport): void {
+    if (report.outcome !== 'failed') return;
+    console.warn(`[harness-engine] ${source}: process(${report.requestId}) failed: ${report.error ?? 'unknown error'}`);
   }
 
   /**

@@ -197,7 +197,7 @@ describe('LauncherLaunchedPage', () => {
     );
     // Status header still renders (with fallback name).
     expect(screen.getByTestId('launcher-launched-status-header')).toBeTruthy();
-    expect(screen.getByTestId('launcher-launched-name').textContent).toContain('unnamed');
+    expect(screen.getByTestId('launcher-launched-name').textContent).toBe('sn-1');
   });
 
   it('Pause button → dialog → confirm calls transitionLifecycle("paused") and refetches', async () => {

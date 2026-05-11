@@ -147,6 +147,7 @@ export function LauncherLaunchedPage({
 
   const record = recordQuery.data;
   const manifest = manifestQuery.data?.manifest;
+  const solverNetName = manifest?.name ?? record.summary?.name ?? record.solverNetId;
 
   return (
     <main
@@ -196,7 +197,7 @@ export function LauncherLaunchedPage({
       <PauseRetireDialog
         open={dialogTarget !== null}
         target={dialogTarget ?? 'paused'}
-        solverNetName={manifest?.name ?? ''}
+        solverNetName={solverNetName}
         pending={lifecycleMutation.isPending}
         errorMessage={dialogError ?? undefined}
         onCancel={() => {

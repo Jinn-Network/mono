@@ -422,9 +422,17 @@ export class IdentityRegistryBackedSolverNetRegistryClient
       // current cache-population paths, which always mark verified, but
       // we keep this branch defensive). Verify hash against on-chain
       // advertised hash if any setMetadata events exist for this cid.
-      const events = await this.subgraph.fetchSetMetadataEventsForCid({
-        manifestCid: args.manifestCid,
-      });
+      let events: SetMetadataEvent[] = [];
+      try {
+        events = await this.subgraph.fetchSetMetadataEventsForCid({
+          manifestCid: args.manifestCid,
+        });
+      } catch (err) {
+        console.error(
+          `[solvernet] manifest ${args.manifestCid}: subgraph hash check unavailable; ` +
+          `using IPFS CID-bound manifest (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
       if (events.length > 0) {
         const advertised = this.latestAdvertisedHash(events);
         const actual = manifestHash(cached);
@@ -528,9 +536,17 @@ export class IdentityRegistryBackedSolverNetRegistryClient
 
     let hash = expectedHash ?? null;
     if (hash === null) {
-      const events = await this.subgraph.fetchSetMetadataEventsForCid({
-        manifestCid,
-      });
+      let events: SetMetadataEvent[] = [];
+      try {
+        events = await this.subgraph.fetchSetMetadataEventsForCid({
+          manifestCid,
+        });
+      } catch (err) {
+        console.error(
+          `[solvernet] manifest ${manifestCid}: subgraph hash check unavailable; ` +
+          `using IPFS CID-bound manifest (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
       if (events.length > 0) {
         hash = this.latestAdvertisedHash(events);
       }

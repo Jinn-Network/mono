@@ -97,7 +97,9 @@ another operator without a CLI-only workaround:
 1. Operator A runs with donation mode enabled and produces artifacts.
 2. Operator B runs a solver or evaluator on SWE-rebench v2.
 3. Operator B discovers envelopes through Network Tools
-   (`search_records` or `inspect_record`).
+   (`search_records` or `inspect_record`) using canonical on-chain ERC-8004
+   metadata plus IPFS. A subgraph may accelerate this query, but it is not the
+   required correctness path.
 4. `acquire_artifact` receives the donated IPFS `sources` from the envelope and
    retrieves the artifact by CID.
 5. The artifact is mirrored into Operator B's network artifact cache with IPFS
@@ -154,7 +156,7 @@ yarn release:donation-consumption --producer-handshake-key <daemon-handshake-key
 `yarn corpus:e2e` and the donation smoke suites are mocked/fast-path coverage.
 They are useful diagnostics, but they are not the release proof for public
 donation mode. The release-blocking proof is `yarn release:donation-consumption`
-with fresh two-operator evidence.
+with fresh two-operator evidence from the canonical on-chain/IPFS path.
 The producer daemon prints the handshake key on startup; the gate uses it only
 to read the UI-protected producer artifact inventory.
 For the broader `yarn release:client --prepare` gate on `main`, export

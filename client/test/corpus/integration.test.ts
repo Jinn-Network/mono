@@ -107,4 +107,54 @@ describe('createCorpus.read (integration)', () => {
 
     expect(acquireFn).toHaveBeenCalledTimes(1); // second read served from cache
   });
+
+  it('falls back to an empty successful on-chain result when the subgraph is unavailable', async () => {
+    const fakeFetch = vi.fn(async () => new Response('rate limited', { status: 429 }));
+    const publicClient = {
+      getBlockNumber: vi.fn(async () => 20n),
+      getLogs: vi.fn(async () => []),
+    };
+    const corpus = createCorpus({
+      subgraphUrl: 'https://subgraph.test/graphql',
+      ipfsGatewayUrl: 'https://gateway.test',
+      store,
+      signer: { privateKey: TEST_KEY },
+      selfSafeAddress: '0x' + 'b'.repeat(40),
+      onchain: {
+        chainId: 84532,
+        identityRegistryAddress: '0x' + '8'.repeat(40),
+        fromBlock: 1,
+        publicClient,
+      },
+    }, { fetch: fakeFetch });
+
+    await expect(corpus.query({ limit: 5 })).resolves.toEqual([]);
+    expect(fakeFetch).toHaveBeenCalled();
+    expect(publicClient.getLogs).toHaveBeenCalled();
+  });
+
+  it('surfaces an actionable error when all configured corpus indexes fail', async () => {
+    const fakeFetch = vi.fn(async () => new Response('rate limited', { status: 429 }));
+    const publicClient = {
+      getBlockNumber: vi.fn(async () => { throw new Error('rpc unavailable'); }),
+      getLogs: vi.fn(async () => []),
+    };
+    const corpus = createCorpus({
+      subgraphUrl: 'https://subgraph.test/graphql',
+      ipfsGatewayUrl: 'https://gateway.test',
+      store,
+      signer: { privateKey: TEST_KEY },
+      selfSafeAddress: '0x' + 'b'.repeat(40),
+      onchain: {
+        chainId: 84532,
+        identityRegistryAddress: '0x' + '8'.repeat(40),
+        fromBlock: 1,
+        publicClient,
+      },
+    }, { fetch: fakeFetch });
+
+    await expect(corpus.query({ limit: 5 })).rejects.toThrow(
+      /corpus query failed: subgraph: .*429.*onchain: .*rpc unavailable/,
+    );
+  });
 });

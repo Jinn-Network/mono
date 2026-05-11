@@ -10,7 +10,7 @@
  * chain calls; no real network requests.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
 
@@ -662,6 +662,40 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const fetched = await client.getManifest({ manifestCid });
     expect(fetched.solverNetId).toBe(manifest.solverNetId);
     expect(fetched.signature.value).toBe(manifest.signature.value);
+  });
+
+  it('uses the CID-bound IPFS manifest when the subgraph hash check is unavailable', async () => {
+    const sharedIpfs = makeMockIpfs();
+    const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      subgraph: makeMockSubgraph(),
+      network: 'base-sepolia',
+    });
+    const { manifest, signer } = await buildSignedManifest();
+    const { manifestCid } = await publisherClient.publishManifest({ manifest, signer });
+
+    const subgraph = makeMockSubgraph();
+    subgraph.fetchSetMetadataEventsForCid = async () => {
+      throw new Error('subgraph HTTP 429');
+    };
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const reader = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      subgraph,
+      network: 'base-sepolia',
+    });
+
+    try {
+      const fetched = await reader.getManifest({ manifestCid });
+      expect(fetched.solverNetId).toBe(manifest.solverNetId);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('subgraph hash check unavailable'),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('rejects when the canonical hash of fetched IPFS content differs from the on-chain advertised hash', async () => {

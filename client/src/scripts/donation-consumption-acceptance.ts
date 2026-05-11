@@ -3,22 +3,27 @@
  * Release-blocking two-operator donation consumption gate.
  *
  * This is intentionally not a mocked corpus test. It expects real testnet
- * subgraph/IPFS discovery, a producer daemon with fresh donated SWE execution
+ * canonical on-chain/IPFS discovery, a producer daemon with fresh donated SWE execution
  * data, and a separate consumer operator home/db that can consume that data
  * through the same MCP tools exposed to the learner runtime.
  */
 
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Store } from '../store/store.js';
 import { DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_SUBGRAPH_URL } from '../config.js';
+import {
+  DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK,
+  DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID,
+  runOnchainCorpusQuery,
+} from '../corpus/onchain-query.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 function findPackageRoot(startDir: string): string {
@@ -69,6 +74,7 @@ interface LocalConfig {
   dbPath?: string;
   earningDir?: string;
   subgraphUrl?: string;
+  taskDiscoveryAllowedTaskIds?: string[];
   ipfsGatewayUrl?: string;
   ipfsRegistryUrl?: string;
   pollIntervalMs?: number;
@@ -92,7 +98,7 @@ interface VerifiedDonation {
   trajectorySourceCid: string;
   envelope: JsonRecord;
   redactedEnvelope: JsonRecord;
-  subgraphExecution: JsonRecord;
+  indexExecution: JsonRecord;
 }
 
 interface HeaderAuth {
@@ -130,6 +136,10 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function defaultRpcUrlForChain(chainId: number): string {
+  return chainId === 8453 ? 'https://mainnet.base.org' : 'https://sepolia.base.org';
+}
+
 function asInt(value: unknown, fallback: number): number {
   const n = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(n) ? n : fallback;
@@ -143,6 +153,17 @@ function readJsonFile(path: string): JsonRecord {
 function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function archiveManagedConsumerDb(dbPath: string, evidenceDir: string): string[] {
+  const archived: string[] = [];
+  for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (!existsSync(path)) continue;
+    const target = join(evidenceDir, `previous-${basename(path)}`);
+    renameSync(path, target);
+    archived.push(target);
+  }
+  return archived;
 }
 
 function defaultClientHome(home: string): string {
@@ -233,25 +254,99 @@ async function querySubgraphExecution(subgraphUrl: string, manifestCid: string):
   });
   const errors = body.errors;
   if (Array.isArray(errors) && errors.length > 0) {
-    fail('subgraph_query_failed', 'Subgraph returned errors while checking donated envelope indexing.', { errors });
+    throw new Error(`Subgraph returned errors while checking donated envelope indexing: ${JSON.stringify(errors)}`);
   }
   const executions = ((body.data as JsonRecord | undefined)?.executions ?? []) as JsonRecord[];
   const execution = executions[0];
   return execution ?? null;
 }
 
-async function waitForSubgraphExecution(opts: {
-  subgraphUrl: string;
+async function querySubgraphTaskIdByTaskCidDigest(subgraphUrl: string, taskCidDigest: string): Promise<string | null> {
+  const body = await fetchJson(subgraphUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      query: `
+        query TaskByTaskCidDigest($taskCidDigest: Bytes!) {
+          tasks(first: 1, where: { taskCidDigest: $taskCidDigest }) {
+            id
+            taskId
+            taskCidDigest
+            createdAtTx
+          }
+        }
+      `,
+      variables: { taskCidDigest: taskCidDigest.toLowerCase() },
+    }),
+  });
+  const errors = body.errors;
+  if (Array.isArray(errors) && errors.length > 0) {
+    throw new Error(`Subgraph returned errors while resolving producer task id: ${JSON.stringify(errors)}`);
+  }
+  const tasks = ((body.data as JsonRecord | undefined)?.tasks ?? []) as JsonRecord[];
+  const task = tasks[0];
+  return asString(task?.taskId) ?? asString(task?.id) ?? null;
+}
+
+async function queryCanonicalExecutionIndex(opts: {
+  subgraphUrl?: string;
+  rpcUrl?: string;
+  chainId: number;
+  manifestCid: string;
+}): Promise<JsonRecord | null> {
+  const warnings: string[] = [];
+  if (opts.subgraphUrl) {
+    try {
+      const subgraphExecution = await querySubgraphExecution(opts.subgraphUrl, opts.manifestCid);
+      if (subgraphExecution) return { source: 'subgraph', ...subgraphExecution };
+    } catch (err) {
+      warnings.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  const identityRegistryAddress = DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID[opts.chainId];
+  if (opts.rpcUrl && identityRegistryAddress) {
+    try {
+      const refs = await runOnchainCorpusQuery(
+        { limit: 100 },
+        {
+          rpcUrl: opts.rpcUrl,
+          chainId: opts.chainId,
+          identityRegistryAddress,
+          fromBlock: DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[opts.chainId],
+        },
+      );
+      const ref = refs.find((candidate) => candidate.manifestCid === opts.manifestCid);
+      if (ref) {
+        return {
+          source: 'onchain',
+          manifestCid: ref.manifestCid,
+          manifestHash: ref.manifestHash,
+          tier: ref.evidenceTier,
+          publishedAt: ref.publishedAt,
+          operator: ref.operator,
+        };
+      }
+    } catch (err) {
+      warnings.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return warnings.length > 0 ? { source: 'unavailable', warnings } : null;
+}
+
+async function waitForCanonicalExecutionIndex(opts: {
+  subgraphUrl?: string;
+  rpcUrl?: string;
+  chainId: number;
   manifestCid: string;
   deadline: number;
   pollMs: number;
 }): Promise<JsonRecord> {
   while (Date.now() < opts.deadline) {
-    const execution = await querySubgraphExecution(opts.subgraphUrl, opts.manifestCid);
-    if (execution) return execution;
+    const execution = await queryCanonicalExecutionIndex(opts);
+    if (execution && execution.source !== 'unavailable') return execution;
     await boundedPollSleep(opts.deadline, opts.pollMs);
   }
-  fail('envelope_not_indexed', 'Donated envelope is not visible in the configured subgraph.', {
+  fail('envelope_not_indexed', 'Donated envelope is not visible through the canonical on-chain/IPFS index path.', {
     manifestCid: opts.manifestCid,
   });
 }
@@ -344,7 +439,7 @@ async function verifyTrajectorySource(envelope: JsonRecord, ipfsGatewayUrl: stri
 async function verifyDonatedEnvelope(
   artifact: ProducerArtifact,
   ipfsGatewayUrl: string,
-  subgraphUrl: string,
+  indexOpts: { subgraphUrl?: string; rpcUrl?: string; chainId: number },
   deadline: number,
   pollMs: number,
 ): Promise<VerifiedDonation> {
@@ -400,8 +495,8 @@ async function verifyDonatedEnvelope(
     }
   }
   const trajectorySourceCid = await verifyTrajectorySource(envelope, ipfsGatewayUrl);
-  const subgraphExecution = await waitForSubgraphExecution({
-    subgraphUrl,
+  const indexExecution = await waitForCanonicalExecutionIndex({
+    ...indexOpts,
     manifestCid: artifact.envelopeCid,
     deadline,
     pollMs,
@@ -412,7 +507,7 @@ async function verifyDonatedEnvelope(
     trajectorySourceCid,
     envelope,
     redactedEnvelope: redactEnvelope(envelope),
-    subgraphExecution,
+    indexExecution,
   };
 }
 
@@ -806,6 +901,69 @@ function startConsumerDaemon(opts: {
   return child;
 }
 
+function childHasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (childHasExited(child)) return Promise.resolve(true);
+  return new Promise((resolvePromise) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolvePromise(childHasExited(child));
+    }, timeoutMs);
+    const done = () => {
+      cleanup();
+      resolvePromise(true);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off('exit', done);
+      child.off('error', done);
+    };
+    child.once('exit', done);
+    child.once('error', done);
+  });
+}
+
+async function stopManagedConsumerDaemon(opts: {
+  child: ChildProcess;
+  configPath: string;
+  home: string;
+  apiToken: string;
+  evidenceDir: string;
+  codexHome?: string;
+}): Promise<void> {
+  const stopResult = spawnSync(process.execPath, [jinnBinPath, 'stop', '--json', '--config', opts.configPath], {
+    cwd: clientRoot,
+    env: buildConsumerChildEnv(opts.home, opts.apiToken, opts.codexHome),
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  writeFileSync(join(opts.evidenceDir, 'consumer-daemon-stop.stdout'), stopResult.stdout ?? '', { flag: 'a' });
+  writeFileSync(join(opts.evidenceDir, 'consumer-daemon-stop.stderr'), stopResult.stderr ?? '', { flag: 'a' });
+
+  if (!childHasExited(opts.child)) {
+    opts.child.kill('SIGTERM');
+    await waitForChildExit(opts.child, 5_000);
+  }
+  if (!childHasExited(opts.child)) {
+    opts.child.kill('SIGKILL');
+    await waitForChildExit(opts.child, 5_000);
+  }
+
+  opts.child.stdout?.destroy();
+  opts.child.stderr?.destroy();
+  if (!childHasExited(opts.child)) {
+    fail('consumer_daemon_cleanup_failed', 'Managed consumer daemon did not exit after the live gate completed.', {
+      pid: opts.child.pid,
+      stopStatus: stopResult.status,
+      stdoutPath: join(opts.evidenceDir, 'consumer-daemon-stop.stdout'),
+      stderrPath: join(opts.evidenceDir, 'consumer-daemon-stop.stderr'),
+    });
+  }
+}
+
 async function waitForStatus(opts: {
   baseUrl: string;
   deadline: number;
@@ -840,8 +998,12 @@ async function callMcpTool(opts: {
   storePath: string;
   daemonApiUrl: string;
   daemonApiToken: string;
-  subgraphUrl: string;
+  subgraphUrl?: string;
   ipfsGatewayUrl: string;
+  rpcUrl?: string;
+  chainId: number;
+  identityRegistryAddress?: string;
+  fromBlock?: number;
 }): Promise<JsonRecord> {
   const client = new Client({ name: 'donation-consumption-acceptance', version: '1.0.0' });
   const transport = new StdioClientTransport({
@@ -853,8 +1015,12 @@ async function callMcpTool(opts: {
       STORE_PATH: opts.storePath,
       DAEMON_API_URL: opts.daemonApiUrl,
       DAEMON_API_TOKEN: opts.daemonApiToken,
-      JINN_CORPUS_SUBGRAPH_URL: opts.subgraphUrl,
+      JINN_CORPUS_SUBGRAPH_URL: opts.subgraphUrl ?? '',
       JINN_CORPUS_IPFS_GATEWAY_URL: opts.ipfsGatewayUrl,
+      JINN_CORPUS_RPC_URL: opts.rpcUrl ?? '',
+      JINN_CORPUS_CHAIN_ID: String(opts.chainId),
+      JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS: opts.identityRegistryAddress ?? '',
+      JINN_CORPUS_FROM_BLOCK: opts.fromBlock != null ? String(opts.fromBlock) : '',
       DESIRED_STATE_ID: 'donation-consumption-acceptance',
       DESIRED_STATE_DESCRIPTION: 'Verify cross-operator donated SWE execution data consumption.',
       DESIRED_STATE_ROLE: 'restoration',
@@ -884,15 +1050,26 @@ async function callMcpTool(opts: {
   }
 }
 
-function findDonatedArtifactRecord(searchResult: JsonRecord, proof: VerifiedDonation): JsonRecord {
+function hasDonatedIpfsSourceArgs(artifact: JsonRecord): boolean {
+  const acquisition = artifact.acquisition as JsonRecord | undefined;
+  const args = acquisition?.arguments as JsonRecord | undefined;
+  const sources = Array.isArray(args?.sources) ? args.sources as JsonRecord[] : [];
+  return sources.some((source) => source.kind === 'ipfs' && source.encoding === 'jinn.artifact.donation.v1');
+}
+
+export function findDonatedArtifactRecord(searchResult: JsonRecord, proof: VerifiedDonation): JsonRecord {
   const records = Array.isArray(searchResult.records) ? searchResult.records as JsonRecord[] : [];
+  const matches: JsonRecord[] = [];
   for (const record of records) {
     const envelopeRef = record.envelopeRef as JsonRecord | null | undefined;
     if (envelopeRef?.cid !== proof.artifact.envelopeCid) continue;
     const artifactRefs = Array.isArray(record.artifactRefs) ? record.artifactRefs as JsonRecord[] : [];
     const artifact = artifactRefs.find((candidate) => candidate.sha256 === proof.artifact.sha256);
-    if (artifact) return artifact;
+    if (artifact) matches.push(artifact);
   }
+  const networkAcquisition = matches.find(hasDonatedIpfsSourceArgs);
+  if (networkAcquisition) return networkAcquisition;
+  if (matches[0]) return matches[0];
   fail('consumer_discovery_missing', 'Consumer MCP search_records did not discover the producer donated artifact.', {
     envelopeCid: proof.artifact.envelopeCid,
     sha256: proof.artifact.sha256,
@@ -908,13 +1085,78 @@ function acquisitionArgsFromArtifact(artifact: JsonRecord): JsonRecord {
       artifact,
     });
   }
-  const sources = Array.isArray(args.sources) ? args.sources as JsonRecord[] : [];
-  if (!sources.some((source) => source.kind === 'ipfs' && source.encoding === 'jinn.artifact.donation.v1')) {
+  if (!hasDonatedIpfsSourceArgs(artifact)) {
     fail('consumer_acquisition_sources_missing', 'Discovered artifact acquisition args do not include donated IPFS sources.', {
       args,
     });
   }
   return args;
+}
+
+function proofParticipantSafe(proof: VerifiedDonation): string {
+  const participant = proof.envelope.participant;
+  if (participant && typeof participant === 'object' && !Array.isArray(participant)) {
+    const safe = (participant as JsonRecord).safeAddress;
+    if (typeof safe === 'string' && safe) return safe;
+  }
+  return '';
+}
+
+function producerTaskCreationTx(proof: VerifiedDonation): string | undefined {
+  const task = proof.envelope.task;
+  if (!task || typeof task !== 'object' || Array.isArray(task)) return undefined;
+  return asString((task as JsonRecord).onchainCreationTx);
+}
+
+function producerTaskCidDigest(proof: VerifiedDonation): string | undefined {
+  const task = proof.envelope.task;
+  if (!task || typeof task !== 'object' || Array.isArray(task)) return undefined;
+  const cid = asString((task as JsonRecord).cid);
+  if (!cid) return undefined;
+  if (/^0x[0-9a-fA-F]{64}$/.test(cid)) return cid;
+  const rawMultihashPrefix = 'f01551220';
+  if (cid.startsWith(rawMultihashPrefix) && cid.length === rawMultihashPrefix.length + 64) {
+    return `0x${cid.slice(rawMultihashPrefix.length)}`;
+  }
+  return undefined;
+}
+
+export async function scopeConsumerConfigToProducerTask(opts: {
+  consumerConfig: LocalConfig;
+  consumerConfigPath: string;
+  proof: VerifiedDonation;
+  subgraphUrl: string;
+  evidenceDir?: string;
+}): Promise<string> {
+  const taskCidDigest = producerTaskCidDigest(opts.proof);
+  if (!taskCidDigest) {
+    fail('producer_task_scope_missing_cid_digest', 'Producer envelope is missing a task CID digest, so the gate cannot scope consumer task discovery.', {
+      envelopeCid: opts.proof.artifact.envelopeCid,
+    });
+  }
+  const createdAtTx = producerTaskCreationTx(opts.proof);
+  const taskId = await querySubgraphTaskIdByTaskCidDigest(opts.subgraphUrl, taskCidDigest);
+  if (!taskId) {
+    fail('producer_task_scope_unresolved', 'Could not resolve the producer on-chain task id from the configured subgraph.', {
+      envelopeCid: opts.proof.artifact.envelopeCid,
+      taskCidDigest,
+      createdAtTx,
+      subgraphUrl: opts.subgraphUrl,
+    });
+  }
+
+  opts.consumerConfig.taskDiscoveryAllowedTaskIds = [taskId];
+  writeJson(opts.consumerConfigPath, opts.consumerConfig);
+  if (opts.evidenceDir) {
+    writeJson(join(opts.evidenceDir, 'consumer-task-scope.json'), {
+      allowedTaskIds: [taskId],
+      producerEnvelopeCid: opts.proof.artifact.envelopeCid,
+      producerTaskCidDigest: taskCidDigest,
+      producerTaskCreatedAtTx: createdAtTx ?? null,
+      consumerConfigPath: opts.consumerConfigPath,
+    });
+  }
+  return taskId;
 }
 
 function parseMaybeJson(bytes: Buffer): JsonRecord | null {
@@ -929,6 +1171,7 @@ function parseMaybeJson(bytes: Buffer): JsonRecord | null {
 export async function waitForConsumerSolveAndEvaluatorProof(opts: {
   storePath: string;
   proof: VerifiedDonation;
+  allowedTaskId?: string;
   startedAt: Date;
   acquisitionStartedAt: Date;
   acquisitionFinishedAt: Date;
@@ -940,21 +1183,57 @@ export async function waitForConsumerSolveAndEvaluatorProof(opts: {
     const store = new Store(opts.storePath);
     try {
       const networkRow = store.getNetworkArtifact(opts.proof.artifact.sha256);
+      const runMatches = (
+        requestId: string | null | undefined,
+        expectedRole: 'restoration' | 'evaluation',
+      ): boolean => {
+        if (!requestId) return false;
+        const row = store.db.prepare(`
+          SELECT
+            task_id AS taskId,
+            task_role AS taskRole,
+            state,
+            manifest_cid AS manifestCid,
+            delivery_tx_hash AS deliveryTxHash
+          FROM task_runs
+          WHERE request_id = ?
+        `).get(requestId) as {
+          taskId?: string | null;
+          taskRole?: string | null;
+          state?: string | null;
+          manifestCid?: string | null;
+          deliveryTxHash?: string | null;
+        } | undefined;
+        if (!row) return false;
+        if (!opts.reuseExisting && opts.allowedTaskId && row.taskId !== opts.allowedTaskId) return false;
+        return (
+          row.taskRole === expectedRole &&
+          row.state === 'COMPLETE' &&
+          typeof row.manifestCid === 'string' &&
+          row.manifestCid.length > 0 &&
+          typeof row.deliveryTxHash === 'string' &&
+          row.deliveryTxHash.length > 0
+        );
+      };
       const solutionRow = store.listServedArtifactMetadata({
         artifactType: SWE_SOLUTION_ARTIFACT_TYPE,
         limit: 50,
       }).find((row) => (
-        opts.reuseExisting ||
-        Date.parse(row.createdAt) >= opts.acquisitionFinishedAt.getTime()
+        (opts.reuseExisting || Date.parse(row.createdAt) >= opts.acquisitionFinishedAt.getTime()) &&
+        runMatches(row.requestId, 'restoration')
       ));
       const verdictRow = store.listServedArtifactMetadata({ limit: 100 }).find((row) => {
         if (!VERDICT_ARTIFACT_TYPES.has(row.artifactType)) return false;
-        return opts.reuseExisting || Date.parse(row.createdAt) >= opts.acquisitionFinishedAt.getTime();
+        return (
+          (opts.reuseExisting || Date.parse(row.createdAt) >= opts.acquisitionFinishedAt.getTime()) &&
+          runMatches(row.requestId, 'evaluation')
+        );
       });
       if (
         networkRow &&
         networkRow.envelopeCid === opts.proof.artifact.envelopeCid &&
         networkRow.sourceEndpoint === `ipfs://${opts.proof.sourceCid}` &&
+        networkRow.sourceOperator === proofParticipantSafe(opts.proof) &&
         networkRow.paidAmountUsdc === '0' &&
         (opts.reuseExisting || Date.parse(networkRow.fetchedAt) >= opts.startedAt.getTime()) &&
         (opts.reuseExisting || Date.parse(networkRow.lastUsedAt) >= opts.acquisitionStartedAt.getTime()) &&
@@ -996,6 +1275,7 @@ export async function waitForConsumerSolveAndEvaluatorProof(opts: {
     sha256: opts.proof.artifact.sha256,
     envelopeCid: opts.proof.artifact.envelopeCid,
     sourceCid: opts.proof.sourceCid,
+    allowedTaskId: opts.allowedTaskId,
     acquisitionStartedAt: opts.acquisitionStartedAt.toISOString(),
     acquisitionFinishedAt: opts.acquisitionFinishedAt.toISOString(),
     requiredArtifacts: [SWE_SOLUTION_ARTIFACT_TYPE, ...VERDICT_ARTIFACT_TYPES],
@@ -1097,6 +1377,10 @@ async function main(): Promise<void> {
   });
   const subgraphUrl = asString(producerConfig.subgraphUrl) ?? DEFAULT_TESTNET_SUBGRAPH_URL;
   const ipfsGatewayUrl = asString(producerConfig.ipfsGatewayUrl) ?? DEFAULT_IPFS_GATEWAY_URL;
+  const chainId = producerConfig.network === 'mainnet' ? 8453 : 84532;
+  const producerRpcUrl = asString(producerConfig.rpcUrl) ?? defaultRpcUrlForChain(chainId);
+  const corpusFromBlock = Number(DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[chainId] ?? 0n);
+  const identityRegistryAddress = DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID[chainId];
 
   const consumerHome = resolve(parsed.values['consumer-home'] ?? join(clientRoot, '.acceptance', 'donation-consumer'));
   const consumerCodexHome = resolveConsumerCodexHome(parsed.values['consumer-codex-home']);
@@ -1125,9 +1409,12 @@ async function main(): Promise<void> {
     });
     writeJson(consumerConfigPath, consumerConfig);
   }
-  const consumerConfig = loadLocalConfig(consumerConfigPath);
+  let consumerConfig = loadLocalConfig(consumerConfigPath);
   const consumerDbPath = configDbPath(consumerConfig, consumerHome);
   const consumerEarningDir = configEarningDir(consumerConfig, consumerHome);
+  const archivedConsumerDb = (!attachConsumerUrl && !parsed.values['consumer-config'] && !reuseExisting)
+    ? archiveManagedConsumerDb(consumerDbPath, evidenceDir)
+    : [];
   assertConsumerConfiguredForSwe(consumerConfig, consumerConfigPath);
   const consumerEvaluatorStatePath = ensureConsumerSweEvaluatorState({
     producerConfig,
@@ -1152,6 +1439,7 @@ async function main(): Promise<void> {
     consumerHome,
     consumerCodexHome: consumerCodexHome ?? '<OPENAI_API_KEY>',
     consumerDbPath,
+    archivedConsumerDb,
     consumerEarningDir,
     consumerEvaluatorStatePath,
     subgraphUrl,
@@ -1168,15 +1456,31 @@ async function main(): Promise<void> {
     pollMs,
     producerAuth,
   });
-  console.log('[donation-consumption] verifying producer IPFS envelope and subgraph indexing');
-  const donationProof = await verifyDonatedEnvelope(producerArtifact, ipfsGatewayUrl, subgraphUrl, deadline, pollMs);
+  console.log('[donation-consumption] verifying producer IPFS envelope and canonical index visibility');
+  const donationProof = await verifyDonatedEnvelope(
+    producerArtifact,
+    ipfsGatewayUrl,
+    { subgraphUrl, rpcUrl: producerRpcUrl, chainId },
+    deadline,
+    pollMs,
+  );
   writeJson(join(evidenceDir, 'producer-proof.json'), {
     artifact: donationProof.artifact,
     sourceCid: donationProof.sourceCid,
     trajectorySourceCid: donationProof.trajectorySourceCid,
-    subgraphExecution: donationProof.subgraphExecution,
+    indexExecution: donationProof.indexExecution,
   });
   writeJson(join(evidenceDir, 'producer-envelope-redacted.json'), donationProof.redactedEnvelope);
+
+  const allowedConsumerTaskId = await scopeConsumerConfigToProducerTask({
+    consumerConfig,
+    consumerConfigPath,
+    proof: donationProof,
+    subgraphUrl,
+    evidenceDir,
+  });
+  consumerConfig = loadLocalConfig(consumerConfigPath);
+  console.log(`[donation-consumption] scoped consumer task discovery to producer task ${allowedConsumerTaskId}`);
 
   let consumerProcess: ChildProcess | null = null;
   if (!attachConsumerUrl) {
@@ -1214,6 +1518,10 @@ async function main(): Promise<void> {
       daemonApiToken: consumerApiToken,
       subgraphUrl,
       ipfsGatewayUrl,
+      rpcUrl: asString(consumerConfig.rpcUrl) ?? producerRpcUrl,
+      chainId,
+      identityRegistryAddress,
+      fromBlock: corpusFromBlock,
     });
     writeJson(join(evidenceDir, 'consumer-search-records.json'), searchResult);
     const discoveredArtifact = findDonatedArtifactRecord(searchResult, donationProof);
@@ -1230,6 +1538,10 @@ async function main(): Promise<void> {
       daemonApiToken: consumerApiToken,
       subgraphUrl,
       ipfsGatewayUrl,
+      rpcUrl: asString(consumerConfig.rpcUrl) ?? producerRpcUrl,
+      chainId,
+      identityRegistryAddress,
+      fromBlock: corpusFromBlock,
     });
     const acquisitionFinishedAt = new Date();
     writeJson(join(evidenceDir, 'consumer-acquire-artifact.json'), {
@@ -1263,6 +1575,7 @@ async function main(): Promise<void> {
     const liveProof = await waitForConsumerSolveAndEvaluatorProof({
       storePath: consumerDbPath,
       proof: donationProof,
+      allowedTaskId: allowedConsumerTaskId,
       startedAt,
       acquisitionStartedAt,
       acquisitionFinishedAt,
@@ -1281,6 +1594,7 @@ async function main(): Promise<void> {
       producerArtifact: donationProof.artifact,
       sourceCid: donationProof.sourceCid,
       trajectorySourceCid: donationProof.trajectorySourceCid,
+      allowedConsumerTaskId,
       acquisitionStartedAt: acquisitionStartedAt.toISOString(),
       acquisitionFinishedAt: acquisitionFinishedAt.toISOString(),
       consumerNetworkArtifact: liveProof.networkRow,
@@ -1290,8 +1604,15 @@ async function main(): Promise<void> {
     writeJson(join(evidenceDir, 'summary.json'), summary);
     console.log(JSON.stringify(summary, null, 2));
   } finally {
-    if (consumerProcess && !consumerProcess.killed) {
-      consumerProcess.kill('SIGTERM');
+    if (consumerProcess) {
+      await stopManagedConsumerDaemon({
+        child: consumerProcess,
+        configPath: consumerConfigPath,
+        home: consumerHome,
+        apiToken: consumerApiToken,
+        evidenceDir,
+        codexHome: consumerCodexHome,
+      });
     }
   }
 }

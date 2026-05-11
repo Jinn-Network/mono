@@ -26,6 +26,10 @@ export interface RunnerContext {
   corpusEnv?: {
     subgraphUrl?: string;
     ipfsGatewayUrl?: string;
+    rpcUrl?: string;
+    chainId?: number;
+    identityRegistryAddress?: string;
+    fromBlock?: number;
   };
   /**
    * In-run trajectory collector. When provided, the runner emits a

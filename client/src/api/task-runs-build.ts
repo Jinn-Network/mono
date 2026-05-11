@@ -24,6 +24,8 @@ export interface TaskRunsStatus {
     observedTasks: number;
     activeTaskRuns: number;
     completed: number;
+    solutions: number;
+    verdicts: number;
     failed: number;
   };
   inFlight: TaskRunSummary[];
@@ -37,12 +39,16 @@ export function gatherTaskRunsStatus(store: Store): TaskRunsStatus {
   const failed = persistence.getByState('FAILED');
   const allRuns = [...inFlight, ...complete, ...failed];
   const allRecent = [...allRuns].sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt);
+  const solutions = complete.filter((run) => run.taskRole !== 'evaluation');
+  const verdicts = complete.filter((run) => run.taskRole === 'evaluation');
 
   return {
     totals: {
       observedTasks: distinctTaskCount(allRuns),
       activeTaskRuns: inFlight.length,
       completed: complete.length,
+      solutions: solutions.length,
+      verdicts: verdicts.length,
       failed: failed.length,
     },
     inFlight: [...inFlight]

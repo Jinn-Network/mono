@@ -77,6 +77,7 @@ import type { Harness } from './harnesses/types.js';
 import { createClients } from './adapters/mech/safe.js';
 import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
+import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from './corpus/onchain-query.js';
 import { CapturesStore } from './store/captures.js';
 import { createLiveCapturePublisher } from './captures/live-publisher.js';
 import { startReceiver, type Receiver } from './trajectory/receiver.js';
@@ -1469,10 +1470,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
-    taskDiscovery: config.subgraphUrl && taskDiscoveryManifestCids.length > 0
+    taskDiscovery: taskDiscoveryManifestCids.length > 0
       ? {
-          subgraphUrl: config.subgraphUrl,
+          ...(config.subgraphUrl ? { subgraphUrl: config.subgraphUrl } : {}),
           solverNetManifestCids: taskDiscoveryManifestCids,
+          onchainFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
+          ...(config.taskDiscoveryAllowedTaskIds?.length
+            ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
+            : {}),
         }
       : undefined,
   }, sharedStore);
@@ -1583,11 +1588,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   }
 
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) tasks
+  const corpusChainId = config.network === 'testnet' ? 84532 : 8453;
+  const corpusFromBlock = Number(DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[corpusChainId] ?? 0n);
   const corpusEnv: RunnerContext['corpusEnv'] | undefined =
-    config.subgraphUrl?.trim()
+    (config.subgraphUrl?.trim() || identityRegistryAddress)
       ? {
-          subgraphUrl: config.subgraphUrl,
+          ...(config.subgraphUrl?.trim() ? { subgraphUrl: config.subgraphUrl } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
+          rpcUrl: config.rpcUrl,
+          chainId: corpusChainId,
+          ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
+          ...(corpusFromBlock > 0 ? { fromBlock: corpusFromBlock } : {}),
         }
       : undefined;
 
@@ -1990,21 +2001,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // Built once per daemon lifetime; the agent EOA private key stays in this
   // process's memory and never crosses into the MCP subprocess. The MCP
   // tool `acquire_artifact` proxies to `POST /v1/artifacts/acquire` instead.
-  // Disabled when subgraphUrl is unset — the API route is then absent and
-  // MCP falls back to local-only behaviour with a warning.
-  const corpusFactory = config.subgraphUrl?.trim()
+  // Enabled when either the optional subgraph accelerator or canonical
+  // on-chain ERC-8004/IPFS discovery is configured. Otherwise the API route is
+  // absent and MCP falls back to local-only behaviour with a warning.
+  const corpusFactory = (config.subgraphUrl?.trim() || identityRegistryAddress)
     ? (store: Store) =>
         (corpusForApi = createCorpus({
-          subgraphUrl: config.subgraphUrl!,
+          ...(config.subgraphUrl?.trim() ? { subgraphUrl: config.subgraphUrl } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           store,
           signer: { privateKey: agentPrivateKey },
           selfSafeAddress: safeAddress,
+          ...(identityRegistryAddress
+            ? {
+                onchain: {
+                  rpcUrl: config.rpcUrl,
+                  chainId: corpusChainId,
+                  identityRegistryAddress,
+                  ...(corpusFromBlock > 0 ? { fromBlock: corpusFromBlock } : {}),
+                },
+              }
+            : {}),
         }))
     : undefined;
   if (!corpusFactory) {
     console.warn(
-      '[main] Corpus disabled (config.subgraphUrl not set); ' +
+      '[main] Corpus disabled (no subgraphUrl or on-chain identity registry); ' +
         'MCP record lookup and artifact acquisition network branches will be unavailable.',
     );
   }

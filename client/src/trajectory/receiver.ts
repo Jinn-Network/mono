@@ -325,11 +325,28 @@ async function startHttpServer(
     port: addr.port,
     close: () =>
       new Promise<void>((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        const timer = setTimeout(done, 2_000);
+        timer.unref?.();
         // `server.close()` stops accepting new connections but lets keep-alive
         // sockets idle on. Without `closeIdleConnections()` shutdown can hang
         // for the full keep-alive timeout. Available since Node 18.2.
-        server.closeIdleConnections();
-        server.close(() => resolve());
+        try {
+          server.closeIdleConnections();
+          server.closeAllConnections();
+          server.close(() => {
+            clearTimeout(timer);
+            done();
+          });
+        } catch {
+          clearTimeout(timer);
+          done();
+        }
       }),
   };
 }
@@ -402,12 +419,24 @@ async function startGrpcServer(
     port: boundPort,
     close: () =>
       new Promise<void>((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          server.forceShutdown();
+          done();
+        }, 2_000);
+        timer.unref?.();
         server.tryShutdown((err) => {
+          clearTimeout(timer);
           if (err) {
             // forceShutdown returns void
             server.forceShutdown();
           }
-          resolve();
+          done();
         });
       }),
   };

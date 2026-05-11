@@ -52,8 +52,9 @@ release.
 `yarn corpus:e2e` and `yarn e2e:donation` remain fast mocked/smoke checks.
 They do not replace `yarn release:donation-consumption`, which is the
 release-blocking proof that another isolated operator can discover and consume
-donated SWE execution data through the real MCP acquisition path, cache it as a
-network artifact, reuse that cache from the learner-facing MCP path, and
+donated SWE execution data through the canonical on-chain/IPFS discovery path
+and real MCP acquisition path, cache it as a network artifact, reuse that cache
+from the learner-facing MCP path, and
 continue through the real SWE solve/evaluate loop.
 
 ## Required Browser Gates
@@ -105,6 +106,8 @@ The release is not ready until the live or canary-dry-run proof shows:
    expected hashes, discovered by another operator, verified, acquired through
    Network Tools/MCP, cached as `network_artifacts`, and followed by a real
    SWE solve/evaluate loop.
+   The subgraph may accelerate discovery, but on-chain ERC-8004 metadata plus
+   IPFS must be sufficient for release proof.
 
 Run the live donation proof with:
 
@@ -148,6 +151,8 @@ failure messaging.
 
 Missing `operator.publicEndpoint` is not a blocker for the public testnet
 donation path. Donation mode must use IPFS as the public artifact transport.
+The Graph/Subgraph endpoints are optional accelerators, not the correctness
+root for the release gate.
 IPFS pinning, hash verification, or scrubbing failures are blockers.
 
 ## Docker Acceptance

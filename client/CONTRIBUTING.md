@@ -98,7 +98,7 @@ This copies the 4 deployment JSON files from `contracts/` into `client/deploymen
 | `yarn staking` | Earning bootstrap validation on Anvil fork |
 | `yarn pack:smoke` | Pack tarball and run smoke tests |
 | `yarn release:operator-gate` | Run the stable-release operator gate (`staking` then `e2e`) |
-| `yarn release:donation-consumption` | Prove two isolated operators can consume donated SWE execution data through real testnet IPFS/subgraph/MCP paths |
+| `yarn release:donation-consumption` | Prove two isolated operators can consume donated SWE execution data through real testnet on-chain/IPFS/MCP paths |
 | `cd ../contracts && yarn test && forge install foundry-rs/forge-std --no-git && forge test --match-contract Invariant` | Run the contracts release gate |
 | `yarn release:testnet-acceptance` | Run the manual Docker-first real testnet acceptance harness |
 | `yarn setup:testnet-acceptance-operator` | First-time Docker acceptance setup + bootstrap/funding helper (`TESTNET_ACCEPTANCE.md`) |

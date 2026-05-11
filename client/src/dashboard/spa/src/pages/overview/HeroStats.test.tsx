@@ -14,6 +14,7 @@ describe('HeroStats', () => {
         statusDot="var(--vow-green)"
       />,
     );
+    expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
     expect(screen.getByText('42')).toBeTruthy();
     expect(screen.getByText('123')).toBeTruthy();
     expect(screen.getByText('4')).toBeTruthy();

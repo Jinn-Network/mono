@@ -9,12 +9,13 @@ import type { Store } from '../store/store.js';
 import type { ArtifactSource, EvidenceTier, Role, SignedEnvelope } from '../types/envelope.js';
 
 export interface CorpusOptions {
-  subgraphUrl: string;
+  subgraphUrl?: string;
   ipfsGatewayUrl: string;
   store: Store;
   signer: { privateKey: string };
   selfSafeAddress: string;
   routeResolver?: RouteResolver;
+  onchain?: import('./onchain-query.js').OnchainCorpusQueryOptions;
 }
 
 export interface CorpusQuery {
@@ -118,7 +119,7 @@ export interface Corpus {
   acquireBySha256(
     sha256: string,
     access: { endpoint: string; priceUsdc: string },
-    hint?: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[] },
+    hint?: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[]; ownerSafe?: string },
   ): Promise<ArtifactContent>;
 }
 

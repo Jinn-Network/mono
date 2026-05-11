@@ -38,7 +38,14 @@ interface OverviewStatusV1 {
     }>;
   };
   taskRuns?: {
-    totals?: { activeTaskRuns?: number };
+    totals?: {
+      observedTasks?: number;
+      activeTaskRuns?: number;
+      completed?: number;
+      solutions?: number;
+      verdicts?: number;
+      failed?: number;
+    };
     inFlight?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
     recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
   };
@@ -67,6 +74,8 @@ interface OverviewStatusV1 {
     recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
   };
 }
+
+type OverviewTaskRunTotals = NonNullable<OverviewStatusV1['taskRuns']>['totals'];
 
 /**
  * The operator's joined SolverNets per spec §12. Tasks 21/22 finish the
@@ -203,6 +212,28 @@ function formatEth(wei?: string): string {
   }
 }
 
+function operatorWaitingMessage(
+  joined: JoinedSolverNet | null,
+  taskRunTotals: OverviewTaskRunTotals,
+  predictionDescription: string | undefined,
+): string | undefined {
+  const hasGenericRuns =
+    (taskRunTotals?.observedTasks ?? 0) > 0 ||
+    (taskRunTotals?.activeTaskRuns ?? 0) > 0 ||
+    (taskRunTotals?.completed ?? 0) > 0 ||
+    (taskRunTotals?.failed ?? 0) > 0;
+  if (hasGenericRuns) {
+    if ((taskRunTotals?.activeTaskRuns ?? 0) > 0) {
+      return 'Working on current run.';
+    }
+    return 'Waiting for the next available run.';
+  }
+  if (joined?.configId === 'prediction') {
+    return predictionDescription;
+  }
+  return undefined;
+}
+
 export function OverviewPage(): JSX.Element {
   const [, navigate] = useLocation();
   const { data: status } = useQuery<OverviewStatusV1>({
@@ -229,12 +260,14 @@ export function OverviewPage(): JSX.Element {
     operator?.solverNet?.enabled === true,
     operator?.solverNet?.roles,
   );
+  const taskRunTotals = status?.taskRuns?.totals;
+  const predictionTotals = status?.predictionV1?.totals;
   const totals = {
-    tasks: status?.predictionV1?.totals?.observedTasks ?? 0,
-    active: status?.predictionV1?.totals?.activeTaskRuns ?? 0,
-    solutions: status?.predictionV1?.totals?.solutions ?? 0,
-    verdicts: status?.predictionV1?.totals?.verdicts ?? 0,
-    failed: status?.predictionV1?.totals?.failed ?? 0,
+    tasks: taskRunTotals?.observedTasks ?? predictionTotals?.observedTasks ?? 0,
+    active: taskRunTotals?.activeTaskRuns ?? predictionTotals?.activeTaskRuns ?? 0,
+    solutions: taskRunTotals?.solutions ?? predictionTotals?.solutions ?? 0,
+    verdicts: taskRunTotals?.verdicts ?? predictionTotals?.verdicts ?? 0,
+    failed: taskRunTotals?.failed ?? predictionTotals?.failed ?? 0,
   };
   const services: ServiceIdentity[] = (status?.fleet?.services ?? []).map((s) => ({
     index: s.index,
@@ -247,6 +280,7 @@ export function OverviewPage(): JSX.Element {
   const jinnEarned = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
   const liveNow = deriveLiveNow(status);
+  const waitingMessage = operatorWaitingMessage(joined, taskRunTotals, operator?.nextAction?.description);
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -279,7 +313,7 @@ export function OverviewPage(): JSX.Element {
           configId={joined.configId}
           roles={joined.roles}
           state="live"
-          waitingMessage={operator?.nextAction?.description}
+          waitingMessage={waitingMessage}
         />
       ) : (
         <AlertBand

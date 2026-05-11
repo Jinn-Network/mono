@@ -6,6 +6,7 @@ const HOISTED = vi.hoisted(() => {
   const REQUEST_ID = ('0x' + 'aa'.repeat(32)) as `0x${string}`;
   const TASK_CID_DIGEST = ('0x' + 'cc'.repeat(32)) as `0x${string}`;
   const TASK_CID = `f01551220${'cc'.repeat(32)}`;
+  const MANIFEST_DIGEST = ('0x' + '99'.repeat(32)) as `0x${string}`;
   const TX_HASH = ('0x' + '12'.repeat(32)) as `0x${string}`;
   const signedTask = (overrides: Partial<SignedTaskV1> = {}): SignedTaskV1 => ({
     schemaVersion: 'task.v1',
@@ -44,10 +45,10 @@ const HOISTED = vi.hoisted(() => {
     },
     ...overrides,
   });
-  return { REQUEST_ID, TASK_CID_DIGEST, TASK_CID, TX_HASH, signedTask };
+  return { REQUEST_ID, TASK_CID_DIGEST, TASK_CID, MANIFEST_DIGEST, TX_HASH, signedTask };
 });
 
-const { REQUEST_ID, TASK_CID_DIGEST, TASK_CID, TX_HASH, signedTask } = HOISTED;
+const { REQUEST_ID, TASK_CID_DIGEST, TASK_CID, MANIFEST_DIGEST, TX_HASH, signedTask } = HOISTED;
 
 // MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
@@ -99,6 +100,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
 
 // MOCK_JUSTIFICATION: task-subgraph.js is the GraphQL candidate-index boundary; adapter tests decide when candidates exist.
 vi.mock('../../../src/adapters/mech/task-subgraph.js', () => ({
+  manifestDigestForCid: vi.fn().mockReturnValue(MANIFEST_DIGEST),
   queryClaimableTaskCandidates: vi.fn().mockResolvedValue([]),
 }));
 
@@ -257,6 +259,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
       taskId: '7',
       taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
       creator: TEST_CONFIG.safeAddress,
       transactionHash: TX_HASH,
       blockNumber: 321,
@@ -294,7 +297,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(queryClaimableTaskCandidates).mockResolvedValueOnce([{
       taskId: '42',
       taskCidDigest: TASK_CID_DIGEST,
-      manifestDigest: ('0x' + '99'.repeat(32)) as `0x${string}`,
+      manifestDigest: MANIFEST_DIGEST,
       createdAtBlock: 80,
       createdAtTx: TX_HASH,
       attemptCount: 0,
@@ -359,7 +362,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       {
         taskId: '42',
         taskCidDigest: TASK_CID_DIGEST,
-        manifestDigest: ('0x' + '99'.repeat(32)) as `0x${string}`,
+        manifestDigest: MANIFEST_DIGEST,
         createdAtBlock: 80,
         createdAtTx: TX_HASH,
         attemptCount: 0,
@@ -368,7 +371,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       {
         taskId: '43',
         taskCidDigest: TASK_CID_DIGEST,
-        manifestDigest: ('0x' + '99'.repeat(32)) as `0x${string}`,
+        manifestDigest: MANIFEST_DIGEST,
         createdAtBlock: 81,
         createdAtTx: TX_HASH,
         attemptCount: 0,
@@ -397,6 +400,152 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(second.done).toBe(true);
     expect(canClaimTask).toHaveBeenCalledTimes(1);
     expect(fetchSignedTaskFromIpfs).toHaveBeenCalledTimes(1);
+
+    await adapter.stop();
+  });
+
+  it('subgraph discovery honors an explicit task id scope', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { queryClaimableTaskCandidates } = await import('../../../src/adapters/mech/task-subgraph.js');
+    const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(queryClaimableTaskCandidates).mockResolvedValueOnce([
+      {
+        taskId: '42',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: MANIFEST_DIGEST,
+        createdAtBlock: 80,
+        createdAtTx: TX_HASH,
+        attemptCount: 0,
+        operatorAttemptCount: 0,
+      },
+      {
+        taskId: '43',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: MANIFEST_DIGEST,
+        createdAtBlock: 81,
+        createdAtTx: TX_HASH,
+        attemptCount: 0,
+        operatorAttemptCount: 0,
+      },
+    ]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'scoped-subgraph-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        subgraphUrl: 'https://subgraph.example/graphql',
+        solverNetManifestCids: ['bafyfixturecid'],
+        allowedTaskIds: ['43'],
+      },
+    });
+    await adapter.initialize();
+
+    const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const first = await iter.next();
+
+    expect(first.value).toMatchObject({
+      taskId: '43',
+      task: { id: 'scoped-subgraph-task' },
+    });
+    expect(canClaimTask).toHaveBeenCalledTimes(1);
+    expect(canClaimTask).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '43',
+      TEST_CONFIG.mechContractAddress,
+    );
+
+    await adapter.stop();
+  });
+
+  it('falls back to canonical TaskCreated logs when configured subgraph discovery fails', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeTaskCreatedLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { queryClaimableTaskCandidates } = await import('../../../src/adapters/mech/task-subgraph.js');
+    const manifestCid = 'bafyfixturecid';
+
+    vi.mocked(queryClaimableTaskCandidates).mockRejectedValueOnce(new Error('subgraph HTTP 429'));
+    vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
+      taskId: '44',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
+      creator: TEST_CONFIG.safeAddress,
+      transactionHash: TX_HASH,
+      blockNumber: 101,
+    }]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'fallback-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        subgraphUrl: 'https://subgraph.example/graphql',
+        solverNetManifestCids: [manifestCid],
+        onchainFromBlock: 100,
+      },
+    });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({
+      taskId: '44',
+      task: { id: 'fallback-task' },
+      taskCid: TASK_CID,
+    });
+
+    await adapter.stop();
+  });
+
+  it('canonical TaskCreated scan honors an explicit task id scope', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeTaskCreatedLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const manifestCid = 'bafyfixturecid';
+
+    vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([
+      {
+        taskId: '44',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: MANIFEST_DIGEST,
+        transactionHash: TX_HASH,
+        blockNumber: 101,
+      },
+      {
+        taskId: '45',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: MANIFEST_DIGEST,
+        transactionHash: TX_HASH,
+        blockNumber: 102,
+      },
+    ]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'scoped-onchain-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        solverNetManifestCids: [manifestCid],
+        onchainFromBlock: 100,
+        allowedTaskIds: ['45'],
+      },
+    });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(102n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({
+      taskId: '45',
+      task: { id: 'scoped-onchain-task' },
+    });
 
     await adapter.stop();
   });
@@ -651,6 +800,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
       taskId: '7',
       taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
       transactionHash: TX_HASH,
       blockNumber: 105,
     }]);
@@ -678,6 +828,57 @@ describe('MechAdapter TaskCoordinator flow', () => {
       toBlock: 110n,
     });
     expect(store.values.get('mech_router_request_block_cursor_v1')).toBe('110');
+
+    await adapter.stop();
+  });
+
+  it('rescans the canonical on-chain backlog on restart even after a previous scan marker', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeTaskCreatedLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const store = makeConfigStore({
+      mech_router_request_block_cursor_v1: '119',
+      mech_router_task_created_canonical_scan_v1: '1',
+    }, 119n);
+
+    vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
+      taskId: '88',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
+      transactionHash: TX_HASH,
+      blockNumber: 105,
+    }]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'rescanned-task' }));
+
+    const adapter = new MechAdapter(
+      {
+        ...TEST_CONFIG,
+        pollIntervalMs: 0,
+        taskDiscovery: {
+          solverNetManifestCids: ['bafyfixturecid'],
+          onchainFromBlock: 100,
+        },
+      },
+      store as any,
+    );
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(120n);
+    const getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).publicClient.getLogs = getLogs;
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({
+      taskId: '88',
+      task: { id: 'rescanned-task' },
+    });
+    expect(getLogs).toHaveBeenCalledWith({
+      address: TEST_CONFIG.routerAddress,
+      fromBlock: 100n,
+      toBlock: 120n,
+    });
+    expect(store.values.get('mech_router_request_block_cursor_v1')).toBe('120');
 
     await adapter.stop();
   });

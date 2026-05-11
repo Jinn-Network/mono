@@ -110,7 +110,7 @@ describe('App routes', () => {
       ),
     );
     // Overview renders HeroStats with these canonical eyebrows.
-    expect(screen.getByText(/tasks delivered/i)).toBeTruthy();
+    expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
     expect(screen.getByText(/jinn earned/i)).toBeTruthy();
   });
 

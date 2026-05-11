@@ -26,6 +26,13 @@ export interface MechAdapterConfig {
   taskDiscovery?: {
     subgraphUrl?: string;
     solverNetManifestCids?: string[];
+    /**
+     * Lower bound for the canonical on-chain TaskCreated scan. The subgraph is
+     * only an acceleration path; this scan is the correctness path.
+     */
+    onchainFromBlock?: number | bigint;
+    /** Optional release/acceptance guard: only discover these on-chain task ids. */
+    allowedTaskIds?: string[];
     pageSize?: number;
     maxPages?: number;
     fetchImpl?: typeof fetch;

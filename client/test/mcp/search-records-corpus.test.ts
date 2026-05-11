@@ -194,6 +194,7 @@ describe('search_records (corpus-backed)', () => {
         access: { endpoint: 'https://operator.example.com/artifacts/b', priceUsdc: '0.25' },
         envelopeCid: 'bafyManifest',
         artifactType: 'output.prediction.v1',
+        ownerSafe: '0x' + '4'.repeat(40),
       },
     });
     store.close();
@@ -262,6 +263,7 @@ describe('search_records (corpus-backed)', () => {
         access: { endpoint: 'http://localhost:7332/v1/artifacts/content', priceUsdc: '0' },
         envelopeCid: envelopeRef.manifestCid,
         artifactType: 'swe-rebench-v2_v1_solution',
+        ownerSafe: '0x' + '4'.repeat(40),
         sources: [{
           kind: 'ipfs',
           cid: 'bafy-swe-donated',
@@ -462,6 +464,7 @@ describe('MCP record tool registration source', () => {
       'evidenceTier',
       'generatedAfter',
       'generatedBefore',
+      'ownerSafe',
       'limit',
     ]) {
       expect(source).toContain(field);

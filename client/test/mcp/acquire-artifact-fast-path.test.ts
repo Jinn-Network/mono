@@ -129,6 +129,7 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
 
   it('forwards envelopeCid + artifactType hints to the daemon route', async () => {
     const sha256 = 'e'.repeat(64);
+    const ownerSafe = '0x' + '2'.repeat(40);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(
         JSON.stringify({
@@ -148,6 +149,7 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
       access: { endpoint: 'https://op.example.com', priceUsdc: '0.01' },
       envelopeCid: 'bafyEnv',
       artifactType: 'design_document',
+      ownerSafe,
     });
     const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
     expect(body).toEqual({
@@ -155,6 +157,7 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
       access: { endpoint: 'https://op.example.com', priceUsdc: '0.01' },
       envelopeCid: 'bafyEnv',
       artifactType: 'design_document',
+      ownerSafe,
     });
     fetchSpy.mockRestore();
   });

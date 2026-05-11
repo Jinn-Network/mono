@@ -695,6 +695,7 @@ export async function pollDeliverEvents(
 export interface TaskRecord {
   taskId: string;
   taskCidDigest: string;
+  manifestDigest?: string;
   creator: string;
   transactionHash?: `0x${string}`;
   blockNumber?: number;
@@ -726,11 +727,17 @@ export async function scanTasks(
           topics: log.topics,
         });
         if (decoded.eventName === 'TaskCreated') {
-          const args = decoded.args as { creator: Address; taskId: bigint; taskCidDigest: Hex };
+          const args = decoded.args as {
+            creator: Address;
+            taskId: bigint;
+            manifestDigest: Hex;
+            taskCidDigest: Hex;
+          };
           if (args.creator.toLowerCase() === creator.toLowerCase()) {
             results.push({
               taskId: String(args.taskId),
               taskCidDigest: String(args.taskCidDigest),
+              manifestDigest: String(args.manifestDigest),
               creator: String(args.creator),
               transactionHash: log.transactionHash ?? undefined,
               blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
@@ -757,6 +764,7 @@ export interface DecodedMarketplaceRequest {
 export interface DecodedTaskCreated {
   taskId: string;
   taskCidDigest: string;
+  manifestDigest: string;
   creator: string;
   transactionHash?: `0x${string}`;
   blockNumber?: number;
@@ -781,10 +789,16 @@ export function decodeTaskCreatedLogs(logs: Log[]): DecodedTaskCreated[] {
         topics: log.topics,
       });
       if (decoded.eventName === 'TaskCreated') {
-        const args = decoded.args as { creator: Address; taskId: bigint; taskCidDigest: Hex };
+        const args = decoded.args as {
+          creator: Address;
+          taskId: bigint;
+          manifestDigest: Hex;
+          taskCidDigest: Hex;
+        };
         results.push({
           taskId: String(args.taskId),
           taskCidDigest: String(args.taskCidDigest),
+          manifestDigest: String(args.manifestDigest),
           creator: String(args.creator),
           transactionHash: log.transactionHash ?? undefined,
           blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,

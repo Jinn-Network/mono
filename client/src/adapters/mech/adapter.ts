@@ -1,4 +1,4 @@
-import { getAddress, zeroAddress, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
+import { getAddress, zeroAddress, type Address, type Hex, type Log, type PublicClient, type WalletClient } from 'viem';
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
@@ -45,6 +45,7 @@ import {
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
 import {
+  manifestDigestForCid,
   queryClaimableTaskCandidates,
   type SubgraphTaskCandidate,
 } from './task-subgraph.js';
@@ -70,6 +71,11 @@ interface PendingEvaluationSolution {
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
 const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
+const DEFAULT_ROUTER_LOG_CHUNK_BLOCKS = 9_999n;
+const DEFAULT_TASK_DISCOVERY_FROM_BLOCK: Record<number, bigint> = {
+  84532: 41_153_291n,
+  8453: 25_000_000n,
+};
 const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {
   mode: 'exclusive',
   maxClaims: 1,
@@ -169,6 +175,11 @@ export class MechAdapter implements ExecutionAdapter {
     if (this.store) {
       this.loadPendingEvaluationSolutions();
       await this.recoverPendingState(blockNumber);
+    } else {
+      const fromBlock = this.onchainTaskDiscoveryFromBlock();
+      if (fromBlock && fromBlock <= blockNumber) {
+        this.requestBlockCursor = fromBlock - 1n;
+      }
     }
   }
 
@@ -189,6 +200,65 @@ export class MechAdapter implements ExecutionAdapter {
     if (routerFromBlock < currentBlock) {
       this.requestBlockCursor = routerFromBlock;
     }
+
+    const scanFromBlock = this.onchainTaskDiscoveryFromBlock();
+    if (scanFromBlock && scanFromBlock <= currentBlock) {
+      const canonicalCursor = scanFromBlock - 1n;
+      if (canonicalCursor < this.requestBlockCursor) {
+        this.requestBlockCursor = canonicalCursor;
+      }
+      console.error(
+        `[mech] TaskCreated canonical backlog scan enabled from block ${scanFromBlock}; ` +
+        'subgraph discovery is optional acceleration only',
+      );
+    }
+  }
+
+  private onchainTaskDiscoveryFromBlock(): bigint | undefined {
+    const discovery = this.config.taskDiscovery;
+    const hasJoinedSolverNet = (discovery?.solverNetManifestCids?.length ?? 0) > 0;
+    if (!hasJoinedSolverNet) return undefined;
+    if (discovery?.onchainFromBlock !== undefined) {
+      const raw = discovery.onchainFromBlock;
+      const value = typeof raw === 'bigint' ? raw : BigInt(Math.max(0, Math.floor(raw)));
+      return value > 0n ? value : undefined;
+    }
+    return DEFAULT_TASK_DISCOVERY_FROM_BLOCK[this.config.chainId];
+  }
+
+  private joinedManifestDigestSet(): Set<string> {
+    const cids = this.config.taskDiscovery?.solverNetManifestCids ?? [];
+    return new Set(
+      cids
+        .filter(Boolean)
+        .map((cid) => manifestDigestForCid(cid).toLowerCase()),
+    );
+  }
+
+  private allowedDiscoveryTaskIds(): Set<string> | null {
+    const raw = this.config.taskDiscovery?.allowedTaskIds ?? [];
+    const ids = raw.map((id) => id.trim()).filter(Boolean);
+    return ids.length > 0 ? new Set(ids) : null;
+  }
+
+  private isDiscoveryTaskAllowed(taskId: string): boolean {
+    const allowed = this.allowedDiscoveryTaskIds();
+    return allowed === null || allowed.has(taskId);
+  }
+
+  private async getRouterLogsInChunks(fromBlock: bigint, toBlock: bigint): Promise<Log[]> {
+    const logs: Log[] = [];
+    for (let start = fromBlock; start <= toBlock; start += DEFAULT_ROUTER_LOG_CHUNK_BLOCKS + 1n) {
+      const end = start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > toBlock
+        ? toBlock
+        : start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
+      logs.push(...await this.publicClient.getLogs({
+        address: this.config.routerAddress,
+        fromBlock: start,
+        toBlock: end,
+      }));
+    }
+    return logs;
   }
 
   private loadPendingEvaluationSolutions(): void {
@@ -497,6 +567,7 @@ export class MechAdapter implements ExecutionAdapter {
     }
 
     for (const candidate of candidates) {
+      if (!this.isDiscoveryTaskAllowed(candidate.taskId)) continue;
       if (this.claimedRestorationTaskIds.has(candidate.taskId)) continue;
 
       const claimable = await canClaimTask(
@@ -525,11 +596,6 @@ export class MechAdapter implements ExecutionAdapter {
         );
       }
     }
-  }
-
-  private hasSubgraphTaskDiscovery(): boolean {
-    const discovery = this.config.taskDiscovery;
-    return Boolean(discovery?.subgraphUrl && (discovery.solverNetManifestCids?.length ?? 0) > 0);
   }
 
   private async deliveryEnvelopeCidForSolution(solution: {
@@ -568,6 +634,14 @@ export class MechAdapter implements ExecutionAdapter {
   private async evaluationAnnouncementForSolution(
     solution: PendingEvaluationSolution,
   ): Promise<TaskAnnouncement | undefined> {
+    if (!this.isDiscoveryTaskAllowed(solution.taskId)) {
+      console.log(
+        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: outside configured task discovery scope`,
+      );
+      this.forgetPendingEvaluationSolution(solution.requestId);
+      return undefined;
+    }
+
     const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
     const claimable = await canClaimEvaluation(
       this.publicClient,
@@ -648,11 +722,7 @@ export class MechAdapter implements ExecutionAdapter {
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.requestBlockCursor) {
           const fromBlock = this.requestBlockCursor + 1n;
-          const logs = await this.publicClient.getLogs({
-            address: this.config.routerAddress,
-            fromBlock,
-            toBlock: currentBlock,
-          });
+          const logs = await this.getRouterLogsInChunks(fromBlock, currentBlock);
 
           const submittedSolutions = decodeSolutionDeliveryClaimedLogs(logs);
           for (const solution of submittedSolutions) {
@@ -663,23 +733,32 @@ export class MechAdapter implements ExecutionAdapter {
             this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
           }
 
-          if (!this.hasSubgraphTaskDiscovery()) {
-            const createdTasks = decodeTaskCreatedLogs(logs);
-            for (const { taskId, taskCidDigest, transactionHash, blockNumber } of createdTasks) {
-              try {
-                const announcement = await this.restorationAnnouncementFromDigest({
-                  taskId,
-                  taskCidDigest,
-                  transactionHash,
-                  blockNumber,
-                });
-                yield announcement;
-              } catch (err) {
-                console.error(`[mech] Failed to parse task ${taskId}:`, err);
-              }
+          const joinedManifestDigests = this.joinedManifestDigestSet();
+          const createdTasks = decodeTaskCreatedLogs(logs);
+          for (const { taskId, taskCidDigest, manifestDigest, transactionHash, blockNumber } of createdTasks) {
+            if (!this.isDiscoveryTaskAllowed(taskId)) continue;
+            if (this.claimedRestorationTaskIds.has(taskId) || this.observedTasks.has(taskId)) continue;
+            if (joinedManifestDigests.size > 0 && !joinedManifestDigests.has(manifestDigest.toLowerCase())) continue;
+            try {
+              const claimable = await canClaimTask(
+                this.publicClient,
+                this.config.safeAddress,
+                this.config.routerAddress,
+                taskId,
+                this.config.mechContractAddress,
+              );
+              if (!claimable.ok) continue;
+              const announcement = await this.restorationAnnouncementFromDigest({
+                taskId,
+                taskCidDigest,
+                transactionHash,
+                blockNumber,
+              });
+              yield announcement;
+            } catch (err) {
+              console.error(`[mech] Failed to parse task ${taskId}:`, err);
             }
           }
-
           for await (const announcement of this.retryPendingEvaluationSolutions()) {
             yield announcement;
           }

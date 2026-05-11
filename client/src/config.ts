@@ -149,6 +149,13 @@ export const JinnConfigSchema = z.object({
   /** The Graph subgraph URL for artifact discovery */
   subgraphUrl: z.string().optional(),
 
+  /**
+   * Narrow task discovery to specific on-chain task ids. This is primarily
+   * for live acceptance gates that must avoid claiming unrelated public
+   * backlog while proving one fresh task path.
+   */
+  taskDiscoveryAllowedTaskIds: z.array(z.string()).optional(),
+
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint: z.string().optional(),
 

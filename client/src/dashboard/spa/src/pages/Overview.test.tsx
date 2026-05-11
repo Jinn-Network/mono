@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -81,6 +81,7 @@ describe('OverviewPage empty-state gating', () => {
           ok: true,
           solverNet: { name: 'prediction', enabled: false },
           diagnostics: [],
+          nextAction: { description: 'Waiting for Tasks. SolverNet active, Harness loaded; no incoming Tasks since startup.' },
         },
         totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
       },
@@ -211,6 +212,55 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(operatorEyebrow('prediction'))).toBeNull();
     const configure = screen.getByText(/configure/i).closest('a');
     expect(configure?.getAttribute('href')).toBe('/operator#solvernets/bafkreiswe');
+  });
+
+  it('uses generic task-run totals before stale prediction counters', async () => {
+    getStatusMock.mockResolvedValue({
+      taskRuns: {
+        totals: {
+          observedTasks: 102,
+          activeTaskRuns: 3,
+          completed: 87,
+          solutions: 45,
+          verdicts: 42,
+          failed: 63,
+        },
+        inFlight: [],
+        recentTasks: [],
+      },
+      predictionV1: {
+        operator: {
+          ok: true,
+          solverNet: { name: 'prediction', enabled: false },
+          diagnostics: [],
+        },
+        totals: { observedTasks: 10, activeTaskRuns: 0, solutions: 5, verdicts: 0, failed: 5 },
+      },
+      fleet: { services: [] },
+    });
+    getBootstrapMock.mockResolvedValue({
+      joinedSolverNets: {
+        bafkreiswe: {
+          manifestCid: 'bafkreiswe',
+          name: 'SWE-rebench v2',
+          roles: ['solver', 'evaluator'],
+        },
+      },
+    });
+    render(withProviders(<OverviewPage />));
+
+    const networkTitle = await screen.findByText(/network · swe-rebench v2/i);
+    const network = networkTitle.closest('section');
+    expect(network).not.toBeNull();
+    expect(within(network as HTMLElement).getByText('102')).toBeTruthy();
+    expect(within(network as HTMLElement).getByText('3')).toBeTruthy();
+    expect(within(network as HTMLElement).getByText('45')).toBeTruthy();
+    expect(within(network as HTMLElement).getByText('42')).toBeTruthy();
+    expect(within(network as HTMLElement).getByText('63')).toBeTruthy();
+    expect(within(network as HTMLElement).queryByText('10')).toBeNull();
+    expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
+    expect(screen.getByText(/working on current run/i)).toBeTruthy();
+    expect(screen.queryByText(/no incoming tasks since startup/i)).toBeNull();
   });
 
   it('shows the OperatorCard from the predictionV1 status as a back-compat signal', async () => {

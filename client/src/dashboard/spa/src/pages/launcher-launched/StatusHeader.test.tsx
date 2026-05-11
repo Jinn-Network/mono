@@ -25,6 +25,28 @@ function buildRecord(
   };
 }
 
+function buildRecordSummary(
+  overrides: Partial<NonNullable<LaunchedSolverNetRecord['summary']>> = {},
+): NonNullable<LaunchedSolverNetRecord['summary']> {
+  return {
+    manifestCid: 'bafybeigdyrztabcdef0123456789abcdef0123456789abcdef0123456789abc',
+    solverNetId: 'agent-1_prediction.v1-1_abcdef01',
+    name: 'SWE-rebench v2',
+    network: 'base-sepolia',
+    launcherAgentId: '5474',
+    launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+    status: 'launched',
+    statusUpdatedAt: '2026-05-05T15:00:00Z',
+    contractId: 'swe-rebench-v2',
+    contractVersion: 'v1',
+    solutionPriceWei: '100',
+    verdictPriceWei: '50',
+    openRoles: ['solver', 'evaluator'],
+    anchorBlock: 1,
+    ...overrides,
+  };
+}
+
 function buildManifest(
   overrides: Partial<SolverNetManifestV1> = {},
 ): SolverNetManifestV1 {
@@ -95,14 +117,24 @@ describe('StatusHeader', () => {
     expect(screen.getByText(/Forecast resolved markets/)).toBeTruthy();
   });
 
-  it('falls back to "— unnamed" when no manifest is supplied', () => {
+  it('falls back to the launched record summary while the manifest is loading', () => {
+    render(
+      <StatusHeader
+        record={buildRecord({ summary: buildRecordSummary() })}
+        onAction={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('launcher-launched-name').textContent).toBe('SWE-rebench v2');
+  });
+
+  it('falls back to the SolverNet id when no manifest or summary is supplied', () => {
     render(
       <StatusHeader
         record={buildRecord()}
         onAction={() => undefined}
       />,
     );
-    expect(screen.getByTestId('launcher-launched-name').textContent).toContain('unnamed');
+    expect(screen.getByTestId('launcher-launched-name').textContent).toBe('agent-1_prediction.v1-1_abcdef01');
   });
 
   it('renders Pause + Retire when status=launched', () => {

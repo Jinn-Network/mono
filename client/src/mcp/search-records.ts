@@ -35,11 +35,12 @@ export interface ArtifactDescriptor {
     arguments: {
       sha256: string;
       access: { endpoint: string; priceUsdc: string };
-      envelopeCid?: string;
-      artifactType?: string;
-      sources?: ArtifactSource[];
+        envelopeCid?: string;
+        artifactType?: string;
+        sources?: ArtifactSource[];
+        ownerSafe?: string;
+      };
     };
-  };
   paidAmountUsdc?: string;
   sourceOperator?: string | null;
   createdAt?: string;
@@ -174,13 +175,17 @@ function localArtifactDescriptor(row: ReturnType<Store['searchOwnAndCached']>[nu
   return descriptor;
 }
 
-function manifestArtifactDescriptor(ref: EnvelopeRef, artifact: Artifact): ArtifactDescriptor {
+function manifestArtifactDescriptor(ref: EnvelopeRef, artifact: Artifact, ownerSafe?: string): ArtifactDescriptor {
   const acquisitionArguments: NonNullable<ArtifactDescriptor['acquisition']>['arguments'] = {
     sha256: artifact.sha256,
     access: artifact.access,
     envelopeCid: ref.manifestCid,
     artifactType: artifact.artifactType,
   };
+  const sourceOperator = ownerSafe || ref.operator.safeAddress;
+  if (sourceOperator) {
+    acquisitionArguments.ownerSafe = sourceOperator;
+  }
   if (artifact.sources && artifact.sources.length > 0) {
     acquisitionArguments.sources = artifact.sources;
   }
@@ -235,20 +240,27 @@ function manifestMatchesArgs(preview: ManifestPreview, args: SearchRecordsArgs):
 function manifestRecord(preview: ManifestPreview, args: SearchRecordsArgs): RecordSummary | null {
   const envelope = preview.envelope;
   if (!manifestMatchesArgs(preview, args)) return null;
+  const ref: EnvelopeRef = {
+    ...preview.ref,
+    operator: {
+      agentId: preview.ref.operator.agentId,
+      safeAddress: preview.ref.operator.safeAddress || envelope.participant.safeAddress,
+    },
+  };
   const artifacts = envelope.artifacts
     .filter((artifact) => !args.artifactType || artifact.artifactType === args.artifactType)
-    .map((artifact) => manifestArtifactDescriptor(preview.ref, artifact));
+    .map((artifact) => manifestArtifactDescriptor(ref, artifact, envelope.participant.safeAddress));
   if (args.artifactType && artifacts.length === 0) return null;
   return {
-    recordRef: `network:envelope:${preview.ref.manifestCid}`,
+    recordRef: `network:envelope:${ref.manifestCid}`,
     source: 'network',
     envelopeRef: {
-      cid: preview.ref.manifestCid,
+      cid: ref.manifestCid,
       sha256: null,
-      manifestHash: preview.ref.manifestHash,
-      evidenceTier: preview.ref.evidenceTier,
-      publishedAt: preview.ref.publishedAt,
-      operator: preview.ref.operator,
+      manifestHash: ref.manifestHash,
+      evidenceTier: ref.evidenceTier,
+      publishedAt: ref.publishedAt,
+      operator: ref.operator,
     },
     taskRef: envelope.task
       ? { cid: envelope.task.cid, requestId: envelope.task.requestId }
@@ -296,7 +308,7 @@ export async function handleSearchRecords(
 
   if (!corpus) {
     console.warn(
-      '[mcp:search_records] corpus not configured (missing JINN_CORPUS_SUBGRAPH_URL or JINN_CORPUS_IPFS_GATEWAY_URL) - local-only results',
+      '[mcp:search_records] corpus not configured (missing IPFS gateway plus subgraph or on-chain corpus config) - local-only results',
     );
     const records: RecordSummary[] = [];
     for (const projection of projections) appendUnique(records, projection);
@@ -304,7 +316,7 @@ export async function handleSearchRecords(
     return {
       records,
       warning:
-        'corpus not configured (missing JINN_CORPUS_SUBGRAPH_URL or JINN_CORPUS_IPFS_GATEWAY_URL); network results unavailable',
+        'corpus not configured (missing IPFS gateway plus subgraph or on-chain corpus config); network results unavailable',
     };
   }
 

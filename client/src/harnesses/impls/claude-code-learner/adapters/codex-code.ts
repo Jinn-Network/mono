@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { accessSync, constants, createWriteStream, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,10 @@ export interface CodexCodeHarnessAdapterConfig {
   corpusEnv?: {
     subgraphUrl?: string;
     ipfsGatewayUrl?: string;
+    rpcUrl?: string;
+    chainId?: number;
+    identityRegistryAddress?: string;
+    fromBlock?: number;
   };
   clientRoot?: string;
   _spawnFn?: typeof spawn;
@@ -22,6 +26,7 @@ export interface CodexCodeHarnessAdapterConfig {
 }
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.4-mini';
+const MACOS_CODEX_APP_BINARY = '/Applications/Codex.app/Contents/Resources/codex';
 
 const ENV_ALLOWLIST = [
   'PATH',
@@ -39,11 +44,28 @@ const ENV_ALLOWLIST = [
   'NPM_CONFIG_PREFIX',
   'OPENAI_API_KEY',
   'CODEX_HOME',
+  'JINN_CODEX_PATH',
 ];
 
 function defaultClientRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   return resolve(here, '..', '..', '..', '..', '..');
+}
+
+function isExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function defaultCodexPath(): string {
+  const explicit = process.env['JINN_CODEX_PATH']?.trim();
+  if (explicit) return explicit;
+  if (isExecutable(MACOS_CODEX_APP_BINARY)) return MACOS_CODEX_APP_BINARY;
+  return 'codex';
 }
 
 function buildAgentEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
@@ -146,7 +168,7 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
   private readonly runSessionStartHook: boolean;
 
   constructor(config: CodexCodeHarnessAdapterConfig = {}) {
-    this.codexPath = config.codexPath ?? 'codex';
+    this.codexPath = config.codexPath ?? defaultCodexPath();
     this.codexModel = config.codexModel ?? DEFAULT_CODEX_MODEL;
     this.storePath = config.storePath;
     this.daemonApiUrl = config.daemonApiUrl;
@@ -177,6 +199,10 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       DAEMON_API_TOKEN: this.daemonApiToken ?? '',
       JINN_CORPUS_SUBGRAPH_URL: this.corpusEnv?.subgraphUrl ?? '',
       JINN_CORPUS_IPFS_GATEWAY_URL: this.corpusEnv?.ipfsGatewayUrl ?? '',
+      JINN_CORPUS_RPC_URL: this.corpusEnv?.rpcUrl ?? '',
+      JINN_CORPUS_CHAIN_ID: this.corpusEnv?.chainId != null ? String(this.corpusEnv.chainId) : '',
+      JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS: this.corpusEnv?.identityRegistryAddress ?? '',
+      JINN_CORPUS_FROM_BLOCK: this.corpusEnv?.fromBlock != null ? String(this.corpusEnv.fromBlock) : '',
       ...(inputs.adapterEnv ?? {}),
     };
     const env = buildAgentEnv(baseEnv);

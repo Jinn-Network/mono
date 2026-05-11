@@ -45,10 +45,13 @@ export function SpendPanel({
 
   const manifestSolverType = manifest
     ? `${manifest.contract.id}.${manifest.contract.version}`
-    : undefined;
-  const matchedEntry = manifest
+    : record.summary
+      ? `${record.summary.contractId}.${record.summary.contractVersion}`
+      : undefined;
+  const matchedEntry = manifestSolverType
     ? status?.nets.find((n) =>
-        n.solverType === manifestSolverType || n.name === manifest.name,
+        n.solverType === manifestSolverType ||
+        n.name === (manifest?.name ?? record.summary?.name),
       )
     : undefined;
 
@@ -56,8 +59,8 @@ export function SpendPanel({
   const safeAddress =
     matchedEntry?.budget.safeAddress ?? record.launcherSafeAddress;
 
-  const solutionPriceWei = manifest?.solutionPriceWei;
-  const verdictPriceWei = manifest?.verdictPriceWei;
+  const solutionPriceWei = manifest?.solutionPriceWei ?? record.summary?.solutionPriceWei;
+  const verdictPriceWei = manifest?.verdictPriceWei ?? record.summary?.verdictPriceWei;
 
   const projection = projectRunwayTasks(
     safeBalanceWei,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -7,7 +7,9 @@ import {
   buildConsumerChildEnv,
   buildConsumerConfig,
   ensureConsumerSweEvaluatorState,
+  findDonatedArtifactRecord,
   resolveConsumerCodexHome,
+  scopeConsumerConfigToProducerTask,
   waitForConsumerSolveAndEvaluatorProof,
 } from '../../src/scripts/donation-consumption-acceptance.js';
 import { Store } from '../../src/store/store.js';
@@ -113,6 +115,125 @@ describe('donation consumption acceptance config', () => {
     });
   });
 
+  it('scopes the managed consumer to the producer task id resolved from the subgraph', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-donation-consumer-scope-'));
+    const configPath = join(root, 'config.json');
+    const consumerConfig = {
+      network: 'testnet',
+      rpcUrl: 'https://rpc.example',
+      apiPort: 7333,
+    };
+    writeFileSync(configPath, JSON.stringify(consumerConfig));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          tasks: [{ taskId: '109', createdAtTx: '0xabc' }],
+        },
+      }),
+    } as unknown as Response);
+    try {
+      const taskId = await scopeConsumerConfigToProducerTask({
+        consumerConfig,
+        consumerConfigPath: configPath,
+        subgraphUrl: 'https://subgraph.example/graphql',
+        proof: {
+          artifact: {
+            sha256: 'producer-sha',
+            artifactType: 'swe-rebench-v2_v1_solution',
+            requestId: 'producer-request',
+            envelopeCid: 'bafk-envelope',
+            createdAt: '2026-05-10T17:15:00.000Z',
+          },
+          sourceCid: 'bafk-source',
+          trajectorySourceCid: 'bafk-trajectory',
+          envelope: {
+            task: {
+              cid: 'f01551220aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              onchainCreationTx: '0xAbC',
+            },
+          },
+          redactedEnvelope: {},
+          indexExecution: {},
+        },
+      });
+
+      expect(taskId).toBe('109');
+      expect(fetchSpy).toHaveBeenCalledWith('https://subgraph.example/graphql', expect.objectContaining({
+        method: 'POST',
+      }));
+      expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
+        taskDiscoveryAllowedTaskIds: ['109'],
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('prefers network discovery records with donated IPFS source args over cached local records', () => {
+    const proof = {
+      artifact: {
+        sha256: 'producer-sha',
+        artifactType: 'swe-rebench-v2_v1_solution',
+        requestId: 'producer-request',
+        envelopeCid: 'bafk-envelope',
+        createdAt: '2026-05-10T17:15:00.000Z',
+      },
+      sourceCid: 'bafk-source',
+      trajectorySourceCid: 'bafk-trajectory',
+      envelope: {},
+      redactedEnvelope: {},
+      indexExecution: {},
+    } as any;
+
+    const localCachedArtifact = {
+      sha256: 'producer-sha',
+      envelopeCid: 'bafk-envelope',
+      acquisition: {
+        arguments: {
+          sha256: 'producer-sha',
+          access: { endpoint: 'ipfs://bafk-source', priceUsdc: '0' },
+          envelopeCid: 'bafk-envelope',
+          artifactType: 'swe-rebench-v2_v1_solution',
+        },
+      },
+    };
+    const networkArtifact = {
+      sha256: 'producer-sha',
+      envelopeCid: 'bafk-envelope',
+      acquisition: {
+        arguments: {
+          sha256: 'producer-sha',
+          envelopeCid: 'bafk-envelope',
+          artifactType: 'swe-rebench-v2_v1_solution',
+          sources: [{
+            kind: 'ipfs',
+            cid: 'bafk-source',
+            sha256: 'producer-sha',
+            encoding: 'jinn.artifact.donation.v1',
+          }],
+        },
+      },
+    };
+
+    const artifact = findDonatedArtifactRecord({
+      records: [
+        {
+          source: 'local',
+          envelopeRef: { cid: 'bafk-envelope' },
+          artifactRefs: [localCachedArtifact],
+        },
+        {
+          source: 'network',
+          envelopeRef: { cid: 'bafk-envelope' },
+          artifactRefs: [networkArtifact],
+        },
+      ],
+    }, proof);
+
+    expect(artifact).toBe(networkArtifact);
+  });
+
   it('accepts cache usage written during acquire_artifact before the call returns', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-donation-consumption-timestamps-'));
     const dbPath = join(root, 'jinn.db');
@@ -151,6 +272,45 @@ describe('donation consumption acceptance config', () => {
         priceUsdc: '0',
         createdAt: '2026-05-10T17:15:39.000Z',
       });
+      const insertRun = store.db.prepare(`
+        INSERT INTO task_runs (
+          request_id, task_id, task_cid, onchain_creation_tx, onchain_creation_block,
+          solver_type, task_role, state, state_updated_at, window_start_ts, window_end_ts,
+          manifest_cid, delivery_tx_hash, task_payload
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insertRun.run(
+        'consumer-request',
+        '15',
+        'cid-consumer-task',
+        '0xsolution',
+        1,
+        'swe-rebench-v2.v1',
+        'restoration',
+        'COMPLETE',
+        acquisitionFinishedAt.getTime(),
+        acquisitionStartedAt.getTime(),
+        acquisitionFinishedAt.getTime() + 1000,
+        'bafk-consumer-solution',
+        '0xsolutiondelivery',
+        JSON.stringify({ id: 'task-15', role: 'restoration' }),
+      );
+      insertRun.run(
+        'consumer-verdict',
+        '15',
+        'cid-consumer-task',
+        '0xverdict',
+        2,
+        'swe-rebench-v2.v1',
+        'evaluation',
+        'COMPLETE',
+        acquisitionFinishedAt.getTime(),
+        acquisitionStartedAt.getTime(),
+        acquisitionFinishedAt.getTime() + 1000,
+        'bafk-consumer-verdict',
+        '0xverdictdelivery',
+        JSON.stringify({ id: 'task-15-evaluation', role: 'evaluation' }),
+      );
     } finally {
       store.close();
     }
@@ -165,14 +325,19 @@ describe('donation consumption acceptance config', () => {
       },
       sourceCid: 'bafk-source',
       trajectorySourceCid: 'bafk-trajectory',
-      envelope: {},
+      envelope: {
+        participant: {
+          safeAddress: 'operator-a',
+        },
+      },
       redactedEnvelope: {},
-      subgraphExecution: {},
+      indexExecution: {},
     };
 
     const result = await waitForConsumerSolveAndEvaluatorProof({
       storePath: dbPath,
       proof,
+      allowedTaskId: '15',
       startedAt,
       acquisitionStartedAt,
       acquisitionFinishedAt,

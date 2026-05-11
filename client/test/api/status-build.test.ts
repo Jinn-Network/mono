@@ -203,7 +203,7 @@ describe('assembleStatusV1', () => {
       pollIntervalMs: 5000,
       masterDailyEstimateWei: '1',
       taskRuns: {
-        totals: { observedTasks: 1, activeTaskRuns: 1, completed: 0, failed: 0 },
+        totals: { observedTasks: 1, activeTaskRuns: 1, completed: 0, solutions: 0, verdicts: 0, failed: 0 },
         inFlight: [{
           requestId: 'req-1',
           taskId: '15',
@@ -224,6 +224,8 @@ describe('assembleStatusV1', () => {
     };
     const j = assembleStatusV1(raw);
     expect(j.taskRuns?.totals.activeTaskRuns).toBe(1);
+    expect(j.taskRuns?.totals.solutions).toBe(0);
+    expect(j.taskRuns?.totals.verdicts).toBe(0);
     expect(j.taskRuns?.inFlight[0]?.solverType).toBe('swe-rebench-v2.v1');
   });
 });

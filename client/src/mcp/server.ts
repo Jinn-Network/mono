@@ -75,15 +75,32 @@ function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
   if (!store) return null;
   const subgraphUrl = process.env['JINN_CORPUS_SUBGRAPH_URL'] ?? '';
   const ipfsGatewayUrl = process.env['JINN_CORPUS_IPFS_GATEWAY_URL'] ?? '';
-  if (!subgraphUrl || !ipfsGatewayUrl) {
+  const rpcUrl = process.env['JINN_CORPUS_RPC_URL'] ?? '';
+  const chainIdRaw = process.env['JINN_CORPUS_CHAIN_ID'] ?? '';
+  const chainId = chainIdRaw ? Number.parseInt(chainIdRaw, 10) : undefined;
+  const identityRegistryAddress = process.env['JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS'] ?? '';
+  const fromBlockRaw = process.env['JINN_CORPUS_FROM_BLOCK'] ?? '';
+  const fromBlock = fromBlockRaw ? Number.parseInt(fromBlockRaw, 10) : undefined;
+  const hasOnchainCorpus = Boolean(rpcUrl && chainId && identityRegistryAddress);
+  if (!ipfsGatewayUrl || (!subgraphUrl && !hasOnchainCorpus)) {
     return null;
   }
   const full = createCorpus({
-    subgraphUrl,
+    ...(subgraphUrl ? { subgraphUrl } : {}),
     ipfsGatewayUrl,
     store,
     signer: { privateKey: '0x0' },
     selfSafeAddress: '0x0000000000000000000000000000000000000000',
+    ...(hasOnchainCorpus
+      ? {
+          onchain: {
+            rpcUrl,
+            chainId: chainId!,
+            identityRegistryAddress: identityRegistryAddress as `0x${string}`,
+            ...(fromBlock !== undefined ? { fromBlock } : {}),
+          },
+        }
+      : {}),
   });
   return {
     query: full.query.bind(full),
@@ -415,6 +432,7 @@ server.tool(
     }),
     envelopeCid: z.string().optional(),
     artifactType: z.string().optional(),
+    ownerSafe: z.string().optional(),
     sources: z.array(artifactSourceSchema).optional(),
   },
   async (args) => {

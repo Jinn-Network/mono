@@ -86,10 +86,10 @@ export interface ApiServerConfig {
    * payment dance.
    *
    * Asymmetry with `search_records` / `inspect_record`: record discovery is
-   * keyless (subgraph + IPFS gateway only) and stays client-side in the MCP
-   * server. Artifact acquisition is the only path that needs the signing key
-   * for x402 payments, so it's the only one that moves to the daemon. See
-   * spec/2026-04-30-phase-a-umbrella.md §4.
+   * keyless (subgraph/on-chain reads + IPFS gateway) and stays client-side in
+   * the MCP server. Artifact acquisition is the only path that needs the
+   * signing key for x402 payments, so it's the only one that moves to the
+   * daemon. See spec/2026-04-30-phase-a-umbrella.md §4.
    */
   corpus?: Corpus | (() => Corpus | undefined);
   /** When set, GET /v1/bootstrap reads <earningDir>/earning_state.json. */
@@ -519,7 +519,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // daemon will sign x402 payments on the caller's behalf.
   //
   // Asymmetry with `search_records` / `inspect_record`: record lookup stays
-  // client-side because subgraph queries and IPFS manifest fetches are keyless.
+  // client-side because subgraph/on-chain queries and IPFS manifest fetches are
+  // keyless.
   // Only the buyer side of x402 needs the signing key, so only the buyer path
   // moves here.
   // See spec/2026-04-30-phase-a-umbrella.md §4.
@@ -550,6 +551,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       const access = body['access'] as { endpoint?: unknown; priceUsdc?: unknown } | undefined;
       const envelopeCid = body['envelopeCid'];
       const artifactType = body['artifactType'];
+      const ownerSafe = body['ownerSafe'];
       const sources = parseArtifactSources(body['sources']);
 
       if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) {
@@ -582,10 +584,16 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       }
 
       const accessNormalized = { endpoint: access.endpoint, priceUsdc: access.priceUsdc };
-      const hint: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[] } = {};
+      const hint: {
+        artifactType?: string;
+        envelopeCid?: string;
+        sources?: ArtifactSource[];
+        ownerSafe?: string;
+      } = {};
       if (typeof artifactType === 'string') hint.artifactType = artifactType;
       if (typeof envelopeCid === 'string') hint.envelopeCid = envelopeCid;
       if (sources && sources.length > 0) hint.sources = sources;
+      if (typeof ownerSafe === 'string') hint.ownerSafe = ownerSafe;
 
       const existing = inFlight.get(sha256);
       const acquirePromise = existing ?? corpus.acquireBySha256(sha256, accessNormalized, hint);
@@ -673,12 +681,28 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         port: actualPort,
         close: () =>
           new Promise<void>((res) => {
-            httpServer.close(() => res());
-            // Shutdown should not wait for dashboard keep-alive/SSE clients.
-            // Once the daemon is stopping, close existing sockets after the
-            // listener has stopped accepting new connections.
-            httpServer.closeIdleConnections();
-            httpServer.closeAllConnections();
+            let settled = false;
+            const done = () => {
+              if (settled) return;
+              settled = true;
+              res();
+            };
+            const timer = setTimeout(done, 2_000);
+            timer.unref?.();
+            try {
+              httpServer.close(() => {
+                clearTimeout(timer);
+                done();
+              });
+              // Shutdown should not wait for dashboard keep-alive/SSE clients.
+              // Once the daemon is stopping, close existing sockets after the
+              // listener has stopped accepting new connections.
+              httpServer.closeIdleConnections();
+              httpServer.closeAllConnections();
+            } catch {
+              clearTimeout(timer);
+              done();
+            }
           }),
         // serve() returns Server | Http2Server | Http2SecureServer; we never
         // pass http2/https opts so it's always a node http.Server at runtime.

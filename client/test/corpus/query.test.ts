@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { encodeAbiParameters, encodeEventTopics, type Hex } from 'viem';
 import { runCorpusQuery, buildSubgraphQuery } from '../../src/corpus/query.js';
+import { runOnchainCorpusQuery } from '../../src/corpus/onchain-query.js';
+import { PAYLOAD_TUPLE } from '../../src/erc8004/abis.js';
 
 describe('buildSubgraphQuery', () => {
   it('builds a query with solverType filter', () => {
@@ -49,6 +52,68 @@ describe('buildSubgraphQuery', () => {
   it('defaults limit to 50 when unset', () => {
     const { variables } = buildSubgraphQuery({});
     expect(variables.first).toBe(50);
+  });
+});
+
+describe('runOnchainCorpusQuery', () => {
+  it('discovers execution envelope metadata from IdentityRegistry logs', async () => {
+    const metadataKey = 'envelope:bafyManifestOnchain';
+    const metadataValue = encodeAbiParameters(PAYLOAD_TUPLE, [
+      1,
+      1,
+      `0x${'a'.repeat(64)}` as Hex,
+      '0x',
+      `0x${'0'.repeat(64)}` as Hex,
+    ]);
+    const topics = encodeEventTopics({
+      abi: [{
+        type: 'event',
+        name: 'MetadataSet',
+        inputs: [
+          { name: 'agentId', type: 'uint256', indexed: true },
+          { name: 'indexedMetadataKey', type: 'string', indexed: true },
+          { name: 'metadataKey', type: 'string', indexed: false },
+          { name: 'metadataValue', type: 'bytes', indexed: false },
+        ],
+      }],
+      eventName: 'MetadataSet',
+      args: {
+        agentId: 42n,
+        indexedMetadataKey: metadataKey,
+      },
+    });
+    const data = encodeAbiParameters([
+      { name: 'metadataKey', type: 'string' },
+      { name: 'metadataValue', type: 'bytes' },
+    ], [metadataKey, metadataValue]);
+    const publicClient = {
+      getBlockNumber: vi.fn(async () => 20n),
+      getLogs: vi.fn(async () => [{
+        address: `0x${'8'.repeat(40)}` as Hex,
+        data,
+        topics,
+        blockNumber: 18n,
+        logIndex: 3,
+      }]),
+    };
+
+    const refs = await runOnchainCorpusQuery(
+      { limit: 5 },
+      {
+        chainId: 84532,
+        identityRegistryAddress: `0x${'8'.repeat(40)}`,
+        fromBlock: 1,
+        publicClient,
+      },
+    );
+
+    expect(refs).toEqual([{
+      manifestCid: 'bafyManifestOnchain',
+      manifestHash: `0x${'a'.repeat(64)}`,
+      operator: { agentId: '42', safeAddress: '' },
+      evidenceTier: 'committed',
+      publishedAt: 0,
+    }]);
   });
 });
 
