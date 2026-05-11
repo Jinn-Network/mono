@@ -94,7 +94,6 @@ export interface HarnessEnv {
    * impl that has external deps.
    */
   disabledNames?: readonly string[];
-  /** Resolved SolverPlugin package roots passed to plugin-aware Harnesses. */
   /** Path to the `hermes` executable. Defaults to `hermes`. */
   hermesPath?: string;
   /** Default Hermes model when a SolverNet does not specify one. */

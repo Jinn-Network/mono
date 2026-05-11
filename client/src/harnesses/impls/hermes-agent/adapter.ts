@@ -58,7 +58,7 @@ export class HermesHarnessAdapter {
 
   async runTask(inputs: TaskSessionInputs): Promise<void> {
     const hermesHome = inputs.implStateDir;
-    const model = inputs.model ?? this.hermesModel;
+    const model = inputs.model ?? inputs.claudeModel ?? this.hermesModel;
 
     // Step 1: bootstrap — write config.yaml + .env
     writePerTaskHermesConfig({
