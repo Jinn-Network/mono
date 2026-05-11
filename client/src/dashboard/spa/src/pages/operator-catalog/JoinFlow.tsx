@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { HermesPrecheckPanel } from './HermesPrecheckPanel.js';
 import { useLocation, useParams } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
@@ -125,6 +126,7 @@ export function JoinFlow({
     model: defaultModel,
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [showHermesPrecheck, setShowHermesPrecheck] = useState(false);
 
   // The catalog loads independently of the manifest — when it arrives, if
   // the operator hasn't picked a harness yet (`form.harness` still equal to
@@ -504,6 +506,18 @@ export function JoinFlow({
         </section>
       )}
 
+      {showHermesPrecheck && (
+        <HermesPrecheckPanel
+          onSuccess={() => {
+            setShowHermesPrecheck(false);
+            submitMutation.mutate();
+          }}
+          onCancel={() => {
+            setShowHermesPrecheck(false);
+          }}
+        />
+      )}
+
       {submitError && (
         <p
           data-testid="join-flow-submit-error"
@@ -541,6 +555,12 @@ export function JoinFlow({
           disabled={!canSubmit}
           onClick={() => {
             setSubmitError(null);
+            // If Hermes Agent is selected as the solver harness, run the install
+            // precheck before persisting the join config.
+            if (form.roles.includes('solver') && form.harness === HERMES_AGENT_HARNESS) {
+              setShowHermesPrecheck(true);
+              return;
+            }
             submitMutation.mutate();
           }}
           style={{

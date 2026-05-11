@@ -25,6 +25,7 @@ const apiMock = vi.hoisted(() => ({
   getSolverNets: vi.fn(),
   operatorJoin: vi.fn(),
   operatorLeave: vi.fn(),
+  hermesDoctor: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({
@@ -37,6 +38,7 @@ vi.mock('../../api/client.js', () => ({
       join: (cid: string, body: unknown) => apiMock.operatorJoin(cid, body),
       leave: (cid: string) => apiMock.operatorLeave(cid),
     },
+    hermesDoctor: () => apiMock.hermesDoctor(),
   },
 }));
 
@@ -140,6 +142,7 @@ beforeEach(() => {
   apiMock.getSolverNets.mockReset();
   apiMock.operatorJoin.mockReset();
   apiMock.operatorLeave.mockReset();
+  apiMock.hermesDoctor.mockReset();
 
   apiMock.getManifest.mockResolvedValue({
     manifest: baseManifest,
@@ -533,5 +536,151 @@ describe('JoinFlow — submission', () => {
     fireEvent.click(screen.getByTestId('join-flow-cancel'));
 
     expect(nav.history.at(-1)).toBe('/operator#solvernets');
+  });
+});
+
+describe('JoinFlow — Hermes Agent precheck panel', () => {
+  /** Catalog with hermes-agent listed as compatible so it appears in the select. */
+  const hermesCompatibleCatalog = {
+    ...baseCatalog,
+    nets: [
+      {
+        ...baseCatalog.nets[0]!,
+        compatibleHarnesses: [
+          { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+        ],
+      },
+    ],
+  };
+
+  async function setupHermesSelected(): Promise<void> {
+    apiMock.getSolverNets.mockResolvedValue(hermesCompatibleCatalog);
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    // Select solver role so the harness picker shows.
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    // Wait for the harness select to be populated with hermes-agent.
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).some((o) => o.value === 'hermes-agent')).toBe(true),
+    );
+
+    // Select hermes-agent.
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+    await waitFor(() => expect(harnessSelect.value).toBe('hermes-agent'));
+  }
+
+  it('shows the not-installed panel when hermesDoctor returns installed:false', async () => {
+    apiMock.hermesDoctor.mockResolvedValue({ installed: false, exitCode: null, stdout: '', stderr: '' });
+
+    await setupHermesSelected();
+
+    // Click submit — should fire precheck instead of join.
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-not-installed')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('hermes-precheck-not-installed').textContent).toMatch(/not installed/i);
+    // The curl install command should be visible.
+    expect(screen.getByTestId('hermes-precheck-not-installed').textContent).toMatch(/curl/);
+    // The join mutation should NOT have fired.
+    expect(apiMock.operatorJoin).not.toHaveBeenCalled();
+  });
+
+  it('shows the config-issue panel when hermesDoctor returns exitCode:1', async () => {
+    const stderrMsg = 'error: no provider configured';
+    apiMock.hermesDoctor.mockResolvedValue({
+      installed: true,
+      exitCode: 1,
+      stdout: '',
+      stderr: stderrMsg,
+    });
+
+    await setupHermesSelected();
+
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-config-issue')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('hermes-precheck-config-issue').textContent).toMatch(stderrMsg);
+    expect(apiMock.operatorJoin).not.toHaveBeenCalled();
+  });
+
+  it('proceeds to join when hermesDoctor returns exitCode:0', async () => {
+    apiMock.hermesDoctor.mockResolvedValue({
+      installed: true,
+      exitCode: 0,
+      stdout: 'all checks passed',
+      stderr: '',
+    });
+    apiMock.operatorJoin.mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
+    });
+
+    await setupHermesSelected();
+
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
+    expect(apiMock.operatorJoin).toHaveBeenCalledWith(
+      'bafybeiaaa',
+      expect.objectContaining({ harness: 'hermes-agent', roles: ['solver'] }),
+    );
+  });
+
+  it('retry precheck button re-runs the doctor check', async () => {
+    // First call: not installed; second call: ok.
+    apiMock.hermesDoctor
+      .mockResolvedValueOnce({ installed: false, exitCode: null, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ installed: true, exitCode: 0, stdout: '', stderr: '' });
+    apiMock.operatorJoin.mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
+    });
+
+    await setupHermesSelected();
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-not-installed')).toBeTruthy(),
+    );
+
+    // Click retry.
+    fireEvent.click(screen.getByTestId('hermes-precheck-retry'));
+
+    // After retry with exitCode:0 the join should proceed.
+    await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
+  });
+
+  it('cancel button on the precheck panel hides the panel and does not join', async () => {
+    apiMock.hermesDoctor.mockResolvedValue({ installed: false, exitCode: null, stdout: '', stderr: '' });
+
+    await setupHermesSelected();
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-not-installed')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByTestId('hermes-precheck-cancel'));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('hermes-precheck-not-installed')).toBeNull(),
+    );
+    expect(apiMock.operatorJoin).not.toHaveBeenCalled();
+    // The harness select should still be visible.
+    expect(screen.getByTestId('join-flow-solver-fields')).toBeTruthy();
   });
 });
