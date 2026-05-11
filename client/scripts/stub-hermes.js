@@ -6,6 +6,15 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const args = process.argv.slice(2);
+
+// Pre-flight commands like `hermes --version` / `--help` must NOT write a
+// solution payload — otherwise the e2e's "binary exists and works" probe
+// drops a sentinel file into cwd before the actual run.
+if (args.includes('--version') || args.includes('--help')) {
+  process.stdout.write('stub-hermes 0.0.0\n');
+  process.exit(0);
+}
+
 const wIdx = args.indexOf('-w');
 const workingDir = wIdx >= 0 ? args[wIdx + 1] : process.cwd();
 mkdirSync(join(workingDir, '.execute'), { recursive: true });

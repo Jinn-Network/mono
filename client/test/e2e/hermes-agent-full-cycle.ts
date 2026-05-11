@@ -128,7 +128,6 @@ async function main(): Promise<void> {
         name: 'hermes-agent-e2e',
         solverType: task.solverType,
         model: 'anthropic/claude-opus-4.6',
-        harness: HERMES_AGENT_HARNESS,
       },
       implStateDir,
       workingDir,
