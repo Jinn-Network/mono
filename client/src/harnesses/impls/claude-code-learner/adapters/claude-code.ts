@@ -110,7 +110,7 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
     'Complete the task described by the task payload below.',
     'Use the available skills, plugins, tools, and runtime context exposed by this harness.',
     'Keep all task work inside `workingDir`.',
-    'When the task requires a typed SolverNet payload, submit it through an available submission tool or write the expected payload file for the harness harvester.',
+    'When the task requires a typed SolverNet payload, call submit_typed_payload. Do not write .execute/solution-payload.json directly unless submit_typed_payload is unavailable; if fallback is required, the file must match the exact SolverNet schema.',
     '',
     'Session inputs:',
     `- goal.id = ${inputs.taskId}`,

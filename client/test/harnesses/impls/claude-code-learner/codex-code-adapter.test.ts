@@ -226,7 +226,12 @@ describe('CodexCodeHarnessAdapter', () => {
       expect(promptArg).toContain(`Use ${workingDir}/repo as the only task repository checkout`);
       expect(promptArg).toContain(`clone https://github.com/Unidata/netcdf-c.git into ${workingDir}/repo`);
       expect(promptArg).toContain('search_records, inspect_record, and acquire_artifact');
+      expect(promptArg).toContain('call submit_typed_payload');
+      expect(promptArg).toContain('Do not write');
+      expect(promptArg).toContain('"schemaVersion":"swe-rebench-v2-solution.v1"');
       expect(promptArg).toContain(`${workingDir}/.execute/solution-payload.json`);
+      expect(promptArg).not.toContain('submit_typed_payload, or write');
+      expect(promptArg).not.toContain('submission tool or write the expected payload file');
       expect(promptArg).not.toContain('claude-code-learner:learn');
       expect(promptArg).not.toContain('Subagent dispatch is available as `spawn_agent`');
       expect(promptArg).not.toContain('Do not pass both `message` and `items`');

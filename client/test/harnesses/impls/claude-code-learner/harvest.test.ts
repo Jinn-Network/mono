@@ -527,6 +527,56 @@ describe('harvestOutput — generic typed-payload path', () => {
     });
   });
 
+  it('normalizes a direct SWE patch-only payload before validation', () => {
+    const patch = 'diff --git a/foo b/foo\n@@ -1 +1 @@\n-old\n+new\n';
+    writeTypedPayload({ patch });
+
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    expect(out.solutionPayload).toEqual({
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+      patch,
+    });
+    const payloadPath = join(workingDir, '.execute', 'solution-payload.json');
+    expect(JSON.parse(readFileSync(payloadPath, 'utf8'))).toEqual(out.solutionPayload);
+  });
+
+  it('rejects malformed direct SWE typed payloads at harvest time', () => {
+    writeTypedPayload({
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+      patch: '',
+    });
+
+    expect(() =>
+      harvestOutput(workingDir, undefined, {
+        id: 'task-1',
+        description: 'd',
+        solverType: 'swe-rebench-v2.v1',
+        role: 'restoration',
+      } as never),
+    ).toThrow(/failed swe-rebench-v2\.v1\/restoration validation/);
+  });
+
+  it('rejects corrupt direct typed payload files at harvest time', () => {
+    const dir = join(workingDir, '.execute');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'solution-payload.json'), '{');
+
+    expect(() =>
+      harvestOutput(workingDir, undefined, {
+        id: 'task-1',
+        description: 'd',
+        solverType: 'swe-rebench-v2.v1',
+        role: 'restoration',
+      } as never),
+    ).toThrow(/invalid JSON in typed payload/);
+  });
+
   it('reads typed payload as verdictPayload for evaluation role', () => {
     const verdict = {
       schemaVersion: 'swe-rebench-v2-verdict.v1',

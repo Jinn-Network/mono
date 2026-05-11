@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSolutionOutput } from '@jinn-network/sdk/solvernets/prediction-v1';
+import type { Role } from '../../../types/envelope.js';
+import { SOLVER_TYPE_PAYLOADS, validatePayload } from '../../../types/payloads/index.js';
 import type { OutputArtifact } from '../../../types/portfolio.js';
 import type { Task } from '../../../types/task.js';
 import type { Solution } from '../../types.js';
@@ -81,6 +83,24 @@ function safeReadJson(path: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function readTypedPayloadJson(path: string): Record<string, unknown> | null {
+  if (!existsSync(path)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  } catch (err) {
+    throw new Error(
+      `[claude-code-learner] harvestOutput: invalid JSON in typed payload ${path}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(
+      `[claude-code-learner] harvestOutput: typed payload ${path} must contain a JSON object`,
+    );
+  }
+  return parsed;
 }
 
 function decimalProbability(value: unknown): string | undefined {
@@ -184,6 +204,47 @@ function maybeMaterializeSweRebenchPatchPayload(
     join(executeDir, 'solution-payload.json'),
     JSON.stringify(payload, null, 2),
   );
+  return payload;
+}
+
+function payloadRole(task?: Task): Role {
+  return task?.role === 'evaluation' ? 'verdict' : 'restoration';
+}
+
+function normalizeTypedPayload(
+  raw: Record<string, unknown>,
+  task: Task | undefined,
+  typedPayloadPath: string,
+): Record<string, unknown> {
+  const solverType = typeof task?.solverType === 'string' ? task.solverType : undefined;
+  const role = payloadRole(task);
+  let payload = raw;
+
+  if (
+    solverType === 'swe-rebench-v2.v1' &&
+    role === 'restoration' &&
+    raw['schemaVersion'] === undefined &&
+    typeof raw['patch'] === 'string' &&
+    raw['patch'].trim()
+  ) {
+    payload = {
+      ...raw,
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+    };
+    writeFileSync(typedPayloadPath, JSON.stringify(payload, null, 2));
+  }
+
+  if (solverType && SOLVER_TYPE_PAYLOADS[solverType]?.[role]) {
+    try {
+      validatePayload(solverType, role, payload);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `[claude-code-learner] harvestOutput: typed payload ${typedPayloadPath} failed ${solverType}/${role} validation. Use submit_typed_payload or write the exact schema shape. ${detail}`,
+      );
+    }
+  }
+
   return payload;
 }
 
@@ -388,9 +449,12 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
   const range = resolvePhaseRange(phaseRange);
   const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
   const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
-  const typedPayload =
-    safeReadJson(typedPayloadPath) ??
+  const rawTypedPayload =
+    readTypedPayloadJson(typedPayloadPath) ??
     maybeMaterializeSweRebenchPatchPayload(workingDir, task);
+  const typedPayload = rawTypedPayload
+    ? normalizeTypedPayload(rawTypedPayload, task, typedPayloadPath)
+    : null;
 
   // Hard-fail on missing or corrupt primary artifacts for all required phases
   // unless a typed SolverNet payload is already present. In the typed-payload

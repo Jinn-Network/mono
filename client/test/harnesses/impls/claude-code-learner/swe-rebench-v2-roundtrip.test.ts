@@ -154,6 +154,8 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
       'utf8',
     );
     expect(skill).toContain('submit_typed_payload');
+    expect(skill).toContain('Only if `submit_typed_payload` is not available');
+    expect(skill).toContain('Do not choose the direct file path when the tool is available');
     expect(skill).toContain('.execute/solution-payload.json');
 
     const workingDir = mkdtempSync(join(tmpdir(), 'jinn-swe-rebench-fallback-'));
