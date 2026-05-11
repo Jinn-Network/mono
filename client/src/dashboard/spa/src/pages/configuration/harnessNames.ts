@@ -1,5 +1,6 @@
 export const CLAUDE_CODE_HARNESS = 'claude-code';
 export const CODEX_HARNESS = 'codex';
+export const HERMES_AGENT_HARNESS = 'hermes-agent';
 
 const HARNESS_ALIASES: Record<string, string> = {
   'claude-code-learner': CLAUDE_CODE_HARNESS,
@@ -9,6 +10,7 @@ const HARNESS_ALIASES: Record<string, string> = {
 const DISPLAY_NAMES: Record<string, string> = {
   [CLAUDE_CODE_HARNESS]: 'Claude Code',
   [CODEX_HARNESS]: 'Codex',
+  [HERMES_AGENT_HARNESS]: 'Hermes Agent',
   'swe-rebench-v2-evaluator': 'SWE-rebench v2 Evaluator',
 };
 
