@@ -46,14 +46,14 @@ If a bd issue does not fit one of these shapes, it is mis-scoped — split or re
 5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open; see `jinn-mono-8qbc`.)_
 6. **Integration tests > mocks for migration / contract surfaces.**
 7. **TDD for new features, regression test for fixes.**
-8. **Auto-canary on main merge; Monday-only named minor.** Cadence policy.
+8. **Auto-canary on main merge; Monday-only named stable cut.** Cadence policy.
 9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy.
 
 ### Cadence
 
 - Every merge to main → npm `canary` (`<v>-canary.<sha>`).
 - Every Monday 09:00 UTC → GitHub Release draft (Hermes-style); Captain publishes; publish triggers npm `latest` + CHANGELOG auto-mirror.
-- Pre-v1: weekly minor (`v0.N.0 → v0.N+1.0`). `v1.0.0` = the Monday cut that ships `jinn-mono-uy6v`. Post-v1 epic close = major bump.
+- Pre-v1: weekly Build Notes cuts patch by default (`v0.1.3 → v0.1.4`). A Monday cut that lands an epic or significant capability can bump the minor (`v0.1.x → v0.2.0`). `v1.0.0` is reserved for far-future graduation (mainnet / exit-testnet / Phase 2), not `jinn-mono-uy6v`.
 
 ### Daily entry point
 

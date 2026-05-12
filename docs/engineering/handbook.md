@@ -15,16 +15,16 @@ Canonical references:
 Two-track release model:
 
 - **Continuous canary on every merge to `main`.** GitHub Actions (`cargo/.github/workflows/npm-publish.yml`) publishes `<package.version>-canary.<sha8>` under the npm dist-tag `canary` within minutes of any PR merge that touches `client/**`. Operators on `npm install -g @jinn-network/client@canary` receive the rolling build.
-- **Weekly named minor every Monday.** A Monday cron creates a GitHub Release **draft** at 09:00 UTC. Captain reviews the draft (Hermes-style: build-name + highlights + known-issues + auto-aggregated PRs/closed-bd/stats), then publishes. Publish triggers npm `latest` and the CHANGELOG auto-mirror. Default `npm install -g @jinn-network/client` (no tag) gets the weekly named minor.
+- **Weekly named Build Notes cut every Monday.** A Monday cron creates a GitHub Release **draft** at 09:00 UTC. Captain reviews the draft (Hermes-style: build-name + highlights + known-issues + auto-aggregated PRs/closed-bd/stats), then publishes. Publish triggers npm `latest` and the CHANGELOG auto-mirror. Default `npm install -g @jinn-network/client` (no tag) gets the weekly named stable build.
 
-Tag format on Monday cuts: dual — `v2026.MM.DD` (the human-readable build identifier) and `v0.N.0` (the semver for npm). Pre-v1 minors go `v0.N.0 → v0.N+1.0`. **v1.0.0 = the Monday cut that ships `jinn-mono-uy6v`** (SWE-rebench v2 donation flow on public testnet). Post-v1 epic close = major bump (`v1 → v2` for `jinn-mono-8psp` Hermes harness, `v2 → v3` for `jinn-mono-jnw9` self-modifying learner).
+Tag format on Monday cuts: dual — `v2026.MM.DD` (the human-readable build identifier) and `vX.Y.Z` (the semver for npm). Pre-v1 weekly Build Notes cuts usually patch (`v0.1.3 → v0.1.4`). A Monday cut where an epic or significant capability lands can bump the minor (`v0.1.x → v0.2.0`). **v1.0.0 is reserved for far-future graduation** (mainnet / exit-testnet / Phase 2), explicitly not `jinn-mono-uy6v`.
 
-**Bump heuristic** (cron's suggestion, Captain overrides): the Monday cron always suggests a minor bump. Captain manually overrides to major when an epic-major bd issue closes in the window. Conventional Commits drives section grouping in Release notes (Features / Fixes / Refactors / Chore / Docs / Tests), **not** per-merge semver bumps. Canary handles per-merge implicit patching.
+**Bump heuristic** (cron's suggestion, Captain overrides): the Monday cron always suggests a patch bump. Captain manually overrides to the next minor when an epic or significant capability closes in the window. Conventional Commits drives section grouping in Release notes (Features / Fixes / Refactors / Chore / Docs / Tests), **not** per-merge semver bumps. Canary handles per-merge implicit patching.
 
 ## Dist-tags
 
 - `canary` — rolling, every-merge build (`<v>-canary.<sha>`).
-- `latest` — Monday named minor.
+- `latest` — Monday named stable build.
 
 There is no `next` channel; `canary` is the rolling channel name we use. Operators who want the rolling build use `@canary`; operators who want stable get `latest` by default.
 
@@ -108,7 +108,7 @@ The eight rules below land in this handbook + [`cargo/CLAUDE.md`](../../CLAUDE.m
 5. **(Deferred — open)** Supervised-diff for the self-modifying learner. Phase A.5+ learner ships proposed changes as PRs against the repo; designated reviewer approves before merge. Concrete mechanism is open until `jinn-mono-8qbc` closes. **Status: open — see `jinn-mono-8qbc`.**
 6. **Integration tests > mocks for migration / contract surfaces.** Mock policy stays for the unit-test pyramid; migration tests must hit a real database or a forked chain (per `superpowers:test-driven-development`'s position on the test pyramid).
 7. **TDD for new features, regression test for fixes.** Per `superpowers:test-driven-development`. TDD on `feat` / `refactor`; regression-first on `fix`; deferred-not-waived on `fix(incident)`.
-8. **Auto-canary on main merge; Monday-only named minor.** Cadence policy from §Cadence above.
+8. **Auto-canary on main merge; Monday-only named stable cut.** Cadence policy from §Cadence above.
 9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy from §Dist-tags above.
 
 Rule-to-shape wiring is in §The shapes of work; the mapping is the load-bearing piece. Rules in the abstract are guidance; rules wired to shapes are operational.
@@ -117,13 +117,13 @@ Rule-to-shape wiring is in §The shapes of work; the mapping is the load-bearing
 
 Per DR-2026-05-11-b, the canonical sprint board is a GitHub Project (v2) on `Jinn-Network/mono` named **Jinn engineering**.
 
-- **Status columns**: Open / In Progress / In Review / Shipped.
-- **Sprint field** (date): keyed to the upcoming Monday's date.
-- **Epic field** (single select): `uy6v` / `8psp` / `jnw9` / `9iq3` / `2cl` (extensible).
+- **Status columns**: Todo / In Progress / In Review / Done.
+- **Sprint field** (Iteration): keyed to the current Monday week.
+- **Epic field** (single select): human option names such as `Engineering handbook`, `Discovery API`, and `v1 public testnet`; option descriptions carry the internal `jinn-mono-<id>` mapping.
 - **Default view**: current sprint Status board.
 - **Roadmap view**: grouped by Epic in Now / Next / Later.
 
-**bd ↔ GitHub Issue boundary**: bd is the internal SoR. When (and only when) a bd issue is pulled into the upcoming sprint, the `cargo/scripts/bd-mirror` helper opens a public GitHub Issue with a curated subset of the bd body and adds it to the Project board with `Sprint = <next-monday-date>`. The Issue body ends with `Internal tracking: jinn-mono-<bd-id>` so the boundary is legible to external readers. Backlog stays in bd-only.
+**bd ↔ GitHub Issue boundary**: bd is the internal SoR. When (and only when) a bd issue is pulled into the upcoming sprint, the `cargo/scripts/bd-mirror` helper opens a public GitHub Issue with a curated subset of the bd body and adds it to the Project board with the current Sprint iteration. The Issue body ends with `Internal tracking: jinn-mono-<bd-id>` so the boundary is legible to external readers. Backlog stays in bd-only.
 
 The Friday triage cron (currently manual via `workflow_dispatch`) auto-mirrors top-N priority bd issues for the upcoming sprint. Captain reviews and **rejects** anything that doesn't belong. Default flow is reject, not select.
 
@@ -133,7 +133,7 @@ Per the umbrella `jinn-mono-2cl` and DR-2026-05-11-b:
 
 - **GitHub Projects (v2)** — public sprint board (this handbook §Sprint surface above).
 - **Public GitHub Issues** — the sprint-scoped mirrored Issues are the externally-visible "what we're working on right now" surface.
-- **GitHub Releases + auto-generated notes** — the devlog. Monday cuts. Released artifacts: `v2026.MM.DD` + `v0.N.0` dual tags.
+- **GitHub Releases + auto-generated notes** — the devlog. Monday cuts. Released artifacts: `v2026.MM.DD` + `vX.Y.Z` dual tags.
 - **CHANGELOG.md** — `cargo/client/CHANGELOG.md` auto-mirrored from Release body on publish via `cargo/.github/workflows/changelog-mirror.yml`. npm-tarball-shipped.
 - **Repo-as-docs** — `cargo/docs/` (engineering, runbooks, specs, decisions). GitHub Pages-ready.
 - **GitHub Discussions** — RFCs / Q&A / governance prep through Phase 2.

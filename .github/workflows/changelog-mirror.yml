@@ -23,7 +23,7 @@ jobs:
   mirror:
     name: Append Release body to client/CHANGELOG.md
     runs-on: ubuntu-latest
-    # Only mirror Releases that look like a Monday named-minor (skip drafts and -canary tags).
+    # Only mirror Releases that look like a Monday named Build Notes cut (skip drafts and -canary tags).
     if: github.event.release.draft == false && !contains(github.event.release.tag_name, 'canary') && !contains(github.event.release.tag_name, '-draft')
     steps:
       - uses: actions/checkout@v5
