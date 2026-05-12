@@ -31,6 +31,10 @@ COPY src ./src
 # Ponder codegen (regenerates ponder-env.d.ts; validates schema).
 RUN yarn codegen
 
+# Build the explorer SPA; output goes to /app/public/.
+COPY explorer ./explorer
+RUN cd explorer && corepack yarn install && corepack yarn build
+
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM node:22-slim
 
@@ -47,6 +51,7 @@ COPY --from=build /app/ponder.config.ts /app/ponder.schema.ts /app/tsconfig.json
 COPY --from=build /app/ponder-env.d.ts ./
 COPY --from=build /app/abis ./abis
 COPY --from=build /app/src ./src
+COPY --from=build /app/public ./public
 
 EXPOSE 42069
 

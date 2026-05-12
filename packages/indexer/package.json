@@ -7,7 +7,8 @@
   "license": "MIT",
   "scripts": {
     "dev": "ponder dev",
-    "build": "ponder codegen",
+    "build:explorer": "cd explorer && yarn install && yarn build",
+    "build": "ponder codegen && yarn build:explorer",
     "start": "ponder start",
     "serve": "ponder serve",
     "codegen": "ponder codegen",
@@ -15,6 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hono/node-server": "^1.13.0",
     "hono": "^4.0.0",
     "ponder": "^0.16.6",
     "viem": "^2.0.0"
