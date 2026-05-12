@@ -1,14 +1,16 @@
 /**
  * Ponder schema for the Jinn protocol indexer.
  *
- * Six entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7:
+ * Seven entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6:
  *
- *   Task              — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
- *   Attempt           — from JinnRouter.TaskAttemptCreated
- *   Verdict           — from JinnRouter.VerdictDeliveryClaimed
- *   RewardDistribution — from JinnDistributor.Claimed on Sepolia L1
- *   SolverNetManifest — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
- *   Envelope          — from IdentityRegistry.MetadataSet (envelope key patterns)
+ *   Task                — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
+ *   Attempt             — from JinnRouter.TaskAttemptCreated
+ *   Verdict             — from JinnRouter.VerdictDeliveryClaimed
+ *   RewardDistribution  — from JinnDistributor.Claimed on Sepolia L1
+ *   SolverNetManifest   — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
+ *   Envelope            — from IdentityRegistry.MetadataSet (envelope key patterns)
+ *   AttemptEnvelopeMeta — IPFS-enriched executor/provenance fields for execution envelopes,
+ *                         keyed by (requestId, chainId), joined from Envelope via IPFS fetch
  *
  * Schema-version policy: any breaking change to an existing entity (rename,
  * remove, or type-change of a column) bumps the schema version and triggers a
@@ -366,6 +368,60 @@ export const harnessCheckpoint = onchainTable(
     pk: primaryKey({ columns: [table.agentId, table.cid, table.chainId] }),
     cidIdx: index().on(table.cid),
     blockIdx: index().on(table.publishedAtBlock),
+  }),
+);
+
+// ── AttemptEnvelopeMeta ──────────────────────────────────────────────────────
+/**
+ * Envelope-sourced metadata for a task attempt, populated by the IPFS enrichment
+ * pass (ebu7.6): for each indexed `envelope:<cid>` (execution evidence), fetch the
+ * envelope body and project its executor block + provenance. Joined to `attempt`
+ * by `requestId` (the envelope's `task.requestId` equals `attempt.requestId`).
+ * Resilient: on IPFS fetch/parse failure no row is written (we have no requestId
+ * without the body); Ponder reprocesses on the next sync giving a natural retry.
+ * `mode`: 'train' (default when the envelope omits executor.mode) | 'frozen' | 'unknown'.
+ *
+ * Primary key: (requestId, chainId).
+ */
+export const attemptEnvelopeMeta = onchainTable(
+  'attempt_envelope_meta',
+  (t) => ({
+    /** MechMarketplace requestId — equals attempt.requestId (the join key). */
+    requestId: t.hex().notNull(),
+    /** The envelope CID this metadata came from. */
+    manifestCid: t.text().notNull(),
+    /** solverType from the envelope. */
+    solverType: t.text().notNull().default(''),
+    /** executor.implName (harness). */
+    implName: t.text().notNull().default(''),
+    /** executor.implVersion. */
+    implVersion: t.text().notNull().default(''),
+    /** executor.codeDigest (e.g. "sha256:..."). */
+    codeDigest: t.text().notNull().default(''),
+    /** executor.mode: 'train' | 'frozen' | 'unknown'. */
+    mode: t.text().notNull().default('train'),
+    /** JSON.stringify(executor.plugins) — array of {name,version,cid?,sha256}. */
+    pluginsJson: t.text().notNull().default('[]'),
+    /** sessionProvenance.originatingTool: "name" or "name@version", else ''. */
+    model: t.text().notNull().default(''),
+    /** Best-effort language tag (repo language / payload hint), else ''. */
+    language: t.text().notNull().default(''),
+    /** evidenceTier from the envelope. */
+    evidenceTier: t.text().notNull().default(''),
+    /** True if executor.source is present (verified-frozen eligibility). */
+    sourcePublished: t.boolean().notNull().default(false),
+    /** 'ok' | 'failed'. (Only 'ok' rows are written today; the field is here for the future batch-retry table.) */
+    enrichmentStatus: t.text().notNull().default('ok'),
+    /** Block number of the MetadataSet event that triggered enrichment. */
+    enrichedAtBlock: t.bigint().notNull(),
+    /** Chain ID. */
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.requestId, table.chainId] }),
+    manifestCidIdx: index().on(table.manifestCid),
+    implNameIdx: index().on(table.implName),
+    modeIdx: index().on(table.mode),
   }),
 );
 

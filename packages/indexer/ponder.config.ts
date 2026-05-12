@@ -19,12 +19,17 @@
  * Contracts: JinnRouter, IdentityRegistry, JinnDistributor.
  *
  * Environment variables:
- *   PONDER_RPC_URL_84532    — RPC URL for Base Sepolia (defaults to the public
- *                             endpoint; set a Tenderly/Alchemy/etc. URL in
- *                             production for headroom).
- *   PONDER_RPC_URL_11155111 — RPC URL for Sepolia L1 (for JinnDistributor;
- *                             defaults to a public endpoint, set a real RPC in
- *                             production).
+ *   PONDER_RPC_URL_84532          — RPC URL for Base Sepolia (defaults to the public
+ *                                   endpoint; set a Tenderly/Alchemy/etc. URL in
+ *                                   production for headroom).
+ *   PONDER_RPC_URL_11155111       — RPC URL for Sepolia L1 (for JinnDistributor;
+ *                                   defaults to a public endpoint, set a real RPC in
+ *                                   production).
+ *   JINN_INDEXER_ENRICH_ENVELOPES — set false/0 to skip per-envelope IPFS fetch;
+ *                                   the explorer's harness/mode/plugin/model facets
+ *                                   and freeze integrity won't populate. Default: enabled.
+ *   JINN_IPFS_GATEWAY_URL         — IPFS gateway for envelope enrichment.
+ *                                   Default: https://gateway.autonolas.tech.
  *
  * Database:
  *   No DATABASE_URL        — uses PGlite (embedded Postgres) for local dev; data in .ponder/

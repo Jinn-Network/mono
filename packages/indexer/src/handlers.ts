@@ -24,6 +24,7 @@ import {
   parseSolverNetManifestKey,
   tierFromRaw,
 } from './types.js';
+import { fetchIpfsJson, type FetchLike } from './ipfs.js';
 
 // ── Minimal structural types for the handler context ──────────────────────────
 // Deliberately narrow — only the fields the handlers actually touch. The real
@@ -331,6 +332,113 @@ export async function handleTaskBudgetRefunded({
   await context.db.update(task, { id }).set({ refunded: true });
 }
 
+// ── Envelope lite parser ──────────────────────────────────────────────────────
+// Dep-free defensive parser: reads only the fields needed for attemptEnvelopeMeta.
+// Returns null if the body isn't an object or task.requestId is absent/empty.
+
+export interface EnvelopeLite {
+  requestId: string;
+  solverType: string;
+  implName: string;
+  implVersion: string;
+  codeDigest: string;
+  mode: string;
+  pluginsJson: string;
+  model: string;
+  language: string;
+  evidenceTier: string;
+  sourcePublished: boolean;
+}
+
+function safeStr(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
+  if (body === null || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+
+  // task.requestId is the join key — required.
+  const task = b['task'];
+  if (task === null || typeof task !== 'object') return null;
+  const taskObj = task as Record<string, unknown>;
+  const requestId = safeStr(taskObj['requestId']);
+  if (!requestId) return null;
+
+  // executor block
+  const executor = b['executor'];
+  const executorObj: Record<string, unknown> =
+    executor !== null && typeof executor === 'object' ? (executor as Record<string, unknown>) : {};
+
+  const implName = safeStr(executorObj['implName']);
+  const implVersion = safeStr(executorObj['implVersion']);
+  const codeDigest = safeStr(executorObj['codeDigest']);
+  // mode: anything that isn't exactly 'frozen' → 'train' (absent → 'train').
+  const mode = executorObj['mode'] === 'frozen' ? 'frozen' : 'train';
+  const sourcePublished = executorObj['source'] != null;
+
+  // plugins: executor.plugins should be an array; JSON.stringify it.
+  let pluginsJson = '[]';
+  if (Array.isArray(executorObj['plugins'])) {
+    try {
+      pluginsJson = JSON.stringify(executorObj['plugins']);
+    } catch {
+      pluginsJson = '[]';
+    }
+  }
+
+  // sessionProvenance.originatingTool → model label
+  let model = '';
+  const prov = b['sessionProvenance'];
+  if (prov !== null && typeof prov === 'object') {
+    const provObj = prov as Record<string, unknown>;
+    const tool = provObj['originatingTool'];
+    if (tool !== null && typeof tool === 'object') {
+      const toolObj = tool as Record<string, unknown>;
+      const name = safeStr(toolObj['name']);
+      if (name) {
+        const version = safeStr(toolObj['version']);
+        model = version ? `${name}@${version}` : name;
+      }
+    }
+  }
+
+  // language: best-effort from payload
+  let language = '';
+  const payload = b['payload'];
+  if (payload !== null && typeof payload === 'object') {
+    const payloadObj = payload as Record<string, unknown>;
+    const lang = payloadObj['language'];
+    if (typeof lang === 'string' && lang) {
+      language = lang;
+    } else {
+      const repo = payloadObj['repo'];
+      if (repo !== null && typeof repo === 'object') {
+        const repoObj = repo as Record<string, unknown>;
+        const repoLang = safeStr(repoObj['language']);
+        if (repoLang) language = repoLang;
+      }
+    }
+  }
+
+  const evidenceTier = safeStr(b['evidenceTier']);
+  const solverType = safeStr(b['solverType']);
+
+  return {
+    requestId,
+    solverType,
+    implName,
+    implVersion,
+    codeDigest,
+    mode,
+    pluginsJson,
+    model,
+    language,
+    evidenceTier,
+    sourcePublished,
+  };
+}
+
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────
 // Routes by key prefix:
 //   solvernet-manifest:<cid>  → upsert SolverNetManifest (most-recent-wins)
@@ -345,12 +453,20 @@ export async function handleMetadataSet({
   solverNetManifest,
   envelope,
   harnessCheckpoint,
+  attemptEnvelopeMeta,
+  enrichEnvelopes = false,
+  ipfsGateway = '',
+  fetchImpl,
 }: {
   event: MetadataSetEvent;
   context: HandlerContext;
   solverNetManifest: unknown;
   envelope: unknown;
   harnessCheckpoint: unknown;
+  attemptEnvelopeMeta?: unknown;
+  enrichEnvelopes?: boolean;
+  ipfsGateway?: string;
+  fetchImpl?: FetchLike;
 }): Promise<void> {
   const key = event.args.metadataKey;
   const agentId = event.args.agentId.toString();
@@ -530,6 +646,84 @@ export async function handleMetadataSet({
           logIndex: row.logIndex,
         };
       });
+
+    // ── Envelope enrichment → attemptEnvelopeMeta ──────────────────────────
+    // Only for execution envelopes (kind === 'envelope'), not evaluation or
+    // capture. attemptEnvelopeMeta is optional for backward compat with callers
+    // that don't pass it (the existing test suite without enrichEnvelopes).
+    if (envelopeKey.kind === 'envelope' && enrichEnvelopes && attemptEnvelopeMeta) {
+      try {
+        const body = await fetchIpfsJson(ipfsGateway, envelopeKey.cid, {
+          timeoutMs: 5000,
+          fetchImpl,
+        });
+        const meta = parseEnvelopeLite(body);
+        if (meta) {
+          await context.db
+            .insert(attemptEnvelopeMeta)
+            .values({
+              requestId: meta.requestId as `0x${string}`,
+              manifestCid: envelopeKey.cid,
+              solverType: meta.solverType,
+              implName: meta.implName,
+              implVersion: meta.implVersion,
+              codeDigest: meta.codeDigest,
+              mode: meta.mode,
+              pluginsJson: meta.pluginsJson,
+              model: meta.model,
+              language: meta.language,
+              evidenceTier: meta.evidenceTier,
+              sourcePublished: meta.sourcePublished,
+              enrichmentStatus: 'ok',
+              enrichedAtBlock: blockNumber,
+              chainId,
+            })
+            .onConflictDoUpdate((row) => {
+              // Most-recent-wins: only update if the incoming event is at least
+              // as recent as the stored enrichment. Stale replays are no-ops.
+              if (blockNumber >= row.enrichedAtBlock) {
+                return {
+                  manifestCid: envelopeKey.cid,
+                  solverType: meta.solverType,
+                  implName: meta.implName,
+                  implVersion: meta.implVersion,
+                  codeDigest: meta.codeDigest,
+                  mode: meta.mode,
+                  pluginsJson: meta.pluginsJson,
+                  model: meta.model,
+                  language: meta.language,
+                  evidenceTier: meta.evidenceTier,
+                  sourcePublished: meta.sourcePublished,
+                  enrichmentStatus: 'ok',
+                  enrichedAtBlock: blockNumber,
+                  chainId,
+                };
+              }
+              // No-op: return existing row fields so Drizzle generates valid SQL.
+              return {
+                manifestCid: row.manifestCid,
+                solverType: row.solverType,
+                implName: row.implName,
+                implVersion: row.implVersion,
+                codeDigest: row.codeDigest,
+                mode: row.mode,
+                pluginsJson: row.pluginsJson,
+                model: row.model,
+                language: row.language,
+                evidenceTier: row.evidenceTier,
+                sourcePublished: row.sourcePublished,
+                enrichmentStatus: row.enrichmentStatus,
+                enrichedAtBlock: row.enrichedAtBlock,
+                chainId: row.chainId,
+              };
+            });
+        }
+      } catch (err) {
+        console.warn(`[indexer] envelope enrichment failed for ${envelopeKey.cid}: ${String(err)}`);
+        // no row — we have no requestId without the body; Ponder reprocesses on next sync.
+      }
+    }
+
     return;
   }
 

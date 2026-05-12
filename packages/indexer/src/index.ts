@@ -1,7 +1,7 @@
 /**
  * Ponder event handlers for the Jinn protocol indexer.
  *
- * Seven event sources, each mapped to one entity in ponder.schema.ts:
+ * Seven event sources, each mapped to one or more entities in ponder.schema.ts:
  *
  *   JinnRouter:TaskCreated             → task
  *   JinnRouter:TaskAttemptCreated      → attempt
@@ -9,6 +9,9 @@
  *   JinnRouter:VerdictDeliveryClaimed  → verdict
  *   JinnRouter:TaskBudgetRefunded      → task.refunded = true
  *   IdentityRegistry:MetadataSet       → solverNetManifest OR harnessCheckpoint OR envelope (routed by key)
+ *                                        the `envelope:` handler also does an IPFS enrichment fetch
+ *                                        → attemptEnvelopeMeta (config-gated by JINN_INDEXER_ENRICH_ENVELOPES,
+ *                                        IPFS gateway from JINN_IPFS_GATEWAY_URL)
  *   JinnDistributor:Claimed            → rewardDistribution
  *
  * Handlers are pure event-to-row mappings with no business logic. The
@@ -29,7 +32,18 @@
  * Schema: ponder.schema.ts
  */
 import { ponder } from 'ponder:registry';
-import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta } from 'ponder:schema';
+
+// ── Enrichment config (read once at module scope) ─────────────────────────────
+// JINN_INDEXER_ENRICH_ENVELOPES: set false/0 to skip per-envelope IPFS fetch
+// and sync faster — the explorer's harness/mode/plugin/model facets, checkpoint
+// timeline, and freeze integrity won't populate. Default: enabled.
+const enrichEnvelopes =
+  process.env['JINN_INDEXER_ENRICH_ENVELOPES'] !== 'false' &&
+  process.env['JINN_INDEXER_ENRICH_ENVELOPES'] !== '0';
+// JINN_IPFS_GATEWAY_URL: IPFS gateway for envelope enrichment.
+// Empty → fetchIpfsJson falls back to https://gateway.autonolas.tech.
+const ipfsGateway = process.env['JINN_IPFS_GATEWAY_URL'] ?? '';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -95,6 +109,9 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     solverNetManifest,
     envelope,
     harnessCheckpoint,
+    attemptEnvelopeMeta,
+    enrichEnvelopes,
+    ipfsGateway,
   });
 });
 

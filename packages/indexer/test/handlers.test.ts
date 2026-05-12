@@ -26,7 +26,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { keccak256, toBytes } from 'viem';
-import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -38,6 +38,7 @@ import {
   type HandlerContext,
 } from '../src/handlers.js';
 import { createInMemoryDb, type InMemoryDb, type PkMap } from './helpers/in-memory-db.js';
+import type { FetchLike } from '../src/ipfs.js';
 import {
   taskCreatedEvent,
   taskAttemptCreatedEvent,
@@ -66,6 +67,7 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [verdict, ['taskId', 'attemptIndex', 'verdictIndex', 'chainId']],
   [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
   [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
+  [attemptEnvelopeMeta, ['requestId', 'chainId']],
 ]);
 
 let db: InMemoryDb;
@@ -236,6 +238,8 @@ describe('MetadataSet key routing', () => {
       solverNetManifest,
       envelope,
       harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
     });
     expect(db.count(solverNetManifest)).toBe(1);
     expect(db.count(envelope)).toBe(0);
@@ -264,6 +268,8 @@ describe('MetadataSet key routing', () => {
         solverNetManifest,
         envelope,
         harnessCheckpoint,
+        attemptEnvelopeMeta,
+        enrichEnvelopes: false,
       });
       expect(localDb.count(envelope)).toBe(1);
       expect(localDb.count(solverNetManifest)).toBe(0);
@@ -289,6 +295,8 @@ describe('MetadataSet key routing', () => {
       solverNetManifest,
       envelope,
       harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
     });
     expect(db.count(solverNetManifest)).toBe(0);
     expect(db.count(envelope)).toBe(0);
@@ -309,6 +317,8 @@ describe('envelope payload decode', () => {
       solverNetManifest,
       envelope,
       harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
     });
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
     expect(row).toMatchObject({ manifestHash: MANIFEST_HASH, evidenceTier: 'attested' });
@@ -325,6 +335,8 @@ describe('envelope payload decode', () => {
       solverNetManifest,
       envelope,
       harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
     });
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
     expect(row).toMatchObject({ manifestHash: MANIFEST_HASH, evidenceTier: 'self-signed' });
@@ -342,6 +354,8 @@ describe('envelope payload decode', () => {
         solverNetManifest,
         envelope,
         harnessCheckpoint,
+        attemptEnvelopeMeta,
+        enrichEnvelopes: false,
       }),
     ).resolves.toBeUndefined();
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
@@ -362,6 +376,8 @@ describe('envelope payload decode', () => {
         solverNetManifest,
         envelope,
         harnessCheckpoint,
+        attemptEnvelopeMeta,
+        enrichEnvelopes: false,
       }),
     ).resolves.toBeUndefined();
     expect(db.count(solverNetManifest)).toBe(0);
@@ -388,6 +404,8 @@ describe('solverNetManifest most-recent-wins', () => {
       solverNetManifest,
       envelope,
       harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
     });
 
   it('a later block overwrites an earlier one', async () => {
@@ -576,6 +594,8 @@ describe('envelope most-recent-wins', () => {
       solverNetManifest,
       envelope,
       harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
     });
   const get = () => db.get(envelope, { agentId: '8', metadataKey: key, chainId: CHAIN_ID });
 
@@ -628,6 +648,8 @@ describe('MetadataSet harness.checkpoint: → harnessCheckpoint', () => {
       solverNetManifest,
       envelope,
       harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
     });
 
     const row = db.get(harnessCheckpoint, { agentId: '42', cid: CHECKPOINT_CID, chainId: CHAIN_ID });
@@ -655,8 +677,201 @@ describe('MetadataSet harness.checkpoint: → harnessCheckpoint', () => {
       },
       { block: 41_300_000n, logIndex: 1 },
     );
-    await handleMetadataSet({ event: ev, context, solverNetManifest, envelope, harnessCheckpoint });
-    await handleMetadataSet({ event: ev, context, solverNetManifest, envelope, harnessCheckpoint });
+    await handleMetadataSet({ event: ev, context, solverNetManifest, envelope, harnessCheckpoint, attemptEnvelopeMeta, enrichEnvelopes: false });
+    await handleMetadataSet({ event: ev, context, solverNetManifest, envelope, harnessCheckpoint, attemptEnvelopeMeta, enrichEnvelopes: false });
     expect(db.count(harnessCheckpoint)).toBe(1);
+  });
+});
+
+// ── MetadataSet envelope: enrichment → attemptEnvelopeMeta ───────────────────
+
+const ENVELOPE_REQUEST_ID = `0x${'aa'.repeat(32)}` as `0x${string}`;
+const SYNTHETIC_ENVELOPE = {
+  schemaVersion: 'jinn.execution.v1',
+  solverType: 'swe-rebench-v2.v1',
+  role: 'restoration',
+  task: {
+    cid: 'bafytask',
+    onchainCreationTx: `0x${'11'.repeat(32)}`,
+    onchainCreationBlock: 1,
+    requestId: ENVELOPE_REQUEST_ID,
+  },
+  participant: {
+    safeAddress: `0x${'22'.repeat(20)}`,
+    agentEoa: `0x${'33'.repeat(20)}`,
+  },
+  executor: {
+    implName: 'claude-code-learner',
+    implVersion: '1.2.3',
+    clientGitSha: 'abc',
+    codeDigest: `sha256:${'bb'.repeat(32)}`,
+    runtimeBundleDigest: `sha256:${'cc'.repeat(32)}`,
+    plugins: [{ name: 'swe-rebench-v2', version: '1.0', sha256: 'dd'.repeat(32) }],
+    signingKey: { kind: 'agent-eoa', pubkey: '0x' },
+    mode: 'frozen',
+  },
+  evidenceTier: 'committed',
+  attestation: null,
+  trajectory: null,
+  artifacts: [],
+  payload: {},
+  sessionProvenance: undefined,
+};
+
+describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
+  const ENRICH_ENVELOPE_CID = 'bafyenv';
+
+  it('test 1: writes attemptEnvelopeMeta and envelope rows on a successful fetch', async () => {
+    const stubFetch: FetchLike = async (_url, _opts) => ({
+      ok: true,
+      status: 200,
+      json: async () => SYNTHETIC_ENVELOPE,
+    });
+
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 9n,
+          metadataKey: `envelope:${ENRICH_ENVELOPE_CID}`,
+          metadataValue: envelopePayloadV2({ tier: 1, manifestHash: MANIFEST_HASH }),
+        },
+        { block: 41_200_000n, logIndex: 0 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    // envelope row must be written (enrichment is additive)
+    const envRow = db.get(envelope, { agentId: '9', metadataKey: `envelope:${ENRICH_ENVELOPE_CID}`, chainId: CHAIN_ID });
+    expect(envRow).toBeDefined();
+    expect(envRow).toMatchObject({
+      kind: 'envelope',
+      manifestCid: ENRICH_ENVELOPE_CID,
+      manifestHash: MANIFEST_HASH,
+      evidenceTier: 'committed',
+    });
+
+    // attemptEnvelopeMeta row must be written
+    const metaRow = db.get(attemptEnvelopeMeta, { requestId: ENVELOPE_REQUEST_ID, chainId: CHAIN_ID });
+    expect(metaRow).toBeDefined();
+    expect(metaRow).toMatchObject({
+      requestId: ENVELOPE_REQUEST_ID,
+      manifestCid: ENRICH_ENVELOPE_CID,
+      solverType: 'swe-rebench-v2.v1',
+      implName: 'claude-code-learner',
+      implVersion: '1.2.3',
+      codeDigest: `sha256:${'bb'.repeat(32)}`,
+      mode: 'frozen',
+      model: '',
+      evidenceTier: 'committed',
+      sourcePublished: false,
+      enrichmentStatus: 'ok',
+      chainId: CHAIN_ID,
+    });
+    // plugins round-trip
+    expect(JSON.parse(metaRow!.pluginsJson as string)).toEqual([
+      { name: 'swe-rebench-v2', version: '1.0', sha256: 'dd'.repeat(32) },
+    ]);
+  });
+
+  it('test 2: fetch failure — no attemptEnvelopeMeta row, no throw, envelope row IS written', async () => {
+    const stubFetch: FetchLike = async (_url, _opts) => ({ ok: false, status: 500, json: async () => null });
+
+    await expect(
+      handleMetadataSet({
+        event: metadataSetEvent(
+          {
+            agentId: 9n,
+            metadataKey: `envelope:${ENRICH_ENVELOPE_CID}`,
+            metadataValue: envelopePayloadV2({ tier: 1, manifestHash: MANIFEST_HASH }),
+          },
+          { block: 41_200_001n, logIndex: 0 },
+        ),
+        context,
+        solverNetManifest,
+        envelope,
+        harnessCheckpoint,
+        attemptEnvelopeMeta,
+        enrichEnvelopes: true,
+        ipfsGateway: 'https://stub',
+        fetchImpl: stubFetch,
+      }),
+    ).resolves.toBeUndefined();
+
+    // envelope row written
+    expect(db.count(envelope)).toBeGreaterThan(0);
+    // no attemptEnvelopeMeta row
+    expect(db.count(attemptEnvelopeMeta)).toBe(0);
+  });
+
+  it('test 3: enrichEnvelopes: false — no fetch, no attemptEnvelopeMeta row, envelope row written', async () => {
+    let fetchCalled = false;
+    const stubFetch: FetchLike = async (_url, _opts) => {
+      fetchCalled = true;
+      return { ok: true, status: 200, json: async () => SYNTHETIC_ENVELOPE };
+    };
+
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 9n,
+          metadataKey: `envelope:${ENRICH_ENVELOPE_CID}`,
+          metadataValue: envelopePayloadV2({ tier: 1, manifestHash: MANIFEST_HASH }),
+        },
+        { block: 41_200_002n, logIndex: 0 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    expect(fetchCalled).toBe(false);
+    expect(db.count(attemptEnvelopeMeta)).toBe(0);
+    // envelope row still written
+    expect(db.count(envelope)).toBeGreaterThan(0);
+  });
+
+  it('test 4: envelope body missing task.requestId — no attemptEnvelopeMeta row, no throw', async () => {
+    const bodyWithoutTask = { ...SYNTHETIC_ENVELOPE, task: undefined };
+    const stubFetch: FetchLike = async (_url, _opts) => ({
+      ok: true,
+      status: 200,
+      json: async () => bodyWithoutTask,
+    });
+
+    await expect(
+      handleMetadataSet({
+        event: metadataSetEvent(
+          {
+            agentId: 9n,
+            metadataKey: `envelope:${ENRICH_ENVELOPE_CID}`,
+            metadataValue: envelopePayloadV2({ tier: 1, manifestHash: MANIFEST_HASH }),
+          },
+          { block: 41_200_003n, logIndex: 0 },
+        ),
+        context,
+        solverNetManifest,
+        envelope,
+        harnessCheckpoint,
+        attemptEnvelopeMeta,
+        enrichEnvelopes: true,
+        ipfsGateway: 'https://stub',
+        fetchImpl: stubFetch,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(db.count(attemptEnvelopeMeta)).toBe(0);
+    expect(db.count(envelope)).toBeGreaterThan(0);
   });
 });
