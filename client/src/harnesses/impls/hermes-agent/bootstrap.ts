@@ -1,5 +1,5 @@
 // client/src/harnesses/impls/hermes-agent/bootstrap.ts
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   hermesConfigFromSolverPlugins,
@@ -18,6 +18,20 @@ const TOOLSET_ALLOWLIST = [
   'code_execution',
 ];
 
+// State the per-Task $HERMES_HOME must inherit from the operator's real Hermes
+// home so a Jinn-run Hermes task can actually authenticate. Hermes resolves
+// OAuth creds from `$HERMES_HOME/auth/google_oauth.json` and pooled creds from
+// `$HERMES_HOME/auth.json` — there is NO real-home fallback for the OAuth file
+// — so a fresh per-Task $HERMES_HOME (which the freeze contract requires) would
+// otherwise have no credentials and Hermes would fail with "No … credentials
+// found." We copy these on first use.
+//
+// Caveat for frozen mode: Hermes may refresh the OAuth access token mid-task,
+// which mutates `auth/google_oauth.json` and would trip the daemon hash-fence.
+// The freeze-mode workstream (SWE-rebench v2 design §6) should exclude `auth/`
+// from the Hermes freeze hash, or pre-refresh the token before a frozen run.
+const OPERATOR_STATE_TO_SEED = ['auth', 'auth.json'] as const;
+
 export interface WritePerTaskConfigInputs {
   hermesHome: string;
   workingDir: string;
@@ -25,6 +39,24 @@ export interface WritePerTaskConfigInputs {
   provider?: string;
   solverPluginRoots: readonly string[];
   env: ConfigBuilderEnv;
+  /**
+   * The operator's real Hermes home (typically `process.env.HERMES_HOME` or
+   * `~/.hermes`). Auth credentials are copied from here into the per-Task
+   * `hermesHome` on first use. Omit (or pass a path equal to `hermesHome`) to
+   * skip seeding — e.g. in tests.
+   */
+  seedFrom?: string;
+}
+
+function seedOperatorState(hermesHome: string, seedFrom: string): void {
+  if (seedFrom === hermesHome || !existsSync(seedFrom)) return;
+  for (const name of OPERATOR_STATE_TO_SEED) {
+    const src = join(seedFrom, name);
+    const dst = join(hermesHome, name);
+    if (existsSync(src) && !existsSync(dst)) {
+      cpSync(src, dst, { recursive: true });
+    }
+  }
 }
 
 function snippetToYaml(snippet: HermesConfigSnippet, opts: { model?: string; provider?: string; workingDir: string }): string {
@@ -111,6 +143,10 @@ function snippetToEnvFile(env: ConfigBuilderEnv): string {
 
 export function writePerTaskHermesConfig(inputs: WritePerTaskConfigInputs): void {
   mkdirSync(inputs.hermesHome, { recursive: true });
+
+  if (inputs.seedFrom) {
+    seedOperatorState(inputs.hermesHome, inputs.seedFrom);
+  }
 
   const snippet = hermesConfigFromSolverPlugins(inputs.solverPluginRoots, inputs.env);
   const yaml = snippetToYaml(snippet, {

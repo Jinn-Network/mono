@@ -36,6 +36,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_STUB_PATH = resolve(__dirname, '../../scripts/stub-hermes.js');
 const hermesPath = process.env['JINN_HERMES_PATH'] ?? DEFAULT_STUB_PATH;
+// For a real-binary run, set the model/provider the operator configured (the
+// stub ignores them). E.g. `JINN_HERMES_MODEL=gemini-3-flash-preview
+// JINN_HERMES_PROVIDER=google-gemini-cli`. Left unset → no `--model`/`--provider`
+// flags → Hermes resolves from its config (fine for the stub).
+const hermesModel = process.env['JINN_HERMES_MODEL'] || undefined;
+const hermesProvider = process.env['JINN_HERMES_PROVIDER'] || undefined;
 
 // ── Pre-flight ───────────────────────────────────────────────────────────────
 
@@ -108,6 +114,8 @@ async function main(): Promise<void> {
       claudePath: 'claude',
       claudeModel: 'claude-haiku-4-5-20251001',
       hermesPath,
+      ...(hermesModel ? { hermesModel } : {}),
+      ...(hermesProvider ? { hermesProvider } : {}),
     }).find((impl) => impl.name === HERMES_AGENT_HARNESS);
 
     if (!harness) {
@@ -127,7 +135,10 @@ async function main(): Promise<void> {
       solverNet: {
         name: 'hermes-agent-e2e',
         solverType: task.solverType,
-        model: 'anthropic/claude-opus-4.6',
+        // No per-SolverNet model override here — the adapter falls back to the
+        // daemon-level `hermesModel` (JINN_HERMES_MODEL for a real run; unset
+        // for the stub). A hardcoded model would override that with a provider
+        // the operator may not have credentials for.
       },
       implStateDir,
       workingDir,

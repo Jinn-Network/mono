@@ -1,5 +1,5 @@
 // client/test/harnesses/impls/hermes-agent/bootstrap.test.ts
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,6 +75,82 @@ describe('writePerTaskHermesConfig', () => {
       expect(envFile).toContain('JINN_CORPUS_SUBGRAPH_URL=https://subgraph.example/');
     } finally {
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('seeds auth/ and auth.json from the operator home into a fresh per-Task home', () => {
+    const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
+    const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
+    try {
+      // Simulate the operator's authenticated Hermes home.
+      mkdirSync(join(operatorHome, 'auth'), { recursive: true });
+      writeFileSync(join(operatorHome, 'auth', 'google_oauth.json'), '{"refresh":"r","access":"a","expires":0,"email":"x"}');
+      writeFileSync(join(operatorHome, 'auth.json'), '{"providers":{}}');
+
+      writePerTaskHermesConfig({
+        hermesHome: taskHome,
+        workingDir: '/work',
+        solverPluginRoots: [],
+        env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+        seedFrom: operatorHome,
+      });
+
+      expect(existsSync(join(taskHome, 'auth', 'google_oauth.json'))).toBe(true);
+      expect(readFileSync(join(taskHome, 'auth', 'google_oauth.json'), 'utf8')).toContain('"refresh":"r"');
+      expect(existsSync(join(taskHome, 'auth.json'))).toBe(true);
+    } finally {
+      rmSync(operatorHome, { recursive: true, force: true });
+      rmSync(taskHome, { recursive: true, force: true });
+    }
+  });
+
+  it('does not overwrite auth/ that already exists in the per-Task home', () => {
+    const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
+    const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
+    try {
+      mkdirSync(join(operatorHome, 'auth'), { recursive: true });
+      writeFileSync(join(operatorHome, 'auth', 'google_oauth.json'), '{"refresh":"OPERATOR"}');
+      // Per-Task home already has its own (e.g. a frozen-mode snapshot restored it).
+      mkdirSync(join(taskHome, 'auth'), { recursive: true });
+      writeFileSync(join(taskHome, 'auth', 'google_oauth.json'), '{"refresh":"EXISTING"}');
+
+      writePerTaskHermesConfig({
+        hermesHome: taskHome,
+        workingDir: '/work',
+        solverPluginRoots: [],
+        env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+        seedFrom: operatorHome,
+      });
+
+      expect(readFileSync(join(taskHome, 'auth', 'google_oauth.json'), 'utf8')).toContain('EXISTING');
+    } finally {
+      rmSync(operatorHome, { recursive: true, force: true });
+      rmSync(taskHome, { recursive: true, force: true });
+    }
+  });
+
+  it('skips seeding when seedFrom equals hermesHome or does not exist', () => {
+    const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
+    try {
+      // Same path — must not recurse-copy onto itself.
+      writePerTaskHermesConfig({
+        hermesHome: taskHome,
+        workingDir: '/work',
+        solverPluginRoots: [],
+        env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+        seedFrom: taskHome,
+      });
+      // Nonexistent source — must not throw.
+      writePerTaskHermesConfig({
+        hermesHome: taskHome,
+        workingDir: '/work',
+        solverPluginRoots: [],
+        env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+        seedFrom: join(tmpdir(), 'definitely-does-not-exist-' + Date.now()),
+      });
+      expect(existsSync(join(taskHome, 'config.yaml'))).toBe(true);
+    } finally {
+      rmSync(taskHome, { recursive: true, force: true });
     }
   });
 });
