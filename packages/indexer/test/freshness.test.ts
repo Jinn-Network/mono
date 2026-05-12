@@ -44,6 +44,8 @@ describe('withFreshness middleware', () => {
     // 304 must have an empty body
     const text = await res.text();
     expect(text).toBe('');
+    // RFC 7232 §4.1 — 304 MUST include the ETag that would have been sent in a 200
+    expect(res.headers.get('etag')).toBe('W/"123"');
   });
 
   it('returns 200 when If-None-Match does NOT match the current ETag', async () => {

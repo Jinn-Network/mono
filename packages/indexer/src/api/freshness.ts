@@ -55,6 +55,7 @@ export function withFreshness(
 
     // Short-circuit with 304 if the client's cached copy is still current.
     if (c.req.header('If-None-Match') === etag) {
+      c.header('ETag', etag);
       return c.newResponse(null, 304);
     }
 
