@@ -38,6 +38,8 @@ type Check = {
 
 export interface PredictionV1EvaluatorConfig {
   stub?: boolean;
+  gammaBaseUrl?: string;
+  clobBaseUrl?: string;
   _testDeps?: {
     getResolution?: typeof getResolution;
   };
@@ -208,7 +210,13 @@ export class PredictionV1Evaluator implements Harness {
     sourceUrl: string,
   ): Promise<ResolutionSnapshot> {
     const read = this.config._testDeps?.getResolution ?? getResolution;
-    return read({ marketId, conditionId, sourceUrl });
+    return read({
+      marketId,
+      conditionId,
+      sourceUrl,
+      ...(this.config.gammaBaseUrl ? { gammaBaseUrl: this.config.gammaBaseUrl } : {}),
+      ...(this.config.clobBaseUrl ? { clobBaseUrl: this.config.clobBaseUrl } : {}),
+    });
   }
 }
 

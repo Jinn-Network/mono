@@ -1655,6 +1655,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
     ipfsRegistryUrl: config.ipfsRegistryUrl,
+    ...(process.env['JINN_POLYMARKET_GAMMA_BASE_URL']
+      ? { polymarketGammaBaseUrl: process.env['JINN_POLYMARKET_GAMMA_BASE_URL'] }
+      : {}),
+    ...(process.env['JINN_POLYMARKET_CLOB_BASE_URL']
+      ? { polymarketClobBaseUrl: process.env['JINN_POLYMARKET_CLOB_BASE_URL'] }
+      : {}),
     externalImpls,
     disabledNames: config.harnesses?.disabled,
     corpusEnv,

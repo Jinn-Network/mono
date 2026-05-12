@@ -12,6 +12,8 @@ services:
   jinn-acceptance-daemon:
     image: ${JINN_ACCEPTANCE_IMAGE:-jinn-client:acceptance-local}
     restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       JINN_PASSWORD: ${JINN_PASSWORD}
       # Non-interactive Claude auth. `claude setup-token` prints an OAT that
@@ -19,6 +21,9 @@ services:
       # flow needed. Keeps the daemon runnable in a headless container.
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       JINN_DISABLE_AUTO_TASKS: ${JINN_DISABLE_AUTO_TASKS:-1}
+      JINN_NO_UI: ${JINN_NO_UI:-1}
+      JINN_POLYMARKET_GAMMA_BASE_URL: ${JINN_POLYMARKET_GAMMA_BASE_URL:-}
+      JINN_POLYMARKET_CLOB_BASE_URL: ${JINN_POLYMARKET_CLOB_BASE_URL:-}
       NO_COLOR: ${NO_COLOR:-1}
     volumes:
       - jinn-acceptance-data:/data

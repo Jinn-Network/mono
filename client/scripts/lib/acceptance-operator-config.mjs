@@ -44,11 +44,10 @@ export function resolveAcceptanceRpcUrl(env = process.env) {
 }
 
 /**
- * Acceptance gate posts no static Tasks. The protocol loop is
- * exercised via the testnet auto-task generator (solverType=prediction.v0,
- * id prefix `pred-v0-auto-…`) which the daemon registers automatically when
- * `network=testnet` and `JINN_DISABLE_AUTO_TASKS` is not set. The gate
- * tracks any prediction.v0 cycles created after `runStartAt`.
+ * Acceptance gate posts no static Tasks through daemon config. The Docker
+ * gate seeds a manifest-backed prediction.v1 task and submits it from a
+ * separate CLI process so the daemon must discover, claim, solve, evaluate,
+ * and settle through the same Task-native path as a public operator.
  */
 export function buildAcceptanceTasks(_runIdSuffix) {
   return [];
@@ -74,12 +73,10 @@ export function buildOperatorClientConfig({ rpcUrl, clientHome, runIdSuffix, env
     targetServices: toInt(env['JINN_TESTNET_ACCEPTANCE_TARGET_SERVICES'], 1),
     minEoaGasWei: env['JINN_TESTNET_ACCEPTANCE_MIN_EOA_GAS_WEI'] ?? '1000000000000000',
     minSafeEthWei: env['JINN_TESTNET_ACCEPTANCE_MIN_SAFE_ETH_WEI'] ?? '200000000000000',
-    // Tighten prediction.v0 auto-cycles for the gate so one round-trip lands
-    // inside the 20-min timeout (default operator setup uses 600000 / 300000).
+    // Kept for legacy prediction.v0 ad-hoc drills; the Docker release gate
+    // now drives prediction.v1 by submitting a live manifest-backed task.
     predictionV0WindowMs: toInt(env['JINN_PREDICTION_V0_WINDOW_MS'], 120_000),
     predictionV0ResolveGapMs: toInt(env['JINN_PREDICTION_V0_RESOLVE_GAP_MS'], 60_000),
-    // Keep harness selection on the deterministic prediction.v0 defaults for
-    // the gate. SolverPlugins still load through the normal daemon defaults.
     tasks: buildAcceptanceTasks(runIdSuffix),
     operator: {
       publicEndpoint: env['JINN_TESTNET_ACCEPTANCE_OPERATOR_PUBLIC_ENDPOINT']

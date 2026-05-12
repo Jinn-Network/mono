@@ -106,6 +106,11 @@ export function readArtifactProgress(dbPath, taskIds) {
   }
 }
 
+export function cycleTaskId(taskId) {
+  if (typeof taskId !== 'string') return taskId;
+  return taskId.replace(/:evaluation:\d+$/u, '');
+}
+
 /**
  * Aggregate artifacts produced after `runStartAt` (ISO 8601), grouped by
  * `task_id`. A cycle is complete when both a `restoration-result`
@@ -132,17 +137,18 @@ export function summarizeRunWindowArtifacts(rows, runStartAt) {
     if (typeof sinceSqlite === 'string' && row.created_at) {
       if (row.created_at < sinceSqlite) continue;
     }
-    let entry = byTaskId.get(row.task_id);
+    const taskId = cycleTaskId(row.task_id);
+    let entry = byTaskId.get(taskId);
     if (!entry) {
       entry = {
-        taskId: row.task_id,
+        taskId,
         restorationRequestId: null,
         evaluationRequestId: null,
         restorationOk: false,
         evaluationOk: false,
         latestArtifactAt: null,
       };
-      byTaskId.set(row.task_id, entry);
+      byTaskId.set(taskId, entry);
     }
     const tags = new Set(normalizeTags(row.tags));
     if (tags.has('restoration-result')) {
@@ -165,8 +171,9 @@ export function summarizeRunWindowArtifacts(rows, runStartAt) {
 
 /**
  * Read artifacts produced after `runStartAt` whose task_id matches
- * the auto-generated `prediction.v0` prefix, then summarise as run-window
- * cycles. Returns the same shape regardless of whether the DB exists.
+ * the legacy auto-generated `prediction.v0` prefix, then summarise as
+ * run-window cycles. The Docker release gate uses its own task-id-scoped
+ * query, but this helper is retained for host/legacy drills.
  */
 export function readRunWindowArtifactProgress(dbPath, runStartAt) {
   if (!existsSync(dbPath)) {
