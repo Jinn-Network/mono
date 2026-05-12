@@ -32,6 +32,7 @@ import {
   handleSolutionDeliveryClaimed,
   handleMetadataSet,
   handleVerdictDeliveryClaimed,
+  handleTaskBudgetRefunded,
   type HandlerContext,
 } from '../src/handlers.js';
 import { createInMemoryDb, type InMemoryDb, type PkMap } from './helpers/in-memory-db.js';
@@ -44,6 +45,7 @@ import {
   envelopePayloadV1,
   envelopePayloadV2,
   verdictDeliveryClaimedEvent,
+  taskBudgetRefundedEvent,
 } from './helpers/events.js';
 
 const CHAIN_ID = 84532;
@@ -465,6 +467,32 @@ describe('VerdictDeliveryClaimed → verdict', () => {
     await handleVerdictDeliveryClaimed({ event: ev, context, verdict });
     await handleVerdictDeliveryClaimed({ event: ev, context, verdict });
     expect(db.count(verdict)).toBe(1);
+  });
+});
+
+// ── TaskBudgetRefunded → task.refunded ───────────────────────────────────────
+
+describe('TaskBudgetRefunded → task.refunded', () => {
+  it('marks an existing task refunded = true', async () => {
+    await handleTaskCreated({ event: taskCreatedEvent({ taskId: 7n }), context, task });
+    expect(db.get(task, { id: '7' })?.refunded).toBe(false);
+    await handleTaskBudgetRefunded({
+      event: taskBudgetRefundedEvent({ taskId: 7n }),
+      context,
+      task,
+    });
+    expect(db.get(task, { id: '7' })?.refunded).toBe(true);
+  });
+
+  it('skips (does not crash) when the task row does not exist (TaskCreated predates startBlock)', async () => {
+    await expect(
+      handleTaskBudgetRefunded({
+        event: taskBudgetRefundedEvent({ taskId: 999n }),
+        context,
+        task,
+      }),
+    ).resolves.toBeUndefined();
+    expect(db.count(task)).toBe(0);
   });
 });
 

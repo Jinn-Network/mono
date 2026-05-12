@@ -1,12 +1,14 @@
 /**
  * Ponder event handlers for the Jinn protocol indexer.
  *
- * Four event sources, each mapped to one entity in ponder.schema.ts:
+ * Six event sources, each mapped to one entity in ponder.schema.ts:
  *
- *   JinnRouter:TaskCreated          → task
- *   JinnRouter:TaskAttemptCreated   → attempt
+ *   JinnRouter:TaskCreated             → task
+ *   JinnRouter:TaskAttemptCreated      → attempt
  *   JinnRouter:SolutionDeliveryClaimed → task.finalized = true
- *   IdentityRegistry:MetadataSet    → solverNetManifest OR envelope (routed by key)
+ *   JinnRouter:VerdictDeliveryClaimed  → verdict
+ *   JinnRouter:TaskBudgetRefunded      → task.refunded = true
+ *   IdentityRegistry:MetadataSet       → solverNetManifest OR envelope (routed by key)
  *
  * Handlers are pure event-to-row mappings with no business logic. The
  * correctness gate (canClaimTask simulation) lives in the daemon adapter,
@@ -33,12 +35,14 @@ import {
   handleSolutionDeliveryClaimed,
   handleMetadataSet,
   handleVerdictDeliveryClaimed,
+  handleTaskBudgetRefunded,
   type HandlerContext,
   type TaskCreatedEvent,
   type TaskAttemptCreatedEvent,
   type SolutionDeliveryClaimedEvent,
   type MetadataSetEvent,
   type VerdictDeliveryClaimedEvent,
+  type TaskBudgetRefundedEvent,
 } from './handlers.js';
 
 ponder.on('JinnRouter:TaskCreated', async ({ event, context }) => {
@@ -70,6 +74,14 @@ ponder.on('JinnRouter:VerdictDeliveryClaimed', async ({ event, context }) => {
     event: event as unknown as VerdictDeliveryClaimedEvent,
     context: context as unknown as HandlerContext,
     verdict,
+  });
+});
+
+ponder.on('JinnRouter:TaskBudgetRefunded', async ({ event, context }) => {
+  await handleTaskBudgetRefunded({
+    event: event as unknown as TaskBudgetRefundedEvent,
+    context: context as unknown as HandlerContext,
+    task,
   });
 });
 

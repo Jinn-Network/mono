@@ -116,6 +116,18 @@ export interface VerdictDeliveryClaimedEvent {
   log: LogShape;
 }
 
+export interface TaskBudgetRefundedEvent {
+  args: {
+    taskId: bigint;
+    creator: `0x${string}`;
+    solutionAmount: bigint;
+    verdictAmount: bigint;
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
 export interface MetadataSetEvent {
   args: {
     agentId: bigint;
@@ -283,6 +295,25 @@ export async function handleSolutionDeliveryClaimed({
   const existing = await context.db.find(task, { id });
   if (!existing) return;
   await context.db.update(task, { id }).set({ finalized: true });
+}
+
+// ── JinnRouter: TaskBudgetRefunded → task.refunded = true ────────────────────
+// Existence guard mirrors handleSolutionDeliveryClaimed: the matching TaskCreated
+// may predate startBlock; db.update on a missing row throws and crashes the
+// indexer, so look up first and skip if absent.
+export async function handleTaskBudgetRefunded({
+  event,
+  context,
+  task,
+}: {
+  event: TaskBudgetRefundedEvent;
+  context: HandlerContext;
+  task: unknown;
+}): Promise<void> {
+  const id = event.args.taskId.toString();
+  const existing = await context.db.find(task, { id });
+  if (!existing) return;
+  await context.db.update(task, { id }).set({ refunded: true });
 }
 
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────

@@ -13,6 +13,7 @@ import {
   type MetadataSetEvent,
   type SolutionDeliveryClaimedEvent,
   type TaskAttemptCreatedEvent,
+  type TaskBudgetRefundedEvent,
   type TaskCreatedEvent,
   type VerdictDeliveryClaimedEvent,
 } from '../../src/handlers.js';
@@ -114,6 +115,23 @@ export function verdictDeliveryClaimedEvent(
     },
     block: { number: o.block ?? 100n },
     transaction: { hash: o.txHash ?? ('0x' + 'fe'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
+export function taskBudgetRefundedEvent(
+  args: Partial<TaskBudgetRefundedEvent['args']> & { taskId: bigint },
+  o: EnvelopeOverrides = {},
+): TaskBudgetRefundedEvent {
+  return {
+    args: {
+      creator: SOME_ADDR,
+      solutionAmount: 0n,
+      verdictAmount: 0n,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'a1'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
 }
