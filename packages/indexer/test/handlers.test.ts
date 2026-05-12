@@ -632,15 +632,17 @@ describe('envelope most-recent-wins', () => {
 
 describe('MetadataSet harness.checkpoint: → harnessCheckpoint', () => {
   const CHECKPOINT_CID = 'bafyckpt';
-  const CHECKPOINT_HASH = `0x${'ef'.repeat(32)}` as `0x${string}`;
 
-  it('writes a harnessCheckpoint row with on-chain anchor fields', async () => {
+  it('writes a harnessCheckpoint row with on-chain anchor fields (value is ignored — CID is in the key)', async () => {
+    // The on-chain value for harness.checkpoint:<cid> is the CID string itself,
+    // not an ABI-encoded payload. The handler ignores the value entirely.
     await handleMetadataSet({
       event: metadataSetEvent(
         {
           agentId: 42n,
           metadataKey: `harness.checkpoint:${CHECKPOINT_CID}`,
-          metadataValue: envelopePayloadV2({ tier: 1, manifestHash: CHECKPOINT_HASH }),
+          // value is ignored by the handler; use the raw CID bytes or anything
+          metadataValue: '0x',
         },
         { block: 41_300_000n, logIndex: 1 },
       ),
@@ -657,12 +659,13 @@ describe('MetadataSet harness.checkpoint: → harnessCheckpoint', () => {
     expect(row).toMatchObject({
       cid: CHECKPOINT_CID,
       agentId: '42',
-      manifestHash: CHECKPOINT_HASH,
-      evidenceTier: 'committed',
       publishedAtBlock: 41_300_000n,
       logIndex: 1,
       chainId: CHAIN_ID,
     });
+    // manifestHash and evidenceTier are no longer stored — only the anchor fields.
+    expect(row).not.toHaveProperty('manifestHash');
+    expect(row).not.toHaveProperty('evidenceTier');
     // Must not pollute envelope or solverNetManifest tables.
     expect(db.count(envelope)).toBe(0);
     expect(db.count(solverNetManifest)).toBe(0);
@@ -673,7 +676,7 @@ describe('MetadataSet harness.checkpoint: → harnessCheckpoint', () => {
       {
         agentId: 42n,
         metadataKey: `harness.checkpoint:${CHECKPOINT_CID}`,
-        metadataValue: envelopePayloadV2({ tier: 1, manifestHash: CHECKPOINT_HASH }),
+        metadataValue: '0x',
       },
       { block: 41_300_000n, logIndex: 1 },
     );

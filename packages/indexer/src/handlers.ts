@@ -571,18 +571,18 @@ export async function handleMetadataSet({
   }
 
   // ── HarnessCheckpoint anchor ─────────────────────────────────────────────
+  // The on-chain value for a harness.checkpoint:<cid> MetadataSet is the
+  // manifest CID string itself — not an ABI-encoded ExecutionPayload tuple.
+  // The CID is already in the key; the value is redundant and intentionally
+  // ignored here. The manifest body lives on IPFS and is not fetched yet.
   const checkpointCid = parseHarnessCheckpointKey(key);
   if (checkpointCid !== null) {
-    const payload = decodeEnvelopePayload(event.args.metadataValue as Hex);
     const logIndex = typeof event.log.logIndex === 'number' ? event.log.logIndex : 0;
-    const manifestHash = (payload.manifestHash || '0x') as `0x${string}`;
     await context.db
       .insert(harnessCheckpoint)
       .values({
         cid: checkpointCid,
         agentId,
-        manifestHash,
-        evidenceTier: payload.evidenceTier,
         publishedAtBlock: blockNumber,
         logIndex,
         chainId,

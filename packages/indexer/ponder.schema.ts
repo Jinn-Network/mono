@@ -1,7 +1,7 @@
 /**
  * Ponder schema for the Jinn protocol indexer.
  *
- * Seven entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6:
+ * Eight entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6:
  *
  *   Task                — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
  *   Attempt             — from JinnRouter.TaskAttemptCreated
@@ -9,6 +9,7 @@
  *   RewardDistribution  — from JinnDistributor.Claimed on Sepolia L1
  *   SolverNetManifest   — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
  *   Envelope            — from IdentityRegistry.MetadataSet (envelope key patterns)
+ *   HarnessCheckpoint   — from IdentityRegistry.MetadataSet (key prefix harness.checkpoint:)
  *   AttemptEnvelopeMeta — IPFS-enriched executor/provenance fields for execution envelopes,
  *                         keyed by (requestId, chainId), joined from Envelope via IPFS fetch
  *
@@ -339,10 +340,12 @@ export const envelope = onchainTable(
 /**
  * A published HarnessCheckpoint anchor. From IdentityRegistry.MetadataSet with key
  * prefix `harness.checkpoint:<manifestPinCid>` (client/src/cli/commands/checkpoint.ts).
- * This row is the on-chain anchor only — the checkpoint manifest body (implStateDirCid,
- * codeDigest, parentCheckpointCid, harnessPackage) lives on IPFS at `cid` and is fetched
- * by the envelope-enrichment pass (ebu7.6 Task 2) if/when checkpoint-manifest enrichment
- * is added; until then only the on-chain fields are populated.
+ *
+ * The on-chain value for a `harness.checkpoint:<cid>` MetadataSet is the manifest CID
+ * string itself — redundant with the key, not an ABI-encoded ExecutionPayload tuple.
+ * This row stores only the on-chain anchor fields. The checkpoint manifest body
+ * (codeDigest, parentCheckpointCid, implStateDirCid, harnessPackage) lives on IPFS at
+ * `cid` and is NOT fetched yet; a follow-up will enrich it (`jinn-mono-ebu7.<checkpoint-enrichment>`).
  *
  * Primary key: (agentId, cid, chainId).
  */
@@ -353,10 +356,6 @@ export const harnessCheckpoint = onchainTable(
     cid: t.text().notNull(),
     /** agentId of the publisher (decimal string). */
     agentId: t.text().notNull(),
-    /** keccak256/hash of the checkpoint manifest, from the ABI-decoded on-chain payload. */
-    manifestHash: t.hex().notNull(),
-    /** Evidence tier from the ABI-decoded payload (text). */
-    evidenceTier: t.text().notNull(),
     /** Block number of the MetadataSet event. */
     publishedAtBlock: t.bigint().notNull(),
     /** Log index within the block. */

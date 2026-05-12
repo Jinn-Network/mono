@@ -16,6 +16,8 @@ Schema definitions, event handlers, and Ponder runtime live here. The wire contr
 
 This package also serves the Jinn network explorer. The explorer page lives at `/` (currently a placeholder that verifiably hits `/explorer/network`; `ebu7.4` ships the real SPA there). Aggregation JSON routes are at `/explorer/*` (network KPIs, per-SolverNet stats, operator leaderboards, learning curves). Anyone running `@jinn-network/indexer` serves an explorer for free — no separate deployment needed. See `docs/superpowers/specs/2026-05-12-network-explorer-design.md` for the full design and `deploy/README.md` for the deployment guide including the new `PONDER_RPC_URL_11155111` env var (required for the JinnDistributor / Sepolia-L1 source).
 
+The schema includes `harnessCheckpoint` (on-chain checkpoint anchors keyed by `harness.checkpoint:<cid>` MetadataSet events) and `attemptEnvelopeMeta` (envelope-sourced harness/mode/plugin/model per attempt, populated by an IPFS-enrichment step). The `/explorer/*` routes expose harness/mode composition, train/frozen leaderboard splits, a checkpoint timeline, and freeze-integrity diagnostics. Enrichment is gated by `JINN_INDEXER_ENRICH_ENVELOPES` (default on) and uses `JINN_IPFS_GATEWAY_URL` — see `deploy/README.md` for details.
+
 ## Running locally (PGlite, no external database)
 
 ```bash

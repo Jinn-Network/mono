@@ -49,7 +49,7 @@ The harness/mode/plugin/model facets, the train/frozen leaderboard split, the ch
 - `JINN_INDEXER_ENRICH_ENVELOPES` — default `true`. Set to `false` (or `0`) to skip the per-envelope IPFS fetch and sync faster; the enriched facets above won't populate (the rest of the explorer still works).
 - `JINN_IPFS_GATEWAY_URL` — default `https://gateway.autonolas.tech`. The gateway used for envelope fetches; the base is normalized to end with `/ipfs/`.
 
-The historical sync is noticeably slower with enrichment on (one IPFS round-trip per execution envelope). For a fast initial sync, run once with `JINN_INDEXER_ENRICH_ENVELOPES=false`, then... (no — Ponder won't backfill enrichment after the fact without a re-sync; just accept the slower first sync, or run a faster RPC). `HarnessCheckpoint` anchors are indexed on-chain (key prefix `harness.checkpoint:`); their manifest bodies (codeDigest, parentCid, implStateDirCid) are not yet fetched, so per-checkpoint frozen-eval scores are pending — a tracked follow-up.
+The historical sync is noticeably slower with enrichment on (one IPFS round-trip per execution envelope). If that's a problem, either run a faster (HyperSync-backed) RPC, or set `JINN_INDEXER_ENRICH_ENVELOPES=false` and accept that the enriched facets won't populate — note that Ponder won't backfill enrichment after the fact, so flipping it on later requires a re-sync (`DATABASE_SCHEMA` bump). `HarnessCheckpoint` anchors are indexed on-chain (key prefix `harness.checkpoint:`); their manifest bodies (codeDigest, parentCid, implStateDirCid) are not yet fetched, so per-checkpoint frozen-eval scores are pending — a tracked follow-up.
 
 ### Sepolia L1 RPC (`PONDER_RPC_URL_11155111`)
 

@@ -453,8 +453,6 @@ app.get('/solvernet/:cid', async (c) => {
         .select({
           cid: schema.harnessCheckpoint.cid,
           agentId: schema.harnessCheckpoint.agentId,
-          manifestHash: schema.harnessCheckpoint.manifestHash,
-          evidenceTier: schema.harnessCheckpoint.evidenceTier,
           publishedAtBlock: schema.harnessCheckpoint.publishedAtBlock,
         })
         .from(schema.harnessCheckpoint)
@@ -503,17 +501,15 @@ app.get('/solvernet/:cid', async (c) => {
   const trainBoard = rankLeaderboard(trainBoardRows, minVerdicts);
   const frozenBoard = rankLeaderboard(frozenBoardRows, minVerdicts);
 
-  // Checkpoint timeline — on-chain anchors only (no codeDigest until checkpoint
-  // manifest enrichment is added; note conveyed in the `note` field)
+  // Checkpoint timeline — on-chain anchors only (manifest body not yet fetched;
+  // codeDigest, parentCheckpointCid etc. pending checkpoint-manifest enrichment)
   const checkpointTimeline = {
     checkpoints: checkpointRows.map((r) => ({
       cid: r.cid,
       agentId: r.agentId,
-      manifestHash: r.manifestHash,
-      evidenceTier: r.evidenceTier,
       publishedAtBlock: String(r.publishedAtBlock),
     })),
-    note: 'per-checkpoint frozen-eval score pending HarnessCheckpoint manifest enrichment (harnessCheckpoint.codeDigest not yet populated)',
+    note: 'per-checkpoint frozen-eval score pending HarnessCheckpoint manifest enrichment (manifest body not yet fetched from IPFS)',
   };
 
   // Freeze integrity
