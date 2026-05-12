@@ -58,6 +58,7 @@ epic_option_for() {
     46l8) echo "VPS deployment" ;;
     9iq3) echo "Prediction freeze" ;;
     ebu7) echo "Network explorer" ;;
+    lrjn|vh74) echo "Operator app" ;;   # embedded agent + per-harness auth flows
     *)    echo "" ;;
   esac
 }
