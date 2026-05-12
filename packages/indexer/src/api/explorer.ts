@@ -22,7 +22,7 @@
 import { db } from 'ponder:api';
 import schema from 'ponder:schema';
 import { Hono } from 'hono';
-import { count, countDistinct, sum, eq, inArray, max, sql } from 'drizzle-orm';
+import { and, count, countDistinct, sum, eq, inArray, max, sql } from 'drizzle-orm';
 import {
   resolvedRateFromCounts,
   bucketResolvedRate,
@@ -31,7 +31,17 @@ import {
   freshness,
   type LeaderboardRow,
 } from './metrics.js';
-import { withFreshness } from './freshness.js';
+import { withFreshness, type FreshnessMeta } from './freshness.js';
+
+// ── Chain scope ───────────────────────────────────────────────────────────────
+
+/**
+ * The chain whose activity the explorer surfaces.
+ * Revisit when 8453 (Base mainnet) is indexed — jinn-mono-280n.4.
+ * Adding mainnet will require per-chain filtering throughout so testnet and
+ * mainnet rows don't merge silently in the aggregations below.
+ */
+const EXPLORER_CHAIN_ID = 84532;
 
 // ── Open-question constants (spec §9) ─────────────────────────────────────────
 
@@ -58,6 +68,13 @@ const DEFAULT_BUCKET_BLOCKS = 7200n;
  * Spec §9 open question: pin value at impl.
  */
 const DEFAULT_ROLLING_K = 50;
+
+// ── Hono context variable types ───────────────────────────────────────────────
+
+type ExplorerVariables = {
+  /** Indexer head stashed by the explorer-freshness middleware. */
+  indexedHead: FreshnessMeta;
+};
 
 // ── Query-param parsers ───────────────────────────────────────────────────────
 
@@ -90,20 +107,26 @@ function parseBigIntParam(raw: string | undefined, def: bigint, max: bigint): bi
  * Returns the greatest of the maximum `createdAtBlock` values across the three
  * main event tables (task, attempt, verdict). Used as the indexer head proxy
  * for freshness middleware.
+ *
+ * Scoped to EXPLORER_CHAIN_ID so it reflects only the activity the explorer
+ * surfaces.
  */
 async function getIndexedHead(): Promise<bigint> {
   const [taskMax, attemptMax, verdictMax] = await Promise.all([
     db
       .select({ v: max(schema.task.createdAtBlock) })
       .from(schema.task)
+      .where(eq(schema.task.chainId, EXPLORER_CHAIN_ID))
       .then((r) => r[0]?.v ?? null),
     db
       .select({ v: max(schema.attempt.createdAtBlock) })
       .from(schema.attempt)
+      .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID))
       .then((r) => r[0]?.v ?? null),
     db
       .select({ v: max(schema.verdict.createdAtBlock) })
       .from(schema.verdict)
+      .where(eq(schema.verdict.chainId, EXPLORER_CHAIN_ID))
       .then((r) => r[0]?.v ?? null),
   ]);
   const candidates = [taskMax, attemptMax, verdictMax].filter(
@@ -113,17 +136,33 @@ async function getIndexedHead(): Promise<bigint> {
   return candidates.reduce((best, cur) => (cur > best ? cur : best), 0n);
 }
 
-/** Freshness middleware factory bound to the shared head query. */
+/**
+ * Explorer-specific freshness middleware.
+ *
+ * Computes the indexer head ONCE and stashes it on the Hono context as
+ * `indexedHead` so route bodies can read it back with `c.get('indexedHead')`
+ * instead of running a second getIndexedHead() query.
+ *
+ * This is a thin wrapper around `withFreshness` that also sets the context
+ * variable before calling next(). We handle the stash here rather than inside
+ * the generic withFreshness so that module stays DB-free and testable.
+ */
 function explorerFreshness() {
-  return withFreshness(async () => ({
-    lastIndexedBlock: await getIndexedHead(),
-    lastIndexedAt: new Date().toISOString(),
-  }));
+  return withFreshness(async (c) => {
+    const lastIndexedBlock = await getIndexedHead();
+    const meta: FreshnessMeta = {
+      lastIndexedBlock,
+      lastIndexedAt: new Date().toISOString(),
+    };
+    // Stash for route body to read — avoids a second getIndexedHead() call.
+    c.set('indexedHead', meta);
+    return meta;
+  });
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
-const app = new Hono();
+const app = new Hono<{ Variables: ExplorerVariables }>();
 
 // ── GET /explorer/network ─────────────────────────────────────────────────────
 
@@ -132,7 +171,7 @@ app.use('/network', explorerFreshness());
 app.get('/network', async (c) => {
   const [taskStats, attemptStats, verdictRows, rewardStats, snStats] =
     await Promise.all([
-      // Task counts
+      // Task counts — scoped to EXPLORER_CHAIN_ID
       db
         .select({
           total: count(),
@@ -146,17 +185,19 @@ app.get('/network', async (c) => {
             sql`CASE WHEN ${schema.task.finalized} = true THEN ${schema.task.createdAtBlock} END`,
           ),
         })
-        .from(schema.task),
+        .from(schema.task)
+        .where(eq(schema.task.chainId, EXPLORER_CHAIN_ID)),
 
-      // Attempt counts
+      // Attempt counts — scoped to EXPLORER_CHAIN_ID
       db
         .select({
           total: count(),
           distinctOperators: countDistinct(schema.attempt.operator),
         })
-        .from(schema.attempt),
+        .from(schema.attempt)
+        .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID)),
 
-      // Verdicts (all rows for rate calc) - just counts
+      // Verdicts (all rows for rate calc) — scoped to EXPLORER_CHAIN_ID
       db
         .select({
           total: count(),
@@ -164,9 +205,12 @@ app.get('/network', async (c) => {
             sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
           ),
         })
-        .from(schema.verdict),
+        .from(schema.verdict)
+        .where(eq(schema.verdict.chainId, EXPLORER_CHAIN_ID)),
 
-      // Reward distributions
+      // Reward distributions — intentionally unfiltered by chainId:
+      // JinnDistributor lives on Sepolia L1 (11155111) and JINN distributed
+      // is reported network-wide across all execution chains.
       db
         .select({
           jinnOperator: sum(schema.rewardDistribution.operatorMinted),
@@ -174,11 +218,16 @@ app.get('/network', async (c) => {
         })
         .from(schema.rewardDistribution),
 
-      // SolverNets running
+      // SolverNets running — scoped to EXPLORER_CHAIN_ID
       db
         .select({ running: count() })
         .from(schema.solverNetManifest)
-        .where(eq(schema.solverNetManifest.status, 'launched')),
+        .where(
+          and(
+            eq(schema.solverNetManifest.status, 'launched'),
+            eq(schema.solverNetManifest.chainId, EXPLORER_CHAIN_ID),
+          ),
+        ),
     ]);
 
   const tRow = taskStats[0];
@@ -191,8 +240,9 @@ app.get('/network', async (c) => {
   const verdictsPass = Number(vRow?.pass ?? 0);
   const resolvedRate = resolvedRateFromCounts(verdictsPass, verdictsTotal);
 
-  const head = await getIndexedHead();
-  const freshnessFields = freshness(head, new Date().toISOString());
+  // Read the head computed by the middleware — no second DB round trip.
+  const meta = c.get('indexedHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
 
   return c.json({
     tasksPosted: Number(tRow?.total ?? 0),
@@ -220,23 +270,27 @@ app.get('/network', async (c) => {
 app.use('/solvernets', explorerFreshness());
 
 app.get('/solvernets', async (c) => {
-  const manifests = await db.select().from(schema.solverNetManifest);
+  const manifests = await db
+    .select()
+    .from(schema.solverNetManifest)
+    .where(eq(schema.solverNetManifest.chainId, EXPLORER_CHAIN_ID));
 
-  const rows = await Promise.all(
-    manifests.map(async (m) => {
-      const stats = await getSolverNetStats(m.cidKeccak);
-      return {
-        cid: m.id,
-        status: m.status,
-        launcherAgentId: m.launcherAgentId,
-        statusUpdatedAt: m.statusUpdatedAt,
-        ...stats,
-      };
-    }),
+  // Batch-load all stats in O(1) round trips instead of O(N).
+  const statsByDigest = await getSolverNetStatsBatch(
+    manifests.map((m) => m.cidKeccak),
   );
 
-  const head = await getIndexedHead();
-  const freshnessFields = freshness(head, new Date().toISOString());
+  const rows = manifests.map((m) => ({
+    cid: m.id,
+    status: m.status,
+    launcherAgentId: m.launcherAgentId,
+    statusUpdatedAt: m.statusUpdatedAt,
+    ...statsByDigest.get(m.cidKeccak),
+  }));
+
+  // Read the head computed by the middleware — no second DB round trip.
+  const meta = c.get('indexedHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
 
   return c.json({ solvernets: rows, ...freshnessFields });
 });
@@ -251,7 +305,12 @@ app.get('/solvernet/:cid', async (c) => {
   const manifests = await db
     .select()
     .from(schema.solverNetManifest)
-    .where(eq(schema.solverNetManifest.id, cid));
+    .where(
+      and(
+        eq(schema.solverNetManifest.id, cid),
+        eq(schema.solverNetManifest.chainId, EXPLORER_CHAIN_ID),
+      ),
+    );
 
   if (manifests.length === 0) {
     return c.json({ error: 'unknown solvernet' }, 404);
@@ -268,13 +327,21 @@ app.get('/solvernet/:cid', async (c) => {
   );
   const rollingK = parseIntParam(c.req.query('k'), DEFAULT_ROLLING_K, 1000);
 
-  const stats = await getSolverNetStats(m.cidKeccak);
+  // Reuse the batch helper with a one-element array so the stats shape is
+  // identical to what /solvernets uses.
+  const statsByDigest = await getSolverNetStatsBatch([m.cidKeccak]);
+  const stats = statsByDigest.get(m.cidKeccak);
 
   // Fetch verdicts for this SolverNet's tasks (ordered by block for curves)
   const taskIds = await db
     .select({ id: schema.task.id })
     .from(schema.task)
-    .where(eq(schema.task.manifestDigest, m.cidKeccak));
+    .where(
+      and(
+        eq(schema.task.manifestDigest, m.cidKeccak),
+        eq(schema.task.chainId, EXPLORER_CHAIN_ID),
+      ),
+    );
 
   const ids = taskIds.map((t) => t.id);
 
@@ -286,7 +353,12 @@ app.get('/solvernet/:cid', async (c) => {
             createdAtBlock: schema.verdict.createdAtBlock,
           })
           .from(schema.verdict)
-          .where(inArray(schema.verdict.taskId, ids))
+          .where(
+            and(
+              inArray(schema.verdict.taskId, ids),
+              eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+            ),
+          )
           .orderBy(schema.verdict.createdAtBlock)
       : [];
 
@@ -301,8 +373,9 @@ app.get('/solvernet/:cid', async (c) => {
     rollingK,
   );
 
-  const head = await getIndexedHead();
-  const freshnessFields = freshness(head, new Date().toISOString());
+  // Read the head computed by the middleware — no second DB round trip.
+  const meta = c.get('indexedHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
 
   return c.json({
     cid: m.id,
@@ -320,6 +393,29 @@ app.get('/solvernet/:cid', async (c) => {
 
 app.use('/operators', explorerFreshness());
 
+/**
+ * GET /explorer/operators
+ *
+ * Returns ranked and low-volume operator leaderboard rows.
+ *
+ * Response shape:
+ * ```json
+ * {
+ *   "ranked": [...],
+ *   "lowVolume": [...],
+ *   "minVerdicts": 5,
+ *   "meta": { "jinnAttribution": "pending" },  // present when ALL jinnEarned are 0
+ *   "lastIndexedBlock": "...",
+ *   "lastIndexedAt": "...",
+ *   "behindHead": null
+ * }
+ * ```
+ *
+ * `meta.jinnAttribution`:
+ *   - `"pending"` — every operator has jinnEarned = 0n (rewardDistribution.multisig
+ *     ↔ attempt.operator mapping not yet resolved — see spec §6.4).
+ *   - `"ok"` — at least one operator has non-zero jinnEarned; attribution is live.
+ */
 app.get('/operators', async (c) => {
   const minVerdicts = parseIntParam(
     c.req.query('minVerdicts'),
@@ -331,8 +427,11 @@ app.get('/operators', async (c) => {
 
   const { ranked, lowVolume } = rankLeaderboard(rows, minVerdicts);
 
-  const head = await getIndexedHead();
-  const freshnessFields = freshness(head, new Date().toISOString());
+  const allJinnEarnedZero = rows.every((r) => r.jinnEarned === 0n);
+
+  // Read the head computed by the middleware — no second DB round trip.
+  const meta = c.get('indexedHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
 
   return c.json({
     ranked: ranked.map((r) => ({ ...r, jinnEarned: r.jinnEarned.toString() })),
@@ -341,6 +440,7 @@ app.get('/operators', async (c) => {
       jinnEarned: r.jinnEarned.toString(),
     })),
     minVerdicts,
+    meta: { jinnAttribution: allJinnEarnedZero ? 'pending' : 'ok' },
     ...freshnessFields,
   });
 });
@@ -349,14 +449,53 @@ app.get('/operators', async (c) => {
 
 app.use('/operator/:addr', explorerFreshness());
 
+/**
+ * GET /explorer/operator/:addr
+ *
+ * Returns per-SolverNet breakdown and totals for one operator address.
+ *
+ * Response shape:
+ * ```json
+ * {
+ *   "operator": "0x...",
+ *   "perSolverNet": [...],
+ *   "totals": {
+ *     "attempts": 0,
+ *     "settledContribution": 0,
+ *     "verdictsTotal": 0,
+ *     "verdictsPass": 0,
+ *     "resolvedRate": null,
+ *     "jinnEarned": "0"
+ *   },
+ *   "meta": { "jinnAttribution": "pending" },  // present when jinnEarned is "0"
+ *   "lastIndexedBlock": "...",
+ *   "lastIndexedAt": "...",
+ *   "behindHead": null
+ * }
+ * ```
+ *
+ * `meta.jinnAttribution`:
+ *   - `"pending"` — jinnEarned is "0", meaning the rewardDistribution.multisig
+ *     ↔ attempt.operator join found no matching rows for this operator.
+ *   - `"ok"` — jinnEarned > "0"; attribution is live.
+ */
 app.get('/operator/:addr', async (c) => {
   const addr = c.req.param('addr').toLowerCase() as `0x${string}`;
 
-  // All attempts by this operator
+  // All attempts by this operator — scoped to EXPLORER_CHAIN_ID
   const operatorAttempts = await db
     .select()
     .from(schema.attempt)
-    .where(eq(schema.attempt.operator, addr));
+    .where(
+      and(
+        eq(schema.attempt.operator, addr),
+        eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
+      ),
+    );
+
+  // Read the head computed by the middleware — no second DB round trip.
+  const meta = c.get('indexedHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
 
   if (operatorAttempts.length === 0) {
     return c.json({
@@ -370,22 +509,28 @@ app.get('/operator/:addr', async (c) => {
         resolvedRate: null,
         jinnEarned: '0',
       },
-      ...freshness(await getIndexedHead(), new Date().toISOString()),
+      meta: { jinnAttribution: 'pending' },
+      ...freshnessFields,
     });
   }
 
-  // Get all tasks for finalization status
+  // Get all tasks for finalization status — scoped to EXPLORER_CHAIN_ID
   const taskIds = [...new Set(operatorAttempts.map((a) => a.taskId))];
   const tasks =
     taskIds.length > 0
       ? await db
           .select({ id: schema.task.id, manifestDigest: schema.task.manifestDigest, finalized: schema.task.finalized })
           .from(schema.task)
-          .where(inArray(schema.task.id, taskIds))
+          .where(
+            and(
+              inArray(schema.task.id, taskIds),
+              eq(schema.task.chainId, EXPLORER_CHAIN_ID),
+            ),
+          )
       : [];
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
 
-  // Get all verdicts for this operator's attempts
+  // Get all verdicts for this operator's attempts — scoped to EXPLORER_CHAIN_ID
   const attemptPairs = operatorAttempts.map((a) => ({
     taskId: a.taskId,
     attemptIndex: a.attemptIndex,
@@ -393,7 +538,10 @@ app.get('/operator/:addr', async (c) => {
   const verdictRows = await getVerdictsForAttempts(attemptPairs);
 
   // Build per-SolverNet breakdown
-  const manifests = await db.select().from(schema.solverNetManifest);
+  const manifests = await db
+    .select()
+    .from(schema.solverNetManifest)
+    .where(eq(schema.solverNetManifest.chainId, EXPLORER_CHAIN_ID));
   const manifestByCidKeccak = new Map(
     manifests.map((m) => [m.cidKeccak, m]),
   );
@@ -471,15 +619,15 @@ app.get('/operator/:addr', async (c) => {
   const totalVerdictsPass = verdictRows.filter((v) => v.verdictCode === 1).length;
   const totalResolvedRate = resolvedRateFromCounts(totalVerdictsPass, totalVerdictsTotal);
 
-  // JINN earned
+  // JINN earned — intentionally unfiltered by chainId:
+  // rewardDistribution is on Sepolia L1 (11155111) and JINN distributed
+  // is reported network-wide across all execution chains.
   const rewards = await db
     .select({ minted: sum(schema.rewardDistribution.operatorMinted) })
     .from(schema.rewardDistribution)
     .where(eq(schema.rewardDistribution.multisig, addr));
   const jinnEarned = rewards[0]?.minted ?? '0';
-
-  const head = await getIndexedHead();
-  const freshnessFields = freshness(head, new Date().toISOString());
+  const jinnEarnedStr = jinnEarned ?? '0';
 
   return c.json({
     operator: addr,
@@ -490,8 +638,9 @@ app.get('/operator/:addr', async (c) => {
       verdictsTotal: totalVerdictsTotal,
       verdictsPass: totalVerdictsPass,
       resolvedRate: totalResolvedRate,
-      jinnEarned: jinnEarned ?? '0',
+      jinnEarned: jinnEarnedStr,
     },
+    meta: { jinnAttribution: jinnEarnedStr === '0' ? 'pending' : 'ok' },
     ...freshnessFields,
   });
 });
@@ -499,67 +648,136 @@ app.get('/operator/:addr', async (c) => {
 // ── Internal query helpers ────────────────────────────────────────────────────
 
 /**
- * Computes the rollup stats for a single SolverNet identified by its
- * `cidKeccak` (= task.manifestDigest).
+ * Computes rollup stats for a batch of SolverNets in O(1) DB round trips
+ * (three aggregate queries, grouped by manifestDigest) instead of O(N).
+ *
+ * Returns a Map from `cidKeccak` → stats object. Every `cidKeccak` in the
+ * input is guaranteed to have an entry (with zeros if no matching rows exist).
+ *
+ * Use this for `/explorer/solvernets` (all SolverNets) or any bulk listing.
+ * For a single SolverNet, pass a one-element array — the implementation is
+ * still O(1) queries so there's no overhead cost.
  */
-async function getSolverNetStats(cidKeccak: `0x${string}`) {
-  // Tasks for this SolverNet
-  const tasks = await db
+async function getSolverNetStatsBatch(
+  cidKeccaks: `0x${string}`[],
+): Promise<
+  Map<
+    `0x${string}`,
+    {
+      tasksPosted: number;
+      tasksSettled: number;
+      attempts: number;
+      verdicts: number;
+      verdictsPass: number;
+      resolvedRate: number | null;
+    }
+  >
+> {
+  // Seed the result map with zero-rows so every input key has an entry.
+  const result = new Map(
+    cidKeccaks.map((k) => [
+      k,
+      {
+        tasksPosted: 0,
+        tasksSettled: 0,
+        attempts: 0,
+        verdicts: 0,
+        verdictsPass: 0,
+        resolvedRate: null as number | null,
+      },
+    ]),
+  );
+
+  if (cidKeccaks.length === 0) return result;
+
+  // Query 1: task counts grouped by manifestDigest, scoped to EXPLORER_CHAIN_ID.
+  const taskAgg = await db
     .select({
-      id: schema.task.id,
-      finalized: schema.task.finalized,
+      manifestDigest: schema.task.manifestDigest,
+      tasksPosted: count(),
+      tasksSettled: count(
+        sql`CASE WHEN ${schema.task.finalized} = true THEN 1 END`,
+      ),
     })
     .from(schema.task)
-    .where(eq(schema.task.manifestDigest, cidKeccak));
+    .where(
+      and(
+        inArray(schema.task.manifestDigest, cidKeccaks),
+        eq(schema.task.chainId, EXPLORER_CHAIN_ID),
+      ),
+    )
+    .groupBy(schema.task.manifestDigest);
 
-  const taskIds = tasks.map((t) => t.id);
-  const tasksPosted = tasks.length;
-  const tasksSettled = tasks.filter((t) => t.finalized).length;
+  // Query 2: attempt counts grouped by task.manifestDigest, scoped to EXPLORER_CHAIN_ID.
+  // Join attempt → task to get the manifestDigest.
+  const attemptAgg = await db
+    .select({
+      manifestDigest: schema.task.manifestDigest,
+      attempts: count(),
+    })
+    .from(schema.attempt)
+    .innerJoin(schema.task, eq(schema.attempt.taskId, schema.task.id))
+    .where(
+      and(
+        inArray(schema.task.manifestDigest, cidKeccaks),
+        eq(schema.task.chainId, EXPLORER_CHAIN_ID),
+        eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
+      ),
+    )
+    .groupBy(schema.task.manifestDigest);
 
-  if (taskIds.length === 0) {
-    return {
-      tasksPosted: 0,
-      tasksSettled: 0,
-      attempts: 0,
-      verdicts: 0,
-      verdictsPass: 0,
-      resolvedRate: null as number | null,
-    };
+  // Query 3: verdict counts grouped by task.manifestDigest, scoped to EXPLORER_CHAIN_ID.
+  const verdictAgg = await db
+    .select({
+      manifestDigest: schema.task.manifestDigest,
+      verdicts: count(),
+      verdictsPass: count(
+        sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
+      ),
+    })
+    .from(schema.verdict)
+    .innerJoin(schema.task, eq(schema.verdict.taskId, schema.task.id))
+    .where(
+      and(
+        inArray(schema.task.manifestDigest, cidKeccaks),
+        eq(schema.task.chainId, EXPLORER_CHAIN_ID),
+        eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+      ),
+    )
+    .groupBy(schema.task.manifestDigest);
+
+  // Stitch aggregates onto the result map.
+  for (const row of taskAgg) {
+    const entry = result.get(row.manifestDigest as `0x${string}`);
+    if (entry) {
+      entry.tasksPosted = Number(row.tasksPosted);
+      entry.tasksSettled = Number(row.tasksSettled);
+    }
+  }
+  for (const row of attemptAgg) {
+    const entry = result.get(row.manifestDigest as `0x${string}`);
+    if (entry) {
+      entry.attempts = Number(row.attempts);
+    }
+  }
+  for (const row of verdictAgg) {
+    const entry = result.get(row.manifestDigest as `0x${string}`);
+    if (entry) {
+      const verdicts = Number(row.verdicts);
+      const verdictsPass = Number(row.verdictsPass);
+      entry.verdicts = verdicts;
+      entry.verdictsPass = verdictsPass;
+      entry.resolvedRate = resolvedRateFromCounts(verdictsPass, verdicts);
+    }
   }
 
-  // Attempts and verdicts
-  const [attemptStats, verdictStats] = await Promise.all([
-    db
-      .select({ total: count() })
-      .from(schema.attempt)
-      .where(inArray(schema.attempt.taskId, taskIds)),
-    db
-      .select({
-        total: count(),
-        pass: count(
-          sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
-        ),
-      })
-      .from(schema.verdict)
-      .where(inArray(schema.verdict.taskId, taskIds)),
-  ]);
-
-  const verdicts = Number(verdictStats[0]?.total ?? 0);
-  const verdictsPass = Number(verdictStats[0]?.pass ?? 0);
-
-  return {
-    tasksPosted,
-    tasksSettled,
-    attempts: Number(attemptStats[0]?.total ?? 0),
-    verdicts,
-    verdictsPass,
-    resolvedRate: resolvedRateFromCounts(verdictsPass, verdicts),
-  };
+  return result;
 }
 
 /**
  * Fetches all verdicts for a set of (taskId, attemptIndex) pairs.
  * Returns the subset of verdict rows matching any of the pairs.
+ * Scoped to EXPLORER_CHAIN_ID.
  */
 async function getVerdictsForAttempts(
   pairs: { taskId: string; attemptIndex: number }[],
@@ -574,7 +792,12 @@ async function getVerdictsForAttempts(
       verdictCode: schema.verdict.verdictCode,
     })
     .from(schema.verdict)
-    .where(inArray(schema.verdict.taskId, taskIds));
+    .where(
+      and(
+        inArray(schema.verdict.taskId, taskIds),
+        eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+      ),
+    );
 
   // Filter to only the exact (taskId, attemptIndex) pairs
   const pairSet = new Set(pairs.map((p) => `${p.taskId}:${p.attemptIndex}`));
@@ -584,34 +807,41 @@ async function getVerdictsForAttempts(
 /**
  * Builds a {@link LeaderboardRow} for every distinct operator that has at least
  * one attempt. Used by `GET /explorer/operators`.
+ * Scoped to EXPLORER_CHAIN_ID.
  */
 async function buildLeaderboardRows(): Promise<LeaderboardRow[]> {
-  // All attempts grouped by operator
+  // All attempts grouped by operator — scoped to EXPLORER_CHAIN_ID
   const allAttempts = await db
     .select({
       taskId: schema.attempt.taskId,
       attemptIndex: schema.attempt.attemptIndex,
       operator: schema.attempt.operator,
     })
-    .from(schema.attempt);
+    .from(schema.attempt)
+    .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID));
 
   if (allAttempts.length === 0) return [];
 
   // Collect distinct operators
   const operators = [...new Set(allAttempts.map((a) => a.operator))];
 
-  // All tasks (for finalization)
+  // All tasks (for finalization) — scoped to EXPLORER_CHAIN_ID
   const allTaskIds = [...new Set(allAttempts.map((a) => a.taskId))];
   const tasks =
     allTaskIds.length > 0
       ? await db
           .select({ id: schema.task.id, finalized: schema.task.finalized })
           .from(schema.task)
-          .where(inArray(schema.task.id, allTaskIds))
+          .where(
+            and(
+              inArray(schema.task.id, allTaskIds),
+              eq(schema.task.chainId, EXPLORER_CHAIN_ID),
+            ),
+          )
       : [];
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
 
-  // All verdicts for these tasks
+  // All verdicts for these tasks — scoped to EXPLORER_CHAIN_ID
   const allVerdicts =
     allTaskIds.length > 0
       ? await db
@@ -621,10 +851,17 @@ async function buildLeaderboardRows(): Promise<LeaderboardRow[]> {
             verdictCode: schema.verdict.verdictCode,
           })
           .from(schema.verdict)
-          .where(inArray(schema.verdict.taskId, allTaskIds))
+          .where(
+            and(
+              inArray(schema.verdict.taskId, allTaskIds),
+              eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+            ),
+          )
       : [];
 
-  // All reward distributions keyed by multisig
+  // All reward distributions keyed by multisig — intentionally unfiltered by
+  // chainId: rewardDistribution is on Sepolia L1 and JINN distributed is
+  // reported network-wide.
   const rewardRows = await db
     .select({
       multisig: schema.rewardDistribution.multisig,
