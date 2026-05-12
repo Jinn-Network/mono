@@ -1,0 +1,189 @@
+# Auto-close bd issues on PR merge — implements jinn-mono-2cl.16 per the engineering
+# handbook §The shipping machine (daily loop step 7: Close bd after merge).
+#
+# On every merged PR, parse the PR body for GitHub close-keywords paired with a
+# `jinn-mono-<id>` reference (e.g. `Closes jinn-mono-2cl.13`, `Fixes jinn-mono-uy6v.7`).
+# For each match, run `bd close <id>` with a reason citing the PR. Finally, push bd
+# state to the dolt remote so the close is durable.
+#
+# Design (locked 2026-05-11, see jinn-mono-2cl.16 + handbook §Building in public):
+# - Parse entire PR body (matches GitHub's native close-keyword behaviour); forgiving
+#   to PRs that don't use the PULL_REQUEST_TEMPLATE's `## Linked bd` section.
+# - `bd dolt push` only — no git auto-export commit-back. Dolt is the SoR; git-tracked
+#   export is a best-effort artifact, not guaranteed.
+# - Runner: ubuntu-latest + install bd via the upstream binary in a setup step.
+#
+# v0 status: shipped with `workflow_dispatch` for manual invocation. Cron-style trigger
+# (`pull_request: closed`) is wired but DISABLED by default until the dolt remote
+# credentials are configured as repo secrets (see ## Required secrets below) and a
+# manual run validates the bd install + close flow.
+#
+# ## Required secrets (configure under repo Settings → Secrets and variables → Actions)
+#
+# - `BD_DOLT_REMOTE_URL`  — dolt remote URL the local bd uses (look at
+#                            `bd dolt remote list` from the dev machine for the value).
+# - `BD_DOLT_REMOTE_USER` — username on the remote (often the same GitHub login).
+# - `BD_DOLT_REMOTE_PASS` — password / token. Treat as secret.
+#
+# Without these, the workflow falls through gracefully: the close-keyword parse runs,
+# the matched bd ids are printed as a `::notice::`, but the `bd close` + push steps
+# are skipped (no-op).
+#
+# Reference:
+# - jinn-mono-2cl.16 (this bd)
+# - docs/engineering/handbook.md §The shipping machine
+# - DR-2026-05-11-b (engineering substrate: dolt is bd SoR)
+
+name: bd-close-on-merge
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Merged PR number to scan for `closes jinn-mono-<id>` references"
+        required: true
+        type: string
+  # pull_request:
+  #   types: [closed]   # enable after dolt secrets are configured and manual run validates
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  close:
+    name: Close referenced bd issues
+    runs-on: ubuntu-latest
+    # On workflow_dispatch, always run. On pull_request, only when merged.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BD_DOLT_REMOTE_URL: ${{ secrets.BD_DOLT_REMOTE_URL }}
+      BD_DOLT_REMOTE_USER: ${{ secrets.BD_DOLT_REMOTE_USER }}
+      BD_DOLT_REMOTE_PASS: ${{ secrets.BD_DOLT_REMOTE_PASS }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve PR number
+        id: pr
+        shell: bash
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            PR_NUMBER="${{ inputs.pr_number }}"
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+          echo "number=${PR_NUMBER}" >> "${GITHUB_OUTPUT}"
+
+      - name: Fetch PR body
+        id: body
+        shell: bash
+        run: |
+          PR_BODY="$(gh pr view "${{ steps.pr.outputs.number }}" --repo "${{ github.repository }}" --json body --jq '.body')"
+          # Persist to a file so multi-line content is preserved across step boundaries.
+          echo "$PR_BODY" > /tmp/pr-body.md
+          echo "body_file=/tmp/pr-body.md" >> "${GITHUB_OUTPUT}"
+
+      - name: Parse `closes jinn-mono-<id>` references
+        id: refs
+        shell: bash
+        run: |
+          # GitHub's native close keywords: close, closes, closed, fix, fixes, fixed,
+          # resolve, resolves, resolved. Case-insensitive. Pair with jinn-mono-<id>.
+          # The id pattern accepts dots (e.g. 2cl.13, uy6v.1.1).
+          # `\b` anchor on the left prevents substring matches like `disclosed` (matches `closed`),
+          # `prefixed` (matches `fixed`), `unresolved` (matches `resolved`). GitHub's native close-
+          # keyword parser requires the keyword to be a whole word; this matches that behaviour.
+          grep -oiE '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' \
+            "${{ steps.body.outputs.body_file }}" 2>/dev/null \
+            | grep -oiE 'jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' \
+            | sort -u > /tmp/bd-ids.txt || true
+
+          COUNT="$(wc -l < /tmp/bd-ids.txt | tr -d ' ')"
+          echo "count=${COUNT}" >> "${GITHUB_OUTPUT}"
+          if [ "${COUNT}" -eq 0 ]; then
+            echo "::notice::PR #${{ steps.pr.outputs.number }} body has no closes/fixes/resolves references to jinn-mono-* ids; nothing to close."
+          else
+            echo "::notice::PR #${{ steps.pr.outputs.number }} body references ${COUNT} bd issue(s) to close:"
+            cat /tmp/bd-ids.txt | sed 's/^/  - /'
+          fi
+
+      - name: Install bd CLI
+        if: steps.refs.outputs.count != '0' && env.BD_DOLT_REMOTE_URL != ''
+        shell: bash
+        run: |
+          # TODO(2cl.16): pin the canonical bd-CLI Linux binary URL once verified.
+          # Current local install on Captain's dev machine is bd v1.0.2 via Homebrew
+          # (Apple Silicon). The upstream releases page (steveyegge/beads or similar)
+          # ships a linux-amd64 binary; the first manual workflow_dispatch run on this
+          # workflow should verify the exact URL pattern and update the line below.
+          #
+          # Placeholder approach: try `npm install -g` if the package is published, or
+          # fall back to the upstream releases page. On first run, this step is expected
+          # to either succeed or fail loudly with a clear error so Captain can pin the
+          # correct URL.
+          set -e
+          if command -v bd >/dev/null 2>&1; then
+            echo "bd already installed: $(bd --version)"
+          else
+            echo "::error::bd CLI install path not yet pinned for ubuntu-latest. See workflow comment for follow-up. The first manual run must finalise the install command."
+            echo "::error::Captain: download bd-linux-amd64 from the upstream releases page, place at /usr/local/bin/bd, chmod +x, and update this workflow's Install bd CLI step."
+            exit 1
+          fi
+
+      - name: Configure dolt remote + pull latest bd state
+        if: steps.refs.outputs.count != '0' && env.BD_DOLT_REMOTE_URL != ''
+        shell: bash
+        run: |
+          # bd uses an embedded Dolt sql-server. Configure the remote so we can pull
+          # the latest state, apply our closes, then push back.
+          # `set -o pipefail` ensures a `bd dolt pull` failure isn't masked by the
+          # `tail -10` pipe; `set -e` aborts the step (and downstream `bd close` /
+          # `bd dolt push` won't run, preventing a divergent-state push).
+          set -eo pipefail
+
+          # Remove-then-add ensures the remote always reflects the current secret
+          # value (in case of credential rotation or URL change). `remote add` alone
+          # fails silently if a remote with the same name already exists, leaving
+          # the previous URL in place.
+          bd dolt remote remove origin 2>/dev/null || true
+          bd dolt remote add origin "${BD_DOLT_REMOTE_URL}"
+
+          bd dolt pull origin 2>&1 | tail -10
+
+      - name: Close referenced bd issues
+        if: steps.refs.outputs.count != '0' && env.BD_DOLT_REMOTE_URL != ''
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -e
+          FAILED=0
+          while IFS= read -r bd_id; do
+            if [ -z "${bd_id}" ]; then continue; fi
+            REASON="Closed via PR merge: https://github.com/${REPO}/pull/${PR_NUMBER} (auto via jinn-mono-2cl.16)."
+            if bd close "${bd_id}" --reason "${REASON}"; then
+              echo "::notice::Closed ${bd_id}"
+            else
+              echo "::warning::Failed to close ${bd_id} (may already be closed; non-fatal)"
+              FAILED=$((FAILED + 1))
+            fi
+          done < /tmp/bd-ids.txt
+          if [ "${FAILED}" -gt 0 ]; then
+            echo "::warning::${FAILED} bd close attempt(s) failed; check logs."
+          fi
+
+      - name: Push bd state to dolt remote
+        if: steps.refs.outputs.count != '0' && env.BD_DOLT_REMOTE_URL != ''
+        shell: bash
+        run: |
+          bd dolt push origin 2>&1 | tail -5
+
+      - name: Fallback notice when secrets missing
+        if: steps.refs.outputs.count != '0' && env.BD_DOLT_REMOTE_URL == ''
+        shell: bash
+        run: |
+          echo "::warning::PR #${{ steps.pr.outputs.number }} references bd issues but BD_DOLT_REMOTE_URL secret is not configured. Auto-close skipped. Captain: configure BD_DOLT_REMOTE_URL / BD_DOLT_REMOTE_USER / BD_DOLT_REMOTE_PASS as repo secrets, then re-run this workflow."
+          echo "::warning::bd ids that would have been closed:"
+          cat /tmp/bd-ids.txt | sed 's/^/  - /'
