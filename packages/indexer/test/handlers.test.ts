@@ -26,7 +26,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { keccak256, toBytes } from 'viem';
-import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -65,6 +65,7 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [envelope, ['agentId', 'metadataKey', 'chainId']],
   [verdict, ['taskId', 'attemptIndex', 'verdictIndex', 'chainId']],
   [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
+  [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
 ]);
 
 let db: InMemoryDb;
@@ -234,6 +235,7 @@ describe('MetadataSet key routing', () => {
       context,
       solverNetManifest,
       envelope,
+      harnessCheckpoint,
     });
     expect(db.count(solverNetManifest)).toBe(1);
     expect(db.count(envelope)).toBe(0);
@@ -261,6 +263,7 @@ describe('MetadataSet key routing', () => {
         context: localCtx,
         solverNetManifest,
         envelope,
+        harnessCheckpoint,
       });
       expect(localDb.count(envelope)).toBe(1);
       expect(localDb.count(solverNetManifest)).toBe(0);
@@ -285,6 +288,7 @@ describe('MetadataSet key routing', () => {
       context,
       solverNetManifest,
       envelope,
+      harnessCheckpoint,
     });
     expect(db.count(solverNetManifest)).toBe(0);
     expect(db.count(envelope)).toBe(0);
@@ -304,6 +308,7 @@ describe('envelope payload decode', () => {
       context,
       solverNetManifest,
       envelope,
+      harnessCheckpoint,
     });
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
     expect(row).toMatchObject({ manifestHash: MANIFEST_HASH, evidenceTier: 'attested' });
@@ -319,6 +324,7 @@ describe('envelope payload decode', () => {
       context,
       solverNetManifest,
       envelope,
+      harnessCheckpoint,
     });
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
     expect(row).toMatchObject({ manifestHash: MANIFEST_HASH, evidenceTier: 'self-signed' });
@@ -335,6 +341,7 @@ describe('envelope payload decode', () => {
         context,
         solverNetManifest,
         envelope,
+        harnessCheckpoint,
       }),
     ).resolves.toBeUndefined();
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
@@ -354,6 +361,7 @@ describe('envelope payload decode', () => {
         context,
         solverNetManifest,
         envelope,
+        harnessCheckpoint,
       }),
     ).resolves.toBeUndefined();
     expect(db.count(solverNetManifest)).toBe(0);
@@ -379,6 +387,7 @@ describe('solverNetManifest most-recent-wins', () => {
       context,
       solverNetManifest,
       envelope,
+      harnessCheckpoint,
     });
 
   it('a later block overwrites an earlier one', async () => {
@@ -566,6 +575,7 @@ describe('envelope most-recent-wins', () => {
       context,
       solverNetManifest,
       envelope,
+      harnessCheckpoint,
     });
   const get = () => db.get(envelope, { agentId: '8', metadataKey: key, chainId: CHAIN_ID });
 
@@ -595,5 +605,58 @@ describe('envelope most-recent-wins', () => {
     await setEnvelope({ block: 100n, logIndex: 2, tier: 1, hash: MANIFEST_HASH });
     expect(get()).toEqual(before);
     expect(db.count(envelope)).toBe(1);
+  });
+});
+
+// ── MetadataSet harness.checkpoint: → harnessCheckpoint ──────────────────────
+
+describe('MetadataSet harness.checkpoint: → harnessCheckpoint', () => {
+  const CHECKPOINT_CID = 'bafyckpt';
+  const CHECKPOINT_HASH = `0x${'ef'.repeat(32)}` as `0x${string}`;
+
+  it('writes a harnessCheckpoint row with on-chain anchor fields', async () => {
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 42n,
+          metadataKey: `harness.checkpoint:${CHECKPOINT_CID}`,
+          metadataValue: envelopePayloadV2({ tier: 1, manifestHash: CHECKPOINT_HASH }),
+        },
+        { block: 41_300_000n, logIndex: 1 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+    });
+
+    const row = db.get(harnessCheckpoint, { agentId: '42', cid: CHECKPOINT_CID, chainId: CHAIN_ID });
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      cid: CHECKPOINT_CID,
+      agentId: '42',
+      manifestHash: CHECKPOINT_HASH,
+      evidenceTier: 'committed',
+      publishedAtBlock: 41_300_000n,
+      logIndex: 1,
+      chainId: CHAIN_ID,
+    });
+    // Must not pollute envelope or solverNetManifest tables.
+    expect(db.count(envelope)).toBe(0);
+    expect(db.count(solverNetManifest)).toBe(0);
+  });
+
+  it('is idempotent — replaying the same event does not create a duplicate row', async () => {
+    const ev = metadataSetEvent(
+      {
+        agentId: 42n,
+        metadataKey: `harness.checkpoint:${CHECKPOINT_CID}`,
+        metadataValue: envelopePayloadV2({ tier: 1, manifestHash: CHECKPOINT_HASH }),
+      },
+      { block: 41_300_000n, logIndex: 1 },
+    );
+    await handleMetadataSet({ event: ev, context, solverNetManifest, envelope, harnessCheckpoint });
+    await handleMetadataSet({ event: ev, context, solverNetManifest, envelope, harnessCheckpoint });
+    expect(db.count(harnessCheckpoint)).toBe(1);
   });
 });

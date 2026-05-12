@@ -8,7 +8,7 @@
  *   JinnRouter:SolutionDeliveryClaimed → task.finalized = true
  *   JinnRouter:VerdictDeliveryClaimed  → verdict
  *   JinnRouter:TaskBudgetRefunded      → task.refunded = true
- *   IdentityRegistry:MetadataSet       → solverNetManifest OR envelope (routed by key)
+ *   IdentityRegistry:MetadataSet       → solverNetManifest OR harnessCheckpoint OR envelope (routed by key)
  *   JinnDistributor:Claimed            → rewardDistribution
  *
  * Handlers are pure event-to-row mappings with no business logic. The
@@ -29,7 +29,7 @@
  * Schema: ponder.schema.ts
  */
 import { ponder } from 'ponder:registry';
-import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint } from 'ponder:schema';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -94,6 +94,7 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     context: context as unknown as HandlerContext,
     solverNetManifest,
     envelope,
+    harnessCheckpoint,
   });
 });
 

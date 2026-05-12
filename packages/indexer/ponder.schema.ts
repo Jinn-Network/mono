@@ -332,6 +332,43 @@ export const envelope = onchainTable(
   }),
 );
 
+// ── HarnessCheckpoint ────────────────────────────────────────────────────────
+
+/**
+ * A published HarnessCheckpoint anchor. From IdentityRegistry.MetadataSet with key
+ * prefix `harness.checkpoint:<manifestPinCid>` (client/src/cli/commands/checkpoint.ts).
+ * This row is the on-chain anchor only — the checkpoint manifest body (implStateDirCid,
+ * codeDigest, parentCheckpointCid, harnessPackage) lives on IPFS at `cid` and is fetched
+ * by the envelope-enrichment pass (ebu7.6 Task 2) if/when checkpoint-manifest enrichment
+ * is added; until then only the on-chain fields are populated.
+ *
+ * Primary key: (agentId, cid, chainId).
+ */
+export const harnessCheckpoint = onchainTable(
+  'harness_checkpoint',
+  (t) => ({
+    /** The checkpoint manifest CID — the part of the metadataKey after `harness.checkpoint:`. */
+    cid: t.text().notNull(),
+    /** agentId of the publisher (decimal string). */
+    agentId: t.text().notNull(),
+    /** keccak256/hash of the checkpoint manifest, from the ABI-decoded on-chain payload. */
+    manifestHash: t.hex().notNull(),
+    /** Evidence tier from the ABI-decoded payload (text). */
+    evidenceTier: t.text().notNull(),
+    /** Block number of the MetadataSet event. */
+    publishedAtBlock: t.bigint().notNull(),
+    /** Log index within the block. */
+    logIndex: t.integer().notNull(),
+    /** Chain ID. */
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.agentId, table.cid, table.chainId] }),
+    cidIdx: index().on(table.cid),
+    blockIdx: index().on(table.publishedAtBlock),
+  }),
+);
+
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const taskRelations = relations(task, ({ many }) => ({

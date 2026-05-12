@@ -20,6 +20,7 @@
 import { decodeAbiParameters, keccak256, toBytes, type Hex } from 'viem';
 import {
   parseEnvelopeKey,
+  parseHarnessCheckpointKey,
   parseSolverNetManifestKey,
   tierFromRaw,
 } from './types.js';
@@ -333,6 +334,7 @@ export async function handleTaskBudgetRefunded({
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────
 // Routes by key prefix:
 //   solvernet-manifest:<cid>  → upsert SolverNetManifest (most-recent-wins)
+//   harness.checkpoint:<cid>  → insert HarnessCheckpoint (on-chain anchor only)
 //   envelope:<cid>            → upsert Envelope
 //   evaluation:<cid>          → upsert Envelope
 //   capture:<cid>             → upsert Envelope
@@ -342,11 +344,13 @@ export async function handleMetadataSet({
   context,
   solverNetManifest,
   envelope,
+  harnessCheckpoint,
 }: {
   event: MetadataSetEvent;
   context: HandlerContext;
   solverNetManifest: unknown;
   envelope: unknown;
+  harnessCheckpoint: unknown;
 }): Promise<void> {
   const key = event.args.metadataKey;
   const agentId = event.args.agentId.toString();
@@ -447,6 +451,27 @@ export async function handleMetadataSet({
           chainId: row.chainId,
         };
       });
+    return;
+  }
+
+  // ── HarnessCheckpoint anchor ─────────────────────────────────────────────
+  const checkpointCid = parseHarnessCheckpointKey(key);
+  if (checkpointCid !== null) {
+    const payload = decodeEnvelopePayload(event.args.metadataValue as Hex);
+    const logIndex = typeof event.log.logIndex === 'number' ? event.log.logIndex : 0;
+    const manifestHash = (payload.manifestHash || '0x') as `0x${string}`;
+    await context.db
+      .insert(harnessCheckpoint)
+      .values({
+        cid: checkpointCid,
+        agentId,
+        manifestHash,
+        evidenceTier: payload.evidenceTier,
+        publishedAtBlock: blockNumber,
+        logIndex,
+        chainId,
+      })
+      .onConflictDoNothing();
     return;
   }
 
