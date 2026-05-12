@@ -1,7 +1,7 @@
 /**
  * Ponder event handlers for the Jinn protocol indexer.
  *
- * Six event sources, each mapped to one entity in ponder.schema.ts:
+ * Seven event sources, each mapped to one entity in ponder.schema.ts:
  *
  *   JinnRouter:TaskCreated             → task
  *   JinnRouter:TaskAttemptCreated      → attempt
@@ -9,6 +9,7 @@
  *   JinnRouter:VerdictDeliveryClaimed  → verdict
  *   JinnRouter:TaskBudgetRefunded      → task.refunded = true
  *   IdentityRegistry:MetadataSet       → solverNetManifest OR envelope (routed by key)
+ *   JinnDistributor:Claimed            → rewardDistribution
  *
  * Handlers are pure event-to-row mappings with no business logic. The
  * correctness gate (canClaimTask simulation) lives in the daemon adapter,
@@ -28,7 +29,7 @@
  * Schema: ponder.schema.ts
  */
 import { ponder } from 'ponder:registry';
-import { task, attempt, solverNetManifest, envelope, verdict } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution } from 'ponder:schema';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -36,6 +37,7 @@ import {
   handleMetadataSet,
   handleVerdictDeliveryClaimed,
   handleTaskBudgetRefunded,
+  handleClaimed,
   type HandlerContext,
   type TaskCreatedEvent,
   type TaskAttemptCreatedEvent,
@@ -43,6 +45,7 @@ import {
   type MetadataSetEvent,
   type VerdictDeliveryClaimedEvent,
   type TaskBudgetRefundedEvent,
+  type ClaimedEvent,
 } from './handlers.js';
 
 ponder.on('JinnRouter:TaskCreated', async ({ event, context }) => {
@@ -91,5 +94,13 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     context: context as unknown as HandlerContext,
     solverNetManifest,
     envelope,
+  });
+});
+
+ponder.on('JinnDistributor:Claimed', async ({ event, context }) => {
+  await handleClaimed({
+    event: event as unknown as ClaimedEvent,
+    context: context as unknown as HandlerContext,
+    rewardDistribution,
   });
 });

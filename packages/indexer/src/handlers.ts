@@ -186,6 +186,20 @@ export function decodeEnvelopePayload(value: Hex): {
   }
 }
 
+export interface ClaimedEvent {
+  args: {
+    serviceId: bigint;
+    multisig: `0x${string}`;
+    operatorMinted: bigint;
+    daoMinted: bigint;
+    totalEntitledOperator: bigint;
+    totalEntitledDao: bigint;
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
 // ── JinnRouter: TaskCreated ───────────────────────────────────────────────────
 
 export async function handleTaskCreated({
@@ -492,4 +506,32 @@ export async function handleMetadataSet({
   }
 
   // Any other key (e.g. future metadata types) — no-op.
+}
+
+// ── JinnDistributor: Claimed → rewardDistribution ────────────────────────────
+export async function handleClaimed({
+  event,
+  context,
+  rewardDistribution,
+}: {
+  event: ClaimedEvent;
+  context: HandlerContext;
+  rewardDistribution: unknown;
+}): Promise<void> {
+  const logIndex = typeof event.log.logIndex === 'number' ? event.log.logIndex : 0;
+  await context.db
+    .insert(rewardDistribution)
+    .values({
+      serviceId: event.args.serviceId.toString(),
+      multisig: event.args.multisig,
+      operatorMinted: event.args.operatorMinted,
+      daoMinted: event.args.daoMinted,
+      totalEntitledOperator: event.args.totalEntitledOperator,
+      totalEntitledDao: event.args.totalEntitledDao,
+      claimedAtBlock: event.block.number,
+      logIndex,
+      claimedAtTx: event.transaction.hash,
+      chainId: context.chain.id,
+    })
+    .onConflictDoNothing();
 }

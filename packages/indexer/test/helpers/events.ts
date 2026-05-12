@@ -10,6 +10,7 @@ import { encodeAbiParameters, toHex } from 'viem';
 import {
   PAYLOAD_TUPLE_V1,
   PAYLOAD_TUPLE_V2,
+  type ClaimedEvent,
   type MetadataSetEvent,
   type SolutionDeliveryClaimedEvent,
   type TaskAttemptCreatedEvent,
@@ -132,6 +133,25 @@ export function taskBudgetRefundedEvent(
     },
     block: { number: o.block ?? 100n },
     transaction: { hash: o.txHash ?? ('0x' + 'a1'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
+export function claimedEvent(
+  args: Partial<ClaimedEvent['args']> & { serviceId: bigint },
+  o: EnvelopeOverrides = {},
+): ClaimedEvent {
+  return {
+    args: {
+      multisig: SOME_ADDR,
+      operatorMinted: 0n,
+      daoMinted: 0n,
+      totalEntitledOperator: 0n,
+      totalEntitledDao: 0n,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'b2'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
 }

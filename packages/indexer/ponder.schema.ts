@@ -171,6 +171,47 @@ export const verdict = onchainTable(
   }),
 );
 
+// ── RewardDistribution ───────────────────────────────────────────────────────
+
+/**
+ * One JINN distribution claim. From JinnDistributor.Claimed on Sepolia L1.
+ * Claimed carries cumulative entitlement (totalEntitled*) and this-claim's
+ * minted delta (operatorMinted / daoMinted). One row per claim event; the
+ * per-channel split (wCreation/wRestorationDelivery/wEvaluationDelivery) is NOT
+ * in the event — the explorer reconstructs it from per-operator JinnRouter
+ * activity counts (TaskCreated by creator, SolutionDeliveryClaimed by operator,
+ * VerdictDeliveryClaimed by evaluator).
+ *
+ * Primary key: (chainId, serviceId, claimedAtBlock, logIndex) — a service can
+ * claim repeatedly; block+logIndex disambiguate.
+ */
+export const rewardDistribution = onchainTable(
+  'reward_distribution',
+  (t) => ({
+    serviceId: t.text().notNull(),
+    /** The operator multisig (Safe) that claimed — joins to attempt.operator. */
+    multisig: t.hex().notNull(),
+    /** JINN minted to the operator on this claim (wei). */
+    operatorMinted: t.bigint().notNull(),
+    /** JINN minted to the DAO on this claim (wei). */
+    daoMinted: t.bigint().notNull(),
+    /** Cumulative operator entitlement after this claim (wei). */
+    totalEntitledOperator: t.bigint().notNull(),
+    /** Cumulative DAO entitlement after this claim (wei). */
+    totalEntitledDao: t.bigint().notNull(),
+    claimedAtBlock: t.bigint().notNull(),
+    logIndex: t.integer().notNull(),
+    claimedAtTx: t.hex().notNull(),
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.chainId, table.serviceId, table.claimedAtBlock, table.logIndex] }),
+    serviceIdx: index().on(table.serviceId),
+    multisigIdx: index().on(table.multisig),
+    blockIdx: index().on(table.claimedAtBlock),
+  }),
+);
+
 // ── SolverNetManifest ─────────────────────────────────────────────────────────
 
 /**
