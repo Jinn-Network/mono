@@ -112,7 +112,7 @@ if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'dev
 //   2. ~/.jinn-client/keystore-password (file from a previous auto-gen)
 //   3. Auto-generate a 32-byte hex string, persist mode 0600, and reuse next run
 //
-// Auto-generation matches what `jinn quickstart` used to do so a brand-new
+// Auto-generation matches `jinn run` CLI password behavior so a brand-new
 // operator can run `jinn run` with no env var, no setup, no input. The
 // known security trade-off is documented in client/src/cli/password.ts:
 // plaintext on disk + encrypted keystore on the same disk only defends
@@ -1411,9 +1411,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     if (!authProbe.authenticated) {
       emitEnvelope({
         code: 'invalid_invocation',
-        message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
-        hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
-        exampleCli: 'jinn auth',
+        message: 'Claude is not authenticated. Complete Claude setup in the operator app, then restart the daemon.',
+        hint: `Detected context: ${authContext}. Run \`jinn run\` to open the app-guided setup flow.`,
+        exampleCli: 'jinn run',
         details: {
           field: 'claude_auth',
           context: authContext,

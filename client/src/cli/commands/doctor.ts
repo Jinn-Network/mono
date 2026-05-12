@@ -316,7 +316,7 @@ export function createDoctorCommand(deps: DoctorDeps = PRODUCTION_DEPS): Command
         : `Not authenticated (${context})`,
       ...(probe.authenticated
         ? {}
-        : { remedy: 'Run `jinn auth` to authenticate Claude.' }),
+        : { remedy: 'Run `jinn run` and complete Claude setup in the operator app.' }),
     };
   }
 

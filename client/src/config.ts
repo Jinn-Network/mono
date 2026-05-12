@@ -131,8 +131,9 @@ export const JinnConfigSchema = z.object({
   claudeModel: z.string().default('claude-haiku-4-5-20251001'),
 
   /**
-   * How the operator runs the daemon. Set once at `jinn auth`, read by every
-   * command that probes the Claude CLI or spawns a subprocess. Leaving it
+   * How the operator runs the daemon. Set once by app-guided setup or the
+   * legacy `jinn auth` compatibility command, then read by every command that
+   * probes the Claude CLI or spawns a subprocess. Leaving it
    * unset falls back to filesystem-based detection (docker-compose.yml near
    * cwd, /.dockerenv, etc.) which is error-prone inside a checkout of the
    * repo itself.

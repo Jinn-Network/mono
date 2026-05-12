@@ -34,6 +34,7 @@ import { isoToSqliteTimestamp, summarizeRunWindowArtifacts } from './lib/accepta
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
+const repoRoot = join(clientRoot, '..');
 const composeFile = join(clientRoot, 'docker-compose.acceptance.yml');
 const composeService = 'jinn-acceptance-daemon';
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -451,11 +452,13 @@ async function main() {
       'build',
       '--build-arg',
       `JINN_BUILD_COMMIT=${buildCommit}`,
+      '-f',
+      'client/Dockerfile',
       '-t',
       imageTag,
       '.',
     ], {
-      cwd: clientRoot,
+      cwd: repoRoot,
       evidenceBase: join(evidenceDir, '05-docker-build'),
     });
     expectExit(build, [0], 'docker build');

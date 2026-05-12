@@ -1,5 +1,6 @@
 .worktrees/
 node_modules/
+.local/
 
 # .claude/ is operator-local (settings.json, worktrees, DS_Store) by default,
 # but shareable skill prose lives at .claude/skills/<name>/SKILL.md and must

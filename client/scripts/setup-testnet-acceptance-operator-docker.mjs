@@ -29,6 +29,7 @@ import { PASSWORD_RESOLUTION_HINT, resolveAcceptancePassword } from './lib/resol
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
+const repoRoot = join(clientRoot, '..');
 const composeFile = join(clientRoot, 'docker-compose.acceptance.yml');
 const composeService = 'jinn-acceptance-daemon';
 const RUN_ID_SETUP = 'operator-setup';
@@ -199,10 +200,12 @@ async function main() {
     'build',
     '--build-arg',
     `JINN_BUILD_COMMIT=${buildCommit}`,
+    '-f',
+    'client/Dockerfile',
     '-t',
     imageTag,
     '.',
-  ], { cwd: clientRoot });
+  ], { cwd: repoRoot });
   expectOk(build, 'docker build');
 
   expectOk(runCompose(['config']), 'docker compose config');
