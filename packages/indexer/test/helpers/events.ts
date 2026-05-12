@@ -37,6 +37,7 @@ export function taskCreatedEvent(
       manifestDigest: ZERO_BYTES32,
       taskCidDigest: ZERO_BYTES32,
       maxClaims: 1,
+      requiredVerdicts: 1,
       ...args,
     },
     block: { number: o.block ?? 100n },

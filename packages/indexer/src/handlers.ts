@@ -69,6 +69,7 @@ export interface TaskCreatedEvent {
     manifestDigest: `0x${string}`;
     taskCidDigest: `0x${string}`;
     maxClaims: bigint | number;
+    requiredVerdicts: bigint | number;
   };
   block: BlockShape;
   transaction: TransactionShape;
@@ -178,6 +179,7 @@ export async function handleTaskCreated({
       taskCidDigest: event.args.taskCidDigest,
       creator: event.args.creator,
       maxClaims: Number(event.args.maxClaims),
+      requiredVerdicts: Number(event.args.requiredVerdicts ?? 0),
       createdAtBlock: event.block.number,
       createdAtTx: event.transaction.hash,
       // claimWindowStart and claimWindowEnd are not emitted in TaskCreated on

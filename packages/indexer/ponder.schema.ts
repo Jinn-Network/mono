@@ -55,6 +55,8 @@ export const task = onchainTable(
     creator: t.hex().notNull(),
     /** maxClaims from TaskCreated event. */
     maxClaims: t.integer().notNull(),
+    /** requiredVerdicts from the TaskCreated event — verdicts needed before an attempt finalizes. */
+    requiredVerdicts: t.integer().notNull().default(0),
     /** Block number of the TaskCreated event. */
     createdAtBlock: t.bigint().notNull(),
     /** Transaction hash of the TaskCreated event. */
