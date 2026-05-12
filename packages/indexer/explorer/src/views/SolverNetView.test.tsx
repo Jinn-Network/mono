@@ -243,7 +243,7 @@ describe('SolverNetView', () => {
     expect(screen.getByText('Frozen')).toBeInTheDocument();
   });
 
-  it('renders train board ranked rows', async () => {
+  it('renders train board ranked rows via the Leaderboard component', async () => {
     mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
@@ -253,14 +253,47 @@ describe('SolverNetView', () => {
     });
   });
 
-  it('renders low-volume section separator', async () => {
+  it('renders low-volume section separator via the Leaderboard component', async () => {
     mockFetch(FIXTURE);
     const { WrappedView } = makeWrapper();
     render(<WrappedView />);
     await waitFor(() => {
-      // DataTable renders the low-volume label
+      // Leaderboard renders the low-volume label
       expect(screen.getByText('New / Low-volume')).toBeInTheDocument();
     });
+  });
+
+  it('renders frozenBoard data when board=frozen is in the URL', async () => {
+    // Give the frozen board a row so we can assert it renders when board=frozen is pre-set
+    const fixtureWithFrozen = {
+      ...FIXTURE,
+      frozenBoard: {
+        ranked: [
+          {
+            rank: 1,
+            operator: '0xffff000000000000ffff',
+            attempts: 10,
+            settledContribution: 8,
+            verdictsTotal: 8,
+            verdictsPass: 7,
+            resolvedRate: 0.875,
+            jinnEarned: '0',
+          },
+        ],
+        lowVolume: [],
+      },
+    };
+    mockFetch(fixtureWithFrozen);
+    // Load the page with board=frozen pre-set in the URL
+    const { WrappedView } = makeWrapper(`/solvernet/${encodeURIComponent(CID)}?board=frozen`);
+    render(<WrappedView />);
+
+    await waitFor(() => {
+      // The frozen operator should now be visible
+      expect(screen.getByText('0xffff…ffff')).toBeInTheDocument();
+    });
+    // The train operator should NOT be visible
+    expect(screen.queryByText('0xaaaa…000a')).not.toBeInTheDocument();
   });
 
   it('renders null resolvedRate as "—"', async () => {

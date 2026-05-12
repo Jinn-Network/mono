@@ -8,7 +8,6 @@
 
 import { Link, useParams } from 'wouter';
 import { useSolverNet } from '../lib/api';
-import type { RankedLeaderboardRow, LeaderboardRow } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
 import { Kpi, KpiRow } from '../components/Kpi';
@@ -16,10 +15,9 @@ import { StatusChip } from '../components/StatusChip';
 import { LearningCurve } from '../components/LearningCurve';
 import { CheckpointTimeline } from '../components/CheckpointTimeline';
 import { FreezeIntegrity } from '../components/FreezeIntegrity';
-import { DataTable } from '../components/DataTable';
-import { cellStyle, cellNumStyle, cellMutedStyle } from '../components/DataTable';
+import { Leaderboard } from '../components/Leaderboard';
 import { useNumParam, useEnumParam } from '../lib/url-state';
-import { pct, int, shortAddr, shortCid, jinn } from '../lib/format';
+import { pct, int, shortAddr, shortCid } from '../lib/format';
 
 // ── K sentinel (show all) ─────────────────────────────────────────────────────
 
@@ -80,77 +78,6 @@ function SegmentedControl<T extends string>({
     </div>
   );
 }
-
-// ── Leaderboard row renderer ──────────────────────────────────────────────────
-
-type AnyLeaderboardRow = (RankedLeaderboardRow | LeaderboardRow) & {
-  dominantMode?: string;
-  dominantHarness?: string;
-};
-
-function renderLeaderboardRow(row: AnyLeaderboardRow) {
-  const ranked = row as RankedLeaderboardRow;
-  return (
-    <>
-      <td
-        className="data"
-        style={{
-          ...cellMutedStyle,
-          width: 40,
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {'rank' in ranked && ranked.rank !== undefined ? ranked.rank : '—'}
-      </td>
-      <td style={cellStyle}>
-        <Link
-          href={`/operator/${encodeURIComponent(row.operator)}`}
-          style={{
-            color: 'var(--accent)',
-            textDecoration: 'none',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 12,
-          }}
-        >
-          {shortAddr(row.operator)}
-        </Link>
-      </td>
-      <td
-        className="data"
-        style={{
-          ...cellNumStyle,
-          color:
-            row.resolvedRate !== null && row.resolvedRate >= 0.9
-              ? 'var(--vow-green)'
-              : row.resolvedRate !== null && row.resolvedRate < 0.5
-                ? 'var(--wane)'
-                : 'var(--fg)',
-        }}
-      >
-        {pct(row.resolvedRate)}
-      </td>
-      <td className="data" style={cellNumStyle}>{int(row.attempts)}</td>
-      <td className="data" style={cellNumStyle}>{int(row.settledContribution)}</td>
-      <td
-        className="data"
-        style={cellNumStyle}
-      >
-        {int(row.verdictsPass)}/{int(row.verdictsTotal)}
-      </td>
-      <td className="data" style={cellNumStyle}>{jinn(row.jinnEarned)}</td>
-    </>
-  );
-}
-
-const LEADERBOARD_COLUMNS = [
-  { key: 'rank', label: '#', sortable: false, width: 40 },
-  { key: 'operator', label: 'Operator', sortable: false },
-  { key: 'resolvedRate', label: 'Resolved', numeric: true, sortable: false },
-  { key: 'attempts', label: 'Attempts', numeric: true, sortable: false },
-  { key: 'settledContribution', label: 'Settled', numeric: true, sortable: false },
-  { key: 'verdicts', label: 'Pass / Total', numeric: true, sortable: false },
-  { key: 'jinnEarned', label: 'JINN earned', numeric: true, sortable: false },
-];
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
@@ -521,30 +448,13 @@ export function SolverNetView() {
               />
             </div>
 
-            {/* TODO(ebu7.4 Task 5): swap for the shared Leaderboard component */}
             {(() => {
               const boardData = board === 'train' ? data.trainBoard : data.frozenBoard;
               return (
-                <DataTable
-                  columns={LEADERBOARD_COLUMNS}
-                  rows={boardData.ranked as AnyLeaderboardRow[]}
-                  sortKey=""
-                  sortDir="desc"
-                  onSort={() => {}}
-                  renderRow={(row) => renderLeaderboardRow(row as AnyLeaderboardRow)}
-                  lowVolumeRows={boardData.lowVolume as AnyLeaderboardRow[]}
-                  lowVolumeLabel="New / Low-volume"
-                  emptyState={
-                    <span
-                      style={{
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 12,
-                        color: 'var(--fg-dim)',
-                      }}
-                    >
-                      No {board} data yet.
-                    </span>
-                  }
+                <Leaderboard
+                  ranked={boardData.ranked}
+                  lowVolume={boardData.lowVolume}
+                  compact
                 />
               );
             })()}

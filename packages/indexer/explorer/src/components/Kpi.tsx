@@ -92,15 +92,17 @@ export function KpiRow({ children, style }: KpiRowProps) {
         ...style,
       }}
     >
-      {/* Each Kpi child gets a left hairline except the first */}
+      {/* Each Kpi child gets a left hairline except the first; staggered fade-up */}
       {Array.isArray(children)
         ? (children as ReactNode[]).map((child, i) => (
             <div
               key={i}
+              className="kpi-animate"
               style={{
                 flex: '1 1 140px',
                 borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
                 minWidth: 0,
+                animationDelay: `${i * 40}ms`,
               }}
             >
               {child}

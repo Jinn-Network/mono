@@ -71,8 +71,10 @@
 
   /* Accents */
   --accent:           var(--blue-400);
+  --accent-sky:       var(--blue-400);   /* alias — sky-blue, same as --accent */
   --accent-hover:     var(--blue-300);
   --accent-fg:        var(--blue-950);
+  --accent-gold:      var(--gold-400);   /* the ONE-per-surface gold emphasis token */
   --gold:             var(--gold-400);
   --gold-hover:       var(--gold-300);
 
@@ -103,8 +105,10 @@
   --border-accent:  var(--gold-500);
 
   --accent:         var(--blue-600);
+  --accent-sky:     var(--blue-600);
   --accent-hover:   var(--blue-500);
   --accent-fg:      var(--blue-50);
+  --accent-gold:    var(--gold-500);
   --gold:           var(--gold-500);
   --gold-hover:     var(--gold-400);
 
