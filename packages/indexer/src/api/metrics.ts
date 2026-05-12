@@ -227,6 +227,117 @@ export function rankLeaderboard(
   };
 }
 
+// ── composition ──────────────────────────────────────────────────────────────
+
+/**
+ * Groups `items` by the string produced by `key`, counts occurrences per
+ * group, and computes each group's share of the total item count.
+ *
+ * Returns an array sorted by count descending, with ties broken by value
+ * ascending (lexicographic). Returns `[]` for an empty `items` array.
+ *
+ * Typical use: `byMode` = composition(enrichedRows, r => r.mode);
+ *              `byHarness` = composition(enrichedRows, r => r.implName);
+ *
+ * @param items - The input array.
+ * @param key - Extractor function that maps each item to its bucket key.
+ */
+export function composition<T>(
+  items: T[],
+  key: (t: T) => string,
+): { value: string; count: number; share: number }[] {
+  if (items.length === 0) return [];
+
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const k = key(item);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+
+  const total = items.length;
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count, share: count / total }))
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.value < b.value ? -1 : a.value > b.value ? 1 : 0;
+    });
+}
+
+// ── detectFreezeViolations ────────────────────────────────────────────────────
+
+/**
+ * Detects operators whose frozen-mode attempts use inconsistent code digests.
+ *
+ * `rows` should already be filtered to `mode === 'frozen'` by the caller (the
+ * function treats every row as a frozen attempt). For each distinct operator it
+ * finds the modal `codeDigest` (most frequent; ties broken by lexicographically
+ * smallest digest), then counts rows whose `codeDigest` differs from the modal
+ * as violations.
+ *
+ * Returns one entry per operator that has at least one row, sorted by
+ * `violatingCount` descending, with ties broken by `operator` ascending.
+ * Returns `[]` for an empty input.
+ *
+ * @param rows - Per-attempt rows already filtered to frozen mode.
+ */
+export function detectFreezeViolations(
+  rows: { operator: string; codeDigest: string }[],
+): { operator: string; modalCodeDigest: string; total: number; violatingCount: number }[] {
+  if (rows.length === 0) return [];
+
+  // Group by operator
+  const byOperator = new Map<string, string[]>();
+  for (const { operator, codeDigest } of rows) {
+    const existing = byOperator.get(operator);
+    if (existing) {
+      existing.push(codeDigest);
+    } else {
+      byOperator.set(operator, [codeDigest]);
+    }
+  }
+
+  const result: { operator: string; modalCodeDigest: string; total: number; violatingCount: number }[] = [];
+
+  for (const [operator, digests] of byOperator.entries()) {
+    // Count each digest's frequency
+    const freq = new Map<string, number>();
+    for (const d of digests) {
+      freq.set(d, (freq.get(d) ?? 0) + 1);
+    }
+
+    // Find modal: most frequent; ties → lexicographically smallest
+    let modalDigest = '';
+    let modalCount = 0;
+    for (const [digest, cnt] of freq.entries()) {
+      if (
+        cnt > modalCount ||
+        (cnt === modalCount && digest < modalDigest)
+      ) {
+        modalDigest = digest;
+        modalCount = cnt;
+      }
+    }
+
+    const total = digests.length;
+    const violatingCount = digests.filter((d) => d !== modalDigest).length;
+
+    result.push({
+      operator,
+      modalCodeDigest: modalDigest,
+      total,
+      violatingCount,
+    });
+  }
+
+  // Sort by violatingCount desc, then operator asc
+  result.sort((a, b) => {
+    if (b.violatingCount !== a.violatingCount) return b.violatingCount - a.violatingCount;
+    return a.operator < b.operator ? -1 : a.operator > b.operator ? 1 : 0;
+  });
+
+  return result;
+}
+
 // ── freshness ─────────────────────────────────────────────────────────────────
 
 /**

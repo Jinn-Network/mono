@@ -12,6 +12,8 @@ import {
   rollingResolvedRate,
   rankLeaderboard,
   freshness,
+  composition,
+  detectFreezeViolations,
   type LeaderboardRow,
 } from '../src/api/metrics.js';
 
@@ -417,5 +419,140 @@ describe('freshness', () => {
     const result = freshness(last, '2026-01-01T00:00:00Z', head);
     expect(result.lastIndexedBlock).toBe('40000000');
     expect(result.behindHead).toBe(50);
+  });
+});
+
+// ── composition ───────────────────────────────────────────────────────────────
+
+describe('composition', () => {
+  it('returns [] for an empty items array', () => {
+    expect(composition([], (x: { m: string }) => x.m)).toEqual([]);
+  });
+
+  it('groups and counts correctly, sorts by count desc then value asc', () => {
+    const items = [{ m: 'a' }, { m: 'a' }, { m: 'b' }];
+    const result = composition(items, (x) => x.m);
+    expect(result).toEqual([
+      { value: 'a', count: 2, share: 2 / 3 },
+      { value: 'b', count: 1, share: 1 / 3 },
+    ]);
+  });
+
+  it('tie on count sorts by value asc', () => {
+    const items = [{ m: 'z' }, { m: 'a' }, { m: 'z' }, { m: 'a' }];
+    const result = composition(items, (x) => x.m);
+    expect(result[0].value).toBe('a');
+    expect(result[1].value).toBe('z');
+    expect(result[0].count).toBe(2);
+    expect(result[1].count).toBe(2);
+    expect(result[0].share).toBeCloseTo(0.5);
+  });
+
+  it('single item: count=1, share=1', () => {
+    const result = composition([{ m: 'x' }], (x) => x.m);
+    expect(result).toEqual([{ value: 'x', count: 1, share: 1 }]);
+  });
+
+  it('all items have the same key: one entry with count=N, share=1', () => {
+    const items = [{ m: 'b' }, { m: 'b' }, { m: 'b' }];
+    const result = composition(items, (x) => x.m);
+    expect(result).toEqual([{ value: 'b', count: 3, share: 1 }]);
+  });
+
+  it('works with a key extractor on a different property', () => {
+    const items = [{ mode: 'train' }, { mode: 'frozen' }, { mode: 'train' }];
+    const result = composition(items, (x) => x.mode);
+    expect(result[0]).toEqual({ value: 'train', count: 2, share: 2 / 3 });
+    expect(result[1]).toEqual({ value: 'frozen', count: 1, share: 1 / 3 });
+  });
+});
+
+// ── detectFreezeViolations ────────────────────────────────────────────────────
+
+describe('detectFreezeViolations', () => {
+  it('returns [] for empty input', () => {
+    expect(detectFreezeViolations([])).toEqual([]);
+  });
+
+  it('one operator all same digest — violatingCount is 0', () => {
+    const rows = [
+      { operator: '0xAAA', codeDigest: 'sha256:abc' },
+      { operator: '0xAAA', codeDigest: 'sha256:abc' },
+    ];
+    const result = detectFreezeViolations(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      operator: '0xAAA',
+      modalCodeDigest: 'sha256:abc',
+      total: 2,
+      violatingCount: 0,
+    });
+  });
+
+  it('one operator 3×digestA + 1×digestB — modal is digestA, violatingCount=1', () => {
+    const rows = [
+      { operator: '0xAAA', codeDigest: 'digestA' },
+      { operator: '0xAAA', codeDigest: 'digestA' },
+      { operator: '0xAAA', codeDigest: 'digestA' },
+      { operator: '0xAAA', codeDigest: 'digestB' },
+    ];
+    const result = detectFreezeViolations(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      operator: '0xAAA',
+      modalCodeDigest: 'digestA',
+      total: 4,
+      violatingCount: 1,
+    });
+  });
+
+  it('tie on modal frequency picks lexicographically smallest digest', () => {
+    const rows = [
+      { operator: '0xAAA', codeDigest: 'digestZ' },
+      { operator: '0xAAA', codeDigest: 'digestA' },
+    ];
+    const result = detectFreezeViolations(rows);
+    expect(result[0].modalCodeDigest).toBe('digestA');
+    // The OTHER digest is the violation
+    expect(result[0].violatingCount).toBe(1);
+  });
+
+  it('two operators, sorted by violatingCount desc then operator asc', () => {
+    const rows = [
+      // 0xBBB: digestA×1, digestB×2 → modal=digestB, violatingCount=1
+      { operator: '0xBBB', codeDigest: 'digestA' },
+      { operator: '0xBBB', codeDigest: 'digestB' },
+      { operator: '0xBBB', codeDigest: 'digestB' },
+      // 0xAAA: digestA×3, digestB×1 → modal=digestA, violatingCount=1
+      { operator: '0xAAA', codeDigest: 'digestA' },
+      { operator: '0xAAA', codeDigest: 'digestA' },
+      { operator: '0xAAA', codeDigest: 'digestA' },
+      { operator: '0xAAA', codeDigest: 'digestB' },
+    ];
+    const result = detectFreezeViolations(rows);
+    // Both have violatingCount=1 → tie → sort by operator asc
+    expect(result[0].operator).toBe('0xAAA');
+    expect(result[1].operator).toBe('0xBBB');
+  });
+
+  it('two operators, higher violatingCount comes first', () => {
+    const rows = [
+      // 0xAAA: 1×digestA, 3×digestB → modal=digestB, violatingCount=1
+      { operator: '0xAAA', codeDigest: 'digestA' },
+      { operator: '0xAAA', codeDigest: 'digestB' },
+      { operator: '0xAAA', codeDigest: 'digestB' },
+      { operator: '0xAAA', codeDigest: 'digestB' },
+      // 0xBBB: 2×digestA, 2×digestB → tie → modal=digestA, violatingCount=2
+      { operator: '0xBBB', codeDigest: 'digestA' },
+      { operator: '0xBBB', codeDigest: 'digestA' },
+      { operator: '0xBBB', codeDigest: 'digestB' },
+      { operator: '0xBBB', codeDigest: 'digestB' },
+    ];
+    const result = detectFreezeViolations(rows);
+    // 0xBBB has violatingCount=2, 0xAAA has violatingCount=1 → 0xBBB first
+    expect(result[0].operator).toBe('0xBBB');
+    expect(result[0].violatingCount).toBe(2);
+    expect(result[1].operator).toBe('0xAAA');
+    expect(result[1].violatingCount).toBe(1);
   });
 });
