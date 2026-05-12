@@ -14,15 +14,17 @@ diagnostics, but the release path must be visible and operable through
    Discover. Joined SolverNets must not remain in Discover after joining.
 3. Confirm the operator has enough ETH runway in the agent EOA and launcher
    Safe for claim, delivery, verdict, and settlement transactions.
-4. Solver joins default to Claude Code (`claude-code-learner`). Operators may
-   switch to Codex (`codex-code-learner`) when intentionally running a
-   Codex-backed solver. Do not select disabled harnesses or models.
+4. Solver joins default to **Hermes Agent** (`hermes-agent`). Operators may
+   switch to Claude Code (`claude-code`) or Codex (`codex`) when intentionally
+   running a Claude- or Codex-backed solver instead. Do not select disabled
+   harnesses or models.
 
-Operators may also select Hermes Agent (`hermes-agent`) as the solver harness.
-Hermes is a self-improving agent by Nous Research with its own learning loop
-(skill self-improvement, MEMORY/USER curation, FTS5 session search), supporting
-200+ models via OpenRouter plus additional providers (Nous Portal, NVIDIA NIM,
-Xiaomi MiMo, GLM, Kimi, etc.). Install via the Hermes one-liner:
+Hermes Agent is a self-improving agent by Nous Research with its own learning
+loop (skill self-improvement, MEMORY/USER curation, FTS5 session search),
+supporting 200+ models via OpenRouter plus additional providers (Nous Portal,
+NVIDIA NIM, Xiaomi MiMo, GLM, Kimi, etc.). Because it is the default solver
+harness, every operator joining as a solver needs Hermes installed. Install via
+the Hermes one-liner:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
@@ -31,8 +33,12 @@ hermes doctor    # verify install
 ```
 
 The daemon's `/operator` join flow runs a `hermes doctor` precheck before
-allowing the join to save. If `hermes doctor` reports issues, the dashboard
-surfaces the install one-liner or the missing-config diagnostic with retry.
+allowing the join to save (when the Hermes Agent harness is selected — the
+default). If `hermes doctor` reports issues, the dashboard surfaces the install
+one-liner or the missing-config diagnostic with retry. The dashboard pins
+`anthropic/claude-opus-4.6` as the default Hermes model (routed via OpenRouter);
+operators can pick another from the model dropdown, or leave the join's `model`
+field unset to inherit whatever they configured via `hermes model`.
 
 Hermes's own learning loop drives orchestration — the Jinn-side seven-phase
 `learner` plugin is not loaded for Hermes operators. SolverPlugins

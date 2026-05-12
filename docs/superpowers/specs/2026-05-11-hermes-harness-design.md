@@ -29,7 +29,7 @@ The integration ships as a **sibling Harness package** at `client/src/harnesses/
 
 The naming refactor lands first: `client/src/harnesses/impls/claude-code-learner/` → `learner/`; `client/plugins/claude-code-learner/` → `client/plugins/learner/`. On-chain `Executor.implName` values (`claude-code`, `codex`, new `hermes-agent`) stay stable.
 
-Hermes ships as opt-in for v1.x. Default-swap to Hermes is filed as a separate decision bead with data-driven acceptance criteria (≥3 operators reporting frozen-mode HarnessCheckpoint scores comparable-or-better on the same monthly slate).
+Hermes Agent ships as the SWE-rebench v2 **default** solver harness in v1 (revised 2026-05-12 — see §10; supersedes the original opt-in posture). The dashboard pre-selects it; operators may switch to Claude Code or Codex. The data-driven criteria that originally gated the default-swap are kept as a post-launch guardrail (flip the default back if Hermes underperforms on the live leaderboard), not a gate on shipping.
 
 ---
 
@@ -42,7 +42,7 @@ Hermes ships as opt-in for v1.x. Default-swap to Hermes is filed as a separate d
 3. The `hermes-agent` Harness consumes the same `ctx.solverPluginRoots` as Claude Code and Codex, translating SolverPlugin manifests into Hermes's native config surface per Task.
 4. Freeze-mode honored by mapping `ctx.implStateDir → $HERMES_HOME` and applying the daemon hash-fence from `agent-harness-solvernet-design` §6.3. No new freeze mechanism.
 5. Operator selection UX: `/operator` join row gains `hermes-agent` as a third harness option. Runbook updated to surface the Hermes install one-liner and `hermes doctor` precheck.
-6. Decision records documenting the major picks: no learner plugin for Hermes, sibling package over adapter swap, per-Task home dir for freeze contract, default-swap held until data-driven.
+6. Decision records documenting the major picks: no learner plugin for Hermes, sibling package over adapter swap, per-Task home dir for freeze contract, Hermes-as-default for SWE-rebench v2 (revised 2026-05-12).
 
 ### 1.2 In scope
 
@@ -54,7 +54,7 @@ Hermes ships as opt-in for v1.x. Default-swap to Hermes is filed as a separate d
 
 ### 1.3 Out of scope
 
-- The default-swap decision (filed as `jinn-mono-8psp.3` once this spec lands).
+- ~~The default-swap decision~~ — decided 2026-05-12: Hermes ships as the default (§10). Tracked as `jinn-mono-8psp.2` (closed).
 - A Hermes-specific SolverPlugin (none needed — `network-tools` and `swe-rebench-v2-runtime` cover the surface).
 - A Jinn-side learner port to agentskills.io format (Hermes drives orchestration; no learner skill needed on Hermes).
 - Hermes-as-evaluator. v1 integration is Solver-role only. SWE-rebench v2 evaluator is deterministic Docker grading (`SweRebenchV2EvaluatorHarness`) and does not need a configurable agent harness.
@@ -493,32 +493,23 @@ Mirrors `codexPath` / `codexModel` from the existing schema.
 
 ---
 
-## 10. Default-swap timing
+## 10. Default harness
 
-### 10.1 v1.x posture
+### 10.1 Decision (revised 2026-05-12 — supersedes the original "opt-in" posture)
 
-Hermes ships as **opt-in through v1.x**. Claude Code stays the SWE-rebench v2 default per the runbook. This is the conservative default: switching the recommended harness on a live SolverNet has operator-trust and recruitment-narrative implications that outweigh any optimism about Hermes's frontier performance.
+**Hermes Agent ships as the SWE-rebench v2 default solver harness in v1.** The dashboard pre-selects it (`compatibleHarnesses[0]` for the `swe-rebench-v2` catalog entry); the runbook documents it as the default; operators may switch to Claude Code or Codex. The dashboard pins `anthropic/claude-opus-4.6` (OpenRouter-routed) as the default Hermes model; operators can pick another or leave the join's `model` field unset to inherit their `hermes model` configuration.
 
-### 10.2 Default-swap criteria (filed as `jinn-mono-8psp.3`)
+This reverses the original draft posture (below, retained for context), which held the default-swap until ≥3 operators reported comparable-or-better frozen-mode HarnessCheckpoint scores. Captain decision (jinn-mono-8psp.2): commit to Hermes as the default now and prove it through the v1 acceptance run, rather than ship it opt-in and wait for field data that a not-yet-default harness is unlikely to accumulate. Trade-off accepted: every operator joining as a solver needs Hermes installed (an external `curl | bash` dependency); the `/operator` precheck (`hermes doctor`) makes the install gate explicit and recoverable.
 
-A separate decision bead, filed off this design, with data-driven acceptance criteria:
+`DR-2026-05-11-g` is superseded by `DR-2026-05-12-a` (this section).
 
-> Default-swap from Claude Code to Hermes Agent on the canonical `swe-rebench-v2` SolverNet runbook is approved when **all** of the following are observed on the live subgraph:
->
-> 1. ≥ 3 operators have published verified HarnessCheckpoints with `harnessPackage.implName = 'hermes-agent'`.
-> 2. The mean `swe-rebench-v2-network-result.meanResolved` across those checkpoints, over the most recent 30-day window, is ≥ the mean across the same window's `claude-code` published checkpoints. (Comparable-or-better; not strictly better.)
-> 3. The per-language stratification (`byLanguage`) shows no language where Hermes Agent regresses by > 5 percentage points against Claude Code. (Guards against operator-painful surprises.)
-> 4. No outstanding P0/P1 bd issues against the Hermes adapter or the Jinn-side `network-tools` MCP wiring.
+### 10.2 Original draft posture (superseded — retained for context)
 
-If criteria are met, the runbook flips `claude-code-learner` → `hermes-agent` as the default-selected radio on the `/operator` join row, with a one-cycle notice period for existing operators.
+The original design held Hermes as **opt-in through v1.x** with Claude Code staying the default, on the reasoning that switching the recommended harness on a live SolverNet has operator-trust and recruitment-narrative costs. The data-driven swap criteria were:
 
-### 10.3 Why not default-swap on day one
+> Default-swap from Claude Code to Hermes Agent is approved when **all** of: (1) ≥ 3 operators have published verified HarnessCheckpoints with `harnessPackage.implName = 'hermes-agent'`; (2) mean `swe-rebench-v2-network-result.meanResolved` across them, over the most recent 30-day window, ≥ the `claude-code` mean over the same window; (3) per-language `byLanguage` shows no language regressing by > 5 percentage points; (4) no outstanding P0/P1 bd issues against the Hermes adapter or `network-tools` MCP wiring.
 
-Three reasons:
-
-1. **Recruitment narrative integrity.** "Hermes works on SWE-rebench v2" is a stronger claim when it's an option three operators have validated than when it's the new default with no field data.
-2. **Operator trust.** Claude Code has been the SWE-rebench v2 default since v1's release; swapping defaults without comparable-or-better evidence costs trust.
-3. **Substrate metric integrity.** The frozen-mode leaderboard surfaces Hermes Agent as one entry among others. Its position there earns or doesn't earn the default-swap. Pre-data swap inverts that incentive.
+These criteria remain a useful health check post-launch — if Hermes-as-default turns out to underperform Claude Code on the live leaderboard, the runbook can flip the default back. The criteria are no longer a *gate* on shipping Hermes as the default; they're a *guardrail* for keeping it there.
 
 ---
 
@@ -561,7 +552,7 @@ The Hermes harness ships when:
 - Hermes as evaluator on judge-graded SolverNets (out of scope for SWE-rebench v2 since its evaluator is deterministic Docker grading).
 - Hermes-agent on `prediction.v1` (filed if operator demand emerges).
 - Cross-checkpoint comparison metrics specific to Hermes — Hermes's built-in skill self-improvement may produce a distinct improvement-curve shape from claude-code-learner's seven-phase Improve. Worth surfacing on the dashboard once data exists.
-- The default-swap decision (`jinn-mono-8psp.3`), data-driven per §10.2.
+- ~~The default-swap decision~~ — decided 2026-05-12 (§10); Hermes is the default. Post-launch guardrail per §10.2.
 
 ---
 
@@ -584,7 +575,8 @@ The following DRs are filed alongside this spec at `log/decisions/2026-05-11-…
 - **DR-2026-05-11-d — Sibling Harness package, not adapter swap.** Hermes is structurally different from Claude Code and Codex (config-driven plug-in model, native learning loop, native MCP client). A third adapter on `LearnerHarness` would have to bypass the plugin-mount step and the `learn` skill orchestration, leaving the shell doing little but spawning a subprocess. Cleaner to make `hermes-agent` a sibling Harness package, sharing only the `Harness` interface contract.
 - **DR-2026-05-11-e — Freeze contract via HERMES_HOME = implStateDir.** Hermes does not support per-session disabling of memory writes or skill creation. Mapping `ctx.implStateDir → $HERMES_HOME` and applying the existing daemon hash-fence (`agent-harness-solvernet-design` §6.3) enforces the freeze contract at the filesystem boundary without modifying Hermes. The full six-layer trust stack applies as-is.
 - **DR-2026-05-11-f — Naming refactor preconditional to Hermes work.** Renaming `claude-code-learner/` to `learner/` (impl dir + plugin dir) is a precondition PR. Lands separately from the Hermes work; mechanical diff; no on-chain identity change (alias paths in `names.ts` already handle the canonical mapping).
-- **DR-2026-05-11-g — Default-swap held until data-driven.** Hermes ships opt-in for v1.x. Default-swap from Claude Code to Hermes on the canonical runbook requires ≥3 operators publishing verified Hermes HarnessCheckpoints with mean `meanResolved` ≥ Claude Code's on the same 30-day window, no language regressing > 5 percentage points, no outstanding P0/P1 bd issues. Filed as `jinn-mono-8psp.3` for separate ratification.
+- **DR-2026-05-11-g — Default-swap held until data-driven.** ~~Superseded by DR-2026-05-12-a.~~ Original: Hermes ships opt-in for v1.x; default-swap requires ≥3 operators publishing verified Hermes HarnessCheckpoints with mean `meanResolved` ≥ Claude Code's, no language regressing > 5pp, no outstanding P0/P1.
+- **DR-2026-05-12-a — Hermes Agent is the SWE-rebench v2 default solver harness in v1.** Supersedes DR-2026-05-11-g. Captain decision (jinn-mono-8psp.2): commit to Hermes as the default and prove it through the v1 acceptance run rather than ship it opt-in and wait for field data a non-default harness won't accumulate. Implemented via `compatibleHarnesses[0] = hermes-agent` in the `swe-rebench-v2` catalog (dashboard pre-selects it), runbook prose, and `HERMES_MODELS` (dashboard default model `anthropic/claude-opus-4.6`, OpenRouter-routed). Trade-off: every solver operator needs Hermes installed; the `/operator` `hermes doctor` precheck makes the install gate explicit. The §10.2 criteria are retained as a post-launch guardrail (flip the default back if Hermes underperforms on the live leaderboard), not a ship gate.
 - **DR-2026-05-11-h — Hermes self-modification orthogonal to `jnw9`.** Hermes's built-in skill self-improvement is its own self-modifying-learner mechanism. The Phase A.5+ Jinn-side self-modifying learner (`jinn-mono-jnw9`) applies to Claude Code / Codex via the `learner` plugin's Improve phase and does not need to special-case Hermes. The two epics are orthogonal.
 - **DR-2026-05-11-i — Explicit toolset allowlist; Hermes defaults are not trusted.** Verified from `hermes_cli/tools_config.py` that Hermes's default-ON toolsets are a strict superset of Claude Code's built-in surface and include footguns under unattended automation (`messaging` can send messages; `cronjob` can schedule things; `browser`, `computer_use`, `tts`, `vision`, `image_gen` are at best irrelevant to text-only code issues). The adapter writes an explicit `platform_toolsets.hermes-cli:` allowlist (`terminal, file, web, skills, memory, session_search, todo, code_execution`) into per-Task config; everything else is disabled by omission. Operators can override per-SolverNet. Rejects "trust Hermes defaults" (broader surface than Claude Code, with explicit footguns) and "match Claude Code exactly" (loses `memory` / `session_search` which are load-bearing for Hermes's continuous-learning value proposition).
 
