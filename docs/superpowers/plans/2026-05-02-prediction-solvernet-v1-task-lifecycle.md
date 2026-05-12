@@ -1,7 +1,7 @@
 # Prediction SolverNet v1 Task lifecycle
 
 **Date:** 2026-05-02  
-**Status:** Decision and implementation handoff  
+**Status:** Historical — superseded for the canonical-plugin sections by `spec/2026-05-01-harness-pack-architecture.md` v0.9 changelog (2026-05-04), which removed `canonicalPlugin` from the runtime model in favour of layered substrate (auto-injected Network Tools + contract `defaultRuntimePlugins` + operator `plugins[]`). The lifecycle, eligibility, generator, and scoring sections of this plan are still load-bearing for `prediction.v1`; treat references to a "canonical plugin" here as historical decision text describing the model in force on 2026-05-02 and not as current instruction. Prediction SolverNet operational launch is additionally frozen per DR-2026-05-11-a (`log/decisions/2026-05-11-freeze-prediction-solvernet.md`).  
 **Primary bead:** `jinn-mono-l2zl.1`  
 **Related beads:** `jinn-mono-l2zl`, `jinn-mono-kod`, `jinn-mono-twut`, `jinn-mono-xp33`, `jinn-mono-l2zl.2`, `jinn-mono-l2zl.3`, `jinn-mono-l2zl.4`
 
@@ -450,6 +450,8 @@ interface ResolutionSnapshot {
 ```
 
 ### 10.5 Solver-facing MCP tools
+
+> **Historical note (2026-05-04):** "Canonical plugin" wording in this section refers to the abandoned single-primary-plugin model removed by `spec/2026-05-01-harness-pack-architecture.md` v0.9. Read it as "the operator-configured prediction runtime plugin." The current model layers Network Tools (auto-injected) + contract `defaultRuntimePlugins` + operator `plugins[]`.
 
 The canonical plugin should expose task-scoped tools first:
 
