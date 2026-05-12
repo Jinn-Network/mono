@@ -24,7 +24,7 @@ import schema from 'ponder:schema';
 import { Hono } from 'hono';
 import { count, countDistinct, sum, eq, inArray, max, sql } from 'drizzle-orm';
 import {
-  verdictResolvedRate,
+  resolvedRateFromCounts,
   bucketResolvedRate,
   rollingResolvedRate,
   rankLeaderboard,
@@ -36,13 +36,13 @@ import { withFreshness } from './freshness.js';
 // ── Open-question constants (spec §9) ─────────────────────────────────────────
 
 /**
- * Minimum number of resolved attempts (verdictsTotal) for a leaderboard row to
- * appear in the `ranked` partition rather than `lowVolume`.
+ * Minimum number of verdicts (verdictsTotal) for a leaderboard row to appear
+ * in the `ranked` partition rather than `lowVolume`.
  *
  * Spec §9 open question: pin value at impl. Chosen as 5 to match the minimum
  * statistically-meaningful sample size for a binary resolved-rate estimate.
  */
-const DEFAULT_MIN_RESOLVED_ATTEMPTS = 5;
+const DEFAULT_MIN_VERDICTS = 5;
 
 /**
  * Default bucket width in blocks for the learning-curve time series.
@@ -189,8 +189,7 @@ app.get('/network', async (c) => {
 
   const verdictsTotal = Number(vRow?.total ?? 0);
   const verdictsPass = Number(vRow?.pass ?? 0);
-  const resolvedRate =
-    verdictsTotal > 0 ? verdictsPass / verdictsTotal : null;
+  const resolvedRate = resolvedRateFromCounts(verdictsPass, verdictsTotal);
 
   const head = await getIndexedHead();
   const freshnessFields = freshness(head, new Date().toISOString());
@@ -322,15 +321,15 @@ app.get('/solvernet/:cid', async (c) => {
 app.use('/operators', explorerFreshness());
 
 app.get('/operators', async (c) => {
-  const minAttempts = parseIntParam(
-    c.req.query('minAttempts'),
-    DEFAULT_MIN_RESOLVED_ATTEMPTS,
+  const minVerdicts = parseIntParam(
+    c.req.query('minVerdicts'),
+    DEFAULT_MIN_VERDICTS,
     1000,
   );
 
   const rows = await buildLeaderboardRows();
 
-  const { ranked, lowVolume } = rankLeaderboard(rows, minAttempts);
+  const { ranked, lowVolume } = rankLeaderboard(rows, minVerdicts);
 
   const head = await getIndexedHead();
   const freshnessFields = freshness(head, new Date().toISOString());
@@ -341,7 +340,7 @@ app.get('/operators', async (c) => {
       ...r,
       jinnEarned: r.jinnEarned.toString(),
     })),
-    minAttempts,
+    minVerdicts,
     ...freshnessFields,
   });
 });
@@ -460,8 +459,7 @@ app.get('/operator/:addr', async (c) => {
     settledContribution: row.settledContribution,
     verdictsTotal: row.verdictsTotal,
     verdictsPass: row.verdictsPass,
-    resolvedRate:
-      row.verdictsTotal > 0 ? row.verdictsPass / row.verdictsTotal : null,
+    resolvedRate: resolvedRateFromCounts(row.verdictsPass, row.verdictsTotal),
   }));
 
   // Totals
@@ -471,8 +469,7 @@ app.get('/operator/:addr', async (c) => {
   ).length;
   const totalVerdictsTotal = verdictRows.length;
   const totalVerdictsPass = verdictRows.filter((v) => v.verdictCode === 1).length;
-  const totalResolvedRate =
-    totalVerdictsTotal > 0 ? totalVerdictsPass / totalVerdictsTotal : null;
+  const totalResolvedRate = resolvedRateFromCounts(totalVerdictsPass, totalVerdictsTotal);
 
   // JINN earned
   const rewards = await db
@@ -556,7 +553,7 @@ async function getSolverNetStats(cidKeccak: `0x${string}`) {
     attempts: Number(attemptStats[0]?.total ?? 0),
     verdicts,
     verdictsPass,
-    resolvedRate: verdicts > 0 ? verdictsPass / verdicts : null,
+    resolvedRate: resolvedRateFromCounts(verdictsPass, verdicts),
   };
 }
 
@@ -665,7 +662,7 @@ async function buildLeaderboardRows(): Promise<LeaderboardRow[]> {
       settledContribution: settled,
       verdictsTotal,
       verdictsPass,
-      resolvedRate: verdictsTotal > 0 ? verdictsPass / verdictsTotal : null,
+      resolvedRate: resolvedRateFromCounts(verdictsPass, verdictsTotal),
       jinnEarned: rewardByOperator.get(op) ?? 0n,
     });
   }

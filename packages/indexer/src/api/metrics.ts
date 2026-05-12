@@ -18,7 +18,7 @@ export interface LeaderboardRow {
   operator: `0x${string}`;
   /** Total attempt count (all time). */
   attempts: number;
-  /** Operator's share of settled task budget (0..1). */
+  /** Count of this operator's attempts on tasks that finalized (settled). */
   settledContribution: number;
   /** Total number of verdicts received across all attempts. */
   verdictsTotal: number;
@@ -41,6 +41,22 @@ export function verdictResolvedRate(verdicts: { verdictCode: number }[]): number
   if (verdicts.length === 0) return null;
   const pass = verdicts.filter((v) => v.verdictCode === 1).length;
   return pass / verdicts.length;
+}
+
+// ── resolvedRateFromCounts ────────────────────────────────────────────────────
+
+/**
+ * Computes the resolved rate from pre-counted pass and total verdict counts.
+ *
+ * Use this when call sites already have integer counts rather than raw verdict
+ * arrays. For array-based call sites, use {@link verdictResolvedRate} instead.
+ *
+ * @param pass - Number of Pass verdicts (verdictCode === 1).
+ * @param total - Total number of verdicts.
+ * @returns `pass / total`, or `null` if `total === 0`.
+ */
+export function resolvedRateFromCounts(pass: number, total: number): number | null {
+  return total === 0 ? null : pass / total;
 }
 
 // ── attemptFinalization ───────────────────────────────────────────────────────
@@ -161,8 +177,8 @@ export function rollingResolvedRate(passes: boolean[], k: number): number[] {
 /**
  * Partitions and ranks operator leaderboard rows.
  *
- * Rows whose `verdictsTotal >= minResolvedAttempts` go into `ranked`; the rest
- * go into `lowVolume`. Both groups are sorted by:
+ * Rows whose `verdictsTotal >= minVerdicts` go into `ranked`; the rest go into
+ * `lowVolume`. Both groups are sorted by:
  *   1. `resolvedRate` desc (null sorts last, after any numeric rate)
  *   2. `attempts` desc
  *   3. `operator` asc (lexicographic)
@@ -172,7 +188,7 @@ export function rollingResolvedRate(passes: boolean[], k: number): number[] {
  */
 export function rankLeaderboard(
   rows: LeaderboardRow[],
-  minResolvedAttempts: number,
+  minVerdicts: number,
 ): {
   ranked: (LeaderboardRow & { rank: number })[];
   lowVolume: LeaderboardRow[];
@@ -195,7 +211,7 @@ export function rankLeaderboard(
   const ranked: LeaderboardRow[] = [];
   const lowVolume: LeaderboardRow[] = [];
   for (const row of rows) {
-    if (row.verdictsTotal >= minResolvedAttempts) {
+    if (row.verdictsTotal >= minVerdicts) {
       ranked.push(row);
     } else {
       lowVolume.push(row);

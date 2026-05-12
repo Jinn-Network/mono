@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   verdictResolvedRate,
+  resolvedRateFromCounts,
   attemptFinalization,
   bucketResolvedRate,
   rollingResolvedRate,
@@ -59,6 +60,26 @@ describe('verdictResolvedRate', () => {
         { verdictCode: 1 },
       ]),
     ).toBe(1 / 5);
+  });
+});
+
+// ── resolvedRateFromCounts ────────────────────────────────────────────────────
+
+describe('resolvedRateFromCounts', () => {
+  it('returns null when total is 0', () => {
+    expect(resolvedRateFromCounts(0, 0)).toBeNull();
+  });
+
+  it('returns 0.75 for pass=3, total=4', () => {
+    expect(resolvedRateFromCounts(3, 4)).toBe(0.75);
+  });
+
+  it('returns 0 when pass is 0 and total > 0', () => {
+    expect(resolvedRateFromCounts(0, 5)).toBe(0);
+  });
+
+  it('returns 1 when pass equals total', () => {
+    expect(resolvedRateFromCounts(5, 5)).toBe(1);
   });
 });
 
@@ -253,7 +274,7 @@ describe('rankLeaderboard', () => {
     overrides: Partial<LeaderboardRow> & Pick<LeaderboardRow, 'operator'>,
   ): LeaderboardRow => ({
     attempts: 10,
-    settledContribution: 0.8,
+    settledContribution: 8,
     verdictsTotal: 5,
     verdictsPass: 4,
     resolvedRate: 0.8,
@@ -261,7 +282,7 @@ describe('rankLeaderboard', () => {
     ...overrides,
   });
 
-  it('partitions rows into ranked (>= minResolvedAttempts) and lowVolume (< min)', () => {
+  it('partitions rows into ranked (>= minVerdicts) and lowVolume (< min)', () => {
     const rows = [
       makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 5 }),
       makeRow({ operator: '0xBBB' as `0x${string}`, verdictsTotal: 2 }),
@@ -351,7 +372,7 @@ describe('rankLeaderboard', () => {
     expect(lowVolume).toHaveLength(1);
   });
 
-  it('minResolvedAttempts = 0 puts all rows in ranked', () => {
+  it('minVerdicts = 0 puts all rows in ranked', () => {
     const rows = [
       makeRow({ operator: '0xAAA' as `0x${string}`, verdictsTotal: 0 }),
     ];
