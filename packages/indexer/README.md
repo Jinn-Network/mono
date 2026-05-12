@@ -12,6 +12,10 @@ The daemon (`@jinn-network/client`) consumes this service via the GraphQL adapte
 
 Schema definitions, event handlers, and Ponder runtime live here. The wire contract (the GraphQL queries the daemon issues) lives in the daemon's source tree. Both sides depend on the same schema shape; when the schema changes, both sides update.
 
+## Network explorer
+
+This package also serves the Jinn network explorer. The explorer page lives at `/` (currently a placeholder that verifiably hits `/explorer/network`; `ebu7.4` ships the real SPA there). Aggregation JSON routes are at `/explorer/*` (network KPIs, per-SolverNet stats, operator leaderboards, learning curves). Anyone running `@jinn-network/indexer` serves an explorer for free — no separate deployment needed. See `docs/superpowers/specs/2026-05-12-network-explorer-design.md` for the full design and `deploy/README.md` for the deployment guide including the new `PONDER_RPC_URL_11155111` env var (required for the JinnDistributor / Sepolia-L1 source).
+
 ## Running locally (PGlite, no external database)
 
 ```bash
@@ -64,20 +68,20 @@ do not require a re-sync — Ponder handles them automatically.
 
 ## Known limitations (v0.1)
 
-### No TaskFinalized / TaskRefunded events
+### No TaskFinalized event
 
-JinnRouter V3 does not emit standalone `TaskFinalized` or `TaskRefunded` events.
+JinnRouter V3 does not emit a standalone `TaskFinalized` event.
 The indexer sets `task.finalized = true` when a `SolutionDeliveryClaimed` event
-is received for that task (the terminal success state in V3). `task.refunded`
-always starts as `false`; no on-chain refund event exists at v0.1.
+is received for that task (the terminal success state in V3).
+
+`task.refunded` is populated from `JinnRouter.TaskBudgetRefunded` (wired in
+`ebu7.2`). `TaskBudgetRefunded` does exist on V3 — the prior comment claiming
+it did not was stale.
 
 The daemon compensates: its `canClaimTask` simulation (in
 `client/src/adapters/mech/contracts.ts`) is the correctness gate before any
 claim is attempted. The indexer is an acceleration path; the simulation is the
 truth.
-
-A future JinnRouter version may add explicit finalization events. When they
-land, add a handler in `src/index.ts` and update this limitation note.
 
 ### claimWindowStart / claimWindowEnd not indexed
 

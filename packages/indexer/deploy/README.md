@@ -19,13 +19,36 @@ This is a **standard Ponder deployment**. The patterns here come directly from P
 4. Wait for `/ready` to return 200 — this means indexing has caught up to realtime.
 5. Verify with `curl localhost:42069/graphql` (should return a GraphQL response).
 
-## Endpoints (all built into Ponder)
+## Endpoints
 
-- `/graphql` — auto-generated GraphQL endpoint over the schema.
+### Built-in Ponder endpoints
+
+- `/graphql` — auto-generated GraphQL endpoint over the schema. This is the daemon's primary read path (`client/src/discovery/http.ts` hits `<indexer-url>/graphql`).
 - `/health` — returns 200 immediately after the process starts. Use for liveness checks.
 - `/ready` — returns 200 once indexing has reached realtime across all chains. Use for readiness checks and as the gate before swapping a load balancer onto a new deployment.
 
-We do not ship custom routes on top of these. If you need a custom endpoint (auth, rate limiting, alternative response shape), wire it in via Ponder's `api/index.ts` extension point.
+### Explorer endpoints (custom Hono routes, mounted alongside GraphQL)
+
+Starting from `ebu7.5`, the indexer also serves the **Jinn network explorer** — anyone running `@jinn-network/indexer` serves an explorer for free. See `docs/superpowers/specs/2026-05-12-network-explorer-design.md` §3 for the architectural rationale.
+
+- `/` — the network explorer page. Currently a placeholder (serves verifiable data from `/explorer/network`); `ebu7.4` will replace it with the real SPA bundle and add static-asset serving. The canonical explorer URL is `<indexer-host>/`.
+- `/explorer/network` — fleet-wide KPI bundle (tasks, attempts, operators, verdicts, resolved rate, JINN distributed, freshness).
+- `/explorer/solvernets` — one row per indexed SolverNetManifest with rollup stats.
+- `/explorer/solvernet/:cid` — per-SolverNet KPIs + learning-curve time series (`?bucket=<blocks>`, `?k=<rolling-window>`).
+- `/explorer/operators` — quality-first operator leaderboard (`?minAttempts=<n>`).
+- `/explorer/operator/:addr` — one operator across all SolverNets they participate in.
+
+The `/explorer/*` routes set `Cache-Control: public, max-age=30, stale-while-revalidate=60` and an `ETag` keyed on `lastIndexedBlock`, so a CDN absorbs traffic spikes. CDN-fronting is recommended for public deployments.
+
+**GraphQL is at `/graphql` only** — the daemon already uses `/graphql`, so no client change is needed following this move. The root path `/` now serves the explorer page instead of a GraphQL catch-all.
+
+### Sepolia L1 RPC (`PONDER_RPC_URL_11155111`)
+
+The indexer sources `JinnDistributor.Claimed` events from Sepolia L1 (chain 11155111) in addition to the Base Sepolia chain (84532). A public default RPC is baked into `ponder.config.ts`; **set a real RPC in production** — the public endpoint rate-limits and the Sepolia historical sync from the conservative start block is slow on a public endpoint. A HyperSync-backed RPC (e.g. from Envio) is strongly recommended, the same as for Base. Add it to `.env`:
+
+```
+PONDER_RPC_URL_11155111=https://your-sepolia-hypersync-rpc
+```
 
 ## Zero-downtime rolling deploys (the views pattern)
 
