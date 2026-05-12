@@ -132,6 +132,45 @@ export const attempt = onchainTable(
   }),
 );
 
+// ── Verdict ──────────────────────────────────────────────────────────────────
+
+/**
+ * One verdict delivered for a task attempt. From JinnRouter.VerdictDeliveryClaimed.
+ * verdictCode: 0=None, 1=Pass, 2=Fail, 3=Invalid, 4=Unresolved (the VerdictCode
+ * enum in contracts/src/tasks/TaskCoordinator.sol). "Resolved" / "verdict-success"
+ * = verdictCode == 1 (Pass). Per-attempt finalization (passed/failed) is derived in
+ * the aggregation routes by counting Pass verdicts against requiredVerdicts; the
+ * contract uses an on-chain passThreshold which is a createTask call-arg, not
+ * emitted (see the claimWindow note in ponder.config.ts for the call-trace-decoding
+ * follow-up).
+ *
+ * Primary key: (taskId, attemptIndex, verdictIndex, chainId).
+ */
+export const verdict = onchainTable(
+  'verdict',
+  (t) => ({
+    taskId: t.text().notNull(),
+    attemptIndex: t.integer().notNull(),
+    verdictIndex: t.integer().notNull(),
+    /** Evaluator Safe address that delivered the verdict. */
+    evaluator: t.hex().notNull(),
+    /** MechMarketplace requestId of the verdict request. */
+    requestId: t.hex().notNull(),
+    /** Raw verdict code: 0..4 per the VerdictCode enum. */
+    verdictCode: t.integer().notNull(),
+    createdAtBlock: t.bigint().notNull(),
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.taskId, table.attemptIndex, table.verdictIndex, table.chainId] }),
+    taskIdx: index().on(table.taskId),
+    taskAttemptIdx: index().on(table.taskId, table.attemptIndex),
+    evaluatorIdx: index().on(table.evaluator),
+    codeIdx: index().on(table.verdictCode),
+    blockIdx: index().on(table.createdAtBlock),
+  }),
+);
+
 // ── SolverNetManifest ─────────────────────────────────────────────────────────
 
 /**
@@ -255,4 +294,8 @@ export const attemptRelations = relations(attempt, ({ one }) => ({
     fields: [attempt.taskId],
     references: [task.id],
   }),
+}));
+
+export const verdictRelations = relations(verdict, ({ one }) => ({
+  task: one(task, { fields: [verdict.taskId], references: [task.id] }),
 }));

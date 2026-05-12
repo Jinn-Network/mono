@@ -26,17 +26,19 @@
  * Schema: ponder.schema.ts
  */
 import { ponder } from 'ponder:registry';
-import { task, attempt, solverNetManifest, envelope } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, verdict } from 'ponder:schema';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
   handleSolutionDeliveryClaimed,
   handleMetadataSet,
+  handleVerdictDeliveryClaimed,
   type HandlerContext,
   type TaskCreatedEvent,
   type TaskAttemptCreatedEvent,
   type SolutionDeliveryClaimedEvent,
   type MetadataSetEvent,
+  type VerdictDeliveryClaimedEvent,
 } from './handlers.js';
 
 ponder.on('JinnRouter:TaskCreated', async ({ event, context }) => {
@@ -60,6 +62,14 @@ ponder.on('JinnRouter:SolutionDeliveryClaimed', async ({ event, context }) => {
     event: event as unknown as SolutionDeliveryClaimedEvent,
     context: context as unknown as HandlerContext,
     task,
+  });
+});
+
+ponder.on('JinnRouter:VerdictDeliveryClaimed', async ({ event, context }) => {
+  await handleVerdictDeliveryClaimed({
+    event: event as unknown as VerdictDeliveryClaimedEvent,
+    context: context as unknown as HandlerContext,
+    verdict,
   });
 });
 

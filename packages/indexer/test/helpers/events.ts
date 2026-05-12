@@ -14,6 +14,7 @@ import {
   type SolutionDeliveryClaimedEvent,
   type TaskAttemptCreatedEvent,
   type TaskCreatedEvent,
+  type VerdictDeliveryClaimedEvent,
 } from '../../src/handlers.js';
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
@@ -94,6 +95,25 @@ export function metadataSetEvent(
     },
     block: { number: o.block ?? 100n },
     transaction: { hash: o.txHash ?? ('0x' + '12'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
+export function verdictDeliveryClaimedEvent(
+  args: Partial<VerdictDeliveryClaimedEvent['args']> & { taskId: bigint },
+  o: EnvelopeOverrides = {},
+): VerdictDeliveryClaimedEvent {
+  return {
+    args: {
+      evaluator: SOME_ADDR,
+      requestId: ZERO_BYTES32,
+      attemptIndex: 0,
+      verdictIndex: 0,
+      verdictCode: 1,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'fe'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
 }

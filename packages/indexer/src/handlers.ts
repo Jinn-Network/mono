@@ -102,6 +102,20 @@ export interface SolutionDeliveryClaimedEvent {
   log: LogShape;
 }
 
+export interface VerdictDeliveryClaimedEvent {
+  args: {
+    evaluator: `0x${string}`;
+    requestId: `0x${string}`;
+    taskId: bigint;
+    attemptIndex: bigint | number;
+    verdictIndex: bigint | number;
+    verdictCode: bigint | number;
+  };
+  block: BlockShape;
+  transaction: TransactionShape;
+  log: LogShape;
+}
+
 export interface MetadataSetEvent {
   args: {
     agentId: bigint;
@@ -213,6 +227,34 @@ export async function handleTaskAttemptCreated({
       operator: event.args.operator,
       priorityMech: event.args.priorityMech,
       deliveryRate: event.args.deliveryRate,
+      createdAtBlock: event.block.number,
+      chainId: context.chain.id,
+    })
+    .onConflictDoNothing();
+}
+
+// ── JinnRouter: VerdictDeliveryClaimed → verdict ─────────────────────────────
+// One row per delivered verdict. verdictCode 0..4 per the VerdictCode enum.
+// Idempotent: a replayed event with the same (taskId, attemptIndex, verdictIndex,
+// chainId) does not clobber the original.
+export async function handleVerdictDeliveryClaimed({
+  event,
+  context,
+  verdict,
+}: {
+  event: VerdictDeliveryClaimedEvent;
+  context: HandlerContext;
+  verdict: unknown;
+}): Promise<void> {
+  await context.db
+    .insert(verdict)
+    .values({
+      taskId: event.args.taskId.toString(),
+      attemptIndex: Number(event.args.attemptIndex),
+      verdictIndex: Number(event.args.verdictIndex),
+      evaluator: event.args.evaluator,
+      requestId: event.args.requestId,
+      verdictCode: Number(event.args.verdictCode),
       createdAtBlock: event.block.number,
       chainId: context.chain.id,
     })

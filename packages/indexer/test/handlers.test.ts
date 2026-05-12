@@ -25,12 +25,13 @@
  *      queries.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { task, attempt, solverNetManifest, envelope } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, verdict } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
   handleSolutionDeliveryClaimed,
   handleMetadataSet,
+  handleVerdictDeliveryClaimed,
   type HandlerContext,
 } from '../src/handlers.js';
 import { createInMemoryDb, type InMemoryDb, type PkMap } from './helpers/in-memory-db.js';
@@ -42,6 +43,7 @@ import {
   lifecyclePayload,
   envelopePayloadV1,
   envelopePayloadV2,
+  verdictDeliveryClaimedEvent,
 } from './helpers/events.js';
 
 const CHAIN_ID = 84532;
@@ -56,6 +58,7 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [attempt, ['taskId', 'attemptIndex', 'chainId']],
   [solverNetManifest, ['id']],
   [envelope, ['agentId', 'metadataKey', 'chainId']],
+  [verdict, ['taskId', 'attemptIndex', 'verdictIndex', 'chainId']],
 ]);
 
 let db: InMemoryDb;
@@ -410,6 +413,58 @@ describe('solverNetManifest most-recent-wins', () => {
     await setManifest({ block: 100n, transactionIndex: 3, logIndex: 1, status: 'paused', hash: MANIFEST_HASH, at: '2026-05-11T00:00:00Z' });
     expect(db.get(solverNetManifest, { id: MANIFEST_CID })).toEqual(before);
     expect(db.count(solverNetManifest)).toBe(1);
+  });
+});
+
+// ── VerdictDeliveryClaimed → verdict ─────────────────────────────────────────
+
+describe('VerdictDeliveryClaimed → verdict', () => {
+  it('creates a verdict row with all expected fields', async () => {
+    await handleVerdictDeliveryClaimed({
+      event: verdictDeliveryClaimedEvent(
+        {
+          taskId: 7n,
+          attemptIndex: 0,
+          verdictIndex: 0,
+          evaluator: `0x${'aa'.repeat(20)}` as `0x${string}`,
+          requestId: `0x${'bb'.repeat(32)}` as `0x${string}`,
+          verdictCode: 1,
+        },
+        { block: 41_153_400n },
+      ),
+      context,
+      verdict,
+    });
+
+    const row = db.get(verdict, { taskId: '7', attemptIndex: 0, verdictIndex: 0, chainId: CHAIN_ID });
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      taskId: '7',
+      attemptIndex: 0,
+      verdictIndex: 0,
+      evaluator: `0x${'aa'.repeat(20)}`,
+      requestId: `0x${'bb'.repeat(32)}`,
+      verdictCode: 1,
+      createdAtBlock: 41_153_400n,
+      chainId: CHAIN_ID,
+    });
+  });
+
+  it('is idempotent — a replayed VerdictDeliveryClaimed does not create a duplicate row', async () => {
+    const ev = verdictDeliveryClaimedEvent(
+      {
+        taskId: 7n,
+        attemptIndex: 0,
+        verdictIndex: 0,
+        evaluator: `0x${'aa'.repeat(20)}` as `0x${string}`,
+        requestId: `0x${'bb'.repeat(32)}` as `0x${string}`,
+        verdictCode: 1,
+      },
+      { block: 41_153_400n },
+    );
+    await handleVerdictDeliveryClaimed({ event: ev, context, verdict });
+    await handleVerdictDeliveryClaimed({ event: ev, context, verdict });
+    expect(db.count(verdict)).toBe(1);
   });
 });
 
