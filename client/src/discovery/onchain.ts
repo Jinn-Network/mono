@@ -40,14 +40,18 @@ import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK, DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID } from '../corpus/onchain-query.js';
 import { JINN_ROUTER_ABI } from '../adapters/mech/types.js';
 import { canClaimTask } from '../adapters/mech/contracts.js';
-import { manifestDigestForCid } from '../adapters/mech/task-subgraph.js';
+import { manifestDigestForCid } from '../adapters/mech/digest.js';
 import { resolveMostRecentWins, type SetMetadataEvent, type SetMetadataLifecyclePayload } from '../solvernets/most-recent-wins.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_PAGES = 5;
-const DEFAULT_CHUNK_BLOCKS = 9_999n;
+// 1999-block chunks: the public Base / Base Sepolia RPCs (the default fallback
+// `rpcUrl`) cap `eth_getLogs` at a 2000-block range. Daemons configured with a
+// higher-limit RPC can override via `chunkBlocks`, but the default must work
+// against the bare public endpoint since this is the always-live fallback floor.
+const DEFAULT_CHUNK_BLOCKS = 1_999n;
 
 /** Default JinnRouter addresses by chain ID. */
 const DEFAULT_ROUTER_BY_CHAIN_ID: Record<number, Address> = {
@@ -699,6 +703,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       status: latest.status,
       statusUpdatedAt: latest.statusUpdatedAt,
       sourceBlock: latest.anchorBlock,
+      manifestHash: latest.manifestHash,
     };
   }
 

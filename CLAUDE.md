@@ -98,9 +98,12 @@ client/          TypeScript daemon — the main runnable component
       server.ts          Hono HTTP API for artifact search/publish
       peers.ts           Background peer sync
     auth/erc8128.ts      ERC-8128 HTTP message signatures
-    discovery/
-      registry.ts        ERC-8004 on-chain artifact registration
-      subgraph.ts        The Graph subgraph queries
+    discovery/           Read-side data access (spec/2026-05-11-discovery-api-and-shared-indexer.md)
+      types.ts           DiscoveryAPI interface + result shapes
+      http.ts            HttpDiscoveryAPI — GraphQL against the Ponder indexer (default)
+      onchain.ts         OnchainDiscoveryAPI — RPC getLogs/multicall floor (always live)
+      with-fallback.ts   Health-tracking wrapper: primary → floor on failure
+      factory.ts         Builds the configured DiscoveryAPI from config
     mcp/server.ts        MCP tools exposed to Claude subprocess
     x402/                Payment-gated artifact access
     types/               DesiredState, errors, core types
@@ -258,14 +261,18 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | dbPath           | JINN_DB_PATH             | ~/.jinn-client/jinn.db            |
 | earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
 | peers            | JINN_PEERS               | []                                |
-| subgraphUrl      | JINN_SUBGRAPH_URL        | (none)                            |
 | tasks            | JINN_TASKS               | []                                |
+| discovery.mode   | JINN_DISCOVERY_MODE      | mainnet: unset → `onchain` RPC floor; testnet: `http` |
+| discovery.url    | JINN_DISCOVERY_URL       | testnet only: `DEFAULT_TESTNET_DISCOVERY_URL` (Ponder indexer); mainnet: unset |
+| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | true (only relevant when mode is `http`/`embedded`) |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
 
 `JINN_PASSWORD` is env-only — never in config files.
+
+Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`) with `fallbackToOnchain: true`. Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
 
 ## On-Chain Addresses (Base)
 

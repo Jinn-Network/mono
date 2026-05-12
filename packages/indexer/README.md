@@ -1,0 +1,165 @@
+# @jinn-network/indexer
+
+Ponder indexer for the Jinn protocol. Indexes four entities (Task, Attempt,
+SolverNetManifest, Envelope) from JinnRouter and IdentityRegistry events on
+Base Sepolia and Base mainnet.
+
+## Architecture: a standalone Ponder service
+
+This package is a normal Ponder app. It runs as its own service — Node process, Postgres backend, GraphQL endpoint on port 42069. Deploy it like any other web service. The canonical patterns (Postgres + `DATABASE_SCHEMA` + views for zero-downtime rolling deploys) are described in `deploy/README.md` and come straight from Ponder's [Self-hosting docs](https://ponder.sh/docs/production/self-hosting). We do not ship custom subsystems on top.
+
+The daemon (`@jinn-network/client`) consumes this service via the GraphQL adapter at `client/src/discovery/http.ts`. The daemon does not bundle or embed this package; it talks to it over HTTP like any other backend.
+
+Schema definitions, event handlers, and Ponder runtime live here. The wire contract (the GraphQL queries the daemon issues) lives in the daemon's source tree. Both sides depend on the same schema shape; when the schema changes, both sides update.
+
+## Running locally (PGlite, no external database)
+
+```bash
+# Install dependencies
+yarn install
+
+# Provide at least one RPC URL (Ponder will error if neither is set and
+# no default RPC is reachable; the defaults in ponder.config.ts are public
+# Base RPC endpoints that may rate-limit in production).
+export PONDER_RPC_URL_84532=https://sepolia.base.org
+export PONDER_RPC_URL_8453=https://mainnet.base.org
+
+# Start the indexer in dev mode (PGlite under .ponder/, hot reload)
+yarn dev
+```
+
+The GraphQL explorer is available at http://localhost:42069/graphql by default.
+
+### Built-in health endpoints
+
+Ponder ships two health endpoints out of the box:
+
+```bash
+curl http://localhost:42069/health   # 200 once the process has started
+curl http://localhost:42069/ready    # 200 once indexing has caught up to realtime
+```
+
+Use `/ready` as the gate before swapping a load balancer onto a new deployment.
+
+## Running in production
+
+See `deploy/README.md` for the full production deployment guide. The short version:
+
+- Postgres (managed or self-hosted).
+- `DATABASE_URL` + `DATABASE_SCHEMA` env vars (per-deployment schema isolation enables rolling deploys via the views pattern).
+- HyperSync-backed RPC URL recommended for fast cold-start sync.
+- `docker build -t jinn-indexer -f deploy/Dockerfile .` then `docker run --env-file deploy/.env -p 42069:42069 jinn-indexer`.
+
+## Schema-version policy
+
+Any **breaking change** to an existing entity — renaming or removing a column,
+changing a column type — requires a re-sync of the indexed state. The canonical
+Ponder pattern for this is rolling deploys via `DATABASE_SCHEMA` + views (see
+`deploy/README.md` §"Zero-downtime rolling deploys"): the new schema indexes
+from genesis in its own Postgres schema while the old version keeps serving;
+swap when ready.
+
+**Pure-additive changes** (new columns with defaults, new entities, new indexes)
+do not require a re-sync — Ponder handles them automatically.
+
+## Known limitations (v0.1)
+
+### No TaskFinalized / TaskRefunded events
+
+JinnRouter V3 does not emit standalone `TaskFinalized` or `TaskRefunded` events.
+The indexer sets `task.finalized = true` when a `SolutionDeliveryClaimed` event
+is received for that task (the terminal success state in V3). `task.refunded`
+always starts as `false`; no on-chain refund event exists at v0.1.
+
+The daemon compensates: its `canClaimTask` simulation (in
+`client/src/adapters/mech/contracts.ts`) is the correctness gate before any
+claim is attempted. The indexer is an acceleration path; the simulation is the
+truth.
+
+A future JinnRouter version may add explicit finalization events. When they
+land, add a handler in `src/index.ts` and update this limitation note.
+
+### claimWindowStart / claimWindowEnd not indexed
+
+These fields are part of the `policy` tuple passed to `createTask` but are not
+emitted in the `TaskCreated` event. Decoding them requires reading the
+originating transaction input (call traces). At v0.1 these columns are stored
+as nullable; `findClaimableTasks` in the adapter compensates by falling back to
+the `nowSeconds` parameter for client-side filtering and relying on
+`canClaimTask` simulation for correctness.
+
+Enabling `includeCallTraces` in `ponder.config.ts` and decoding the `policy`
+tuple from `createTask` args is the fix; tracked in `jinn-mono-280n.4`.
+
+### HyperSync is not a separate Ponder transport at v0.16.x
+
+Ponder 0.16.x uses standard JSON-RPC transports. Use a HyperSync-backed RPC
+URL (e.g. from Envio) in `PONDER_RPC_URL_*` to get HyperSync performance.
+Native HyperSync transport support may arrive in a later Ponder release.
+
+### `SolverNetManifestSummary` is a partial mirror
+
+The GraphQL endpoint exposes 6 on-chain-derivable fields per SolverNet
+(`manifestCid`, `solverNetId`, `launcherAgentId`, `status`, `statusUpdatedAt`,
+`anchorBlock`) derived entirely from on-chain index data. The canonical
+`SolverNetManifestSummary` in `client/src/solvernets/registry-client.ts` has
+14 fields; the remaining 8 (`name`, `network`, `launcherSafeAddress`,
+`contractId`, `contractVersion`, `solutionPriceWei`, `verdictPriceWei`,
+`openRoles`) live in the IPFS manifest body and are not stored in the indexer.
+
+The daemon's `HttpDiscoveryAPI` (at `client/src/discovery/http.ts`) fills
+these 8 fields with sentinel values and leaves enrichment to the caller. This
+matches how `solvernets/registry-client-erc8004.ts:listLaunched` already works
+post-`280n.3`: it fetches the IPFS manifest for each summary row.
+
+### `CorpusQuery.solverType` cannot be filtered at the indexer level
+
+`solverType` is a field of the IPFS manifest body, not part of the on-chain
+envelope payload (`IdentityRegistry.MetadataSet` only carries the ABI-encoded
+`(version, tier, manifestHash, ...)` tuple). The indexer cannot populate or
+filter by `solverType`.
+
+Callers that need per-`solverType` filtering must do so client-side after
+fetching and decoding the IPFS manifests referenced by the returned
+`EnvelopeRef` rows. Passing `solverType` in a `CorpusQuery` to
+`queryEnvelopes` is accepted at the interface level but is silently ignored by
+the indexer adapter.
+
+## Development commands
+
+```bash
+yarn dev       # Ponder dev server (hot reload, PGlite)
+yarn build     # Ponder build (codegen — regenerates ponder-env.d.ts; this Ponder
+               # version has no separate `ponder build` command)
+yarn start     # Ponder production server (indexer + HTTP, requires DATABASE_URL)
+yarn serve     # Ponder production HTTP server only (no indexer, requires DATABASE_URL)
+yarn codegen   # Regenerate ponder-env.d.ts type artifacts
+yarn typecheck # TypeScript check (no emit)
+yarn test      # Vitest unit tests for the event handlers (test/handlers.test.ts).
+```
+
+### What the handler tests cover, and how
+
+`test/handlers.test.ts` exercises the event-folding logic in `src/handlers.ts`:
+MetadataSet key routing (manifest vs. envelope vs. ignored), envelope-payload
+decode with the V2→V1 fallback (and garbage-payload tolerance), most-recent-wins
+upsert ordering — including the `(block, transactionIndex, logIndex)` tiebreak
+and idempotent re-sync — the `SolutionDeliveryClaimed` missing-row guard, and
+Task/Attempt folding (cross-checked against the GraphQL field names
+`client/src/discovery/http.ts` queries).
+
+Ponder 0.16.x has no first-class unit-test util for indexing functions, and the
+`ponder:registry` / `ponder:schema` modules are virtual modules the Ponder
+build resolves — not importable from Vitest. So the handler logic is extracted
+out of the `ponder.on(...)` registrations in `src/index.ts` into exported pure
+functions in `src/handlers.ts` (`src/index.ts` is now thin shims that forward
+`{ event, context }` plus the schema table objects), and the tests run those
+pure functions against `test/helpers/in-memory-db.ts` — a stub that mirrors the
+`find / insert / update / onConflictDoNothing / onConflictDoUpdate` surface the
+handlers use. The two-operator end-to-end (a real Ponder service indexing a live
+testnet contract) is tracked separately.
+
+The daemon-side GraphQL **client** surface (the queries `HttpDiscoveryAPI`
+issues against this service) is covered by `client/test/discovery/http.test.ts`
+in the `@jinn-network/client` package — that suite mocks `fetch` and asserts
+the query/response shape; it does not run these handlers.

@@ -75,7 +75,6 @@
     "staking": "tsx test/e2e/staking.ts",
     "stolas": "tsx test/e2e/stolas.ts",
     "withdraw": "tsx scripts/withdraw.ts",
-    "corpus:e2e": "tsx scripts/corpus-e2e-validate.ts",
     "build:spa": "yarn workspace @jinn-network/operator-spa build",
     "dev:spa": "yarn workspace @jinn-network/operator-spa dev",
     "e2e:spa": "yarn build && playwright test --config=playwright.config.ts test/dashboard/spa.e2e.test.ts",

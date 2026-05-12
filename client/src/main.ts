@@ -913,7 +913,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       store: sharedStore,
       apiToken,
       bindHost: apiBindHost,
-      corpus: config.subgraphUrl?.trim() ? () => corpusForApi : undefined,
+      corpus: () => corpusForApi,
       ui: { token: uiToken, handshakeKey },
       admin: {
         onRestartRequested: () => {
@@ -1479,28 +1479,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
     const discoveryConfig = config.discovery;
     if (discoveryConfig) {
-      // A discovery block was explicitly set (or normalized from subgraphUrl).
-      let subgraphClientForDiscovery: import('./solvernets/registry-client-erc8004.js').SubgraphClient | undefined;
-      if (discoveryConfig.mode === 'http-subgraph') {
-        const { createGraphqlSubgraphClient, createNoopSubgraphClient } = await import('./solvernets/daemon-init.js');
-        subgraphClientForDiscovery = discoveryConfig.url?.trim()
-          ? createGraphqlSubgraphClient({ url: discoveryConfig.url })
-          : createNoopSubgraphClient();
-      }
+      // A discovery block was explicitly set.
       try {
         const { createDiscoveryAPI } = await import('./discovery/factory.js');
-        sharedDiscoveryApi = createDiscoveryAPI(discoveryConfig, {
-          ...onchainFloorOpts,
-          subgraphClient: subgraphClientForDiscovery,
-        });
+        sharedDiscoveryApi = createDiscoveryAPI(discoveryConfig, { ...onchainFloorOpts });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[main] DiscoveryAPI construction failed: ${msg} — falling back to onchain discovery`);
         sharedDiscoveryApi = await buildOnchainFloor();
       }
     } else {
-      // No discovery config — default to onchain floor (no subgraphUrl in config).
-      // TODO(280n.4): flip default to 'http' once HttpDiscoveryAPI lands.
+      // No discovery config (mainnet without an explicit discovery block) —
+      // default to the always-live onchain floor.
       sharedDiscoveryApi = await buildOnchainFloor();
     }
   }
@@ -1638,10 +1628,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) tasks
   const corpusChainId = config.network === 'testnet' ? 84532 : 8453;
   const corpusFromBlock = Number(DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[corpusChainId] ?? 0n);
+  // The MCP subprocess reads JINN_DISCOVERY_URL.
+  const corpusDiscoveryUrl = config.discovery?.url?.trim() || '';
   const corpusEnv: RunnerContext['corpusEnv'] | undefined =
-    (config.subgraphUrl?.trim() || identityRegistryAddress)
+    (corpusDiscoveryUrl || identityRegistryAddress)
       ? {
-          ...(config.subgraphUrl?.trim() ? { subgraphUrl: config.subgraphUrl } : {}),
+          ...(corpusDiscoveryUrl ? { discoveryUrl: corpusDiscoveryUrl } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           rpcUrl: config.rpcUrl,
           chainId: corpusChainId,
@@ -1793,9 +1785,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
   //      identity.
   //   2. An agentId resolver — looks up the harness's agentId from the
-  //      parent manifest's evidenceHash via the subgraph. When `subgraphUrl`
-  //      is unconfigured the resolver returns null cleanly and the hook
-  //      becomes a no-op (defensive: feedback is non-fatal).
+  //      parent manifest's evidenceHash via the shared `DiscoveryAPI`. When
+  //      no DiscoveryAPI is available the resolver returns null cleanly and
+  //      the hook becomes a no-op (defensive: feedback is non-fatal).
   //
   // Skipped when the operator hasn't minted an agent NFT yet (matches the
   // IdentityPublisher gating above).
@@ -1818,14 +1810,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       const { resolveAgentIdForManifest } = await import(
         './erc8004/index.js'
       );
-      const subgraphUrl = config.subgraphUrl;
       reputationFeedback = {
         client: reputationClient,
         resolveAgentId: (manifestHash) =>
-          resolveAgentIdForManifest({ manifestHash, subgraphUrl }),
+          resolveAgentIdForManifest({ manifestHash, discoveryApi: sharedDiscoveryApi }),
       };
       console.log(
-        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${subgraphUrl ? ` subgraph=${subgraphUrl}` : ' (no subgraph configured — resolver always null)'}`,
+        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${sharedDiscoveryApi ? ' discoveryApi=active' : ' (no discoveryApi — resolver always null)'}`,
       );
     } else {
       console.log(
@@ -1846,10 +1837,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // lands in Task 12; until then we expose `pendingGenerators` so the
   // upcoming wiring has a clean handoff point.
   //
-  // Day-1 SubgraphClient is the no-op stub — Task 25 wires the real
-  // subgraph extension. The launch state machine still resumes correctly
-  // through the receipt-confirmation path; only the mempool-drop fallback
-  // depends on subgraph reads.
+  // The launch state machine resumes correctly through the receipt-confirmation
+  // path; discovery is now exclusively via DiscoveryAPI (280n.6).
   let solverNetSubsystem: import('./solvernets/daemon-init.js').SolverNetSubsystem | undefined;
   // Hoisted so the engine wiring below can pick the registry client up as
   // its `manifestResolver` (Task 27 of the SolverNet creation-and-launch
@@ -1861,8 +1850,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     const {
       initSolverNetSubsystem,
       createIpfsClientAdapter,
-      createNoopSubgraphClient,
-      createGraphqlSubgraphClient,
       createMetadataPublisherFromViem,
       createDefaultRegistryClient,
     } = await import('./solvernets/daemon-init.js');
@@ -1873,9 +1860,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       registryUrl: config.ipfsRegistryUrl,
       gatewayUrl: config.ipfsGatewayUrl,
     });
-    const solverNetSubgraph = config.subgraphUrl?.trim()
-      ? createGraphqlSubgraphClient({ url: config.subgraphUrl })
-      : createNoopSubgraphClient();
     const solverNetPublisher = createMetadataPublisherFromViem({
       identityRegistryAddress,
       walletClient: agentClients.walletClient,
@@ -1884,7 +1868,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     const solverNetRegistryClient = createDefaultRegistryClient({
       ipfs: solverNetIpfs,
       publisher: solverNetPublisher,
-      subgraph: solverNetSubgraph,
       discoveryApi: sharedDiscoveryApi,
       network: 'base-sepolia',
     });
@@ -1901,7 +1884,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         store: solverNetStore,
         ipfs: solverNetIpfs,
         publisher: solverNetPublisher,
-        subgraph: solverNetSubgraph,
         registryClient: solverNetRegistryClient,
         network: 'base-sepolia',
         resolveSigner: async () => launcherSigner,
@@ -1929,11 +1911,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           return { blockNumber: Number(receipt.blockNumber) };
         };
         const pendingGeneratorsRef = { current: solverNetSubsystem.pendingGenerators };
+        // Noop subgraph for launch/lifecycle state-machine mempool-drop recovery.
+        // Real subgraph extension lands in Task 25 (jinn-mono-280n).
+        const noopSubgraph = {
+          async fetchSetMetadataEvents() { return []; },
+          async fetchSetMetadataEventsForCid() { return []; },
+        };
         const launchAction = new LaunchAction({
           store: solverNetStore,
           ipfs: solverNetIpfs,
           publisher: solverNetPublisher,
-          subgraph: solverNetSubgraph,
+          subgraph: noopSubgraph,
           spawnGenerator: async () => {
             /* Generators are spawned by main.ts post-launch loop;
              * the launcher endpoint just persists the record here. */
@@ -1944,7 +1932,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           store: solverNetStore,
           registry: solverNetRegistryClient,
           signer: launcherSigner,
-          subgraph: solverNetSubgraph,
+          subgraph: noopSubgraph,
           awaitTxConfirmation: awaitLauncherTxConfirmation,
         });
         if (!safeAddressForLauncher) {
@@ -2050,20 +2038,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // Built once per daemon lifetime; the agent EOA private key stays in this
   // process's memory and never crosses into the MCP subprocess. The MCP
   // tool `acquire_artifact` proxies to `POST /v1/artifacts/acquire` instead.
-  // Enabled when either the optional subgraph accelerator or canonical
-  // on-chain ERC-8004/IPFS discovery is configured. Otherwise the API route is
-  // absent and MCP falls back to local-only behaviour with a warning.
-  // The corpus is always enabled when a DiscoveryAPI is available (which is
-  // always true after 280n.3 — the onchain floor is always constructed).
-  // The legacy condition (subgraphUrl || identityRegistryAddress) is kept for
-  // backwards compatibility with callers that don't use the new path.
-  const corpusFactory = (sharedDiscoveryApi || config.subgraphUrl?.trim() || identityRegistryAddress)
+  // Always enabled when a DiscoveryAPI is available (which is always true after
+  // 280n.3 — the onchain floor is always constructed). Falls back to disabled
+  // when no discovery is available and no identity registry is set.
+  const corpusFactory = (sharedDiscoveryApi || identityRegistryAddress)
     ? (store: Store) =>
         (corpusForApi = createCorpus({
-          // Prefer DiscoveryAPI when available (280n.3 migration).
           ...(sharedDiscoveryApi ? { discovery: sharedDiscoveryApi } : {}),
-          // Legacy fallbacks kept for backwards compatibility.
-          ...(!sharedDiscoveryApi && config.subgraphUrl?.trim() ? { subgraphUrl: config.subgraphUrl } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           store,
           signer: { privateKey: agentPrivateKey },
@@ -2082,7 +2063,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     : undefined;
   if (!corpusFactory) {
     console.warn(
-      '[main] Corpus disabled (no DiscoveryAPI, subgraphUrl, or on-chain identity registry); ' +
+      '[main] Corpus disabled (no DiscoveryAPI or on-chain identity registry); ' +
         'MCP record lookup and artifact acquisition network branches will be unavailable.',
     );
   }
@@ -2099,7 +2080,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     apiBindHost,
     apiToken,
     peers: config.peers.length > 0 ? config.peers : undefined,
-    subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
     corpusFactory,

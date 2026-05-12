@@ -31,6 +31,7 @@ export interface SolverNetLifecycleStatus {
   status: 'launched' | 'paused' | 'retired';
   statusUpdatedAt: string;
   sourceBlock: number;
+  manifestHash: `0x${string}`;
 }
 
 /**

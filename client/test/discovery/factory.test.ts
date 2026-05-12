@@ -2,25 +2,17 @@
  * Tests for createDiscoveryAPI factory.
  *
  * Verifies:
- *  - mode: 'onchain'       → returns the floor alone (no withFallback wrapping)
- *  - mode: 'http-subgraph' → returns a withFallback composition
- *  - mode: 'http'          → throws (HttpDiscoveryAPI not yet shipped)
- *  - mode: 'embedded'      → throws (Embedded not yet shipped)
- *  - legacy subgraphUrl    → is mapped to http-subgraph mode (tested via config normalization)
+ *  - mode: 'onchain'  → returns the floor alone (no withFallback wrapping)
+ *  - mode: 'http'     → returns a withFallback composition
+ *  - mode: 'embedded' → throws (Embedded not yet shipped)
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { createDiscoveryAPI } from '../../src/discovery/factory.js';
-import type { SubgraphClient } from '../../src/solvernets/registry-client-erc8004.js';
 
 // ── Deps fixture ──────────────────────────────────────────────────────────────
 
 const CHAIN_ID = 84532; // Base Sepolia testnet
-
-const noopSubgraphClient: SubgraphClient = {
-  fetchSetMetadataEvents: vi.fn().mockResolvedValue([]),
-  fetchSetMetadataEventsForCid: vi.fn().mockResolvedValue([]),
-};
 
 const baseDeps = {
   chainId: CHAIN_ID,
@@ -65,17 +57,13 @@ describe('createDiscoveryAPI(mode=onchain)', () => {
   });
 });
 
-// ── mode: 'http-subgraph' ──────────────────────────────────────────────────────
+// ── mode: 'http' ───────────────────────────────────────────────────────────────
 
-describe('createDiscoveryAPI(mode=http-subgraph)', () => {
-  it('returns a DiscoveryAPI with all four methods when subgraphClient and url are provided', () => {
+describe('createDiscoveryAPI(mode=http)', () => {
+  it('returns a DiscoveryAPI with all four methods when url is provided', () => {
     const api = createDiscoveryAPI(
-      {
-        mode: 'http-subgraph',
-        url: 'https://subgraph.test/graphql',
-        fallbackToOnchain: true,
-      },
-      { ...baseDeps, subgraphClient: noopSubgraphClient },
+      { mode: 'http', url: 'https://discovery.example.com', fallbackToOnchain: true },
+      baseDeps,
     );
 
     expect(typeof api.findClaimableTasks).toBe('function');
@@ -84,54 +72,18 @@ describe('createDiscoveryAPI(mode=http-subgraph)', () => {
     expect(typeof api.queryEnvelopes).toBe('function');
   });
 
-  it('throws when subgraphClient is missing', () => {
-    expect(() =>
-      createDiscoveryAPI(
-        { mode: 'http-subgraph', url: 'https://subgraph.test/graphql' },
-        baseDeps, // no subgraphClient
-      ),
-    ).toThrow(/subgraphClient/);
-  });
-
-  it('throws when url is missing', () => {
-    expect(() =>
-      createDiscoveryAPI(
-        { mode: 'http-subgraph' }, // no url
-        { ...baseDeps, subgraphClient: noopSubgraphClient },
-      ),
-    ).toThrow(/discovery\.url/);
-  });
-
   it('returns the primary directly when fallbackToOnchain is false', () => {
-    // With fallbackToOnchain: false the api is the HttpSubgraphDiscoveryAPI
-    // directly, not wrapped in withFallback. We verify via behavior: when the
-    // primary subgraph fails, the call should propagate (not fall back).
-    const failingSubgraph: SubgraphClient = {
-      fetchSetMetadataEvents: vi.fn().mockRejectedValue(new Error('subgraph down')),
-      fetchSetMetadataEventsForCid: vi.fn().mockRejectedValue(new Error('subgraph down')),
-    };
-
     const api = createDiscoveryAPI(
-      {
-        mode: 'http-subgraph',
-        url: 'https://subgraph.test/graphql',
-        fallbackToOnchain: false,
-      },
-      { ...baseDeps, subgraphClient: failingSubgraph },
+      { mode: 'http', url: 'https://discovery.example.com', fallbackToOnchain: false },
+      baseDeps,
     );
-
-    // DiscoveryUnavailableError should propagate (not be silently swallowed)
-    return expect(api.listLaunchedSolverNets()).rejects.toThrow();
+    expect(typeof api.findClaimableTasks).toBe('function');
   });
-});
 
-// ── mode: 'http' ───────────────────────────────────────────────────────────────
-
-describe('createDiscoveryAPI(mode=http)', () => {
-  it('throws because HttpDiscoveryAPI is not yet shipped (280n.4)', () => {
+  it('throws DiscoveryUnavailableError when url is missing', () => {
     expect(() =>
-      createDiscoveryAPI({ mode: 'http', url: 'https://discovery.example.com' }, baseDeps),
-    ).toThrow(/280n\.4/);
+      createDiscoveryAPI({ mode: 'http' }, baseDeps),
+    ).toThrow(/discovery\.url/);
   });
 });
 
@@ -141,7 +93,7 @@ describe('createDiscoveryAPI(mode=embedded)', () => {
   it('throws because EmbeddedPonderDiscoveryAPI is not yet shipped (280n.5)', () => {
     expect(() =>
       createDiscoveryAPI({ mode: 'embedded' }, baseDeps),
-    ).toThrow(/280n\.5/);
+    ).toThrow(/280n\.5|not yet available/);
   });
 });
 

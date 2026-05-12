@@ -100,10 +100,9 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   digestHexToGatewayUrl: vi.fn(),
 }));
 
-// MOCK_JUSTIFICATION: task-subgraph.js is the GraphQL candidate-index boundary; adapter tests decide when candidates exist.
-vi.mock('../../../src/adapters/mech/task-subgraph.js', () => ({
+// MOCK_JUSTIFICATION: digest.js is a pure CID-to-digest transform; mocking it pins the output so manifest-filter assertions use a deterministic digest.
+vi.mock('../../../src/adapters/mech/digest.js', () => ({
   manifestDigestForCid: vi.fn().mockReturnValue(MANIFEST_DIGEST),
-  queryClaimableTaskCandidates: vi.fn().mockResolvedValue([]),
 }));
 
 // MOCK_JUSTIFICATION: canonical-json is a pure transform; mocking it fixes the output for deterministic evidence hash assertions.

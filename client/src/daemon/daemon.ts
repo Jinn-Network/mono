@@ -8,7 +8,6 @@ import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
-import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../erc8004/index.js';
 import type { X402Config } from '../x402/handler.js';
 import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
@@ -47,7 +46,6 @@ export interface DaemonConfig {
   apiToken?: string;
   peers?: string[];
   signer?: EthHttpSigner;
-  subgraphUrl?: string;
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint?: string;
   x402?: X402Config;
@@ -79,7 +77,8 @@ export interface DaemonConfig {
    * Store so the corpus shares the same SQLite handle. When set, the API
    * server exposes `POST /v1/artifacts/acquire` so the MCP subprocess can
    * acquire artifacts without ever holding the agent EOA private key. Built
-   * in `main.ts` once `subgraphUrl` is configured. See
+   * in `main.ts` once the discovery layer is wired (see
+   * spec/2026-05-11-discovery-api-and-shared-indexer.md). See
    * spec/2026-04-30-phase-a-umbrella.md §4.
    */
   corpusFactory?: (store: Store) => Corpus;
@@ -233,27 +232,6 @@ export class Daemon {
         corpus,
       });
       this.ownsApiServer = true;
-    }
-
-    // Backfill remote artifacts from subgraph if configured
-    const subgraphUrl = this.config.subgraphUrl ?? process.env['JINN_SUBGRAPH_URL'];
-    if (subgraphUrl) {
-      try {
-        await this.backfillFromSubgraph({ url: subgraphUrl });
-      } catch (err) {
-        console.error('[daemon] Subgraph backfill failed (non-fatal):', err instanceof Error ? err.message : err);
-        emitEvent(this.store, {
-          kind: 'tick_error',
-          outcome: 'failed',
-          detail: err instanceof Error ? err.message : String(err),
-        }, 'daemon');
-        emitStructured({
-          kind: 'error',
-          message: 'subgraph backfill failed',
-          errorCode: 'subgraph_backfill',
-          details: { error: err instanceof Error ? err.message : String(err) },
-        });
-      }
     }
 
     // Start peer sync if peers configured
@@ -512,50 +490,4 @@ export class Daemon {
     }
   }
 
-  private async backfillFromSubgraph(config: SubgraphConfig): Promise<void> {
-    console.log(`[daemon] Backfilling from subgraph: ${config.url}`);
-
-    // Backfill artifacts
-    const artifacts = await queryArtifacts(config);
-    let artifactCount = 0;
-    for (const result of artifacts) {
-      const artifactId = getMetadataValue(result, 'artifactId');
-      const title = getMetadataValue(result, 'title') ?? '';
-      const outcome = getMetadataValue(result, 'outcome') ?? 'UNKNOWN';
-      const endpoint = getMetadataValue(result, 'endpoint') ?? '';
-      const tagsRaw = getMetadataValue(result, 'tags');
-      const tags = tagsRaw ? JSON.parse(tagsRaw) as string[] : [];
-
-      if (!artifactId || !endpoint) continue;
-
-      this.store.insertRemoteArtifact({
-        id: artifactId,
-        taskId: '',
-        requestId: '',
-        title,
-        tags,
-        outcome: outcome as 'SUCCESS' | 'FAILURE' | 'UNKNOWN',
-        ownerAddress: result.owner,
-        endpoint,
-      });
-      artifactCount++;
-    }
-
-    // Backfill peer nodes
-    const nodes = await queryNodes(config);
-    const discoveredPeers: string[] = [];
-    for (const result of nodes) {
-      const endpoint = getMetadataValue(result, 'endpoint');
-      if (endpoint) discoveredPeers.push(endpoint);
-    }
-
-    console.log(`[daemon] Backfill complete: ${artifactCount} artifacts, ${discoveredPeers.length} nodes`);
-
-    // Auto-add discovered peers to peer sync
-    if (discoveredPeers.length > 0 && this.peerSync) {
-      // PeerSync is already running with configured peers — discovered peers
-      // would need to be merged. For now, just log them.
-      console.log(`[daemon] Discovered peers: ${discoveredPeers.join(', ')}`);
-    }
-  }
 }

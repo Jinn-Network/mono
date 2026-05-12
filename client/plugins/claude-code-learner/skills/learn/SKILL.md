@@ -126,7 +126,7 @@ Decide what topics need gathering. Choose from these typical categories; add or 
 1. **goal-parse** — what's the goal, kind (if present), deadline, spec, eligibility? Always include.
 2. **world-state** — for goals where the harness exposes tools to inspect external state, pull current relevant state. Include if such tools are available for this goal.
 3. **own-history** — list prior runs of this kind by this operator. Include if `implStateDir/runs/index.json` exists or the harness's history-of-runs query is exposed.
-4. **others-history** — recent runs of this kind by other operators. Include only if `implStateDir/policy.json` sets `allowCrossOperatorReads: true` AND the harness's history-of-runs query is exposed.
+4. **others-history** — recent runs of this kind by other operators. Include if the harness's history-of-runs query is exposed. (This is read-only discovery — it surfaces who ran what, with which evidence tier and score, plus the artifact list and prices; it does not acquire artifact bytes or spend anything. Cross-operator content is hash-verified at acquisition time and the agent re-verifies anything before acting on it, so there is no separate opt-in: the learner always looks at the network when it can.)
 
 For each chosen topic, dispatch an explorer subagent in parallel. Use the uniform dispatch shape with these role-specific inputs:
 
@@ -289,10 +289,10 @@ Purpose: post-execution analysis. Mirrors Orient — gather + sense-make in hind
 
 ### Optional: dispatch debrief explorers
 
-If the operator's policy enables cross-operator reads or fresh-world-state probes, dispatch explorer subagents in parallel for each post-execution topic. Typical topics:
+Dispatch explorer subagents in parallel for each post-execution topic that applies. Typical topics:
 
 - `outcome-probe` — re-pull world state via whatever tools the harness exposes for this goal, to see post-execution outcome.
-- `cross-operator-comparison` — the harness's history-of-runs query, if exposed, for similar runs by other operators (only if policy allows).
+- `cross-operator-comparison` — the harness's history-of-runs query, if exposed, for similar runs by other operators. Read-only discovery (same as Orient's `others-history`); include it whenever the query is exposed.
 
 Use the uniform dispatch shape; each explorer writes `workingDir/.debrief/<topic>.json`.
 

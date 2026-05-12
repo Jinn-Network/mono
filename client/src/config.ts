@@ -146,35 +146,27 @@ export const JinnConfigSchema = z.object({
     z.array(z.string()),
   ]).default([]),
 
-  /** The Graph subgraph URL for artifact discovery */
-  subgraphUrl: z.string().optional(),
-
   /**
    * Discovery backend configuration.
    *
    * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §9.1.
    *
    * mode:
-   *   'http'           — HTTP client pointing at a shared indexer (default per spec §4, but
-   *                      requires 280n.4's HttpDiscoveryAPI — throws at boot until that ships).
-   *   'http-subgraph'  — transitional: wraps the existing hosted The Graph subgraph behind
-   *                      the DiscoveryAPI interface (ships with 280n.3). Removed in 280n.6.
-   *   'embedded'       — embedded Ponder in-process (ships in 280n.5 — throws until then).
-   *   'onchain'        — direct RPC getLogs; always-live floor; no indexer required.
+   *   'http'      — HTTP client pointing at a shared Ponder indexer (ships in 280n.4).
+   *   'embedded'  — embedded Ponder in-process (ships in 280n.5 — throws until then).
+   *   'onchain'   — direct RPC getLogs; always-live floor; no indexer required.
    *
-   * TODO(280n.4): flip default to 'http' once HttpDiscoveryAPI lands and a
-   * default URL is configured.
+   * Default URLs for mode='http' (intentionally undefined until the maintainer's VPS is live):
+   *   // TODO: set once maintainer's VPS is live (jinn-mono-280n.4 deployment)
+   *   // DEFAULT_TESTNET_DISCOVERY_URL = 'https://...'  // Base Sepolia
+   *   // DEFAULT_MAINNET_DISCOVERY_URL = 'https://...'  // Base mainnet
    *
    * Env overrides: JINN_DISCOVERY_MODE, JINN_DISCOVERY_URL,
    * JINN_DISCOVERY_FALLBACK (1|true|yes to enable, 0|false|no to disable).
-   *
-   * Legacy `subgraphUrl` is accepted with a deprecation warning and maps to
-   * mode: 'http-subgraph' automatically. The mapping happens at loadConfig
-   * normalisation time, not at the type level.
    */
   discovery: z
     .object({
-      mode: z.enum(['http', 'http-subgraph', 'embedded', 'onchain']).optional(),
+      mode: z.enum(['http', 'embedded', 'onchain']).optional(),
       url: z.string().optional(),
       fallbackToOnchain: z.boolean().optional(),
     })
@@ -658,8 +650,16 @@ export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'task
 
 const DEFAULT_DIR = join(homedir(), '.jinn-client');
 export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
-export const DEFAULT_TESTNET_SUBGRAPH_URL =
-  'https://api.studio.thegraph.com/query/1749489/jinn-testnet/capture-live-20260508183750';
+
+/**
+ * Default discovery indexer for Base Sepolia testnet daemons — the
+ * privately-operated Ponder instance (jinn-mono-280n.4). Operators override
+ * via `discovery.url` / `JINN_DISCOVERY_URL`, or pin `discovery.mode: 'onchain'`
+ * for RPC-only. No mainnet default yet (the public mainnet RPC can't sustain the
+ * historical sync — see ponder.config.ts).
+ */
+export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
+
 
 export type ConfigLoadErrorCode =
   | 'config_file_not_found'
@@ -733,8 +733,6 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
   if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
   if (env['JINN_PEERS'])             merged.peers = env['JINN_PEERS'];
-  if (env['JINN_SUBGRAPH_URL'])      merged.subgraphUrl = env['JINN_SUBGRAPH_URL'];
-
   // Discovery block env overrides
   if (env['JINN_DISCOVERY_MODE'] || env['JINN_DISCOVERY_URL'] || env['JINN_DISCOVERY_FALLBACK'] !== undefined) {
     const prevDiscovery = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
@@ -744,11 +742,20 @@ export function loadConfig(configPath?: string): JinnConfig {
     const fallbackToOnchain = fallbackRaw !== undefined
       ? !(['0', 'false', 'no'].includes(fallbackRaw.trim().toLowerCase()))
       : undefined;
+    // A URL only makes sense in http mode — when the operator points
+    // JINN_DISCOVERY_URL at a host but doesn't say JINN_DISCOVERY_MODE,
+    // default mode to 'http' so the URL is actually consulted (and isn't
+    // silently dropped by the on-chain default in createDiscoveryAPI). In that
+    // inferred-http case, also default fallbackToOnchain on (http without a
+    // floor is a footgun) unless JINN_DISCOVERY_FALLBACK overrides.
+    const inferredHttp = !!env['JINN_DISCOVERY_URL'] && !env['JINN_DISCOVERY_MODE'] && !prevDiscovery['mode'];
+    const mode = env['JINN_DISCOVERY_MODE'] ?? (inferredHttp ? 'http' : undefined);
+    const resolvedFallback = fallbackToOnchain ?? (inferredHttp ? true : undefined);
     merged['discovery'] = {
       ...prevDiscovery,
-      ...(env['JINN_DISCOVERY_MODE'] ? { mode: env['JINN_DISCOVERY_MODE'] } : {}),
+      ...(mode ? { mode } : {}),
       ...(env['JINN_DISCOVERY_URL'] ? { url: env['JINN_DISCOVERY_URL'] } : {}),
-      ...(fallbackToOnchain !== undefined ? { fallbackToOnchain } : {}),
+      ...(resolvedFallback !== undefined ? { fallbackToOnchain: resolvedFallback } : {}),
     };
   }
   if (env['JINN_NODE_ENDPOINT'])     merged.nodeEndpoint = env['JINN_NODE_ENDPOINT'];
@@ -869,29 +876,27 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
-  if (resolvedNetwork === 'testnet' && merged.subgraphUrl === undefined) {
-    merged.subgraphUrl = DEFAULT_TESTNET_SUBGRAPH_URL;
-  }
 
-  // Legacy `subgraphUrl` → `discovery` normalization.
-  // When `subgraphUrl` is set but `discovery` has no explicit mode, map it
-  // to http-subgraph with a deprecation warning.
+  // Testnet default: point discovery at the privately-operated Ponder indexer
+  // (jinn-mono-280n.4), unless the operator has set their own `discovery` block.
+  // The on-chain RPC floor stays as the fallback.
   //
-  // TODO(280n.6): remove this block when subgraphUrl is retired.
-  const hasSubgraphUrl = typeof merged.subgraphUrl === 'string' && (merged.subgraphUrl as string).trim().length > 0;
-  const discoveryBlock = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
-    ? (merged['discovery'] as { mode?: string; url?: string; fallbackToOnchain?: boolean })
-    : null;
-  if (hasSubgraphUrl && (!discoveryBlock || !discoveryBlock.mode)) {
-    console.warn(
-      '[config] subgraphUrl is deprecated. Mapping to discovery: { mode: "http-subgraph", url: <subgraphUrl> }. ' +
-      'Migrate to discovery.mode in your config file. The hosted subgraph will be removed in 280n.6.',
-    );
+  // Only fill fields the operator left absent — never overwrite an
+  // operator-set `url` / `mode` / `fallbackToOnchain`. A bare
+  // `discovery: { url: '...' }` (or `JINN_DISCOVERY_URL` alone) keeps the
+  // operator's URL and gets `mode: 'http'` defaulted in (a URL is only
+  // meaningful in http mode).
+  const explicitDiscoveryMode = (typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+    && typeof (merged['discovery'] as { mode?: unknown }).mode === 'string');
+  if (resolvedNetwork === 'testnet' && !explicitDiscoveryMode) {
+    const existing = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+      ? (merged['discovery'] as { mode?: string; url?: string; fallbackToOnchain?: boolean })
+      : undefined;
     merged['discovery'] = {
-      ...(discoveryBlock ?? {}),
-      mode: 'http-subgraph',
-      url: merged.subgraphUrl as string,
-      fallbackToOnchain: discoveryBlock?.fallbackToOnchain ?? true,
+      ...(existing ?? {}),
+      mode: existing?.mode ?? 'http',
+      url: existing?.url ?? DEFAULT_TESTNET_DISCOVERY_URL,
+      fallbackToOnchain: existing?.fallbackToOnchain ?? true,
     };
   }
 
@@ -1018,7 +1023,9 @@ const TRACKED_ENV_VARS = [
   'JINN_CLAUDE_MODEL',
   'JINN_RUNTIME_MODE',
   'JINN_PEERS',
-  'JINN_SUBGRAPH_URL',
+  'JINN_DISCOVERY_MODE',
+  'JINN_DISCOVERY_URL',
+  'JINN_DISCOVERY_FALLBACK',
   'JINN_NODE_ENDPOINT',
   'JINN_IPFS_REGISTRY_URL',
   'JINN_IPFS_GATEWAY_URL',

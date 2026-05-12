@@ -26,7 +26,7 @@ import {
 } from 'viem';
 import { createOnchainDiscoveryAPI, limitedConcurrency, type OnchainCursorCache } from '../../src/discovery/onchain.js';
 import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
-import { manifestDigestForCid } from '../../src/adapters/mech/task-subgraph.js';
+import { manifestDigestForCid } from '../../src/adapters/mech/digest.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -362,6 +362,8 @@ describe('OnchainDiscoveryAPI — getLifecycleStatus', () => {
     expect(result).toBeDefined();
     expect(result?.status).toBe('launched');
     expect(result?.sourceBlock).toBe(5_000);
+    // The buildSolvernetMetadataLog helper embeds hash: `0x${'ab'.repeat(32)}`.
+    expect(result?.manifestHash).toBe('0x' + 'ab'.repeat(32));
   });
 
   it('returns undefined for a different cid even if other events exist', async () => {
@@ -517,6 +519,9 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
       safeAddress: SAFE_ADDRESS,
       mechAddress: MECH_ADDRESS,
       taskDiscoveryFromBlock: 0,
+      // Force a single getLogs chunk so the mock's call-indexed responses line up
+      // regardless of DEFAULT_CHUNK_BLOCKS.
+      chunkBlocks: 100_000,
       publicClient: mockClient as never,
     });
 
@@ -693,6 +698,9 @@ describe('OnchainDiscoveryAPI — cursorCache', () => {
       routerAddress: ROUTER,
       safeAddress: SAFE_ADDRESS,
       mechAddress: MECH_ADDRESS,
+      // Single chunk so [CACHED_BLOCK, head] is one getLogs call → its fromBlock
+      // is exactly CACHED_BLOCK, independent of DEFAULT_CHUNK_BLOCKS.
+      chunkBlocks: 100_000,
       publicClient: mockClient as never,
       cursorCache: cache,
     });

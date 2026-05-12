@@ -1,4 +1,0 @@
-{
-  "extends": "@graphprotocol/graph-ts/tsconfig.json",
-  "include": ["src", "generated"]
-}

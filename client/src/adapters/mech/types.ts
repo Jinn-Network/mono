@@ -28,12 +28,8 @@ export interface MechAdapterConfig {
     /**
      * DiscoveryAPI instance for finding claimable tasks. When provided,
      * replaces direct subgraph calls in discoverSubgraphRestorationTasks.
-     * If absent but subgraphUrl is set, a deprecation warning is emitted and
-     * the legacy direct-subgraph path is used (via the injected discovery API).
      */
     discoveryApi?: DiscoveryAPI;
-    /** @deprecated Pass discoveryApi instead. Legacy: direct subgraph URL. */
-    subgraphUrl?: string;
     solverNetManifestCids?: string[];
     /**
      * Lower bound for the canonical on-chain TaskCreated scan. The subgraph is

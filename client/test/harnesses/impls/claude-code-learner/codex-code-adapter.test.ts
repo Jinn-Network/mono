@@ -173,7 +173,7 @@ describe('CodexCodeHarnessAdapter', () => {
         daemonApiUrl: 'http://127.0.0.1:7332',
         daemonApiToken: 'test-token',
         corpusEnv: {
-          subgraphUrl: 'https://subgraph.example',
+          discoveryUrl: 'https://subgraph.example',
           ipfsGatewayUrl: 'https://ipfs.example',
         },
         _spawnFn: spawnFn as never,
@@ -256,7 +256,8 @@ describe('CodexCodeHarnessAdapter', () => {
         STORE_PATH: '/tmp/jinn-test.db',
         DAEMON_API_URL: 'http://127.0.0.1:7332',
         DAEMON_API_TOKEN: 'test-token',
-        JINN_CORPUS_SUBGRAPH_URL: 'https://subgraph.example',
+        JINN_DISCOVERY_URL: 'https://subgraph.example',
+        JINN_DISCOVERY_MODE: 'http',
         JINN_CORPUS_IPFS_GATEWAY_URL: 'https://ipfs.example',
       });
       expect(existsSync(join(workingDir, '.agents', 'skills', 'claude-code-learner__learn', 'SKILL.md'))).toBe(true);

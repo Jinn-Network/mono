@@ -44,9 +44,7 @@ import {
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
-import {
-  manifestDigestForCid,
-} from './task-subgraph.js';
+import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
@@ -547,10 +545,8 @@ export class MechAdapter implements ExecutionAdapter {
     const solverNetManifestCids = discovery?.solverNetManifestCids ?? [];
 
     // Without a DiscoveryAPI or SolverNet manifest CIDs there is nothing to
-    // discover via this path. The legacy subgraphUrl is handled in config.ts
-    // normalization (mapped to discovery: { mode: 'http-subgraph', ... }) and
-    // the resulting DiscoveryAPI is injected here. Direct subgraph calls are
-    // no longer supported from this method.
+    // discover via this path. A DiscoveryAPI is injected by the daemon from
+    // the shared discovery client (Ponder HTTP or onchain floor).
     if (!discoveryApi || solverNetManifestCids.length === 0) return;
 
     let candidates;

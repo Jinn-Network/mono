@@ -20,6 +20,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
+import { createHttpDiscoveryAPI } from '../discovery/http.js';
 import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
 import { SOLVER_TYPE_PAYLOADS } from '../types/payloads/index.js';
@@ -73,7 +74,11 @@ const daemonApiToken = process.env['DAEMON_API_TOKEN'] ?? '';
 // to this closure and never escape via the returned object.
 function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
   if (!store) return null;
-  const subgraphUrl = process.env['JINN_CORPUS_SUBGRAPH_URL'] ?? '';
+  // Discovery config: prefer JINN_DISCOVERY_URL (Ponder indexer) over the
+  // legacy JINN_CORPUS_SUBGRAPH_URL. JINN_DISCOVERY_MODE defaults to 'http'
+  // when a URL is present, 'onchain' otherwise.
+  const discoveryUrl = process.env['JINN_DISCOVERY_URL'] ?? '';
+  const discoveryMode = process.env['JINN_DISCOVERY_MODE'] ?? (discoveryUrl ? 'http' : 'onchain');
   const ipfsGatewayUrl = process.env['JINN_CORPUS_IPFS_GATEWAY_URL'] ?? '';
   const rpcUrl = process.env['JINN_CORPUS_RPC_URL'] ?? '';
   const chainIdRaw = process.env['JINN_CORPUS_CHAIN_ID'] ?? '';
@@ -82,11 +87,18 @@ function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
   const fromBlockRaw = process.env['JINN_CORPUS_FROM_BLOCK'] ?? '';
   const fromBlock = fromBlockRaw ? Number.parseInt(fromBlockRaw, 10) : undefined;
   const hasOnchainCorpus = Boolean(rpcUrl && chainId && identityRegistryAddress);
-  if (!ipfsGatewayUrl || (!subgraphUrl && !hasOnchainCorpus)) {
+  const hasDiscovery = Boolean(discoveryUrl && discoveryMode === 'http');
+  if (!ipfsGatewayUrl || (!hasDiscovery && !hasOnchainCorpus)) {
     return null;
   }
+
+  // Build a DiscoveryAPI from the discovery env when a URL is available.
+  const discovery = hasDiscovery
+    ? createHttpDiscoveryAPI({ url: discoveryUrl, fetchImpl: globalThis.fetch })
+    : undefined;
+
   const full = createCorpus({
-    ...(subgraphUrl ? { subgraphUrl } : {}),
+    ...(discovery ? { discovery } : {}),
     ipfsGatewayUrl,
     store,
     signer: { privateKey: '0x0' },

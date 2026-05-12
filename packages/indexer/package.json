@@ -1,0 +1,26 @@
+{
+  "name": "@jinn-network/indexer",
+  "version": "0.1.0",
+  "description": "Ponder indexer for the Jinn protocol — four-entity schema (Task, Attempt, SolverNetManifest, Envelope) with a GraphQL→DiscoveryAPI adapter.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "scripts": {
+    "dev": "ponder dev",
+    "build": "ponder codegen",
+    "start": "ponder start",
+    "serve": "ponder serve",
+    "codegen": "ponder codegen",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "ponder": "^0.16.6",
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
+  }
+}

@@ -319,7 +319,12 @@ function makeMockDiscoveryApi(subgraph: SubgraphClient): DiscoveryAPI & {
         if (cur.anchorBlock !== acc.anchorBlock) return cur.anchorBlock > acc.anchorBlock ? cur : acc;
         return cur.anchorTransactionIndex > acc.anchorTransactionIndex ? cur : acc;
       });
-      return { status: latest.status, statusUpdatedAt: latest.statusUpdatedAt, sourceBlock: latest.anchorBlock };
+      return {
+        status: latest.status,
+        statusUpdatedAt: latest.statusUpdatedAt,
+        sourceBlock: latest.anchorBlock,
+        manifestHash: latest.manifestHash ?? (('0x' + 'ab'.repeat(32)) as `0x${string}`),
+      };
     },
 
     async findClaimableTasks() { return []; },
@@ -342,7 +347,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishManifest', () => 
     client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
   });
@@ -420,7 +424,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
     client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
   });
@@ -478,7 +481,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
     const clientA = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: publisherA,
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
 
@@ -507,7 +509,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
     const clientB = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: publisherB,
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
 
@@ -545,7 +546,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -601,7 +601,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -618,7 +617,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
       // discoveryApi intentionally absent
     });
@@ -636,7 +634,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -698,7 +695,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -717,7 +713,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -758,7 +753,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -770,26 +764,29 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     expect(fetched.signature.value).toBe(manifest.signature.value);
   });
 
-  it('uses the CID-bound IPFS manifest when the subgraph hash check is unavailable', async () => {
+  it('uses the CID-bound IPFS manifest when the discoveryApi hash check is unavailable', async () => {
     const sharedIpfs = makeMockIpfs();
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       network: 'base-sepolia',
     });
     const { manifest, signer } = await buildSignedManifest();
     const { manifestCid } = await publisherClient.publishManifest({ manifest, signer });
 
-    const subgraph = makeMockSubgraph();
-    subgraph.fetchSetMetadataEventsForCid = async () => {
-      throw new Error('subgraph HTTP 429');
+    // Provide a discoveryApi whose getLifecycleStatus throws — the client
+    // should fall back to CID-bound IPFS content and log the error.
+    const failingDiscoveryApi: DiscoveryAPI = {
+      async getLifecycleStatus() { throw new Error('discoveryApi unavailable 429'); },
+      async listLaunchedSolverNets() { return []; },
+      async findClaimableTasks() { return []; },
+      async queryEnvelopes() { return []; },
     };
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph,
+      discoveryApi: failingDiscoveryApi,
       network: 'base-sepolia',
     });
 
@@ -797,7 +794,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
       const fetched = await reader.getManifest({ manifestCid });
       expect(fetched.solverNetId).toBe(manifest.solverNetId);
       expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('subgraph hash check unavailable'),
+        expect.stringContaining('hash check unavailable'),
       );
     } finally {
       errorSpy.mockRestore();
@@ -808,44 +805,35 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     // Cold-path scenario: the client did NOT publish the manifest itself,
     // so verifiedCids is empty. getManifest falls through to
     // fetchAndValidateManifest, which cross-checks the canonical hash of
-    // the IPFS body against the on-chain advertised hash and rejects on
-    // mismatch.
-    //
-    // We share IPFS + subgraph between the publisher and the reader, but
-    // the reader is a fresh client (no verifiedCids fast-path).
+    // the IPFS body against the advertised hash from discoveryApi and
+    // rejects on mismatch.
     const sharedIpfs = makeMockIpfs();
-    const sharedSubgraph = makeMockSubgraph();
 
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
     const { manifest, signer } = await buildSignedManifest();
     const { manifestCid } = await publisherClient.publishManifest({ manifest, signer });
 
-    // Inject an on-chain event that advertises a DIFFERENT hash than the
-    // canonical hash of the IPFS body — simulating a tampered pinner.
+    // Provide a discoveryApi that returns a DIFFERENT hash than the canonical
+    // hash of the IPFS body — simulating a tampered pinner / wrong on-chain state.
     const wrongHash = ('0x' + 'cd'.repeat(32)) as `0x${string}`;
-    sharedSubgraph.events.push({
-      agentId: signer.agentId,
-      key: `solvernet-manifest:${manifestCid}`,
-      payload: {
-        schemaVersion: 'solvernet.lifecycle.v1',
-        status: 'launched',
-        at: '2026-05-06T00:00:00Z',
-        hash: wrongHash,
+    const tamperingDiscoveryApi: DiscoveryAPI = {
+      async getLifecycleStatus() {
+        return { status: 'launched', statusUpdatedAt: '2026-05-06T00:00:00Z', sourceBlock: 100, manifestHash: wrongHash };
       },
-      blockNumber: 100,
-      transactionIndex: 0,
-    });
+      async listLaunchedSolverNets() { return []; },
+      async findClaimableTasks() { return []; },
+      async queryEnvelopes() { return []; },
+    };
 
-    // Fresh reader — no in-process trust state.
+    // Fresh reader with the tampering discoveryApi — no in-process trust state.
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: sharedSubgraph,
+      discoveryApi: tamperingDiscoveryApi,
       network: 'base-sepolia',
     });
 
@@ -859,13 +847,95 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
     // Pre-seed the IPFS double with a malformed body under a known cid.
     const cid = await ipfs.upload({ wrong: 'shape' });
     await expect(client.getManifest({ manifestCid: cid })).rejects.toThrow();
+  });
+
+  it('does NOT throw when discoveryApi returns the "0x" sentinel manifestHash (falls through to no-hash path)', async () => {
+    // Regression guard for the sentinel-is-truthy bug: when the Ponder indexer
+    // returns null for `manifestHash` on older rows, http.ts maps it to '0x'.
+    // The registry client must NOT treat '0x' as a real hash — it should skip
+    // the comparison entirely (no-advertised-hash fallthrough), not throw a
+    // spurious mismatch error.
+    const sharedIpfs = makeMockIpfs();
+
+    const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      network: 'base-sepolia',
+    });
+    const { manifest, signer } = await buildSignedManifest();
+    const { manifestCid } = await publisherClient.publishManifest({ manifest, signer });
+
+    // discoveryApi returns the '0x' sentinel — simulates an older indexed row
+    // where the Ponder schema predates the manifestHash column.
+    const sentinelDiscoveryApi: DiscoveryAPI = {
+      async getLifecycleStatus() {
+        return {
+          status: 'launched',
+          statusUpdatedAt: '2026-05-06T00:00:00Z',
+          sourceBlock: 100,
+          manifestHash: '0x' as `0x${string}`,
+        };
+      },
+      async listLaunchedSolverNets() { return []; },
+      async findClaimableTasks() { return []; },
+      async queryEnvelopes() { return []; },
+    };
+
+    const reader = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      discoveryApi: sentinelDiscoveryApi,
+      network: 'base-sepolia',
+    });
+
+    // Must NOT throw — the sentinel is treated as "no advertised hash available".
+    const fetched = await reader.getManifest({ manifestCid });
+    expect(fetched.solverNetId).toBe(manifest.solverNetId);
+  });
+
+  it('throws a hash mismatch when discoveryApi returns a real hash that differs from the fetched manifest', async () => {
+    // Complementary to the sentinel test: a non-sentinel, non-matching hash
+    // MUST throw. This ensures the sentinel guard does not accidentally
+    // suppress legitimate mismatch errors.
+    const sharedIpfs = makeMockIpfs();
+
+    const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      network: 'base-sepolia',
+    });
+    const { manifest, signer } = await buildSignedManifest();
+    const { manifestCid } = await publisherClient.publishManifest({ manifest, signer });
+
+    const wrongHash = ('0x' + 'cd'.repeat(32)) as `0x${string}`;
+    const mismatchDiscoveryApi: DiscoveryAPI = {
+      async getLifecycleStatus() {
+        return {
+          status: 'launched',
+          statusUpdatedAt: '2026-05-06T00:00:00Z',
+          sourceBlock: 100,
+          manifestHash: wrongHash,
+        };
+      },
+      async listLaunchedSolverNets() { return []; },
+      async findClaimableTasks() { return []; },
+      async queryEnvelopes() { return []; },
+    };
+
+    const reader = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      discoveryApi: mismatchDiscoveryApi,
+      network: 'base-sepolia',
+    });
+
+    await expect(reader.getManifest({ manifestCid })).rejects.toThrow(/hash/i);
   });
 
   it('skips subgraph round-trip when cid is already verified (post-publish cache hit)', async () => {
@@ -880,7 +950,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -912,7 +981,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -935,7 +1003,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -958,7 +1025,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
     const { manifest, signer } = await buildSignedManifest();
@@ -967,7 +1033,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
     // Cold: cache miss before getManifest.
@@ -985,14 +1050,15 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
 // ── Tests: getLifecycleStatus ───────────────────────────────────────────────
 
 describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () => {
-  it('returns the latest status for a given cid', async () => {
+  it('returns the latest status for a given cid via discoveryApi.getLifecycleStatus', async () => {
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
+    const discoveryApi = makeMockDiscoveryApi(subgraph);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
+      discoveryApi,
       network: 'base-sepolia',
     });
 
@@ -1030,19 +1096,36 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     expect(result.sourceBlock).toBe(200);
   });
 
-  it('throws when no events exist for the cid', async () => {
+  it('throws when no events exist for the cid (discoveryApi returns undefined)', async () => {
+    const ipfs = makeMockIpfs();
+    const publisher = makeMockPublisher();
+    const subgraph = makeMockSubgraph();
+    const discoveryApi = makeMockDiscoveryApi(subgraph);
+    const client = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      discoveryApi,
+      network: 'base-sepolia',
+    });
+
+    await expect(client.getLifecycleStatus({ manifestCid: 'bafyMissing' })).rejects.toThrow(
+      /no setMetadata/i,
+    );
+  });
+
+  it('throws when no discoveryApi is injected', async () => {
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
+      // discoveryApi intentionally absent
       network: 'base-sepolia',
     });
 
-    await expect(client.getLifecycleStatus({ manifestCid: 'bafyMissing' })).rejects.toThrow(
-      /no setMetadata/i,
+    await expect(client.getLifecycleStatus({ manifestCid: 'bafyAny' })).rejects.toThrow(
+      /requires a DiscoveryAPI/i,
     );
   });
 
@@ -1054,10 +1137,11 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     const ipfs = makeMockIpfs();
     const publisher = makeMockPublisher();
     const subgraph = makeMockSubgraph();
+    const discoveryApi = makeMockDiscoveryApi(subgraph);
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
+      discoveryApi,
       network: 'base-sepolia',
     });
 

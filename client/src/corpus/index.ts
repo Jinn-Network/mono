@@ -14,7 +14,6 @@ import type {
   ArtifactContent,
   ReadArgs,
 } from './types.js';
-import { runCorpusQuery } from './query.js';
 import { runOnchainCorpusQuery } from './onchain-query.js';
 import { fetchManifest } from './fetch.js';
 import { acquireArtifactContent } from './acquire.js';
@@ -73,9 +72,8 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
   const acquireFn = deps.acquireFn;
 
   async function query(q: CorpusQuery): Promise<EnvelopeRef[]> {
-    // When a DiscoveryAPI is injected, delegate entirely — the corpus library
-    // no longer owns the subgraph-vs-onchain split. The DiscoveryAPI handles
-    // the split internally (primary + fallback via withFallback).
+    // When a DiscoveryAPI is injected, delegate entirely — the DiscoveryAPI
+    // owns the primary-vs-floor split (Ponder HTTP + onchain floor via withFallback).
     if (opts.discovery) {
       try {
         const refs = await opts.discovery.queryEnvelopes(q);
@@ -89,26 +87,10 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
       }
     }
 
-    // Legacy path: subgraphUrl and/or onchain options. TODO(jinn-mono-280n.6):
-    // remove this branch once subgraphUrl is retired and all callers pass
-    // opts.discovery.
-    if (opts.subgraphUrl) {
-      console.warn(
-        '[corpus] opts.subgraphUrl is deprecated. Pass a DiscoveryAPI via opts.discovery instead.',
-      );
-    }
-
+    // Legacy path: onchain option.
     const refs: EnvelopeRef[] = [];
     const warnings: string[] = [];
     let successfulSources = 0;
-    if (opts.subgraphUrl) {
-      try {
-        refs.push(...await runCorpusQuery(opts.subgraphUrl, q, fetchImpl));
-        successfulSources += 1;
-      } catch (err) {
-        warnings.push(`subgraph: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
     if (opts.onchain) {
       try {
         refs.push(...await runOnchainCorpusQuery(q, opts.onchain));
