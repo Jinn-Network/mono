@@ -19,7 +19,7 @@
 #   options:
 #     --status <Todo|In Progress|Done>   Project Status (default: Todo)
 #     --epic <option-name>               override the Epic option (default: derived from the
-#                                        bead's parent epic via the EPIC_MAP table below)
+#                                        bead's parent epic via epic_option_for() below)
 #     --labels l1,l2,...                 extra GitHub Issue labels (auto-created if missing)
 #     --update                           if the bead is already mirrored, don't create a new
 #                                        Issue — just re-apply Sprint/Epic/Status to its
@@ -34,8 +34,8 @@
 # Changelog:
 # - v0.2 (jinn-mono-2cl.21, 2026-05-12): Sprint field is an Iteration (not a Date) — resolve
 #   @current/@next/<title> to an iteration id and set with --iteration-id. Epic is set to the
-#   human-readable single-select option (mapped from the bead's parent epic via EPIC_MAP), not a
-#   raw bd id. Added Status setting (--status) and --update (move between sprints). Auto-create
+#   human-readable single-select option (mapped from the bead's parent epic via epic_option_for()),
+#   not a raw bd id. Added Status setting (--status) and --update (move between sprints). Auto-create
 #   any missing GitHub labels before use. Use the Project's GraphQL node id for item-edit.
 # - v0.1 (jinn-mono-2cl.13, 2026-05-11): fix bd JSON parsing (array index, .parent, owner fallback).
 
