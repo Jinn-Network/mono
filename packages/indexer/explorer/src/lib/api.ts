@@ -1,0 +1,277 @@
+/**
+ * Typed fetch helpers + React Query hooks for the Jinn network explorer.
+ *
+ * All shapes mirror the exact JSON responses from `packages/indexer/src/api/explorer.ts`.
+ * bigint fields serialised as decimal strings (jinnEarned, mostRecentSettlementBlock, etc.).
+ */
+
+import { useQuery } from '@tanstack/react-query';
+
+// ── Freshness ────────────────────────────────────────────────────────────────
+
+export interface FreshnessMeta {
+  lastIndexedBlock: string;
+  lastIndexedAt: string;
+  /** null if the head RPC call is not available */
+  behindHead: number | null;
+}
+
+// ── Shared ───────────────────────────────────────────────────────────────────
+
+export interface CompositionEntry {
+  value: string;
+  count: number;
+  share: number;
+}
+
+export interface LeaderboardRow {
+  operator: string;
+  attempts: number;
+  settledContribution: number;
+  verdictsTotal: number;
+  verdictsPass: number;
+  /** null when verdictsTotal === 0 */
+  resolvedRate: number | null;
+  /** decimal string, e.g. "100500000000000000044" */
+  jinnEarned: string;
+}
+
+export interface RankedLeaderboardRow extends LeaderboardRow {
+  rank: number;
+  dominantMode?: string;
+  dominantHarness?: string;
+}
+
+// ── GET /explorer/network ────────────────────────────────────────────────────
+
+export interface NetworkResponse extends FreshnessMeta {
+  tasksPosted: number;
+  tasksSettled: number;
+  tasksRefunded: number;
+  attempts: number;
+  distinctOperators: number;
+  solverNetsRunning: number;
+  verdicts: number;
+  verdictsPass: number;
+  resolvedRate: number | null;
+  jinnDistributedOperator: string;
+  jinnDistributedDao: string;
+  mostRecentSettlementBlock: string | null;
+  composition: {
+    byMode: CompositionEntry[];
+    byHarness: CompositionEntry[];
+  };
+  enrichmentCoverage: {
+    enrichedAttempts: number;
+    totalAttempts: number;
+    share: number;
+  };
+}
+
+// ── GET /explorer/solvernets ─────────────────────────────────────────────────
+
+export interface SolverNetRow {
+  cid: string;
+  status: string;
+  launcherAgentId: string | null;
+  statusUpdatedAt: string | null;
+  tasksPosted: number;
+  tasksSettled: number;
+  attempts: number;
+  verdicts: number;
+  verdictsPass: number;
+  resolvedRate: number | null;
+}
+
+export interface SolverNetsResponse extends FreshnessMeta {
+  solvernets: SolverNetRow[];
+}
+
+// ── GET /explorer/solvernet/:cid ─────────────────────────────────────────────
+
+export interface LearningCurveBucket {
+  bucketStartBlock: string;
+  total: number;
+  pass: number;
+  rate: number | null;
+}
+
+export interface CheckpointTimelineEntry {
+  cid: string;
+  agentId: string;
+  publishedAtBlock: string;
+}
+
+export interface FreezeViolation {
+  operator: string;
+  modalCodeDigest: string;
+  total: number;
+  violatingCount: number;
+}
+
+export interface SolverNetResponse extends FreshnessMeta {
+  cid: string;
+  status: string;
+  launcherAgentId: string | null;
+  tasksPosted: number;
+  tasksSettled: number;
+  attempts: number;
+  verdicts: number;
+  verdictsPass: number;
+  resolvedRate: number | null;
+  learningCurveBuckets: LearningCurveBucket[];
+  learningCurveRolling: number[];
+  trainBoard: {
+    ranked: (RankedLeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
+    lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
+  };
+  frozenBoard: {
+    ranked: (RankedLeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
+    lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
+  };
+  checkpointTimeline: {
+    checkpoints: CheckpointTimelineEntry[];
+    note: string;
+  };
+  freezeIntegrity: {
+    violations: FreezeViolation[];
+    verifiedFrozenShare: number;
+    frozenAttempts: number;
+  };
+}
+
+// ── GET /explorer/operators ──────────────────────────────────────────────────
+
+export interface OperatorsResponse extends FreshnessMeta {
+  ranked: RankedLeaderboardRow[];
+  lowVolume: (LeaderboardRow & { dominantMode?: string; dominantHarness?: string })[];
+  minVerdicts: number;
+  appliedFilters?: {
+    mode?: string;
+    harness?: string;
+  };
+  meta: {
+    jinnAttribution: 'pending' | 'ok';
+  };
+}
+
+// ── GET /explorer/operator/:addr ─────────────────────────────────────────────
+
+export interface OperatorPerSolverNet {
+  cid: string;
+  status: string;
+  attempts: number;
+  settledContribution: number;
+  verdictsTotal: number;
+  verdictsPass: number;
+  resolvedRate: number | null;
+  modeBreakdown: CompositionEntry[];
+}
+
+export interface OperatorResponse extends FreshnessMeta {
+  operator: string;
+  dominantMode: string;
+  dominantHarness: string;
+  dominantSolverType: string;
+  perSolverNet: OperatorPerSolverNet[];
+  totals: {
+    attempts: number;
+    settledContribution: number;
+    verdictsTotal: number;
+    verdictsPass: number;
+    resolvedRate: number | null;
+    jinnEarned: string;
+  };
+  meta: {
+    jinnAttribution: 'pending' | 'ok';
+  };
+}
+
+// ── Fetch helper ─────────────────────────────────────────────────────────────
+
+export async function fetchJson<T>(path: string): Promise<T> {
+  const res = await fetch(path);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText} — ${path}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ── Query-string builder ─────────────────────────────────────────────────────
+
+function qs(params: Record<string, string | number | undefined>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') p.set(k, String(v));
+  }
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
+// ── Hooks ────────────────────────────────────────────────────────────────────
+
+export function useNetwork() {
+  return useQuery({
+    queryKey: ['network'],
+    queryFn: () => fetchJson<NetworkResponse>('/explorer/network'),
+  });
+}
+
+export function useSolverNets() {
+  return useQuery({
+    queryKey: ['solvernets'],
+    queryFn: () => fetchJson<SolverNetsResponse>('/explorer/solvernets'),
+  });
+}
+
+export interface SolverNetParams {
+  bucket?: number;
+  k?: number;
+  minVerdicts?: number;
+}
+
+export function useSolverNet(cid: string, params?: SolverNetParams) {
+  return useQuery({
+    queryKey: ['solvernet', cid, params],
+    queryFn: () =>
+      fetchJson<SolverNetResponse>(
+        `/explorer/solvernet/${encodeURIComponent(cid)}${qs({
+          bucket: params?.bucket,
+          k: params?.k,
+          minVerdicts: params?.minVerdicts,
+        })}`,
+      ),
+    enabled: Boolean(cid),
+  });
+}
+
+export interface OperatorsParams {
+  minVerdicts?: number;
+  mode?: string;
+  harness?: string;
+}
+
+export function useOperators(params?: OperatorsParams) {
+  return useQuery({
+    queryKey: ['operators', params],
+    queryFn: () =>
+      fetchJson<OperatorsResponse>(
+        `/explorer/operators${qs({
+          minVerdicts: params?.minVerdicts,
+          mode: params?.mode,
+          harness: params?.harness,
+        })}`,
+      ),
+  });
+}
+
+export function useOperator(addr: string) {
+  return useQuery({
+    queryKey: ['operator', addr],
+    queryFn: () =>
+      fetchJson<OperatorResponse>(
+        `/explorer/operator/${encodeURIComponent(addr)}`,
+      ),
+    enabled: Boolean(addr),
+  });
+}
