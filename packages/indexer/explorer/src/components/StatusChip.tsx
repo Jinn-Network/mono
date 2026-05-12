@@ -27,7 +27,9 @@ const KIND_COLOR: Record<StatusKind, string> = {
   retired:   'var(--fg-dim)',
   unknown:   'var(--fg-dim)',
   train:     'var(--accent)',
-  frozen:    'var(--accent-gold)',
+  // "frozen" uses muted lamplight gold (--gold-600) rather than --accent-gold so it
+  // doesn't compete with the one-gold-per-surface focal headline on Operator surfaces.
+  frozen:    'var(--gold-600)',
   violation: 'var(--break-red)',
 };
 

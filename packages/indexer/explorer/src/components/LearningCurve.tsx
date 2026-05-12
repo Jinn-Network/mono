@@ -127,6 +127,11 @@ export function LearningCurve({
 
     const w = containerRef.current.clientWidth || 600;
 
+    // Guard against React StrictMode double-invoke: if cleanup runs before the
+    // async import resolves, we must not construct (or must immediately destroy)
+    // the orphaned uPlot instance.
+    let cancelled = false;
+
     // Using a local alias to hold the constructor after dynamic import
     let UPlot: (typeof uPlotType) | undefined;
     let instance: unknown;
@@ -134,6 +139,11 @@ export function LearningCurve({
     async function init() {
       try {
         const mod = await import('uplot');
+
+        // StrictMode / fast-refresh safety: bail if the effect was cleaned up
+        // while the dynamic import was in-flight.
+        if (cancelled || !containerRef.current) return;
+
         // uPlot uses `export =` — the constructor is either at mod or mod.default
         // depending on the bundler. We cast to handle both.
         UPlot = (mod as unknown as { default?: typeof uPlotType }).default
@@ -144,8 +154,19 @@ export function LearningCurve({
         instance = new UPlot(
           opts as uPlotType.Options,
           [xs as number[], ys as number[]],
-          containerRef.current!,
+          containerRef.current,
         );
+
+        // Check again: cleanup may have run between construction and assignment.
+        if (cancelled) {
+          try {
+            (instance as { destroy?: () => void }).destroy?.();
+          } catch (_e) {
+            // ignore
+          }
+          return;
+        }
+
         plotRef.current = instance;
       } catch (_e) {
         // Silently skip in environments where uPlot can't render (jsdom, canvas-less)
@@ -175,6 +196,8 @@ export function LearningCurve({
     }
 
     return () => {
+      // Signal the async init not to construct (or to immediately destroy) the instance.
+      cancelled = true;
       ro?.disconnect();
       try {
         (plotRef.current as { destroy?: () => void } | null)?.destroy?.();

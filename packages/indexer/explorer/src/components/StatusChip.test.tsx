@@ -24,10 +24,10 @@ describe('StatusChip', () => {
     expect(chip.style.color).toContain('break-red');
   });
 
-  it('renders with accent-gold color for frozen', () => {
+  it('renders with gold-600 color for frozen (muted — does not compete with focal headline gold)', () => {
     const { container } = render(<StatusChip kind="frozen" label="frozen" />);
     const chip = container.firstChild as HTMLElement;
-    expect(chip.style.color).toContain('accent-gold');
+    expect(chip.style.color).toContain('gold-600');
   });
 
   it('renders with wane color for paused', () => {

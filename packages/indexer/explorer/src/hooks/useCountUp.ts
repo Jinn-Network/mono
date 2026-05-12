@@ -15,9 +15,10 @@ export function useCountUp(target: number, durationMs = 400): number {
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // Respect prefers-reduced-motion
+    // Respect prefers-reduced-motion; guard against jsdom where matchMedia may be absent.
     const reduced =
       typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     if (reduced || durationMs <= 0) {

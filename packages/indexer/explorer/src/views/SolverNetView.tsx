@@ -17,6 +17,7 @@ import { CheckpointTimeline } from '../components/CheckpointTimeline';
 import { FreezeIntegrity } from '../components/FreezeIntegrity';
 import { Leaderboard } from '../components/Leaderboard';
 import { useNumParam, useEnumParam } from '../lib/url-state';
+import { useCountUp } from '../hooks/useCountUp';
 import { pct, int, shortAddr, shortCid } from '../lib/format';
 
 // ── K sentinel (show all) ─────────────────────────────────────────────────────
@@ -143,6 +144,9 @@ export function SolverNetView() {
     k: k === K_ALL ? undefined : k,
     bucket,
   });
+
+  // Animate the gold headline resolved-rate; respects prefers-reduced-motion.
+  const animatedRate = useCountUp(data?.resolvedRate ?? 0, 400);
 
   // Unused setter reference to silence lint — bucket setter is available
   void setBucket;
@@ -310,7 +314,7 @@ export function SolverNetView() {
                 }}
                 aria-label={`Resolved rate: ${pct(data.resolvedRate)}`}
               >
-                {data.resolvedRate !== null ? pct(data.resolvedRate) : '—'}
+                {data.resolvedRate === null ? '—' : pct(animatedRate)}
               </div>
               <div
                 style={{
@@ -454,6 +458,8 @@ export function SolverNetView() {
                 <Leaderboard
                   ranked={boardData.ranked}
                   lowVolume={boardData.lowVolume}
+                  // JINN attribution can't be split by mode — show "—" until ebu7.9
+                  meta={{ jinnAttribution: 'pending' }}
                   compact
                 />
               );
