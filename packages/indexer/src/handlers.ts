@@ -17,7 +17,7 @@
  * — this is a refactor, not a behaviour change. See `src/index.ts` for the
  * Ponder docs links and the schema rationale.
  */
-import { decodeAbiParameters, type Hex } from 'viem';
+import { decodeAbiParameters, keccak256, toBytes, type Hex } from 'viem';
 import {
   parseEnvelopeKey,
   parseSolverNetManifestKey,
@@ -396,6 +396,7 @@ export async function handleMetadataSet({
       .insert(solverNetManifest)
       .values({
         id: manifestCid,
+        cidKeccak: keccak256(toBytes(manifestCid)),
         launcherAgentId: agentId,
         status,
         statusUpdatedAt,
@@ -421,6 +422,7 @@ export async function handleMetadataSet({
             logIndex > row.anchorLogIndex);
         if (incomingIsNewer) {
           return {
+            cidKeccak: keccak256(toBytes(manifestCid)),
             launcherAgentId: agentId,
             status,
             statusUpdatedAt,
@@ -434,6 +436,7 @@ export async function handleMetadataSet({
         // No-op: return existing row fields so Drizzle generates valid SQL.
         // (SET col = col, ... is a valid no-op; SET with empty SET clause is not.)
         return {
+          cidKeccak: row.cidKeccak,
           launcherAgentId: row.launcherAgentId,
           status: row.status,
           statusUpdatedAt: row.statusUpdatedAt,

@@ -25,6 +25,7 @@
  *      queries.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { keccak256, toBytes } from 'viem';
 import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution } from '../ponder.schema.js';
 import {
   handleTaskCreated,
@@ -238,6 +239,7 @@ describe('MetadataSet key routing', () => {
     expect(db.count(envelope)).toBe(0);
     expect(db.get(solverNetManifest, { id: MANIFEST_CID })).toMatchObject({
       id: MANIFEST_CID,
+      cidKeccak: keccak256(toBytes(MANIFEST_CID)),
       launcherAgentId: '5',
       status: 'launched',
       statusUpdatedAt: '2026-05-11T00:00:00Z',

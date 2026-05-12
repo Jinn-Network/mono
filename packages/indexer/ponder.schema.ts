@@ -1,12 +1,14 @@
 /**
  * Ponder schema for the Jinn protocol indexer.
  *
- * Four entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7:
+ * Six entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7:
  *
- *   Task            — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
- *   Attempt         — from JinnRouter.TaskAttemptCreated
+ *   Task              — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
+ *   Attempt           — from JinnRouter.TaskAttemptCreated
+ *   Verdict           — from JinnRouter.VerdictDeliveryClaimed
+ *   RewardDistribution — from JinnDistributor.Claimed on Sepolia L1
  *   SolverNetManifest — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
- *   Envelope        — from IdentityRegistry.MetadataSet (envelope key patterns)
+ *   Envelope          — from IdentityRegistry.MetadataSet (envelope key patterns)
  *
  * Schema-version policy: any breaking change to an existing entity (rename,
  * remove, or type-change of a column) bumps the schema version and triggers a
@@ -227,6 +229,11 @@ export const solverNetManifest = onchainTable(
   (t) => ({
     /** manifestCid — the IPFS CID after the `solvernet-manifest:` prefix. Primary key. */
     id: t.text().primaryKey(),
+    /**
+     * keccak256(utf8 bytes of the manifest CID string). Equals Task.manifestDigest,
+     * so per-SolverNet rollups join task.manifestDigest == solverNetManifest.cidKeccak.
+     */
+    cidKeccak: t.hex().notNull(),
     /** agentId of the launcher (decimal string of the uint256). */
     launcherAgentId: t.text().notNull(),
     /**
@@ -255,6 +262,7 @@ export const solverNetManifest = onchainTable(
     chainId: t.integer().notNull(),
   }),
   (table) => ({
+    cidKeccakIdx: index().on(table.cidKeccak),
     launcherIdx: index().on(table.launcherAgentId),
     statusIdx: index().on(table.status),
     chainIdx: index().on(table.chainId),
