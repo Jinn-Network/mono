@@ -46,8 +46,10 @@ ORG="${REPO%%/*}"
 PROJECT_TITLE="Jinn engineering"
 
 # bd epic short id -> public Epic single-select option name on the board.
-# Keep in sync with the board's Epic field (DR-2026-05-11-b). A case statement (not an
-# associative array) so this runs on macOS's bash 3.2 — `declare -A` is bash 4+ only.
+# Keep in sync with the board's Epic field (DR-2026-05-11-b) — when an epic ships and its
+# board column is removed, drop its entry here too (e.g. 280n "Discovery API", removed once
+# shipped). A case statement (not an associative array) so this runs on macOS's bash 3.2 —
+# `declare -A` is bash 4+ only.
 epic_option_for() {
   case "$1" in
     uy6v) echo "v1 public testnet" ;;
@@ -55,7 +57,6 @@ epic_option_for() {
     2cl)  echo "Engineering handbook" ;;
     46l8) echo "VPS deployment" ;;
     9iq3) echo "Prediction freeze" ;;
-    280n) echo "Discovery API" ;;
     *)    echo "" ;;
   esac
 }
