@@ -9,6 +9,7 @@ import type { Store } from '../store/store.js';
 import type { ArtifactSource, EvidenceTier, Role, SignedEnvelope } from '../types/envelope.js';
 
 export interface CorpusOptions {
+  /** @deprecated Use `discovery` instead. Legacy subgraph URL for corpus queries. */
   subgraphUrl?: string;
   ipfsGatewayUrl: string;
   store: Store;
@@ -16,6 +17,17 @@ export interface CorpusOptions {
   selfSafeAddress: string;
   routeResolver?: RouteResolver;
   onchain?: import('./onchain-query.js').OnchainCorpusQueryOptions;
+  /**
+   * DiscoveryAPI instance for envelope queries. When provided, replaces both
+   * the legacy `subgraphUrl` subgraph path and the `onchain` path — the corpus
+   * library delegates queryEnvelopes to the DiscoveryAPI and no longer owns
+   * the subgraph-vs-onchain split internally.
+   *
+   * When both `discovery` and `subgraphUrl`/`onchain` are set, `discovery`
+   * takes precedence. The legacy paths are still honoured when absent for
+   * backwards compatibility.
+   */
+  discovery?: import('../discovery/types.js').DiscoveryAPI;
 }
 
 export interface CorpusQuery {

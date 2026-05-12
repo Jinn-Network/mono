@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
 import type { SignedTaskV1 } from '../../../src/types/task-document.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate } from '../../../src/discovery/types.js';
+import { DiscoveryUnavailableError } from '../../../src/discovery/types.js';
 
 const HOISTED = vi.hoisted(() => {
   const REQUEST_ID = ('0x' + 'aa'.repeat(32)) as `0x${string}`;
@@ -288,13 +290,12 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('watchForTasks yields subgraph-discovered claimable backlog tasks', async () => {
+  it('watchForTasks yields discoveryApi-discovered claimable backlog tasks', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
-    const { queryClaimableTaskCandidates } = await import('../../../src/adapters/mech/task-subgraph.js');
     const { canClaimTask, claimTask } = await import('../../../src/adapters/mech/contracts.js');
     const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
-    vi.mocked(queryClaimableTaskCandidates).mockResolvedValueOnce([{
+    const candidate: ClaimableTaskCandidate = {
       taskId: '42',
       taskCidDigest: TASK_CID_DIGEST,
       manifestDigest: MANIFEST_DIGEST,
@@ -302,13 +303,19 @@ describe('MechAdapter TaskCoordinator flow', () => {
       createdAtTx: TX_HASH,
       attemptCount: 0,
       operatorAttemptCount: 0,
-    }]);
-    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'subgraph-task' }));
+    };
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([candidate]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'discovery-task' }));
 
     const adapter = new MechAdapter({
       ...TEST_CONFIG,
       taskDiscovery: {
-        subgraphUrl: 'https://subgraph.example/graphql',
+        discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
       },
     });
@@ -318,8 +325,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
     const { value } = await gen.next();
 
-    expect(queryClaimableTaskCandidates).toHaveBeenCalledWith(expect.objectContaining({
-      url: 'https://subgraph.example/graphql',
+    expect(mockDiscoveryApi.findClaimableTasks).toHaveBeenCalledWith(expect.objectContaining({
       solverNetManifestCids: ['bafyfixturecid'],
       operatorAddress: TEST_CONFIG.safeAddress,
     }));
@@ -335,7 +341,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskCid: TASK_CID,
       onchainCreationTx: TX_HASH,
       onchainCreationBlock: 80,
-      task: { id: 'subgraph-task' },
+      task: { id: 'discovery-task' },
     });
 
     await adapter.claimTask(value!.taskId);
@@ -352,38 +358,42 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('subgraph discovery yields one backlog task per polling pass', async () => {
+  it('discovery yields one backlog task per polling pass', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
-    const { queryClaimableTaskCandidates } = await import('../../../src/adapters/mech/task-subgraph.js');
     const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
     const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
-    vi.mocked(queryClaimableTaskCandidates).mockResolvedValueOnce([
-      {
-        taskId: '42',
-        taskCidDigest: TASK_CID_DIGEST,
-        manifestDigest: MANIFEST_DIGEST,
-        createdAtBlock: 80,
-        createdAtTx: TX_HASH,
-        attemptCount: 0,
-        operatorAttemptCount: 0,
-      },
-      {
-        taskId: '43',
-        taskCidDigest: TASK_CID_DIGEST,
-        manifestDigest: MANIFEST_DIGEST,
-        createdAtBlock: 81,
-        createdAtTx: TX_HASH,
-        attemptCount: 0,
-        operatorAttemptCount: 0,
-      },
-    ]);
-    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'first-subgraph-task' }));
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([
+        {
+          taskId: '42',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 80,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        {
+          taskId: '43',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 81,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+      ]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'first-discovery-task' }));
 
     const adapter = new MechAdapter({
       ...TEST_CONFIG,
       taskDiscovery: {
-        subgraphUrl: 'https://subgraph.example/graphql',
+        discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
       },
     });
@@ -395,7 +405,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
     expect(first.value).toMatchObject({
       taskId: '42',
-      task: { id: 'first-subgraph-task' },
+      task: { id: 'first-discovery-task' },
     });
     expect(second.done).toBe(true);
     expect(canClaimTask).toHaveBeenCalledTimes(1);
@@ -404,38 +414,42 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('subgraph discovery honors an explicit task id scope', async () => {
+  it('discovery honors an explicit task id scope', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
-    const { queryClaimableTaskCandidates } = await import('../../../src/adapters/mech/task-subgraph.js');
     const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
     const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
-    vi.mocked(queryClaimableTaskCandidates).mockResolvedValueOnce([
-      {
-        taskId: '42',
-        taskCidDigest: TASK_CID_DIGEST,
-        manifestDigest: MANIFEST_DIGEST,
-        createdAtBlock: 80,
-        createdAtTx: TX_HASH,
-        attemptCount: 0,
-        operatorAttemptCount: 0,
-      },
-      {
-        taskId: '43',
-        taskCidDigest: TASK_CID_DIGEST,
-        manifestDigest: MANIFEST_DIGEST,
-        createdAtBlock: 81,
-        createdAtTx: TX_HASH,
-        attemptCount: 0,
-        operatorAttemptCount: 0,
-      },
-    ]);
-    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'scoped-subgraph-task' }));
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([
+        {
+          taskId: '42',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 80,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        {
+          taskId: '43',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 81,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+      ]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'scoped-discovery-task' }));
 
     const adapter = new MechAdapter({
       ...TEST_CONFIG,
       taskDiscovery: {
-        subgraphUrl: 'https://subgraph.example/graphql',
+        discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
         allowedTaskIds: ['43'],
       },
@@ -447,7 +461,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
     expect(first.value).toMatchObject({
       taskId: '43',
-      task: { id: 'scoped-subgraph-task' },
+      task: { id: 'scoped-discovery-task' },
     });
     expect(canClaimTask).toHaveBeenCalledTimes(1);
     expect(canClaimTask).toHaveBeenCalledWith(
@@ -461,14 +475,20 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('falls back to canonical TaskCreated logs when configured subgraph discovery fails', async () => {
+  it('falls back to canonical TaskCreated logs when discoveryApi fails', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { decodeTaskCreatedLogs } = await import('../../../src/adapters/mech/contracts.js');
     const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
-    const { queryClaimableTaskCandidates } = await import('../../../src/adapters/mech/task-subgraph.js');
     const manifestCid = 'bafyfixturecid';
 
-    vi.mocked(queryClaimableTaskCandidates).mockRejectedValueOnce(new Error('subgraph HTTP 429'));
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockRejectedValueOnce(
+        new DiscoveryUnavailableError('discovery HTTP 429'),
+      ),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
     vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
       taskId: '44',
       taskCidDigest: TASK_CID_DIGEST,
@@ -482,7 +502,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const adapter = new MechAdapter({
       ...TEST_CONFIG,
       taskDiscovery: {
-        subgraphUrl: 'https://subgraph.example/graphql',
+        discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: [manifestCid],
         onchainFromBlock: 100,
       },

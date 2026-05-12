@@ -46,9 +46,8 @@ import {
 import { type MechAdapterConfig } from './types.js';
 import {
   manifestDigestForCid,
-  queryClaimableTaskCandidates,
-  type SubgraphTaskCandidate,
 } from './task-subgraph.js';
+import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
@@ -544,23 +543,27 @@ export class MechAdapter implements ExecutionAdapter {
 
   private async *discoverSubgraphRestorationTasks(): AsyncIterable<TaskAnnouncement> {
     const discovery = this.config.taskDiscovery;
-    const subgraphUrl = discovery?.subgraphUrl;
+    const discoveryApi: DiscoveryAPI | undefined = discovery?.discoveryApi;
     const solverNetManifestCids = discovery?.solverNetManifestCids ?? [];
-    if (!subgraphUrl || solverNetManifestCids.length === 0) return;
 
-    let candidates: SubgraphTaskCandidate[];
+    // Without a DiscoveryAPI or SolverNet manifest CIDs there is nothing to
+    // discover via this path. The legacy subgraphUrl is handled in config.ts
+    // normalization (mapped to discovery: { mode: 'http-subgraph', ... }) and
+    // the resulting DiscoveryAPI is injected here. Direct subgraph calls are
+    // no longer supported from this method.
+    if (!discoveryApi || solverNetManifestCids.length === 0) return;
+
+    let candidates;
     try {
-      candidates = await queryClaimableTaskCandidates({
-        url: subgraphUrl,
+      candidates = await discoveryApi.findClaimableTasks({
         solverNetManifestCids,
         operatorAddress: this.config.safeAddress,
-        pageSize: discovery.pageSize,
-        maxPages: discovery.maxPages,
-        fetchImpl: discovery.fetchImpl,
+        pageSize: discovery?.pageSize,
+        maxPages: discovery?.maxPages,
       });
     } catch (err) {
       console.error(
-        '[mech] task subgraph discovery failed:',
+        '[mech] task discovery (DiscoveryAPI) failed:',
         err instanceof Error ? err.message : err,
       );
       return;
@@ -570,6 +573,11 @@ export class MechAdapter implements ExecutionAdapter {
       if (!this.isDiscoveryTaskAllowed(candidate.taskId)) continue;
       if (this.claimedRestorationTaskIds.has(candidate.taskId)) continue;
 
+      // Verify claimability per backend: HttpSubgraphDiscoveryAPI cannot run
+      // canClaimTask (no on-chain simulation), so this check is load-bearing
+      // for that path. OnchainDiscoveryAPI already filters internally; this
+      // is redundant there. TODO: add a DiscoveryAPI capability flag so the
+      // onchain path can skip the extra simulateContract round-trip.
       const claimable = await canClaimTask(
         this.publicClient,
         this.config.safeAddress,

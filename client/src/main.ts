@@ -1457,6 +1457,54 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     .filter((entry) => entry.roles.includes('solver'))
     .map((entry) => entry.manifestCid);
 
+  // ── DiscoveryAPI construction ─────────────────────────────────────────────
+  // Build the shared DiscoveryAPI used by MechAdapter (task discovery),
+  // the SolverNet registry client (lifecycle status), and the corpus library
+  // (envelope discovery). See spec/2026-05-11-discovery-api-and-shared-indexer.md §9.
+  let sharedDiscoveryApi: import('./discovery/types.js').DiscoveryAPI | undefined;
+  {
+    const onchainFloorOpts = {
+      rpcUrl: config.rpcUrl,
+      chainId: config.network === 'testnet' ? 84532 : 8453,
+      routerAddress: ROUTER_ADDRESS,
+      identityRegistryAddress: identityRegistryAddress ?? undefined,
+      safeAddress,
+      mechAddress: mechAddress ?? undefined,
+      taskDiscoveryFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
+    } as const;
+    async function buildOnchainFloor(): Promise<import('./discovery/types.js').DiscoveryAPI> {
+      const { createOnchainDiscoveryAPI } = await import('./discovery/onchain.js');
+      return createOnchainDiscoveryAPI(onchainFloorOpts);
+    }
+
+    const discoveryConfig = config.discovery;
+    if (discoveryConfig) {
+      // A discovery block was explicitly set (or normalized from subgraphUrl).
+      let subgraphClientForDiscovery: import('./solvernets/registry-client-erc8004.js').SubgraphClient | undefined;
+      if (discoveryConfig.mode === 'http-subgraph') {
+        const { createGraphqlSubgraphClient, createNoopSubgraphClient } = await import('./solvernets/daemon-init.js');
+        subgraphClientForDiscovery = discoveryConfig.url?.trim()
+          ? createGraphqlSubgraphClient({ url: discoveryConfig.url })
+          : createNoopSubgraphClient();
+      }
+      try {
+        const { createDiscoveryAPI } = await import('./discovery/factory.js');
+        sharedDiscoveryApi = createDiscoveryAPI(discoveryConfig, {
+          ...onchainFloorOpts,
+          subgraphClient: subgraphClientForDiscovery,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[main] DiscoveryAPI construction failed: ${msg} — falling back to onchain discovery`);
+        sharedDiscoveryApi = await buildOnchainFloor();
+      }
+    } else {
+      // No discovery config — default to onchain floor (no subgraphUrl in config).
+      // TODO(280n.4): flip default to 'http' once HttpDiscoveryAPI lands.
+      sharedDiscoveryApi = await buildOnchainFloor();
+    }
+  }
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrl,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1472,7 +1520,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
     taskDiscovery: taskDiscoveryManifestCids.length > 0
       ? {
-          ...(config.subgraphUrl ? { subgraphUrl: config.subgraphUrl } : {}),
+          discoveryApi: sharedDiscoveryApi,
           solverNetManifestCids: taskDiscoveryManifestCids,
           onchainFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
           ...(config.taskDiscoveryAllowedTaskIds?.length
@@ -1837,6 +1885,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       ipfs: solverNetIpfs,
       publisher: solverNetPublisher,
       subgraph: solverNetSubgraph,
+      discoveryApi: sharedDiscoveryApi,
       network: 'base-sepolia',
     });
     solverNetRegistryClientForEngine = solverNetRegistryClient;
@@ -2004,15 +2053,22 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // Enabled when either the optional subgraph accelerator or canonical
   // on-chain ERC-8004/IPFS discovery is configured. Otherwise the API route is
   // absent and MCP falls back to local-only behaviour with a warning.
-  const corpusFactory = (config.subgraphUrl?.trim() || identityRegistryAddress)
+  // The corpus is always enabled when a DiscoveryAPI is available (which is
+  // always true after 280n.3 — the onchain floor is always constructed).
+  // The legacy condition (subgraphUrl || identityRegistryAddress) is kept for
+  // backwards compatibility with callers that don't use the new path.
+  const corpusFactory = (sharedDiscoveryApi || config.subgraphUrl?.trim() || identityRegistryAddress)
     ? (store: Store) =>
         (corpusForApi = createCorpus({
-          ...(config.subgraphUrl?.trim() ? { subgraphUrl: config.subgraphUrl } : {}),
+          // Prefer DiscoveryAPI when available (280n.3 migration).
+          ...(sharedDiscoveryApi ? { discovery: sharedDiscoveryApi } : {}),
+          // Legacy fallbacks kept for backwards compatibility.
+          ...(!sharedDiscoveryApi && config.subgraphUrl?.trim() ? { subgraphUrl: config.subgraphUrl } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           store,
           signer: { privateKey: agentPrivateKey },
           selfSafeAddress: safeAddress,
-          ...(identityRegistryAddress
+          ...(!sharedDiscoveryApi && identityRegistryAddress
             ? {
                 onchain: {
                   rpcUrl: config.rpcUrl,
@@ -2026,7 +2082,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     : undefined;
   if (!corpusFactory) {
     console.warn(
-      '[main] Corpus disabled (no subgraphUrl or on-chain identity registry); ' +
+      '[main] Corpus disabled (no DiscoveryAPI, subgraphUrl, or on-chain identity registry); ' +
         'MCP record lookup and artifact acquisition network branches will be unavailable.',
     );
   }

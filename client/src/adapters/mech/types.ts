@@ -1,4 +1,5 @@
 import type { Address, WalletClient } from 'viem';
+import type { DiscoveryAPI } from '../../discovery/types.js';
 
 export interface EvictionRecoveryConfig {
   serviceId: number;
@@ -24,6 +25,14 @@ export interface MechAdapterConfig {
    * the adapter still verifies claimability on-chain before yielding work.
    */
   taskDiscovery?: {
+    /**
+     * DiscoveryAPI instance for finding claimable tasks. When provided,
+     * replaces direct subgraph calls in discoverSubgraphRestorationTasks.
+     * If absent but subgraphUrl is set, a deprecation warning is emitted and
+     * the legacy direct-subgraph path is used (via the injected discovery API).
+     */
+    discoveryApi?: DiscoveryAPI;
+    /** @deprecated Pass discoveryApi instead. Legacy: direct subgraph URL. */
     subgraphUrl?: string;
     solverNetManifestCids?: string[];
     /**

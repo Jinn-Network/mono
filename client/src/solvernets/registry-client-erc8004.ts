@@ -67,6 +67,7 @@ import type {
   SolverNetManifestSummary,
   SignerWithAgentEoa,
 } from './registry-client.js';
+import type { DiscoveryAPI } from '../discovery/types.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -166,6 +167,21 @@ export interface IdentityRegistryBackedSolverNetRegistryClientConfig {
   publisher: MetadataPublisher;
   subgraph: SubgraphClient;
   /**
+   * DiscoveryAPI instance for `listLaunched` and `getLifecycleStatus`.
+   *
+   * When provided, these read methods delegate to the DiscoveryAPI instead of
+   * calling `this.subgraph` directly. This allows the registry client to be
+   * backed by any DiscoveryAPI implementation (onchain, http-subgraph, etc.)
+   * without changing its interface.
+   *
+   * When absent, the legacy `subgraph` client is used directly (backwards
+   * compatibility).
+   *
+   * NOTE: `getManifest` and publish paths always use `this.ipfs` and
+   * `this.subgraph` directly — discovery only covers the list/status read paths.
+   */
+  discoveryApi?: DiscoveryAPI;
+  /**
    * Network for which this client serves operator catalog rows. Used to
    * filter `listLaunched` summaries — manifests record their target network
    * in `manifest.network` per spec §7.
@@ -199,6 +215,7 @@ export class IdentityRegistryBackedSolverNetRegistryClient
   private readonly ipfs: IpfsClient;
   private readonly publisher: MetadataPublisher;
   private readonly subgraph: SubgraphClient;
+  private readonly discoveryApi: DiscoveryAPI | undefined;
   private readonly network: 'base-sepolia' | 'base';
   private readonly now: () => Date;
 
@@ -231,6 +248,7 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     this.ipfs = config.ipfs;
     this.publisher = config.publisher;
     this.subgraph = config.subgraph;
+    this.discoveryApi = config.discoveryApi;
     this.network = config.network;
     this.now = config.now ?? (() => new Date());
   }
@@ -350,27 +368,35 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     statusFilter?: Array<'launched' | 'paused' | 'retired'>;
     sinceBlock?: number;
   }): Promise<SolverNetManifestSummary[]> {
-    const events = await this.subgraph.fetchSetMetadataEvents({
-      keyPrefix: SOLVERNET_MANIFEST_KEY_PREFIX,
-      ...(args.sinceBlock !== undefined ? { sinceBlock: args.sinceBlock } : {}),
-    });
+    // Discovery is now the only supported path for listing launched SolverNets.
+    // Direct subgraph calls are no longer supported from this method — the
+    // DiscoveryAPI abstraction wraps the subgraph (or onchain RPC) and is the
+    // single callsite for read-side discovery queries.
+    if (!this.discoveryApi) {
+      throw new Error(
+        'listLaunched requires a DiscoveryAPI to be injected at construction time. ' +
+        'Pass discoveryApi in the IdentityRegistryBackedSolverNetRegistryClientConfig.',
+      );
+    }
 
-    const resolved = resolveMostRecentWins(events);
+    // Step 1: Obtain coarse summaries (manifestCid + lifecycle status) from
+    // the DiscoveryAPI. The http-subgraph implementation folds
+    // resolveMostRecentWins internally; the onchain implementation scans logs.
+    // Note: listLaunchedSolverNets does not accept sinceBlock — that arg was
+    // a subgraph optimisation that does not translate to the abstract interface.
+    const rawSummaries = await this.discoveryApi.listLaunchedSolverNets(
+      args.statusFilter !== undefined ? { status: args.statusFilter } : undefined,
+    );
 
-    const filterByStatus = args.statusFilter;
+    // Step 2: For each summary, fetch the full manifest body from IPFS.
+    // This enriches the coarse summary (which has empty name/network/prices)
+    // with the fields that come only from the manifest body.
     const out: SolverNetManifestSummary[] = [];
 
-    for (const row of resolved) {
-      if (filterByStatus !== undefined && !filterByStatus.includes(row.status)) {
-        continue;
-      }
-
-      // Fetch the manifest body so we can populate the catalog-row fields.
-      // Cache hit avoids the IPFS round-trip for rows we've published or
-      // read in this process.
+    for (const row of rawSummaries) {
       let manifest: SolverNetManifestV1;
       try {
-        manifest = await this.fetchAndValidateManifest(row.manifestCid, row.manifestHash);
+        manifest = await this.fetchAndValidateManifest(row.manifestCid);
       } catch {
         // Skip rows whose IPFS body can't be fetched/validated. Operators
         // see "missing/tampered manifest" rows nowhere, which is
@@ -470,6 +496,18 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     statusUpdatedAt: string;
     sourceBlock: number;
   }> {
+    // Delegate to DiscoveryAPI when available (280n.3 migration).
+    if (this.discoveryApi) {
+      const result = await this.discoveryApi.getLifecycleStatus(args.manifestCid);
+      if (result === undefined) {
+        throw new Error(
+          `no setMetadata events for manifestCid ${args.manifestCid}`,
+        );
+      }
+      return result;
+    }
+
+    // Legacy path: direct subgraph call.
     const events = await this.subgraph.fetchSetMetadataEventsForCid({
       manifestCid: args.manifestCid,
     });

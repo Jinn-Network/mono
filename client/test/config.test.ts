@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_TESTNET_SUBGRAPH_URL, loadConfig, buildConfigProvenance } from '../src/config.js';
 
 describe('loadConfig RPC override handling', () => {
@@ -941,5 +941,88 @@ describe('capture config', () => {
     process.env['JINN_CAPTURES_LLM_PROXY_PORT'] = '7451';
     const cfg = loadConfig(configPath);
     expect(cfg.captures.llmProxy).toEqual({ enabled: true, port: 7451 });
+  });
+});
+
+describe('loadConfig legacy subgraphUrl → discovery normalization', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+    vi.restoreAllMocks();
+    delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_NETWORK'];
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('maps subgraphUrl to discovery.mode=http-subgraph and emits a deprecation warning', async () => {
+    const configPath = await writeConfigFile({
+      subgraphUrl: 'https://example.com/subgraph',
+    });
+    delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.mode).toBe('http-subgraph');
+    expect(config.discovery?.url).toBe('https://example.com/subgraph');
+    expect(config.discovery?.fallbackToOnchain).toBe(true);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => String(args[0]));
+    const deprecationWarning = warnCalls.find(
+      (msg) => msg.includes('subgraphUrl') || msg.includes('deprecated'),
+    );
+    expect(deprecationWarning).toBeDefined();
+  });
+
+  it('does not map subgraphUrl when discovery.mode is already set', async () => {
+    const configPath = await writeConfigFile({
+      subgraphUrl: 'https://example.com/subgraph',
+      discovery: { mode: 'onchain' },
+    });
+    delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const config = loadConfig(configPath);
+
+    // discovery.mode was already set — subgraphUrl mapping should not override it
+    expect(config.discovery?.mode).toBe('onchain');
+
+    // No deprecation warning about subgraphUrl → discovery mapping should be emitted
+    const warnCalls = warnSpy.mock.calls.map((args) => String(args[0]));
+    const mappingWarning = warnCalls.find(
+      (msg) => msg.includes('Mapping to discovery'),
+    );
+    expect(mappingWarning).toBeUndefined();
+  });
+
+  it('maps JINN_SUBGRAPH_URL env var to discovery.mode=http-subgraph', async () => {
+    const configPath = await writeConfigFile({});
+    process.env['JINN_SUBGRAPH_URL'] = 'https://env.example.com/subgraph';
+    delete process.env['JINN_NETWORK'];
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.mode).toBe('http-subgraph');
+    expect(config.discovery?.url).toBe('https://env.example.com/subgraph');
+
+    const warnCalls = warnSpy.mock.calls.map((args) => String(args[0]));
+    const deprecationWarning = warnCalls.find(
+      (msg) => msg.includes('subgraphUrl') || msg.includes('deprecated'),
+    );
+    expect(deprecationWarning).toBeDefined();
   });
 });

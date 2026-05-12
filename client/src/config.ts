@@ -150,6 +150,37 @@ export const JinnConfigSchema = z.object({
   subgraphUrl: z.string().optional(),
 
   /**
+   * Discovery backend configuration.
+   *
+   * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §9.1.
+   *
+   * mode:
+   *   'http'           — HTTP client pointing at a shared indexer (default per spec §4, but
+   *                      requires 280n.4's HttpDiscoveryAPI — throws at boot until that ships).
+   *   'http-subgraph'  — transitional: wraps the existing hosted The Graph subgraph behind
+   *                      the DiscoveryAPI interface (ships with 280n.3). Removed in 280n.6.
+   *   'embedded'       — embedded Ponder in-process (ships in 280n.5 — throws until then).
+   *   'onchain'        — direct RPC getLogs; always-live floor; no indexer required.
+   *
+   * TODO(280n.4): flip default to 'http' once HttpDiscoveryAPI lands and a
+   * default URL is configured.
+   *
+   * Env overrides: JINN_DISCOVERY_MODE, JINN_DISCOVERY_URL,
+   * JINN_DISCOVERY_FALLBACK (1|true|yes to enable, 0|false|no to disable).
+   *
+   * Legacy `subgraphUrl` is accepted with a deprecation warning and maps to
+   * mode: 'http-subgraph' automatically. The mapping happens at loadConfig
+   * normalisation time, not at the type level.
+   */
+  discovery: z
+    .object({
+      mode: z.enum(['http', 'http-subgraph', 'embedded', 'onchain']).optional(),
+      url: z.string().optional(),
+      fallbackToOnchain: z.boolean().optional(),
+    })
+    .optional(),
+
+  /**
    * Narrow task discovery to specific on-chain task ids. This is primarily
    * for live acceptance gates that must avoid claiming unrelated public
    * backlog while proving one fresh task path.
@@ -703,6 +734,23 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
   if (env['JINN_PEERS'])             merged.peers = env['JINN_PEERS'];
   if (env['JINN_SUBGRAPH_URL'])      merged.subgraphUrl = env['JINN_SUBGRAPH_URL'];
+
+  // Discovery block env overrides
+  if (env['JINN_DISCOVERY_MODE'] || env['JINN_DISCOVERY_URL'] || env['JINN_DISCOVERY_FALLBACK'] !== undefined) {
+    const prevDiscovery = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+      ? (merged['discovery'] as Record<string, unknown>)
+      : {};
+    const fallbackRaw = env['JINN_DISCOVERY_FALLBACK'];
+    const fallbackToOnchain = fallbackRaw !== undefined
+      ? !(['0', 'false', 'no'].includes(fallbackRaw.trim().toLowerCase()))
+      : undefined;
+    merged['discovery'] = {
+      ...prevDiscovery,
+      ...(env['JINN_DISCOVERY_MODE'] ? { mode: env['JINN_DISCOVERY_MODE'] } : {}),
+      ...(env['JINN_DISCOVERY_URL'] ? { url: env['JINN_DISCOVERY_URL'] } : {}),
+      ...(fallbackToOnchain !== undefined ? { fallbackToOnchain } : {}),
+    };
+  }
   if (env['JINN_NODE_ENDPOINT'])     merged.nodeEndpoint = env['JINN_NODE_ENDPOINT'];
   if (env['JINN_IPFS_REGISTRY_URL']) merged.ipfsRegistryUrl = env['JINN_IPFS_REGISTRY_URL'];
   if (env['JINN_IPFS_GATEWAY_URL'])  merged.ipfsGatewayUrl = env['JINN_IPFS_GATEWAY_URL'];
@@ -823,6 +871,28 @@ export function loadConfig(configPath?: string): JinnConfig {
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
   if (resolvedNetwork === 'testnet' && merged.subgraphUrl === undefined) {
     merged.subgraphUrl = DEFAULT_TESTNET_SUBGRAPH_URL;
+  }
+
+  // Legacy `subgraphUrl` → `discovery` normalization.
+  // When `subgraphUrl` is set but `discovery` has no explicit mode, map it
+  // to http-subgraph with a deprecation warning.
+  //
+  // TODO(280n.6): remove this block when subgraphUrl is retired.
+  const hasSubgraphUrl = typeof merged.subgraphUrl === 'string' && (merged.subgraphUrl as string).trim().length > 0;
+  const discoveryBlock = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+    ? (merged['discovery'] as { mode?: string; url?: string; fallbackToOnchain?: boolean })
+    : null;
+  if (hasSubgraphUrl && (!discoveryBlock || !discoveryBlock.mode)) {
+    console.warn(
+      '[config] subgraphUrl is deprecated. Mapping to discovery: { mode: "http-subgraph", url: <subgraphUrl> }. ' +
+      'Migrate to discovery.mode in your config file. The hosted subgraph will be removed in 280n.6.',
+    );
+    merged['discovery'] = {
+      ...(discoveryBlock ?? {}),
+      mode: 'http-subgraph',
+      url: merged.subgraphUrl as string,
+      fallbackToOnchain: discoveryBlock?.fallbackToOnchain ?? true,
+    };
   }
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must

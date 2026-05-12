@@ -76,6 +76,7 @@ import {
   type LifecycleTransitionDeps,
 } from './lifecycle-transitions.js';
 import type { SolverNetRegistryClient, SolverNetManifestSummary } from './registry-client.js';
+import type { DiscoveryAPI } from '../discovery/types.js';
 import type { LaunchedSolverNetRecord, SolverNetStore } from './store.js';
 
 // Import viem types lazily-named — keep the runtime import scoped so unit
@@ -639,12 +640,14 @@ export function createDefaultRegistryClient(args: {
   ipfs: IpfsClient;
   publisher: MetadataPublisher;
   subgraph: SubgraphClient;
+  discoveryApi?: DiscoveryAPI;
   network: 'base-sepolia' | 'base';
 }): SolverNetRegistryClient {
   return new IdentityRegistryBackedSolverNetRegistryClient({
     ipfs: args.ipfs,
     publisher: args.publisher,
     subgraph: args.subgraph,
+    discoveryApi: args.discoveryApi,
     network: args.network,
   });
 }
