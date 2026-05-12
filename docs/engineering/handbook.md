@@ -157,6 +157,5 @@ Tooling: `gh-stack` (GitHub-native CLI extension, April 2026) is the canonical r
 ## Open
 
 - **Rule 5 concrete mechanism.** Waits on `jinn-mono-8qbc` (self-modifying learner design).
-- **prepublishOnly hardening (jinn-mono-2cl.7).** Needs careful design about canary vs named release gating (full release-gate suite would slow canary publish from ~5 min to ~30 min on every merge). Open.
 - **Cron enablement for 2cl.2 + 2cl.11.** Both shipped with `workflow_dispatch` only; cron schedules commented out. Promote after first manual run validates.
 - **GitHub Project (v2) board creation.** Tracked as `jinn-mono-2cl.9`. External irreversible org-write; Captain does manually.

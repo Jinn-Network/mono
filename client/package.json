@@ -52,7 +52,7 @@
     "test:claude-prediction-apy": "yarn build && JINN_TEST_CLAUDE_PREDICTION_APY=1 vitest run test/harnesses/impls/claude-mcp-prediction-apy/isolation.test.ts",
     "skill:generate": "tsx scripts/skill-generate.ts",
     "skill:check": "tsx scripts/skill-check.ts",
-    "prepublishOnly": "yarn build && yarn test",
+    "prepublishOnly": "yarn typecheck",
     "pack:smoke": "node scripts/smoke-test-pack.mjs",
     "release:client": "node scripts/release-client.mjs",
     "release:operator-gate": "yarn staking && yarn e2e",

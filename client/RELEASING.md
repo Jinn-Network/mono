@@ -7,16 +7,18 @@ This package is published from the monorepo, but operators consume it as a stand
 - legacy no-install form (still supported): `npx -p @jinn-network/client@latest jinn <verb>`
 - container: `ghcr.io/jinn-network/client:<version>`
 
-The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `client-vX.Y.Z`.
+The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `v<semver>` (new, produced by the Monday scaffold workflow) or `client-v<semver>` (legacy). The engineering handbook (`cargo/docs/engineering/handbook.md`) is the canonical reference for the cadence.
 
 The release flow has six layers:
 
 1. fast CI in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
-2. the fork-based local operator gate (`yarn release:operator-gate`)
-3. the cross-operator donated SWE execution-data gate (`yarn release:donation-consumption`)
+2. the fork-based local operator gate (`yarn release:operator-gate`) — **now runs automatically in `npm-publish.yml` on stable publishes** (jinn-mono-2cl.7); previously manual
+3. the cross-operator donated SWE execution-data gate (`yarn release:donation-consumption`) — **now runs automatically in `npm-publish.yml` on stable publishes** (jinn-mono-2cl.7); previously manual
 4. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
 5. the manual app-first SWE-rebench v2 and data-donation testnet acceptance gate, with Docker diagnostics retained as supporting evidence (see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
 6. the GitHub Release workflows for npm `latest` and GHCR
+
+The package's `prepublishOnly` script (`yarn typecheck`) runs on every `npm publish` as a final type-check safety net. The workflow (`npm-publish.yml`) explicitly runs `yarn typecheck`, `yarn build`, and `yarn test` as unconditional steps before publish, and on stable publishes additionally runs layers 2 and 3 above. Keeping `prepublishOnly` to just `yarn typecheck` avoids a redundant rebuild in CI between the gate steps and the actual `npm publish` call — the artifact npm packs is the same one the gates validated. **If you run `npm publish` locally (e.g. from a clean checkout), make sure to `yarn build` first** — the workflow handles this automatically.
 
 The old host-installed full acceptance run remains available only as a secondary debug path:
 

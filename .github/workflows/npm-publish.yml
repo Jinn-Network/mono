@@ -25,6 +25,11 @@ jobs:
     name: Publish package
     if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
+    # Stable publish runs the release-gate suite (jinn-mono-2cl.7): ~40-45 min for both gates
+    # + ~5-7 min for build/test + buffer for npm publish. 90 min upper bound catches gate
+    # hangs (e.g., Anvil port-bind failure) without cutting legitimate runs short. Canary
+    # publish completes in ~5-7 min, well under the cap.
+    timeout-minutes: 90
     environment: npm-publish
     env:
       JINN_BUILD_COMMIT: ${{ github.sha }}
@@ -101,6 +106,7 @@ jobs:
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
+      - run: yarn typecheck
       - run: yarn build
       - run: yarn test
 
@@ -109,6 +115,20 @@ jobs:
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag canary
+
+      # Heavy release gates (jinn-mono-2cl.7, per the engineering handbook §Cadence).
+      # Only run for stable releases (dist_tag == 'latest'). Combined runtime ~30 min;
+      # running these on every canary merge would slow the rolling channel from ~5 min
+      # to ~30 min. The package's `prepublishOnly` script stays cheap (typecheck +
+      # build + test); these workflow steps are the release-quality gate that must
+      # pass before stable npm publish.
+      - name: Release gate — operator-gate (staking + e2e on Anvil fork)
+        if: steps.meta.outputs.dist_tag == 'latest'
+        run: yarn release:operator-gate
+
+      - name: Release gate — donation-consumption (cross-operator donation e2e)
+        if: steps.meta.outputs.dist_tag == 'latest'
+        run: yarn release:donation-consumption
 
       - name: Publish stable
         if: steps.meta.outputs.dist_tag == 'latest'
