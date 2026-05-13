@@ -25,10 +25,10 @@ jobs:
     name: Publish package
     if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
-    # Stable publish runs the release-gate suite (jinn-mono-2cl.7): ~40-45 min for both gates
-    # + ~5-7 min for build/test + buffer for npm publish. 90 min upper bound catches gate
-    # hangs (e.g., Anvil port-bind failure) without cutting legitimate runs short. Canary
-    # publish completes in ~5-7 min, well under the cap.
+    # Stable publish reruns the CI-safe release gates. The live donation-consumption
+    # and app-first testnet gates require a producer daemon, UI auth/handshake, and
+    # local operator evidence; those stay in `yarn release:client --prepare` before
+    # Captain publishes the GitHub Release.
     timeout-minutes: 90
     environment: npm-publish
     env:
@@ -116,19 +116,43 @@ jobs:
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag canary
 
-      # Heavy release gates (jinn-mono-2cl.7, per the engineering handbook §Cadence).
-      # Only run for stable releases (dist_tag == 'latest'). Combined runtime ~30 min;
-      # running these on every canary merge would slow the rolling channel from ~5 min
-      # to ~30 min. The package's `prepublishOnly` script stays cheap (typecheck +
-      # build + test); these workflow steps are the release-quality gate that must
-      # pass before stable npm publish.
+      - name: Verify stable release evidence marker
+        if: steps.meta.outputs.dist_tag == 'latest'
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const body = process.env.RELEASE_BODY ?? '';
+          const required = [
+            ['schema marker', '<!-- jinn-release-evidence:v1'],
+            ['release tag', `release-tag=${process.env.RELEASE_TAG}`],
+            ['release commit', `release-commit=${process.env.RELEASE_SHA}`],
+            ['release client prepare', 'release-client-prepare=passed'],
+            ['donation consumption', 'donation-consumption=passed'],
+            ['app-first testnet acceptance', 'app-first-testnet-acceptance=passed'],
+            ['marker close', '-->'],
+          ];
+          const missing = required
+            .filter(([, needle]) => !body.includes(needle))
+            .map(([label, needle]) => `${label}: ${needle}`);
+          if (missing.length > 0) {
+            console.error('Stable publish requires a jinn-release-evidence:v1 marker in the GitHub Release body.');
+            console.error('Missing required evidence entries:');
+            for (const item of missing) console.error(`- ${item}`);
+            process.exit(1);
+          }
+          NODE
+
+      # CI-safe release gate (jinn-mono-2cl.7, per the engineering handbook §Cadence).
+      # The package's `prepublishOnly` script stays cheap; this workflow reruns the
+      # deterministic Anvil gate before stable npm publish. The live donation and
+      # app-first acceptance gates are release-prep evidence, not GitHub Actions
+      # steps, because they need an operator daemon and local credentials.
       - name: Release gate — operator-gate (staking + e2e on Anvil fork)
         if: steps.meta.outputs.dist_tag == 'latest'
         run: yarn release:operator-gate
-
-      - name: Release gate — donation-consumption (cross-operator donation e2e)
-        if: steps.meta.outputs.dist_tag == 'latest'
-        run: yarn release:donation-consumption
 
       - name: Publish stable
         if: steps.meta.outputs.dist_tag == 'latest'
