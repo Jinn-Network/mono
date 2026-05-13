@@ -1,0 +1,35 @@
+# {{packageName}}
+
+Jinn SolverPlugin targeting `{{solverTypeString}}`.
+
+## What this is
+
+A SolverPlugin is a package that drops into a Jinn-running harness (Hermes, Claude Code, Codex) and contributes skills + MCP tools when the harness runs a task on `{{solverTypeString}}`. See the canonical `/docs/build/` tree for the full builder reference.
+
+## Get started
+
+```bash
+yarn install
+yarn test
+```
+
+Edit `skills/example/SKILL.md` with the actual skill content you want to ship. Add new skill files under `skills/<name>/SKILL.md` and add their paths to `jinn.plugin.json`'s `jinn.skills` array.
+
+## Publish
+
+When ready to ship:
+
+```bash
+# Validate the manifest first
+jinn solver-plugins validate path:.
+
+# Publish to the Jinn network
+jinn solver-plugins publish path:.
+```
+
+The published plug-in becomes discoverable to operators running `{{solverTypeString}}` SolverNets.
+
+## Reference
+
+- Quickstart: https://github.com/Jinn-Network/mono/blob/main/cargo/docs/build/quickstart.md (placeholder until `52x3.6` ships the canonical docs tree)
+- Spec: `docs/superpowers/specs/2026-05-13-plug-in-builder-entry-point-design.md`
