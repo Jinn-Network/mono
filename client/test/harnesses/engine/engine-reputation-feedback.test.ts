@@ -27,6 +27,7 @@ import {
 } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { ReputationRegistryClient, ResolvedAgent } from '../../../src/erc8004/index.js';
+import { claimDelivery as mockedClaimDelivery } from '../../../src/adapters/mech/contracts.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,15 @@ interface SeedOptions {
   taskRole: 'restoration' | 'evaluation';
   verdict: 'PASS' | 'FAIL' | 'REJECTED' | 'INDETERMINATE' | null;
   inlineHarnessManifest: boolean;
+  /**
+   * Override the full `gatingClaim` shape persisted at POST_SNAPSHOT. When
+   * provided, supersedes the default `{ verdict, score }` derived from
+   * `opts.verdict` — used to assert engine behaviour against harness-specific
+   * gating shapes (e.g. swe-rebench-v2's `{ score, passed_match, verdict }`).
+   */
+  gatingClaimOverride?: Record<string, unknown>;
+  /** Override the persisted `solverType` (default `portfolio.v0`). */
+  solverType?: string;
 }
 
 async function seedDelivering(
@@ -133,11 +143,12 @@ async function seedDelivering(
   opts: SeedOptions,
 ): Promise<void> {
   const now = Date.now() - 1000;
+  const solverType = opts.solverType ?? 'portfolio.v0';
   const task: PersistedTaskRunInput['task'] = {
     id: requestId,
     description: 'eval test',
     role: opts.taskRole,
-    solverType: 'portfolio.v0',
+    solverType,
     ...(opts.taskRole === 'evaluation' && opts.inlineHarnessManifest
       ? {
           context: { restorationResult: buildInlinedRestorationResult() },
@@ -151,7 +162,7 @@ async function seedDelivering(
     taskCid: 'bafyintent',
     onchainCreationTx: '0xdeadbeef',
     onchainCreationBlock: 100,
-    solverType: 'portfolio.v0',
+    solverType,
     taskRole: opts.taskRole,
     windowStartTs: now,
     windowEndTs: now + 86_400_000,
@@ -173,7 +184,7 @@ async function seedDelivering(
     postSnapshotCapturedAt: now,
     postSnapshotPayload: { capturedAt: now, hlTime: 0 },
     fillsPayload: [],
-    gatingClaim: opts.verdict ? { verdict: opts.verdict, score: '0.5' } : {},
+    gatingClaim: opts.gatingClaimOverride ?? (opts.verdict ? { verdict: opts.verdict, score: '0.5' } : {}),
   });
   p.transition(requestId, TaskRunState.PACKAGING, {
     manifestCid: 'bafyEvalManifest',
@@ -207,6 +218,10 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
 
   beforeEach(() => {
     store = new Store(':memory:');
+    // Engine.verdictCodeForTask flows into claimDelivery's `verdictCode`
+    // argument — reset between tests so per-test assertions on call args
+    // are not polluted by sibling tests.
+    vi.mocked(mockedClaimDelivery).mockClear();
   });
   afterEach(() => {
     store.close();
@@ -469,5 +484,221 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('could not extract harness manifest hash'),
     );
+  });
+
+  // ── swe-rebench-v2 regression coverage (jinn-mono-uy6v.10) ─────────────────
+  //
+  // Before the fix, the swe-rebench-v2-evaluator harness emitted
+  // `gating: { score, passed_match }` (no `verdict` field). The engine's
+  // feedback hook reads `gatingClaim.verdict`, so the hook silently no-op'd
+  // on every verdict and the agent-reputation registry was never updated.
+  //
+  // The harness now derives `verdict: 'PASS' | 'FAIL'` from `passed_match`
+  // and includes it in `gating`. These tests pin that the engine reads it
+  // and submits feedback for both PASS and FAIL deliveries.
+
+  it('swe-rebench-v2 passed_match=true gating → PASS feedback (score=100)', async () => {
+    const registry = makeRegistry();
+    const resolveAgentId = vi
+      .fn<(h: Hex) => Promise<ResolvedAgent | null>>()
+      .mockResolvedValue({
+        agentId: RESTORER_AGENT_ID,
+        manifestCid: RESTORER_MANIFEST_CID_FROM_SUBGRAPH,
+      });
+
+    const engine = new TestEngine(
+      makeOpts(store, {
+        reputationFeedback: { client: registry, resolveAgentId },
+      }),
+    );
+    const requestId = '0xrid-swe-rebench-pass';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'PASS',
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      // Real shape emitted by SweRebenchV2EvaluatorHarness.run() on a passing
+      // grade. The `verdict` field is what the engine's feedback hook keys on.
+      gatingClaimOverride: { score: 1, passed_match: true, verdict: 'PASS' },
+    });
+
+    await engine.process(requestId);
+
+    const intent = engine.testPersistence.getByRequestId(requestId)!;
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
+
+    expect(resolveAgentId).toHaveBeenCalledWith(RESTORER_EVIDENCE_HASH);
+    expect(registry.giveFeedback).toHaveBeenCalledOnce();
+    expect(registry.giveFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harnessAgentId: RESTORER_AGENT_ID,
+        score: 100,
+        scoreDecimals: 2,
+        manifestRef: `manifest:${RESTORER_MANIFEST_CID_FROM_SUBGRAPH}`,
+        manifestHash: RESTORER_EVIDENCE_HASH,
+        tag1: 'swe-rebench-v2.v1',
+      }),
+    );
+  });
+
+  it('swe-rebench-v2 passed_match=false gating → FAIL feedback (score=0)', async () => {
+    const registry = makeRegistry();
+    const resolveAgentId = vi
+      .fn<(h: Hex) => Promise<ResolvedAgent | null>>()
+      .mockResolvedValue({
+        agentId: RESTORER_AGENT_ID,
+        manifestCid: RESTORER_MANIFEST_CID_FROM_SUBGRAPH,
+      });
+
+    const engine = new TestEngine(
+      makeOpts(store, {
+        reputationFeedback: { client: registry, resolveAgentId },
+      }),
+    );
+    const requestId = '0xrid-swe-rebench-fail';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'FAIL',
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      gatingClaimOverride: { score: 0, passed_match: false, verdict: 'FAIL' },
+    });
+
+    await engine.process(requestId);
+
+    const intent = engine.testPersistence.getByRequestId(requestId)!;
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
+
+    expect(registry.giveFeedback).toHaveBeenCalledOnce();
+    expect(registry.giveFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harnessAgentId: RESTORER_AGENT_ID,
+        score: 0,
+        scoreDecimals: 2,
+        tag1: 'swe-rebench-v2.v1',
+      }),
+    );
+  });
+
+  // ── On-chain verdictCode pinning (jinn-mono-uy6v.10 review) ───────────────
+  //
+  // `verdictCodeForTask` reads `gatingClaim.verdict` and maps PASS→1, FAIL→2,
+  // INVALID→3, INDETERMINATE/UNRESOLVED→4. The `default` arm silently returns
+  // 1 (PASS) — so any gatingClaim without a recognised `verdict` field tags
+  // the on-chain delivery as PASS regardless of test outcome. This was the
+  // secondary half of uy6v.10: the live daemon's pre-fix swe-rebench-v2
+  // verdicts tagged FAIL deliveries as PASS on chain. The harness fix above
+  // (verdict in gating) closes the live path; these tests pin the mapping so
+  // a future harness that emits `verdict: 'FAIL'` actually lands as 2 on
+  // chain, and the silent-PASS default for the missing-verdict case is
+  // documented (regression bait for the next harness that forgets it).
+  function lastClaimVerdictCode(): number | undefined {
+    const calls = vi.mocked(mockedClaimDelivery).mock.calls;
+    if (calls.length === 0) return undefined;
+    const lastCall = calls[calls.length - 1]!;
+    const options = lastCall[5] as { verdictCode?: number };
+    return options.verdictCode;
+  }
+
+  it('swe-rebench-v2 verdict=FAIL gating → on-chain claimDelivery tagged with FAIL code (2)', async () => {
+    const engine = new TestEngine(makeOpts(store));
+    const requestId = '0xrid-verdictcode-fail';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'FAIL',
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      gatingClaimOverride: { score: 0, passed_match: false, verdict: 'FAIL' },
+    });
+
+    await engine.process(requestId);
+
+    expect(engine.testPersistence.getByRequestId(requestId)!.state).toBe(
+      TaskRunState.COMPLETE,
+    );
+    expect(lastClaimVerdictCode()).toBe(2);
+  });
+
+  it('swe-rebench-v2 verdict=PASS gating → on-chain claimDelivery tagged with PASS code (1)', async () => {
+    const engine = new TestEngine(makeOpts(store));
+    const requestId = '0xrid-verdictcode-pass';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'PASS',
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      gatingClaimOverride: { score: 1, passed_match: true, verdict: 'PASS' },
+    });
+
+    await engine.process(requestId);
+
+    expect(engine.testPersistence.getByRequestId(requestId)!.state).toBe(
+      TaskRunState.COMPLETE,
+    );
+    expect(lastClaimVerdictCode()).toBe(1);
+  });
+
+  it('pre-fix gating shape (no verdict field) still tags on-chain delivery as PASS (1) — documents the silent fallback', async () => {
+    // This pins the known fallback at engine.ts `verdictCodeForTask.default`:
+    // a missing/unrecognised `verdict` returns 1 (PASS). The harness fix in
+    // this PR removes the live trigger of this branch, but the engine still
+    // silently defaults to PASS for any future harness that emits the
+    // pre-fix shape. A regression here means a new harness can silently
+    // mis-tag every verdict as PASS — exactly the failure mode uy6v.10
+    // surfaced. If we later harden `verdictCodeForTask` to throw or default
+    // to UNRESOLVED (4) on missing verdict, this test's expected value
+    // changes — that's the intended signal.
+    const engine = new TestEngine(makeOpts(store));
+    const requestId = '0xrid-verdictcode-prefix';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'PASS', // ignored by the override below
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      gatingClaimOverride: { score: 0, passed_match: false }, // no `verdict`
+    });
+
+    await engine.process(requestId);
+
+    expect(lastClaimVerdictCode()).toBe(1);
+  });
+
+  it('swe-rebench-v2 pre-fix gating shape (no verdict field) → skip log surfaces (regression guard)', async () => {
+    // This pins the pre-fix bug: a gatingClaim that carries score + passed_match
+    // but NO `verdict` field is exactly what the live daemon was producing
+    // (uy6v.10). The hook MUST skip with the recognisable log and never call
+    // giveFeedback — so if a future harness regresses to that shape, this test
+    // catches it loudly (no more silent no-op).
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const registry = makeRegistry();
+    const resolveAgentId = vi
+      .fn<(h: Hex) => Promise<ResolvedAgent | null>>()
+      .mockResolvedValue({
+        agentId: RESTORER_AGENT_ID,
+        manifestCid: RESTORER_MANIFEST_CID_FROM_SUBGRAPH,
+      });
+
+    const engine = new TestEngine(
+      makeOpts(store, {
+        reputationFeedback: { client: registry, resolveAgentId },
+      }),
+    );
+    const requestId = '0xrid-swe-rebench-pre-fix';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'PASS',
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      // The exact shape the harness used to emit before uy6v.10.
+      gatingClaimOverride: { score: 1, passed_match: true },
+    });
+
+    await engine.process(requestId);
+
+    expect(registry.giveFeedback).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('reputation feedback skipped — gatingClaim has no recognised verdict'),
+    );
+    warn.mockRestore();
   });
 });

@@ -48,6 +48,12 @@ const UPSTREAM_REPO_URL = 'https://github.com/SWE-rebench/SWE-rebench-V2.git';
 const STATE_FILE = 'state.json';
 const ENABLE_CLI = 'jinn harnesses enable swe-rebench-v2-evaluator';
 
+/** The two verdict values emitted by this evaluator. The broader registry
+ *  shape (`reputation.ts`) also recognises `'INDETERMINATE'` / `'REJECTED'`,
+ *  but swe-rebench v2 grades are binary: the gold tests either resolve or
+ *  they don't. Mirrors the pattern in `prediction-v0-evaluator/types.ts`. */
+type SweRebenchVerdict = 'PASS' | 'FAIL';
+
 interface EnabledState {
   schemaVersion: 'swe-rebench-v2-evaluator-state.v1';
   enabled: true;
@@ -363,11 +369,19 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       'utf8',
     );
 
+    // Derive the engine-facing `verdict` from `passed_match`. The engine's
+    // reputation-feedback hook (and `verdictCodeForTask` for the on-chain
+    // verdict tag in `claimDelivery`) keys on `gating.verdict`. Before this
+    // mapping, the hook silently no-op'd on every swe-rebench-v2 delivery and
+    // every verdict tag defaulted to PASS — see jinn-mono-uy6v.10.
+    const verdict: SweRebenchVerdict = verdictPayload.passed_match ? 'PASS' : 'FAIL';
+
     return {
       venueRef: { name: 'swe-rebench-v2' },
       gating: {
         score: verdictPayload.score,
         passed_match: verdictPayload.passed_match,
+        verdict,
       },
       informational: {
         instance_id: task.instance_id,

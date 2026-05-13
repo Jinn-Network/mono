@@ -386,7 +386,10 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
 
     const sol = await harness.run(ctx);
 
-    expect(sol.gating).toEqual({ score: 1, passed_match: true });
+    // gating MUST include `verdict` ('PASS'|'FAIL') — the engine's reputation
+    // feedback hook keys on this field (jinn-mono-uy6v.10). passed_match=true
+    // → 'PASS'; passed_match=false → 'FAIL'.
+    expect(sol.gating).toEqual({ score: 1, passed_match: true, verdict: 'PASS' });
     expect(sol.verdictPayload).toMatchObject({
       schemaVersion: 'swe-rebench-v2-verdict.v1',
       score: 1,
@@ -454,6 +457,11 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     const sol = await harness.run(ctx);
     expect((sol.verdictPayload as Record<string, unknown>)['score']).toBe(0);
     expect((sol.verdictPayload as Record<string, unknown>)['passed_match']).toBe(false);
+    // Failing-grade gating MUST carry `verdict: 'FAIL'` so the engine's
+    // reputation feedback hook records a 0-score on the harness's agent NFT
+    // (jinn-mono-uy6v.10). Before this fix the field was missing and the hook
+    // silently no-op'd on every verdict.
+    expect(sol.gating).toEqual({ score: 0, passed_match: false, verdict: 'FAIL' });
   });
 
   it('does not produce a verdict when the eval could not grade the solution (skips instead)', async () => {
