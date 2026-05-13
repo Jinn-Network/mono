@@ -498,10 +498,10 @@ async function bootstrap(): Promise<{
   });
 
   const fundingStartedAt = Date.now();
-  let result: Awaited<ReturnType<typeof bootstrapper.bootstrap>>;
+  let result: Awaited<ReturnType<typeof bootstrapper.ensureStage1And2>>;
   let lastFundingMessage = '';
   const fundingGatePath = join(config.earningDir, 'bootstrap-funding.json');
-  const persistFundingGate = (funding: NonNullable<Awaited<ReturnType<typeof bootstrapper.bootstrap>>['funding']>): void => {
+  const persistFundingGate = (funding: NonNullable<Awaited<ReturnType<typeof bootstrapper.ensureStage1And2>>['funding']>): void => {
     mkdirSync(config.earningDir, { recursive: true, mode: 0o700 });
     writeFileSyncMain(fundingGatePath, `${JSON.stringify({
       schemaVersion: 1,
@@ -519,7 +519,7 @@ async function bootstrap(): Promise<{
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    result = await bootstrapper.bootstrap(PASSWORD);
+    result = await bootstrapper.ensureStage1And2(PASSWORD);
     if (!result.funding) {
       clearFundingGate();
       break;
