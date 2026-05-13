@@ -52,6 +52,7 @@ import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
+import { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import { buildInfo } from '../../build-info.js';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
@@ -1748,23 +1749,28 @@ export class TaskEngine {
     });
   }
 
-  private verdictCodeForTask(task: PersistedTaskRun): number {
+  private verdictCodeForTask(task: PersistedTaskRun): VerdictCode {
     const gating = task.gatingClaim as { verdict?: unknown } | null;
     const raw = gating?.verdict;
     switch (raw) {
       case 'PASS':
       case 'SCORED':
-        return 1;
+        return VerdictCode.Pass;
       case 'FAIL':
       case 'REJECTED':
-        return 2;
+        return VerdictCode.Fail;
       case 'INVALID':
-        return 3;
+        return VerdictCode.Invalid;
       case 'INDETERMINATE':
       case 'UNRESOLVED':
-        return 4;
+        return VerdictCode.Unresolved;
       default:
-        return 1;
+        // gatingClaim is null, verdict is absent, or the string is unrecognized.
+        // Return Invalid(3) — not Pass(1). Pass must come from an explicit PASS/SCORED verdict.
+        console.warn(
+          `[harness-engine] verdictCodeForTask: unrecognized gatingClaim.verdict (got=${String(raw)}); defaulting to Invalid(3) — should never happen, indicates the evaluator harness didn't set gatingClaim.verdict before submission`,
+        );
+        return VerdictCode.Invalid;
     }
   }
 
