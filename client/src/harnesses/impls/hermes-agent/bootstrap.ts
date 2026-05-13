@@ -1,5 +1,5 @@
 // client/src/harnesses/impls/hermes-agent/bootstrap.ts
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   hermesConfigFromSolverPlugins,
@@ -156,6 +156,27 @@ export function writePerTaskHermesConfig(inputs: WritePerTaskConfigInputs): void
   });
   writeFileSync(join(inputs.hermesHome, 'config.yaml'), yaml, 'utf8');
 
-  const envFile = snippetToEnvFile(inputs.env);
+  // Per-Task .env = operator's .env (provider API keys, debug toggles, etc.)
+  // + Jinn-runtime keys. Jinn keys go LAST so they win on duplicate names
+  // (most dotenv loaders use last-wins; Hermes uses python-dotenv).
+  // Without the operator's keys, Jinn-run Hermes can't authenticate to any
+  // provider except google-gemini-cli (whose OAuth creds are seeded via
+  // auth/), so Hermes-as-default with OpenRouter / Anthropic / etc. requires
+  // this merge.
+  const operatorEnv = inputs.seedFrom ? readOperatorEnvFile(inputs.seedFrom) : '';
+  const trailingNewline = operatorEnv.endsWith('\n') ? '' : '\n';
+  const header = operatorEnv ? `${operatorEnv}${trailingNewline}# --- Jinn-runtime keys (per-Task, override any operator entries above) ---\n` : '';
+  const envFile = header + snippetToEnvFile(inputs.env);
   writeFileSync(join(inputs.hermesHome, '.env'), envFile, 'utf8');
+}
+
+function readOperatorEnvFile(seedFrom: string): string {
+  const path = join(seedFrom, '.env');
+  if (!existsSync(path)) return '';
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    // Permissions / race — better to proceed with just Jinn keys than crash.
+    return '';
+  }
 }

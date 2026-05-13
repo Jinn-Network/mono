@@ -129,6 +129,49 @@ describe('writePerTaskHermesConfig', () => {
     }
   });
 
+  it('merges the operator .env into the per-Task .env (Jinn keys last, override any duplicates)', () => {
+    const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
+    const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
+    try {
+      // Operator has provider keys + a custom toggle that Jinn doesn't know about.
+      writeFileSync(
+        join(operatorHome, '.env'),
+        [
+          'OPENROUTER_API_KEY=sk-or-OP_KEY_REDACTED',
+          'ANTHROPIC_API_KEY=sk-ant-OP_KEY_REDACTED',
+          'OPERATOR_CUSTOM_FLAG=on',
+          // Operator-set DAEMON_API_URL — Jinn must override this with its own.
+          'DAEMON_API_URL=http://operator-set:9999',
+        ].join('\n') + '\n',
+      );
+
+      writePerTaskHermesConfig({
+        hermesHome: taskHome,
+        workingDir: '/work',
+        solverPluginRoots: [],
+        env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok-jinn', corpusEnv: {} },
+        seedFrom: operatorHome,
+      });
+
+      const envFile = readFileSync(join(taskHome, '.env'), 'utf8');
+      // Operator entries present.
+      expect(envFile).toContain('OPENROUTER_API_KEY=sk-or-OP_KEY_REDACTED');
+      expect(envFile).toContain('ANTHROPIC_API_KEY=sk-ant-OP_KEY_REDACTED');
+      expect(envFile).toContain('OPERATOR_CUSTOM_FLAG=on');
+      // Jinn DAEMON_API_URL appears after the operator's, so last-wins
+      // semantics (python-dotenv default) give Jinn the override.
+      const operatorIdx = envFile.indexOf('DAEMON_API_URL=http://operator-set:9999');
+      const jinnIdx = envFile.indexOf('DAEMON_API_URL=http://127.0.0.1:7331');
+      expect(operatorIdx).toBeGreaterThanOrEqual(0);
+      expect(jinnIdx).toBeGreaterThan(operatorIdx);
+      // Jinn-runtime credentials still present.
+      expect(envFile).toContain('DAEMON_API_TOKEN=tok-jinn');
+    } finally {
+      rmSync(operatorHome, { recursive: true, force: true });
+      rmSync(taskHome, { recursive: true, force: true });
+    }
+  });
+
   it('skips seeding when seedFrom equals hermesHome or does not exist', () => {
     const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
     try {
