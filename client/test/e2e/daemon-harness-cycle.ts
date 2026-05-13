@@ -15,6 +15,7 @@
 import {
   harnessSelectorFromEnv,
   setupAnvilFixture,
+  bootstrapStakedOperator,
 } from './_daemon-harness-helpers.js';
 
 async function main(): Promise<void> {
@@ -26,8 +27,15 @@ async function main(): Promise<void> {
     console.log(`operator EOA: ${fixture.operatorEoa.address}`);
     console.log(`workingDirRoot: ${fixture.workingDirRoot}`);
     console.log(`implStateRoot: ${fixture.implStateRoot}`);
-    // Subsequent tasks fill in: bootstrap → daemon → task post → wait → assert
-    console.log('\n=== Task 1 skeleton ok — Anvil + fixture up ===');
+
+    const operator = await bootstrapStakedOperator(fixture);
+    console.log(`agent EOA:    ${operator.agentAddress}`);
+    console.log(`Safe:         ${operator.safeAddress}`);
+    console.log(`service id:   ${operator.serviceId}`);
+    console.log(`mech:         ${operator.mechAddress}`);
+
+    // Subsequent tasks fill in: daemon → task post → wait → assert
+    console.log('\n=== Task 2 ok — operator bootstrapped ===');
   } finally {
     await fixture.teardown();
   }
