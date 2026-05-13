@@ -13,6 +13,7 @@ import { StatusBar } from '../components/StatusBar';
 import { StatusChip } from '../components/StatusChip';
 import { DataTable } from '../components/DataTable';
 import { cellStyle, cellNumStyle, cellMutedStyle } from '../components/DataTable';
+import { Sparkline } from '../components/Sparkline';
 import { useEnumParam } from '../lib/url-state';
 import { pct, int, shortCid, relTime } from '../lib/format';
 
@@ -65,6 +66,8 @@ const COLUMNS = [
   { key: 'attempts', label: 'Attempts', numeric: true, sortable: true },
   { key: 'verdicts', label: 'Verdicts', numeric: true, sortable: true },
   { key: 'resolvedRate', label: 'Resolved', numeric: true, sortable: true },
+  // Trend sparkline — not sortable (visual only)
+  { key: 'trend', label: 'Trend', sortable: false },
 ];
 
 // ── Row renderer ──────────────────────────────────────────────────────────────
@@ -122,6 +125,18 @@ function renderRow(row: SolverNetRow) {
         }}
       >
         {pct(row.resolvedRate)}
+      </td>
+      {/* Trend sparkline — visual only, not sortable */}
+      <td
+        style={{
+          ...cellStyle,
+          width: 72,
+          paddingTop: 0,
+          paddingBottom: 0,
+          verticalAlign: 'middle',
+        }}
+      >
+        <Sparkline data={row.recentResolvedRateSeries} />
       </td>
     </>
   );
@@ -212,7 +227,7 @@ export function SolverNetsListView() {
                 background: 'var(--bg-elevated)',
               }}
             >
-              {Array.from({ length: 9 }).map((__, j) => (
+              {Array.from({ length: 10 }).map((__, j) => (
                 <div
                   key={j}
                   style={{

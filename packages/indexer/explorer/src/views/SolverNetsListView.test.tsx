@@ -18,6 +18,7 @@ const SOLVERNET_A = {
   verdicts: 800,
   verdictsPass: 760,
   resolvedRate: 0.95,
+  recentResolvedRateSeries: [0.8, 0.85, 0.9, 0.93, 0.95],
 };
 
 const SOLVERNET_B = {
@@ -31,6 +32,7 @@ const SOLVERNET_B = {
   verdicts: 300,
   verdictsPass: 240,
   resolvedRate: 0.8,
+  recentResolvedRateSeries: [0.7, 0.75, 0.8],
 };
 
 const FIXTURE: SolverNetsResponse = {
@@ -149,6 +151,18 @@ describe('SolverNetsListView', () => {
     });
   });
 
+  it('renders trend sparklines for rows with series data', async () => {
+    mockFetch(FIXTURE);
+    const { Wrapper } = makeWrapper();
+    const { container } = render(<SolverNetsListView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      // SOLVERNET_A has 5-point series, SOLVERNET_B has 3-point series — both
+      // should render SVG sparklines (need >=2 points).
+      const svgs = container.querySelectorAll('svg');
+      expect(svgs.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   it('renders column headers', async () => {
     mockFetch(FIXTURE);
     const { Wrapper } = makeWrapper();
@@ -158,6 +172,7 @@ describe('SolverNetsListView', () => {
       expect(screen.getByText('Status')).toBeInTheDocument();
       expect(screen.getByText('Attempts')).toBeInTheDocument();
       expect(screen.getByText('Resolved')).toBeInTheDocument();
+      expect(screen.getByText('Trend')).toBeInTheDocument();
     });
   });
 

@@ -71,6 +71,23 @@ const DEFAULT_BUCKET_BLOCKS = 7200n;
  */
 const DEFAULT_ROLLING_K = 50;
 
+/**
+ * Bucket width used for the per-SolverNet trend sparkline series on the
+ * `/explorer/solvernets` index page (ebu7.7).
+ *
+ * Coarser than `DEFAULT_BUCKET_BLOCKS` (1 day) to keep the sparkline readable
+ * at small sizes: ≈7 days on Base at ~12 s/block: 7 × 86400 / 12 = 50400.
+ * Rounded to 50000 for cleanliness.
+ */
+const SPARKLINE_BUCKET_BLOCKS = 50000n;
+
+/**
+ * Number of trailing non-empty buckets to include in each net's sparkline.
+ * 12 buckets ≈ 12 weeks — enough trajectory at a glance without overloading
+ * the index response with data.
+ */
+const SPARKLINE_TRAILING_BUCKETS = 12;
+
 // ── Hono context variable types ───────────────────────────────────────────────
 
 type ExplorerVariables = {
@@ -316,6 +333,20 @@ app.get('/network', async (c) => {
 
 app.use('/solvernets', explorerFreshness());
 
+/**
+ * GET /explorer/solvernets
+ *
+ * One row per indexed SolverNet, including:
+ *   - Standard stats (tasksPosted, tasksSettled, attempts, verdicts, verdictsPass, resolvedRate)
+ *   - `recentResolvedRateSeries` — a short trailing resolved-rate series for sparkline rendering.
+ *
+ * `recentResolvedRateSeries`:
+ *   Computed via a single batch GROUP BY query over `verdict ⋈ task` grouped by
+ *   `(task.manifestDigest, floor(verdict.createdAtBlock / SPARKLINE_BUCKET_BLOCKS))`.
+ *   Bucket width = `SPARKLINE_BUCKET_BLOCKS` (≈7 days on Base at 12s/block).
+ *   The last `SPARKLINE_TRAILING_BUCKETS` non-empty buckets' pass/total rates are
+ *   returned per net, ascending (oldest first). Empty when a net has no verdicts.
+ */
 app.get('/solvernets', async (c) => {
   const manifests = await db
     .select()
@@ -327,12 +358,18 @@ app.get('/solvernets', async (c) => {
     manifests.map((m) => m.cidKeccak),
   );
 
+  // Batch-load sparkline series in one extra query — all manifests at once.
+  const sparklinesByDigest = await getSolverNetSparklinesBatch(
+    manifests.map((m) => m.cidKeccak),
+  );
+
   const rows = manifests.map((m) => ({
     cid: m.id,
     status: m.status,
     launcherAgentId: m.launcherAgentId,
     statusUpdatedAt: m.statusUpdatedAt,
     ...statsByDigest.get(m.cidKeccak),
+    recentResolvedRateSeries: sparklinesByDigest.get(m.cidKeccak) ?? [],
   }));
 
   // Read the head computed by the middleware — no second DB round trip.
@@ -923,6 +960,82 @@ app.get('/operator/:addr', async (c) => {
 });
 
 // ── Internal query helpers ────────────────────────────────────────────────────
+
+/**
+ * Computes a trailing resolved-rate sparkline series for a batch of SolverNets
+ * in O(1) DB round trips (one GROUP BY query over `verdict ⋈ task`).
+ *
+ * The bucket width is `SPARKLINE_BUCKET_BLOCKS` (≈7 days). For each net the
+ * last `SPARKLINE_TRAILING_BUCKETS` non-empty buckets are returned as a
+ * `number[]` of pass rates (0..1) in ascending block order (oldest first).
+ *
+ * Returns a Map from `cidKeccak` → `number[]`. Every key in the input is
+ * guaranteed an entry; nets with no verdicts get `[]`.
+ *
+ * Reuses `bucketResolvedRate` from metrics.ts to group samples and compute
+ * rates — we just do it in-process after fetching the per-bucket counts from
+ * the DB rather than fetching all raw verdict rows (which could be large).
+ */
+async function getSolverNetSparklinesBatch(
+  cidKeccaks: `0x${string}`[],
+): Promise<Map<`0x${string}`, number[]>> {
+  const result = new Map<`0x${string}`, number[]>(
+    cidKeccaks.map((k) => [k, []]),
+  );
+
+  if (cidKeccaks.length === 0) return result;
+
+  // One aggregate query: GROUP BY (manifestDigest, bucketIndex) where
+  // bucketIndex = floor(verdict.createdAtBlock / SPARKLINE_BUCKET_BLOCKS).
+  // We compute bucketIndex in SQL using integer division.
+  const bucketRows = await db
+    .select({
+      manifestDigest: schema.task.manifestDigest,
+      bucketIndex: sql<string>`(${schema.verdict.createdAtBlock} / ${SPARKLINE_BUCKET_BLOCKS})`,
+      total: count(),
+      pass: count(
+        sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
+      ),
+    })
+    .from(schema.verdict)
+    .innerJoin(schema.task, eq(schema.verdict.taskId, schema.task.id))
+    .where(
+      and(
+        inArray(schema.task.manifestDigest, cidKeccaks),
+        eq(schema.task.chainId, EXPLORER_CHAIN_ID),
+        eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
+      ),
+    )
+    .groupBy(schema.task.manifestDigest, sql`(${schema.verdict.createdAtBlock} / ${SPARKLINE_BUCKET_BLOCKS})`);
+
+  // Group rows by manifestDigest, accumulate buckets, sort and slice.
+  const byDigest = new Map<`0x${string}`, { bucketIndex: bigint; total: number; pass: number }[]>();
+  for (const row of bucketRows) {
+    const digest = row.manifestDigest as `0x${string}`;
+    const existing = byDigest.get(digest);
+    const bucket = {
+      bucketIndex: BigInt(row.bucketIndex),
+      total: Number(row.total),
+      pass: Number(row.pass),
+    };
+    if (existing) {
+      existing.push(bucket);
+    } else {
+      byDigest.set(digest, [bucket]);
+    }
+  }
+
+  for (const [digest, buckets] of byDigest.entries()) {
+    // Sort ascending by bucketIndex, take last SPARKLINE_TRAILING_BUCKETS.
+    const sorted = buckets
+      .sort((a, b) => (a.bucketIndex < b.bucketIndex ? -1 : a.bucketIndex > b.bucketIndex ? 1 : 0))
+      .slice(-SPARKLINE_TRAILING_BUCKETS);
+    const series = sorted.map((b) => (b.total === 0 ? 0 : b.pass / b.total));
+    result.set(digest, series);
+  }
+
+  return result;
+}
 
 /**
  * Computes rollup stats for a batch of SolverNets in O(1) DB round trips

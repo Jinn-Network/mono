@@ -81,6 +81,12 @@ export interface SolverNetRow {
   verdicts: number;
   verdictsPass: number;
   resolvedRate: number | null;
+  /**
+   * Short trailing resolved-rate series for sparkline rendering (ebu7.7).
+   * Values are in [0, 1]; oldest bucket first. Empty array when no verdicts.
+   * Up to SPARKLINE_TRAILING_BUCKETS (12) buckets of ~7 days each.
+   */
+  recentResolvedRateSeries: number[];
 }
 
 export interface SolverNetsResponse extends FreshnessMeta {
