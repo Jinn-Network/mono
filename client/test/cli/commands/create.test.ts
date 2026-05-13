@@ -202,3 +202,42 @@ describe('runCreate (alternative-harness pattern)', () => {
     ).rejects.toThrow(/unsupported pattern/);
   });
 });
+
+describe('runCreate (plugin target — solver-type-plugin)', () => {
+  it('emits a solver-type-plugin package matching the template', async () => {
+    const target = await runCreate({
+      target: 'plugin',
+      pattern: 'solver-type-plugin',
+      packageName: '@example/test-plugin',
+      solverTypeString: 'swe-rebench-v2.v1',
+      outDir: TMP,
+    });
+    expect(target).toBe(join(TMP, '@example/test-plugin'));
+    expect(existsSync(join(target, 'package.json'))).toBe(true);
+    expect(existsSync(join(target, 'jinn.plugin.json'))).toBe(true);
+    expect(existsSync(join(target, 'skills/example/SKILL.md'))).toBe(true);
+    expect(existsSync(join(target, 'test/plugin.test.ts'))).toBe(true);
+    expect(existsSync(join(target, 'README.md'))).toBe(true);
+    expect(existsSync(join(target, 'tsconfig.json'))).toBe(true);
+    expect(existsSync(join(target, '.gitignore'))).toBe(true);
+
+    const pkg = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'));
+    expect(pkg.name).toBe('@example/test-plugin');
+    expect(pkg.devDependencies.vitest).toBeDefined();
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn.plugin.json'), 'utf8'),
+    );
+    expect(manifest.name).toBe('@example/test-plugin');
+    expect(manifest.jinn.supports).toContain('swe-rebench-v2.v1');
+    expect(manifest.jinn.skills).toContain('skills/example/SKILL.md');
+
+    const skillMd = readFileSync(join(target, 'skills/example/SKILL.md'), 'utf8');
+    expect(skillMd).toContain('swe-rebench-v2.v1');
+    expect(skillMd).not.toContain('{{');
+
+    const testTs = readFileSync(join(target, 'test/plugin.test.ts'), 'utf8');
+    expect(testTs).toContain('@example/test-plugin');
+    expect(testTs).not.toContain('{{');
+  });
+});
