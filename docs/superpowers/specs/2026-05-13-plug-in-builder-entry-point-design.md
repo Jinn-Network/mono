@@ -3,7 +3,7 @@
 - **Date:** 2026-05-13
 - **Author:** opus (drafted with Captain `oak`)
 - **Status:** Proposal
-- **Version:** 0.3
+- **Version:** 0.4
 - **Bead:** `jinn-mono-52x3` (epic)
 - **Tracks:** Phase A.2 builder-surface layer; sequenced after `jinn-mono-uy6v` (first public release) and `jinn-mono-8psp` (Hermes harness integration).
 
@@ -21,7 +21,7 @@ This spec **explicitly reframes** the Skill Oracle v0 framing in [discussion #12
 
 - **`client/src/types/envelope.ts`** — the `jinn.execution.v1` envelope already carries `executor.plugins[]` (name, version, cid, sha256) per attempt. The epic consumes this; it does not extend it.
 - **`client/src/erc8004/{identity,reputation,addresses,abis}.ts`** — the wired ERC-8004 IdentityRegistry + ReputationRegistry surfaces. The epic adds a new metadata kind (`plugin`) and reuses identity + reputation primitives unchanged.
-- **`docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md`** — the entity model that decides "one agent NFT per Safe, per-execution commitments via `setMetadata`." This epic extends the model to builder Safes by symmetry, adding the `plugin` kind to the enumerated set.
+- **`docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md`** — the entity model that decides "one agent NFT per Safe, per-execution commitments via `setMetadata`." This epic extends the enumerated kind set with `plugin` (and `revocation`), staying within "one agent NFT per Safe" — there is no parallel builder-agent primitive (see §5.1).
 - **`docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md`** — the payload-schema design for `setMetadata` kinds. The epic adds a payload variant for `plugin:<cid>`.
 - **`jinn-mono-ebu7`** (network explorer) — already ships per-operator + per-SolverNet leaderboards keyed on HarnessCheckpoint (which carries the plug-in set). Builder-side views fold into this; no new aggregation is built.
 - **`jinn-mono-0www`** (Phase B.2 evaluator economics + reputation slashing) — owns stake-backed reputation and challenge mechanism. This epic ships record-only attribution and explicitly defers slashing.
@@ -126,7 +126,7 @@ The epic ships the smallest closure of these four.
 
 The epic is shipped when, on testnet, all of the following hold:
 
-1. **First external builder publishes a plug-in.** Scaffolds via `jinn create plugin <name>`, edits skills + MCP tools, runs `jinn builder init` (if not already an operator) to mint a builder agentId, publishes to npm, runs `jinn solver-plugins publish <pkg>` to register the on-chain plug-in record. Zero CLI workarounds.
+1. **First external builder publishes a plug-in.** Scaffolds via `jinn create plugin <name>`, edits skills + MCP tools, publishes to npm, runs `jinn solver-plugins publish <pkg>` — which lazily ensures bootstrap Stage 1 (identity) if not already complete (prompts for ETH funding, deploys Safe, registers agentId via `IdentityRegistry`) before writing the `plugin:<cid>` record on chain. **No separate `jinn builder init` step required.** Zero CLI workarounds.
 2. **Published plug-in is discoverable in the operator app.** Operator opens the `/build` route (or equivalent surface), browses published plug-ins for `swe-rebench-v2.v1`, sees the new plug-in with builder attribution, and installs it via the existing `jinn solver-nets add-plugin` resolver path.
 3. **Plug-in runs and scores via the existing pipeline.** Hermes's `hermesConfigFromSolverPlugins()` consumes the plug-in's `.mcp.json` and `skills/`. The attempt completes; the signed envelope's `executor.plugins[]` field carries the plug-in attribution (already in `jinn.execution.v1`); ebu7's HarnessCheckpoint enrichment picks it up.
 4. **Score is visible in the builder-shape view.** The `/build` surface filters the existing ebu7 leaderboard by published-plug-in and by builder identity; the new plug-in's first verified score is visible alongside other published plug-ins for the same SolverNet.
@@ -134,38 +134,40 @@ The epic is shipped when, on testnet, all of the following hold:
 6. **`/build` SPA route ships** the cold-start walk: intro, plug-in shape catalogue (drawn live from the schema in `client/src/plugins/types.ts`), scaffold instructions, browse-published-plug-ins panel (reuses `Leaderboard.tsx`), "your published plug-ins" panel for the local operator's builder identity. Reachable from the SPA nav.
 7. **Canonical `/docs/build/` tree exists**: quickstart (60-second walk anchored on copying `swe-rebench-v2-runtime/`), shape reference, examples, publishing-flow doc, compatibility doc. `jinn create plugin` prints the quickstart URL on completion.
 8. **`jinn create plugin <name>` scaffold ships**, producing a package whose `yarn test` passes on first run. Templates under `client/templates/plugins/`. Two patterns: `solver-type-plugin` (modeled on `swe-rebench-v2-runtime`) and `runtime-plugin` (modeled on `network-tools`).
-9. **`jinn builder init` ships** the 5-step builder bootstrap (wallet, Safe predict, await funding, Safe deploy, agentId mint). Dual-role users (operator-also-builder) get a no-op or a `--new-agent-id` flag to mint a second agentId on the same Safe.
-10. **Cold-start E2E acceptance gate green** — a vitest that walks scaffold → `jinn builder init` (or detect-existing) → publish (local registry) → `jinn solver-plugins publish` → operator discovers via the Discovery API → operator installs → run task → envelope publishes plug-in attribution → ebu7 reflects it → builder filter on `/build` shows the score. Plus `yarn typecheck` and `yarn build`.
+9. **Bootstrap state machine is staged.** `client/src/earning/bootstrap.ts` is refactored into Stage 1 (identity: `wallet` → `safe_predicted` → `awaiting_funding` → `safe_deployed` → `identity_registered`) and Stage 2 (operator: `service_created` → `service_activated` → `agents_registered` → `service_deployed` → `service_staked` → `mech_deployed`). Each stage is independently re-entrant and idempotent. `jinn solver-plugins publish` lazily ensures Stage 1; `jinn run` lazily ensures Stage 1+2. A builder who later wants to operate continues from `service_created` — no re-mint, no second Safe, no second agentId.
+10. **Cold-start E2E acceptance gate green** — a vitest that walks scaffold → publish to local npm registry → `jinn solver-plugins publish` (lazily completes Stage 1 against a stub IdentityRegistry) → operator discovers via the Discovery API → operator installs → run task → envelope publishes plug-in attribution → ebu7 reflects it → builder filter on `/build` shows the score. Plus `yarn typecheck` and `yarn build`.
 
 ## 5. Substrate design
 
 Identity, attribution, reputation, and the on-chain registry are designed on the existing ERC-8004 substrate. **No new contracts.** Builder identity is the same primitive as operator identity, distinguished only by which metadata kinds the agentId publishes. The plug-in registry is a new metadata kind on the existing `IdentityRegistry.setMetadata` surface.
 
-### 5.1 Builder identity mirrors operator identity
+### 5.1 Identity is staged, not separate-per-role
 
-A builder mints an `agentId` in the same `IdentityRegistry` contract operators use today. Same Safe → agentId → `setMetadata` write surface. Two patterns are admitted:
+There is **one stateful identity** per user — one EOA, one Safe, one agentId, one keystore, one state file. There are **two completion levels** on that identity, each independently re-entrant:
 
-- **Reuse the operator agentId** (default, v0). A user who already runs an operator has an agentId; their builder role uses the same one. Disambiguation is by metadata `kind`: operator activity surfaces under `envelope:` / `evaluation:` / `capture:` keys; builder activity surfaces under `plugin:` / `revocation:`. The Ponder indexer separates the streams natively.
-- **Mint a dedicated builder agentId** (opt-in). A user who wants a clean builder reputation stream calls `jinn builder init --new-agent-id` to mint a second agentId on the same Safe. Both agentIds coexist; the user picks which one to use per publication via `--builder-agent-id <id>`. v0 ships the flow; the default stays "reuse."
+- **Stage 1 — Identity (universal).** Required for any participation, builder or operator. Steps: `wallet` → `safe_predicted` → `awaiting_funding` (ETH only — no OLAS required) → `safe_deployed` → `identity_registered`. The `identity_registered` step calls `IdentityRegistry.register()` then `setAgentWallet(agentId, safeAddress)`. After Stage 1, the user has a full ERC-8004 identity and can sign `setMetadata` for any kind (envelope, evaluation, capture, intent, plugin, revocation).
+- **Stage 2 — Operator (opt-in, daemon-driven).** Required only for users who want to run a daemon and claim/deliver tasks. Steps: `service_created` → `service_activated` → `agents_registered` → `service_deployed` → `service_staked` (needs OLAS) → `mech_deployed`. Wires the Stage 1 identity into OLAS service registry + staking + mech marketplace.
 
-Builders who are *not* operators (the more common shape for this epic) mint an agentId on a fresh Safe via `jinn builder init`. The Safe is bootstrapped minimally — just the IdentityRegistry registration, no OLAS service / mech / staking. Builder bootstrap is the strict subset of operator bootstrap that drops the OLAS / mech / staking steps:
+The bootstrap state machine in `client/src/earning/bootstrap.ts` is refactored to carry a stage marker, and each action point in the codebase ensures its own minimum stage:
 
-| Step | Operator (11) | Builder (5) |
+| Action | Ensures stage | Notes |
 |---|---|---|
-| `wallet` — generate agent EOA + encrypted keystore | yes | yes |
-| `safe_predicted` — predict Safe address | yes | yes |
-| `awaiting_funding` — wait for gas (no OLAS for builders) | yes | yes |
-| `safe_deployed` — deploy Safe via factory | yes | yes |
-| `service_created` — OLAS service registration | yes | **no** |
-| `service_activated` — OLAS bond + activate | yes | **no** |
-| `agents_registered` — register agent in OLAS service | yes | **no** |
-| `service_deployed` — deploy service | yes | **no** |
-| `service_staked` — stake service in staking contract | yes | **no** |
-| `mech_deployed` — deploy mech via marketplace | yes | **no** |
-| `identity_registered` — `IdentityRegistry.register` + `setAgentWallet` | (today: lazy / via separate flow) | **yes (explicit)** |
-| `complete` | yes | yes |
+| `jinn solver-plugins publish` | Stage 1 | Lazily triggers Stage 1 if not complete. Never touches Stage 2. |
+| `jinn solver-plugins revoke` | Stage 1 | Same. |
+| `jinn run` (and any operator-side action) | Stage 1 + 2 | Existing behaviour. A builder who later wants to operate runs `jinn run`; it detects Stage 1 done, continues at `service_created`. |
+| Any envelope/evaluation/capture write | Stage 1 + 2 (de facto) | The daemon does these; the daemon requires Stage 2. |
 
-Reference: `client/src/earning/bootstrap.ts` for the operator bootstrap. Builder bootstrap reuses `wallet`, `safe_predicted`, `awaiting_funding`, `safe_deployed`; adds an explicit `identity_registered` step; drops the OLAS / mech / staking steps. The `identity_registered` step calls `IdentityRegistry.register()` then `setAgentWallet(agentId, safeAddress)` per the existing entity-model wiring.
+**One EOA, one Safe, one agentId by default.** A user becoming-an-operator-later doesn't migrate or re-mint anything; the state machine continues from where it stopped. A dual-role user (operator-also-builder) is the natural case — same agentId, all activity flows through it; the Ponder indexer separates streams by metadata `kind` (operator activity under `envelope:` / `evaluation:` / `capture:`; builder activity under `plugin:` / `revocation:`).
+
+**The `--new-agent-id` flag** mints a second agentId on the same Safe for users who want explicit reputation-stream separation. Niche, opt-in. Default is one agentId for everything.
+
+**Why staged-bootstrap is the right factoring**, not parallel-bootstraps-per-role:
+
+- Builders don't carry operator state they don't need (no OLAS bond locked, no mech deployed, no staking, no service registration). ETH for gas is the only funding requirement.
+- Dual-role is free — same identity, same Safe, same agentId. No switching between identities, no decision about "am I a builder or operator" at bootstrap time.
+- Idempotent forward: re-run any action; the state machine picks up where it left off.
+- Lowers the barrier to entry for builders — no OLAS funding required to publish a plug-in.
+- The existing bootstrap state machine just needs to be made stage-aware. Not a new bootstrap; a refactor.
 
 ### 5.2 Plug-in registry = a new `kind=plugin` on `IdentityRegistry.setMetadata`
 
@@ -263,9 +265,19 @@ The envelope schema is **untouched**. `executor.plugins[].cid` is already the pr
 
 Per `uy6v`'s scope rule, each child is acceptance-criteria-shaped, not solution-shaped. Per-child planning sessions choose the implementation. The §5 substrate design grounds these — the children are implementation, not further design.
 
-### 6.1 Builder identity bootstrap: `jinn builder init`
+### 6.1 Staged-bootstrap refactor + `identity_registered` step
 
-Implements the 5-step builder bootstrap from §5.1. Reuses `wallet`, `safe_predicted`, `awaiting_funding`, `safe_deployed` from the existing `client/src/earning/bootstrap.ts`; adds an explicit `identity_registered` step calling `IdentityRegistry.register()` + `setAgentWallet(agentId, safeAddress)`. Lazy invocation: `jinn solver-plugins publish` triggers `jinn builder init` if the builder agentId is missing. Dual-role support via `--new-agent-id` flag (mints a second agentId on an existing operator Safe) and `--builder-agent-id <id>` (picks which agentId to write submissions under). State persisted under `~/.jinn-client/builder/`.
+Refactor `client/src/earning/bootstrap.ts` to make Stage 1 (identity) and Stage 2 (operator) independently re-entrant per §5.1. Concretely:
+
+- The state file (`~/.jinn-client/earning/earning_state.json`) gains a `stage` marker (`'stage-1' | 'stage-2'`) and a per-step `stage` tag.
+- A new `identity_registered` step is added as the Stage 1 capstone: calls `IdentityRegistry.register()` then `setAgentWallet(agentId, safeAddress)` via the existing Safe-routed tx path. Composes with `jinn-mono-j07` (agent NFT mint) and `jinn-mono-aev` (`setAgentWallet`) — either by extending those beads' surfaces or absorbing their work here, depending on whether they have shipped at planning time.
+- The bootstrap orchestrator gains two entry points: `ensureStage1(ctx)` and `ensureStage1And2(ctx)`. Each walks the state machine forward to its target stage, idempotent and re-entrant.
+- `jinn solver-plugins publish` (and `revoke`, and any other builder action) calls `ensureStage1`. `jinn run` (and any operator action) calls `ensureStage1And2`. Today's `jinn run` already does the full bootstrap; the refactor preserves that behaviour and adds the Stage 1-only entry point.
+- The existing `awaiting_funding` gate splits: in Stage 1 it requires ETH for gas only; in Stage 2 it additionally requires OLAS for the service bond and staking.
+
+`--new-agent-id` and `--builder-agent-id <id>` are flags on `jinn solver-plugins publish` (and the daemon-side writers) for users who want explicit per-role agentId separation. Default is one agentId per Safe. No separate `jinn builder init` ship — the capability exists as a side effect of `publish`'s lazy stage-ensure.
+
+If a convenience verb is desirable (`jinn identity ensure` or similar) so users can pre-provision Stage 1 ahead of any specific action, it ships as a thin wrapper around `ensureStage1`; not required by acceptance.
 
 ### 6.2 `jinn create plugin <name>` scaffold
 
@@ -324,8 +336,8 @@ Two coupled deliverables; combined because the SPA route's intro card and shape 
 
 Two concerns combined into one bead because they're naturally one piece of evidence:
 
-- A separate published package that demonstrates the full builder loop and serves as the first-integrator artefact (per `spec/2026-04-30-plug-in-surface.md` §6's adaptation of #57 §3 — "the first integrator must have at least as good an experience as the second"). Lives outside `client/plugins/` (either under `examples/plug-ins/<name>/` in this repo or as its own published package). Targets `swe-rebench-v2.v1`. Demonstrates: scaffold → builder init → publish → operator install → score.
-- A vitest under `client/test/acceptance/` (or wherever the cold-start E2E pattern fits) that walks the loop end-to-end against a stub/fixture daemon: scaffold via `jinn create plugin` → `jinn builder init` (or skip if existing agentId detected) → pack → publish to a local IPFS-stub + on-chain stub `IdentityRegistry` → operator's Discovery API surfaces the published plug-in → operator installs (existing path) → stub-Hermes runs a SWE-rebench v2 task with the plug-in loaded → envelope emits `executor.plugins[]` → ebu7-compatible rollup picks it up → `/build` builder-filter shows the score → builder attribution record updates.
+- A separate published package that demonstrates the full builder loop and serves as the first-integrator artefact (per `spec/2026-04-30-plug-in-surface.md` §6's adaptation of #57 §3 — "the first integrator must have at least as good an experience as the second"). Lives outside `client/plugins/` (either under `examples/plug-ins/<name>/` in this repo or as its own published package). Targets `swe-rebench-v2.v1`. Demonstrates: scaffold → publish (which lazily completes Stage 1) → operator install → score.
+- A vitest under `client/test/acceptance/` (or wherever the cold-start E2E pattern fits) that walks the loop end-to-end against a stub/fixture daemon: scaffold via `jinn create plugin` → pack → `jinn solver-plugins publish` against a stub IPFS + stub `IdentityRegistry` (Stage 1 ensured lazily, idempotent on re-run) → operator's Discovery API surfaces the published plug-in → operator installs (existing path) → stub-Hermes runs a SWE-rebench v2 task with the plug-in loaded → envelope emits `executor.plugins[]` → ebu7-compatible rollup picks it up → `/build` builder-filter shows the score → builder attribution record updates. The test should also exercise the dual-role path: an operator (who has completed Stage 1+2 via `jinn run`) publishes a plug-in via the same flow; Stage 1 detected as done; proceeds straight to packing + `setMetadata`.
 
 ## 7. Dependencies
 
@@ -340,6 +352,7 @@ This epic is a **post-v1 epic**. It depends on uy6v's release ship; it does not 
 ## 8. Out of scope
 
 - **Path 2 (bring-your-own restorer impl) publishing flow** — separate epic for forecaster-shape recruits. The Path 2 substrate (`jinn create harness`, `jinn.manifest.json` schema, capability allow-list, ed25519 signature) already exists; the publishing analogue adds a sibling `harness:<cid>` metadata kind, surfaces in the same `/builders/<address>/artifacts` endpoint (per §5.6 future-proofing), and is otherwise mechanically symmetric. v0 sets up the read-layer base interface; the Path 2 publishing epic adds the kind + payload + indexer entry.
+- **Parallel identity primitives per role.** Explicitly rejected — see §5.1. One agentId per Safe, two stages on one state machine, lazy stage-ensure per action. No separate "builder identity" primitive.
 - **Stake-backed reputation slashing + challenge mechanism** — `jinn-mono-0www` (Phase B.2 evaluator economics).
 - **New cross-operator score aggregation** — already shipped under ebu7.4, ebu7.6, ebu7.7.
 - **Verdict envelope extensions for plug-in attribution** — `executor.plugins[]` already exists in `jinn.execution.v1`.
@@ -351,11 +364,12 @@ This epic is a **post-v1 epic**. It depends on uy6v's release ship; it does not 
 
 ## 9. Open questions
 
-1. **Builder agentId default for dual-role users.** Default is **reuse the operator agentId**; `--new-agent-id` mints a separate one. Open: is this the right default, or should dual-role users be steered toward separate agentIds for clean reputation streams? Defer to §6.1 planning with observation after the first cohort of dual-role users.
-2. **`jinn solver-plugins publish` vs `jinn publish plugin <pkg>`.** Folding under `solver-plugins` (consistent with the current command tree) vs a top-level `publish` verb (clearer for cold-start). Defer to §6.3 planning.
-3. **IPFS upload backend for `publish`.** Use the Autonolas gateway (already wired for envelopes/evaluations), or require operators to configure their own pin service, or fall back to a local-only mode for testing. Defer to §6.3 planning; default to Autonolas gateway for v0.
-4. **Where the `/build` route lives in the SPA nav.** Top-level alongside `/operator` and `/launcher`, or under a new section. Recommend top-level peer.
-5. **First-integrator candidate.** §6.7 commits to publishing one reference plug-in. Which recruit shape it anchors on — Hermes-migrator (per the growth lanes in #129's roadmap comment) vs sovereign-forker vs ERC-8004 builder — is a `GROWTH.md`-touching question; defer to §6.7 planning with input from `spec/2026-05-12-growth-target-ecosystem-builders.md`.
+1. **Whether `--new-agent-id` survives v0.** Default is one agentId per Safe — all activity flows through it, streams separated by metadata kind. `--new-agent-id` opt-in mints a second agentId on the same Safe for users who want explicit reputation-stream separation. Open: is the flag worth shipping in v0, or is one-agentId-everywhere sufficient until evidence shows users want separation? Defer to §6.1 planning.
+2. **Convenience verb for pre-provisioning Stage 1.** `jinn identity ensure` (or `jinn init` or similar) as a thin wrapper around `ensureStage1` for users who want to provision an identity ahead of any specific action. Not required for acceptance (the lazy stage-ensure from `publish` is enough); shipping it is a UX question.
+3. **`jinn solver-plugins publish` vs `jinn publish plugin <pkg>`.** Folding under `solver-plugins` (consistent with the current command tree) vs a top-level `publish` verb (clearer for cold-start). Defer to §6.3 planning.
+4. **IPFS upload backend for `publish`.** Use the Autonolas gateway (already wired for envelopes/evaluations), or require operators to configure their own pin service, or fall back to a local-only mode for testing. Defer to §6.3 planning; default to Autonolas gateway for v0.
+5. **Where the `/build` route lives in the SPA nav.** Top-level alongside `/operator` and `/launcher`, or under a new section. Recommend top-level peer.
+6. **First-integrator candidate.** §6.7 commits to publishing one reference plug-in. Which recruit shape it anchors on — Hermes-migrator (per the growth lanes in #129's roadmap comment) vs sovereign-forker vs ERC-8004 builder — is a `GROWTH.md`-touching question; defer to §6.7 planning with input from `spec/2026-05-12-growth-target-ecosystem-builders.md`.
 
 ## 10. References
 
