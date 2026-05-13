@@ -268,3 +268,45 @@ describe('runCreate (plugin target — runtime-plugin)', () => {
     expect(serverJs).not.toContain('{{');
   });
 });
+
+describe('runCreate (plugin target — first-run yarn test passes)', () => {
+  it('scaffolded solver-type-plugin passes yarn install && yarn test', async () => {
+    const target = await runCreate({
+      target: 'plugin',
+      pattern: 'solver-type-plugin',
+      packageName: 'test-plugin-e2e',
+      solverTypeString: 'swe-rebench-v2.v1',
+      outDir: TMP,
+    });
+    // yarn install with --no-immutable so the missing lockfile doesn't fail
+    const installResult = execFileSync('yarn', ['install', '--no-immutable'], {
+      cwd: target,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    expect(installResult).toBeDefined();
+    const testResult = execFileSync('yarn', ['test'], {
+      cwd: target,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    expect(testResult).toMatch(/(passed|PASS)/i);
+  }, 60_000);
+
+  it('scaffolded runtime-plugin passes yarn install && yarn test', async () => {
+    const target = await runCreate({
+      target: 'plugin',
+      pattern: 'runtime-plugin',
+      packageName: 'test-runtime-e2e',
+      solverTypeString: 'jinn.runtime',
+      outDir: TMP,
+    });
+    execFileSync('yarn', ['install', '--no-immutable'], { cwd: target, stdio: 'pipe' });
+    const testResult = execFileSync('yarn', ['test'], {
+      cwd: target,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    expect(testResult).toMatch(/(passed|PASS)/i);
+  }, 60_000);
+});
