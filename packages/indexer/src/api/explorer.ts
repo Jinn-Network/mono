@@ -34,6 +34,7 @@ import {
   type LeaderboardRow,
 } from './metrics.js';
 import { withFreshness, type FreshnessMeta } from './freshness.js';
+import { getChainHead } from './chain-head.js';
 
 // ── Chain scope ───────────────────────────────────────────────────────────────
 
@@ -93,6 +94,8 @@ const SPARKLINE_TRAILING_BUCKETS = 12;
 type ExplorerVariables = {
   /** Indexer head stashed by the explorer-freshness middleware. */
   indexedHead: FreshnessMeta;
+  /** Chain head block number, or null if the RPC is unavailable. */
+  chainHead: bigint | null;
 };
 
 // ── Query-param parsers ───────────────────────────────────────────────────────
@@ -162,19 +165,31 @@ async function getIndexedHead(): Promise<bigint> {
  * `indexedHead` so route bodies can read it back with `c.get('indexedHead')`
  * instead of running a second getIndexedHead() query.
  *
+ * Also fetches the chain-head block number (cached for 60 s via getChainHead)
+ * and stashes it as `chainHead` so every route can pass it to freshness() and
+ * get a real `behindHead` value. The chain-head fetch is done in parallel with
+ * the DB query and does not block the route on a slow RPC — getChainHead()
+ * resolves to null within ~1.5 s on timeout/error (and caches that null for
+ * 60 s so subsequent callers aren't blocked).
+ *
  * This is a thin wrapper around `withFreshness` that also sets the context
- * variable before calling next(). We handle the stash here rather than inside
+ * variables before calling next(). We handle the stash here rather than inside
  * the generic withFreshness so that module stays DB-free and testable.
  */
 function explorerFreshness() {
   return withFreshness(async (c) => {
-    const lastIndexedBlock = await getIndexedHead();
+    // Parallel: DB head + chain-head RPC (cached; fast path is memory-only).
+    const [lastIndexedBlock, chainHead] = await Promise.all([
+      getIndexedHead(),
+      getChainHead(),
+    ]);
     const meta: FreshnessMeta = {
       lastIndexedBlock,
       lastIndexedAt: new Date().toISOString(),
     };
-    // Stash for route body to read — avoids a second getIndexedHead() call.
+    // Stash for route body to read — avoids second DB / RPC round trips.
     c.set('indexedHead', meta);
+    c.set('chainHead', chainHead);
     return meta;
   });
 }
@@ -302,9 +317,10 @@ app.get('/network', async (c) => {
     share: totalAttempts === 0 ? 0 : enrichedAttempts / totalAttempts,
   };
 
-  // Read the head computed by the middleware — no second DB round trip.
+  // Read the heads computed by the middleware — no second DB / RPC round trips.
   const meta = c.get('indexedHead');
-  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
+  const chainHead = c.get('chainHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
   return c.json({
     tasksPosted: Number(tRow?.total ?? 0),
@@ -372,9 +388,10 @@ app.get('/solvernets', async (c) => {
     recentResolvedRateSeries: sparklinesByDigest.get(m.cidKeccak) ?? [],
   }));
 
-  // Read the head computed by the middleware — no second DB round trip.
+  // Read the heads computed by the middleware — no second DB / RPC round trips.
   const meta = c.get('indexedHead');
-  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
+  const chainHead = c.get('chainHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
   return c.json({ solvernets: rows, ...freshnessFields });
 });
@@ -485,12 +502,22 @@ app.get('/solvernet/:cid', async (c) => {
 
       // HarnessCheckpoint rows (all on-chain anchors — not scoped to a SolverNet
       // since the harnessCheckpoint schema has no SolverNet link; we return all
-      // of them sorted by publishedAtBlock asc).
+      // of them sorted by publishedAtBlock asc). ebu7.9: also select the
+      // IPFS-enriched manifest body fields.
       db
         .select({
           cid: schema.harnessCheckpoint.cid,
           agentId: schema.harnessCheckpoint.agentId,
           publishedAtBlock: schema.harnessCheckpoint.publishedAtBlock,
+          name: schema.harnessCheckpoint.name,
+          version: schema.harnessCheckpoint.version,
+          codeDigest: schema.harnessCheckpoint.codeDigest,
+          parentCheckpointCid: schema.harnessCheckpoint.parentCheckpointCid,
+          implStateDirCid: schema.harnessCheckpoint.implStateDirCid,
+          implName: schema.harnessCheckpoint.implName,
+          implVersion: schema.harnessCheckpoint.implVersion,
+          sourceBundleCid: schema.harnessCheckpoint.sourceBundleCid,
+          enrichmentStatus: schema.harnessCheckpoint.enrichmentStatus,
         })
         .from(schema.harnessCheckpoint)
         .where(eq(schema.harnessCheckpoint.chainId, EXPLORER_CHAIN_ID))
@@ -538,15 +565,137 @@ app.get('/solvernet/:cid', async (c) => {
   const trainBoard = rankLeaderboard(trainBoardRows, minVerdicts);
   const frozenBoard = rankLeaderboard(frozenBoardRows, minVerdicts);
 
-  // Checkpoint timeline — on-chain anchors only (manifest body not yet fetched;
-  // codeDigest, parentCheckpointCid etc. pending checkpoint-manifest enrichment)
+  // Checkpoint timeline — ebu7.9: include enriched manifest body fields and
+  // per-checkpoint frozen-eval score (frozenResolvedRate).
+  //
+  // frozenResolvedRate: pass/total rate of mode='frozen' attempts in THIS
+  // SolverNet whose attemptEnvelopeMeta.codeDigest matches the checkpoint's
+  // codeDigest. We batch this: one pass over frozenEnvelopeRows (already loaded
+  // for freeze integrity) + their corresponding verdicts.
+  //
+  // TODO: batch the verdict lookup per codeDigest in a single query for
+  // production scale. At testnet scale (small row counts) the in-process join
+  // is fine; a dedicated batch query is a perf optimisation with no functional
+  // impact (deferred — file as its own bead).
+  //
+  // Build: codeDigest → { pass, total } from frozen attempts in this SolverNet.
+  // frozenEnvelopeRows has { operator, codeDigest, sourcePublished } for mode='frozen'
+  // attempts. We need verdicts for those attempts; they're already in `allVerdicts`
+  // fetched for the leaderboard... but `allVerdicts` isn't available here — it's
+  // inside buildLeaderboardRows. Re-query verdicts for frozen attempts directly.
+  //
+  // Simpler approach: we have frozenEnvelopeRows keyed by (operator, codeDigest,
+  // sourcePublished). We need the requestIds for those attempts to join to verdicts.
+  // Instead, use a separate per-codeDigest verdict query for each checkpoint that
+  // has a non-empty codeDigest (with a // TODO: batch comment as instructed).
+
+  // Build a map from codeDigest → frozenResolvedRate for all distinct codeDigests
+  // present in the checkpoint rows that have enrichmentStatus='ok'.
+  const enrichedCkptDigests = [
+    ...new Set(
+      checkpointRows
+        .filter((r) => r.enrichmentStatus === 'ok' && r.codeDigest)
+        .map((r) => r.codeDigest),
+    ),
+  ];
+
+  // For each distinct codeDigest, compute pass/total from frozen attemptEnvelopeMeta
+  // rows in this SolverNet (by joining attempt → task → manifestDigest). We iterate
+  // in a loop here; TODO(perf): batch into a single GROUP BY query when row counts grow.
+  const frozenRateByDigest = new Map<string, number | null>();
+  if (enrichedCkptDigests.length > 0 && ids.length > 0) {
+    for (const digest of enrichedCkptDigests) {
+      // Count frozen attempts with this codeDigest in this SolverNet.
+      // frozenEnvelopeRows is already filtered to mode='frozen' + this net's taskIds.
+      const matchingFrozen = frozenEnvelopeRows.filter((r) => r.codeDigest === digest);
+      if (matchingFrozen.length === 0) {
+        frozenRateByDigest.set(digest, null);
+        continue;
+      }
+      // We need verdict counts for those attempts. frozenEnvelopeRows doesn't carry
+      // verdicts; they live in the verdict table. Get request IDs from the join.
+      // Since we already have operator+codeDigest but not requestId, we need an
+      // additional query. The frozen envelope rows were fetched via:
+      //   attemptEnvelopeMeta JOIN attempt WHERE taskId IN ids AND mode='frozen'
+      // We need requestIds for these rows to look up verdicts. Re-query with requestId.
+      // TODO(perf): merge this into the main frozenEnvelopeRows query above.
+      const frozenAttemptRows =
+        ids.length > 0
+          ? await db
+              .select({
+                requestId: schema.attempt.requestId,
+                taskId: schema.attempt.taskId,
+                attemptIndex: schema.attempt.attemptIndex,
+              })
+              .from(schema.attemptEnvelopeMeta)
+              .innerJoin(
+                schema.attempt,
+                and(
+                  eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
+                  eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
+                ),
+              )
+              .where(
+                and(
+                  inArray(schema.attempt.taskId, ids),
+                  eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
+                  eq(schema.attemptEnvelopeMeta.mode, 'frozen'),
+                  eq(schema.attemptEnvelopeMeta.codeDigest, digest),
+                ),
+              )
+          : [];
+
+      if (frozenAttemptRows.length === 0) {
+        frozenRateByDigest.set(digest, null);
+        continue;
+      }
+
+      // Get verdicts for these attempts.
+      const pairs = frozenAttemptRows.map((a) => ({
+        taskId: a.taskId,
+        attemptIndex: a.attemptIndex,
+      }));
+      const frozenVerdicts = await getVerdictsForAttempts(pairs);
+      const total = frozenVerdicts.length;
+      const pass = frozenVerdicts.filter((v) => v.verdictCode === 1).length;
+      frozenRateByDigest.set(digest, resolvedRateFromCounts(pass, total));
+    }
+  }
+
+  // Determine whether any checkpoints still need enrichment for the note.
+  const pendingCount = checkpointRows.filter(
+    (r) => r.enrichmentStatus === 'pending' || r.enrichmentStatus === 'failed',
+  ).length;
+  const checkpointNote =
+    pendingCount > 0
+      ? `${pendingCount} checkpoint(s) pending IPFS enrichment — frozen-eval scores may be incomplete`
+      : '';
+
   const checkpointTimeline = {
-    checkpoints: checkpointRows.map((r) => ({
-      cid: r.cid,
-      agentId: r.agentId,
-      publishedAtBlock: String(r.publishedAtBlock),
-    })),
-    note: 'per-checkpoint frozen-eval score pending HarnessCheckpoint manifest enrichment (manifest body not yet fetched from IPFS)',
+    checkpoints: checkpointRows.map((r) => {
+      const codeDigest = r.codeDigest ?? '';
+      const frozenResolvedRate =
+        r.enrichmentStatus === 'ok' && codeDigest
+          ? (frozenRateByDigest.get(codeDigest) ?? null)
+          : null;
+      const verifiedFrozen = r.sourceBundleCid != null && r.sourceBundleCid !== '';
+      return {
+        cid: r.cid,
+        agentId: r.agentId,
+        publishedAtBlock: String(r.publishedAtBlock),
+        name: r.name ?? '',
+        version: r.version ?? '',
+        codeDigest,
+        parentCheckpointCid: r.parentCheckpointCid ?? null,
+        implName: r.implName ?? '',
+        implVersion: r.implVersion ?? '',
+        sourceBundleCid: r.sourceBundleCid ?? '',
+        enrichmentStatus: r.enrichmentStatus ?? 'pending',
+        frozenResolvedRate,
+        verifiedFrozen,
+      };
+    }),
+    note: checkpointNote,
   };
 
   // Freeze integrity
@@ -564,9 +713,10 @@ app.get('/solvernet/:cid', async (c) => {
     frozenAttempts: frozenCount,
   };
 
-  // Read the head computed by the middleware — no second DB round trip.
+  // Read the heads computed by the middleware — no second DB / RPC round trips.
   const meta = c.get('indexedHead');
-  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
+  const chainHead = c.get('chainHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
   return c.json({
     cid: m.id,
@@ -673,9 +823,10 @@ app.get('/operators', async (c) => {
   if (modeParam !== undefined) appliedFilters['mode'] = modeParam;
   if (harnessParam !== undefined) appliedFilters['harness'] = harnessParam;
 
-  // Read the head computed by the middleware — no second DB round trip.
+  // Read the heads computed by the middleware — no second DB / RPC round trips.
   const meta = c.get('indexedHead');
-  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
+  const chainHead = c.get('chainHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
   const serializeRow = (r: LeaderboardRow & { rank?: number }) => ({
     ...r,
@@ -764,9 +915,10 @@ app.get('/operator/:addr', async (c) => {
       ),
     );
 
-  // Read the head computed by the middleware — no second DB round trip.
+  // Read the heads computed by the middleware — no second DB / RPC round trips.
   const meta = c.get('indexedHead');
-  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt);
+  const chainHead = c.get('chainHead');
+  const freshnessFields = freshness(meta.lastIndexedBlock, meta.lastIndexedAt, chainHead ?? undefined);
 
   if (operatorAttempts.length === 0) {
     return c.json({

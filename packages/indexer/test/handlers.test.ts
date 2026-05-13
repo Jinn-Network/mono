@@ -35,6 +35,7 @@ import {
   handleVerdictDeliveryClaimed,
   handleTaskBudgetRefunded,
   handleClaimed,
+  parseCheckpointManifestLite,
   type HandlerContext,
 } from '../src/handlers.js';
 import { createInMemoryDb, type InMemoryDb, type PkMap } from './helpers/in-memory-db.js';
@@ -845,6 +846,41 @@ describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
     expect(db.count(envelope)).toBeGreaterThan(0);
   });
 
+  it('test 4.5: language field extracted from payload.language (SWE-rebench task carries language)', async () => {
+    const bodyWithLanguage = {
+      ...SYNTHETIC_ENVELOPE,
+      payload: { language: 'python', repo: 'owner/repo' },
+    };
+    const stubFetch: FetchLike = async (_url, _opts) => ({
+      ok: true,
+      status: 200,
+      json: async () => bodyWithLanguage,
+    });
+
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 9n,
+          metadataKey: `envelope:${ENRICH_ENVELOPE_CID}`,
+          metadataValue: envelopePayloadV2({ tier: 1, manifestHash: MANIFEST_HASH }),
+        },
+        { block: 41_200_010n, logIndex: 0 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    const metaRow = db.get(attemptEnvelopeMeta, { requestId: ENVELOPE_REQUEST_ID, chainId: CHAIN_ID });
+    expect(metaRow).toBeDefined();
+    expect(metaRow?.language).toBe('python');
+  });
+
   it('test 4: envelope body missing task.requestId — no attemptEnvelopeMeta row, no throw', async () => {
     const bodyWithoutTask = { ...SYNTHETIC_ENVELOPE, task: undefined };
     const stubFetch: FetchLike = async (_url, _opts) => ({
@@ -876,5 +912,244 @@ describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
 
     expect(db.count(attemptEnvelopeMeta)).toBe(0);
     expect(db.count(envelope)).toBeGreaterThan(0);
+  });
+});
+
+// ── parseCheckpointManifestLite unit tests ────────────────────────────────────
+
+describe('parseCheckpointManifestLite', () => {
+  const SYNTHETIC_CHECKPOINT_MANIFEST = {
+    schemaVersion: 'harness.checkpoint.v1',
+    name: 'claude-code-learner',
+    version: '1.0.0',
+    parentCheckpointCid: null,
+    harnessPackage: {
+      implName: 'claude-code-learner',
+      implVersion: '1.0.0',
+      clientGitSha: 'abc123',
+      sourceBundleCid: 'bafyreidummysourcebundle',
+    },
+    implStateDirCid: 'bafyreidummyimplstatedir',
+    codeDigest: `sha256:${'ab'.repeat(32)}`,
+    publisher: {
+      agentId: '42',
+      signingKey: `ed25519:${'cd'.repeat(32)}`,
+      safeAddress: '0x' + 'ee'.repeat(20),
+    },
+    publishedAt: '2026-05-13T00:00:00Z',
+    registry: {
+      anchor: 'IdentityRegistry.setMetadata',
+      metadataKey: 'harness.checkpoint:bafyckptcid',
+      txHash: '0x' + 'ff'.repeat(32),
+      blockNumber: 41_300_000,
+    },
+    signature: 'sig',
+  };
+
+  it('parses a valid checkpoint manifest', () => {
+    const result = parseCheckpointManifestLite(SYNTHETIC_CHECKPOINT_MANIFEST);
+    expect(result).not.toBeNull();
+    expect(result).toMatchObject({
+      name: 'claude-code-learner',
+      version: '1.0.0',
+      codeDigest: `sha256:${'ab'.repeat(32)}`,
+      parentCheckpointCid: null,
+      implStateDirCid: 'bafyreidummyimplstatedir',
+      implName: 'claude-code-learner',
+      implVersion: '1.0.0',
+      sourceBundleCid: 'bafyreidummysourcebundle',
+    });
+  });
+
+  it('returns null for a non-object body', () => {
+    expect(parseCheckpointManifestLite('string')).toBeNull();
+    expect(parseCheckpointManifestLite(null)).toBeNull();
+    expect(parseCheckpointManifestLite(42)).toBeNull();
+  });
+
+  it('returns null when codeDigest is missing', () => {
+    const body = { ...SYNTHETIC_CHECKPOINT_MANIFEST, codeDigest: undefined };
+    expect(parseCheckpointManifestLite(body)).toBeNull();
+  });
+
+  it('returns null when implStateDirCid is missing', () => {
+    const body = { ...SYNTHETIC_CHECKPOINT_MANIFEST, implStateDirCid: undefined };
+    expect(parseCheckpointManifestLite(body)).toBeNull();
+  });
+
+  it('handles parentCheckpointCid: non-null string', () => {
+    const body = { ...SYNTHETIC_CHECKPOINT_MANIFEST, parentCheckpointCid: 'bafyparent' };
+    const result = parseCheckpointManifestLite(body);
+    expect(result?.parentCheckpointCid).toBe('bafyparent');
+  });
+
+  it('handles missing harnessPackage gracefully (implName/implVersion/sourceBundleCid → empty)', () => {
+    const { harnessPackage: _unused, ...body } = SYNTHETIC_CHECKPOINT_MANIFEST;
+    const result = parseCheckpointManifestLite(body);
+    // codeDigest and implStateDirCid are still present — should still parse
+    expect(result).not.toBeNull();
+    expect(result?.implName).toBe('');
+    expect(result?.implVersion).toBe('');
+    expect(result?.sourceBundleCid).toBe('');
+  });
+});
+
+// ── MetadataSet harness.checkpoint: enrichment ────────────────────────────────
+
+const SYNTHETIC_CHECKPOINT_MANIFEST_BODY = {
+  schemaVersion: 'harness.checkpoint.v1',
+  name: 'claude-code-learner',
+  version: '1.0.0',
+  parentCheckpointCid: null,
+  harnessPackage: {
+    implName: 'claude-code-learner',
+    implVersion: '1.0.0',
+    clientGitSha: 'abc123',
+    sourceBundleCid: 'bafyreidummysourcebundle',
+  },
+  implStateDirCid: 'bafyreidummyimplstatedir',
+  codeDigest: `sha256:${'ab'.repeat(32)}`,
+};
+
+describe('MetadataSet harness.checkpoint: enrichment → harnessCheckpoint', () => {
+  const CKPT_CID = 'bafycheckpointenrich';
+
+  it('ckpt-enrich-1: successful fetch → harnessCheckpoint row has enrichmentStatus=ok + manifest fields', async () => {
+    const stubFetch: FetchLike = async (_url, _opts) => ({
+      ok: true,
+      status: 200,
+      json: async () => SYNTHETIC_CHECKPOINT_MANIFEST_BODY,
+    });
+
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 99n,
+          metadataKey: `harness.checkpoint:${CKPT_CID}`,
+          metadataValue: '0x',
+        },
+        { block: 41_400_000n, logIndex: 0 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    const row = db.get(harnessCheckpoint, { agentId: '99', cid: CKPT_CID, chainId: CHAIN_ID });
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      cid: CKPT_CID,
+      agentId: '99',
+      publishedAtBlock: 41_400_000n,
+      chainId: CHAIN_ID,
+      enrichmentStatus: 'ok',
+      name: 'claude-code-learner',
+      version: '1.0.0',
+      codeDigest: `sha256:${'ab'.repeat(32)}`,
+      parentCheckpointCid: null,
+      implStateDirCid: 'bafyreidummyimplstatedir',
+      implName: 'claude-code-learner',
+      implVersion: '1.0.0',
+      sourceBundleCid: 'bafyreidummysourcebundle',
+    });
+  });
+
+  it('ckpt-enrich-2: fetch throws → enrichmentStatus=failed, no throw from handler', async () => {
+    const stubFetch: FetchLike = async (_url, _opts) => {
+      throw new Error('IPFS timeout');
+    };
+
+    await expect(
+      handleMetadataSet({
+        event: metadataSetEvent(
+          {
+            agentId: 99n,
+            metadataKey: `harness.checkpoint:${CKPT_CID}`,
+            metadataValue: '0x',
+          },
+          { block: 41_400_001n, logIndex: 0 },
+        ),
+        context,
+        solverNetManifest,
+        envelope,
+        harnessCheckpoint,
+        attemptEnvelopeMeta,
+        enrichEnvelopes: true,
+        ipfsGateway: 'https://stub',
+        fetchImpl: stubFetch,
+      }),
+    ).resolves.toBeUndefined();
+
+    const row = db.get(harnessCheckpoint, { agentId: '99', cid: CKPT_CID, chainId: CHAIN_ID });
+    expect(row).toBeDefined();
+    expect(row?.enrichmentStatus).toBe('failed');
+  });
+
+  it('ckpt-enrich-3: fetch succeeds but body is not a valid manifest → enrichmentStatus=failed', async () => {
+    const stubFetch: FetchLike = async (_url, _opts) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ schemaVersion: 'unknown', notACheckpoint: true }),
+    });
+
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 99n,
+          metadataKey: `harness.checkpoint:${CKPT_CID}`,
+          metadataValue: '0x',
+        },
+        { block: 41_400_002n, logIndex: 0 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    const row = db.get(harnessCheckpoint, { agentId: '99', cid: CKPT_CID, chainId: CHAIN_ID });
+    expect(row).toBeDefined();
+    expect(row?.enrichmentStatus).toBe('failed');
+  });
+
+  it('ckpt-enrich-4: enrichEnvelopes=false → no fetch, row has enrichmentStatus=pending', async () => {
+    let fetchCalled = false;
+    const stubFetch: FetchLike = async (_url, _opts) => {
+      fetchCalled = true;
+      return { ok: true, status: 200, json: async () => SYNTHETIC_CHECKPOINT_MANIFEST_BODY };
+    };
+
+    await handleMetadataSet({
+      event: metadataSetEvent(
+        {
+          agentId: 99n,
+          metadataKey: `harness.checkpoint:${CKPT_CID}`,
+          metadataValue: '0x',
+        },
+        { block: 41_400_003n, logIndex: 0 },
+      ),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      enrichEnvelopes: false,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    expect(fetchCalled).toBe(false);
+    const row = db.get(harnessCheckpoint, { agentId: '99', cid: CKPT_CID, chainId: CHAIN_ID });
+    expect(row).toBeDefined();
+    expect(row?.enrichmentStatus).toBe('pending');
   });
 });

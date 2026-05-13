@@ -332,6 +332,63 @@ export async function handleTaskBudgetRefunded({
   await context.db.update(task, { id }).set({ refunded: true });
 }
 
+// ── CheckpointManifest lite parser ───────────────────────────────────────────
+// Dep-free defensive parser: reads only the fields needed for harnessCheckpoint
+// enrichment from a HarnessCheckpointManifest body (packages/sdk/src/checkpoint.ts).
+// Returns null if the body isn't an object or lacks the required codeDigest /
+// implStateDirCid fields — defensive safeStr reads like parseEnvelopeLite.
+
+export interface CheckpointManifestLite {
+  name: string;
+  version: string;
+  codeDigest: string;
+  parentCheckpointCid: string | null;
+  implStateDirCid: string;
+  implName: string;
+  implVersion: string;
+  sourceBundleCid: string;
+}
+
+export function parseCheckpointManifestLite(body: unknown): CheckpointManifestLite | null {
+  if (body === null || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+
+  // codeDigest is required — if absent/empty this isn't a valid checkpoint manifest.
+  const codeDigest = safeStr(b['codeDigest']);
+  if (!codeDigest) return null;
+
+  // implStateDirCid is required by the schema.
+  const implStateDirCid = safeStr(b['implStateDirCid']);
+  if (!implStateDirCid) return null;
+
+  const name = safeStr(b['name']);
+  const version = safeStr(b['version']);
+
+  // parentCheckpointCid: nullable per schema
+  const rawParent = b['parentCheckpointCid'];
+  const parentCheckpointCid =
+    rawParent === null || rawParent === undefined ? null : safeStr(rawParent) || null;
+
+  // harnessPackage block
+  const pkg = b['harnessPackage'];
+  const pkgObj: Record<string, unknown> =
+    pkg !== null && typeof pkg === 'object' ? (pkg as Record<string, unknown>) : {};
+  const implName = safeStr(pkgObj['implName']);
+  const implVersion = safeStr(pkgObj['implVersion']);
+  const sourceBundleCid = safeStr(pkgObj['sourceBundleCid']);
+
+  return {
+    name,
+    version,
+    codeDigest,
+    parentCheckpointCid,
+    implStateDirCid,
+    implName,
+    implVersion,
+    sourceBundleCid,
+  };
+}
+
 // ── Envelope lite parser ──────────────────────────────────────────────────────
 // Dep-free defensive parser: reads only the fields needed for attemptEnvelopeMeta.
 // Returns null if the body isn't an object or task.requestId is absent/empty.
@@ -570,11 +627,17 @@ export async function handleMetadataSet({
     return;
   }
 
-  // ── HarnessCheckpoint anchor ─────────────────────────────────────────────
+  // ── HarnessCheckpoint anchor + manifest enrichment ───────────────────────
   // The on-chain value for a harness.checkpoint:<cid> MetadataSet is the
   // manifest CID string itself — not an ABI-encoded ExecutionPayload tuple.
   // The CID is already in the key; the value is redundant and intentionally
-  // ignored here. The manifest body lives on IPFS and is not fetched yet.
+  // ignored here. The manifest body lives on IPFS.
+  //
+  // ebu7.9: if enrichEnvelopes is true, fetch the manifest from IPFS and
+  // populate the enriched columns; mark 'ok' on success, 'failed' on error.
+  // Unlike the envelope case, we DO have the PK (agentId, cid, chainId) from
+  // the on-chain event without needing the body, so we can always write a
+  // 'failed' marker for future batch retry.
   const checkpointCid = parseHarnessCheckpointKey(key);
   if (checkpointCid !== null) {
     const logIndex = typeof event.log.logIndex === 'number' ? event.log.logIndex : 0;
@@ -586,8 +649,45 @@ export async function handleMetadataSet({
         publishedAtBlock: blockNumber,
         logIndex,
         chainId,
+        enrichmentStatus: 'pending',
       })
       .onConflictDoNothing();
+
+    if (enrichEnvelopes) {
+      try {
+        const body = await fetchIpfsJson(ipfsGateway, checkpointCid, {
+          timeoutMs: 5000,
+          fetchImpl,
+        });
+        const m = parseCheckpointManifestLite(body);
+        if (m) {
+          await context.db
+            .update(harnessCheckpoint, { agentId, cid: checkpointCid, chainId })
+            .set({
+              name: m.name,
+              version: m.version,
+              codeDigest: m.codeDigest,
+              parentCheckpointCid: m.parentCheckpointCid,
+              implStateDirCid: m.implStateDirCid,
+              implName: m.implName,
+              implVersion: m.implVersion,
+              sourceBundleCid: m.sourceBundleCid,
+              enrichmentStatus: 'ok',
+            });
+        } else {
+          console.warn(`[indexer] checkpoint manifest parse failed for ${checkpointCid}: body missing required fields`);
+          await context.db
+            .update(harnessCheckpoint, { agentId, cid: checkpointCid, chainId })
+            .set({ enrichmentStatus: 'failed' });
+        }
+      } catch (err) {
+        console.warn(`[indexer] checkpoint manifest enrichment failed for ${checkpointCid}: ${String(err)}`);
+        await context.db
+          .update(harnessCheckpoint, { agentId, cid: checkpointCid, chainId })
+          .set({ enrichmentStatus: 'failed' });
+      }
+    }
+
     return;
   }
 

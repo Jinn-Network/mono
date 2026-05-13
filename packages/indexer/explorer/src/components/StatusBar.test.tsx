@@ -53,4 +53,59 @@ describe('StatusBar', () => {
     // relTime renders e.g. "2m ago" — find by regex
     expect(screen.getByText(/ago$/)).toBeInTheDocument();
   });
+
+  it('shows "blocks behind head" when behindHead > 0', () => {
+    render(
+      <StatusBar
+        lastIndexedBlock="1000"
+        lastIndexedAt={new Date().toISOString()}
+        behindHead={5}
+      />,
+    );
+    expect(screen.getByLabelText(/5 blocks behind head/i)).toBeInTheDocument();
+  });
+
+  it('does not show "blocks behind head" when behindHead is null', () => {
+    render(
+      <StatusBar
+        lastIndexedBlock="1000"
+        lastIndexedAt={new Date().toISOString()}
+        behindHead={null}
+      />,
+    );
+    expect(screen.queryByText(/blocks behind head/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show "blocks behind head" when behindHead is 0', () => {
+    render(
+      <StatusBar
+        lastIndexedBlock="1000"
+        lastIndexedAt={new Date().toISOString()}
+        behindHead={0}
+      />,
+    );
+    expect(screen.queryByText(/blocks behind head/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the Wane chip when behindHead > 100', () => {
+    render(
+      <StatusBar
+        lastIndexedBlock="1000"
+        lastIndexedAt={new Date().toISOString()}
+        behindHead={150}
+      />,
+    );
+    expect(screen.getByLabelText(/indexer falling behind head/i)).toBeInTheDocument();
+  });
+
+  it('does not show the Wane chip when behindHead is 50 (below threshold)', () => {
+    render(
+      <StatusBar
+        lastIndexedBlock="1000"
+        lastIndexedAt={new Date().toISOString()}
+        behindHead={50}
+      />,
+    );
+    expect(screen.queryByLabelText(/indexer falling behind head/i)).not.toBeInTheDocument();
+  });
 });

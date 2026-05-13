@@ -343,9 +343,14 @@ export const envelope = onchainTable(
  *
  * The on-chain value for a `harness.checkpoint:<cid>` MetadataSet is the manifest CID
  * string itself — redundant with the key, not an ABI-encoded ExecutionPayload tuple.
- * This row stores only the on-chain anchor fields. The checkpoint manifest body
- * (codeDigest, parentCheckpointCid, implStateDirCid, harnessPackage) lives on IPFS at
- * `cid` and is NOT fetched yet; a follow-up will enrich it (`jinn-mono-ebu7.<checkpoint-enrichment>`).
+ * This row stores the on-chain anchor fields plus IPFS-enriched manifest body fields
+ * (ebu7.9): codeDigest, parentCheckpointCid, implStateDirCid, harnessPackage fields,
+ * name, version, and enrichmentStatus.
+ *
+ * Enrichment flow: insert with enrichmentStatus='pending', then — if enrichEnvelopes
+ * is true — fetch the manifest from IPFS and update the row with the parsed fields
+ * and enrichmentStatus='ok' (or 'failed' on error/parse failure). A 'failed' marker
+ * allows a future batch-retry to find unenriched rows.
  *
  * Primary key: (agentId, cid, chainId).
  */
@@ -362,11 +367,46 @@ export const harnessCheckpoint = onchainTable(
     logIndex: t.integer().notNull(),
     /** Chain ID. */
     chainId: t.integer().notNull(),
+
+    // ── IPFS-enriched manifest body fields (ebu7.9) ──────────────────────────
+    /** Display name from the checkpoint manifest (harnessPackage.implName). */
+    name: t.text().notNull().default(''),
+    /** Version string from the checkpoint manifest (harnessPackage.implVersion). */
+    version: t.text().notNull().default(''),
+    /**
+     * sha256:<hex> code digest from the checkpoint manifest.
+     * Indexed for per-codeDigest frozen-eval score queries.
+     */
+    codeDigest: t.text().notNull().default(''),
+    /**
+     * CID of the parent checkpoint, or null if this is a root checkpoint.
+     * From HarnessCheckpointManifest.parentCheckpointCid.
+     */
+    parentCheckpointCid: t.text(),
+    /** CID of the impl-state directory pinned with this checkpoint. */
+    implStateDirCid: t.text().notNull().default(''),
+    /** harnessPackage.implName from the checkpoint manifest. */
+    implName: t.text().notNull().default(''),
+    /** harnessPackage.implVersion from the checkpoint manifest. */
+    implVersion: t.text().notNull().default(''),
+    /**
+     * harnessPackage.sourceBundleCid from the checkpoint manifest.
+     * Non-empty indicates the checkpoint published its source bundle
+     * (verified-frozen eligibility).
+     */
+    sourceBundleCid: t.text().notNull().default(''),
+    /**
+     * IPFS enrichment status: 'pending' | 'ok' | 'failed'.
+     * 'pending' at insert; updated to 'ok' or 'failed' after the manifest fetch.
+     * A 'failed' marker allows a future batch-retry worker to find and re-enrich rows.
+     */
+    enrichmentStatus: t.text().notNull().default('pending'),
   }),
   (table) => ({
     pk: primaryKey({ columns: [table.agentId, table.cid, table.chainId] }),
     cidIdx: index().on(table.cid),
     blockIdx: index().on(table.publishedAtBlock),
+    codeDigestIdx: index().on(table.codeDigest),
   }),
 );
 

@@ -106,6 +106,29 @@ export interface CheckpointTimelineEntry {
   cid: string;
   agentId: string;
   publishedAtBlock: string;
+  /** Display name from the checkpoint manifest (harnessPackage.implName). Empty before IPFS enrichment. */
+  name: string;
+  /** Version string from the checkpoint manifest. Empty before enrichment. */
+  version: string;
+  /** sha256:<hex> code digest. Empty before enrichment. */
+  codeDigest: string;
+  /** CID of the parent checkpoint, or null for root checkpoints. */
+  parentCheckpointCid: string | null;
+  /** harnessPackage.implName. Empty before enrichment. */
+  implName: string;
+  /** harnessPackage.implVersion. Empty before enrichment. */
+  implVersion: string;
+  /** harnessPackage.sourceBundleCid. Empty before enrichment or if not published. */
+  sourceBundleCid: string;
+  /** 'pending' | 'ok' | 'failed' */
+  enrichmentStatus: string;
+  /**
+   * Pass rate of mode='frozen' attempts in this SolverNet whose codeDigest matches.
+   * null when enrichment is not 'ok', codeDigest is empty, or no frozen attempts.
+   */
+  frozenResolvedRate: number | null;
+  /** True when sourceBundleCid is non-empty (checkpoint published its source bundle). */
+  verifiedFrozen: boolean;
 }
 
 export interface FreezeViolation {

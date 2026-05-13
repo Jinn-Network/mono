@@ -3,15 +3,18 @@
  *
  * Design:
  *   - Horizontal hairline with ticks positioned linearly across block range
- *   - Each tick shows shortCid + shortAddr + block on hover tooltip
- *   - Below: note caption in var(--fg-dim)
+ *   - Each tick shows enriched manifest fields + frozen-eval score on hover tooltip
+ *   - verifiedFrozen checkpoints show a "verified-frozen" StatusChip in the tooltip
+ *   - enrichmentStatus !== 'ok': show CID + "enrichment pending/failed" caption
+ *   - Below: note caption in var(--fg-dim) when non-empty
  *   - 0-1 checkpoints: centered or single placement
  *   - No emoji, no gradients, linear motion
  */
 
 import { useState } from 'react';
 import type { CheckpointTimelineEntry } from '../lib/api';
-import { shortCid, shortAddr, block as blockFmt } from '../lib/format';
+import { StatusChip } from './StatusChip';
+import { shortCid, shortAddr, block as blockFmt, pct } from '../lib/format';
 
 export interface CheckpointTimelineData {
   checkpoints: CheckpointTimelineEntry[];
@@ -60,6 +63,13 @@ export function CheckpointTimeline({ data }: CheckpointTimelineProps) {
     return ((Number(cp.publishedAtBlock) - minBlock) / range) * 100;
   }
 
+  // Tick accent: 'ok' = accent, 'failed' = wane, 'pending' = fg-dim
+  function tickColor(status: string): string {
+    if (status === 'ok') return 'var(--accent)';
+    if (status === 'failed') return 'var(--wane)';
+    return 'var(--fg-dim)';
+  }
+
   return (
     <div style={{ position: 'relative' }}>
       {/* Timeline track */}
@@ -85,6 +95,7 @@ export function CheckpointTimeline({ data }: CheckpointTimelineProps) {
         {/* Ticks */}
         {checkpoints.map((cp, i) => {
           const xPos = xPct(cp);
+          const color = tickColor(cp.enrichmentStatus ?? 'pending');
           return (
             <div
               key={cp.cid + i}
@@ -125,7 +136,7 @@ export function CheckpointTimeline({ data }: CheckpointTimelineProps) {
                 style={{
                   width: 10,
                   height: 10,
-                  border: '1px solid var(--accent)',
+                  border: `1px solid ${color}`,
                   borderRadius: 'var(--radius-1)',
                   background: 'var(--bg-elevated)',
                   transition: `background var(--dur-fast) var(--ease-linear)`,
@@ -171,21 +182,74 @@ export function CheckpointTimeline({ data }: CheckpointTimelineProps) {
             zIndex: 'var(--z-overlay)' as unknown as number,
             boxShadow: 'var(--shadow-float)',
             lineHeight: 1.6,
+            minWidth: 180,
           }}
         >
+          {/* CID (always shown) */}
           <div style={{ color: 'var(--accent)', marginBottom: 2 }}>
             {shortCid(tooltip.entry.cid)}
           </div>
+
+          {/* Agent */}
           <div style={{ color: 'var(--fg-muted)' }}>
             {shortAddr(tooltip.entry.agentId)}
           </div>
+
+          {/* Block */}
           <div style={{ color: 'var(--fg-dim)', marginTop: 2 }}>
             Block {blockFmt(tooltip.entry.publishedAtBlock)}
           </div>
+
+          {/* Enriched fields */}
+          {tooltip.entry.enrichmentStatus === 'ok' ? (
+            <>
+              {/* name + version */}
+              {(tooltip.entry.name || tooltip.entry.implName) && (
+                <div style={{ marginTop: 6, color: 'var(--fg)' }}>
+                  {tooltip.entry.name || tooltip.entry.implName}
+                  {tooltip.entry.version ? ` v${tooltip.entry.version}` : ''}
+                </div>
+              )}
+
+              {/* codeDigest */}
+              {tooltip.entry.codeDigest && (
+                <div style={{ color: 'var(--fg-dim)', fontSize: 10, marginTop: 2 }}>
+                  {shortCid(tooltip.entry.codeDigest, 12, 8)}
+                </div>
+              )}
+
+              {/* frozenResolvedRate */}
+              {tooltip.entry.frozenResolvedRate !== null && (
+                <div style={{ marginTop: 4, color: 'var(--fg-muted)' }}>
+                  frozen eval: {pct(tooltip.entry.frozenResolvedRate)}
+                </div>
+              )}
+
+              {/* verifiedFrozen badge */}
+              {tooltip.entry.verifiedFrozen && (
+                <div style={{ marginTop: 6 }}>
+                  <StatusChip kind="ok" label="verified-frozen" />
+                </div>
+              )}
+            </>
+          ) : (
+            /* enrichment pending/failed caption */
+            <div
+              style={{
+                marginTop: 6,
+                color: tooltip.entry.enrichmentStatus === 'failed'
+                  ? 'var(--wane)'
+                  : 'var(--fg-dim)',
+                fontSize: 10,
+              }}
+            >
+              enrichment {tooltip.entry.enrichmentStatus ?? 'pending'}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Note caption */}
+      {/* Note caption — only shown when non-empty */}
       {note && (
         <div
           style={{

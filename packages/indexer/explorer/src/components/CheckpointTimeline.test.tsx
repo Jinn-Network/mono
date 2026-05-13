@@ -2,17 +2,39 @@ import { render, screen } from '@testing-library/react';
 import { CheckpointTimeline } from './CheckpointTimeline';
 import type { CheckpointTimelineData } from './CheckpointTimeline';
 
+// ── Base fixture (enriched) ───────────────────────────────────────────────────
+
 const FIXTURE: CheckpointTimelineData = {
   checkpoints: [
     {
       cid: 'bafkreiabc12345678xyz',
       agentId: '0xdeadbeefdeadbeef0001',
       publishedAtBlock: '1000000',
+      name: 'claude-code-learner',
+      version: '1.0.0',
+      codeDigest: 'sha256:' + 'ab'.repeat(32),
+      parentCheckpointCid: null,
+      implName: 'claude-code-learner',
+      implVersion: '1.0.0',
+      sourceBundleCid: 'bafyreidummysourcebundle',
+      enrichmentStatus: 'ok',
+      frozenResolvedRate: 0.85,
+      verifiedFrozen: true,
     },
     {
       cid: 'bafkreidef87654321abc',
       agentId: '0xdeadbeefdeadbeef0002',
       publishedAtBlock: '1050000',
+      name: '',
+      version: '',
+      codeDigest: '',
+      parentCheckpointCid: null,
+      implName: '',
+      implVersion: '',
+      sourceBundleCid: '',
+      enrichmentStatus: 'pending',
+      frozenResolvedRate: null,
+      verifiedFrozen: false,
     },
   ],
   note: 'Showing last 2 checkpoints.',
@@ -69,5 +91,11 @@ describe('CheckpointTimeline', () => {
     );
     // The note is rendered in empty state
     expect(screen.getByText('Some note.')).toBeInTheDocument();
+  });
+
+  it('does not show note when note is empty string', () => {
+    render(<CheckpointTimeline data={{ checkpoints: FIXTURE.checkpoints, note: '' }} />);
+    // The note container should not be rendered when note is empty
+    expect(screen.queryByText(/pending/i)).not.toBeInTheDocument();
   });
 });
