@@ -1144,8 +1144,11 @@ async function getSolverNetSparklinesBatch(
   // The divisor MUST be inlined as a literal (not a bound param) so the SELECT
   // and GROUP BY expressions are identical text — Postgres compares them
   // textually and rejects the query as a non-grouped column reference if the
-  // param placeholders differ between SELECT and GROUP BY.
-  const sparklineDiv = sql.raw(`/ ${SPARKLINE_BUCKET_BLOCKS.toString()}`);
+  // param placeholders differ between SELECT and GROUP BY. We also cast the
+  // divisor to bigint so the result is integer division (bigint/bigint),
+  // otherwise Postgres returns numeric and the JS-side BigInt(...) parse blows
+  // up on the decimal fraction (e.g. '828.4158400000000000').
+  const sparklineDiv = sql.raw(`/ ${SPARKLINE_BUCKET_BLOCKS.toString()}::bigint`);
   const bucketRows = await db
     .select({
       manifestDigest: schema.task.manifestDigest,
