@@ -22,7 +22,9 @@
 import { db } from 'ponder:api';
 import schema from 'ponder:schema';
 import { Hono } from 'hono';
-import { and, count, countDistinct, sum, eq, inArray, max, sql } from 'drizzle-orm';
+// Drizzle query helpers — re-exported by Ponder so we don't take a direct
+// dep on drizzle-orm (avoids the prod-install resolution miss we hit before).
+import { and, count, countDistinct, sum, eq, inArray, max, sql } from 'ponder';
 import {
   resolvedRateFromCounts,
   bucketResolvedRate,
