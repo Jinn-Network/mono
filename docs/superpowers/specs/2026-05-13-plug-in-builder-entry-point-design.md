@@ -3,7 +3,7 @@
 - **Date:** 2026-05-13
 - **Author:** opus (drafted with Captain `oak`)
 - **Status:** Proposal
-- **Version:** 0.4
+- **Version:** 0.5
 - **Bead:** `jinn-mono-52x3` (epic)
 - **Tracks:** Phase A.2 builder-surface layer; sequenced after `jinn-mono-uy6v` (first public release) and `jinn-mono-8psp` (Hermes harness integration).
 
@@ -143,12 +143,14 @@ Identity, attribution, reputation, and the on-chain registry are designed on the
 
 ### 5.1 Identity is staged, not separate-per-role
 
-There is **one stateful identity** per user — one EOA, one Safe, one agentId, one keystore, one state file. There are **two completion levels** on that identity, each independently re-entrant:
+There is **one stateful identity** per user — one EOA, one agentId, one keystore, one state file. There are **two completion levels** on that identity, each independently re-entrant.
 
-- **Stage 1 — Identity (universal).** Required for any participation, builder or operator. Steps: `wallet` → `safe_predicted` → `awaiting_funding` (ETH only — no OLAS required) → `safe_deployed` → `identity_registered`. The `identity_registered` step calls `IdentityRegistry.register()` then `setAgentWallet(agentId, safeAddress)`. After Stage 1, the user has a full ERC-8004 identity and can sign `setMetadata` for any kind (envelope, evaluation, capture, intent, plugin, revocation).
-- **Stage 2 — Operator (opt-in, daemon-driven).** Required only for users who want to run a daemon and claim/deliver tasks. Steps: `service_created` → `service_activated` → `agents_registered` → `service_deployed` → `service_staked` (needs OLAS) → `mech_deployed`. Wires the Stage 1 identity into OLAS service registry + staking + mech marketplace.
+> **Implementation reality check** (spike findings at `docs/superpowers/specs/2026-05-14-nghf-staged-bootstrap-fit-findings.md`): the existing bootstrap is a fleet-of-services state machine with per-service Safes. The standard (stOLAS) staking mode — the v1 testnet default — has no separate Safe-predict/deploy; the Safe is born atomically from `distributor.stake()` and requires OLAS. So the Stage 1 design described below adopts the **self-bond Safe topology** (deterministic Safe prediction from the agent EOA) unconditionally, regardless of the operator's eventual staking mode. Dual-role operators in standard mode therefore end up with **two Safes** — a Stage 1 identity Safe (where `setMetadata` and reputation accrue), and a Stage 2 staking Safe (where OLAS activity runs). The two Safes share an agent EOA. Mechanically clean; users see one agentId.
 
-The bootstrap state machine in `client/src/earning/bootstrap.ts` is refactored to carry a stage marker, and each action point in the codebase ensures its own minimum stage:
+- **Stage 1 — Identity (universal).** Required for any participation, builder or operator. Steps: `wallet` → `safe_predicted` → `awaiting_funding` (ETH only — no OLAS required) → `safe_deployed` → `identity_registered`. The Safe is predicted deterministically from the agent EOA via the existing `initPredictedSafe` helper (`client/src/earning/safe-adapter.ts`); funding is ETH-only since standard-mode OLAS only matters in Stage 2. The `identity_registered` step calls `IdentityRegistry.register()` then `setAgentWallet(agentId, safeAddress)` (the existing flow from `jinn-mono-j07` / `jinn-mono-aev`, reordered to fire here). After Stage 1, the user has a full ERC-8004 identity and can sign `setMetadata` for any kind (envelope, evaluation, capture, intent, plugin, revocation).
+- **Stage 2 — Operator (opt-in, daemon-driven).** Required only for users who want to run a daemon and claim/deliver tasks. In standard (stOLAS) mode: `awaiting_stake` → `staked` (this is where `distributor.stake()` creates the staking Safe and registers the OLAS service atomically) → `mech_deployed`. In self-bond mode (legacy): `service_created` → `service_activated` → `agents_registered` → `service_deployed` → `service_staked` (needs OLAS bond) → `mech_deployed`. In self-bond mode, Stage 2 reuses the Stage 1 Safe (one Safe total). In standard mode, Stage 2 creates a separate staking Safe via `distributor.stake()` (two Safes total — see implementation reality check above).
+
+`FleetState` (`client/src/earning/types.ts`) gains four fleet-level fields to carry the Stage 1 result independent of service rows: `fleet_agent_id: string | null`, `fleet_safe_address: string | null`, `fleet_identity_registry: string | null`, and `fleet_stage: 'none' | 'stage1' | 'stage1_and_2'`. Service rows in `services[]` remain strictly Stage 2 state. `FleetBootstrapper` exposes two entry points: `ensureStage1(password): Promise<FleetBootstrapResult>` and `ensureStage1And2(password): Promise<FleetBootstrapResult>`. Each action point in the codebase ensures its own minimum stage:
 
 | Action | Ensures stage | Notes |
 |---|---|---|
@@ -157,7 +159,9 @@ The bootstrap state machine in `client/src/earning/bootstrap.ts` is refactored t
 | `jinn run` (and any operator-side action) | Stage 1 + 2 | Existing behaviour. A builder who later wants to operate runs `jinn run`; it detects Stage 1 done, continues at `service_created`. |
 | Any envelope/evaluation/capture write | Stage 1 + 2 (de facto) | The daemon does these; the daemon requires Stage 2. |
 
-**One EOA, one Safe, one agentId by default.** A user becoming-an-operator-later doesn't migrate or re-mint anything; the state machine continues from where it stopped. A dual-role user (operator-also-builder) is the natural case — same agentId, all activity flows through it; the Ponder indexer separates streams by metadata `kind` (operator activity under `envelope:` / `evaluation:` / `capture:`; builder activity under `plugin:` / `revocation:`).
+**One EOA, one agentId by default.** A user becoming-an-operator-later doesn't migrate or re-mint anything; the state machine continues from where it stopped. A builder-only user has `fleet_stage: 'stage1'` and `services: []`. Calling `jinn run` triggers `ensureStage1And2`, which detects `fleet_stage === 'stage1'` and creates the first service row, beginning Stage 2 from `awaiting_stake` (standard mode) or `service_created` (self-bond mode). The Stage 1 identity (`fleet_agent_id`, `fleet_safe_address`) is reused for `setMetadata` calls; Stage 2 creates a separate staking Safe (standard mode) or reuses the Stage 1 Safe (self-bond mode). No re-mint occurs.
+
+A dual-role user (operator-also-builder) is the natural case — same agentId; the Ponder indexer separates streams by metadata `kind` (operator activity under `envelope:` / `evaluation:` / `capture:` on the staking Safe in standard mode; builder activity under `plugin:` / `revocation:` on the identity Safe).
 
 **The `--new-agent-id` flag** mints a second agentId on the same Safe for users who want explicit reputation-stream separation. Niche, opt-in. Default is one agentId for everything.
 
