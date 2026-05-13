@@ -40,13 +40,20 @@ const TOOLSET_ALLOWLIST = [
  * fresh per-Task home (which the freeze contract requires) would otherwise
  * have no credentials and Hermes would fail with "No … credentials found."
  *
+ * `bin/` carries Hermes-managed binaries — most importantly `bin/tirith`, the
+ * shell-command security scanner Hermes runs before every `terminal_tool`
+ * invocation. Hermes resolves it from `$HERMES_HOME/bin/tirith` and falls back
+ * to an auto-download from `github.com/sheeki03/tirith/releases/latest` on
+ * first use. Without seeding, every per-Task run pays the multi-MB download
+ * cost on its first shell command — long enough to blow the harness budget.
+ *
  * Caveat for frozen mode: Hermes may refresh the OAuth access token mid-task,
  * which mutates `auth/google_oauth.json` and would trip the daemon hash-fence.
  * The freeze-fence-subset workstream (file `jinn-mono-8psp.6`) addresses this
  * by hashing only the learning surface (memories/, skills/, sessions/), not
- * `auth/`.
+ * `auth/` or `bin/`.
  */
-const OPERATOR_STATE_TO_SEED = ['auth', 'auth.json'] as const;
+const OPERATOR_STATE_TO_SEED = ['auth', 'auth.json', 'bin'] as const;
 
 export interface WritePerTaskConfigInputs {
   hermesHome: string;

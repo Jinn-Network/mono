@@ -239,11 +239,13 @@ async function main(): Promise<void> {
     console.error(`\ne2e FAILED: ${err instanceof Error ? err.message : err}`);
     exitCode = 1;
   } finally {
-    if (exitCode === 0) {
+    const keep = process.env['JINN_HERMES_E2E_KEEP'] === '1';
+    if (exitCode === 0 && !keep) {
       rmSync(implStateDir, { recursive: true, force: true });
       rmSync(workingDir, { recursive: true, force: true });
     } else {
-      console.log(`\nFailure artifacts preserved at:`);
+      const label = exitCode === 0 ? 'Success artifacts preserved' : 'Failure artifacts preserved';
+      console.log(`\n${label} at:`);
       console.log(`  implStateDir: ${implStateDir}`);
       console.log(`  workingDir:   ${workingDir}`);
     }

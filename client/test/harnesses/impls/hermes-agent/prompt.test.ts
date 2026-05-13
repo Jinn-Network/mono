@@ -30,7 +30,11 @@ describe('buildInitialPrompt', () => {
   it('includes Jinn task framing and delivery instruction', () => {
     const p = buildInitialPrompt(baseInputs());
     expect(p).toContain('Jinn task');
-    expect(p).toContain('submit_typed_payload');
+    // Intent-language reference to the typed-payload submission tool;
+    // we deliberately do NOT hardcode the harness-specific registry name
+    // (`mcp_jinn_client_submit_typed_payload`) so the model can bridge via
+    // tool description. See DR in the harness design spec.
+    expect(p).toContain('typed-payload submission tool');
     expect(p).toContain('/wd');
     expect(p).toContain('/state');
     expect(p).toContain('train');
@@ -41,7 +45,7 @@ describe('buildInitialPrompt', () => {
     expect(p).toContain('SWE-rebench v2');
     expect(p).toContain('Unidata/netcdf-c');
     expect(p).toContain('a'.repeat(40));
-    expect(p).toContain('submit_typed_payload');
+    expect(p).toContain('typed-payload submission tool');
   });
 
   it('omits SWE-rebench guidance for non-SWE solver types', () => {

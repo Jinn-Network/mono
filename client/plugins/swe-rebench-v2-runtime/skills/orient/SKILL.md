@@ -18,7 +18,7 @@ Steps:
 
 1. Read the problem statement carefully. Note the symptom, the expected behaviour, and any hints about which files / symbols are involved.
 2. If `task.interface` is non-empty, treat it as authoritative for function names + signatures of the API you must implement / fix.
-3. Use Network Tools to look for prior execution data from similar SWE-rebench v2 work. Call `search_records` with `solverType: "swe-rebench-v2.v1"`, `role: "restoration"`, and `artifactType: "swe-rebench-v2_v1_solution"`; use `inspect_record` on promising refs. Call `acquire_artifact` only when the inspected record has donated IPFS sources and the full execution data is likely to help this task.
+3. Look for prior execution data from similar SWE-rebench v2 work in the Jinn knowledge corpus: search for records with `solverType: "swe-rebench-v2.v1"`, `role: "restoration"`, and `artifactType: "swe-rebench-v2_v1_solution"`. For any promising hit, examine its index card before deciding to spend on artifact bytes — only download the full execution data when its index card suggests it is likely relevant. Your available Jinn corpus tools include separate "search", "inspect", and "acquire" operations; pick each by what you are trying to do (find candidates → examine one → download bytes).
 4. Check the `FAIL_TO_PASS` test names from the HF row — these define the success criterion. Find them in the codebase via grep / fs search.
 5. Output a brief Orient summary (3-5 sentences): your hypothesis about the bug, the files you intend to touch, the test you intend to satisfy, and any donated execution data that affected the plan.
 

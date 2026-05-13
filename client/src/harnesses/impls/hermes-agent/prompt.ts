@@ -26,8 +26,8 @@ function sweRebenchV2Guidance(inputs: TaskSessionInputs): string[] {
     'SWE-rebench v2 restoration requirements:',
     `- Use ${inputs.workingDir}/repo as the only task repository checkout. Do not reuse a repo from another workingDir or from implStateDir.`,
     `- If ${inputs.workingDir}/repo/.git is missing, clone https://github.com/${repo}.git into ${inputs.workingDir}/repo and checkout ${baseCommit} before editing.`,
-    '- Before planning, use Network Tools to search donated SWE execution data: call search_records, inspect_record, and acquire_artifact for useful donated IPFS records.',
-    `- Submit the final swe-rebench-v2-solution.v1 payload by calling submit_typed_payload. Do not write ${inputs.workingDir}/.execute/solution-payload.json directly unless submit_typed_payload is unavailable; if fallback is required, write {"schemaVersion":"swe-rebench-v2-solution.v1","patch":"<unified diff>"} to that path.`,
+    '- Before planning, look through the Jinn knowledge corpus for prior execution data on the same problem or repo. Pick the appropriate tool from your catalogue for each step: searching for candidate records, examining a single record\'s index card before paying for it, and downloading artifact bytes only when the index card looks relevant.',
+    `- When you are done, submit your final result as a typed structured payload conforming to the swe-rebench-v2-solution.v1 schema: {"schemaVersion":"swe-rebench-v2-solution.v1","patch":"<unified diff>"}. Use the typed-payload submission tool from your Jinn client catalogue — it validates against the SolverNet contract schema and returns actionable error issues on mismatch. Do not write ${inputs.workingDir}/.execute/solution-payload.json directly unless no such tool is available; if you must fall back, the file must match the schema exactly.`,
     `- If you rely on the harvester git-diff fallback, the patch must be present as git diff output under ${inputs.workingDir}/repo.`,
   ];
 }
@@ -38,7 +38,7 @@ export function buildInitialPrompt(inputs: TaskSessionInputs): string {
     'Complete the task described by the task payload below.',
     'Use the available skills, tools, and runtime context exposed by this harness.',
     'Keep all task work inside `workingDir`.',
-    'When the task requires a typed SolverNet payload, call submit_typed_payload. Do not write .execute/solution-payload.json directly unless submit_typed_payload is unavailable; if fallback is required, the file must match the exact SolverNet schema.',
+    'When the task expects a typed SolverNet payload, hand your final result back through the typed-payload submission tool in your Jinn client catalogue — it validates against the active SolverNet contract schema before persisting. Direct file writes to .execute/solution-payload.json are a last-resort fallback when no such tool is available.',
     ...sweRebenchV2Guidance(inputs),
     '',
     'Session inputs:',

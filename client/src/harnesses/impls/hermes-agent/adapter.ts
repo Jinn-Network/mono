@@ -72,7 +72,17 @@ export class HermesHarnessAdapter {
     const hermesHome = inputs.implStateDir;
     const model = inputs.model ?? inputs.claudeModel ?? this.hermesModel;
 
-    // Step 1: bootstrap — seed auth from the operator's home, write config.yaml + .env
+    // Step 1: bootstrap — seed auth from the operator's home, write config.yaml + .env.
+    //
+    // The MCP server (`client/src/mcp/server.ts`) reads task identity from a
+    // family of `DESIRED_STATE_*` env vars; without them, `submit_typed_payload`
+    // fails with `missing_solver_type` and `get_task` returns an empty record.
+    // Mirror what claude-code-learner / codex-code-learner adapters do.
+    const taskContextJson = (() => {
+      const ctx = inputs.taskBody?.['context'];
+      if (!ctx || typeof ctx !== 'object') return '';
+      try { return JSON.stringify(ctx); } catch { return ''; }
+    })();
     writePerTaskHermesConfig({
       hermesHome,
       workingDir: inputs.workingDir,
@@ -84,22 +94,44 @@ export class HermesHarnessAdapter {
         daemonApiUrl: this.daemonApiUrl,
         daemonApiToken: this.daemonApiToken,
         corpusEnv: this.corpusEnv,
+        task: {
+          id: inputs.taskId,
+          description: typeof inputs.taskBody?.description === 'string' ? inputs.taskBody.description : '',
+          contextJson: taskContextJson,
+          role: typeof inputs.taskBody?.role === 'string' ? inputs.taskBody.role : '',
+          solverType: inputs.taskBody?.solverType ?? inputs.solverType ?? '',
+          restorationRequestId: typeof inputs.taskBody?.restorationRequestId === 'string'
+            ? inputs.taskBody.restorationRequestId : '',
+          requestId: inputs.requestId ?? inputs.taskId,
+          workingDir: inputs.workingDir,
+        },
       },
       seedFrom: this.operatorHermesHome,
     });
 
     // Step 2: build prompt + args.
     //
-    // `hermes chat -q <prompt> -Q` — single-query (-q) + quiet/programmatic
-    // (-Q: suppress banner/spinner/tool-previews, only the final response +
-    // session info). Model/provider passed when the daemon or SolverNet config
-    // specifies them; otherwise Hermes resolves from $HERMES_HOME/config.yaml
-    // (which bootstrap wrote). No `-w` flag — `hermes chat` has `--worktree`
-    // (a boolean that makes Hermes create a git worktree, which we do NOT
-    // want); the working directory is set via the spawn cwd + `terminal.cwd`
-    // in the per-Task config.yaml.
+    // `hermes chat -q <prompt> -Q --yolo --accept-hooks` —
+    //   -q PROMPT     single-query non-interactive mode
+    //   -Q            quiet/programmatic (suppress banner, spinner, tool previews)
+    //   --yolo        bypass dangerous-command approval prompts (hardline floor
+    //                 — rm -rf /, mkfs, sudo password injection, etc. — still
+    //                 blocks even with --yolo). Required for daemon-driven
+    //                 execution: there is no human at a TTY to approve, so
+    //                 without this flag any tirith "warn" or pattern-based
+    //                 "dangerous command" verdict (e.g. git reset --hard,
+    //                 chmod -R 777) drops to the default-deny prompt path and
+    //                 the agent dead-ends. The per-Task workingDir is a fresh
+    //                 sandboxed tmpdir, so blast radius is bounded.
+    //   --accept-hooks  auto-approve any unseen shell hooks (config.yaml
+    //                 `hooks:` declarations) without a TTY prompt.
+    // Model/provider passed when the daemon or SolverNet config specifies
+    // them; otherwise Hermes resolves from $HERMES_HOME/config.yaml. No `-w`
+    // flag — `hermes chat` has `--worktree` (a boolean that makes Hermes
+    // create a git worktree, which we do NOT want); the working directory is
+    // set via the spawn cwd + `terminal.cwd` in the per-Task config.yaml.
     const prompt = buildInitialPrompt(inputs);
-    const args: string[] = ['chat', '-q', prompt, '-Q'];
+    const args: string[] = ['chat', '-q', prompt, '-Q', '--yolo', '--accept-hooks'];
     if (model) {
       args.push('--model', model);
     }
