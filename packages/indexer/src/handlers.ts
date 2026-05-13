@@ -444,21 +444,17 @@ export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
     }
   }
 
-  // sessionProvenance.originatingTool → model label
-  let model = '';
-  const prov = b['sessionProvenance'];
-  if (prov !== null && typeof prov === 'object') {
-    const provObj = prov as Record<string, unknown>;
-    const tool = provObj['originatingTool'];
-    if (tool !== null && typeof tool === 'object') {
-      const toolObj = tool as Record<string, unknown>;
-      const name = safeStr(toolObj['name']);
-      if (name) {
-        const version = safeStr(toolObj['version']);
-        model = version ? `${name}@${version}` : name;
-      }
-    }
-  }
+  // Model label — read executor.model when present (the daemon currently does NOT
+  // publish this field; tracked as jinn-mono-gbut / gh#191). Until the daemon
+  // catches up, this stays '' and the explorer hides the byModel facet. When the
+  // daemon starts stamping executor.model = ctx.solverNet?.model ?? ctx.claudeModel,
+  // this parser path auto-lights-up — no further indexer change needed.
+  //
+  // Why NOT sessionProvenance.originatingTool.name: the envelope schema in
+  // client/src/types/envelope.ts:170 enforces sessionProvenance only on
+  // role='capture' envelopes; role='restoration' (the ones we enrich) never
+  // carry it. Reading it would be 100% empty (it was, in the first cut).
+  const model = safeStr(executorObj['model']);
 
   // language: best-effort from payload
   let language = '';

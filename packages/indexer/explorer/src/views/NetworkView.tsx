@@ -215,14 +215,22 @@ export function NetworkView() {
                   share: e.share,
                 }))}
               />
-              <HBars
-                title="By model"
-                data={data.composition.byModel.map((e) => ({
-                  label: e.value,
-                  value: e.count,
-                  share: e.share,
-                }))}
-              />
+              {/* By Model HBars: hide when the daemon hasn't yet stamped
+                  executor.model into the envelope (jinn-mono-gbut / gh#191).
+                  Today, every entry is '(unknown)' so showing it reads as
+                  broken; auto-shows once at least one real model name lands. */}
+              {data.composition.byModel.some(
+                (e) => e.value && e.value !== '(unknown)',
+              ) && (
+                <HBars
+                  title="By model"
+                  data={data.composition.byModel.map((e) => ({
+                    label: e.value,
+                    value: e.count,
+                    share: e.share,
+                  }))}
+                />
+              )}
               <HBars
                 title="By plugin"
                 data={data.composition.byPlugin.map((e) => ({
