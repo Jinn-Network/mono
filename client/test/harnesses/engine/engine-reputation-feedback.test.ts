@@ -583,15 +583,11 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
   // ── On-chain verdictCode pinning (jinn-mono-uy6v.10 review) ───────────────
   //
   // `verdictCodeForTask` reads `gatingClaim.verdict` and maps PASS→1, FAIL→2,
-  // INVALID→3, INDETERMINATE/UNRESOLVED→4. The `default` arm silently returns
-  // 1 (PASS) — so any gatingClaim without a recognised `verdict` field tags
-  // the on-chain delivery as PASS regardless of test outcome. This was the
-  // secondary half of uy6v.10: the live daemon's pre-fix swe-rebench-v2
-  // verdicts tagged FAIL deliveries as PASS on chain. The harness fix above
-  // (verdict in gating) closes the live path; these tests pin the mapping so
-  // a future harness that emits `verdict: 'FAIL'` actually lands as 2 on
-  // chain, and the silent-PASS default for the missing-verdict case is
-  // documented (regression bait for the next harness that forgets it).
+  // INVALID→3, INDETERMINATE/UNRESOLVED→4. The `default` arm returns Invalid(3)
+  // so any gatingClaim without a recognised `verdict` field cannot tag the
+  // on-chain delivery as PASS. This pins both halves of uy6v.10/uy6v.7: a future
+  // harness that emits `verdict: 'FAIL'` actually lands as 2 on chain, and a
+  // missing-verdict case is treated as Invalid rather than silent PASS.
   function lastClaimVerdictCode(): number | undefined {
     const calls = vi.mocked(mockedClaimDelivery).mock.calls;
     if (calls.length === 0) return undefined;
@@ -638,16 +634,11 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     expect(lastClaimVerdictCode()).toBe(1);
   });
 
-  it('pre-fix gating shape (no verdict field) still tags on-chain delivery as PASS (1) — documents the silent fallback', async () => {
-    // This pins the known fallback at engine.ts `verdictCodeForTask.default`:
-    // a missing/unrecognised `verdict` returns 1 (PASS). The harness fix in
-    // this PR removes the live trigger of this branch, but the engine still
-    // silently defaults to PASS for any future harness that emits the
-    // pre-fix shape. A regression here means a new harness can silently
-    // mis-tag every verdict as PASS — exactly the failure mode uy6v.10
-    // surfaced. If we later harden `verdictCodeForTask` to throw or default
-    // to UNRESOLVED (4) on missing verdict, this test's expected value
-    // changes — that's the intended signal.
+  it('pre-fix gating shape (no verdict field) tags on-chain delivery as Invalid (3)', async () => {
+    // This pins the hardened fallback at engine.ts `verdictCodeForTask.default`:
+    // a missing/unrecognised `verdict` returns 3 (Invalid), not 1 (PASS). A
+    // regression here means a future harness can silently mis-tag missing
+    // verdicts as PASS, exactly the failure mode uy6v.10/uy6v.7 addressed.
     const engine = new TestEngine(makeOpts(store));
     const requestId = '0xrid-verdictcode-prefix';
     await seedDelivering(engine, requestId, {
@@ -660,7 +651,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
 
     await engine.process(requestId);
 
-    expect(lastClaimVerdictCode()).toBe(1);
+    expect(lastClaimVerdictCode()).toBe(3);
   });
 
   it('swe-rebench-v2 pre-fix gating shape (no verdict field) → skip log surfaces (regression guard)', async () => {
