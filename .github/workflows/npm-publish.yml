@@ -73,7 +73,7 @@ jobs:
                 PUBLISH_VERSION="${RELEASE_TAG#v}"
                 # Guard against `v<garbage>` tags slipping through the `startsWith(v)` filter
                 # in the job-level `if:` (e.g. `vbeta`, `v-foo`). Require semver-shaped suffix.
-                if ! [[ "${PUBLISH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                if ! [[ "${PUBLISH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
                   echo "::error::Release tag ${RELEASE_TAG} does not look like v<semver>; got version: ${PUBLISH_VERSION}"
                   exit 1
                 fi
@@ -150,6 +150,11 @@ jobs:
       # deterministic Anvil gate before stable npm publish. The live donation and
       # app-first acceptance gates are release-prep evidence, not GitHub Actions
       # steps, because they need an operator daemon and local credentials.
+      - name: Install contracts dependencies for release gate
+        if: steps.meta.outputs.dist_tag == 'latest'
+        working-directory: contracts
+        run: yarn install --immutable
+
       - name: Release gate — operator-gate (staking + e2e on Anvil fork)
         if: steps.meta.outputs.dist_tag == 'latest'
         run: yarn release:operator-gate
