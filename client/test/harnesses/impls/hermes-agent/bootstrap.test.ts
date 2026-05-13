@@ -4,12 +4,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { parse as yamlParse } from 'yaml';
 import { writePerTaskHermesConfig } from '../../../../src/harnesses/impls/hermes-agent/bootstrap.js';
 
 const networkToolsRoot = fileURLToPath(new URL('../../../../plugins/network-tools/', import.meta.url));
+const sweRuntimeRoot = fileURLToPath(new URL('../../../../plugins/swe-rebench-v2-runtime/', import.meta.url));
+
+function readConfig(home: string): Record<string, any> {
+  return yamlParse(readFileSync(join(home, 'config.yaml'), 'utf8'));
+}
 
 describe('writePerTaskHermesConfig', () => {
-  it('writes config.yaml with mcp_servers, skills, terminal, and toolset allowlist', () => {
+  it('writes config.yaml with mcp_servers, skills, terminal, and toolset allowlist (no operator config)', () => {
     const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
     try {
       writePerTaskHermesConfig({
@@ -17,7 +23,7 @@ describe('writePerTaskHermesConfig', () => {
         workingDir: '/work',
         model: 'anthropic/claude-opus-4.6',
         provider: 'anthropic',
-        solverPluginRoots: [networkToolsRoot],
+        solverPluginRoots: [networkToolsRoot, sweRuntimeRoot],
         env: {
           storePath: '/tmp/jinn.db',
           daemonApiUrl: 'http://127.0.0.1:7331',
@@ -26,30 +32,30 @@ describe('writePerTaskHermesConfig', () => {
         },
       });
 
-      const yaml = readFileSync(join(home, 'config.yaml'), 'utf8');
-      expect(yaml).toContain('mcp_servers:');
-      expect(yaml).toContain('jinn-client');
-      expect(yaml).toContain('terminal:');
-      expect(yaml).toContain('backend: local');
-      expect(yaml).toContain('cwd: "/work"');
-      expect(yaml).toContain('platform_toolsets:');
-      expect(yaml).toContain('hermes-cli:');
-      expect(yaml).toContain('- terminal');
-      expect(yaml).toContain('- file');
-      expect(yaml).toContain('- web');
-      expect(yaml).toContain('- skills');
-      expect(yaml).toContain('- memory');
-      expect(yaml).toContain('- session_search');
-      expect(yaml).toContain('- todo');
-      expect(yaml).toContain('- code_execution');
-      // Footgun toolsets MUST NOT appear
-      expect(yaml).not.toContain('- messaging');
-      expect(yaml).not.toContain('- cronjob');
-      expect(yaml).not.toContain('- browser');
-      expect(yaml).not.toContain('- computer_use');
-      // Model block
-      expect(yaml).toContain("default: \"anthropic/claude-opus-4.6\"");
-      expect(yaml).toContain('provider: "anthropic"');
+      const cfg = readConfig(home);
+      // Model block — Jinn override applied.
+      expect(cfg.model.default).toBe('anthropic/claude-opus-4.6');
+      expect(cfg.model.provider).toBe('anthropic');
+      // Terminal block — Jinn enforces local backend + per-Task cwd.
+      expect(cfg.terminal.backend).toBe('local');
+      expect(cfg.terminal.cwd).toBe('/work');
+      // Toolset allowlist — exactly the 8-item Jinn list.
+      expect(cfg.platform_toolsets['hermes-cli']).toEqual([
+        'terminal', 'file', 'web', 'skills',
+        'memory', 'session_search', 'todo', 'code_execution',
+      ]);
+      // Footgun toolsets must NOT appear.
+      const allowlist = cfg.platform_toolsets['hermes-cli'] as string[];
+      for (const banned of ['messaging', 'cronjob', 'browser', 'computer_use', 'vision', 'tts']) {
+        expect(allowlist).not.toContain(banned);
+      }
+      // MCP servers (translated from network-tools/.mcp.json).
+      expect(cfg.mcp_servers['jinn-client']).toBeDefined();
+      expect(cfg.mcp_servers['jinn-client'].command).toBe('node');
+      // Skills external_dirs from swe-rebench-v2-runtime.
+      expect(cfg.skills.external_dirs).toEqual([
+        expect.stringMatching(/swe-rebench-v2-runtime\/skills$/),
+      ]);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -68,7 +74,6 @@ describe('writePerTaskHermesConfig', () => {
           corpusEnv: { subgraphUrl: 'https://subgraph.example/' },
         },
       });
-
       const envFile = readFileSync(join(home, '.env'), 'utf8');
       expect(envFile).toContain('DAEMON_API_TOKEN=tok-xyz');
       expect(envFile).toContain('DAEMON_API_URL=http://127.0.0.1:7331');
@@ -82,7 +87,6 @@ describe('writePerTaskHermesConfig', () => {
     const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
     const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
     try {
-      // Simulate the operator's authenticated Hermes home.
       mkdirSync(join(operatorHome, 'auth'), { recursive: true });
       writeFileSync(join(operatorHome, 'auth', 'google_oauth.json'), '{"refresh":"r","access":"a","expires":0,"email":"x"}');
       writeFileSync(join(operatorHome, 'auth.json'), '{"providers":{}}');
@@ -110,7 +114,6 @@ describe('writePerTaskHermesConfig', () => {
     try {
       mkdirSync(join(operatorHome, 'auth'), { recursive: true });
       writeFileSync(join(operatorHome, 'auth', 'google_oauth.json'), '{"refresh":"OPERATOR"}');
-      // Per-Task home already has its own (e.g. a frozen-mode snapshot restored it).
       mkdirSync(join(taskHome, 'auth'), { recursive: true });
       writeFileSync(join(taskHome, 'auth', 'google_oauth.json'), '{"refresh":"EXISTING"}');
 
@@ -133,14 +136,12 @@ describe('writePerTaskHermesConfig', () => {
     const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
     const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
     try {
-      // Operator has provider keys + a custom toggle that Jinn doesn't know about.
       writeFileSync(
         join(operatorHome, '.env'),
         [
           'OPENROUTER_API_KEY=sk-or-OP_KEY_REDACTED',
           'ANTHROPIC_API_KEY=sk-ant-OP_KEY_REDACTED',
           'OPERATOR_CUSTOM_FLAG=on',
-          // Operator-set DAEMON_API_URL — Jinn must override this with its own.
           'DAEMON_API_URL=http://operator-set:9999',
         ].join('\n') + '\n',
       );
@@ -154,18 +155,165 @@ describe('writePerTaskHermesConfig', () => {
       });
 
       const envFile = readFileSync(join(taskHome, '.env'), 'utf8');
-      // Operator entries present.
       expect(envFile).toContain('OPENROUTER_API_KEY=sk-or-OP_KEY_REDACTED');
       expect(envFile).toContain('ANTHROPIC_API_KEY=sk-ant-OP_KEY_REDACTED');
       expect(envFile).toContain('OPERATOR_CUSTOM_FLAG=on');
-      // Jinn DAEMON_API_URL appears after the operator's, so last-wins
-      // semantics (python-dotenv default) give Jinn the override.
       const operatorIdx = envFile.indexOf('DAEMON_API_URL=http://operator-set:9999');
       const jinnIdx = envFile.indexOf('DAEMON_API_URL=http://127.0.0.1:7331');
       expect(operatorIdx).toBeGreaterThanOrEqual(0);
       expect(jinnIdx).toBeGreaterThan(operatorIdx);
-      // Jinn-runtime credentials still present.
       expect(envFile).toContain('DAEMON_API_TOKEN=tok-jinn');
+    } finally {
+      rmSync(operatorHome, { recursive: true, force: true });
+      rmSync(taskHome, { recursive: true, force: true });
+    }
+  });
+
+  it('merges the operator config.yaml — anything not Jinn-managed passes through; Jinn-managed keys are authoritative', () => {
+    const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
+    const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
+    try {
+      // A reasonably rich operator config.yaml — covers every category of
+      // setting that we want to inherit verbatim plus a couple Jinn must
+      // override.
+      writeFileSync(
+        join(operatorHome, 'config.yaml'),
+        [
+          'model:',
+          '  default: "operator-default"',
+          '  provider: "operator-provider"',
+          '  max_tokens: 16000',
+          '  context_length: 131072',
+          '  base_url: "https://op.example/v1"',
+          '',
+          'provider_routing:',
+          '  sort: "price"',
+          '',
+          'openrouter:',
+          '  response_cache: true',
+          '  response_cache_ttl: 300',
+          '',
+          'agent:',
+          '  iteration_budget: 50',
+          '',
+          'compression:',
+          '  threshold: 0.9',
+          '',
+          'auxiliary:',
+          '  vision:',
+          '    backend: gemini',
+          '',
+          'providers:',
+          '  ollama-local:',
+          '    request_timeout_seconds: 300',
+          '',
+          'terminal:',
+          '  backend: docker',           // Jinn must override → local
+          '  timeout: 600',              // passes through
+          '  lifetime_seconds: 900',     // passes through
+          '  docker_image: "custom"',    // passes through (inert under local)',
+          '',
+          'platform_toolsets:',
+          '  hermes-cli:',                // Jinn replaces this list
+          '    - browser',                // (operator tried to enable a footgun)
+          '    - cronjob',
+          '  hermes-telegram:',           // other-platform allowlist passes through
+          '    - terminal',
+          '',
+          'mcp_servers:',
+          '  github:',                    // operator's MCP — passes through',
+          '    command: "/op/github-mcp"',
+          '',
+          'skills:',
+          '  external_dirs:',
+          '    - "/home/op/skills"',       // operator's dir — preserved
+          '',
+        ].join('\n'),
+      );
+
+      writePerTaskHermesConfig({
+        hermesHome: taskHome,
+        workingDir: '/wd',
+        model: 'jinn-overridden-model',      // Jinn provides daemon/SolverNet model
+        provider: 'jinn-overridden-provider',
+        solverPluginRoots: [networkToolsRoot, sweRuntimeRoot],
+        env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+        seedFrom: operatorHome,
+      });
+
+      const cfg = readConfig(taskHome);
+
+      // ── model — operator's fields preserved; Jinn's default+provider win ──
+      expect(cfg.model.default).toBe('jinn-overridden-model');
+      expect(cfg.model.provider).toBe('jinn-overridden-provider');
+      expect(cfg.model.max_tokens).toBe(16000);
+      expect(cfg.model.context_length).toBe(131072);
+      expect(cfg.model.base_url).toBe('https://op.example/v1');
+
+      // ── operator-only top-level blocks all pass through unchanged ──
+      expect(cfg.provider_routing).toEqual({ sort: 'price' });
+      expect(cfg.openrouter).toEqual({ response_cache: true, response_cache_ttl: 300 });
+      expect(cfg.agent).toEqual({ iteration_budget: 50 });
+      expect(cfg.compression).toEqual({ threshold: 0.9 });
+      expect(cfg.auxiliary.vision.backend).toBe('gemini');
+      expect(cfg.providers['ollama-local'].request_timeout_seconds).toBe(300);
+
+      // ── terminal — Jinn forces backend+cwd; operator's other terminal fields kept ──
+      expect(cfg.terminal.backend).toBe('local');
+      expect(cfg.terminal.cwd).toBe('/wd');
+      expect(cfg.terminal.timeout).toBe(600);
+      expect(cfg.terminal.lifetime_seconds).toBe(900);
+      expect(cfg.terminal.docker_image).toBe('custom');
+
+      // ── platform_toolsets — Jinn replaces hermes-cli with the allowlist;
+      //    other platforms (hermes-telegram) pass through ──
+      expect(cfg.platform_toolsets['hermes-cli']).toEqual([
+        'terminal', 'file', 'web', 'skills',
+        'memory', 'session_search', 'todo', 'code_execution',
+      ]);
+      // Operator's footgun additions GONE.
+      expect(cfg.platform_toolsets['hermes-cli']).not.toContain('browser');
+      expect(cfg.platform_toolsets['hermes-cli']).not.toContain('cronjob');
+      expect(cfg.platform_toolsets['hermes-telegram']).toEqual(['terminal']);
+
+      // ── mcp_servers — operator's `github` preserved; Jinn's `jinn-client` added ──
+      expect(cfg.mcp_servers.github.command).toBe('/op/github-mcp');
+      expect(cfg.mcp_servers['jinn-client']).toBeDefined();
+
+      // ── skills.external_dirs — operator first, Jinn's appended ──
+      expect(cfg.skills.external_dirs[0]).toBe('/home/op/skills');
+      expect(cfg.skills.external_dirs.some((d: string) => d.endsWith('swe-rebench-v2-runtime/skills'))).toBe(true);
+    } finally {
+      rmSync(operatorHome, { recursive: true, force: true });
+      rmSync(taskHome, { recursive: true, force: true });
+    }
+  });
+
+  it('passes through operator config.yaml even when no Jinn model/provider override is given', () => {
+    const operatorHome = mkdtempSync(join(tmpdir(), 'hermes-operator-'));
+    const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
+    try {
+      writeFileSync(
+        join(operatorHome, 'config.yaml'),
+        'model:\n  default: "op-only-model"\n  max_tokens: 8192\n',
+      );
+
+      writePerTaskHermesConfig({
+        hermesHome: taskHome,
+        workingDir: '/wd',
+        // no model, no provider — bare daemon (operator's choices apply)
+        solverPluginRoots: [],
+        env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+        seedFrom: operatorHome,
+      });
+
+      const cfg = readConfig(taskHome);
+      expect(cfg.model.default).toBe('op-only-model');
+      expect(cfg.model.max_tokens).toBe(8192);
+      // Jinn-managed keys still authoritative.
+      expect(cfg.terminal.backend).toBe('local');
+      expect(cfg.terminal.cwd).toBe('/wd');
+      expect(cfg.platform_toolsets['hermes-cli']).toContain('terminal');
     } finally {
       rmSync(operatorHome, { recursive: true, force: true });
       rmSync(taskHome, { recursive: true, force: true });
@@ -175,7 +323,6 @@ describe('writePerTaskHermesConfig', () => {
   it('skips seeding when seedFrom equals hermesHome or does not exist', () => {
     const taskHome = mkdtempSync(join(tmpdir(), 'hermes-task-'));
     try {
-      // Same path — must not recurse-copy onto itself.
       writePerTaskHermesConfig({
         hermesHome: taskHome,
         workingDir: '/work',
@@ -183,7 +330,6 @@ describe('writePerTaskHermesConfig', () => {
         env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
         seedFrom: taskHome,
       });
-      // Nonexistent source — must not throw.
       writePerTaskHermesConfig({
         hermesHome: taskHome,
         workingDir: '/work',
