@@ -398,7 +398,9 @@ export function RegistryCatalog({
             fontSize: '13px',
           }}
         >
-          No unjoined SolverNets available.
+          {allSummaries.length === 0
+            ? 'No launched SolverNets available.'
+            : 'No unjoined SolverNets available.'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

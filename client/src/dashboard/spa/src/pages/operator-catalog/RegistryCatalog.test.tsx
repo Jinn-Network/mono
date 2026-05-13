@@ -55,7 +55,7 @@ describe('RegistryCatalog', () => {
       expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy(),
     );
     expect(
-      screen.getByText(/no unjoined solvernets available\./i),
+      screen.getByText(/no launched solvernets available\./i),
     ).toBeTruthy();
   });
 
@@ -188,6 +188,45 @@ describe('RegistryCatalog', () => {
     );
     expect(screen.queryByText('Already Joined')).toBeNull();
     expect(screen.getByText('Not Joined')).toBeTruthy();
+  });
+
+  it('shows the unjoined empty-state copy when all SolverNets are already joined', async () => {
+    listJoinedMock.mockResolvedValue({
+      joinedSolverNets: {
+        bafybeiaaa: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
+      },
+    });
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        {
+          manifestCid: 'bafybeiaaa',
+          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
+          name: 'Already Joined',
+          network: 'base-sepolia',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '10000000000',
+          verdictPriceWei: '5000000000',
+          openRoles: ['solver'],
+          anchorBlock: 1,
+        },
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(/no unjoined solvernets available\./i),
+    ).toBeTruthy();
   });
 
   it('formats tiny live prices as gwei instead of scientific ETH notation', async () => {
