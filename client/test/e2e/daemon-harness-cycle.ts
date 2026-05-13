@@ -16,6 +16,7 @@ import {
   harnessSelectorFromEnv,
   setupAnvilFixture,
   bootstrapStakedOperator,
+  startDaemon,
 } from './_daemon-harness-helpers.js';
 
 async function main(): Promise<void> {
@@ -34,8 +35,15 @@ async function main(): Promise<void> {
     console.log(`service id:   ${operator.serviceId}`);
     console.log(`mech:         ${operator.mechAddress}`);
 
-    // Subsequent tasks fill in: daemon → task post → wait → assert
-    console.log('\n=== Task 2 ok — operator bootstrapped ===');
+    const running = await startDaemon(fixture, operator, harness);
+    try {
+      console.log('daemon started — loops running');
+      // Next tasks: post task, wait for delivery, assert.
+      console.log('\n=== Task 3 ok — production Daemon up against Anvil fork ===');
+    } finally {
+      // Daemon must stop before Anvil tears down (avoids loops throwing on disconnect).
+      await running.stop();
+    }
   } finally {
     await fixture.teardown();
   }

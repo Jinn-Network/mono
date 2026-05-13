@@ -29,6 +29,15 @@ import {
   ANVIL_PRIVATE_KEYS,
   compileContracts,
 } from './task-first-helpers.js';
+import { Daemon } from '../../src/daemon/daemon.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { buildHarnesses } from '../../src/harnesses/impls/index.js';
+import { Store } from '../../src/store/store.js';
+import {
+  HarnessRegistry,
+  DEFAULT_HARNESS,
+  DEFAULT_DISABLED_HARNESSES,
+} from '../../src/harnesses/engine/registry.js';
 export { compileContracts };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -234,4 +243,181 @@ export async function bootstrapStakedOperator(
     mechAddress: getAddress(service.mech_address) as `0x${string}`,
     serviceId,
   };
+}
+
+// ── Daemon startup ─────────────────────────────────────────────────────────────
+
+export interface RunningDaemon {
+  daemon: Daemon;
+  store: Store;
+  /** Stop all loops + close store. Idempotent. */
+  stop: () => Promise<void>;
+}
+
+/**
+ * Instantiate the production Daemon class with MechAdapter pointed at the
+ * Anvil fork + the bootstrapped operator's credentials. Start all long-running
+ * loops.
+ *
+ * Polling intervals are shortened (300ms vs production 5000ms) so the test
+ * does not sit idle. Increase if the fork RPC starts struggling.
+ *
+ * SolverNet selection (which harness handles which task) is configured in
+ * Task 6 via JINN_E2E_HARNESS. Task 3 just proves the daemon starts cleanly.
+ *
+ * Translation notes vs main.ts:
+ *   - No shared setupApiServer: Daemon owns and starts its own API server.
+ *   - apiPort: 0 → OS assigns a free port at daemon-startup time (no TOCTOU race).
+ *   - peers: empty (no peer discovery in the test).
+ *   - subgraphUrl: omitted (no-subgraph mode is supported).
+ *   - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → loops not started).
+ *   - packagingDeps / envelopeDeps / deliveryDeps: omitted → pack() falls back
+ *     to NotImplementedError (Task 4+ will wire delivery deps as needed).
+ *   - identityPublisher / reputationFeedback: omitted (no ERC-8004 in test).
+ *   - operatorConfig: minimal synthetic value (no donation, no price).
+ *   - harnessMode: 'train' (default learning mode, same as production default).
+ *   - taskSources: empty (no creator-side tasks; daemon waits for on-chain claims).
+ *   - creatorSafeAddress: set from operator.safeAddress so CreatorLoop scopes correctly.
+ */
+export async function startDaemon(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  _harnessSelector: HarnessSelector,
+): Promise<RunningDaemon> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const chainCfg = getChainConfig('base');
+
+  // 1. SQLite store (Daemon owns this instance; stop() will close it).
+  const storePath = join(fixture.implStateRoot, 'daemon-jinn.db');
+  const store = new Store(storePath);
+
+  // 2. Let the OS allocate a free port at daemon-startup time (apiPort: 0).
+  //    Using 0 avoids a TOCTOU race — no pre-allocation window where another
+  //    process could grab the port between our close() and the daemon's bind.
+  const apiPort = 0;
+  // WARNING — TASK 5+: this URL is http://127.0.0.1:0, which is NOT a usable
+  // endpoint. Harnesses constructed below will bake this value into their
+  // adapter env at construction time. Task 3 is safe because no harness is
+  // invoked. Before Task 5 spawns a harness, the URL must be rebuilt from the
+  // ACTUAL bound port after `daemon.start()` returns — read it from
+  // `daemon.apiServer?.port` (see src/api/server.ts:683-687) and rebuild the
+  // URL, or restructure to build harnesses post-daemon-start.
+  const daemonApiUrl = `http://127.0.0.1:${apiPort}`;
+  // API token: Daemon will generate a random one when not supplied; match that
+  // by not supplying one here — the test doesn't call cost-mutating routes.
+
+  // 3. Build harnesses. Mirror the HarnessEnv shape from main.ts §1614.
+  //    - claudePath / claudeModel: use env vars with production defaults
+  //      (harnesses just need valid path strings; they won't be invoked in Task 3)
+  //    - runner: omitted → LegacyClaudeImpl is not constructed (OK for Task 3)
+  //    - storePath: wired so harnesses can hand off artifacts through SQLite
+  //    - implStateDirRoot: use fixture.implStateRoot so harness state is isolated
+  const claudePath = process.env['JINN_CLAUDE_PATH'] ?? 'claude';
+  const claudeModel = process.env['JINN_CLAUDE_MODEL'] ?? 'claude-haiku-4-5-20251001';
+
+  const harnessList = buildHarnesses({
+    rpcUrl,
+    claudePath,
+    claudeModel,
+    pk: operator.agentPrivateKey,
+    safe: operator.safeAddress,
+    // runner omitted → no LegacyClaudeImpl (acceptable for Task 3)
+    storePath,
+    daemonApiUrl,
+    // daemonApiToken omitted → harnesses will handle missing token gracefully
+    implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
+    // ipfsRegistryUrl omitted — harnesses that need IPFS won't be invoked in Task 3
+    // externalImpls omitted — no operator-supplied harnesses
+    // disabledNames omitted — use production defaults
+  });
+
+  const implRegistry = new HarnessRegistry({
+    default: DEFAULT_HARNESS,
+    disabled: [...DEFAULT_DISABLED_HARNESSES],
+  });
+  for (const impl of harnessList) {
+    implRegistry.register(impl);
+  }
+
+  // 4. Build MechAdapter. Translation of main.ts §1469.
+  //    - routerClaimDeliveryVariant: 'v1' (Base mainnet canonical variant)
+  //    - taskDiscovery: omitted — no joined SolverNets in Task 3; daemon
+  //      still discovers tasks via on-chain log scanning from DEFAULT_TASK_DISCOVERY_FROM_BLOCK
+  //    - evictionRecovery: omitted — no master wallet in the test context
+  //    - pollIntervalMs: 300ms (shortened for test cadence)
+  const mechAdapter = new MechAdapter({
+    rpcUrl,
+    mechMarketplaceAddress: chainCfg.mechMarketplace as `0x${string}`,
+    routerAddress: (chainCfg.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`,
+    mechContractAddress: operator.mechAddress,
+    safeAddress: operator.safeAddress,
+    agentEoaPrivateKey: operator.agentPrivateKey,
+    ipfsRegistryUrl: process.env['JINN_IPFS_REGISTRY_URL'] ?? 'https://registry.autonolas.tech',
+    ipfsGatewayUrl: process.env['JINN_IPFS_GATEWAY_URL'] ?? 'https://gateway.autonolas.tech',
+    pollIntervalMs: 300,
+    chainId: 8453,
+    routerClaimDeliveryVariant: chainCfg.routerClaimDeliveryVersion,
+    // evictionRecovery: omitted — no master wallet in test
+    // taskDiscovery: omitted — no joined SolverNets yet (Task 4+ will add them)
+  }, store);
+
+  // 5. Build agent viem clients for deliveryDeps (mirrors main.ts §1513 + §1699).
+  //    Omitting packagingDeps / envelopeDeps / deliveryDeps in Task 3 because:
+  //    - pack() falls back to NotImplementedError (acceptable — no deliveries yet)
+  //    - Task 4+ will wire these as needed for the full delivery path
+
+  // 6. Construct Daemon. Translation of main.ts §2046.
+  //    - store: injected so Daemon does NOT own it (our stop() closes it explicitly)
+  //    - taskSources: omitted (no creator-side tasks in Task 3)
+  //    - peers / subgraphUrl / nodeEndpoint: omitted (test environment)
+  //    - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → no loops)
+  //    - status: omitted (GET /v1/status not exercised in Task 3)
+  //    - corpusFactory: omitted (no subgraph configured)
+  const daemon = new Daemon({
+    adapter: mechAdapter,
+    // runner not passed — Daemon accepts undefined runner; LegacyClaudeImpl
+    // was not constructed since runner was omitted from buildHarnesses above
+    runner: undefined as unknown as import('../../src/runner/runner.js').Runner,
+    store,        // Daemon adopts (ownsStore=false); our stop() handles close
+    dbPath: storePath, // used only when store is absent; kept for completeness
+    pollIntervalMs: 300,  // shortened from production 5000ms for test cadence
+    apiPort,
+    // apiBindHost: default 127.0.0.1 is fine
+    // apiToken: omitted → Daemon generates a random per-process token
+    peers: [],
+    creatorSafeAddress: operator.safeAddress,
+    // subgraphUrl / nodeEndpoint / x402 / signer: omitted
+    // rewardClaim / balanceTopup / jinnClaim: omitted → those loops don't start
+    // corpusFactory / apiServer: omitted → Daemon starts its own API server
+    restorationEngine: {
+      paths: {
+        workingDirRoot: fixture.workingDirRoot,
+        implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
+      },
+      implRegistry,
+      // packagingDeps / envelopeDeps / deliveryDeps: omitted in Task 3
+      // joinedSolverNets: omitted — engine falls back to legacy solverType gate
+      // manifestResolver / identityPublisher / reputationFeedback: omitted
+      operatorConfig: {
+        publicEndpoint: daemonApiUrl,
+        defaultPriceUsdc: '0',
+        perArtifactTypePrice: {},
+        donation: { enabled: false },
+      },
+      harnessMode: 'train',
+    },
+  });
+
+  // 7. Start the daemon (kicks off all configured loops).
+  await daemon.start();
+
+  let stopped = false;
+  const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    await daemon.stop();
+    store.close();
+  };
+
+  return { daemon, store, stop };
 }
