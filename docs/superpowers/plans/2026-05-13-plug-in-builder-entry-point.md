@@ -589,6 +589,61 @@ Scope: pick the first-integrator candidate (spec §9 #6) — Hermes-migrator vs 
 
 ---
 
+## Task 8: Cross-epic simplification pass (`/simplify` loop)
+
+**Files:** TBD (whatever the simplification pass touches).
+
+After all seven children have landed in main and `52x3.7`'s acceptance E2E is green, run a final simplification pass over the cumulative epic diff. Independent per-child TDD planning sessions tend to leave small inconsistencies, duplicated helpers, over-broad type unions, and premature abstractions that only become visible when the whole surface is in one place.
+
+Not filed as its own bd bead and not mirrored to GitHub — it's a closeout step on the epic, not a tracked work item. Run it as part of closing `jinn-mono-52x3`.
+
+- [ ] **Step 1: Compute the cumulative epic diff**
+
+Run from the cargo dir on a worktree branched from latest main:
+
+```bash
+git checkout -b chore/52x3-simplify main
+git log --oneline main..HEAD  # should be empty at the start
+git diff main -- $(git log --all --format=%H --grep '52x3\.' | head -1)..main
+```
+
+Expected: a diff that spans the seven children's merged work. Save the file list (`git diff --name-only main..HEAD`) to anchor the simplify scope.
+
+- [ ] **Step 2: Invoke the simplify skill against the epic's changed surface**
+
+Run the `/simplify` skill with explicit scope: the union of files touched by the seven `52x3.*` PRs. The skill reviews for:
+
+- Repeated helper code across `52x3.1`'s `ensureStage1` / `ensureStage1And2` and `52x3.3`'s lazy Stage 1 ensure.
+- Duplicated payload encoding between `52x3.3`'s `encodePluginPayload` and any analogous code in `52x3.4`'s indexer decoder.
+- Over-broad union types between `PublishedArtifact` base interface and the `PluginPublication` extension (`52x3.4` / `52x3.5`).
+- SPA component duplication between the `/build` route's panels (`52x3.6`) and the reused `Leaderboard.tsx` (from `ebu7`).
+- Test helpers that could be promoted to shared fixtures.
+- Doc paragraphs that drifted between `/docs/build/` (`52x3.6`) and the spec's §5 design language.
+
+Expected output from the skill: either "no changes needed" (best case) or a list of concrete simplifications with patches.
+
+- [ ] **Step 3: Apply simplifications + open a single chore PR**
+
+If the skill found issues, apply the patches, run `yarn typecheck` + `yarn test` + `yarn e2e:cold-start-builder` to confirm nothing regresses, and open a PR titled `chore(52x3): simplify epic surface (post-merge cleanup)`. The PR's description should list each simplification with a one-line "why this is safe" justification.
+
+If the skill found nothing, skip the PR; record the no-op in the bd epic's notes:
+
+```bash
+bd note jinn-mono-52x3 "Simplify pass run on YYYY-MM-DD against cumulative epic diff; no changes needed."
+```
+
+- [ ] **Step 4: Close the epic**
+
+After the simplify PR merges (or the no-op is recorded):
+
+```bash
+bd close jinn-mono-52x3
+```
+
+Verify the GitHub epic issue (#199) gets closed automatically via the `external_ref` link, or close it manually if not.
+
+---
+
 ## Integration & PR sequencing
 
 ### Critical path
@@ -600,7 +655,8 @@ The shortest path to "epic acceptance green":
 3. `52x3.4` ships → unlocks `52x3.5`.
 4. `52x3.5` ships → unlocks `52x3.6`.
 5. `52x3.6` ships → unlocks `52x3.7`.
-6. `52x3.7` ships → epic acceptance gate passes.
+6. `52x3.7` ships → epic acceptance E2E green.
+7. Task 8 (`/simplify` loop) ships → epic closed.
 
 Total: 6 sequential merges along the critical path.
 
@@ -624,11 +680,7 @@ When all seven children are closed:
 bd show jinn-mono-52x3 2>&1 | grep -A1 'CHILDREN' | tail -8
 ```
 
-Should show all seven children with `✓` status. Then mark the epic closed:
-
-```bash
-bd close jinn-mono-52x3
-```
+Should show all seven children with `✓` status. Then run Task 8 (the `/simplify` loop), which closes the epic on completion.
 
 ---
 
