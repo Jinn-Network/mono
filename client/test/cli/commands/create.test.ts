@@ -241,3 +241,30 @@ describe('runCreate (plugin target — solver-type-plugin)', () => {
     expect(testTs).not.toContain('{{');
   });
 });
+
+describe('runCreate (plugin target — runtime-plugin)', () => {
+  it('emits a runtime-plugin package matching the template', async () => {
+    const target = await runCreate({
+      target: 'plugin',
+      pattern: 'runtime-plugin',
+      packageName: '@example/test-runtime',
+      solverTypeString: 'jinn.runtime',
+      outDir: TMP,
+    });
+    expect(target).toBe(join(TMP, '@example/test-runtime'));
+    expect(existsSync(join(target, 'package.json'))).toBe(true);
+    expect(existsSync(join(target, 'jinn.plugin.json'))).toBe(true);
+    expect(existsSync(join(target, '.mcp.json'))).toBe(true);
+    expect(existsSync(join(target, 'mcp/server.mjs'))).toBe(true);
+    expect(existsSync(join(target, 'test/plugin.test.ts'))).toBe(true);
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn.plugin.json'), 'utf8'),
+    );
+    expect(manifest.jinn.supports).toEqual(['jinn.runtime']);
+
+    const serverJs = readFileSync(join(target, 'mcp/server.mjs'), 'utf8');
+    expect(serverJs).toContain('example-test-runtime-example');
+    expect(serverJs).not.toContain('{{');
+  });
+});
