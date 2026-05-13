@@ -32,7 +32,7 @@
  * Schema: ponder.schema.ts
  */
 import { ponder } from 'ponder:registry';
-import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from 'ponder:schema';
 
 // ── Enrichment config (read once at module scope) ─────────────────────────────
 // JINN_INDEXER_ENRICH_ENVELOPES: set false/0 to skip per-envelope IPFS fetch
@@ -110,6 +110,7 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     envelope,
     harnessCheckpoint,
     attemptEnvelopeMeta,
+    verdictEnvelopeMeta,
     enrichEnvelopes,
     ipfsGateway,
   });

@@ -1,17 +1,21 @@
 /**
  * Ponder schema for the Jinn protocol indexer.
  *
- * Eight entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6:
+ * Nine entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6 + ebu7.X:
  *
- *   Task                — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
- *   Attempt             — from JinnRouter.TaskAttemptCreated
- *   Verdict             — from JinnRouter.VerdictDeliveryClaimed
- *   RewardDistribution  — from JinnDistributor.Claimed on Sepolia L1
- *   SolverNetManifest   — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
- *   Envelope            — from IdentityRegistry.MetadataSet (envelope key patterns)
- *   HarnessCheckpoint   — from IdentityRegistry.MetadataSet (key prefix harness.checkpoint:)
- *   AttemptEnvelopeMeta — IPFS-enriched executor/provenance fields for execution envelopes,
- *                         keyed by (requestId, chainId), joined from Envelope via IPFS fetch
+ *   Task                  — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
+ *   Attempt               — from JinnRouter.TaskAttemptCreated
+ *   Verdict               — from JinnRouter.VerdictDeliveryClaimed
+ *   RewardDistribution    — from JinnDistributor.Claimed on Sepolia L1
+ *   SolverNetManifest     — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
+ *   Envelope              — from IdentityRegistry.MetadataSet (envelope key patterns)
+ *   HarnessCheckpoint     — from IdentityRegistry.MetadataSet (key prefix harness.checkpoint:)
+ *   AttemptEnvelopeMeta   — IPFS-enriched executor/provenance fields for execution envelopes,
+ *                           keyed by (requestId, chainId), joined from Envelope via IPFS fetch
+ *   VerdictEnvelopeMeta   — IPFS-enriched actual outcome fields for evaluation envelopes (ebu7.X),
+ *                           keyed by (requestId, verdictIndex, chainId). The on-chain verdictCode
+ *                           defaults to Pass(1) for failed evaluations (daemon bug); this table
+ *                           holds the evaluator's real judgment from the off-chain envelope.
  *
  * Schema-version policy: any breaking change to an existing entity (rename,
  * remove, or type-change of a column) bumps the schema version and triggers a
@@ -461,6 +465,91 @@ export const attemptEnvelopeMeta = onchainTable(
     manifestCidIdx: index().on(table.manifestCid),
     implNameIdx: index().on(table.implName),
     modeIdx: index().on(table.mode),
+  }),
+);
+
+// ── VerdictEnvelopeMeta ──────────────────────────────────────────────────────
+/**
+ * Envelope-sourced metadata for a delivered verdict, populated by the IPFS
+ * enrichment pass (ebu7.X): for each indexed `evaluation:<cid>` MetadataSet
+ * event, fetch the evaluation envelope body and project its actual outcome.
+ *
+ * Background: the on-chain `JinnRouter.VerdictDeliveryClaimed.verdictCode`
+ * defaults to Pass(1) for failed evaluations (daemon bug in
+ * `client/src/adapters/mech/adapter.ts:899` + engine.ts fall-through).
+ * The evaluator's real judgment is written correctly in the off-chain
+ * evaluation envelope on IPFS (anchored via `IdentityRegistry.MetadataSet`
+ * with key `evaluation:<cid>`). This table is the source of truth for whether
+ * an evaluation actually passed or failed.
+ *
+ * Join: `(requestId, verdictIndex, chainId)` → `verdict`.
+ * Also joinable to `attempt` via `requestId`.
+ *
+ * Resilient: on IPFS fetch/parse failure no row is written (we have no PK
+ * without the body); Ponder reprocesses on the next sync giving a natural
+ * retry. `enrichmentStatus` documents the last attempt result.
+ *
+ * `actualPassed` is the source of truth. `verdict.verdictCode` is what was
+ * submitted on-chain (often defaulted to Pass). When both are present and
+ * disagree, prefer `actualPassed` in UI and metrics.
+ *
+ * Primary key: (requestId, verdictIndex, chainId).
+ * Index on manifestCid, evaluator, actualPassed, evaluatorVerdict, taskId.
+ */
+export const verdictEnvelopeMeta = onchainTable(
+  'verdict_envelope_meta',
+  (t) => ({
+    /** MechMarketplace requestId — equals verdict.requestId (the join key). */
+    requestId: t.hex().notNull(),
+    /**
+     * Verdict index within the attempt. From the envelope body or the matching
+     * on-chain Verdict row. A single attempt may have multiple verdicts;
+     * the envelope identifies which by verdictIndex.
+     */
+    verdictIndex: t.integer().notNull(),
+    /** Best-effort attempt index, from the envelope's task.attemptIndex if present. */
+    attemptIndex: t.integer().notNull().default(0),
+    /** The bigint task id as a decimal string, from the envelope. */
+    taskId: t.text().notNull().default(''),
+    /** participant.safeAddress from the envelope (evaluator Safe address). */
+    evaluator: t.hex().notNull().default('0x'),
+    /** The envelope IPFS CID (from the metadata key `evaluation:<cid>`). */
+    manifestCid: t.text().notNull(),
+    /** solverType from the envelope. */
+    solverType: t.text().notNull().default(''),
+    /** evidenceTier from the envelope. */
+    evidenceTier: t.text().notNull().default(''),
+    /**
+     * TRUE iff the evaluator's actual judgment was a pass.
+     * For swe-rebench-v2: from payload.passed_match.
+     * For other solverTypes: from payload.verdict === 'PASS'.
+     * This is the source of truth; on-chain verdictCode often defaults to Pass.
+     */
+    actualPassed: t.boolean().notNull().default(false),
+    /**
+     * Numeric score where one exists, as a string (e.g. "1.0" / "0.0").
+     * Populated for swe-rebench-v2 from payload.score. Empty for other types.
+     */
+    actualScore: t.text().notNull().default(''),
+    /**
+     * Normalized off-chain verdict: 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN'.
+     * 'UNKNOWN' when the envelope body lacks a recognizable verdict field.
+     */
+    evaluatorVerdict: t.text().notNull().default('UNKNOWN'),
+    /** 'pending' | 'ok' | 'failed'. */
+    enrichmentStatus: t.text().notNull().default('pending'),
+    /** Block number of the MetadataSet event that triggered enrichment. */
+    enrichedAtBlock: t.bigint().notNull(),
+    /** Chain ID. */
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    pk: primaryKey({ columns: [table.requestId, table.verdictIndex, table.chainId] }),
+    manifestCidIdx: index().on(table.manifestCid),
+    evaluatorIdx: index().on(table.evaluator),
+    actualPassedIdx: index().on(table.actualPassed),
+    evaluatorVerdictIdx: index().on(table.evaluatorVerdict),
+    taskIdIdx: index().on(table.taskId),
   }),
 );
 

@@ -496,6 +496,124 @@ export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
   };
 }
 
+// ── Verdict envelope lite parser ──────────────────────────────────────────────
+// For evaluation envelopes (role='verdict' or kind='evaluation'). Reads the
+// ACTUAL evaluator outcome — the on-chain VerdictDeliveryClaimed.verdictCode
+// defaults to Pass(1) for failed evaluations (daemon bug), so the off-chain
+// envelope is the source of truth.
+//
+// SWE-rebench v2: payload.{passed_match,score}. Other solverTypes: payload.verdict.
+// Returns null if body isn't a recognisable jinn.execution.v1 verdict envelope.
+
+export interface VerdictEnvelopeLite {
+  requestId: string;
+  verdictIndex: number;
+  attemptIndex: number;
+  taskId: string;
+  evaluator: string;
+  solverType: string;
+  evidenceTier: string;
+  actualPassed: boolean;
+  actualScore: string;
+  evaluatorVerdict: 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN';
+}
+
+function safeInt(v: unknown, def = 0): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
+  if (typeof v === 'string') {
+    const n = Number.parseInt(v, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  if (typeof v === 'bigint') return Number(v);
+  return def;
+}
+
+function normalizeVerdict(raw: unknown): 'PASS' | 'FAIL' | 'INVALID' | 'INDETERMINATE' | 'UNKNOWN' {
+  if (typeof raw !== 'string') return 'UNKNOWN';
+  const v = raw.trim().toUpperCase();
+  if (v === 'PASS' || v === 'SCORED' || v === 'OK') return 'PASS';
+  if (v === 'FAIL' || v === 'REJECTED' || v === 'FAILED') return 'FAIL';
+  if (v === 'INVALID') return 'INVALID';
+  if (v === 'INDETERMINATE' || v === 'UNRESOLVED' || v === 'UNKNOWN') return 'INDETERMINATE';
+  return 'UNKNOWN';
+}
+
+export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | null {
+  if (body === null || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+
+  // role must be 'verdict' for an evaluation envelope (execution envelopes are role='restoration').
+  // We're permissive: also accept envelopes that lack role but have task.requestId + a parseable payload.
+  // task.requestId is the join key — required.
+  const task = b['task'];
+  if (task === null || typeof task !== 'object') return null;
+  const taskObj = task as Record<string, unknown>;
+  const requestId = safeStr(taskObj['requestId']);
+  if (!requestId) return null;
+
+  const attemptIndex = safeInt(taskObj['attemptIndex'], 0);
+  const taskId = safeStr(taskObj['taskId']) || String(taskObj['taskId'] ?? '');
+  // verdictIndex may be at the top level or under task.
+  const verdictIndex = safeInt(b['verdictIndex'] ?? taskObj['verdictIndex'], 0);
+
+  const solverType = safeStr(b['solverType']);
+  const evidenceTier = safeStr(b['evidenceTier']);
+
+  // participant.safeAddress → evaluator
+  let evaluator = '0x';
+  const participant = b['participant'];
+  if (participant !== null && typeof participant === 'object') {
+    const p = participant as Record<string, unknown>;
+    const s = safeStr(p['safeAddress']);
+    if (s) evaluator = s;
+  }
+
+  // Payload — read the verdict.
+  const payload = b['payload'];
+  const payloadObj: Record<string, unknown> =
+    payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+
+  let actualPassed = false;
+  let actualScore = '';
+  let evaluatorVerdict: VerdictEnvelopeLite['evaluatorVerdict'] = 'UNKNOWN';
+
+  // SWE-rebench v2 (solverType prefix): payload.passed_match + payload.score.
+  if (solverType.startsWith('swe-rebench-v2')) {
+    const passedRaw =
+      payloadObj['passed_match'] ?? payloadObj['passedMatch'] ?? payloadObj['passed'];
+    if (typeof passedRaw === 'boolean') {
+      actualPassed = passedRaw;
+    } else if (typeof passedRaw === 'string') {
+      actualPassed = passedRaw.toLowerCase() === 'true' || passedRaw === '1';
+    }
+    const scoreRaw = payloadObj['score'];
+    if (typeof scoreRaw === 'number' && Number.isFinite(scoreRaw)) {
+      actualScore = scoreRaw.toString();
+    } else if (typeof scoreRaw === 'string') {
+      actualScore = scoreRaw;
+    }
+    evaluatorVerdict = actualPassed ? 'PASS' : 'FAIL';
+  } else {
+    // Generic: payload.verdict (uppercase normalize).
+    const norm = normalizeVerdict(payloadObj['verdict']);
+    evaluatorVerdict = norm;
+    actualPassed = norm === 'PASS';
+  }
+
+  return {
+    requestId,
+    verdictIndex,
+    attemptIndex,
+    taskId,
+    evaluator,
+    solverType,
+    evidenceTier,
+    actualPassed,
+    actualScore,
+    evaluatorVerdict,
+  };
+}
+
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────
 // Routes by key prefix:
 //   solvernet-manifest:<cid>  → upsert SolverNetManifest (most-recent-wins)
@@ -511,6 +629,7 @@ export async function handleMetadataSet({
   envelope,
   harnessCheckpoint,
   attemptEnvelopeMeta,
+  verdictEnvelopeMeta,
   enrichEnvelopes = false,
   ipfsGateway = '',
   fetchImpl,
@@ -521,6 +640,7 @@ export async function handleMetadataSet({
   envelope: unknown;
   harnessCheckpoint: unknown;
   attemptEnvelopeMeta?: unknown;
+  verdictEnvelopeMeta?: unknown;
   enrichEnvelopes?: boolean;
   ipfsGateway?: string;
   fetchImpl?: FetchLike;
@@ -820,6 +940,81 @@ export async function handleMetadataSet({
         }
       } catch (err) {
         console.warn(`[indexer] envelope enrichment failed for ${envelopeKey.cid}: ${String(err)}`);
+        // no row — we have no requestId without the body; Ponder reprocesses on next sync.
+      }
+    }
+
+    // ── Evaluation envelope enrichment → verdictEnvelopeMeta (ebu7.13) ─────
+    // Only for evaluation envelopes (kind === 'evaluation'). The off-chain body
+    // carries the evaluator's ACTUAL outcome — the on-chain verdictCode is
+    // submitted as Pass(1) by default in the daemon (client/src/adapters/mech/
+    // adapter.ts:899 + engine.ts:1751 fall-through), so failed evaluations
+    // appear as Pass on-chain. The envelope is the source of truth.
+    // verdictEnvelopeMeta is optional for backward compat with callers/tests
+    // that don't pass it.
+    if (envelopeKey.kind === 'evaluation' && enrichEnvelopes && verdictEnvelopeMeta) {
+      try {
+        const body = await fetchIpfsJson(ipfsGateway, envelopeKey.cid, {
+          timeoutMs: 5000,
+          fetchImpl,
+        });
+        const meta = parseVerdictEnvelopeLite(body);
+        if (meta) {
+          await context.db
+            .insert(verdictEnvelopeMeta)
+            .values({
+              requestId: meta.requestId as `0x${string}`,
+              verdictIndex: meta.verdictIndex,
+              attemptIndex: meta.attemptIndex,
+              taskId: meta.taskId,
+              evaluator: meta.evaluator as `0x${string}`,
+              manifestCid: envelopeKey.cid,
+              solverType: meta.solverType,
+              evidenceTier: meta.evidenceTier,
+              actualPassed: meta.actualPassed,
+              actualScore: meta.actualScore,
+              evaluatorVerdict: meta.evaluatorVerdict,
+              enrichmentStatus: 'ok',
+              enrichedAtBlock: blockNumber,
+              chainId,
+            })
+            .onConflictDoUpdate((row) => {
+              // Most-recent-wins by enrichedAtBlock. Stale replays no-op.
+              if (blockNumber >= row.enrichedAtBlock) {
+                return {
+                  attemptIndex: meta.attemptIndex,
+                  taskId: meta.taskId,
+                  evaluator: meta.evaluator as `0x${string}`,
+                  manifestCid: envelopeKey.cid,
+                  solverType: meta.solverType,
+                  evidenceTier: meta.evidenceTier,
+                  actualPassed: meta.actualPassed,
+                  actualScore: meta.actualScore,
+                  evaluatorVerdict: meta.evaluatorVerdict,
+                  enrichmentStatus: 'ok',
+                  enrichedAtBlock: blockNumber,
+                  chainId,
+                };
+              }
+              // No-op: return existing row fields so Drizzle generates valid SQL.
+              return {
+                attemptIndex: row.attemptIndex,
+                taskId: row.taskId,
+                evaluator: row.evaluator,
+                manifestCid: row.manifestCid,
+                solverType: row.solverType,
+                evidenceTier: row.evidenceTier,
+                actualPassed: row.actualPassed,
+                actualScore: row.actualScore,
+                evaluatorVerdict: row.evaluatorVerdict,
+                enrichmentStatus: row.enrichmentStatus,
+                enrichedAtBlock: row.enrichedAtBlock,
+                chainId: row.chainId,
+              };
+            });
+        }
+      } catch (err) {
+        console.warn(`[indexer] verdict envelope enrichment failed for ${envelopeKey.cid}: ${String(err)}`);
         // no row — we have no requestId without the body; Ponder reprocesses on next sync.
       }
     }

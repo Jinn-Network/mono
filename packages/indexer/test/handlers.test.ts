@@ -26,7 +26,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { keccak256, toBytes } from 'viem';
-import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -36,6 +36,7 @@ import {
   handleTaskBudgetRefunded,
   handleClaimed,
   parseCheckpointManifestLite,
+  parseVerdictEnvelopeLite,
   type HandlerContext,
 } from '../src/handlers.js';
 import { createInMemoryDb, type InMemoryDb, type PkMap } from './helpers/in-memory-db.js';
@@ -69,6 +70,7 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
   [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
   [attemptEnvelopeMeta, ['requestId', 'chainId']],
+  [verdictEnvelopeMeta, ['requestId', 'verdictIndex', 'chainId']],
 ]);
 
 let db: InMemoryDb;
@@ -1151,5 +1153,230 @@ describe('MetadataSet harness.checkpoint: enrichment → harnessCheckpoint', () 
     const row = db.get(harnessCheckpoint, { agentId: '99', cid: CKPT_CID, chainId: CHAIN_ID });
     expect(row).toBeDefined();
     expect(row?.enrichmentStatus).toBe('pending');
+  });
+});
+
+// ─── parseVerdictEnvelopeLite (pure) ──────────────────────────────────────────
+
+describe('parseVerdictEnvelopeLite', () => {
+  it('parses a SWE-rebench v2 verdict envelope (passed_match=false → FAIL)', () => {
+    const body = {
+      schemaVersion: 'jinn.execution.v1',
+      role: 'verdict',
+      solverType: 'swe-rebench-v2.v1',
+      task: { requestId: `0x${'aa'.repeat(32)}`, taskId: '7', attemptIndex: 0 },
+      verdictIndex: 0,
+      participant: { safeAddress: `0x${'bb'.repeat(20)}`, agentEoa: '0x' },
+      evidenceTier: 'committed',
+      payload: { passed_match: false, score: 0 },
+    };
+    const m = parseVerdictEnvelopeLite(body);
+    expect(m).not.toBeNull();
+    expect(m!.requestId).toBe(`0x${'aa'.repeat(32)}`);
+    expect(m!.solverType).toBe('swe-rebench-v2.v1');
+    expect(m!.actualPassed).toBe(false);
+    expect(m!.actualScore).toBe('0');
+    expect(m!.evaluatorVerdict).toBe('FAIL');
+    expect(m!.evidenceTier).toBe('committed');
+    expect(m!.taskId).toBe('7');
+    expect(m!.attemptIndex).toBe(0);
+    expect(m!.verdictIndex).toBe(0);
+  });
+
+  it('parses SWE-rebench v2 passed_match=true → PASS', () => {
+    const body = {
+      task: { requestId: `0x${'cc'.repeat(32)}` },
+      solverType: 'swe-rebench-v2.v1',
+      payload: { passed_match: true, score: 1.0 },
+    };
+    const m = parseVerdictEnvelopeLite(body);
+    expect(m!.actualPassed).toBe(true);
+    expect(m!.actualScore).toBe('1');
+    expect(m!.evaluatorVerdict).toBe('PASS');
+  });
+
+  it('parses a generic verdict envelope (payload.verdict=PASS)', () => {
+    const body = {
+      task: { requestId: `0x${'dd'.repeat(32)}` },
+      solverType: 'prediction.v1',
+      payload: { verdict: 'PASS' },
+    };
+    const m = parseVerdictEnvelopeLite(body);
+    expect(m!.evaluatorVerdict).toBe('PASS');
+    expect(m!.actualPassed).toBe(true);
+    expect(m!.actualScore).toBe('');
+  });
+
+  it('normalizes generic verdict values (REJECTED → FAIL, UNRESOLVED → INDETERMINATE)', () => {
+    const a = parseVerdictEnvelopeLite({
+      task: { requestId: `0x${'ee'.repeat(32)}` },
+      solverType: 'prediction.v1',
+      payload: { verdict: 'REJECTED' },
+    });
+    expect(a!.evaluatorVerdict).toBe('FAIL');
+    const b = parseVerdictEnvelopeLite({
+      task: { requestId: `0x${'ff'.repeat(32)}` },
+      solverType: 'prediction.v1',
+      payload: { verdict: 'UNRESOLVED' },
+    });
+    expect(b!.evaluatorVerdict).toBe('INDETERMINATE');
+  });
+
+  it('returns null when body is null/non-object/missing task.requestId', () => {
+    expect(parseVerdictEnvelopeLite(null)).toBeNull();
+    expect(parseVerdictEnvelopeLite('not an object')).toBeNull();
+    expect(parseVerdictEnvelopeLite([1, 2, 3])).toBeNull();
+    expect(parseVerdictEnvelopeLite({})).toBeNull();
+    expect(parseVerdictEnvelopeLite({ task: {} })).toBeNull();
+    expect(parseVerdictEnvelopeLite({ task: { requestId: '' } })).toBeNull();
+  });
+
+  it('falls back to UNKNOWN for unrecognized payloads', () => {
+    const m = parseVerdictEnvelopeLite({
+      task: { requestId: `0x${'11'.repeat(32)}` },
+      solverType: 'mystery.v1',
+      payload: {},
+    });
+    expect(m!.evaluatorVerdict).toBe('UNKNOWN');
+    expect(m!.actualPassed).toBe(false);
+  });
+});
+
+// ─── MetadataSet evaluation: enrichment → verdictEnvelopeMeta ─────────────────
+
+describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
+  const EVAL_CID = 'bafyevaluation';
+  const REQUEST_ID = `0x${'aa'.repeat(32)}` as `0x${string}`;
+  const EVALUATOR = `0x${'bb'.repeat(20)}` as `0x${string}`;
+  const evalKey = `evaluation:${EVAL_CID}`;
+  const SWE_REBENCH_FAIL_BODY = {
+    schemaVersion: 'jinn.execution.v1',
+    role: 'verdict',
+    solverType: 'swe-rebench-v2.v1',
+    task: { requestId: REQUEST_ID, taskId: '42', attemptIndex: 1 },
+    verdictIndex: 0,
+    participant: { safeAddress: EVALUATOR, agentEoa: '0x' },
+    evidenceTier: 'committed',
+    payload: { passed_match: false, score: 0 },
+  };
+
+  it('writes a verdictEnvelopeMeta row on successful fetch + parse', async () => {
+    const stubFetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => SWE_REBENCH_FAIL_BODY,
+    });
+    await handleMetadataSet({
+      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+    const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, verdictIndex: 0, chainId: CHAIN_ID });
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      requestId: REQUEST_ID,
+      verdictIndex: 0,
+      attemptIndex: 1,
+      taskId: '42',
+      evaluator: EVALUATOR,
+      manifestCid: EVAL_CID,
+      solverType: 'swe-rebench-v2.v1',
+      evidenceTier: 'committed',
+      actualPassed: false,
+      actualScore: '0',
+      evaluatorVerdict: 'FAIL',
+      enrichmentStatus: 'ok',
+      chainId: CHAIN_ID,
+    });
+    // The Envelope row is also still written (the existing path).
+    const env = db.rows(envelope).find((e) => e.metadataKey === evalKey);
+    expect(env).toBeDefined();
+    expect(env?.kind).toBe('evaluation');
+  });
+
+  it('does NOT write a row when the fetch throws (resilient — no row, no throw)', async () => {
+    const stubFetch: FetchLike = async () => { throw new Error('IPFS offline'); };
+    await expect(
+      handleMetadataSet({
+        event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
+        context,
+        solverNetManifest,
+        envelope,
+        harnessCheckpoint,
+        attemptEnvelopeMeta,
+        verdictEnvelopeMeta,
+        enrichEnvelopes: true,
+        ipfsGateway: 'https://stub',
+        fetchImpl: stubFetch,
+      })
+    ).resolves.toBeUndefined();
+    expect(db.count(verdictEnvelopeMeta)).toBe(0);
+    // The Envelope row IS still written (the on-chain upsert is unaffected).
+    expect(db.rows(envelope).some((e) => e.metadataKey === evalKey)).toBe(true);
+  });
+
+  it('does NOT fetch or write when enrichEnvelopes:false', async () => {
+    let called = false;
+    const stubFetch: FetchLike = async () => { called = true; return { ok: true, status: 200, json: async () => SWE_REBENCH_FAIL_BODY }; };
+    await handleMetadataSet({
+      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: false,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+    expect(called).toBe(false);
+    expect(db.count(verdictEnvelopeMeta)).toBe(0);
+  });
+
+  it('does NOT write a row when the body has no task.requestId', async () => {
+    const stubFetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ schemaVersion: 'jinn.execution.v1', role: 'verdict', payload: { passed_match: true } }),
+    });
+    await handleMetadataSet({
+      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+    expect(db.count(verdictEnvelopeMeta)).toBe(0);
+  });
+
+  it('does NOT enrich envelope:<cid> (execution) — only evaluation:<cid> triggers verdictEnvelopeMeta', async () => {
+    const stubFetch: FetchLike = async () => ({ ok: true, status: 200, json: async () => SWE_REBENCH_FAIL_BODY });
+    await handleMetadataSet({
+      event: metadataSetEvent({ agentId: 5n, metadataKey: `envelope:${EVAL_CID}`, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+    // No verdictEnvelopeMeta row from an execution envelope — that path goes to attemptEnvelopeMeta.
+    expect(db.count(verdictEnvelopeMeta)).toBe(0);
   });
 });
