@@ -626,6 +626,11 @@ test('Launcher happy-path: walks Create wizard and lands on the post-launch dash
     /launched/i,
     { timeout: 10_000 },
   );
+  await expect(page.getByTestId('launcher-launched-name')).toContainText(
+    'Polymarket forecasts',
+  );
+  await expect(page.getByTestId('launcher-launched-spend-solution-price')).not.toHaveText('—');
+  await expect(page.getByTestId('launcher-launched-spend-verdict-price')).not.toHaveText('—');
 
   // Daemon-side assertions: the launch fired exactly once against our
   // draft and the launched record is being polled.
