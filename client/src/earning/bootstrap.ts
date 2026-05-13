@@ -356,19 +356,36 @@ export class FleetBootstrapper {
     }
   }
 
-  async bootstrap(password: string): Promise<FleetBootstrapResult> {
-    // Handle legacy keystore migration
-    if (!this.store.hasMnemonicKeystore() && this.store.hasLegacyKeystore()) {
-      await this.store.migrateLegacyFiles();
+  /**
+   * Stage 1 + Stage 2 — full operator bootstrap. Calls `ensureStage1`
+   * first; on success, walks Stage 2 per service. Builder-only users who
+   * have completed Stage 1 and call this method later begin Stage 2 from
+   * `awaiting_stake` for the first service row (created lazily here).
+   *
+   * Two-Safe topology in standard mode: `fleet_safe_address !==
+   * services[0].safe_address` because Stage 2's `distributor.stake()`
+   * creates its own Safe. In self-bond mode the two converge (both
+   * derived from HD-index-1).
+   *
+   * See docs/superpowers/specs/2026-05-13-plug-in-builder-entry-point-design.md §5.1.
+   */
+  async ensureStage1And2(password: string): Promise<FleetBootstrapResult> {
+    // Stage 1 first — establishes fleet identity. Short-circuits if already done.
+    const stage1Result = await this.ensureStage1(password);
+    if (!stage1Result.ok) {
+      return stage1Result;
     }
 
+    // Original bootstrap body — copied verbatim from the previous bootstrap()
+    // method, with two changes:
+    //   (a) the legacy-keystore migration and master-wallet-ensure are no-ops
+    //       because ensureStage1 already ran them.
+    //   (b) at the end, if any service reached `complete`/`safe_binding_pending`
+    //       we advance `fleet_stage` to `'stage1_and_2'`.
     let state = await this.store.load(this.chain);
 
     try {
-      // Phase 1: Master wallet setup
-      state = await this.ensureMasterWallet(state, password);
-
-      // Phase 1b: Check master funding
+      // Phase 1b: Check master funding for the full operator path.
       const masterAddress = state.master_address!;
       let masterBalance = await this.publicClient.getBalance({ address: masterAddress as Address });
       // Self-bond mode needs much more ETH than standard mode because the master
@@ -565,6 +582,12 @@ export class FleetBootstrapper {
         state = await this.bootstrapService(state, mnemonic, nextIndex);
       }
 
+      // Advance fleet_stage to 'stage1_and_2' if any service is operational.
+      const anyOperationalAfter = state.services.some(s => isOperationalServiceStep(s.step));
+      if (anyOperationalAfter && state.fleet_stage !== 'stage1_and_2') {
+        state = await this.store.patchFleet({ fleet_stage: 'stage1_and_2' });
+      }
+
       return {
         ok: true,
         fleet_state: state,
@@ -592,6 +615,15 @@ export class FleetBootstrapper {
         rawErrorMessage: rawMessage,
       };
     }
+  }
+
+  /**
+   * Back-compat alias. Existing call sites in `client/src/cli/commands/bootstrap.ts`
+   * and `client/src/cli/commands/fleet-scale.ts` continue to call `bootstrap()`;
+   * forwarding to `ensureStage1And2` preserves their semantics without churn.
+   */
+  async bootstrap(password: string): Promise<FleetBootstrapResult> {
+    return this.ensureStage1And2(password);
   }
 
   /**
@@ -1428,6 +1460,8 @@ export class FleetBootstrapper {
     let svc = (await this.store.load(this.chain)).services.find(s => s.index === index);
     if (!svc) throw new Error(`Service ${index} not found in state`);
 
+    const fleetSnapshot = await this.store.load(this.chain);
+
     const identityRegistry = this.config.identityRegistry
       ?? IDENTITY_REGISTRY_ADDRESSES[this.config.chainId];
     if (!identityRegistry) {
@@ -1440,7 +1474,7 @@ export class FleetBootstrapper {
     const agentSigner = deriveAgentSigner(mnemonic, index);
     const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
 
-    // ── Sub-step A: mint NFT (skip if agent_id is already set). ─────────
+    // ── Sub-step A: mint NFT (skip if agent_id is already set OR fleet identity exists). ─
     let agentId: string;
     if (svc.agent_id) {
       console.error(
@@ -1451,6 +1485,24 @@ export class FleetBootstrapper {
       svc = await this.firstServiceUpdate(index, {
         identity_registry_address: svc.identity_registry_address ?? getAddress(identityRegistry),
         step: svc.step === 'safe_binding_pending' ? 'safe_binding_pending' : 'agent_registered',
+      });
+    } else if (fleetSnapshot.fleet_agent_id) {
+      // nghf: reuse the fleet-level agentId minted by ensureStage1 instead of
+      // minting a second one. This collapses the "one agentId per user"
+      // invariant in spec §5.1 for the standard-mode two-Safe topology.
+      console.error(
+        `[fleet-bootstrap] Service ${index}: reusing fleet agentId=${fleetSnapshot.fleet_agent_id} ` +
+        `(no second mint needed).`,
+      );
+      agentId = fleetSnapshot.fleet_agent_id;
+      svc = await this.firstServiceUpdate(index, {
+        agent_id: fleetSnapshot.fleet_agent_id,
+        agent_uri: '',
+        identity_registry_address:
+          fleetSnapshot.fleet_identity_registry ?? getAddress(identityRegistry),
+        agent_registered_tx: null,
+        step: 'agent_registered',
+        error: null,
       });
     } else {
       // v0: empty agentURI. The richer agent card (per §6 of the spec) is
