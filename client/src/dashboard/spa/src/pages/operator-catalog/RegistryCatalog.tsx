@@ -47,6 +47,36 @@ function formatTimestamp(iso: string | null): string | null {
   }
 }
 
+function errorCode(error: unknown): string | null {
+  if (error instanceof Error) {
+    const code = (error as Error & { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    if (error.message.includes('subsystem_not_ready')) return 'subsystem_not_ready';
+    if (error.message.includes('registry_unavailable')) return 'registry_unavailable';
+  }
+  return null;
+}
+
+function registryErrorCopy(error: unknown): { title: string; detail: string } {
+  switch (errorCode(error)) {
+    case 'subsystem_not_ready':
+      return {
+        title: 'SolverNet subsystem is still starting.',
+        detail: 'Wait a few seconds, then retry. If this persists, restart the daemon and check its startup logs.',
+      };
+    case 'registry_unavailable':
+      return {
+        title: 'Registry cache is unavailable.',
+        detail: 'The daemon could not read the SolverNet registry cache. Retry after startup finishes; check daemon logs if it keeps failing.',
+      };
+    default:
+      return {
+        title: 'Failed to load registry catalog.',
+        detail: error instanceof Error ? error.message : 'Unknown error',
+      };
+  }
+}
+
 function StatusBadge({
   status,
 }: {
@@ -297,6 +327,7 @@ export function RegistryCatalog({
 
   if (isError || joinedQuery.isError) {
     const visibleError = isError ? error : joinedQuery.error;
+    const copy = registryErrorCopy(visibleError);
     return (
       <div
         data-testid="registry-catalog-error"
@@ -320,10 +351,10 @@ export function RegistryCatalog({
               fontWeight: 500,
             }}
           >
-            Failed to load registry catalog.
+            {copy.title}
           </span>
           <span style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
-            {visibleError instanceof Error ? visibleError.message : 'Unknown error'}
+            {copy.detail}
           </span>
         </div>
         <button

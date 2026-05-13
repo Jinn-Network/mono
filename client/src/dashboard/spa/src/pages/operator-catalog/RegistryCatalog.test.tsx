@@ -308,6 +308,38 @@ describe('RegistryCatalog', () => {
     expect(screen.getByTestId('registry-catalog-retry')).toBeTruthy();
   });
 
+  it('explains subsystem_not_ready registry errors as startup lag', async () => {
+    listRegistryMock.mockRejectedValue(
+      Object.assign(new Error('503 Service Unavailable: SolverNet subsystem still initialising'), {
+        status: 503,
+        code: 'subsystem_not_ready',
+      }),
+    );
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByText(/solvernet subsystem is still starting/i)).toBeTruthy(),
+    );
+    expect(screen.getByText(/wait a few seconds, then retry/i)).toBeTruthy();
+  });
+
+  it('explains registry_unavailable errors as registry cache failures', async () => {
+    listRegistryMock.mockRejectedValue(
+      Object.assign(new Error('503 Service Unavailable: registry_unavailable'), {
+        status: 503,
+        code: 'registry_unavailable',
+      }),
+    );
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByText(/registry cache is unavailable/i)).toBeTruthy(),
+    );
+    expect(screen.getByText(/check daemon logs/i)).toBeTruthy();
+  });
+
   it('surfaces lastRefreshedAt and lastError from the response envelope', async () => {
     listRegistryMock.mockResolvedValue({
       summaries: [],
