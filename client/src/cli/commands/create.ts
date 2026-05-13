@@ -210,11 +210,13 @@ export async function runCreate(args: RunCreateArgs): Promise<string> {
 
 const HELP_TEXT = `\
 jinn create harness <packageName>
+jinn create plugin <packageName>
 
 Scaffold a new Jinn package on disk.
 
 Subcommands:
   harness    external Harness package (forecaster / evaluator / alternative-harness)
+  plugin     SolverPlugin package (solver-type-plugin / runtime-plugin)
 
 Harness options:
   --pattern=<pattern>     Template pattern (default: forecaster)
@@ -223,24 +225,34 @@ Harness options:
   --network=<network>     Default network (default: base-sepolia)
                           One of: base-mainnet, base-sepolia, sepolia, ethereum-mainnet
 
+Plugin options:
+  --pattern=<pattern>     Template pattern (default: solver-type-plugin)
+                          Supported: solver-type-plugin, runtime-plugin
+  --solver-type=<value>   SolverType this plug-in targets (default: swe-rebench-v2.v1;
+                          ignored for runtime-plugin)
+
 Common:
   --out-dir=<path>        Where to write the package (default: cwd)
   --help                  Show this help
 
 Examples:
   jinn create harness @example/forecaster
+  jinn create plugin  @example/my-skill
+  jinn create plugin  @example/my-runtime --pattern runtime-plugin
+
+Quickstart (placeholder until 52x3.6 ships):
+  https://github.com/Jinn-Network/mono/blob/main/cargo/docs/build/quickstart.md
 `;
 
 async function run(ctx: CommandContext): Promise<void> {
-  // Manual parsing — we want positional: subcommand + packageName.
   const sub = ctx.argv[0];
   if (!sub || sub === '--help' || ctx.argv.includes('--help')) {
     ctx.writer.write(HELP_TEXT);
     return;
   }
-  if (sub !== 'harness') {
+  if (sub !== 'harness' && sub !== 'plugin') {
     ctx.writer.write(
-      `error: unknown subcommand '${sub}' (expected 'harness')\n`,
+      `error: unknown subcommand '${sub}' (expected 'harness' or 'plugin')\n`,
     );
     ctx.writer.write(HELP_TEXT);
     ctx.exit(1);
@@ -254,17 +266,17 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
+  const defaultPattern = sub === 'harness' ? 'forecaster' : 'solver-type-plugin';
+  const defaultSolverType = sub === 'harness' ? 'prediction.v1' : 'swe-rebench-v2.v1';
+
   let parsed;
   try {
     parsed = parseArgs({
       args: ctx.argv.slice(2),
       options: {
         ...COMMON_FLAGS,
-        pattern: {
-          type: 'string' as const,
-          default: 'forecaster',
-        },
-        'solver-type': { type: 'string' as const, default: 'prediction.v1' },
+        pattern: { type: 'string' as const, default: defaultPattern },
+        'solver-type': { type: 'string' as const, default: defaultSolverType },
         network: { type: 'string' as const, default: 'base-sepolia' },
         'out-dir': { type: 'string' as const },
       },
@@ -277,24 +289,34 @@ async function run(ctx: CommandContext): Promise<void> {
   }
   const flags = parsed.values;
   const outDir = String(flags['out-dir'] ?? process.cwd());
+  const pattern = String(flags.pattern ?? defaultPattern);
 
-  const pattern = String(flags.pattern ?? 'forecaster') as HarnessPattern;
-  if (!SUPPORTED_PATTERNS.includes(pattern)) {
-    ctx.writer.write(
-      `error: unsupported --pattern '${pattern}' (supported: ${SUPPORTED_PATTERNS.join(', ')})\n`,
-    );
-    ctx.exit(1);
-    return;
+  if (sub === 'harness') {
+    if (!SUPPORTED_PATTERNS.includes(pattern as HarnessPattern)) {
+      ctx.writer.write(
+        `error: unsupported --pattern '${pattern}' (supported: ${SUPPORTED_PATTERNS.join(', ')})\n`,
+      );
+      ctx.exit(1);
+      return;
+    }
+  } else {
+    if (!SUPPORTED_PLUGIN_PATTERNS.includes(pattern as PluginPattern)) {
+      ctx.writer.write(
+        `error: unsupported --pattern '${pattern}' (supported: ${SUPPORTED_PLUGIN_PATTERNS.join(', ')})\n`,
+      );
+      ctx.exit(1);
+      return;
+    }
   }
 
   let target: string;
   try {
     target = await runCreate({
-      target: 'harness',
-      pattern,
+      target: sub,
+      pattern: pattern as HarnessPattern | PluginPattern,
       packageName,
-      solverTypeString: String(flags['solver-type'] ?? 'prediction.v1'),
-      network: String(flags.network ?? 'base-sepolia'),
+      solverTypeString: String(flags['solver-type'] ?? defaultSolverType),
+      network: sub === 'harness' ? String(flags.network ?? 'base-sepolia') : undefined,
       outDir,
     });
   } catch (err) {
@@ -309,7 +331,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
 export const createCommand: CommandModule = {
   name: 'create',
-  summary: 'Scaffold a new Jinn external harness impl package',
+  summary: 'Scaffold a new Jinn external harness or SolverPlugin package',
   helpText: HELP_TEXT,
   run,
 };
