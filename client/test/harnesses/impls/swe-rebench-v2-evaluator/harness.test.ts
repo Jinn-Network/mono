@@ -516,4 +516,52 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     );
     await expect(harness.run(ctx)).rejects.toThrow(/not enabled/);
   });
+
+  it('reuses a single EvalRunner across run() calls so the LRU image cache accumulates (jinn-mono-uy6v.11)', async () => {
+    // Regression: pre-fix, `new PythonEvalRunner(...)` was constructed inside
+    // each `run()` call, so the in-process LRU image cache was rebuilt empty
+    // every invocation and `cleanupImage` never fired in production. The
+    // existing LRU-eviction tests didn't catch this because they exercise
+    // PythonEvalRunner directly. This test pins the harness→runner wiring:
+    // the runner factory must be invoked exactly once across multiple run()
+    // calls, regardless of how many distinct tasks the harness grades.
+    const makeRunner = vi.fn(() => ({
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a', 'test_b'],
+        failed: [],
+        log: 'ok',
+        exitCode: 0,
+      }),
+    }));
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        fetcher: makeFakeFetcher(),
+        makeRunner,
+        uploadToIpfs: vi.fn().mockResolvedValue('bafy-test-log'),
+      },
+    });
+    const ctx1 = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    const ctx2 = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    await harness.run(ctx1);
+    await harness.run(ctx2);
+    expect(makeRunner).toHaveBeenCalledTimes(1);
+    // The factory is also expected to receive the upstream repo dir from the
+    // enabled state — guards against a future refactor that passes the wrong
+    // path and silently creates a broken runner.
+    expect(makeRunner).toHaveBeenCalledWith(
+      expect.objectContaining({ upstreamRepoDir: expect.any(String) }),
+    );
+    // Sanity: both runs actually invoked runEval — proves the harness is
+    // exercising the cached runner, not falling back to anything else.
+    const runner = makeRunner.mock.results[0]?.value as { runEval: ReturnType<typeof vi.fn> };
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
+  });
 });
