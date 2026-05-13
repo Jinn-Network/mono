@@ -1141,14 +1141,17 @@ async function getSolverNetSparklinesBatch(
 
   // One aggregate query: GROUP BY (manifestDigest, bucketIndex) where
   // bucketIndex = floor(verdict.createdAtBlock / SPARKLINE_BUCKET_BLOCKS).
-  // The divisor MUST be inlined as a literal (not a bound param) so the SELECT
-  // and GROUP BY expressions are identical text — Postgres compares them
-  // textually and rejects the query as a non-grouped column reference if the
-  // param placeholders differ between SELECT and GROUP BY. We also cast the
-  // divisor to bigint so the result is integer division (bigint/bigint),
-  // otherwise Postgres returns numeric and the JS-side BigInt(...) parse blows
-  // up on the decimal fraction (e.g. '828.4158400000000000').
-  const sparklineDiv = sql.raw(`/ ${SPARKLINE_BUCKET_BLOCKS.toString()}::bigint`);
+  // The bucket expression MUST be inlined as a literal (not a bound param) so
+  // the SELECT and GROUP BY expressions are identical text — Postgres compares
+  // them textually and rejects the query as a non-grouped column reference if
+  // the param placeholders differ between SELECT and GROUP BY. We also wrap in
+  // FLOOR(...)::bigint because Ponder's `t.bigint()` columns are stored as
+  // PostgreSQL NUMERIC (so EVM uint256 fits), and NUMERIC / NUMERIC returns
+  // NUMERIC with decimals — JS-side `BigInt(...)` then blows up on the
+  // fraction (e.g. '828.4158400000000000'). FLOOR + ::bigint truncates.
+  const sparklineBucketExpr = sql.raw(
+    `floor(verdict.created_at_block / ${SPARKLINE_BUCKET_BLOCKS.toString()})::bigint`,
+  );
   const bucketRows = await db
     .select({
       manifestDigest: schema.task.manifestDigest,
@@ -1167,7 +1170,7 @@ async function getSolverNetSparklinesBatch(
         eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
       ),
     )
-    .groupBy(schema.task.manifestDigest, sql`(${schema.verdict.createdAtBlock} ${sparklineDiv})`);
+    .groupBy(schema.task.manifestDigest, sql`${sparklineBucketExpr}`);
 
   // Group rows by manifestDigest, accumulate buckets, sort and slice.
   const byDigest = new Map<`0x${string}`, { bucketIndex: bigint; total: number; pass: number }[]>();
