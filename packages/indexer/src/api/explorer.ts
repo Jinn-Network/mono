@@ -1141,11 +1141,15 @@ async function getSolverNetSparklinesBatch(
 
   // One aggregate query: GROUP BY (manifestDigest, bucketIndex) where
   // bucketIndex = floor(verdict.createdAtBlock / SPARKLINE_BUCKET_BLOCKS).
-  // We compute bucketIndex in SQL using integer division.
+  // The divisor MUST be inlined as a literal (not a bound param) so the SELECT
+  // and GROUP BY expressions are identical text — Postgres compares them
+  // textually and rejects the query as a non-grouped column reference if the
+  // param placeholders differ between SELECT and GROUP BY.
+  const sparklineDiv = sql.raw(`/ ${SPARKLINE_BUCKET_BLOCKS.toString()}`);
   const bucketRows = await db
     .select({
       manifestDigest: schema.task.manifestDigest,
-      bucketIndex: sql<string>`(${schema.verdict.createdAtBlock} / ${SPARKLINE_BUCKET_BLOCKS})`,
+      bucketIndex: sql<string>`(${schema.verdict.createdAtBlock} ${sparklineDiv})`,
       total: count(),
       pass: count(
         sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
@@ -1160,7 +1164,7 @@ async function getSolverNetSparklinesBatch(
         eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
       ),
     )
-    .groupBy(schema.task.manifestDigest, sql`(${schema.verdict.createdAtBlock} / ${SPARKLINE_BUCKET_BLOCKS})`);
+    .groupBy(schema.task.manifestDigest, sql`(${schema.verdict.createdAtBlock} ${sparklineDiv})`);
 
   // Group rows by manifestDigest, accumulate buckets, sort and slice.
   const byDigest = new Map<`0x${string}`, { bucketIndex: bigint; total: number; pass: number }[]>();
