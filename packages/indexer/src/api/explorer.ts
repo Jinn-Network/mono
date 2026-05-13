@@ -245,15 +245,40 @@ app.get('/network', async (c) => {
         .from(schema.attempt)
         .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID)),
 
-      // Verdicts (all rows for rate calc) — scoped to EXPLORER_CHAIN_ID
+      // Verdicts (all rows for rate calc) — scoped to EXPLORER_CHAIN_ID.
+      // LEFT JOIN verdictEnvelopeMeta so we can compute both on-chain count
+      // (verdict.verdictCode == 1) and envelope-truth count (preferring
+      // attemptEnvelopeMeta.actualPassed when an enriched row exists). The
+      // on-chain verdictCode defaults to Pass(1) for failed evaluations in
+      // the daemon (ebu7.13); the envelope is the source of truth.
       db
         .select({
           total: count(),
-          pass: count(
+          onChainPass: count(
             sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
+          ),
+          // envelope-truth pass: prefer actualPassed when enriched; else fall back to verdictCode.
+          envelopePass: count(
+            sql`CASE WHEN (${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' AND ${schema.verdictEnvelopeMeta.actualPassed} = true) OR (${schema.verdictEnvelopeMeta.enrichmentStatus} IS NULL AND ${schema.verdict.verdictCode} = 1) THEN 1 END`,
+          ),
+          // verdicts with an enriched envelope row
+          enriched: count(
+            sql`CASE WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' THEN 1 END`,
+          ),
+          // disagreement: enriched AND on-chain != envelope
+          disagreed: count(
+            sql`CASE WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' AND ((${schema.verdict.verdictCode} = 1) <> ${schema.verdictEnvelopeMeta.actualPassed}) THEN 1 END`,
           ),
         })
         .from(schema.verdict)
+        .leftJoin(
+          schema.verdictEnvelopeMeta,
+          and(
+            eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
+            eq(schema.verdictEnvelopeMeta.verdictIndex, schema.verdict.verdictIndex),
+            eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
+          ),
+        )
         .where(eq(schema.verdict.chainId, EXPLORER_CHAIN_ID)),
 
       // Reward distributions — intentionally unfiltered by chainId:
@@ -277,13 +302,17 @@ app.get('/network', async (c) => {
           ),
         ),
 
-      // Envelope enrichment: mode + implName per enriched attempt, scoped to EXPLORER_CHAIN_ID.
-      // No join to `attempt` needed — every attemptEnvelopeMeta row corresponds to an attempt
-      // (the requestId FK) and is already chain-scoped.
+      // Envelope enrichment: mode + implName + model + pluginsJson per enriched attempt,
+      // scoped to EXPLORER_CHAIN_ID. No join to `attempt` needed — every
+      // attemptEnvelopeMeta row corresponds to an attempt (the requestId FK)
+      // and is already chain-scoped. Models + plugins fuel the new composition.byModel /
+      // composition.byPlugin facets.
       db
         .select({
           mode: schema.attemptEnvelopeMeta.mode,
           implName: schema.attemptEnvelopeMeta.implName,
+          model: schema.attemptEnvelopeMeta.model,
+          pluginsJson: schema.attemptEnvelopeMeta.pluginsJson,
         })
         .from(schema.attemptEnvelopeMeta)
         .where(eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID)),
@@ -302,13 +331,53 @@ app.get('/network', async (c) => {
   const snRow = snStats[0];
 
   const verdictsTotal = Number(vRow?.total ?? 0);
-  const verdictsPass = Number(vRow?.pass ?? 0);
+  // Envelope-truth-preferring pass count (the headline number — what the SPA's
+  // "RESOLVED RATE" gold KPI displays). The on-chain code defaults to Pass(1)
+  // in the daemon for failed evaluations; we prefer the off-chain evaluator's
+  // actualPassed where the verdictEnvelopeMeta enrichment has landed.
+  const verdictsPass = Number(vRow?.envelopePass ?? 0);
+  const onChainVerdictsPass = Number(vRow?.onChainPass ?? 0);
+  const verdictsEnriched = Number(vRow?.enriched ?? 0);
+  const verdictsDisagreed = Number(vRow?.disagreed ?? 0);
   const resolvedRate = resolvedRateFromCounts(verdictsPass, verdictsTotal);
+  const onChainResolvedRate = resolvedRateFromCounts(onChainVerdictsPass, verdictsTotal);
+  const verdictConsistency = verdictsEnriched === 0
+    ? { matched: 0, disagreed: 0, total: 0, agreementShare: null as number | null }
+    : {
+        matched: verdictsEnriched - verdictsDisagreed,
+        disagreed: verdictsDisagreed,
+        total: verdictsEnriched,
+        agreementShare: resolvedRateFromCounts(verdictsEnriched - verdictsDisagreed, verdictsEnriched),
+      };
+  const enrichmentCoverageVerdicts = verdictsTotal === 0
+    ? { enriched: 0, total: 0, share: 0 }
+    : { enriched: verdictsEnriched, total: verdictsTotal, share: verdictsEnriched / verdictsTotal };
 
   // Envelope-sourced composition facets
-  // Empty implName is included as '(unknown)' so callers get a complete picture.
+  // Empty implName/model is rendered as '(unknown)' so callers get a complete picture.
+  // Plugins are exploded (an attempt is counted once per plugin in its pluginsJson).
+  const pluginExpanded: { plugin: string }[] = [];
+  for (const r of enrichmentRows) {
+    if (!r.pluginsJson) continue;
+    try {
+      const arr = JSON.parse(r.pluginsJson) as Array<{ name?: unknown; version?: unknown }>;
+      if (Array.isArray(arr)) {
+        for (const p of arr) {
+          const name = typeof p?.name === 'string' && p.name ? p.name : '';
+          if (name) {
+            const version = typeof p?.version === 'string' && p.version ? p.version : '';
+            pluginExpanded.push({ plugin: version ? `${name}@${version}` : name });
+          }
+        }
+      }
+    } catch {
+      // Malformed pluginsJson — skip this row's plugins.
+    }
+  }
   const byMode = composition(enrichmentRows, (r) => r.mode || 'unknown');
   const byHarness = composition(enrichmentRows, (r) => r.implName || '(unknown)');
+  const byModel = composition(enrichmentRows, (r) => r.model || '(unknown)');
+  const byPlugin = composition(pluginExpanded, (r) => r.plugin);
 
   // Enrichment coverage
   const enrichedAttempts = enrichmentRows.length;
@@ -334,6 +403,13 @@ app.get('/network', async (c) => {
     verdicts: verdictsTotal,
     verdictsPass,
     resolvedRate,
+    // On-chain code's view (often defaulted to Pass(1) by the daemon for failed evaluations).
+    onChainVerdictsPass,
+    onChainResolvedRate,
+    // Agreement between on-chain code and off-chain evaluation envelope.
+    verdictConsistency,
+    // How many verdicts have an evaluation-envelope enrichment row.
+    enrichmentCoverageVerdicts,
     jinnDistributedOperator: rRow?.jinnOperator ?? '0',
     jinnDistributedDao: rRow?.jinnDao ?? '0',
     mostRecentSettlementBlock:
@@ -341,7 +417,7 @@ app.get('/network', async (c) => {
       tRow?.mostRecentSettlementBlock !== undefined
         ? String(tRow.mostRecentSettlementBlock)
         : null,
-    composition: { byMode, byHarness },
+    composition: { byMode, byHarness, byModel, byPlugin },
     enrichmentCoverage,
     ...freshnessFields,
   });
@@ -1222,8 +1298,12 @@ async function getSolverNetStatsBatch(
       tasksSettled: number;
       attempts: number;
       verdicts: number;
-      verdictsPass: number;
-      resolvedRate: number | null;
+      verdictsPass: number;          // envelope-truth-preferring (the headline)
+      onChainVerdictsPass: number;   // raw on-chain (verdictCode == 1)
+      enrichedVerdicts: number;
+      disagreedVerdicts: number;
+      resolvedRate: number | null;          // envelope-truth-preferring
+      onChainResolvedRate: number | null;   // raw on-chain
     }
   >
 > {
@@ -1237,7 +1317,11 @@ async function getSolverNetStatsBatch(
         attempts: 0,
         verdicts: 0,
         verdictsPass: 0,
+        onChainVerdictsPass: 0,
+        enrichedVerdicts: 0,
+        disagreedVerdicts: 0,
         resolvedRate: null as number | null,
+        onChainResolvedRate: null as number | null,
       },
     ]),
   );
@@ -1281,16 +1365,37 @@ async function getSolverNetStatsBatch(
     .groupBy(schema.task.manifestDigest);
 
   // Query 3: verdict counts grouped by task.manifestDigest, scoped to EXPLORER_CHAIN_ID.
+  // LEFT JOIN verdictEnvelopeMeta so we can compute envelope-truth pass count
+  // (ebu7.13): on-chain verdictCode defaults to Pass(1) in the daemon for
+  // failed evaluations; prefer the off-chain actualPassed where enriched.
   const verdictAgg = await db
     .select({
       manifestDigest: schema.task.manifestDigest,
       verdicts: count(),
-      verdictsPass: count(
+      onChainPass: count(
         sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
+      ),
+      // Envelope-truth pass: prefer enriched actualPassed; fall back to on-chain code.
+      envelopePass: count(
+        sql`CASE WHEN (${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' AND ${schema.verdictEnvelopeMeta.actualPassed} = true) OR (${schema.verdictEnvelopeMeta.enrichmentStatus} IS NULL AND ${schema.verdict.verdictCode} = 1) THEN 1 END`,
+      ),
+      enriched: count(
+        sql`CASE WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' THEN 1 END`,
+      ),
+      disagreed: count(
+        sql`CASE WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' AND ((${schema.verdict.verdictCode} = 1) <> ${schema.verdictEnvelopeMeta.actualPassed}) THEN 1 END`,
       ),
     })
     .from(schema.verdict)
     .innerJoin(schema.task, eq(schema.verdict.taskId, schema.task.id))
+    .leftJoin(
+      schema.verdictEnvelopeMeta,
+      and(
+        eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
+        eq(schema.verdictEnvelopeMeta.verdictIndex, schema.verdict.verdictIndex),
+        eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
+      ),
+    )
     .where(
       and(
         inArray(schema.task.manifestDigest, cidKeccaks),
@@ -1318,10 +1423,15 @@ async function getSolverNetStatsBatch(
     const entry = result.get(row.manifestDigest as `0x${string}`);
     if (entry) {
       const verdicts = Number(row.verdicts);
-      const verdictsPass = Number(row.verdictsPass);
+      const envelopePass = Number(row.envelopePass);
+      const onChainPass = Number(row.onChainPass);
       entry.verdicts = verdicts;
-      entry.verdictsPass = verdictsPass;
-      entry.resolvedRate = resolvedRateFromCounts(verdictsPass, verdicts);
+      entry.verdictsPass = envelopePass;
+      entry.onChainVerdictsPass = onChainPass;
+      entry.enrichedVerdicts = Number(row.enriched);
+      entry.disagreedVerdicts = Number(row.disagreed);
+      entry.resolvedRate = resolvedRateFromCounts(envelopePass, verdicts);
+      entry.onChainResolvedRate = resolvedRateFromCounts(onChainPass, verdicts);
     }
   }
 

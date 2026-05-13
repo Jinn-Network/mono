@@ -215,8 +215,94 @@ export function NetworkView() {
                   share: e.share,
                 }))}
               />
+              <HBars
+                title="By model"
+                data={data.composition.byModel.map((e) => ({
+                  label: e.value,
+                  value: e.count,
+                  share: e.share,
+                }))}
+              />
+              <HBars
+                title="By plugin"
+                data={data.composition.byPlugin.map((e) => ({
+                  label: e.value,
+                  value: e.count,
+                  share: e.share,
+                }))}
+              />
             </div>
           </Card>
+
+          {/* Verdict consistency — on-chain code vs off-chain evaluation envelope (ebu7.13).
+              Surfaces the daemon-side verdictCode = 1 (Pass) default that makes failed
+              evaluations appear as passes on-chain; envelope truth is the headline. */}
+          {data.verdictConsistency.total > 0 && (
+            <Card title="On-chain vs envelope">
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 32,
+                  alignItems: 'baseline',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--text-sm)',
+                }}
+              >
+                <div>
+                  <div className="label" style={{ color: 'var(--fg-muted)' }}>
+                    Envelope-truth resolved
+                  </div>
+                  <div className="data" style={{ fontSize: 22 }}>{pct(data.resolvedRate)}</div>
+                </div>
+                <div>
+                  <div className="label" style={{ color: 'var(--fg-muted)' }}>
+                    On-chain code resolved
+                  </div>
+                  <div className="data" style={{ fontSize: 22, color: 'var(--fg-muted)' }}>
+                    {pct(data.onChainResolvedRate)}
+                  </div>
+                </div>
+                <div>
+                  <div className="label" style={{ color: 'var(--fg-muted)' }}>Agreement</div>
+                  <div className="data" style={{ fontSize: 22 }}>{pct(data.verdictConsistency.agreementShare)}</div>
+                </div>
+                <div>
+                  <div className="label" style={{ color: 'var(--fg-muted)' }}>Disagreed</div>
+                  <div
+                    className="data"
+                    style={{
+                      fontSize: 22,
+                      color:
+                        data.verdictConsistency.disagreed > 0
+                          ? 'var(--break-red)'
+                          : 'var(--vow-green)',
+                    }}
+                  >
+                    {int(data.verdictConsistency.disagreed)}
+                    {' / '}
+                    {int(data.verdictConsistency.total)}
+                  </div>
+                </div>
+              </div>
+              <div
+                style={{
+                  marginTop: 12,
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--fg-dim)',
+                  maxWidth: 720,
+                }}
+              >
+                The daemon's <span className="data">submitVerdictDelivery</span> default sends
+                <span className="data"> verdictCode = 1 (Pass) </span>
+                even for failed evaluations, so on-chain pass-rate is artificially high. The
+                evaluator's real outcome lives in the off-chain evaluation envelope on IPFS; the
+                explorer now indexes it and prefers it where enriched. The headline
+                <span className="data"> resolved rate </span>uses envelope truth.
+              </div>
+            </Card>
+          )}
 
           {/* Enrichment coverage line */}
           <div

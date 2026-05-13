@@ -52,14 +52,35 @@ export interface NetworkResponse extends FreshnessMeta {
   distinctOperators: number;
   solverNetsRunning: number;
   verdicts: number;
+  /** Envelope-truth-preferring pass count. */
   verdictsPass: number;
+  /** Envelope-truth-preferring resolved-rate (the headline number). */
   resolvedRate: number | null;
+  /** Raw on-chain verdictCode==Pass count (daemon defaults to Pass; often wrong). */
+  onChainVerdictsPass: number;
+  /** Raw on-chain resolved-rate (verdictCode==Pass / total). */
+  onChainResolvedRate: number | null;
+  /** Agreement between on-chain code and off-chain envelope (ebu7.13). */
+  verdictConsistency: {
+    matched: number;
+    disagreed: number;
+    total: number;
+    agreementShare: number | null;
+  };
+  /** Coverage of evaluation-envelope enrichment over the verdict set. */
+  enrichmentCoverageVerdicts: {
+    enriched: number;
+    total: number;
+    share: number;
+  };
   jinnDistributedOperator: string;
   jinnDistributedDao: string;
   mostRecentSettlementBlock: string | null;
   composition: {
     byMode: CompositionEntry[];
     byHarness: CompositionEntry[];
+    byModel: CompositionEntry[];
+    byPlugin: CompositionEntry[];
   };
   enrichmentCoverage: {
     enrichedAttempts: number;

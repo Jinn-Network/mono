@@ -97,7 +97,11 @@ export default createConfig({
       chain: {
         sepolia: {
           address: '0xaC9CD847660d05e77D82A3684aFC4EbFd94fBfe6', // Sepolia L1 — client/deployments/deployment-jinn-mvi-l1-sepolia.json
-          startBlock: 8_000_000, // TODO(ebu7.2): tighten to the JinnDistributor deploy block
+          // First on-chain Claimed event is at Sepolia block 10_756_427 (from the live cast logs scan
+          // 2026-05-13). Starting a few hundred blocks earlier to be conservative and not miss any
+          // earlier events. Cuts historical sync from ~2.85M blocks (when this was 8_000_000) to ~100K
+          // — minutes vs hours on the Alchemy RPC. Resync requires a DATABASE_SCHEMA bump.
+          startBlock: 10_756_000,
         },
       },
     },
