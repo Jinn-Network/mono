@@ -26,6 +26,34 @@ How to apply:
 
 The market makes its own threats. We make the case for what is structurally inevitable.
 
+### Personal narrative stays in the room
+
+Where you've worked, why you left, who you know — none of this belongs in deck, presenter notes, or any written artefact. Critique of other protocols in writing should be third-party and factual.
+
+Total claims ("no one else has bet on X") need softening or named specifics on demand. Default in writing: soften.
+
+### Replace "training" in external contexts
+
+"Training" reads as LLM training in a builder's head. Use **learning** (the broader Bitter Lesson term) in any external context where the LLM frame would confuse the reader.
+
+- Internal / technical writing where the context is unambiguous: "training" is fine.
+- Pitch decks, marketing copy, external docs, growth content: **learning**.
+- Headline framing of the Bitter Lesson in Jinn material: "learning over hand-coded structure."
+
+### Sanctioned strong language
+
+These phrasings landed cleanly in a builder context — keep them in active vocabulary for pitch and growth material.
+
+- "insider allocation" — the precise term builders are wary of; use it.
+- "rugged into a corporate moat" — names the failure mode.
+- "no exit to satisfy" — names the pressure investors create.
+- "minted only from useful network activity" — the positive framing of the same point.
+- "community pushback" — names the visible consequence of insider allocation; builders recognise it from their own experience.
+
+### Drop ironic or self-deprecating subtitles
+
+Subtitles like "boring on purpose" add a register a builder audience reads as too clever. Prefer plain description. The voice can be dry; it should not be arch.
+
 ## Posture: headless and co-created
 
 This is brand posture, not decoration. Jinn is a *headless brand* in the sense Other Internet defined in [*Headless Brands*](https://otherinter.net/research/headless-brands/) — read the essay before doing brand work.
