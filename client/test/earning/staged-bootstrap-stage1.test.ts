@@ -182,4 +182,54 @@ describe('FleetBootstrapper.ensureStage1 — greenfield walk (nghf)', () => {
     expect((bootstrapper as any).stepFleetSafeDeploy).toHaveBeenCalledTimes(1);
     expect((bootstrapper as any).stepFleetIdentityRegister).toHaveBeenCalledTimes(1);
   });
+
+  it('Stage 1 ignores OLAS balances entirely', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-nghf-stage1-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const bootstrapper = buildBootstrapper(earningDir);
+    // Plenty of ETH everywhere.
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      50_000_000_000_000_000n,
+    );
+    // Safe code: "0x" first call (predict), bytecode after deploy.
+    let safeDeployed = false;
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockImplementation(async () =>
+      safeDeployed ? '0xdeadbeef' : '0x',
+    );
+
+    // The contract surface that would read OLAS balance: getBondTokenBalance.
+    // Spy on it; assert it is NEVER called from ensureStage1.
+    const olasSpy = vi
+      .spyOn(bootstrapper as any, 'getBondTokenBalance')
+      .mockResolvedValue(0n);
+
+    vi.spyOn(bootstrapper as any, 'stepFleetSafePredict').mockImplementation(async () => {
+      await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+      return store.load('base');
+    });
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockImplementation(async () => {
+      safeDeployed = true;
+      return store.load('base');
+    });
+    vi.spyOn(bootstrapper as any, 'stepFleetIdentityRegister').mockImplementation(async () => {
+      await store.patchFleet({
+        fleet_agent_id: FLEET_AGENT_ID,
+        fleet_identity_registry: IDENTITY_REGISTRY,
+        fleet_stage: 'stage1',
+      });
+      return store.load('base');
+    });
+
+    const result = await bootstrapper.ensureStage1('test-password');
+
+    expect(result.ok).toBe(true);
+    expect(result.fleet_state.fleet_stage).toBe('stage1');
+    expect(olasSpy).not.toHaveBeenCalled();
+  });
 });
