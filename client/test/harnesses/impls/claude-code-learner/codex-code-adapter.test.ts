@@ -230,6 +230,8 @@ describe('CodexCodeHarnessAdapter', () => {
       expect(promptArg).toContain('Do not write');
       expect(promptArg).toContain('"schemaVersion":"swe-rebench-v2-solution.v1"');
       expect(promptArg).toContain(`${workingDir}/.execute/solution-payload.json`);
+      expect(promptArg).toMatch(/test files? .* discarded|discarded before grading/i);
+      expect(promptArg).toMatch(/edit source files? only|source files? only/i);
       expect(promptArg).not.toContain('submit_typed_payload, or write');
       expect(promptArg).not.toContain('submission tool or write the expected payload file');
       expect(promptArg).not.toContain('claude-code-learner:learn');

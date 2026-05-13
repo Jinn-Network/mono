@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -218,6 +219,11 @@ const command: CommandModule = {
   jinn solver-nets remove-plugin <name> <source-or-name> [--config <path>]
   jinn solver-nets doctor <name> [--human|--json] [--config <path>]
   jinn solver-nets sample <name> [--closed-window]
+  jinn solver-nets validate-pool swe-rebench-v2 [--limit <n>] [--force]
+            Run the gold patch of each pool instance through the eval harness
+            and cache which instances are scorable; the generator then posts
+            only those. Requires Docker + \`jinn harnesses enable
+            swe-rebench-v2-evaluator\`.
 
 Output flags:
   --human   Render readable terminal output instead of JSON (supported by
@@ -236,6 +242,8 @@ Output flags:
         config: { type: 'string' },
         harness: { type: 'string' },
         'closed-window': { type: 'boolean' },
+        limit: { type: 'string' },
+        force: { type: 'boolean' },
         human: { type: 'boolean' },
         json: { type: 'boolean' },
       },
@@ -265,6 +273,65 @@ Output flags:
           .map((n) => `${n.name}  ${n.enabled ? 'enabled' : 'disabled'}  ${n.solverType}  harness=${n.harness ?? '(default)'}  plugins=${n.pluginCount}  generator=${n.taskGeneratorEnabled ? 'on' : 'off'}`)
           .join('\n');
       });
+      return;
+    }
+
+    if (subverb === 'validate-pool') {
+      if (name !== 'swe-rebench-v2') {
+        fail(ctx, 'solver-nets validate-pool currently supports only `swe-rebench-v2`');
+        return;
+      }
+      // The upstream eval harness must be set up (`jinn harnesses enable
+      // swe-rebench-v2-evaluator`) — that's where the eval.py repo lives.
+      const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
+        await import('../../harnesses/impls/swe-rebench-v2-evaluator/harness.js');
+      const enabled = readEnabledState(defaultSweRebenchV2EvaluatorImplStateDir());
+      if (!enabled || !existsSync(enabled.upstreamRepoDir)) {
+        fail(ctx, 'swe-rebench-v2 evaluator is not set up — run `jinn harnesses enable swe-rebench-v2-evaluator` first');
+        return;
+      }
+      const upstreamRepoDir = enabled.upstreamRepoDir;
+      // Docker must be reachable, or every gold-eval would be classified as
+      // ungradeable and the whole pool wrongly marked unscorable.
+      if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
+        fail(ctx, 'Docker daemon not reachable — start Docker, then re-run `jinn solver-nets validate-pool swe-rebench-v2`');
+        return;
+      }
+
+      const { loadSweRebenchV2Pool, getSweRebenchV2ValidatedPoolStore } = await import('../../solver-types/swe-rebench-v2.js');
+      const { HttpHfFetcher } = await import('../../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js');
+      const { PythonEvalRunner } = await import('../../harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
+      const { validatePoolInstances, EVAL_SEMANTICS_VERSION } = await import('../../solver-types/_swe-rebench-v2-validated-pool.js');
+
+      const limitRaw = parsed.values['limit'] as string | undefined;
+      const limitParsed = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
+      const limit = Number.isFinite(limitParsed as number) && (limitParsed as number) > 0 ? (limitParsed as number) : undefined;
+      const force = Boolean(parsed.values['force']);
+
+      process.stderr.write('[validate-pool] loading the SWE-rebench v2 pool…\n');
+      const poolTasks = await loadSweRebenchV2Pool();
+      const store = getSweRebenchV2ValidatedPoolStore();
+      const summary = await validatePoolInstances(
+        poolTasks,
+        {
+          fetcher: new HttpHfFetcher(),
+          runner: new PythonEvalRunner({ upstreamRepoDir }),
+          store,
+          semanticsVersion: EVAL_SEMANTICS_VERSION,
+          log: (m) => process.stderr.write(`${m}\n`),
+        },
+        { limit, force },
+      );
+      emit(
+        ctx,
+        { verb: 'solver-nets validate-pool', solverNet: 'swe-rebench-v2', evalSemanticsVersion: EVAL_SEMANTICS_VERSION, poolSize: poolTasks.length, ...summary },
+        human,
+        json,
+        (v) => {
+          const s = v as { poolSize: number; checked: number; scorable: number; unscorable: number; skipped: number };
+          return `pool=${s.poolSize}  checked=${s.checked}  scorable=${s.scorable}  unscorable=${s.unscorable}  skipped(non-pytest)=${s.skipped}`;
+        },
+      );
       return;
     }
 

@@ -7,6 +7,7 @@ import { SOLVER_TYPE_PAYLOADS, validatePayload } from '../../../types/payloads/i
 import type { OutputArtifact } from '../../../types/portfolio.js';
 import type { Task } from '../../../types/task.js';
 import type { Solution } from '../../types.js';
+import { stripTestPathHunks } from './restoration-patch.js';
 
 const PHASE_ORDER = [
   'orient',
@@ -178,9 +179,9 @@ function maybeMaterializeSweRebenchPatchPayload(
     return null;
   }
 
-  let patch = '';
+  let rawPatch = '';
   try {
-    patch = execFileSync('git', ['-C', repoDir, 'diff', '--binary'], {
+    rawPatch = execFileSync('git', ['-C', repoDir, 'diff', '--binary'], {
       encoding: 'utf8',
       maxBuffer: 50 * 1024 * 1024,
     });
@@ -190,7 +191,20 @@ function maybeMaterializeSweRebenchPatchPayload(
     );
     return null;
   }
+  if (!rawPatch.trim()) {
+    return null;
+  }
+  // Drop the model's own test-file edits: the upstream eval applies the gold
+  // `test_patch` after the model patch with `set -e`, so model test changes
+  // either collide (3-way conflict → eval aborts) or pollute the test set. The
+  // restorer never sees the gold test_patch, so we strip on the producer side
+  // (matches standard SWE-bench, which resets test files before grading). See
+  // jinn-mono-uy6v.8.
+  const patch = stripTestPathHunks(rawPatch);
   if (!patch.trim()) {
+    console.warn(
+      '[claude-code-learner] harvestOutput: swe-rebench-v2 git diff contained only test-file changes; no source patch to submit.',
+    );
     return null;
   }
 
@@ -223,12 +237,15 @@ function normalizeTypedPayload(
   if (
     solverType === 'swe-rebench-v2.v1' &&
     role === 'restoration' &&
-    raw['schemaVersion'] === undefined &&
-    typeof raw['patch'] === 'string' &&
-    raw['patch'].trim()
+    typeof raw['patch'] === 'string'
   ) {
+    // Strip the model's own test-file edits regardless of whether the patch
+    // arrived hand-authored or was derived from `git diff` (idempotent on the
+    // latter). See jinn-mono-uy6v.8 / restoration-patch.ts.
+    const strippedPatch = stripTestPathHunks(raw['patch'] as string);
     payload = {
       ...raw,
+      patch: strippedPatch,
       schemaVersion: 'swe-rebench-v2-solution.v1',
     };
     writeFileSync(typedPayloadPath, JSON.stringify(payload, null, 2));
@@ -449,9 +466,13 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
   const range = resolvePhaseRange(phaseRange);
   const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
   const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
+  // For swe-rebench-v2 restoration the `git diff` over the task checkout is the
+  // authoritative patch (always well-formed; agent-authored diffs are not).
+  // maybeMaterialize* returns null for any other case, so the agent-authored
+  // .execute/solution-payload.json path is preserved everywhere else.
   const rawTypedPayload =
-    readTypedPayloadJson(typedPayloadPath) ??
-    maybeMaterializeSweRebenchPatchPayload(workingDir, task);
+    maybeMaterializeSweRebenchPatchPayload(workingDir, task) ??
+    readTypedPayloadJson(typedPayloadPath);
   const typedPayload = rawTypedPayload
     ? normalizeTypedPayload(rawTypedPayload, task, typedPayloadPath)
     : null;

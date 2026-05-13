@@ -164,11 +164,53 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
     expect(r.reason).toBe('implStateDir not configured');
   });
 
-  it('reports ready when state file + upstream repo are present', async () => {
+  function dockerOk() {
+    return vi.fn(async (bin: string) =>
+      bin === 'docker'
+        ? { exitCode: 0, stdout: 'Server Version: 27.0.0', stderr: '' }
+        : { exitCode: 0, stdout: '', stderr: '' },
+    );
+  }
+
+  it('reports ready when state file + upstream repo are present and Docker is reachable', async () => {
     makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
-    const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand: dockerOk() },
+    });
     const r = await h.isReady();
     expect(r.ready).toBe(true);
+  });
+
+  it('reports not-ready when Docker is unreachable, even with a valid enable marker', async () => {
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    const runCommand = vi.fn(async (bin: string) =>
+      bin === 'docker'
+        ? { exitCode: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock.' }
+        : { exitCode: 0, stdout: '', stderr: '' },
+    );
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+    const r = await h.isReady();
+    expect(r.ready).toBe(false);
+    expect(r.reason).toMatch(/docker/i);
+    expect(r.nextStep?.description).toMatch(/docker/i);
+    expect(runCommand).toHaveBeenCalledWith('docker', ['info']);
+  });
+
+  it('caches the docker info probe across rapid isReady() calls (claim-loop hot path)', async () => {
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    const runCommand = vi.fn(async (bin: string) =>
+      bin === 'docker' ? { exitCode: 0, stdout: 'ok', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' },
+    );
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+    for (let i = 0; i < 25; i++) {
+      const r = await h.isReady();
+      expect(r.ready).toBe(true);
+    }
+    expect(runCommand).toHaveBeenCalledTimes(1);
   });
 
   it('reports not-ready when upstream repo dir is missing despite a marker', async () => {
@@ -412,6 +454,35 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     const sol = await harness.run(ctx);
     expect((sol.verdictPayload as Record<string, unknown>)['score']).toBe(0);
     expect((sol.verdictPayload as Record<string, unknown>)['passed_match']).toBe(false);
+  });
+
+  it('does not produce a verdict when the eval could not grade the solution (skips instead)', async () => {
+    const { EvalCouldNotGradeError } = await import(
+      '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js'
+    );
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const uploadToIpfs = vi.fn().mockResolvedValue('bafy-should-not-be-called');
+    const runner = {
+      runEval: vi
+        .fn()
+        .mockRejectedValue(
+          new EvalCouldNotGradeError(
+            'docker_unavailable',
+            'docker: Cannot connect to the Docker daemon',
+          ),
+        ),
+    };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { fetcher: makeFakeFetcher(), runner, uploadToIpfs },
+    });
+    const ctx = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    await expect(harness.run(ctx)).rejects.toBeInstanceOf(SkippableError);
+    expect(uploadToIpfs).not.toHaveBeenCalled();
+    expect(existsSync(join(ctx.workingDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
   });
 
   it('throws when the envelope is not swe-rebench-v2.v1/restoration', async () => {
