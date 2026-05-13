@@ -22,21 +22,19 @@ import { COMMON_FLAGS } from '../command.js';
  * to `client/dist/templates` — we copy templates into dist on build.
  * For robustness we probe both locations.
  */
-function resolveTemplatesRoot(): string {
+function resolveTemplatesRoot(target: 'harness' | 'plugin'): string {
+  const subdir = target === 'harness' ? 'harnesses' : 'plugins';
   const here = fileURLToPath(new URL('.', import.meta.url));
   const candidates = [
-    join(here, '../../../templates/harnesses/'), // src/cli/commands -> client/templates
-    join(here, '../../templates/harnesses/'),    // dist/cli/commands -> client/templates
-    join(here, '../../../../templates/harnesses/'),
+    join(here, `../../../templates/${subdir}/`),
+    join(here, `../../templates/${subdir}/`),
+    join(here, `../../../../templates/${subdir}/`),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }
-  // Fallback: first candidate (will surface a clear ENOENT below).
   return candidates[0];
 }
-
-const TEMPLATES_ROOT = resolveTemplatesRoot();
 
 const NETWORK_CHAIN_IDS: Record<string, number> = {
   'base-mainnet': 8453,
@@ -53,12 +51,19 @@ export const SUPPORTED_PATTERNS: readonly HarnessPattern[] = [
   'alternative-harness',
 ];
 
+export type PluginPattern = 'solver-type-plugin' | 'runtime-plugin';
+
+export const SUPPORTED_PLUGIN_PATTERNS: readonly PluginPattern[] = [
+  'solver-type-plugin',
+  'runtime-plugin',
+];
+
 export interface RunCreateArgs {
-  target: 'harness';
-  pattern: HarnessPattern;
+  target: 'harness' | 'plugin';
+  pattern: HarnessPattern | PluginPattern;
   packageName: string;
   solverTypeString: string;
-  network: string;
+  network?: string;
   outDir: string;
 }
 
@@ -108,6 +113,38 @@ const ALTERNATIVE_HARNESS_FILES: TemplateFile[] = [
   { src: 'gitignore.tmpl', dst: '.gitignore' },
 ];
 
+const SOLVER_TYPE_PLUGIN_FILES: TemplateFile[] = [
+  { src: 'package.json.tmpl', dst: 'package.json' },
+  { src: 'jinn.plugin.json.tmpl', dst: 'jinn.plugin.json' },
+  { src: 'skills/example/SKILL.md.tmpl', dst: 'skills/example/SKILL.md' },
+  { src: 'test/plugin.test.ts.tmpl', dst: 'test/plugin.test.ts' },
+  { src: 'README.md.tmpl', dst: 'README.md' },
+  { src: 'tsconfig.json.tmpl', dst: 'tsconfig.json' },
+  { src: 'gitignore.tmpl', dst: '.gitignore' },
+];
+
+const RUNTIME_PLUGIN_FILES: TemplateFile[] = [
+  { src: 'package.json.tmpl', dst: 'package.json' },
+  { src: 'jinn.plugin.json.tmpl', dst: 'jinn.plugin.json' },
+  { src: '.mcp.json.tmpl', dst: '.mcp.json' },
+  { src: 'mcp/server.mjs.tmpl', dst: 'mcp/server.mjs' },
+  { src: 'test/plugin.test.ts.tmpl', dst: 'test/plugin.test.ts' },
+  { src: 'README.md.tmpl', dst: 'README.md' },
+  { src: 'tsconfig.json.tmpl', dst: 'tsconfig.json' },
+  { src: 'gitignore.tmpl', dst: '.gitignore' },
+];
+
+function pluginTemplateFiles(pattern: PluginPattern): TemplateFile[] {
+  switch (pattern) {
+    case 'solver-type-plugin':
+      return SOLVER_TYPE_PLUGIN_FILES;
+    case 'runtime-plugin':
+      return RUNTIME_PLUGIN_FILES;
+    default:
+      throw new Error(`unsupported plugin pattern: ${pattern as string}`);
+  }
+}
+
 function templateFiles(pattern: HarnessPattern): TemplateFile[] {
   switch (pattern) {
     case 'forecaster':
@@ -132,26 +169,37 @@ function packageNameSlug(packageName: string): string {
 }
 
 export async function runCreate(args: RunCreateArgs): Promise<string> {
-  if (args.target !== 'harness') {
-    throw new Error(`unsupported target: ${args.target as string}`);
-  }
-  const networkChainId = NETWORK_CHAIN_IDS[args.network];
-  if (networkChainId === undefined) {
-    throw new Error(
-      `unknown network ${args.network}; known: ${Object.keys(NETWORK_CHAIN_IDS).join(', ')}`,
-    );
-  }
   const targetRoot = join(args.outDir, args.packageName);
   const vars: Record<string, string | number> = {
     packageName: args.packageName,
     packageNameSlug: packageNameSlug(args.packageName),
     solverTypeString: args.solverTypeString,
-    network: args.network,
-    networkChainId,
   };
 
-  for (const file of templateFiles(args.pattern)) {
-    const srcPath = join(TEMPLATES_ROOT, args.pattern, file.src);
+  let files: TemplateFile[];
+  let templatesRoot: string;
+
+  if (args.target === 'harness') {
+    const network = args.network ?? 'base-sepolia';
+    const networkChainId = NETWORK_CHAIN_IDS[network];
+    if (networkChainId === undefined) {
+      throw new Error(
+        `unknown network ${network}; known: ${Object.keys(NETWORK_CHAIN_IDS).join(', ')}`,
+      );
+    }
+    vars.network = network;
+    vars.networkChainId = networkChainId;
+    files = templateFiles(args.pattern as HarnessPattern);
+    templatesRoot = join(resolveTemplatesRoot('harness'), args.pattern);
+  } else if (args.target === 'plugin') {
+    files = pluginTemplateFiles(args.pattern as PluginPattern);
+    templatesRoot = join(resolveTemplatesRoot('plugin'), args.pattern);
+  } else {
+    throw new Error(`unsupported target: ${(args as { target: string }).target}`);
+  }
+
+  for (const file of files) {
+    const srcPath = join(templatesRoot, file.src);
     const dstPath = join(targetRoot, file.dst);
     const text = readFileSync(srcPath, 'utf8');
     mkdirSync(dirname(dstPath), { recursive: true });
