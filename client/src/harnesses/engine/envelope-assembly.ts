@@ -47,6 +47,12 @@ export interface EnvelopeInputs {
       measurement: string;
     };
     mode?: 'train' | 'frozen';
+    /**
+     * Underlying LLM model identifier this attempt was run against (e.g.
+     * 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6'). When present,
+     * stamped directly into the envelope's executor.model field (jinn-mono-gbut).
+     */
+    model?: string;
   };
   evidenceTier?: EvidenceTier;
   attestation?: SignedEnvelope['attestation'];

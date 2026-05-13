@@ -1720,6 +1720,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     defaultPriceUsdc: operatorDefaultPrice,
     perArtifactTypePrice: operatorPerTypePrice,
     donation: { enabled: donationEnabled },
+    // Daemon-wide LLM model — stamped as executor.model fallback in envelopes
+    // when a SolverNet does not specify its own model (jinn-mono-gbut, gh#191).
+    claudeModel: config.claudeModel,
   };
 
   // Envelope assembly deps: sign envelopes with agent EOA private key

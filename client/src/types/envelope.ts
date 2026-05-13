@@ -79,6 +79,15 @@ const ExecutorSchema = z.object({
    * treat undefined as 'train' (the legacy behaviour).
    */
   mode: z.enum(['train', 'frozen']).optional(),
+  /**
+   * Underlying LLM model identifier this attempt was run against (e.g.
+   * 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'codex-defaults').
+   * Optional for back-compat: envelopes produced before this field was
+   * introduced lack it. Sourced from solverNet.model / claudeModel runtime
+   * config; stamped at envelope-assembly time. Indexer reads this for the
+   * network explorer's composition.byModel facet (jinn-mono-gbut, gh#191).
+   */
+  model: z.string().optional(),
 });
 
 const AttestationSchema = z.object({

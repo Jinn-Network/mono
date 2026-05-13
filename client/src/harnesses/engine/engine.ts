@@ -288,6 +288,12 @@ export interface TaskEngineOptions {
     defaultPriceUsdc: string;
     perArtifactTypePrice: Record<string, string>;
     donation?: { enabled: boolean };
+    /**
+     * Daemon-wide default LLM model identifier (from JinnConfig.claudeModel).
+     * Used as the fallback when a SolverNet does not specify its own model.
+     * Stamped into executor.model in the assembled envelope (jinn-mono-gbut).
+     */
+    claudeModel?: string;
   };
   /**
    * Harness execution mode from operator config (JinnConfig.harness.mode).
@@ -1466,6 +1472,10 @@ export class TaskEngine {
         // Propagate the harness execution mode (train | frozen) so the
         // envelope records whether implStateDir was locked during this run.
         mode: executorMode,
+        // LLM model: prefer SolverNet-specific override, fall back to daemon-wide
+        // default from operatorConfig.claudeModel (jinn-mono-gbut, gh#191).
+        // Left undefined when neither is set — the field is optional in the schema.
+        model: solverNet?.model ?? this.operatorConfig?.claudeModel,
       },
       evidenceTier,
       trajectory: envelopeTrajectory,

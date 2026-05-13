@@ -156,4 +156,26 @@ describe('SignedEnvelopeSchema', () => {
   it('accepts a signed envelope', () => {
     expect(() => SignedEnvelopeSchema.parse(baseSigned)).not.toThrow();
   });
+
+  describe('executor.model (jinn-mono-gbut, gh#191)', () => {
+    it('accepts envelope with executor.model set', () => {
+      const env = {
+        ...baseSigned,
+        executor: { ...baseSigned.executor, model: 'claude-haiku-4-5-20251001' },
+      };
+      const parsed = SignedEnvelopeSchema.parse(env);
+      expect(parsed.executor.model).toBe('claude-haiku-4-5-20251001');
+    });
+
+    it('accepts envelope without executor.model (back-compat)', () => {
+      // baseSigned has no model field — must parse cleanly
+      const parsed = SignedEnvelopeSchema.parse(baseSigned);
+      expect(parsed.executor.model).toBeUndefined();
+    });
+
+    it('does not coerce missing executor.model to empty string', () => {
+      const parsed = SignedEnvelopeSchema.parse(baseSigned);
+      expect(parsed.executor.model).not.toBe('');
+    });
+  });
 });
