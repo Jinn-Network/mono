@@ -47,6 +47,10 @@ const SOLVERNETS_FIXTURE: SolverNetsResponse = {
 
 const SOLVERNET_FIXTURE: SolverNetResponse = {
   cid: 'abc',
+  name: 'Test',
+  description: '',
+  solverNetId: '',
+  manifestEnrichmentStatus: 'pending',
   status: 'launched',
   launcherAgentId: null,
   tasksPosted: 1,

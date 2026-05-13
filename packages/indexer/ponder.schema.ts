@@ -267,6 +267,19 @@ export const solverNetManifest = onchainTable(
     anchorLogIndex: t.integer().notNull(),
     /** Chain ID. */
     chainId: t.integer().notNull(),
+    // ── IPFS-enriched manifest fields (ebu7.13 follow-up — `name` ask) ──────
+    // The full SolverNet manifest body lives on IPFS at the `id` CID. These
+    // are populated by an enrichment pass mirroring the harnessCheckpoint
+    // manifest enrichment (see handlers.ts). `name` is the human-readable
+    // label (e.g. 'SWE-rebench v2') used as the primary identifier in the
+    // explorer UI; `description` is a short one-paragraph blurb; `solverNetId`
+    // is the contract-side numeric id. Empty strings when enrichment hasn't
+    // landed yet.
+    name: t.text().notNull().default(''),
+    description: t.text().notNull().default(''),
+    solverNetId: t.text().notNull().default(''),
+    /** 'pending' | 'ok' | 'failed' — enrichment lifecycle. */
+    manifestEnrichmentStatus: t.text().notNull().default('pending'),
   }),
   (table) => ({
     cidKeccakIdx: index().on(table.cidKeccak),

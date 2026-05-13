@@ -389,6 +389,35 @@ export function parseCheckpointManifestLite(body: unknown): CheckpointManifestLi
   };
 }
 
+// ── SolverNet manifest lite parser ────────────────────────────────────────────
+// For solvernet-manifest:<cid> IPFS bodies. Reads the user-facing name +
+// description + numeric solverNetId. Returns null if body lacks the required
+// `name` field. The on-chain solverNetManifest row already has the cid (the
+// PK), status/lifecycle, manifestHash, anchor block — this enrichment fills
+// the user-visible label so the SPA can show 'SWE-rebench v2' instead of the
+// 60-char CID.
+
+export interface SolverNetManifestLite {
+  name: string;
+  description: string;
+  solverNetId: string;
+}
+
+export function parseSolverNetManifestLite(body: unknown): SolverNetManifestLite | null {
+  if (body === null || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  const name = safeStr(b['name']);
+  if (!name) return null;
+  const description = safeStr(b['description']);
+  // solverNetId may be number or string in the manifest; normalize to string.
+  let solverNetId = '';
+  const raw = b['solverNetId'];
+  if (typeof raw === 'string') solverNetId = raw;
+  else if (typeof raw === 'number' && Number.isFinite(raw)) solverNetId = String(raw);
+  else if (typeof raw === 'bigint') solverNetId = raw.toString();
+  return { name, description, solverNetId };
+}
+
 // ── Envelope lite parser ──────────────────────────────────────────────────────
 // Dep-free defensive parser: reads only the fields needed for attemptEnvelopeMeta.
 // Returns null if the body isn't an object or task.requestId is absent/empty.
@@ -740,6 +769,43 @@ export async function handleMetadataSet({
           chainId: row.chainId,
         };
       });
+
+    // ── SolverNet manifest body enrichment (ebu7.13 follow-up) ─────────────
+    // The IPFS body at `manifestCid` carries the human-readable `name`,
+    // `description`, and `solverNetId`. We enrich the on-chain row with those
+    // so the SPA can display 'SWE-rebench v2' instead of the CID. Like the
+    // harnessCheckpoint case, we have the PK from the on-chain event without
+    // needing the body, so we can always write a 'failed' marker for retry.
+    if (enrichEnvelopes) {
+      try {
+        const body = await fetchIpfsJson(ipfsGateway, manifestCid, {
+          timeoutMs: 5000,
+          fetchImpl,
+        });
+        const m = parseSolverNetManifestLite(body);
+        if (m) {
+          await context.db
+            .update(solverNetManifest, { id: manifestCid })
+            .set({
+              name: m.name,
+              description: m.description,
+              solverNetId: m.solverNetId,
+              manifestEnrichmentStatus: 'ok',
+            });
+        } else {
+          console.warn(`[indexer] solvernet manifest parse failed for ${manifestCid}: body missing required 'name' field`);
+          await context.db
+            .update(solverNetManifest, { id: manifestCid })
+            .set({ manifestEnrichmentStatus: 'failed' });
+        }
+      } catch (err) {
+        console.warn(`[indexer] solvernet manifest enrichment failed for ${manifestCid}: ${String(err)}`);
+        await context.db
+          .update(solverNetManifest, { id: manifestCid })
+          .set({ manifestEnrichmentStatus: 'failed' });
+      }
+    }
+
     return;
   }
 

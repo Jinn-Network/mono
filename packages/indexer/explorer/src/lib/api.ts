@@ -93,6 +93,13 @@ export interface NetworkResponse extends FreshnessMeta {
 
 export interface SolverNetRow {
   cid: string;
+  /** Human-readable name (e.g. 'SWE-rebench v2') from the IPFS manifest body.
+   * Empty string until the manifest enrichment pass populates it. */
+  name: string;
+  description: string;
+  solverNetId: string;
+  /** 'pending' | 'ok' | 'failed' — the IPFS-manifest enrichment status. */
+  manifestEnrichmentStatus: string;
   status: string;
   launcherAgentId: string | null;
   statusUpdatedAt: string | null;
@@ -161,6 +168,11 @@ export interface FreezeViolation {
 
 export interface SolverNetResponse extends FreshnessMeta {
   cid: string;
+  /** IPFS-enriched manifest fields (empty strings until enrichment lands). */
+  name: string;
+  description: string;
+  solverNetId: string;
+  manifestEnrichmentStatus: string;
   status: string;
   launcherAgentId: string | null;
   tasksPosted: number;

@@ -459,6 +459,13 @@ app.get('/solvernets', async (c) => {
 
   const rows = manifests.map((m) => ({
     cid: m.id,
+    // IPFS-enriched manifest fields (empty strings until the enrichment pass
+    // catches up; the SPA falls back to `shortCid(cid)` for the link label
+    // when `name` is empty).
+    name: m.name,
+    description: m.description,
+    solverNetId: m.solverNetId,
+    manifestEnrichmentStatus: m.manifestEnrichmentStatus,
     status: m.status,
     launcherAgentId: m.launcherAgentId,
     statusUpdatedAt: m.statusUpdatedAt,
@@ -555,14 +562,28 @@ app.get('/solvernet/:cid', async (c) => {
 
   const [verdictRows, trainBoardRows, frozenBoardRows, checkpointRows, frozenEnvelopeRows] =
     await Promise.all([
-      // Verdicts for learning curves
+      // Verdicts for learning curves — LEFT JOIN verdictEnvelopeMeta so the
+      // pass-signal can prefer the off-chain evaluator's actualPassed when
+      // enriched (the on-chain verdictCode defaults to Pass for failed evals
+      // in the current daemon — see ebu7.13 / uy6v.7 / gh#193). Falls back to
+      // verdictCode == 1 when no envelope row.
       ids.length > 0
         ? db
             .select({
               verdictCode: schema.verdict.verdictCode,
               createdAtBlock: schema.verdict.createdAtBlock,
+              actualPassed: schema.verdictEnvelopeMeta.actualPassed,
+              enrichmentStatus: schema.verdictEnvelopeMeta.enrichmentStatus,
             })
             .from(schema.verdict)
+            .leftJoin(
+              schema.verdictEnvelopeMeta,
+              and(
+                eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
+                eq(schema.verdictEnvelopeMeta.verdictIndex, schema.verdict.verdictIndex),
+                eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
+              ),
+            )
             .where(
               and(
                 inArray(schema.verdict.taskId, ids),
@@ -628,14 +649,23 @@ app.get('/solvernet/:cid', async (c) => {
         : Promise.resolve([]),
     ]);
 
+  // Envelope-truth-preferring pass signal: when the verdict has a matching
+  // verdictEnvelopeMeta row (enrichmentStatus === 'ok'), use the evaluator's
+  // actualPassed; otherwise fall back to on-chain verdictCode === 1 (Pass).
+  // This makes the learning curve reflect REAL pass-rate over time rather
+  // than the daemon's currently-defaulted-to-Pass on-chain truth (ebu7.13).
+  const verdictTruth = (v: { verdictCode: number; actualPassed: boolean | null; enrichmentStatus: string | null }): boolean =>
+    v.enrichmentStatus === 'ok' && v.actualPassed !== null
+      ? v.actualPassed
+      : v.verdictCode === 1;
   const samples = verdictRows.map((v) => ({
     block: v.createdAtBlock,
-    pass: v.verdictCode === 1,
+    pass: verdictTruth(v),
   }));
 
   const learningCurveBuckets = bucketResolvedRate(samples, bucketBlocks);
   const learningCurveRolling = rollingResolvedRate(
-    verdictRows.map((v) => v.verdictCode === 1),
+    verdictRows.map(verdictTruth),
     rollingK,
   );
 
@@ -798,6 +828,10 @@ app.get('/solvernet/:cid', async (c) => {
 
   return c.json({
     cid: m.id,
+    name: m.name,
+    description: m.description,
+    solverNetId: m.solverNetId,
+    manifestEnrichmentStatus: m.manifestEnrichmentStatus,
     status: m.status,
     launcherAgentId: m.launcherAgentId,
     statusUpdatedAt: m.statusUpdatedAt,

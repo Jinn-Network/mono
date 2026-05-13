@@ -9,6 +9,10 @@ import type { SolverNetsResponse } from '../lib/api';
 
 const SOLVERNET_A = {
   cid: 'bafkreiabc000000000000000000000001',
+  name: 'SWE-rebench v2',
+  description: 'Test SolverNet for unit tests.',
+  solverNetId: '1',
+  manifestEnrichmentStatus: 'ok',
   status: 'launched',
   launcherAgentId: '0xaaaa0001',
   statusUpdatedAt: new Date(Date.now() - 3600_000).toISOString(),
@@ -23,6 +27,10 @@ const SOLVERNET_A = {
 
 const SOLVERNET_B = {
   cid: 'bafkreidef111111111111111111111111',
+  name: '',
+  description: '',
+  solverNetId: '',
+  manifestEnrichmentStatus: 'pending',
   status: 'paused',
   launcherAgentId: '0xbbbb0002',
   statusUpdatedAt: new Date(Date.now() - 7200_000).toISOString(),

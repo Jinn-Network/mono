@@ -11,6 +11,10 @@ const CID = 'bafkreiabc000000000000000000000001';
 
 const FIXTURE: SolverNetResponse = {
   cid: CID,
+  name: 'SWE-rebench v2',
+  description: 'Test fixture description.',
+  solverNetId: '1',
+  manifestEnrichmentStatus: 'ok',
   status: 'launched',
   launcherAgentId: '0xdeadbeefdeadbeef0001',
   tasksPosted: 500,

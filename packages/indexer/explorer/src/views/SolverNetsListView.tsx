@@ -81,11 +81,37 @@ function renderRow(row: SolverNetRow) {
           style={{
             color: 'var(--accent)',
             textDecoration: 'none',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 12,
+            display: 'block',
+            lineHeight: 1.3,
           }}
         >
-          {shortCid(row.cid)}
+          {/* Primary line: human-readable name (e.g. 'SWE-rebench v2');
+              falls back to shortCid when manifest enrichment hasn't landed. */}
+          <span
+            style={{
+              fontFamily: row.name
+                ? 'var(--font-display)'
+                : 'var(--font-mono)',
+              fontSize: row.name ? 17 : 12,
+              fontStyle: row.name ? 'italic' : 'normal',
+            }}
+          >
+            {row.name || shortCid(row.cid)}
+          </span>
+          {/* Secondary line: shortCid when name is present. */}
+          {row.name && (
+            <span
+              style={{
+                display: 'block',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10,
+                color: 'var(--fg-dim)',
+                marginTop: 2,
+              }}
+            >
+              {shortCid(row.cid)}
+            </span>
+          )}
         </Link>
       </td>
       <td style={cellStyle}>

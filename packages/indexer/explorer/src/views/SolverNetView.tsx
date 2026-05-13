@@ -272,8 +272,37 @@ export function SolverNetView() {
                   fontWeight: 400,
                 }}
               >
-                {shortCid(data.cid)}
+                {data.name || shortCid(data.cid)}
               </h1>
+              {/* Subtitle: cid (when name is present) + optional description.
+                  Both empty until IPFS manifest enrichment lands. */}
+              {data.name && (
+                <div
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11,
+                    color: 'var(--fg-dim)',
+                    marginBottom: 8,
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  {shortCid(data.cid)}
+                </div>
+              )}
+              {data.description && (
+                <div
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--text-sm)',
+                    color: 'var(--fg-muted)',
+                    marginBottom: 12,
+                    maxWidth: 720,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {data.description}
+                </div>
+              )}
               <div
                 style={{
                   display: 'flex',
