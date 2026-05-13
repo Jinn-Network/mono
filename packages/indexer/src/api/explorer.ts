@@ -1155,7 +1155,7 @@ async function getSolverNetSparklinesBatch(
   const bucketRows = await db
     .select({
       manifestDigest: schema.task.manifestDigest,
-      bucketIndex: sql<string>`(${schema.verdict.createdAtBlock} ${sparklineDiv})`,
+      bucketIndex: sql<string>`${sparklineBucketExpr}`,
       total: count(),
       pass: count(
         sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
