@@ -20,18 +20,18 @@
  * Refs: jinn-mono-uy6v.9.
  */
 
-import { readFile, writeFile, mkdir, stat, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, rename, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { resolve as resolvePath, dirname, join } from 'node:path';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { EvalRunner, HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import { computeRowHash, resolveImageDigest, resolveUpstreamEvalCommit, type CommandRunner } from './_swe-rebench-v2-substrate.js';
 
-/** Module-level write-mutex keyed by file path. Serialises concurrent
- *  record() calls from different store instances pointing at the same file,
- *  preventing the last-write-wins race that occurs inside a single process. */
-const writeLocks = new Map<string, Promise<void>>();
+// In-process mutex map: serialises concurrent record() calls against the
+// same file. Entries are never removed; bounded by the number of distinct
+// validated-pool.json paths used in this process (typically 1).
+const writeLocks: Map<string, Promise<void>> = new Map();
 function withWriteLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
   const prev = writeLocks.get(file) ?? Promise.resolve();
   let release!: () => void;
@@ -101,7 +101,7 @@ export class ValidatedPoolStore {
   private scorableIdsCache: { mtimeMs: number; semanticsVersion: string; ids: Set<string> | null } | null = null;
 
   constructor(opts: { stateDir: string }) {
-    this.file = join(opts.stateDir, 'validated-pool.json');
+    this.file = resolvePath(join(opts.stateDir, 'validated-pool.json'));
   }
 
   private async readRaw(): Promise<unknown> {
@@ -123,7 +123,13 @@ export class ValidatedPoolStore {
     await mkdir(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.${randomBytes(6).toString('hex')}.tmp`;
     await writeFile(tmp, JSON.stringify(file, null, 2));
-    await rename(tmp, this.file); // POSIX rename is atomic
+    try {
+      await rename(tmp, this.file); // POSIX rename is atomic
+    } catch (err) {
+      // Best-effort tempfile cleanup — don't mask the original error.
+      await unlink(tmp).catch(() => undefined);
+      throw err;
+    }
   }
 
   /** The set of instance ids known scorable for `evalSemanticsVersion`, or
