@@ -24,6 +24,7 @@ import { createHttpDiscoveryAPI } from '../discovery/http.js';
 import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
 import { SOLVER_TYPE_PAYLOADS } from '../types/payloads/index.js';
+import { CanonicalRoleSchema, normalizeEnvelopeRole } from '../types/envelope.js';
 
 const server = new McpServer({
   name: 'jinn-client',
@@ -244,7 +245,7 @@ server.tool(
       ),
   },
   async ({ payload }) => {
-    const role = task.role === 'evaluation' ? 'verdict' : 'restoration';
+    const role = task.role === 'evaluation' ? 'verdict' : 'solution';
     if (!task.solverType) {
       return mcpError({
         kind: 'missing_solver_type',
@@ -260,7 +261,7 @@ server.tool(
         solverType: task.solverType,
       });
     }
-    const schema = bucket[role];
+    const schema = bucket[normalizeEnvelopeRole(role)];
     if (!schema) {
       return mcpError({
         kind: 'unknown_role',
@@ -373,7 +374,7 @@ server.tool(
     solverType: z.string().optional().describe('SolverType filter, e.g. "prediction.v1"'),
     artifactType: z.string().optional().describe('Artifact type filter, e.g. "output.prediction.v1"'),
     taskCid: z.string().optional().describe('Filter to a specific task CID'),
-    role: z.enum(['restoration', 'verdict']).optional().describe('Envelope role filter'),
+    role: z.preprocess(normalizeEnvelopeRole, CanonicalRoleSchema).optional().describe('Envelope role filter'),
     taskId: z.string().optional().describe('Runtime task id filter for local envelope projections'),
     requestId: z.string().optional().describe('On-chain request id filter'),
     participant: z.object({

@@ -1302,9 +1302,9 @@ export class TaskEngine {
     const solverType = task.solverType ?? 'legacy.v0';
 
     // Derive role from Task.role. Evaluator tasks produce 'verdict' envelopes;
-    // all other tasks produce 'restoration' envelopes.
+    // all other tasks produce 'solution' envelopes.
     const isEvaluation = task.taskRole === 'evaluation';
-    const role: Role = isEvaluation ? 'verdict' : 'restoration';
+    const role: Role = isEvaluation ? 'verdict' : 'solution';
 
     let envelopePayload: Record<string, unknown>;
 
@@ -1319,7 +1319,7 @@ export class TaskEngine {
       // with a wrong shape — validatePayload will catch schema mismatches.
       //
       // verificationOfRestoration: stubbed — Plan D will connect the real SDK.
-      // restorationEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
+      // solutionEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
       const verdictPayload = implOutput?.verdictPayload;
       if (!verdictPayload) {
         throw new Error(

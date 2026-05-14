@@ -43,7 +43,7 @@ import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../src/harnesses/engine/state.js';
 import { PredictionV1Evaluator } from '../../src/harnesses/impls/prediction-v1-evaluator/index.js';
-import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY, RESTORATION_TASK_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
+import { SOLUTION_ENVELOPE_CID_CONTEXT_KEY, SOLUTION_TASK_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
 import type { Harness, HarnessContext, Solution } from '../../src/harnesses/types.js';
 import { runHarnessWithFreezeFence } from '../../src/daemon/freeze-fence.js';
 import { hashImplStateDir } from '../../src/harnesses/freeze.js';
@@ -514,7 +514,7 @@ export function makePredictionV1SolutionPayload(
     methodology: 'Deterministic Task-first e2e smoke payload.',
     ...overrides,
   };
-  validatePayload('prediction.v1', 'restoration', payload);
+  validatePayload('prediction.v1', 'solution', payload);
   return payload;
 }
 
@@ -535,7 +535,7 @@ export function makePredictionV1VerdictPayload(now = Date.now()): Record<string,
       id: 'prediction-v1-e2e',
     },
     solutionEnvelope: {
-      cid: 'bafy-restoration-envelope',
+      cid: 'bafy-solution-envelope',
       sha256: 'a'.repeat(64),
     },
     claimed: {
@@ -713,7 +713,7 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
       });
       const solutionEnvelope = await signedExecutionEnvelope({
         solverType: 'prediction.v1',
-        role: 'restoration',
+        role: 'solution',
         taskCid,
         requestId: keccak256(toBytes(request.requestId)),
         onchainCreationTx: request.onchainCreationTx ?? '0x' + '00'.repeat(32),
@@ -743,8 +743,8 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
         context: {
           ...(announcement.task.context ?? {}),
           restorationResult: JSON.stringify(solutionEnvelope),
-          [RESTORATION_TASK_CID_CONTEXT_KEY]: taskCid,
-          [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: `bafy-restoration-local-${attemptIndex}`,
+          [SOLUTION_TASK_CID_CONTEXT_KEY]: taskCid,
+          [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: `bafy-solution-local-${attemptIndex}`,
         },
       };
       const verdictPosted = await adapter.postTask(evaluationTask);
@@ -1136,7 +1136,7 @@ export async function deployTaskFirstStack(
 
 export async function signedExecutionEnvelope(params: {
   solverType: string;
-  role: 'restoration' | 'verdict';
+  role: 'solution' | 'verdict';
   taskCid: string;
   requestId: string;
   onchainCreationTx: Hex;
@@ -1873,9 +1873,9 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     );
 
     const solutionPayload = makePredictionV1SolutionPayload();
-    const restorationEnvelope = await signedExecutionEnvelope({
+    const solutionEnvelope = await signedExecutionEnvelope({
       solverType: 'prediction.v1',
-      role: 'restoration',
+      role: 'solution',
       taskCid,
       requestId,
       onchainCreationTx: created.hash,
@@ -1885,7 +1885,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
       window: predictionTask.window,
       payload: solutionPayload,
     });
-    validatePayload('prediction.v1', 'restoration', restorationEnvelope.payload);
+    validatePayload('prediction.v1', 'solution', solutionEnvelope.payload);
 
     await callDeliverToMarketplace(
       publicClient,
@@ -1893,7 +1893,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
       operator.safeAddress,
       operator.mechAddress,
       [requestId],
-      [restorationEnvelope.signature.hash],
+      [solutionEnvelope.signature.hash],
     );
     await claimDelivery(
       publicClient,
@@ -1901,7 +1901,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
       operator.safeAddress,
       deployment.router,
       requestId,
-      { variant: 'v3', kind: 'solution', evidenceHash: restorationEnvelope.signature.hash },
+      { variant: 'v3', kind: 'solution', evidenceHash: solutionEnvelope.signature.hash },
     );
 
     const verdictClaim = await claimEvaluation(
@@ -1930,9 +1930,9 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
           role: 'evaluation',
           restorationRequestId: requestId,
           context: {
-            restorationResult: JSON.stringify(restorationEnvelope),
-            [RESTORATION_TASK_CID_CONTEXT_KEY]: taskCid,
-            [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-restoration-fork',
+            restorationResult: JSON.stringify(solutionEnvelope),
+            [SOLUTION_TASK_CID_CONTEXT_KEY]: taskCid,
+            [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-solution-fork',
           },
         },
         taskCid,
@@ -2010,7 +2010,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     });
     assert(tupleField<string>(attemptRecord, 'operator', 2).toLowerCase() === operator.safeAddress.toLowerCase(), 'fork attempt operator mismatch');
     assert(tupleField<string>(attemptRecord, 'requestId', 3).toLowerCase() === requestId.toLowerCase(), 'fork attempt requestId mismatch');
-    assert(tupleField<string>(attemptRecord, 'solutionCidDigest', 4).toLowerCase() === restorationEnvelope.signature.hash.toLowerCase(), 'fork evidence hash mismatch');
+    assert(tupleField<string>(attemptRecord, 'solutionCidDigest', 4).toLowerCase() === solutionEnvelope.signature.hash.toLowerCase(), 'fork evidence hash mismatch');
     assert(Number(tupleField<bigint>(attemptRecord, 'status', 9)) === 3, 'fork attempt was not submitted');
     assert(Number(tupleField<bigint>(attemptRecord, 'finalization', 10)) === 2, 'fork attempt was not finalized as passed');
 
@@ -2374,9 +2374,9 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     const requestId = claim.requestId as Hex;
 
     const solutionPayload = makePredictionV1SolutionPayload();
-    const restorationEnvelope = await signedExecutionEnvelope({
+    const solutionEnvelope = await signedExecutionEnvelope({
       solverType: 'prediction.v1',
-      role: 'restoration',
+      role: 'solution',
       taskCid,
       requestId,
       onchainCreationTx: created.hash,
@@ -2386,7 +2386,7 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       window: predictionTask.window,
       payload: solutionPayload,
     });
-    validatePayload('prediction.v1', 'restoration', restorationEnvelope.payload);
+    validatePayload('prediction.v1', 'solution', solutionEnvelope.payload);
 
     await callDeliverToMarketplace(
       publicClient,
@@ -2394,7 +2394,7 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       operator.safeAddress,
       operator.mechAddress,
       [requestId],
-      [restorationEnvelope.signature.hash],
+      [solutionEnvelope.signature.hash],
     );
     await claimDelivery(
       publicClient,
@@ -2402,7 +2402,7 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       operator.safeAddress,
       deployment.router,
       requestId,
-      { variant: 'v3', kind: 'solution', evidenceHash: restorationEnvelope.signature.hash },
+      { variant: 'v3', kind: 'solution', evidenceHash: solutionEnvelope.signature.hash },
     );
 
     const verdictClaim = await claimEvaluation(
@@ -2431,9 +2431,9 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
           role: 'evaluation',
           restorationRequestId: requestId,
           context: {
-            restorationResult: JSON.stringify(restorationEnvelope),
-            [RESTORATION_TASK_CID_CONTEXT_KEY]: taskCid,
-            [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-restoration-solvernet',
+            restorationResult: JSON.stringify(solutionEnvelope),
+            [SOLUTION_TASK_CID_CONTEXT_KEY]: taskCid,
+            [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-solution-solvernet',
           },
         },
         taskCid,
@@ -2799,9 +2799,9 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
     assert(requestIdB !== requestIdA, 'parallel attempts reused the same requestId');
 
     const solutionPayload = makePredictionV1SolutionPayload();
-    const restorationEnvelope = await signedExecutionEnvelope({
+    const solutionEnvelope = await signedExecutionEnvelope({
       solverType: 'prediction.v1',
-      role: 'restoration',
+      role: 'solution',
       taskCid,
       requestId: requestIdA,
       onchainCreationTx: created.hash,
@@ -2811,7 +2811,7 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
       window: predictionTask.window,
       payload: solutionPayload,
     });
-    validatePayload('prediction.v1', 'restoration', restorationEnvelope.payload);
+    validatePayload('prediction.v1', 'solution', solutionEnvelope.payload);
 
     await writeContractTx({
       publicClient,
@@ -2820,7 +2820,7 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
       address: deployment.mechA,
       abi: artifacts.mech.abi,
       functionName: 'deliverToMarketplace',
-      args: [[requestIdA], [restorationEnvelope.signature.hash]],
+      args: [[requestIdA], [solutionEnvelope.signature.hash]],
     });
     await writeContractTx({
       publicClient,
@@ -2829,7 +2829,7 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
       address: deployment.router,
       abi: artifacts.router.abi,
       functionName: 'claimSolutionDelivery',
-      args: [requestIdA, restorationEnvelope.signature.hash],
+      args: [requestIdA, solutionEnvelope.signature.hash],
     });
     const claimVerdict = await writeContractTx({
       publicClient,
@@ -2859,9 +2859,9 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
           role: 'evaluation',
           restorationRequestId: requestIdA,
           context: {
-            restorationResult: JSON.stringify(restorationEnvelope),
-            [RESTORATION_TASK_CID_CONTEXT_KEY]: taskCid,
-            [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-restoration-anvil',
+            restorationResult: JSON.stringify(solutionEnvelope),
+            [SOLUTION_TASK_CID_CONTEXT_KEY]: taskCid,
+            [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-solution-anvil',
           },
         },
         taskCid,
@@ -2930,7 +2930,7 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
       args: [1n, 0],
     });
     assert(tupleField<string>(attemptRecord, 'requestId', 3).toLowerCase() === requestIdA.toLowerCase(), 'attempt requestId mismatch');
-    assert(tupleField<string>(attemptRecord, 'solutionCidDigest', 4).toLowerCase() === restorationEnvelope.signature.hash.toLowerCase(), 'submission evidence hash mismatch');
+    assert(tupleField<string>(attemptRecord, 'solutionCidDigest', 4).toLowerCase() === solutionEnvelope.signature.hash.toLowerCase(), 'submission evidence hash mismatch');
     assert(Number(tupleField<bigint>(attemptRecord, 'status', 9)) === 3, 'attempt was not submitted');
     assert(Number(tupleField<bigint>(attemptRecord, 'finalization', 10)) === 2, 'attempt was not finalized as passed');
 

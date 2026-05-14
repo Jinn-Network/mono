@@ -21,7 +21,7 @@ function makeValidEnvelope(overrides: Record<string, unknown> = {}) {
   return {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'prediction.apy.v0',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: 1_000,
     task: intentProv,
     participant: { safeAddress: '0x' + '44'.repeat(20), agentEoa: '0x' + '55'.repeat(20) },
@@ -52,7 +52,7 @@ describe('parsePredictionApySubmissionEnvelope', () => {
     const raw = makeValidEnvelope();
     const { envelope, payload } = parsePredictionApySubmissionEnvelope(JSON.stringify(raw));
     expect(envelope.solverType).toBe('prediction.apy.v0');
-    expect(envelope.role).toBe('restoration');
+    expect(envelope.role).toBe('solution');
     expect(payload.prediction.predictedBps).toBe('42');
     expect(payload.prediction.submittedAt).toBe(100_000);
   });
@@ -65,6 +65,12 @@ describe('parsePredictionApySubmissionEnvelope', () => {
     });
     const { payload } = parsePredictionApySubmissionEnvelope(JSON.stringify(raw));
     expect(payload.prediction.modelId).toBe('m');
+  });
+
+  it('accepts legacy restoration role envelopes without mutating signed data', () => {
+    const raw = makeValidEnvelope({ role: 'restoration' });
+    const { envelope } = parsePredictionApySubmissionEnvelope(JSON.stringify(raw));
+    expect(envelope.role).toBe('restoration');
   });
 
   it('throws on invalid json', () => {

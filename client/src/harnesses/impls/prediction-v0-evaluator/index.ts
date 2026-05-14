@@ -22,7 +22,7 @@ import type { Task } from '../../../types/task.js';
 import {
   PredictionV1TaskSchema,
 } from '../../../types/prediction.js';
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import { PredictionV0RestorationPayloadSchema, type PredictionV0RestorationPayload } from '../../../types/payloads/prediction-v0.js';
 import {
   oraclePriceAtResolveTs,
@@ -42,7 +42,7 @@ import {
   checkTaskRefMissingExpected,
   recomputeTopLevelSignatureHash,
 } from './checks/integrity.js';
-import { resolveExpectedRestorationTaskCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
+import { resolveExpectedSolutionTaskCid, resolveSolutionEnvelopeCid } from '../evaluation-context.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { checkQuestionKindSupported } from './checks/spec.js';
 
@@ -101,7 +101,7 @@ export class PredictionV1Evaluator implements Harness {
     const { task: task, workingDir, log } = ctx;
     // Support _testDeps injection from ctx (test) or config (constructor).
     const testDeps = (ctx as any)._testDeps ?? this.config._testDeps;
-    const expectedRef = resolveExpectedRestorationTaskCid(task, testDeps);
+    const expectedRef = resolveExpectedSolutionTaskCid(task, testDeps);
 
     // 1. Parse task — same spec the harness ran under
     const predictionTask = PredictionV1TaskSchema.parse(task);
@@ -111,9 +111,12 @@ export class PredictionV1Evaluator implements Harness {
     const manifestJson = task.context!['restorationResult'] as string;
     const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
     const envelope = SignedEnvelopeSchema.parse(rawPayload);
-    if (envelope.solverType !== 'prediction.v1' || envelope.role !== 'restoration') {
+    if (
+      envelope.solverType !== 'prediction.v1' ||
+      normalizeEnvelopeRole(envelope.role) !== 'solution'
+    ) {
       throw new Error(
-        `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.v1/restoration`,
+        `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.v1/solution`,
       );
     }
     const payload: PredictionV0RestorationPayload = PredictionV0RestorationPayloadSchema.parse(envelope.payload);
@@ -302,8 +305,8 @@ export class PredictionV1Evaluator implements Harness {
     // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
     // Assembles the PredictionV1VerdictPayload from the already-computed fields.
     //
-    // restorationEnvelope: CID threaded from the daemon via context, sha256
-    // computed as sha256(JCS(restorationEnvelope)) — matching the upload pipeline
+    // solutionEnvelope: CID threaded from the daemon via context, sha256
+    // computed as sha256(JCS(solutionEnvelope)) — matching the upload pipeline
     // and the conformance harness (8l6 fix A).
     //
     // verificationOfRestoration: stub — Plan D will connect the real SDK that
@@ -311,12 +314,12 @@ export class PredictionV1Evaluator implements Harness {
     // For V1 the stub always reports 'valid' (self-signed tier), which means
     // the REJECTED-if-invalid path in engine.pack() never fires in practice
     // until Plan D replaces this stub.
-    const envelopeCid = (task.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+    const envelopeCid = resolveSolutionEnvelopeCid(task)
       ?? task.restorationRequestId
       ?? 'bafy-unknown';
     // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
     const envelopeSha256 = createHash('sha256').update(canonicalJson(rawPayload)).digest('hex');
-    const restorationEnvelope = {
+    const solutionEnvelope = {
       cid: envelopeCid,
       sha256: envelopeSha256,
     };
@@ -324,7 +327,7 @@ export class PredictionV1Evaluator implements Harness {
     const verificationOfRestoration = buildVerificationStub();
 
     const verdictPayload: Record<string, unknown> = {
-      restorationEnvelope,
+      solutionEnvelope,
       verificationOfRestoration,
       verdict,
       score,

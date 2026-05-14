@@ -559,7 +559,7 @@ describe('harvestOutput — generic typed-payload path', () => {
         solverType: 'swe-rebench-v2.v1',
         role: 'restoration',
       } as never),
-    ).toThrow(/failed swe-rebench-v2\.v1\/restoration validation/);
+    ).toThrow(/failed swe-rebench-v2\.v1\/solution validation/);
   });
 
   it('rejects corrupt direct typed payload files at harvest time', () => {

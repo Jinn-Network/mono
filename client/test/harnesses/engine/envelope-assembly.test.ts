@@ -16,7 +16,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
 const TEST_PK: `0x${string}` = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 
-const validPortfolioRestorationPayload = {
+const validPortfolioSolutionPayload = {
   preSnapshot: { capturedAt: 1, hlTime: 1, payload: {} },
   postSnapshot: { capturedAt: 2, hlTime: 2, payload: {} },
   fills: [],
@@ -30,7 +30,7 @@ const validPortfolioRestorationPayload = {
 
 const baseInputs: EnvelopeInputs = {
   solverType: 'portfolio.v0',
-  role: 'restoration',
+  role: 'solution',
   task: {
     cid: 'bafy-task',
     onchainCreationTx: '0x' + 'ab'.repeat(32),
@@ -55,7 +55,7 @@ const baseInputs: EnvelopeInputs = {
     },
   },
   artifacts: [],
-  payload: validPortfolioRestorationPayload,
+  payload: validPortfolioSolutionPayload,
   generatedAt: 1700000000000,
 };
 
@@ -87,6 +87,11 @@ describe('assembleAndSignEnvelope', () => {
     expect(result.envelope.evidenceTier).toBe('self-signed');
   });
 
+  it('normalizes legacy restoration input to canonical solution before signing', async () => {
+    const result = await assembleAndSignEnvelope(baseInputs, deps);
+    expect(result.envelope.role).toBe('solution');
+  });
+
   it('defaults attestation and trajectory to null', async () => {
     const result = await assembleAndSignEnvelope(baseInputs, deps);
     expect(result.envelope.attestation).toBeNull();
@@ -103,8 +108,8 @@ describe('assembleAndSignEnvelope', () => {
 
   it('accepts verdict role with verdict payload', async () => {
     const verdictPayload = {
-      restorationEnvelope: {
-        cid: 'bafy-rest',
+      solutionEnvelope: {
+        cid: 'bafy-solution',
         sha256: 'ab'.repeat(32),
       },
       verificationOfRestoration: {
