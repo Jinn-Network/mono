@@ -14,26 +14,9 @@
 import { createReadStream, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { Readable } from 'node:stream';
-import { normalizeIpfsRegistryAddUrl } from './ipfs.js';
+import { normalizeIpfsRegistryAddUrl, parseRegistryUploadCid } from './ipfs.js';
 
 const IPFS_UPLOAD_TIMEOUT_MS = 120_000;
-
-function parseRegistryUploadCid(responseText: string): string {
-  let lastHash: string | undefined;
-  for (const line of responseText.trim().split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line) as { Hash?: unknown };
-      if (typeof entry.Hash === 'string' && entry.Hash.length > 0) {
-        lastHash = entry.Hash;
-      }
-    } catch {
-      // ignore non-JSON lines
-    }
-  }
-  if (!lastHash) throw new Error('IPFS registry upload did not return a CID');
-  return lastHash;
-}
 
 /**
  * Upload a local file to the IPFS registry and return its CID.
