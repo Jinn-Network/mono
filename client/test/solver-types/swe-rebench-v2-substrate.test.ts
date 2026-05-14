@@ -56,17 +56,23 @@ describe('computeRowHash', () => {
   it('has a sha256: prefix and 64-hex-char body', () => {
     expect(computeRowHash(basicArgs())).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
+
+  it('treats array element order as significant', () => {
+    const a = computeRowHash({ ...basicArgs(), FAIL_TO_PASS: ['t::a', 't::b'] });
+    const b = computeRowHash({ ...basicArgs(), FAIL_TO_PASS: ['t::b', 't::a'] });
+    expect(a).not.toEqual(b);
+  });
 });
 
 describe('resolveImageDigest', () => {
   it('returns the digest portion (after `@`) of the first RepoDigests entry', async () => {
     const runner = vi.fn().mockResolvedValue({
       exitCode: 0,
-      stdout: '["myimg@sha256:abc123def456"]',
+      stdout: '["myimg@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456ab12"]',
       stderr: '',
     });
     const digest = await resolveImageDigest('myimg:latest', runner);
-    expect(digest).toBe('sha256:abc123def456');
+    expect(digest).toBe('sha256:abc123def456abc123def456abc123def456abc123def456abc123def456ab12');
     expect(runner).toHaveBeenCalledWith('docker', [
       'image', 'inspect', 'myimg:latest', '--format', '{{json .RepoDigests}}',
     ]);
@@ -79,6 +85,11 @@ describe('resolveImageDigest', () => {
 
   it('returns null when RepoDigests is empty', async () => {
     const runner = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '[]', stderr: '' });
+    expect(await resolveImageDigest('myimg:latest', runner)).toBeNull();
+  });
+
+  it('returns null when the digest after `@` is malformed', async () => {
+    const runner = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '["myimg@notadigest"]', stderr: '' });
     expect(await resolveImageDigest('myimg:latest', runner)).toBeNull();
   });
 });

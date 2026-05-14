@@ -81,7 +81,12 @@ export async function resolveImageDigest(
   if (typeof first !== 'string') return null;
   // `RepoDigests` entries are `<name>@sha256:<hex>`; strip the name.
   const at = first.indexOf('@');
-  return at === -1 ? null : first.slice(at + 1);
+  if (at === -1) return null;
+  const digest = first.slice(at + 1);
+  // Docker `RepoDigests` entries are `<name>@sha256:<hex>`. Refuse to accept
+  // a malformed digest (e.g. `<name>@` or a non-sha256 algorithm); the call
+  // site relies on the digest being a comparable `sha256:` value.
+  return /^sha256:[0-9a-f]{64}$/.test(digest) ? digest : null;
 }
 
 /**
@@ -95,5 +100,5 @@ export async function resolveUpstreamEvalCommit(
   const res = await runner('git', ['rev-parse', 'HEAD'], { cwd: upstreamRepoDir });
   if (res.exitCode !== 0) return null;
   const sha = res.stdout.trim();
-  return /^[0-9a-f]{7,40}$/.test(sha) ? sha : null;
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
 }
