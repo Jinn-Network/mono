@@ -34,10 +34,7 @@ import {
 } from '../../plugins/index.js';
 import type { PluginPayload } from '../../erc8004/plugin-registry.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
-
-function writeJson(ctx: CommandContext, value: unknown): void {
-  ctx.writer.write(JSON.stringify(value) + '\n');
-}
+import { writeJson } from './solver-plugins.js';
 
 export interface PublishOptions {
   source: string;

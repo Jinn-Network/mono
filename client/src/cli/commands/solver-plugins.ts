@@ -37,7 +37,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 
-function writeJson(ctx: CommandContext, value: unknown): void {
+export function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
 }
 
