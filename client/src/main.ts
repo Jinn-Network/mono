@@ -72,7 +72,7 @@ import {
 import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
-import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, harnessStateDirName } from './harnesses/names.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
 import type { Harness } from './harnesses/types.js';
 import { createClients } from './adapters/mech/safe.js';
 import { loadSolverNets } from './solver-nets/registry.js';
@@ -915,6 +915,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       bindHost: apiBindHost,
       corpus: config.subgraphUrl?.trim() ? () => corpusForApi : undefined,
       ui: { token: uiToken, handshakeKey },
+      hermesDoctor: {
+        hermesPath: config.hermesPath,
+        hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
+      },
       admin: {
         onRestartRequested: () => {
           console.log('[main] Restart requested via operator MCP. Exiting...');
@@ -1003,7 +1007,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               contract: { id: 'swe-rebench-v2', version: 'v1' },
               state: 'live' as const,
               supportedRoles: ['solving' as const, 'evaluating' as const],
+              // Order matters: the dashboard pre-selects compatibleHarnesses[0]
+              // as the default solver harness. Hermes Agent is the SWE-rebench v2
+              // default per the 2026-05-12 decision (jinn-mono-8psp.2 / spec §10);
+              // operators may switch to Claude Code or Codex.
               compatibleHarnesses: [
+                { name: HERMES_AGENT_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
                 { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
                 { name: CODEX_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
                 { name: 'swe-rebench-v2-evaluator', version: '0.1.0', supportsRoles: ['evaluating' as const] },

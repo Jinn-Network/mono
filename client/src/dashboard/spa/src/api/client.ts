@@ -147,6 +147,11 @@ export const api = {
       },
     ),
 
+  hermesDoctor: () =>
+    jfetch<{ installed: boolean; exitCode: number | null; stdout: string; stderr: string }>(
+      '/api/hermes/doctor',
+    ),
+
   // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----
   // Operator mode never calls these — Operator-mode UI shows zero launcher
   // state per §6.3 strict separation.

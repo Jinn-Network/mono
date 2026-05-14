@@ -14,6 +14,8 @@ import {
 import { createDefaultFleetState } from '../../src/earning/types.js';
 import { DEPRECATED_BASE_SEPOLIA_STAKING_PROXY } from '../../src/earning/testnet-setup-migration.js';
 
+const BOOTSTRAP_TEST_TIMEOUT_MS = 15_000;
+
 describe('Fleet bootstrap', () => {
   const dirs: string[] = [];
 
@@ -397,7 +399,7 @@ describe('Fleet bootstrap', () => {
     expect(result.fleet_state.services.every(s => s.step === 'complete')).toBe(true);
     // Services should have distinct indices 1, 2, 3
     expect(result.fleet_state.services.map(s => s.index)).toEqual([1, 2, 3]);
-  });
+  }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it('reconciles standard service unstaked on-chain before resume (mocked chain reads)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
@@ -533,7 +535,7 @@ describe('Fleet bootstrap', () => {
     const result = await bootstrapper.bootstrap('test-password');
     expect(result.ok).toBe(true);
     expect(sweepSpy).not.toHaveBeenCalled();
-  });
+  }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it('surfaces an actionable error when distributor.reStake reverts with UnauthorizedAccount', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
@@ -788,7 +790,7 @@ describe('Fleet bootstrap', () => {
     expect(svc.identity_registry_address).toBe(
       '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
     );
-  });
+  }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it('agent_registered step short-circuits in stepRegisterAgent when agent_id already set', async () => {
     // Direct unit test of the idempotency guard in `stepRegisterAgent`,

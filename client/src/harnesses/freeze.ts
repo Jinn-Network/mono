@@ -14,6 +14,18 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
+export interface HashImplStateDirOptions {
+  ignoreRelPaths?: readonly string[];
+}
+
+function normalizeRelPath(path: string): string {
+  return path.split(/[\\/]+/).filter(Boolean).join('/');
+}
+
+function shouldIgnore(relPath: string, ignored: readonly string[]): boolean {
+  return ignored.some((ignoredPath) => relPath === ignoredPath || relPath.startsWith(`${ignoredPath}/`));
+}
+
 /**
  * Compute a deterministic SHA-256 hash of an `implStateDir`'s contents.
  *
@@ -36,20 +48,26 @@ import { join, relative } from 'node:path';
  * Returns a 64-character lowercase hex string (no `sha256:` prefix; callers
  * that need that prefix add it themselves).
  */
-export async function hashImplStateDir(dirPath: string): Promise<string> {
+export async function hashImplStateDir(
+  dirPath: string,
+  opts: HashImplStateDirOptions = {},
+): Promise<string> {
   const entries: Array<{ relPath: string; fileHash: string }> = [];
+  const ignored = (opts.ignoreRelPaths ?? []).map(normalizeRelPath).filter(Boolean);
 
   async function walk(currentPath: string): Promise<void> {
     const items = (await readdir(currentPath)).sort();
     for (const item of items) {
       const full = join(currentPath, item);
+      const relPath = normalizeRelPath(relative(dirPath, full));
+      if (shouldIgnore(relPath, ignored)) continue;
       const s = await stat(full);
       if (s.isDirectory()) {
         await walk(full);
       } else if (s.isFile()) {
         const content = await readFile(full);
         const fileHash = createHash('sha256').update(content).digest('hex');
-        entries.push({ relPath: relative(dirPath, full), fileHash });
+        entries.push({ relPath, fileHash });
       }
       // Symlinks and special files are skipped (not expected in implStateDir).
     }

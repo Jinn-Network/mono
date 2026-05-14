@@ -32,10 +32,12 @@ describe('HermesHarness', () => {
     expect(h.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
   });
 
-  it('supports() rejects non-SWE solver types for v1', () => {
+  it('supports() rejects non-SWE-rebench v2 restoration solver types', () => {
     const fakeAdapter = { name: 'hermes-agent', runTask: vi.fn() };
     const h = new HermesHarness({ adapter: fakeAdapter as any });
     expect(h.supports({ solverType: 'prediction.v1', role: 'restoration' })).toBe(false);
+    expect(h.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
+    expect(h.supports({ solverType: 'portfolio.v0', role: 'restoration' })).toBe(false);
   });
 
   it('run() delegates to adapter.runTask and overrides venueRef.name to hermes-agent', async () => {

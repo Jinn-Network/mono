@@ -344,6 +344,15 @@ yarn e2e             # end-to-end on Anvil fork
 yarn staking         # earning bootstrap validation on Anvil
 node dist/bin/jinn.js run    # contributor daemon launch (after `yarn build`)
 
+# Daemon + real harness + Anvil settlement loop e2e (jinn-mono-wyy6)
+yarn e2e:daemon-harness   # production Daemon + real harness + Anvil settlement loop
+                          # JINN_E2E_HARNESS=prediction-v1-baseline (default) | hermes-agent | claude-code | codex
+                          # skips cleanly when the harness's API key is absent
+                          # exercises: Anvil fork of Base, real FleetBootstrapper,
+                          # locally-deployed JinnRouterV3 stack + mock IPFS,
+                          # production Daemon class, claim → execute → deliver →
+                          # activity-counter increment
+
 # Contracts
 cd contracts
 yarn install

@@ -33,6 +33,24 @@ export interface ConfigBuilderEnv {
     identityRegistryAddress?: string;
     fromBlock?: number;
   };
+  /**
+   * Active-task identifiers injected into MCP server env so jinn-client tools
+   * (get_task, submit_typed_payload, …) know which Task they are operating on.
+   * Mirrors what claude-code and codex-code adapters thread through in
+   * `buildSubprocessEnv`. When unset (e.g. unit tests), the MCP server returns
+   * a default empty task — fine for tests, broken for live runs.
+   */
+  task?: {
+    id?: string;
+    description?: string;
+    /** Already-stringified JSON of `taskBody.context`; empty string when absent. */
+    contextJson?: string;
+    role?: string;
+    solverType?: string;
+    restorationRequestId?: string;
+    requestId?: string;
+    workingDir?: string;
+  };
 }
 
 function buildJinnRuntimeEnv(env: ConfigBuilderEnv): Record<string, string> {
@@ -49,6 +67,20 @@ function buildJinnRuntimeEnv(env: ConfigBuilderEnv): Record<string, string> {
     out.JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS = env.corpusEnv.identityRegistryAddress;
   }
   if (env.corpusEnv.fromBlock != null) out.JINN_CORPUS_FROM_BLOCK = String(env.corpusEnv.fromBlock);
+  // Active-task env — read by the jinn-client MCP server in
+  // `client/src/mcp/server.ts` to populate the `task` runtime context. Without
+  // these, submit_typed_payload errors with `missing_solver_type` and get_task
+  // returns an empty record.
+  if (env.task) {
+    if (env.task.id) out.DESIRED_STATE_ID = env.task.id;
+    if (env.task.description) out.DESIRED_STATE_DESCRIPTION = env.task.description;
+    if (env.task.contextJson) out.DESIRED_STATE_CONTEXT = env.task.contextJson;
+    if (env.task.role) out.DESIRED_STATE_ROLE = env.task.role;
+    if (env.task.solverType) out.DESIRED_STATE_SOLVER_TYPE = env.task.solverType;
+    if (env.task.restorationRequestId) out.RESTORATION_REQUEST_ID = env.task.restorationRequestId;
+    if (env.task.requestId) out.REQUEST_ID = env.task.requestId;
+    if (env.task.workingDir) out.JINN_WORKING_DIR = env.task.workingDir;
+  }
   return out;
 }
 
