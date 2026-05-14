@@ -758,6 +758,25 @@ describe('SweRebenchV2EvaluatorHarness — verdict-time substrate recheck', () =
     expect(existsSync(join(implStateDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
   });
 
+  it('throws SkippableError with reason hf_fetch_failed when the HF row fetch fails', async () => {
+    // Seed a scorable admission (no rowHash/imageDigest so only the HF fetch matters).
+    await seedAdmission(stateDir, INSTANCE_ID, { scorable: true });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const harness = makeHarness({
+      fetcher: {
+        fetchTaskRow: vi.fn().mockRejectedValue(new Error('HF datasets-server unavailable')),
+      },
+      runner: { runEval: vi.fn() },
+      uploadToIpfs: vi.fn(),
+    });
+    const err = await harness.run(makeCtx()).catch((e) => e);
+    expect(err).toBeInstanceOf(SkippableError);
+    expect(err.reason).toBe('hf_fetch_failed');
+    expect(err.message).toMatch(/HF unreachable/);
+    // No verdict artifact should be written.
+    expect(existsSync(join(implStateDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
+  });
+
   it('grades normally when admission entry matches current substrate', async () => {
     // Seed an admission with both rowHash and imageDigest matching current state.
     await seedAdmission(stateDir, INSTANCE_ID, {

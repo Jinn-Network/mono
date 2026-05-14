@@ -100,7 +100,7 @@ interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
   };
 }
 
-function defaultStateDir(): string {
+export function defaultStateDir(): string {
   return join(process.env['HOME'] ?? homedir(), '.jinn-client', 'swe-rebench-v2');
 }
 
