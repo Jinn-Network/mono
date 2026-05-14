@@ -186,3 +186,35 @@ describe('validatePoolInstances', () => {
     expect(runner.runEval).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('ValidatedPoolStore — extended substrate fields (semantics v3)', () => {
+  it('persists rowHash, imageName, imageDigest, upstreamEvalCommit alongside scorable/reason/checkedAt', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record(
+      'a__1',
+      {
+        scorable: true,
+        reason: 'gold-patch-resolves',
+        checkedAt: '2026-05-14T00:00:00Z',
+        rowHash: 'sha256:abc123',
+        imageName: 'swerebenchv2/sweb.eval.x86_64.a__1:latest',
+        imageDigest: 'sha256:def456',
+        upstreamEvalCommit: '0123456789abcdef',
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const entry = await store.getEntry('a__1', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({
+      scorable: true,
+      rowHash: 'sha256:abc123',
+      imageName: 'swerebenchv2/sweb.eval.x86_64.a__1:latest',
+      imageDigest: 'sha256:def456',
+      upstreamEvalCommit: '0123456789abcdef',
+    });
+  });
+
+  it('EVAL_SEMANTICS_VERSION === "3"', () => {
+    expect(EVAL_SEMANTICS_VERSION).toBe('3');
+  });
+});

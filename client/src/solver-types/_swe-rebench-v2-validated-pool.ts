@@ -28,11 +28,17 @@ import type { EvalRunner, HfFetcher } from '../harnesses/impls/swe-rebench-v2-ev
 /**
  * Bump when the eval grading semantics change (verdict re-derivation,
  * ungradeable classification, test-command construction) so cached validation
- * results from an older harness are treated as stale and re-checked. `'2'` =
- * the SWE-bench "resolved" semantics + run-the-named-tests `test_cmd` override
- * (jinn-mono-uy6v.8); `'1'` was the original exact-set `passed_match`.
+ * results from an older harness are treated as stale and re-checked.
+ *
+ *   '1' — original exact-set `passed_match`.
+ *   '2' — SWE-bench "resolved" semantics + run-the-named-tests `test_cmd`
+ *         override (jinn-mono-uy6v.8).
+ *   '3' — adds verdict-time substrate recheck (`rowHash`, `imageDigest`,
+ *         `upstreamEvalCommit`) and extended ungradeable classifier
+ *         (venv collision, missing pytest, dependency warnings, conftest
+ *         import/setup failures) — jinn-mono-fufn.
  */
-export const EVAL_SEMANTICS_VERSION = '2';
+export const EVAL_SEMANTICS_VERSION = '3';
 
 const SCHEMA_VERSION = 'swe-rebench-v2-validated-pool.v1' as const;
 
@@ -41,6 +47,14 @@ export interface ValidatedPoolEntry {
   /** Why scorable/unscorable — `'gold-patch-resolves'`, `'ungradeable:<reason>'`, etc. */
   reason: string;
   checkedAt: string; // ISO timestamp
+  /** Canonical-JSON SHA-256 over the HF row fields used for grading. v3+. */
+  rowHash?: string;
+  /** Image tag the validation pulled. v3+. */
+  imageName?: string;
+  /** Image digest resolved from `docker image inspect` after validation. v3+. */
+  imageDigest?: string;
+  /** `git rev-parse HEAD` of the enabled upstream SWE-rebench repo at validation time. v3+. */
+  upstreamEvalCommit?: string;
 }
 
 interface ValidatedPoolFile {
