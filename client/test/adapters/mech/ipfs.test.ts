@@ -253,10 +253,13 @@ describe('cidToDigestHex', () => {
     expect(cidToDigestHex(cid)).toBe(KNOWN_DIGEST);
   });
 
-  it('truncated f-prefix CID (f01) throws on unsupported multihash', () => {
-    // 'f01' decodes to version=0x01 with no remaining bytes for the multihash,
-    // so bytes[0] is undefined and the function throws "Unsupported multihash".
-    expect(() => cidToDigestHex('f01')).toThrow();
+  it('truncated f-prefix CID (f01) throws with a length-shaped error', () => {
+    // 'f01' decodes to version=0x01 with no remaining bytes for the multihash.
+    // The length-precheck should fire before the multihash-fn check, so the
+    // thrown error names the real failure (payload too short) instead of
+    // rendering an "fn=0xundefined" message from reading undefined out of
+    // an empty array.
+    expect(() => cidToDigestHex('f01')).toThrow(/CID payload too short/);
   });
 
   it('malformed input (non-CID garbage string) throws', () => {

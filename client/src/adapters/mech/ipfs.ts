@@ -295,6 +295,14 @@ export function cidToDigestHex(cid: string): Hex {
   }
 
   // bytes is now the multihash: [hashFn, length, ...digest]
+  // Reject truncated inputs up front so the error message names the real
+  // failure (length) rather than reading undefined out of an empty array
+  // and rendering "fn=0xundefined, len=undefined".
+  if (bytes.length < 34) {
+    throw new Error(
+      `CID payload too short for sha2-256 multihash: expected ≥ 34 bytes (fn + len + 32 digest), got ${bytes.length} (cid=${cid.slice(0, 16)}…)`,
+    );
+  }
   if (bytes[0] !== 0x12 || bytes[1] !== 0x20) {
     throw new Error(`Unsupported multihash: fn=0x${bytes[0]!.toString(16)}, len=${bytes[1]}`);
   }
