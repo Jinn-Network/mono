@@ -149,7 +149,7 @@ server.tool(
   // uploaded to IPFS at job creation time and is referenced by the on-chain CID.
   // Claude receives this runtime shape to understand what objective to pursue —
   // it does not need to verify or re-sign the task envelope.
-  'Get the current Task. Returns runtime Task context: id, description, role (restoration|evaluation), restorationRequestId, requestId, and optional context bag. This is the RUNTIME shape — not the signed task.v1 wire format.',
+  'Fetch the current Jinn task you are working on — what objective to pursue, which role you play (restoration agent producing a solution, or evaluation agent producing a verdict), and any task-specific context. Call this first when you are unsure what work to perform; the task description and context bag drive every subsequent action. Returns runtime fields (id, description, role, restorationRequestId, requestId, context) — not the signed wire format.',
   {},
   async () => ({
     content: [{
@@ -168,7 +168,7 @@ server.tool(
 
 server.tool(
   'report_progress',
-  'Report progress on the restoration',
+  'Send a brief progress update on the task you are executing — a one-line status note about what you have done or are about to do next. The daemon logs this for operators watching the run; it is not persisted as a solution artifact. Use this to leave a breadcrumb when a step takes a while, not to submit results.',
   { message: z.string().describe('Progress message') },
   async ({ message }) => {
     console.error(`[mcp] Progress: ${message}`);
@@ -180,7 +180,7 @@ server.tool(
 
 server.tool(
   'submit_restoration_result',
-  'Submit the result of a restoration attempt',
+  'Submit your final result as a free-form text artifact when the task does NOT have a typed payload schema. Use this for prose answers, free-form reports, or any solution where the on-chain SolverNet contract does not define a strict schema. If the active SolverNet expects a structured payload (e.g. swe-rebench-v2.v1, prediction.v1) submit the typed payload instead — the structured submission validates against the contract schema, this one does not. Call this exactly once per task, when you are done.',
   {
     success: z.boolean().describe('Whether the restoration was successful'),
     description: z.string().describe('Description of what was done'),
@@ -236,12 +236,12 @@ server.tool(
 
 server.tool(
   'submit_typed_payload',
-  'Submit the result of the active Task as a typed structured payload. Validated against the SolverNet contract\'s schema for this task\'s (solverType, role) pair before being persisted; on validation failure, the Zod error tree is returned so the agent can correct and retry. On success, the validated payload is persisted to <WORKING_DIR>/.execute/solution-payload.json for the daemon harness to read post-execution. Use this for all SolverNets with typed payload schemas (prediction.v1, swe-rebench-v2.v1, etc.); use submit_restoration_result for free-form text artifacts.',
+  'Submit your final solution / verdict as a structured typed payload — this is the canonical way to hand a finished result back to Jinn for any SolverNet with a typed schema (swe-rebench-v2.v1, prediction.v1, prediction-apy.v0, portfolio.v0, etc.). The payload is validated against the SolverNet contract schema for this task\'s (solverType, role) pair before being persisted; if validation fails, the Zod error tree is returned under issues[] and you should correct the payload shape and call again. On success, the validated payload is persisted to <WORKING_DIR>/.execute/solution-payload.json for the daemon\'s post-execution harvester. Call this whenever a task description mentions submitting a structured solution, a typed payload, a final patch in a specific schema, or anything that should round-trip through a contract schema. Use the free-form submit-restoration-result alternative ONLY when the SolverNet has no typed schema.',
   {
     payload: z
       .record(z.unknown())
       .describe(
-        'Typed payload object. The required shape is defined by the active SolverNet contract — check the contract\'s solution / verdict schema for the field set.',
+        'Typed payload object. The required shape is defined by the active SolverNet contract — check the contract\'s solution / verdict schema for the field set (e.g. for swe-rebench-v2.v1 restoration: { schemaVersion: "swe-rebench-v2-solution.v1", patch: "<unified diff>" }).',
       ),
   },
   async ({ payload }) => {
@@ -314,7 +314,7 @@ server.tool(
 
 server.tool(
   'get_restoration_delivery',
-  'Get the restoration result that needs to be evaluated (only available for evaluation requests)',
+  'Fetch the restoration delivery you are evaluating — the previous solver\'s submitted result, ready for verdict. Only meaningful when your task role is "evaluation" (you are a verdict agent reviewing someone else\'s restoration). Returns the original restorationRequestId and the delivery payload the restorer submitted. Once you have rendered a verdict, hand it back via the typed-payload submission.',
   {},
   async () => {
     const raw = process.env['RESTORATION_DELIVERY_DATA'];
@@ -340,7 +340,7 @@ server.tool(
 
 server.tool(
   'publish_artifact',
-  'Publish a knowledge artifact for future agents to reference',
+  'Publish a reusable knowledge artifact for the corpus — a note, lesson, summary, or reference snippet that future agents working on similar tasks can search and reuse. This is distinct from submitting your final task solution: this is for side knowledge you produced along the way (a debugging trick you discovered, an API quirk, a useful summary of a tricky repo). Pick tags that future searchers might try, and record whether the underlying work succeeded or failed.',
   {
     title: z.string().describe('Short title for the artifact'),
     content: z.string().describe('The artifact content (text, JSON, etc)'),
@@ -369,7 +369,7 @@ server.tool(
 
 server.tool(
   'search_records',
-  'Search local and network corpus records. Returns lightweight record refs, envelope refs, artifact refs, source, access, and price metadata. This tool is read-only and never acquires artifact bytes.',
+  'Search the Jinn knowledge corpus — prior execution data, solutions, verdicts, and notes that other agents have donated. Use this BEFORE planning a task to look for prior work on the same problem, the same repo, or the same solverType (e.g. someone else\'s swe-rebench-v2.v1 restorations against the same instance_id). Read-only: returns lightweight refs and metadata (source, access, price) but never downloads bytes. Once you find a promising ref, examine its index card (without paying) before deciding whether to actually fetch the artifact bytes.',
   {
     solverType: z.string().optional().describe('SolverType filter, e.g. "prediction.v1"'),
     artifactType: z.string().optional().describe('Artifact type filter, e.g. "output.prediction.v1"'),
@@ -402,7 +402,7 @@ server.tool(
 
 server.tool(
   'inspect_record',
-  'Inspect a local or network corpus record by record, envelope, projection, or artifact ref. Returns index-card metadata and acquisition costs without acquiring artifact bytes.',
+  'Examine an index card for a corpus record without fetching its bytes — what was produced, by whom, when, and what it would cost to download. Run this on any ref you got from searching the corpus: it tells you the artifact type, the evidence tier (self-signed / committed / attested), the operator who produced it, the access endpoint, and the per-byte price in USDC. Lets you decide whether the artifact is worth acquiring before you spend funds on it.',
   {
     ref: z.string().optional().describe('Any record/envelope/projection/artifact ref returned by search_records'),
     recordRef: z.string().optional(),
@@ -436,7 +436,7 @@ server.tool(
 
 server.tool(
   'acquire_artifact',
-  'Fetch artifact bytes by sha256. Hits local-store (own served) and corpus cache fast paths first; proxies to the daemon for network fetches (the daemon owns the agent EOA private key for x402 payments). Returns base64-encoded bytes and the fetch source.',
+  'Download the actual bytes of a corpus artifact by its sha256, paying the operator who hosts it. Use this only after inspecting a record\'s index card and confirming the content is worth the cost. The daemon handles x402 payment from your agent EOA, hits any local-cache fast path first, and returns the artifact as base64. Side effect: spends USDC according to the access price you pass in. If you have not yet inspected the record, do that first to avoid wasted spend.',
   {
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
     access: z.object({
