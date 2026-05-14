@@ -22,25 +22,21 @@ const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 // resolveValidatePoolInstanceIds — exported for unit testing
 // ---------------------------------------------------------------------------
 
-function readInstanceIdFile(relPath: string): string[] {
-  // Resolve relative to the repo root the client lives in. In tests this
-  // resolves to the worktree root; in production the file is bundled in
-  // the published package's scripts/ directory.
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    resolvePath(process.cwd(), relPath),
-    resolvePath(__dirname, '..', '..', '..', relPath),
-    resolvePath(__dirname, '..', '..', '..', '..', relPath),
-  ];
-  for (const p of candidates) {
-    try {
-      const parsed = JSON.parse(readFileSync(p, 'utf8')) as { instance_ids?: string[] };
-      if (Array.isArray(parsed.instance_ids)) return parsed.instance_ids;
-    } catch {
-      // try next candidate
-    }
+function readInstanceIdFile(name: 'swe-rebench-v2-seed-pool.json' | 'swe-rebench-v2-known-bad.json'): string[] {
+  // Resolve relative to this compiled file's location. At runtime the file is
+  // at dist/cli/commands/<this>.js and the data files are at dist/scripts/<name>
+  // (copied there during `yarn build`). In dev/test the source file is at
+  // src/cli/commands/<this>.ts and the data files live at scripts/<name>
+  // (sibling to src/). In both cases ../../../scripts/<name> resolves correctly:
+  //   dist/cli/commands → dist/ → dist/../scripts  (published package)
+  //   src/cli/commands  → src/  → src/../scripts   (dev / vitest)
+  const here = dirname(fileURLToPath(import.meta.url));
+  const path = resolvePath(here, '..', '..', '..', 'scripts', name);
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as { instance_ids?: string[] };
+  if (!Array.isArray(parsed.instance_ids)) {
+    throw new Error(`${path} does not contain an instance_ids array`);
   }
-  throw new Error(`Could not locate ${relPath} (looked in ${candidates.join(', ')})`);
+  return parsed.instance_ids;
 }
 
 export function resolveValidatePoolInstanceIds(flags: {
@@ -52,7 +48,15 @@ export function resolveValidatePoolInstanceIds(flags: {
   const collected: string[] = [];
   if (flags.instanceId) collected.push(...flags.instanceId);
   if (flags.instancesFile) {
-    const body = readFileSync(flags.instancesFile, 'utf8');
+    let body: string;
+    try {
+      body = readFileSync(flags.instancesFile, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`--instances-file: file not found: ${flags.instancesFile}`);
+      }
+      throw err;
+    }
     for (const raw of body.split(/\r?\n/)) {
       const line = raw.trim();
       if (!line || line.startsWith('#')) continue;
@@ -60,10 +64,10 @@ export function resolveValidatePoolInstanceIds(flags: {
     }
   }
   if (flags.seedPositive) {
-    collected.push(...readInstanceIdFile('client/scripts/swe-rebench-v2-seed-pool.json'));
+    collected.push(...readInstanceIdFile('swe-rebench-v2-seed-pool.json'));
   }
   if (flags.knownBad) {
-    collected.push(...readInstanceIdFile('client/scripts/swe-rebench-v2-known-bad.json'));
+    collected.push(...readInstanceIdFile('swe-rebench-v2-known-bad.json'));
   }
   return Array.from(new Set(collected));
 }
@@ -277,10 +281,14 @@ const command: CommandModule = {
             and cache which instances are scorable; the generator then posts
             only those. Requires Docker + \`jinn harnesses enable
             swe-rebench-v2-evaluator\`.
-            --seed-positive runs against client/scripts/swe-rebench-v2-seed-pool.json;
-            --known-bad records instances from .../swe-rebench-v2-known-bad.json
-            as scorable:false. Repeatable --instance-id and --instances-file
-            scope the run to a specific subset.
+            --seed-positive scopes the run to instances in
+            client/scripts/swe-rebench-v2-seed-pool.json (gold eval runs;
+            most expected to record scorable:true).
+            --known-bad scopes the run to instances in
+            client/scripts/swe-rebench-v2-known-bad.json (gold eval runs;
+            expected to record scorable:false).
+            Repeatable --instance-id and --instances-file scope the run to
+            a specific subset.
 
 Output flags:
   --human   Render readable terminal output instead of JSON (supported by

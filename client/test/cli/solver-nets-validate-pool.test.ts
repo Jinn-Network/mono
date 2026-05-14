@@ -17,11 +17,14 @@ describe('resolveValidatePoolInstanceIds', () => {
 
   it('reads --instances-file (newline-delimited, ignores blanks and # comments)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'validate-pool-cli-'));
-    const path = join(dir, 'ids.txt');
-    writeFileSync(path, '# comment\na__1\n\na__2\n  a__3  \n');
-    const ids = resolveValidatePoolInstanceIds({ instancesFile: path });
-    expect(ids).toEqual(['a__1', 'a__2', 'a__3']);
-    rmSync(dir, { recursive: true, force: true });
+    try {
+      const path = join(dir, 'ids.txt');
+      writeFileSync(path, '# comment\na__1\n\na__2\n  a__3  \n');
+      const ids = resolveValidatePoolInstanceIds({ instancesFile: path });
+      expect(ids).toEqual(['a__1', 'a__2', 'a__3']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('reads --seed-positive from client/scripts/swe-rebench-v2-seed-pool.json', () => {
@@ -42,5 +45,8 @@ describe('resolveValidatePoolInstanceIds', () => {
       knownBad: true,
     });
     expect(ids.filter((id) => id === 'basicmachines-co__basic-memory-341')).toHaveLength(1);
+    // De-dup preserves first-occurrence order: the explicit --instance-id flag
+    // came first, so its position wins.
+    expect(ids[0]).toBe('basicmachines-co__basic-memory-341');
   });
 });
