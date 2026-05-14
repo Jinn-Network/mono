@@ -28,8 +28,7 @@ describe('getChainConfig', () => {
   // ── ERC-8004 IdentityRegistry (jinn-mono-j07) ────────────────────────────
   it('exposes the canonical IdentityRegistry on Base mainnet', () => {
     const cfg = getChainConfig('base');
-    // Vanity address from subgraph/networks.json (cross-checked against
-    // erc-8004/erc-8004-contracts/scripts/addresses.ts).
+    // Vanity address from erc-8004/erc-8004-contracts/scripts/addresses.ts.
     expect(cfg.identityRegistry).toBe(
       '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
     );

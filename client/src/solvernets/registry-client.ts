@@ -21,6 +21,20 @@ import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
 // ── Supporting types ────────────────────────────────────────────────────────
 
 /**
+ * Current lifecycle status of a SolverNet manifest.
+ *
+ * Returned by `SolverNetRegistryClient.getLifecycleStatus`. This is the
+ * canonical definition; `client/src/discovery/types.ts` re-exports it so
+ * consumers of the discovery layer only need one import path.
+ */
+export interface SolverNetLifecycleStatus {
+  status: 'launched' | 'paused' | 'retired';
+  statusUpdatedAt: string;
+  sourceBlock: number;
+  manifestHash: `0x${string}`;
+}
+
+/**
  * Minimal "ready to sign" handle for the launcher's agent EOA. Held by the
  * registry client implementation to (a) sign manifests via `signManifest` and
  * (b) send the on-chain `setMetadata` tx that anchors the manifest CID.
@@ -126,9 +140,5 @@ export interface SolverNetRegistryClient {
 
   getLifecycleStatus(args: {
     manifestCid: string;
-  }): Promise<{
-    status: 'launched' | 'paused' | 'retired';
-    statusUpdatedAt: string;
-    sourceBlock: number;
-  }>;
+  }): Promise<SolverNetLifecycleStatus>;
 }

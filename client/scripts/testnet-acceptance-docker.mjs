@@ -10,6 +10,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +35,7 @@ import { isoToSqliteTimestamp, summarizeRunWindowArtifacts } from './lib/accepta
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
+const repoRoot = join(clientRoot, '..');
 const composeFile = join(clientRoot, 'docker-compose.acceptance.yml');
 const composeService = 'jinn-acceptance-daemon';
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -230,12 +232,13 @@ function warnIfBranchLagsMain() {
   }
 }
 
-function queryDockerArtifactRows(composeEnvPath, runStartAt, evidenceBase) {
+function queryDockerArtifactRows(composeEnvPath, runStartAt, evidenceBase, taskId) {
   const script = `
     import Database from 'better-sqlite3';
     import { existsSync } from 'node:fs';
     const dbPath = '/data/jinn.db';
     const since = process.argv[1];
+    const taskId = process.argv[2];
     if (!existsSync(dbPath)) {
       console.log('[]');
       process.exit(0);
@@ -245,10 +248,10 @@ function queryDockerArtifactRows(composeEnvPath, runStartAt, evidenceBase) {
       const rows = db.prepare(
         \`SELECT task_id, request_id, title, tags, outcome, created_at
             FROM artifacts
-           WHERE task_id LIKE 'pred-v0-auto-%'
+           WHERE (task_id = ? OR task_id LIKE ?)
              AND created_at >= ?
            ORDER BY created_at ASC\`,
-      ).all(since);
+      ).all(taskId, \`\${taskId}:evaluation:%\`, since);
       console.log(JSON.stringify(rows));
     } finally {
       db.close();
@@ -268,6 +271,7 @@ function queryDockerArtifactRows(composeEnvPath, runStartAt, evidenceBase) {
       '-e',
       script,
       isoToSqliteTimestamp(runStartAt),
+      taskId,
     ]),
     {
       cwd: clientRoot,
@@ -276,6 +280,241 @@ function queryDockerArtifactRows(composeEnvPath, runStartAt, evidenceBase) {
   );
   expectExit(result, [0], 'docker artifact query');
   return parseJsonStdout(result.stdout, 'docker-artifact-query');
+}
+
+async function startPolymarketFixtureServer() {
+  const now = Date.now();
+  const endDate = new Date(now + 48 * 60 * 60 * 1000).toISOString();
+  const market = {
+    id: 'acceptance-market-1',
+    marketId: 'acceptance-market-1',
+    conditionId: '0xacceptancecondition00000000000000000000000000000000000000000000000001',
+    slug: 'release-acceptance-market',
+    question: 'Will the release acceptance fixture remain unresolved during this gate?',
+    description: 'Deterministic local Polymarket-compatible fixture for release acceptance.',
+    rules: 'This fixture is intentionally unresolved while the gate runs.',
+    endDateIso: endDate,
+    active: true,
+    closed: false,
+    archived: false,
+    outcomes: JSON.stringify(['YES', 'NO']),
+    clobTokenIds: JSON.stringify(['acceptance-yes-token', 'acceptance-no-token']),
+    liquidity: '100000',
+    volume24hr: '50000',
+    url: '',
+  };
+  const book = {
+    bids: [{ price: '0.49', size: '100' }],
+    asks: [{ price: '0.51', size: '100' }],
+    timestamp: Date.now(),
+  };
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    res.setHeader('content-type', 'application/json');
+    if (url.pathname === '/markets') {
+      res.end(JSON.stringify([market]));
+      return;
+    }
+    if (url.pathname === `/markets/${market.id}`) {
+      res.end(JSON.stringify(market));
+      return;
+    }
+    if (url.pathname === '/book') {
+      res.end(JSON.stringify(book));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  await new Promise((resolvePromise, rejectPromise) => {
+    server.once('error', rejectPromise);
+    server.listen(0, '0.0.0.0', () => {
+      server.off('error', rejectPromise);
+      resolvePromise();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('polymarket fixture server did not bind to a TCP port');
+  }
+  const dockerBaseUrl = `http://host.docker.internal:${address.port}`;
+  market.url = `${dockerBaseUrl}/markets/${market.id}`;
+  return {
+    server,
+    localBaseUrl: `http://127.0.0.1:${address.port}`,
+    dockerBaseUrl,
+    market,
+    marketUrl: market.url,
+    yesTokenId: 'acceptance-yes-token',
+    noTokenId: 'acceptance-no-token',
+    orderbook: {
+      sampledAt: new Date(book.timestamp).toISOString(),
+      bestBidYes: '0.4900',
+      bestAskYes: '0.5100',
+      midpointYes: '0.5000',
+      spread: '0.0200',
+      source: 'polymarket-clob',
+    },
+  };
+}
+
+function buildAcceptanceSeedScript(runId, fixture) {
+  return `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    import { uploadToIpfs } from './dist/adapters/mech/ipfs.js';
+
+    const runId = ${JSON.stringify(runId)};
+    const fixture = ${JSON.stringify(fixture)};
+    const config = JSON.parse(readFileSync('/acceptance/config.json', 'utf8'));
+    const state = JSON.parse(readFileSync('/data/earning/earning_state.json', 'utf8'));
+    const service = (state.services ?? []).find((svc) =>
+      svc.step === 'complete' && svc.safe_address && svc.agent_address && svc.agent_id
+    );
+    if (!service) {
+      throw new Error('acceptance seed: no complete service with Safe, agent EOA, and agent id');
+    }
+
+    const nowIso = new Date().toISOString();
+    const solverNetId = 'acceptance_prediction-v1_' + runId.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const manifest = {
+      schemaVersion: 'solvernet.manifest.v1',
+      solverNetId,
+      network: 'base-sepolia',
+      name: 'Release acceptance Prediction v1',
+      description: 'Release acceptance SolverNet manifest for the public testnet gate.',
+      launcher: {
+        safeAddress: service.safe_address,
+        agentEoa: service.agent_address,
+        agentId: String(service.agent_id),
+      },
+      contract: {
+        id: 'prediction',
+        version: 'v1',
+        schemas: {
+          task: { type: 'object' },
+          solution: { type: 'object' },
+          verdict: { type: 'object' },
+        },
+        claimPolicyDefaults: {
+          mode: 'parallel',
+          maxClaims: 10,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 600,
+        },
+        credentialRequirements: {
+          creator: [],
+          solver: [],
+          evaluator: [],
+        },
+        evaluationFunction: {
+          id: 'prediction.brier-loss.v1',
+          deterministic: true,
+          inputs: ['prediction.v1 Task', 'prediction.v1 Solution', 'Polymarket/UMA resolution'],
+          output: 'prediction.v1 Verdict',
+          implementation: 'jinn:harness:prediction-v1-evaluator',
+        },
+        aggregationFunction: {
+          id: 'prediction.trailing-mean-brier-spread.v1',
+          deterministic: true,
+          inputs: ['SCORED prediction.v1 Verdicts'],
+          output: 'score',
+          windowDays: 30,
+        },
+      },
+      solutionPriceWei: '0',
+      verdictPriceWei: '0',
+      openRoles: ['solver', 'evaluator'],
+      createdAt: nowIso,
+      launchedAt: nowIso,
+      signature: {
+        alg: 'eip-191',
+        signer: service.agent_address,
+        value: '0x' + '00'.repeat(65),
+      },
+    };
+    const manifestCid = await uploadToIpfs(
+      config.ipfsRegistryUrl ?? 'https://registry.autonolas.tech',
+      manifest,
+    );
+
+    const now = Date.now();
+    const selected = fixture.market;
+    const selectedOrderbook = fixture.orderbook;
+    const taskPath = '/data/release-acceptance-task.json';
+    const taskTemplate = {
+      solverType: 'prediction.v1',
+      window: {
+        startTs: now,
+        endTs: now + 10 * 60 * 1000,
+      },
+      claimPolicy: {
+        mode: 'parallel',
+        maxClaims: 10,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+      },
+      spec: {
+        question: {
+          kind: 'binary',
+          text: selected.question,
+          yesLabel: 'YES',
+          noLabel: 'NO',
+        },
+        source: {
+          type: 'prediction-market',
+          venue: 'polymarket',
+          url: fixture.marketUrl,
+          identifiers: {
+            marketId: selected.id,
+            conditionId: selected.conditionId,
+            yesTokenId: fixture.yesTokenId,
+            noTokenId: fixture.noTokenId,
+          },
+        },
+        resolution: {
+          expectedResolutionTime: selected.endDateIso,
+          rulesText: selected.rules,
+          rulesUrl: fixture.marketUrl,
+          timezone: 'UTC',
+        },
+        consensusSnapshot: {
+          sampledAt: selectedOrderbook.sampledAt,
+          probabilityYes: selectedOrderbook.midpointYes,
+          method: 'best-bid-ask-midpoint',
+          bestBidYes: selectedOrderbook.bestBidYes,
+          bestAskYes: selectedOrderbook.bestAskYes,
+          spread: selectedOrderbook.spread,
+          source: 'polymarket-clob',
+        },
+        eligibilitySnapshot: {
+          sampledAt: new Date(now).toISOString(),
+          timeToResolutionHours: Number(((Date.parse(selected.endDateIso) - now) / 3600000).toFixed(2)),
+          liquidityUsd: selected.liquidity,
+          volume24hUsd: selected.volume24hr,
+          orderbookAgeSeconds: Math.max(0, Math.round((now - Date.parse(selectedOrderbook.sampledAt)) / 1000)),
+          selectionReason: 'release-acceptance-live-polymarket-cycle',
+        },
+      },
+      eligibility: {
+        maxSubmissionDelayMs: 60000,
+        acceptanceRunId: runId,
+      },
+    };
+    writeFileSync(taskPath, JSON.stringify(taskTemplate, null, 2) + '\\n', 'utf8');
+    console.log(JSON.stringify({
+      manifestCid,
+      solverNetId,
+      taskPath,
+      market: {
+        marketId: selected.marketId,
+        conditionId: selected.conditionId,
+        question: selected.question,
+        url: fixture.marketUrl,
+        resolutionStatus: 'unresolved',
+      },
+    }));
+  `;
 }
 
 async function sleep(ms) {
@@ -325,6 +564,7 @@ async function main() {
   const configPath = dockerAcceptanceConfigPath(clientRoot);
   const composeEnvPath = dockerAcceptanceComposeEnvPath(clientRoot);
   const runId = makeRunId();
+  const acceptanceTaskId = `release-acceptance-${runId}`;
   const evidenceDir = resolve(
     parsed.values['evidence-dir'] ?? join(dockerAcceptanceEvidenceRoot(clientRoot), runId),
   );
@@ -338,12 +578,24 @@ async function main() {
 
   ensureDir(workspaceRoot);
   ensureDir(evidenceDir);
+  const polymarketFixture = await startPolymarketFixtureServer();
+  let polymarketFixtureClosed = false;
+  const closePolymarketFixture = async () => {
+    if (polymarketFixtureClosed) return;
+    polymarketFixtureClosed = true;
+    await new Promise((resolvePromise) => polymarketFixture.server.close(resolvePromise));
+  };
+  const acceptanceEnv = {
+    ...gateEnv,
+    JINN_POLYMARKET_GAMMA_BASE_URL: polymarketFixture.dockerBaseUrl,
+    JINN_POLYMARKET_CLOB_BASE_URL: polymarketFixture.dockerBaseUrl,
+  };
 
   const config = buildOperatorClientConfig({
     rpcUrl,
     clientHome: '/data',
     runIdSuffix: runId,
-    env: gateEnv,
+    env: acceptanceEnv,
   });
   if (targetCycles < 1) {
     fail(`target-cycles (${targetCycles}) must be >= 1.`);
@@ -353,7 +605,7 @@ async function main() {
 
   const composeEnv = buildDockerComposeEnv({
     clientRoot,
-    env: gateEnv,
+    env: acceptanceEnv,
     imageTag,
     configPath,
   });
@@ -370,7 +622,14 @@ async function main() {
     dirty,
     composeEnvPath,
     configPath,
-    cycleSubstrate: 'prediction.v0',
+    cycleSubstrate: 'prediction.v1',
+    acceptanceTaskId,
+    polymarketFixture: {
+      localBaseUrl: polymarketFixture.localBaseUrl,
+      dockerBaseUrl: polymarketFixture.dockerBaseUrl,
+      marketId: polymarketFixture.market.id,
+      conditionId: polymarketFixture.market.conditionId,
+    },
     dataVolume: composeEnv.JINN_ACCEPTANCE_DATA_VOLUME,
     claudeVolume: composeEnv.JINN_ACCEPTANCE_CLAUDE_VOLUME,
   });
@@ -451,11 +710,13 @@ async function main() {
       'build',
       '--build-arg',
       `JINN_BUILD_COMMIT=${buildCommit}`,
+      '-f',
+      'client/Dockerfile',
       '-t',
       imageTag,
       '.',
     ], {
-      cwd: clientRoot,
+      cwd: repoRoot,
       evidenceBase: join(evidenceDir, '05-docker-build'),
     });
     expectExit(build, [0], 'docker build');
@@ -488,30 +749,73 @@ async function main() {
       fail('bootstrap: expected at least one complete service', bootstrap);
     }
 
-    const baselineStatus = parseJsonStdout(runJinn(['status', '--json'], '11-status-before').stdout, 'status-before');
-    const baselineRewards = parseJsonStdout(runJinn(['rewards', '--json'], '12-rewards-before').stdout, 'rewards-before');
-    const baselineHistory = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '13-history-before').stdout, 'history-before');
-    // runStartAt is the lower bound for cycle attribution: any prediction.v0
-    // artifacts created at or after this timestamp belong to this gate run.
+    const seed = parseJsonStdout(
+      runCompose([
+        'run',
+        '--rm',
+        '-T',
+        '--no-deps',
+        '--entrypoint',
+        'node',
+        composeService,
+        '--input-type=module',
+        '-e',
+        buildAcceptanceSeedScript(runId, {
+          market: polymarketFixture.market,
+          marketUrl: polymarketFixture.marketUrl,
+          yesTokenId: polymarketFixture.yesTokenId,
+          noTokenId: polymarketFixture.noTokenId,
+          orderbook: polymarketFixture.orderbook,
+        }),
+      ], '11-seed-acceptance-task').stdout,
+      'acceptance-seed',
+    );
+    writeJson(join(evidenceDir, '11-seed-acceptance-task.json'), seed);
+
+    config.joinedSolverNets = {
+      ...(config.joinedSolverNets ?? {}),
+      [seed.manifestCid]: {
+        manifestCid: seed.manifestCid,
+        name: 'Release acceptance Prediction v1',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver', 'evaluator'],
+        harness: 'prediction-v1-baseline',
+      },
+    };
+    writeJson(configPath, config);
+
+    const baselineStatus = parseJsonStdout(runJinn(['status', '--json'], '12-status-before').stdout, 'status-before');
+    const baselineRewards = parseJsonStdout(runJinn(['rewards', '--json'], '13-rewards-before').stdout, 'rewards-before');
+    const baselineHistory = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '14-history-before').stdout, 'history-before');
+    // runStartAt is the lower bound for cycle attribution: any prediction.v1
+    // artifacts for acceptanceTaskId created at or after this timestamp belong
+    // to this gate run.
     const runStartAt = new Date().toISOString();
-    const baselineRows = queryDockerArtifactRows(composeEnvPath, runStartAt, join(evidenceDir, '14-artifacts-before'));
+    const baselineRows = queryDockerArtifactRows(
+      composeEnvPath,
+      runStartAt,
+      join(evidenceDir, '15-artifacts-before'),
+      acceptanceTaskId,
+    );
     const baselineArtifacts = summarizeRunWindowArtifacts(baselineRows, runStartAt);
     writeJson(join(evidenceDir, 'baseline-summary.json'), {
       historyCounts: countHistoryKinds(baselineHistory),
       runStartAt,
-      cycleSubstrate: 'prediction.v0',
+      cycleSubstrate: 'prediction.v1',
+      acceptanceTaskId,
+      acceptanceSeed: seed,
       artifactProgress: baselineArtifacts.byTaskId,
       pendingRewardsWei: sumPendingRewards(baselineRewards).toString(),
       status: baselineStatus,
     });
 
-    runCompose(['up', '-d', composeService], '15-compose-up', [0]);
+    runCompose(['up', '-d', composeService], '16-compose-up', [0]);
 
     let startup = null;
     const startupStartedAt = Date.now();
     while (Date.now() - startupStartedAt < 60_000) {
-      const logs = runCompose(['logs', '--no-color', composeService], '16-logs-startup', [0]);
-      writeFileSync(join(evidenceDir, '16-daemon.logs.txt'), logs.stdout, 'utf8');
+      const logs = runCompose(['logs', '--no-color', composeService], '17-logs-startup', [0]);
+      writeFileSync(join(evidenceDir, '17-daemon.logs.txt'), logs.stdout, 'utf8');
       const lines = logs.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
       for (const rawLine of lines) {
         // Docker Compose prefixes lines with "<service>  | "; strip that.
@@ -533,17 +837,45 @@ async function main() {
     }
     if (!startup) {
       fail('daemon did not emit daemon_started within 60s', {
-        logsPath: join(evidenceDir, '16-daemon.logs.txt'),
+        logsPath: join(evidenceDir, '17-daemon.logs.txt'),
       });
     }
-    writeJson(join(evidenceDir, '16-run.startup.json'), startup);
+    writeJson(join(evidenceDir, '17-run.startup.json'), startup);
+
+    const submit = parseJsonStdout(
+      runJinnRaw([
+        'tasks',
+        'submit',
+        '--id',
+        acceptanceTaskId,
+        '--description',
+        'Release acceptance prediction.v1 protocol cycle',
+        '--solver-type',
+        'prediction.v1',
+        '--manifest-cid',
+        seed.manifestCid,
+        '--spec-file',
+        seed.taskPath,
+        '--yes',
+        '--json',
+        '--config',
+        '/acceptance/config.json',
+      ], '18-submit-acceptance-task').stdout,
+      'submit-acceptance-task',
+    );
+    writeJson(join(evidenceDir, '18-submit-acceptance-task.json'), submit);
 
     let observed = null;
-    const pollPath = join(evidenceDir, '17-cycle-poll.jsonl');
+    const pollPath = join(evidenceDir, '19-cycle-poll.jsonl');
     const pollStartedAt = Date.now();
     while (Date.now() - pollStartedAt < timeoutMs) {
-      const status = parseJsonStdout(runJinn(['status', '--json'], '17-status-poll').stdout, 'status-poll');
-      const rows = queryDockerArtifactRows(composeEnvPath, runStartAt, join(evidenceDir, '17-artifacts-poll'));
+      const status = parseJsonStdout(runJinn(['status', '--json'], '19-status-poll').stdout, 'status-poll');
+      const rows = queryDockerArtifactRows(
+        composeEnvPath,
+        runStartAt,
+        join(evidenceDir, '19-artifacts-poll'),
+        acceptanceTaskId,
+      );
       const artifactProgress = summarizeRunWindowArtifacts(rows, runStartAt);
       const snapshot = {
         at: new Date().toISOString(),
@@ -562,8 +894,8 @@ async function main() {
       await sleep(pollMs);
     }
 
-    const logsAfter = runCompose(['logs', '--no-color', '--timestamps', composeService], '18-logs-final', [0]);
-    writeFileSync(join(evidenceDir, '18-daemon.logs.txt'), logsAfter.stdout, 'utf8');
+    const logsAfter = runCompose(['logs', '--no-color', '--timestamps', composeService], '20-logs-final', [0]);
+    writeFileSync(join(evidenceDir, '20-daemon.logs.txt'), logsAfter.stdout, 'utf8');
 
     if (!observed) {
       fail(`Timed out waiting for ${targetCycles} new protocol cycles`, {
@@ -572,20 +904,25 @@ async function main() {
       });
     }
 
-    const stop = parseJsonStdout(runJinnRaw(['stop', '--json'], '19-stop').stdout, 'stop');
+    const stop = parseJsonStdout(runJinnRaw(['stop', '--json'], '21-stop').stdout, 'stop');
     await sleep(10_000);
 
-    const fleet = parseJsonStdout(runJinn(['fleet', '--json'], '20-fleet-after').stdout, 'fleet-after');
-    const statusAfter = parseJsonStdout(runJinn(['status', '--json'], '21-status-after').stdout, 'status-after');
-    const rewardsBeforeClaim = parseJsonStdout(runJinn(['rewards', '--json'], '22-rewards-before-claim').stdout, 'rewards-before-claim');
-    const historyAfter = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '23-history-after').stdout, 'history-after');
+    const fleet = parseJsonStdout(runJinn(['fleet', '--json'], '22-fleet-after').stdout, 'fleet-after');
+    const statusAfter = parseJsonStdout(runJinn(['status', '--json'], '23-status-after').stdout, 'status-after');
+    const rewardsBeforeClaim = parseJsonStdout(runJinn(['rewards', '--json'], '24-rewards-before-claim').stdout, 'rewards-before-claim');
+    const historyAfter = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '25-history-after').stdout, 'history-after');
     const artifactsAfter = summarizeRunWindowArtifacts(
-      queryDockerArtifactRows(composeEnvPath, runStartAt, join(evidenceDir, '24-artifacts-after')),
+      queryDockerArtifactRows(
+        composeEnvPath,
+        runStartAt,
+        join(evidenceDir, '26-artifacts-after'),
+        acceptanceTaskId,
+      ),
       runStartAt,
     );
-    writeJson(join(evidenceDir, '24-artifacts-after.json'), artifactsAfter);
+    writeJson(join(evidenceDir, '26-artifacts-after.json'), artifactsAfter);
 
-    const claim = parseJsonStdout(runJinn(['claim-rewards', '--yes', '--json'], '25-claim-rewards').stdout, 'claim-rewards');
+    const claim = parseJsonStdout(runJinn(['claim-rewards', '--yes', '--json'], '27-claim-rewards').stdout, 'claim-rewards');
     const pendingBeforeClaim = sumPendingRewards(rewardsBeforeClaim);
     const rewardClaimMode = pendingBeforeClaim > 0n ? 'submitted' : 'no-pending';
     if (pendingBeforeClaim > 0n && (claim.submitted ?? 0) <= 0) {
@@ -612,10 +949,13 @@ async function main() {
       version,
       doctor,
       bootstrap,
+      acceptanceTaskId,
+      acceptanceSeed: seed,
+      submit,
       startup,
       stop,
       runStartAt,
-      cycleSubstrate: 'prediction.v0',
+      cycleSubstrate: 'prediction.v1',
       observedCompletedCycles: observed.artifactProgress.completedCycles,
       observedArtifactProgress: observed.artifactProgress.byTaskId,
       pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
@@ -642,6 +982,7 @@ async function main() {
       cwd: clientRoot,
       evidenceBase: join(evidenceDir, '99-compose-down'),
     });
+    await closePolymarketFixture();
   }
 }
 

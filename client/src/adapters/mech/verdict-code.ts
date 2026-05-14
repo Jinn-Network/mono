@@ -1,0 +1,20 @@
+/**
+ * On-chain verdict codes as defined in contracts/src/tasks/TaskCoordinator.sol (VerdictCode enum).
+ *
+ * Valid values: 1..4. `recordVerdict` rejects 0 (None) and anything > 4.
+ *
+ *   None       = 0  — not a valid submission value
+ *   Pass       = 1  — evaluation concluded the restoration was correct
+ *   Fail       = 2  — evaluation concluded the restoration was incorrect
+ *   Invalid    = 3  — the evaluator could not produce a verdict (missing data, harness error, etc.)
+ *   Unresolved = 4  — the outcome cannot be determined yet (prediction window still open, etc.)
+ */
+export const VerdictCode = {
+  None: 0,
+  Pass: 1,
+  Fail: 2,
+  Invalid: 3,
+  Unresolved: 4,
+} as const;
+
+export type VerdictCode = typeof VerdictCode[keyof typeof VerdictCode];

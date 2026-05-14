@@ -35,7 +35,7 @@ import { buildGoodTrajectoryFixture } from './fixtures/good-trajectory.js';
 // ─── Pass case ────────────────────────────────────────────────────────────────
 
 describe('runConformance — pass case', () => {
-  it('returns PASS + layer1Passed + layer2=N/A for a good self-signed restoration envelope', async () => {
+  it('returns PASS + layer1Passed + layer2=N/A for a good self-signed solution envelope', async () => {
     const fx = await buildGoodRestorationFixture();
     const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
 
@@ -66,14 +66,14 @@ describe('runConformance — pass case', () => {
     expect(ids).toContain('artifacts.linkage');
   });
 
-  it('returns PASS for a good verdict envelope with restoration bytes', async () => {
+  it('returns PASS for a good verdict envelope with solution bytes', async () => {
     const vfx = await buildGoodVerdictFixture();
 
     const report = await runConformance({
       envelopeCid: vfx.envelopeCid,
       options: {
         envelopeBytes: vfx.envelopeBytes,
-        restorationEnvelopeBytes: vfx.restorationEnvelopeBytes,
+        solutionEnvelopeBytes: vfx.solutionEnvelopeBytes,
       },
     });
 
@@ -248,12 +248,12 @@ describe('runConformance — known-bad matrix', () => {
 
   it('FAIL: verdict sha256 mismatch → verdict.back-ref fails', async () => {
     const vfx = await buildGoodVerdictFixture();
-    const tampered = new Uint8Array([...vfx.restorationEnvelopeBytes, 0x00]);
+    const tampered = new Uint8Array([...vfx.solutionEnvelopeBytes, 0x00]);
     const report = await runConformance({
       envelopeCid: vfx.envelopeCid,
       options: {
         envelopeBytes: vfx.envelopeBytes,
-        restorationEnvelopeBytes: tampered,
+        solutionEnvelopeBytes: tampered,
       },
     });
     expect(report.overall).toBe('FAIL');
@@ -279,7 +279,7 @@ describe('runConformance — known-bad matrix', () => {
       envelopeCid: vfx.envelopeCid,
       options: {
         envelopeBytes: new TextEncoder().encode(JSON.stringify(badEnvelope)),
-        restorationEnvelopeBytes: vfx.restorationEnvelopeBytes,
+        solutionEnvelopeBytes: vfx.solutionEnvelopeBytes,
       },
     });
     expect(report.overall).toBe('FAIL');

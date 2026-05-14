@@ -7,16 +7,16 @@
  *   - ReputationRegistry — evaluator → harness feedback (DR §4.3).
  *   - ValidationRegistry — Phase 1b challenge mechanism (DR §4.4).
  *
- * Cross-checked against `subgraph/networks.json` and the canonical
- * `erc-8004/erc-8004-contracts` reference. Mainnets and their respective
- * testnets share vanity prefixes (0x8004…); the chains 1/8453 vs 11155111/84532
- * pair accordingly.
+ * Cross-checked against the canonical `erc-8004/erc-8004-contracts`
+ * reference. Mainnets and their respective testnets share vanity prefixes
+ * (0x8004…); the chains 1/8453 vs 11155111/84532 pair accordingly.
  *
  * IdentityRegistry addresses live alongside the staking contract config in
  * `client/src/earning/contracts.ts` (since the bootstrap reads them at mint
  * time); we duplicate the lookup here for the consolidated ERC-8004 surface.
  *
- * If you add a chain, update all three maps + `subgraph/networks.json`.
+ * If you add a chain, update all three maps here and the IdentityRegistry
+ * lookup in `client/src/earning/contracts.ts`.
  */
 
 import type { Address } from 'viem';
@@ -48,8 +48,7 @@ export function getReputationRegistryAddress(chainId: number): Address | null {
 // ── ValidationRegistry ────────────────────────────────────────────────────────
 
 /**
- * Canonical 0x8004… ValidationRegistry deployments. Source of truth:
- * `subgraph/networks.json` (populated by `jinn-mono-fud`).
+ * Canonical 0x8004… ValidationRegistry deployments.
  */
 export const VALIDATION_REGISTRY_ADDRESSES: Record<number, Address> = {
   // Base mainnet

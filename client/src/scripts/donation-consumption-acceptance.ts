@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Store } from '../store/store.js';
-import { DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_SUBGRAPH_URL } from '../config.js';
+import { DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_DISCOVERY_URL } from '../config.js';
 import {
   DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK,
   DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID,
@@ -73,7 +73,7 @@ interface LocalConfig {
   apiPort?: number;
   dbPath?: string;
   earningDir?: string;
-  subgraphUrl?: string;
+  discovery?: { mode?: string; url?: string; fallbackToOnchain?: boolean };
   taskDiscoveryAllowedTaskIds?: string[];
   ipfsGatewayUrl?: string;
   ipfsRegistryUrl?: string;
@@ -229,76 +229,90 @@ function decodeBase64(value: unknown, label: string): Buffer {
   return Buffer.from(value, 'base64');
 }
 
-async function querySubgraphExecution(subgraphUrl: string, manifestCid: string): Promise<JsonRecord | null> {
-  const body = await fetchJson(subgraphUrl, {
+async function queryIndexerExecution(indexerUrl: string, manifestCid: string): Promise<JsonRecord | null> {
+  const gqlUrl = indexerUrl.endsWith('/graphql') ? indexerUrl : `${indexerUrl}/graphql`;
+  const where = { manifestCid };
+  const body = await fetchJson(gqlUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       query: `
-        query DonationEnvelope($manifestCid: String!) {
-          executions(first: 1, where: { manifestCid: $manifestCid }) {
-            id
-            manifestCid
-            tier
-            publishedAt
-            operator {
+        query DonationEnvelope($where: envelopeFilter) {
+          envelopes(where: $where, limit: 1, orderBy: "publishedAtBlock", orderDirection: "desc") {
+            items {
               agentId
-              owner
-              agentWallet
+              manifestCid
+              manifestHash
+              kind
+              evidenceTier
+              publishedAtBlock
             }
           }
         }
       `,
-      variables: { manifestCid },
+      variables: { where },
     }),
   });
   const errors = body.errors;
   if (Array.isArray(errors) && errors.length > 0) {
-    throw new Error(`Subgraph returned errors while checking donated envelope indexing: ${JSON.stringify(errors)}`);
+    throw new Error(`Indexer returned errors while checking donated envelope indexing: ${JSON.stringify(errors)}`);
   }
-  const executions = ((body.data as JsonRecord | undefined)?.executions ?? []) as JsonRecord[];
-  const execution = executions[0];
-  return execution ?? null;
+  const items = ((body.data as JsonRecord | undefined)?.envelopes as JsonRecord | undefined)?.items;
+  const item = (Array.isArray(items) ? items : [])[0] as JsonRecord | undefined;
+  if (!item) return null;
+  // Map Ponder indexer fields to the shape expected by queryCanonicalExecutionIndex callers:
+  //   evidenceTier → tier, agentId → operator.agentId, publishedAtBlock → publishedAt
+  return {
+    manifestCid: item.manifestCid,
+    manifestHash: item.manifestHash,
+    tier: item.evidenceTier,
+    publishedAt: item.publishedAtBlock,
+    operator: { agentId: item.agentId },
+  };
 }
 
-async function querySubgraphTaskIdByTaskCidDigest(subgraphUrl: string, taskCidDigest: string): Promise<string | null> {
-  const body = await fetchJson(subgraphUrl, {
+async function queryIndexerTaskIdByTaskCidDigest(indexerUrl: string, taskCidDigest: string): Promise<string | null> {
+  const gqlUrl = indexerUrl.endsWith('/graphql') ? indexerUrl : `${indexerUrl}/graphql`;
+  const where = { taskCidDigest: taskCidDigest.toLowerCase() };
+  const body = await fetchJson(gqlUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       query: `
-        query TaskByTaskCidDigest($taskCidDigest: Bytes!) {
-          tasks(first: 1, where: { taskCidDigest: $taskCidDigest }) {
-            id
-            taskId
-            taskCidDigest
-            createdAtTx
+        query TaskByTaskCidDigest($where: taskFilter) {
+          tasks(where: $where, limit: 1) {
+            items {
+              id
+              taskCidDigest
+              createdAtTx
+            }
           }
         }
       `,
-      variables: { taskCidDigest: taskCidDigest.toLowerCase() },
+      variables: { where },
     }),
   });
   const errors = body.errors;
   if (Array.isArray(errors) && errors.length > 0) {
-    throw new Error(`Subgraph returned errors while resolving producer task id: ${JSON.stringify(errors)}`);
+    throw new Error(`Indexer returned errors while resolving producer task id: ${JSON.stringify(errors)}`);
   }
-  const tasks = ((body.data as JsonRecord | undefined)?.tasks ?? []) as JsonRecord[];
-  const task = tasks[0];
-  return asString(task?.taskId) ?? asString(task?.id) ?? null;
+  const items = ((body.data as JsonRecord | undefined)?.tasks as JsonRecord | undefined)?.items;
+  const task = (Array.isArray(items) ? items : [])[0] as JsonRecord | undefined;
+  // The Ponder indexer's task `id` IS the on-chain task id (decimal string).
+  return asString(task?.id) ?? null;
 }
 
 async function queryCanonicalExecutionIndex(opts: {
-  subgraphUrl?: string;
+  indexerUrl?: string;
   rpcUrl?: string;
   chainId: number;
   manifestCid: string;
 }): Promise<JsonRecord | null> {
   const warnings: string[] = [];
-  if (opts.subgraphUrl) {
+  if (opts.indexerUrl) {
     try {
-      const subgraphExecution = await querySubgraphExecution(opts.subgraphUrl, opts.manifestCid);
-      if (subgraphExecution) return { source: 'subgraph', ...subgraphExecution };
+      const indexerExecution = await queryIndexerExecution(opts.indexerUrl, opts.manifestCid);
+      if (indexerExecution) return { source: 'indexer', ...indexerExecution };
     } catch (err) {
       warnings.push(err instanceof Error ? err.message : String(err));
     }
@@ -334,7 +348,7 @@ async function queryCanonicalExecutionIndex(opts: {
 }
 
 async function waitForCanonicalExecutionIndex(opts: {
-  subgraphUrl?: string;
+  indexerUrl?: string;
   rpcUrl?: string;
   chainId: number;
   manifestCid: string;
@@ -439,7 +453,7 @@ async function verifyTrajectorySource(envelope: JsonRecord, ipfsGatewayUrl: stri
 async function verifyDonatedEnvelope(
   artifact: ProducerArtifact,
   ipfsGatewayUrl: string,
-  indexOpts: { subgraphUrl?: string; rpcUrl?: string; chainId: number },
+  indexOpts: { indexerUrl?: string; rpcUrl?: string; chainId: number },
   deadline: number,
   pollMs: number,
 ): Promise<VerifiedDonation> {
@@ -631,7 +645,7 @@ export function buildConsumerConfig(opts: {
   producerConfig: LocalConfig;
   consumerHome: string;
   consumerPort: number;
-  subgraphUrl: string;
+  indexerUrl: string;
   ipfsGatewayUrl: string;
 }): LocalConfig {
   const clientHome = defaultClientHome(opts.consumerHome);
@@ -643,7 +657,7 @@ export function buildConsumerConfig(opts: {
     dbPath: join(clientHome, 'jinn.db'),
     apiPort: opts.consumerPort,
     pollIntervalMs: opts.producerConfig.pollIntervalMs ?? 5000,
-    subgraphUrl: opts.subgraphUrl,
+    discovery: { mode: 'http', url: opts.indexerUrl, fallbackToOnchain: true },
     ipfsGatewayUrl: opts.ipfsGatewayUrl,
     ipfsRegistryUrl: opts.producerConfig.ipfsRegistryUrl ?? 'https://registry.autonolas.tech',
     operator: {
@@ -998,7 +1012,7 @@ async function callMcpTool(opts: {
   storePath: string;
   daemonApiUrl: string;
   daemonApiToken: string;
-  subgraphUrl?: string;
+  indexerUrl?: string;
   ipfsGatewayUrl: string;
   rpcUrl?: string;
   chainId: number;
@@ -1015,7 +1029,10 @@ async function callMcpTool(opts: {
       STORE_PATH: opts.storePath,
       DAEMON_API_URL: opts.daemonApiUrl,
       DAEMON_API_TOKEN: opts.daemonApiToken,
-      JINN_CORPUS_SUBGRAPH_URL: opts.subgraphUrl ?? '',
+      // Discovery env for the MCP server's read-only corpus bootstrap.
+      // JINN_DISCOVERY_URL replaces the old JINN_CORPUS_SUBGRAPH_URL.
+      JINN_DISCOVERY_URL: opts.indexerUrl ?? '',
+      JINN_DISCOVERY_MODE: opts.indexerUrl ? 'http' : 'onchain',
       JINN_CORPUS_IPFS_GATEWAY_URL: opts.ipfsGatewayUrl,
       JINN_CORPUS_RPC_URL: opts.rpcUrl ?? '',
       JINN_CORPUS_CHAIN_ID: String(opts.chainId),
@@ -1125,7 +1142,7 @@ export async function scopeConsumerConfigToProducerTask(opts: {
   consumerConfig: LocalConfig;
   consumerConfigPath: string;
   proof: VerifiedDonation;
-  subgraphUrl: string;
+  indexerUrl: string;
   evidenceDir?: string;
 }): Promise<string> {
   const taskCidDigest = producerTaskCidDigest(opts.proof);
@@ -1135,13 +1152,13 @@ export async function scopeConsumerConfigToProducerTask(opts: {
     });
   }
   const createdAtTx = producerTaskCreationTx(opts.proof);
-  const taskId = await querySubgraphTaskIdByTaskCidDigest(opts.subgraphUrl, taskCidDigest);
+  const taskId = await queryIndexerTaskIdByTaskCidDigest(opts.indexerUrl, taskCidDigest);
   if (!taskId) {
-    fail('producer_task_scope_unresolved', 'Could not resolve the producer on-chain task id from the configured subgraph.', {
+    fail('producer_task_scope_unresolved', 'Could not resolve the producer on-chain task id from the configured Ponder indexer.', {
       envelopeCid: opts.proof.artifact.envelopeCid,
       taskCidDigest,
       createdAtTx,
-      subgraphUrl: opts.subgraphUrl,
+      indexerUrl: opts.indexerUrl,
     });
   }
 
@@ -1375,7 +1392,9 @@ async function main(): Promise<void> {
     producerUiToken,
     producerHandshakeKey,
   });
-  const subgraphUrl = asString(producerConfig.subgraphUrl) ?? DEFAULT_TESTNET_SUBGRAPH_URL;
+  const indexerUrl = asString(
+    (producerConfig.discovery as Record<string, unknown> | undefined)?.url as string | undefined,
+  ) ?? DEFAULT_TESTNET_DISCOVERY_URL;
   const ipfsGatewayUrl = asString(producerConfig.ipfsGatewayUrl) ?? DEFAULT_IPFS_GATEWAY_URL;
   const chainId = producerConfig.network === 'mainnet' ? 8453 : 84532;
   const producerRpcUrl = asString(producerConfig.rpcUrl) ?? defaultRpcUrlForChain(chainId);
@@ -1404,7 +1423,7 @@ async function main(): Promise<void> {
       producerConfig,
       consumerHome,
       consumerPort,
-      subgraphUrl,
+      indexerUrl,
       ipfsGatewayUrl,
     });
     writeJson(consumerConfigPath, consumerConfig);
@@ -1442,7 +1461,7 @@ async function main(): Promise<void> {
     archivedConsumerDb,
     consumerEarningDir,
     consumerEvaluatorStatePath,
-    subgraphUrl,
+    indexerUrl,
     ipfsGatewayUrl,
   });
 
@@ -1460,7 +1479,7 @@ async function main(): Promise<void> {
   const donationProof = await verifyDonatedEnvelope(
     producerArtifact,
     ipfsGatewayUrl,
-    { subgraphUrl, rpcUrl: producerRpcUrl, chainId },
+    { indexerUrl, rpcUrl: producerRpcUrl, chainId },
     deadline,
     pollMs,
   );
@@ -1476,7 +1495,7 @@ async function main(): Promise<void> {
     consumerConfig,
     consumerConfigPath,
     proof: donationProof,
-    subgraphUrl,
+    indexerUrl,
     evidenceDir,
   });
   consumerConfig = loadLocalConfig(consumerConfigPath);
@@ -1509,14 +1528,14 @@ async function main(): Promise<void> {
       name: 'search_records',
       args: {
         solverType: 'swe-rebench-v2.v1',
-        role: 'restoration',
+        role: 'solution',
         artifactType: SWE_SOLUTION_ARTIFACT_TYPE,
         limit: 50,
       },
       storePath: consumerDbPath,
       daemonApiUrl: consumerUrl,
       daemonApiToken: consumerApiToken,
-      subgraphUrl,
+      indexerUrl,
       ipfsGatewayUrl,
       rpcUrl: asString(consumerConfig.rpcUrl) ?? producerRpcUrl,
       chainId,
@@ -1536,7 +1555,7 @@ async function main(): Promise<void> {
       storePath: consumerDbPath,
       daemonApiUrl: consumerUrl,
       daemonApiToken: consumerApiToken,
-      subgraphUrl,
+      indexerUrl,
       ipfsGatewayUrl,
       rpcUrl: asString(consumerConfig.rpcUrl) ?? producerRpcUrl,
       chainId,

@@ -45,10 +45,7 @@ yarn global add @jinn-network/client@latest
 The fast path for a new operator on Base Sepolia:
 
 ```bash
-# One-time: pick runtime mode + authenticate Claude Code (interactive).
-jinn auth
-
-# Zero-to-running (wallet + funding check + bootstrap + run).
+# Zero-to-running: opens the app, then wallet + funding check + bootstrap + run.
 jinn run
 ```
 
@@ -57,6 +54,8 @@ it to `~/.jinn-client/keystore-password` (mode 0600), and prints a summary
 with the master address and a pointer to back up your mnemonic. Subsequent
 verbs (`jinn run`, `jinn bootstrap`, `jinn claim-rewards`, …) pick up the
 password from that file automatically — no env var needed.
+If Claude Code authentication or runtime setup is needed, complete it in the
+operator app that `jinn run` opens.
 
 **Back up your mnemonic before you fund anything:**
 
@@ -152,7 +151,7 @@ Then open your agent and paste:
 > running. Keep me in the loop if anything needs my input.
 
 The `jinn-operator` skill activates on mentions of "jinn", "jinn network", and
-"jinn run", then walks your agent through install, auth, bootstrap, and
+"jinn run", then walks your agent through install, app-guided setup, bootstrap, and
 daemon lifecycle. You stay in the loop for funding decisions.
 
 ## Opting in to SolverNets

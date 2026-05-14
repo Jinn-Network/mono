@@ -55,7 +55,7 @@ function displayName(name: string): string {
   return DISPLAY_NAMES[name] ?? name;
 }
 
-function canonicalPluginName(value: string): string {
+function stripBundledPrefix(value: string): string {
   return value.startsWith(BUNDLED_PREFIX) ? value.slice(BUNDLED_PREFIX.length) : value;
 }
 
@@ -67,7 +67,7 @@ function uniquePluginValues(values: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
-    const name = canonicalPluginName(value);
+    const name = stripBundledPrefix(value);
     if (seen.has(name)) continue;
     seen.add(name);
     out.push(value);
@@ -95,7 +95,7 @@ function buildOptions(available: CatalogPluginOption[], selected: string[]): Plu
     });
   }
   for (const value of selected) {
-    const name = canonicalPluginName(value);
+    const name = stripBundledPrefix(value);
     if (seen.has(name)) continue;
     seen.add(name);
     out.push({
@@ -126,8 +126,8 @@ export function PluginPicker({
   const [open, setOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<PluginOption | null>(null);
   const options = useMemo(() => buildOptions(available, selected), [available, selected]);
-  const selectedSet = new Set(selected.map(canonicalPluginName));
-  const disabledDefaultSet = new Set(disabledDefaultPlugins.map(canonicalPluginName));
+  const selectedSet = new Set(selected.map(stripBundledPrefix));
+  const disabledDefaultSet = new Set(disabledDefaultPlugins.map(stripBundledPrefix));
   const activeSet = new Set(selectedSet);
   for (const option of options) {
     if (option.defaultIncluded && !disabledDefaultSet.has(option.name)) {
@@ -149,7 +149,7 @@ export function PluginPicker({
 
   const addOption = (option: PluginOption): void => {
     const nextDisabled = option.defaultIncluded
-      ? disabledDefaultPlugins.filter((name) => canonicalPluginName(name) !== option.name)
+      ? disabledDefaultPlugins.filter((name) => stripBundledPrefix(name) !== option.name)
       : disabledDefaultPlugins;
     const nextSelected = option.defaultIncluded
       ? selected
@@ -167,7 +167,7 @@ export function PluginPicker({
       return;
     }
     onChange(
-      selected.filter((name) => canonicalPluginName(name) !== option.name),
+      selected.filter((name) => stripBundledPrefix(name) !== option.name),
       disabledDefaultPlugins,
     );
   };

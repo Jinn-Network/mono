@@ -60,7 +60,9 @@ export interface ConformanceOptions {
   trajectoryBytes?: Buffer | Uint8Array;
   /** Pre-loaded trajectory (skip IPFS fetch). */
   trajectory?: unknown;
-  /** Pre-fetched restoration envelope bytes (skip IPFS fetch). */
+  /** Pre-fetched solution envelope bytes (skip IPFS fetch). */
+  solutionEnvelopeBytes?: Buffer | Uint8Array;
+  /** Legacy alias for solutionEnvelopeBytes. */
   restorationEnvelopeBytes?: Buffer | Uint8Array;
   /** Pre-loaded source bundle (skip IPFS fetch). */
   sourceBundle?: { files: Map<string, string>; manifest?: Record<string, unknown> };
@@ -74,14 +76,19 @@ export interface ConformanceOptions {
 export interface ConformanceContext {
   envelopeCid: string;
   envelopeBytes?: Uint8Array;
+  rawEnvelope?: Record<string, unknown>;
   envelope?: SignedEnvelope;
   task?: Task;
   trajectoryBytes?: Uint8Array;
   trajectory?: unknown; // typed after Plan D schema lands
   sourceBundle?: { files: Map<string, string>; manifest?: Record<string, unknown> };
-  /** Pre-fetched bytes of the referenced restoration envelope (for verdict checks). */
+  /** Pre-fetched bytes of the referenced solution envelope (for verdict checks). */
+  solutionEnvelopeBytes?: Uint8Array;
+  /** Legacy alias for solutionEnvelopeBytes. */
   restorationEnvelopeBytes?: Uint8Array;
-  /** Pre-loaded restoration envelope object (for verdict checks). */
+  /** Pre-loaded solution envelope object (for verdict checks). */
+  solutionEnvelope?: SignedEnvelope;
+  /** Legacy alias for solutionEnvelope. */
   restorationEnvelope?: SignedEnvelope;
   options: ConformanceOptions;
 }

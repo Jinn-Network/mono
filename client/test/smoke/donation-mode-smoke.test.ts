@@ -9,6 +9,7 @@ import { TaskRunPersistence, type PersistedTaskRunInput } from '../../src/harnes
 import { TaskRunState } from '../../src/harnesses/engine/state.js';
 import { createCorpus } from '../../src/corpus/index.js';
 import type { SignedEnvelope } from '../../src/types/envelope.js';
+import type { DiscoveryAPI } from '../../src/discovery/types.js';
 
 const {
   ipfsStore,
@@ -222,32 +223,27 @@ describe('testnet donation mode e2e smoke', () => {
     expect(served?.content.equals(donatedBytes)).toBe(true);
 
     const x402Acquire = vi.fn();
+    const discovery: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValue([]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([{
+        manifestCid: packed!.manifestCid,
+        manifestHash: envelope!.signature.hash,
+        operator: { agentId: '1', safeAddress: SOLVER_SAFE },
+        evidenceTier: 'self-signed' as const,
+        publishedAt: Math.floor(Date.now() / 1000),
+      }]),
+    };
     const corpus = createCorpus(
       {
-        subgraphUrl: 'https://subgraph.example/graphql',
+        discovery,
         ipfsGatewayUrl: 'fake-ipfs://gateway',
         store: readerStore,
         signer: { privateKey: TEST_PRIVATE_KEY },
         selfSafeAddress: READER_SAFE,
       },
       {
-        fetch: vi.fn(async () => new Response(JSON.stringify({
-          data: {
-            executions: [{
-              id: '1',
-              manifestCid: packed!.manifestCid,
-              manifestHash: envelope!.signature.hash,
-              tier: 'SELF_SIGNED',
-              publishedAt: String(Math.floor(Date.now() / 1000)),
-              operator: {
-                id: '1',
-                agentId: '1',
-                owner: SOLVER_SAFE,
-                agentWallet: SOLVER_SAFE,
-              },
-            }],
-          },
-        }), { status: 200, headers: { 'content-type': 'application/json' } })),
         fetchFromIpfs: async (_gatewayUrl: string, cid: string) => {
           const payload = ipfsStore.get(cid);
           if (payload === undefined) throw new Error(`fake IPFS CID not found: ${cid}`);

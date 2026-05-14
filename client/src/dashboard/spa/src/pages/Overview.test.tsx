@@ -67,10 +67,10 @@ function renderOverviewWithMemory(): { history: string[] } {
   return { history: memory.history };
 }
 
-/** Match the OperatorCard's `<span>Your {name}</span>` eyebrow exactly. */
-function operatorEyebrow(name: string): (_: string, el: Element | null) => boolean {
+/** Match the OperatorCard's active SolverNet name exactly. */
+function operatorCardName(name: string): (_: string, el: Element | null) => boolean {
   return (_, el) =>
-    el?.tagName === 'SPAN' && el.textContent?.trim() === `Your ${name}`;
+    el?.tagName === 'SPAN' && el.textContent?.trim() === name;
 }
 
 describe('OverviewPage empty-state gating', () => {
@@ -91,8 +91,7 @@ describe('OverviewPage empty-state gating', () => {
     render(withProviders(<OverviewPage />));
 
     expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
-    // OperatorCard's "Your <name>" eyebrow must NOT render in this state.
-    expect(screen.queryByText(operatorEyebrow('prediction'))).toBeNull();
+    expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
   });
 
   it('shows the OperatorCard from the legacy `enabled` flag (predecessor compat)', async () => {
@@ -116,7 +115,7 @@ describe('OverviewPage empty-state gating', () => {
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByText(operatorEyebrow('prediction'))).toBeTruthy(),
+      expect(screen.getByText(operatorCardName('prediction'))).toBeTruthy(),
     );
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
     expect(screen.getByText(/waiting for tasks/i)).toBeTruthy();
@@ -138,7 +137,7 @@ describe('OverviewPage empty-state gating', () => {
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByText(operatorEyebrow('prediction'))).toBeTruthy(),
+      expect(screen.getByText(operatorCardName('prediction'))).toBeTruthy(),
     );
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
     expect(screen.getByText(/^solver$/i)).toBeTruthy();
@@ -171,7 +170,7 @@ describe('OverviewPage empty-state gating', () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(operatorEyebrow('Prediction Markets')),
+        screen.getByText(operatorCardName('Prediction Markets')),
       ).toBeTruthy(),
     );
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
@@ -206,12 +205,12 @@ describe('OverviewPage empty-state gating', () => {
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByText(operatorEyebrow('SWE-rebench v2'))).toBeTruthy(),
+      expect(screen.getByText(operatorCardName('SWE-rebench v2'))).toBeTruthy(),
     );
     expect(screen.getByText(/network · swe-rebench v2/i)).toBeTruthy();
-    expect(screen.queryByText(operatorEyebrow('prediction'))).toBeNull();
-    const configure = screen.getByText(/configure/i).closest('a');
-    expect(configure?.getAttribute('href')).toBe('/operator#solvernets/bafkreiswe');
+    expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
+    const change = screen.getByText(/change/i).closest('a');
+    expect(change?.getAttribute('href')).toBe('/operator#solvernets');
   });
 
   it('uses generic task-run totals before stale prediction counters', async () => {
@@ -280,7 +279,7 @@ describe('OverviewPage empty-state gating', () => {
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
-      expect(screen.getByText(operatorEyebrow('prediction'))).toBeTruthy(),
+      expect(screen.getByText(operatorCardName('prediction'))).toBeTruthy(),
     );
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
   });
@@ -291,7 +290,7 @@ describe('OverviewPage empty-state gating', () => {
     render(withProviders(<OverviewPage />));
 
     expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
-    expect(screen.queryByText(operatorEyebrow('prediction'))).toBeNull();
+    expect(screen.queryByText(operatorCardName('prediction'))).toBeNull();
   });
 
   it('CTA on empty-state deep-links into /operator#solvernets', async () => {
@@ -323,7 +322,7 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByTestId('live-now-band')).toBeNull();
   });
 
-  it('wires quick actions to their real dashboard actions', async () => {
+  it('wires dashboard card actions to their real actions', async () => {
     getStatusMock.mockResolvedValue({
       rewards: { pendingStakingRewardsWei: '1000000000000000000' },
       masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
@@ -344,16 +343,18 @@ describe('OverviewPage empty-state gating', () => {
     });
     const { history } = renderOverviewWithMemory();
 
-    fireEvent.click(await screen.findByRole('button', { name: /claim jinn/i }));
+    expect(await screen.findByText(/jinn claimable/i)).toBeTruthy();
+    expect(screen.queryByText(/quick actions/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /manage wallet/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /claim now/i }));
     await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
 
-    fireEvent.click(screen.getByRole('button', { name: /top up gas/i }));
+    fireEvent.click(screen.getByRole('button', { name: /top up/i }));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
 
-    fireEvent.click(screen.getByRole('button', { name: /restart node/i }));
+    fireEvent.click(screen.getByRole('button', { name: /restart/i }));
     await waitFor(() => expect(restartDaemonMock).toHaveBeenCalledOnce());
-
-    fireEvent.click(screen.getByRole('button', { name: /manage wallet/i }));
-    await waitFor(() => expect(history.at(-1)).toBe('/operator#security'));
+    expect(history.at(-1)).toBe('/overview');
   });
 });

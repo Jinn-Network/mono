@@ -475,6 +475,33 @@ describe('solver-nets command', () => {
     expect(status.harness).toBeUndefined();
   });
 
+  it('reports a generic operator recovery path when the legacy prediction SolverNet is missing', async () => {
+    const configPath = tempConfig({ solverNets: {} });
+    const config = loadConfig(configPath);
+    delete config.solverNets.prediction;
+
+    const status = await buildPredictionOperatorStatus({
+      config,
+      configPath,
+      ...operatorStatusDeps,
+      loadSolverNets: async () => ({
+        get: () => undefined,
+      }),
+    });
+
+    const diagnostic = status.diagnostics.find((candidate) => candidate.code === 'prediction_solvernet_missing');
+    expect(status.ok).toBe(false);
+    expect(diagnostic?.message).toBe('No active SolverNet configured.');
+    expect(diagnostic?.configField).toBe('solverNets');
+    expect(diagnostic?.nextAction).toEqual({
+      description: 'Open Operator > SolverNets to join or configure a SolverNet.',
+      url: '/operator#solvernets',
+    });
+    expect(status.nextAction).toEqual(diagnostic?.nextAction);
+    expect(JSON.stringify(status)).not.toContain("No SolverNet named 'prediction'");
+    expect(JSON.stringify(status)).not.toContain('jinn solver-nets enable prediction');
+  });
+
   it('reports insufficient sample task windows with a complete non-config diagnostic', async () => {
     const sample = await runPredictionSample({ closedWindow: true });
     const diagnostic = sample.diagnostics.find((candidate) => candidate.code === 'prediction_sample_cannot_attempt');
@@ -498,5 +525,159 @@ describe('solver-nets command', () => {
     const text = JSON.stringify(status);
     expect(text).not.toMatch(/start the daemon/i);
     expect(text).toMatch(/waiting for tasks/i);
+  });
+
+  describe('legacy canonical-plugin config sanitization', () => {
+    it('strips canonicalPlugin and referencePlugins from solver-nets show output for legacy SolverNet entries', async () => {
+      const legacyConfig = {
+        solverNets: {
+          legacy: {
+            enabled: true,
+            solverType: 'prediction.v0',
+            harness: 'claude-code-learner',
+            canonicalPlugin: { source: 'bundled:jinn-prediction-plugin' },
+            referencePlugins: ['npm:@example/old-reference-plugin'],
+            plugins: [],
+            taskGenerator: { enabled: true },
+          },
+        },
+      };
+      const configPath = tempConfig(legacyConfig);
+      const result = await runSolverNets(['show', 'legacy', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      const envelope = result.envelope;
+      expect(envelope['solverNet']).not.toHaveProperty('canonicalPlugin');
+      expect(envelope['solverNet']).not.toHaveProperty('referencePlugins');
+      // Legacy source was promoted into plugins[] so display sanitization does
+      // not silently discard operator intent.
+      expect(envelope['solverNet']['plugins']).toContain('bundled:jinn-prediction-plugin');
+      // referencePlugins entries are dropped — they were never live runtime
+      // substrate and the abandoned reference-plugin concept must not surface.
+      expect(envelope['solverNet']['plugins']).not.toContain('npm:@example/old-reference-plugin');
+    });
+
+    it('returns a safe minimal shape when a SolverNet entry is malformed (not an object)', async () => {
+      const malformedConfig = {
+        solverNets: {
+          broken: 42 as unknown as object,
+        },
+      };
+      const configPath = tempConfig(malformedConfig);
+      const result = await runSolverNets(['show', 'broken', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      const envelope = result.envelope;
+      // Sanitizer must not emit the raw scalar — that would propagate
+      // malformed config into operator-facing surfaces.
+      expect(typeof envelope['solverNet']).toBe('object');
+      expect(envelope['solverNet']).not.toBe(null);
+    });
+
+    it('strips canonicalPlugin from solver-nets doctor output for non-prediction.v1 SolverNets', async () => {
+      const legacyConfig = {
+        solverNets: {
+          legacy: {
+            enabled: true,
+            solverType: 'prediction.v0',
+            harness: 'claude-code-learner',
+            canonicalPlugin: { source: 'bundled:jinn-prediction-plugin' },
+            referencePlugins: ['bundled:jinn-prediction-plugin'],
+            plugins: [],
+            taskGenerator: { enabled: true },
+          },
+        },
+      };
+      const configPath = tempConfig(legacyConfig);
+      const result = await runSolverNets(['doctor', 'legacy', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      const envelope = result.envelope;
+      expect(envelope['verb']).toBe('solver-nets doctor');
+      expect(envelope['solverNet']).not.toHaveProperty('canonicalPlugin');
+      expect(envelope['solverNet']).not.toHaveProperty('referencePlugins');
+    });
+
+    it('does not duplicate plugins when canonicalPlugin.source already appears in plugins[]', async () => {
+      const legacyConfig = {
+        solverNets: {
+          legacy: {
+            enabled: true,
+            solverType: 'prediction.v0',
+            harness: 'claude-code-learner',
+            canonicalPlugin: { source: 'bundled:jinn-prediction-plugin' },
+            plugins: ['bundled:jinn-prediction-plugin'],
+            taskGenerator: { enabled: true },
+          },
+        },
+      };
+      const configPath = tempConfig(legacyConfig);
+      const result = await runSolverNets(['show', 'legacy', '--config', configPath]);
+
+      const plugins = result.envelope['solverNet']['plugins'] as unknown[];
+      const occurrences = plugins.filter((entry) => entry === 'bundled:jinn-prediction-plugin').length;
+      expect(occurrences).toBe(1);
+    });
+  });
+
+  describe('--human output mode', () => {
+    it('solver-nets doctor --human emits readable text, not JSON, for prediction.v1', async () => {
+      const configPath = tempConfig(predictionConfig());
+      const made = makeCommandCtx({ argv: ['doctor', 'prediction', '--human', '--config', configPath] });
+      await solverNetsCommand.run(made.ctx);
+      const raw = made.writes.join('');
+
+      expect(made.exits).toEqual([]);
+      // First write must not be a JSON object header (which is what `--human`
+      // is meant to suppress per docs/runbooks operator dogfood evidence).
+      expect(raw.trim().startsWith('{')).toBe(false);
+      expect(raw).toContain('SolverNet: prediction');
+      expect(raw).toContain('solverType: prediction.v1');
+    });
+
+    it('solver-nets show --human emits readable text for arbitrary SolverNet entries', async () => {
+      const legacyConfig = {
+        solverNets: {
+          legacy: {
+            enabled: true,
+            solverType: 'prediction.v0',
+            harness: 'claude-code-learner',
+            plugins: ['bundled:jinn-prediction-plugin'],
+            taskGenerator: { enabled: true },
+          },
+        },
+      };
+      const configPath = tempConfig(legacyConfig);
+      const made = makeCommandCtx({ argv: ['show', 'legacy', '--human', '--config', configPath] });
+      await solverNetsCommand.run(made.ctx);
+      const raw = made.writes.join('');
+
+      expect(made.exits).toEqual([]);
+      expect(raw.trim().startsWith('{')).toBe(false);
+      expect(raw).toContain('SolverNet: legacy');
+      expect(raw).toContain('plugins: bundled:jinn-prediction-plugin');
+    });
+
+    it('solver-nets doctor without --human keeps JSON output (default behaviour)', async () => {
+      const configPath = tempConfig(predictionConfig());
+      const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      // runSolverNets already JSON.parses the writes — proves output remains JSON.
+      expect(result.envelope['verb']).toBe('solver-nets doctor');
+    });
+
+    it('solver-nets list --human emits readable text, not JSON', async () => {
+      const configPath = tempConfig(predictionConfig());
+      const made = makeCommandCtx({ argv: ['list', '--human', '--config', configPath] });
+      await solverNetsCommand.run(made.ctx);
+      const raw = made.writes.join('');
+
+      expect(made.exits).toEqual([]);
+      // Help text advertises --human for list as well — verify it is honored.
+      expect(raw.trim().startsWith('{')).toBe(false);
+      expect(raw).toContain('prediction');
+      expect(raw).toContain('prediction.v1');
+    });
   });
 });

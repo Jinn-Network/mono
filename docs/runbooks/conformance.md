@@ -77,9 +77,9 @@ Conformance report for bafybeiabc123...
 | `trajectory.schema` | Full trajectory against `JinnTrajectoryV1Schema`. Skipped when `envelope.trajectory` is null. |
 | `trajectory.hash-chain` | Every span's `jinn.prevSpanHash` matches the hash of the previous span (span[0] links to genesis = `keccak256(JCS({ runStart: taskCid }))`). Skipped when trajectory is absent. |
 | `trajectory.span-profile` | Every span has the required attributes for its `jinn.span.kind` per `SPAN_PROFILE`. Unknown kinds fail immediately. |
-| `artifacts.vocabulary` | Required artifact types are present: `output.<solverType>` (always for restoration), `system_snapshot` (restoration), `trajectory` (when `envelope.trajectory` is non-null). |
+| `artifacts.vocabulary` | Required artifact types are present: `output.<solverType>` (always for solution), `system_snapshot` (solution), `trajectory` (when `envelope.trajectory` is non-null). |
 | `artifacts.linkage` | Bidirectional: every `artifact.metadata.producedBy.spanId` references a real span; every `jinn.artifact.emit` span's `jinn.artifact.cid` is in `envelope.artifacts[]`. |
-| `verdict.back-ref` | Verdict-role only: `payload.restorationEnvelope.sha256` matches the fetched bytes of the referenced restoration envelope. Skipped on restoration envelopes. |
+| `verdict.back-ref` | Verdict-role only: `payload.solutionEnvelope.sha256` matches the fetched bytes of the referenced solution envelope. Legacy `payload.restorationEnvelope` is accepted on read. Skipped on solution envelopes. |
 | `verdict.verification-record` | Verdict-role only: `payload.verificationOfRestoration` is structurally valid (claimedTier, sdkVersion, timestamp, non-empty checks[], overall). |
 | `secret-scrub.compliance` | No raw credentials in span attributes (Bearer tokens, API keys, JWTs, hex private keys) on attribute names matching `*.authorization`, `*.apiKey`, `*.bearer`, `*.password`, `*.secret`, `*.token`, `*.privateKey`. Properly scrubbed `<redacted:name>` markers pass. |
 

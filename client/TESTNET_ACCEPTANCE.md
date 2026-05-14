@@ -49,8 +49,8 @@ Do not remove tests or lower assertions to pass this gate. If a test exposes a
 real mismatch in the public flow, fix the implementation or explicitly hold the
 release.
 
-`yarn corpus:e2e` and `yarn e2e:donation` remain fast mocked/smoke checks.
-They do not replace `yarn release:donation-consumption`, which is the
+`yarn e2e:donation` (and the corpus integration suite, `vitest run test/corpus`)
+remain fast mocked/smoke checks. They do not replace `yarn release:donation-consumption`, which is the
 release-blocking proof that another isolated operator can discover and consume
 donated SWE execution data through the canonical on-chain/IPFS discovery path
 and real MCP acquisition path, cache it as a network artifact, reuse that cache

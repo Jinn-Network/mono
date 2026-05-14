@@ -140,6 +140,7 @@ function decodeMetadataLog(log: Log): ExecutionMetadataEvent | null {
 
 function matchesQuery(ref: EnvelopeRef, q: CorpusQuery): boolean {
   if (q.evidenceTier && ref.evidenceTier !== q.evidenceTier) return false;
+  if (q.manifestHash && ref.manifestHash.toLowerCase() !== q.manifestHash.toLowerCase()) return false;
   return true;
 }
 

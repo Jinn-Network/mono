@@ -172,10 +172,21 @@ describe('release-client runner', () => {
       'test',
       'build',
       'pack:smoke',
-      'release:operator-gate',
       'install --immutable',
+      'release:operator-gate',
       'test',
     ]);
+    const contractsInstallIndex = calls.findIndex((call) =>
+      call.command === 'yarn' &&
+      call.args.join(' ') === 'install --immutable' &&
+      call.cwd?.endsWith('/contracts'),
+    );
+    const operatorGateIndex = calls.findIndex((call) =>
+      call.command === 'yarn' &&
+      call.args.join(' ') === 'release:operator-gate',
+    );
+    expect(contractsInstallIndex).toBeGreaterThan(-1);
+    expect(operatorGateIndex).toBeGreaterThan(contractsInstallIndex);
     const forgeCalls = calls
       .filter((call) => call.command === 'forge')
       .map((call) => call.args.join(' '));

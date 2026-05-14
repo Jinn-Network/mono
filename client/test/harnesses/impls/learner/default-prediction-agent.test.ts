@@ -133,7 +133,7 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
         daemonApiUrl: 'http://127.0.0.1:7331',
         daemonApiToken: 'test-token',
         corpusEnv: {
-          subgraphUrl: 'https://subgraph.example',
+          discoveryUrl: 'https://subgraph.example',
           ipfsGatewayUrl: 'https://ipfs.example',
         },
         pluginInstallDir,
@@ -192,7 +192,8 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
         STORE_PATH: '/tmp/jinn-test.db',
         DAEMON_API_URL: 'http://127.0.0.1:7331',
         DAEMON_API_TOKEN: 'test-token',
-        JINN_CORPUS_SUBGRAPH_URL: 'https://subgraph.example',
+        JINN_DISCOVERY_URL: 'https://subgraph.example',
+        JINN_DISCOVERY_MODE: 'http',
         JINN_CORPUS_IPFS_GATEWAY_URL: 'https://ipfs.example',
       });
       expect(calls[0]!.options.env?.['DESIRED_STATE_CONTEXT']).toBe('');

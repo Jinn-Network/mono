@@ -85,7 +85,7 @@ Full text in [`docs/engineering/handbook.md`](docs/engineering/handbook.md#ai-wo
 5. _(Deferred — see [`jinn-mono-8qbc`](https://github.com/Jinn-Network/mono/issues?q=jinn-mono-8qbc))_
 6. Integration tests > mocks for migration / contract surfaces.
 7. TDD for new features, regression test for fixes.
-8. Auto-canary on main merge; Monday-only named minor.
+8. Auto-canary on main merge; Monday-only named stable cut.
 9. `canary` for rolling patches, `latest` for Monday named.
 
 ## Issue tracker

@@ -13,7 +13,8 @@ export interface CodexCodeHarnessAdapterConfig {
   daemonApiUrl?: string;
   daemonApiToken?: string;
   corpusEnv?: {
-    subgraphUrl?: string;
+    /** Discovery indexer URL (Ponder). Sets JINN_DISCOVERY_URL on the MCP subprocess. */
+    discoveryUrl?: string;
     ipfsGatewayUrl?: string;
     rpcUrl?: string;
     chainId?: number;
@@ -175,7 +176,8 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       STORE_PATH: this.storePath ?? '',
       DAEMON_API_URL: this.daemonApiUrl ?? '',
       DAEMON_API_TOKEN: this.daemonApiToken ?? '',
-      JINN_CORPUS_SUBGRAPH_URL: this.corpusEnv?.subgraphUrl ?? '',
+      JINN_DISCOVERY_URL: this.corpusEnv?.discoveryUrl ?? '',
+      JINN_DISCOVERY_MODE: this.corpusEnv?.discoveryUrl ? 'http' : 'onchain',
       JINN_CORPUS_IPFS_GATEWAY_URL: this.corpusEnv?.ipfsGatewayUrl ?? '',
       JINN_CORPUS_RPC_URL: this.corpusEnv?.rpcUrl ?? '',
       JINN_CORPUS_CHAIN_ID: this.corpusEnv?.chainId != null ? String(this.corpusEnv.chainId) : '',

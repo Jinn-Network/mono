@@ -87,17 +87,26 @@ When `GROWTH.md` §3 tightens or rotates (cluster handle changes, vertical pinni
 
 ## Stage 0 — Account state check
 
-Before drafting anything, ask:
+Before drafting anything, derive cadence directly from the account. **Do not ask the user** — they are running this skill to ship, not to recite their own posting log. Use `bird`:
 
-> "When did you last post? What's your cadence over the last 14 days?"
+```
+bird user-tweets tannedoaksprout --plain 2>&1 | head -120
+```
 
-Three states:
+Read the timestamps. Compute:
 
-- **Active** (posted within 36h, ≥3 posts/week) — proceed.
-- **Lapsed** (posted within 7d, <3 posts/week) — proceed but flag: today's post fights an elevated cold-start. Set realistic expectations in Stage 4 and Stage 6.
+- Hours since most recent original post (ignore RTs for freshness).
+- Count of original posts in the last 7 days and last 14 days.
+
+Classify into one of three states and report the read back in one line before proceeding:
+
+- **Active** (posted within 36h, ≥3 posts/week) — proceed without flagging.
+- **Lapsed** (last post within 7d but >36h, OR <3 posts/week) — proceed but flag: today's post fights an elevated cold-start. Set realistic expectations in Stage 4 prediction and Stage 6 post-mortem.
 - **Dormant** (>7d gap, or first post after a long absence) — **block by default**. Tweepcred is in cold-start (model §8, §13). Recommend a 5–7 day ramp of smaller, lower-stakes posts before this one. Single-post obsession on a dormant account wastes the strongest material on the smallest test audience.
 
-If the user overrides the block, proceed but explicitly cap the predicted-reach expectation. State the cap in writing so the post-mortem isn't read as a content failure when it's a Tweepcred floor.
+If `bird` is unavailable or returns nothing useful (auth failure, account renamed), then and only then fall back to asking the user. State the failure mode explicitly so they know why the question came.
+
+If the read is Dormant and the user overrides the block, proceed but explicitly cap the predicted-reach expectation. State the cap in writing so the post-mortem isn't read as a content failure when it's a Tweepcred floor.
 
 ## Stage 1 — Source
 

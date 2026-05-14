@@ -559,7 +559,7 @@ describe('harvestOutput — generic typed-payload path', () => {
         solverType: 'swe-rebench-v2.v1',
         role: 'restoration',
       } as never),
-    ).toThrow(/failed swe-rebench-v2\.v1\/restoration validation/);
+    ).toThrow(/failed swe-rebench-v2\.v1\/solution validation/);
   });
 
   it('rejects corrupt direct typed payload files at harvest time', () => {
@@ -629,6 +629,71 @@ describe('harvestOutput — generic typed-payload path', () => {
     const payloadPath = join(workingDir, '.execute', 'solution-payload.json');
     expect(existsSync(payloadPath)).toBe(true);
     expect(JSON.parse(readFileSync(payloadPath, 'utf8'))).toEqual(out.solutionPayload);
+  });
+
+  function makeRepoWithDiff(workingDir: string): string {
+    const repoDir = join(workingDir, 'repo');
+    mkdirSync(repoDir, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repoDir });
+    writeFileSync(join(repoDir, 'example.py'), 'old = True\n');
+    mkdirSync(join(repoDir, 'tests'), { recursive: true });
+    writeFileSync(join(repoDir, 'tests', 'test_example.py'), 'def test_old():\n    assert True\n');
+    execFileSync('git', ['add', '.'], { cwd: repoDir });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: repoDir });
+    // The model edits the source AND adds a regression test (normal agent behaviour).
+    writeFileSync(join(repoDir, 'example.py'), 'old = False\n');
+    writeFileSync(
+      join(repoDir, 'tests', 'test_example.py'),
+      'def test_old():\n    assert True\n\ndef test_new():\n    assert True\n',
+    );
+    return repoDir;
+  }
+
+  it('strips test-file changes from the materialized git-diff restoration patch', () => {
+    rmSync(workingDir, { recursive: true, force: true });
+    mkdirSync(workingDir, { recursive: true });
+    makeRepoWithDiff(workingDir);
+
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    const patch = (out.solutionPayload as Record<string, unknown>).patch as string;
+    expect(patch).toContain('example.py');
+    expect(patch).toContain('old = False');
+    expect(patch).not.toContain('tests/test_example.py');
+    expect(patch).not.toContain('test_new');
+  });
+
+  it('prefers the git-diff harvest over a stale agent-authored solution-payload.json for swe-rebench restoration', () => {
+    rmSync(workingDir, { recursive: true, force: true });
+    mkdirSync(workingDir, { recursive: true });
+    makeRepoWithDiff(workingDir);
+    const dir = join(workingDir, '.execute');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'solution-payload.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-solution.v1',
+        patch: 'diff --git a/STALE.py b/STALE.py\n--- a/STALE.py\n+++ b/STALE.py\n@@ -1 +1 @@\n-x\n+y\n',
+      }),
+    );
+
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    const patch = (out.solutionPayload as Record<string, unknown>).patch as string;
+    expect(patch).toContain('example.py');
+    expect(patch).not.toContain('STALE');
   });
 
   it('falls through to phase-artifact-only shape when no typed payload was submitted', () => {

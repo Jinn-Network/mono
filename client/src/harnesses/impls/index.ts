@@ -68,6 +68,10 @@ export interface HarnessEnv {
   codexPath?: string;
   /** Default Codex model when a SolverNet does not specify one. */
   codexModel?: string;
+  /** Optional Polymarket Gamma API override for acceptance or private mirrors. */
+  polymarketGammaBaseUrl?: string;
+  /** Optional Polymarket CLOB API override for acceptance or private mirrors. */
+  polymarketClobBaseUrl?: string;
   /**
    * Root for impl-scoped state dirs (e.g. hyperliquid api-wallet). Defaults under
    * `~/.jinn-client/engine/impl-state` when unset — wired from `config.engine` in main.
@@ -166,7 +170,10 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(
     isStub
       ? new PredictionV1Evaluator({ stub: true })
-      : new PredictionV1Evaluator(),
+      : new PredictionV1Evaluator({
+          ...(env.polymarketGammaBaseUrl ? { gammaBaseUrl: env.polymarketGammaBaseUrl } : {}),
+          ...(env.polymarketClobBaseUrl ? { clobBaseUrl: env.polymarketClobBaseUrl } : {}),
+        }),
   );
   out.push(
     new PredictionApyV0BaselineImpl({

@@ -80,7 +80,7 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     const collector = new TrajectoryCollector({ taskCid: 'bafy', runId: 'corpus-propagate' });
     const runner = new ClaudeRunner({ claudePath: 'claude', model: 'test-model' });
     const corpusEnv = {
-      subgraphUrl: 'https://sg.example/gql',
+      discoveryUrl: 'https://sg.example/gql',
       ipfsGatewayUrl: 'https://gw.example',
     };
     await runner.run(
@@ -99,7 +99,8 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
 
     expect(captured).toBeDefined();
     const env = captured!.mcpServers['jinn-client'].env;
-    expect(env.JINN_CORPUS_SUBGRAPH_URL).toBe('https://sg.example/gql');
+    expect(env.JINN_DISCOVERY_URL).toBe('https://sg.example/gql');
+    expect(env.JINN_DISCOVERY_MODE).toBe('http');
     expect(env.JINN_CORPUS_IPFS_GATEWAY_URL).toBe('https://gw.example');
     // Security posture: the agent EOA private key NEVER crosses into the MCP
     // subprocess. acquire_artifact proxies to the daemon at DAEMON_API_URL.

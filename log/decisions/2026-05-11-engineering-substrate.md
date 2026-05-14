@@ -11,7 +11,7 @@ supersedes-context-from: (none — establishes substrate)
 
 ## Context
 
-The 2026-05-11 backlog narrowing pass promoted jinn-mono-2cl (engineering handbook v1) from P2 decision to P1 task. The umbrella body locks the cadence (auto-canary on every merge to main; Monday named-minor release with build-in-public devlog) and lists nine AI workflow rules. It defers two structural picks to a co-design with the v1 release epics: (i) what container holds the weekly sprint, and (ii) how that container relates to bd, the existing internal issue tracker.
+The 2026-05-11 backlog narrowing pass promoted jinn-mono-2cl (engineering handbook v1) from P2 decision to P1 task. The umbrella body locks the cadence (auto-canary on every merge to main; Monday named Build Notes release with patch-by-default semver; minor bumps only for epic or significant-capability cuts; v1 reserved for far-future graduation, not uy6v) and lists nine AI workflow rules. It defers two structural picks to a co-design with the public-testnet and later release epics: (i) what container holds the weekly sprint, and (ii) how that container relates to bd, the existing internal issue tracker.
 
 The handbook also commits to a *building-in-public substrate* — GitHub Projects (v2) for the public roadmap, public Issues with templates, GitHub Releases + auto-generated notes as the devlog, repo-as-docs, and GitHub Discussions for RFCs/Q&A through Phase 2. That commitment leaves the bd-vs-GitHub boundary ambiguous: is bd sunset in favor of GitHub Issues, mirrored to GitHub Issues, or kept as a private parallel tracker?
 
@@ -24,11 +24,11 @@ This decision picks the boundary.
 Concretely:
 
 - All engineering work originates as a bd issue. Backlog, drafts, exploratory needs-design-session bodies, and not-yet-scoped items live in bd only and are not visible publicly.
-- A single GitHub Project (v2) on `Jinn-Network/mono`, named "Jinn engineering", is the canonical sprint surface. Columns: Open / In Progress / In Review / Shipped. Custom fields: `Sprint` (date of the upcoming Monday cut) and `Epic` (one of `uy6v` / `8psp` / `jnw9` / `9iq3` / `2cl`, expandable as new epics file).
+- A single GitHub Project (v2) on `Jinn-Network/mono`, named "Jinn engineering", is the canonical sprint surface. Columns: Todo / In Progress / In Review / Done. Custom fields: `Sprint` (Iteration field for the current Monday week) and `Epic` (single-select human option names such as "Engineering handbook", "Discovery API", and "v1 public testnet"; option descriptions carry the internal bd epic ids).
 - The default view is the current sprint's Status board. A secondary Roadmap view groups all open items by Epic in Now / Next / Later columns.
-- When a bd issue is pulled into the upcoming sprint, a small helper (jinn-mono-2cl.12 `bd-mirror` script) opens a public GitHub Issue with a curated subset of the bd body, applies labels (`epic:<id>`, `sprint:<date>`, `agent:opus`/`codex`/`human` for ownership), adds the Issue to the Project board, and sets `Sprint = <next-monday-date>`. The Issue body ends with `Internal tracking: jinn-mono-<bd-id>`.
+- When a bd issue is pulled into the upcoming sprint, a small helper (jinn-mono-2cl.12 `bd-mirror` script) opens a public GitHub Issue with a curated subset of the bd body, applies labels (`epic:<id>`, `sprint:<date>`, `agent:opus`/`codex`/`human` for ownership), adds the Issue to the Project board, and sets `Sprint` to the current iteration. The Issue body ends with `Internal tracking: jinn-mono-<bd-id>`.
 - A Friday cron (jinn-mono-2cl.11) auto-mirrors the top-N priority bd issues (default: all P0, capped P1) for the upcoming sprint. Captain reviews on Friday and **rejects** anything that doesn't belong (close the Issue, remove the sprint label). Captain adds Issues by exception only. The default flow is reject, not select.
-- On PR merge, the linked Issue closes automatically; Project automation moves it to Shipped.
+- On PR merge, the linked Issue closes automatically; Project automation moves it to Done.
 - bd issue close (`bd close <id>`) is the SoR signal that work is done. The Project mirror moves on PR-merge automation; the bd close is the canonical record.
 - The daily brief skill `eng-day` (jinn-mono-2cl.8) reads the Project board state via `gh project item-list`, joins with `bd ready` and `gh pr list`, and surfaces a top-3 guidance line for the Captain. The skill does not auto-dispatch.
 
@@ -61,7 +61,7 @@ Three reasons, in order of weight:
 
 - **2cl.11 cron threshold.** Top-N defaults to "all P0 + capped P1." The cap value is itself open. Starting heuristic: 8 Issues per sprint; calibrate after two sprints.
 - **Mirror script location.** `cargo/scripts/bd-mirror` (shell or TypeScript) — decide at 2cl.12 implementation time.
-- **bd → Project sync direction.** This decision specifies write-only from bd to Project (via the mirror at sprint-pull time). If `bd close <id>` should also update the Project state directly (e.g., move the Project item to Shipped before PR merge auto-closes the Issue), that's a future optimization, not v1.
+- **bd → Project sync direction.** This decision specifies write-only from bd to Project (via the mirror at sprint-pull time). If `bd close <id>` should also update the Project state directly (e.g., move the Project item to Done before PR merge auto-closes the Issue), that's a future optimization, not v1.
 - **Public-Issue body curation.** What gets stripped from the bd body when mirroring (captain-internal notes, references to private runbooks, exploratory framing) is a per-issue judgment today. A template or strip-rule may emerge; 2cl.12 implementation captures whatever pattern Captain finds useful.
 
 ## Status
