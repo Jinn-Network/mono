@@ -172,12 +172,20 @@ export class ValidatedPoolStore {
   }
 }
 
+export type AdmissionMode = 'required' | 'python-floor';
+
 /**
- * Restrict the generator's posting pool to instances we can actually score.
- * With validation data (`scorableIds` non-null): keep only the scorable set.
- * Without it: fall back to Python-only instances — the conservative floor our
- * pytest `test_cmd` override supports — and the caller should warn that the
- * full gate (`jinn solver-nets validate-pool swe-rebench-v2`) hasn't been run.
+ * Restrict the generator's posting pool.
+ *
+ * Required mode (default for launched/public generators): only admitted
+ * scorable instances are eligible. Absent or stale admission data → empty
+ * pool. The generator is expected to surface a startup warning instructing
+ * the operator to run `jinn solver-nets validate-pool`.
+ *
+ * Python-floor mode (local/dev opt-in): if admission data is present, use
+ * it; otherwise fall back to Python-only instances (today's pre-fufn
+ * behaviour). Preserved so contributors can iterate without running a
+ * full validation pass.
  *
  * The `nebius/SWE-rebench-leaderboard` rows don't carry an explicit `language`
  * field (it's `undefined`/`null` on every row), so we also infer from the
@@ -186,11 +194,15 @@ export class ValidatedPoolStore {
 export function filterToScorablePool(
   pool: PoolTask[],
   scorableIds: Set<string> | null,
-): { pool: PoolTask[]; mode: 'validated' | 'python-floor' } {
+  admissionMode: AdmissionMode = 'required',
+): { pool: PoolTask[]; mode: 'validated' | 'python-floor' | 'admission-required-no-data' } {
   if (scorableIds) {
     return { pool: pool.filter((t) => scorableIds.has(t.instance_id)), mode: 'validated' };
   }
-  return { pool: pool.filter(isPythonInstance), mode: 'python-floor' };
+  if (admissionMode === 'python-floor') {
+    return { pool: pool.filter(isPythonInstance), mode: 'python-floor' };
+  }
+  return { pool: [], mode: 'admission-required-no-data' };
 }
 
 function isPythonInstance(task: PoolTask): boolean {

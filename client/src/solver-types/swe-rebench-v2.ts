@@ -30,6 +30,7 @@ import {
   ValidatedPoolStore,
   filterToScorablePool,
   EVAL_SEMANTICS_VERSION,
+  type AdmissionMode,
 } from './_swe-rebench-v2-validated-pool.js';
 import {
   buildHistoricalPool,
@@ -136,7 +137,9 @@ function nonNegativeInt(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
-function normalizeGeneratorConfig(raw: unknown): GeneratorConfig {
+const DEFAULT_ADMISSION_MODE: AdmissionMode = 'required';
+
+function normalizeGeneratorConfig(raw: unknown): GeneratorConfig & { admissionMode: AdmissionMode } {
   const cfg = typeof raw === 'object' && raw !== null
     ? raw as Record<string, unknown>
     : {};
@@ -151,10 +154,14 @@ function normalizeGeneratorConfig(raw: unknown): GeneratorConfig {
       DEFAULT_GENERATOR_CONFIG.N_max_postings_per_task,
     ),
   );
+  const rawMode = cfg['admissionMode'];
+  const admissionMode: AdmissionMode =
+    rawMode === 'python-floor' ? 'python-floor' : DEFAULT_ADMISSION_MODE;
   return {
     N_target_successes,
     N_max_postings_per_task,
     cooldown_ms: nonNegativeInt(cfg['cooldown_ms'], DEFAULT_GENERATOR_CONFIG.cooldown_ms),
+    admissionMode,
   };
 }
 
@@ -320,15 +327,30 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     }
     lastPollAt = new Date(now).toISOString();
 
-    // Restrict to instances we can actually score (validated gold-patch pool),
-    // or — absent validation data — to Python instances (the floor our pytest
-    // test_cmd override supports). See jinn-mono-uy6v.9.
+    // Restrict to instances we can actually score (validated gold-patch pool).
+    // In required mode (default): absent or stale admission data → empty pool,
+    // emit a startup warning. In python-floor mode (local/dev opt-in): fall
+    // back to Python-only instances when no validation data exists.
+    // See jinn-mono-uy6v.9.
     const scorableIds = await validatedPoolStore.getScorableIds(EVAL_SEMANTICS_VERSION);
-    const { pool: eligiblePool, mode: poolMode } = filterToScorablePool(pool, scorableIds);
+    const { pool: eligiblePool, mode: poolMode } = filterToScorablePool(
+      pool,
+      scorableIds,
+      genConfig.admissionMode,
+    );
+    if (poolMode === 'admission-required-no-data' && !floorWarned) {
+      floorWarned = true;
+      console.warn(
+        `[swe-rebench-v2-gen] no pool-validation data — admissionMode='required' is fail-closed.\n` +
+        `  Run:  jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad\n` +
+        `  Expected duration: ~1-2h (one gold-patch eval per seed instance).\n` +
+        `  For local development, set solverNets.<name>.taskGenerator.admissionMode = "python-floor".`,
+      );
+    }
     if (poolMode === 'python-floor' && !floorWarned) {
       floorWarned = true;
       console.warn(
-        `[swe-rebench-v2-gen] no pool-validation data — restricting to ${eligiblePool.length} Python instance(s) of ${pool.length}; run \`jinn solver-nets validate-pool swe-rebench-v2\` to validate the full pool.`,
+        `[swe-rebench-v2-gen] admissionMode='python-floor' (local/dev): restricting to ${eligiblePool.length} Python instance(s) of ${pool.length}; run \`jinn solver-nets validate-pool swe-rebench-v2 --seed-positive\` to advance to required mode.`,
       );
     }
     if (eligiblePool.length === 0) {

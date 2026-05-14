@@ -4,7 +4,31 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeSweRebenchV2GeneratorForLaunchedRecord } from '../../src/solver-types/swe-rebench-v2.js';
+import type { AdmissionMode } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+import { ValidatedPoolStore, EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
+import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
+
+const DEFAULT_MOCK_ROWS = [
+  {
+    row: {
+      instance_id: 'org__repo-1',
+      repo: 'org/repo',
+      base_commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      language: 'python',
+      problem_statement: 'fix first bug',
+    },
+  },
+  {
+    row: {
+      instance_id: 'org__repo-2',
+      repo: 'org/repo',
+      base_commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      language: 'python',
+      problem_statement: 'fix second bug',
+    },
+  },
+];
 
 vi.mock('node:https', () => ({
   request(_url: unknown, _opts: unknown, cb: (res: EventEmitter) => void) {
@@ -12,28 +36,7 @@ vi.mock('node:https', () => ({
     req.end = () => {
       const res = new EventEmitter();
       cb(res);
-      const body = JSON.stringify({
-        rows: [
-          {
-            row: {
-              instance_id: 'org__repo-1',
-              repo: 'org/repo',
-              base_commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-              language: 'python',
-              problem_statement: 'fix first bug',
-            },
-          },
-          {
-            row: {
-              instance_id: 'org__repo-2',
-              repo: 'org/repo',
-              base_commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-              language: 'python',
-              problem_statement: 'fix second bug',
-            },
-          },
-        ],
-      });
+      const body = JSON.stringify({ rows: DEFAULT_MOCK_ROWS });
       res.emit('data', body);
       res.emit('end');
     };
@@ -63,6 +66,49 @@ function launchedRecord(overrides: Partial<LaunchedSolverNetRecord> = {}): Launc
   };
 }
 
+function poolTask(id: string, overrides: Partial<PoolTask> = {}): PoolTask {
+  return {
+    instance_id: id,
+    hf_dataset: 'nebius/SWE-rebench-leaderboard',
+    hf_split: '2026_02',
+    repo: 'org/repo',
+    base_commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    language: 'python',
+    problem_statement: `fix bug in ${id}`,
+    ...overrides,
+  };
+}
+
+function tmpDir(): string {
+  return mkdtempSync(join(tmpdir(), 'jinn-swe-gen-cooldown-'));
+}
+
+interface MakeTestGeneratorOpts {
+  stateDir: string;
+  admissionMode?: AdmissionMode;
+  poolTasks?: PoolTask[];
+  N_max_postings_per_task?: number;
+  cooldown_ms?: number;
+}
+
+function makeTestGenerator(opts: MakeTestGeneratorOpts) {
+  const { stateDir, admissionMode, N_max_postings_per_task = 3, cooldown_ms = 0 } = opts;
+  const recordRef = { current: launchedRecord() };
+  const configRef = {
+    current: {
+      N_target_successes: 1,
+      N_max_postings_per_task,
+      cooldown_ms,
+      ...(admissionMode !== undefined ? { admissionMode } : {}),
+    },
+  };
+  return makeSweRebenchV2GeneratorForLaunchedRecord({
+    recordRef,
+    configRef,
+    staticConfig: { stateDir },
+  });
+}
+
 describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
   let stateDir: string;
 
@@ -89,6 +135,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
         N_target_successes: 1,
         N_max_postings_per_task: 1,
         cooldown_ms: 86_400_000,
+        admissionMode: 'python-floor' as AdmissionMode,
       },
     };
     const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
@@ -119,6 +166,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
         N_target_successes: 1,
         N_max_postings_per_task: 1,
         cooldown_ms: 86_400_000,
+        admissionMode: 'python-floor' as AdmissionMode,
         claimPolicy: {
           maxClaims: 10,
           maxClaimsPerOperator: 2,
@@ -143,5 +191,56 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
         claimLeaseTtlSeconds: 1_800,
       },
     });
+  });
+});
+
+describe('swe-rebench-v2 generator — admissionMode: required', () => {
+  let stateDir: string;
+
+  beforeEach(() => {
+    stateDir = tmpDir();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-14T10:00:00.000Z'));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ splits: [{ split: '2026_02' }] }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  it('posts nothing when validated-pool.json is absent in required mode', async () => {
+    const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
+    const task = await gen();
+    expect(task).toBeNull();
+  });
+
+  it('posts nothing when validated-pool.json has no scorable entries in required mode', async () => {
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record('a__1', { scorable: false, reason: 'unscorable', checkedAt: '2026-05-14T00:00:00Z' }, EVAL_SEMANTICS_VERSION);
+    const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
+    const task = await gen();
+    expect(task).toBeNull();
+  });
+
+  it('posts only admitted scorable instances in required mode', async () => {
+    const store = new ValidatedPoolStore({ stateDir });
+    await store.record('org__repo-1', { scorable: true, reason: 'ok', checkedAt: '2026-05-14T00:00:00Z' }, EVAL_SEMANTICS_VERSION);
+    const gen = makeTestGenerator({ stateDir, admissionMode: 'required' });
+    const task = await gen();
+    expect(task?.spec).toMatchObject({ instance_id: 'org__repo-1' });
+  });
+
+  it('falls back to python-floor when admissionMode is python-floor and no validation data exists', async () => {
+    const gen = makeTestGenerator({
+      stateDir,
+      admissionMode: 'python-floor',
+    });
+    const task = await gen();
+    expect(task?.spec).toMatchObject({ instance_id: 'org__repo-1' });
   });
 });
