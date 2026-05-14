@@ -6,6 +6,8 @@ export default defineConfig({
     globals: true,
     include: [
       'test/**/*.test.ts',
+      // Plugin tests live next to the plugin source under plugins/*/test/.
+      'plugins/**/test/**/*.test.ts',
       // SPA component tests live next to their components in src/dashboard/spa.
       'src/dashboard/spa/src/**/*.test.{ts,tsx}',
     ],
