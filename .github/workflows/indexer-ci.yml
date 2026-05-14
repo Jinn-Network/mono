@@ -1,0 +1,71 @@
+name: Indexer CI
+
+on:
+  pull_request:
+    branches: [main, next]
+    paths:
+      - '.github/workflows/indexer-ci.yml'
+      - 'packages/indexer/**'
+  push:
+    branches: [main, next]
+    paths:
+      - '.github/workflows/indexer-ci.yml'
+      - 'packages/indexer/**'
+
+permissions:
+  contents: read
+
+jobs:
+  indexer:
+    name: Indexer Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/indexer
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn codegen
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn build
+
+  explorer:
+    name: Explorer
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/indexer/explorer
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn build
+
+  docker:
+    name: Indexer Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build indexer image
+        working-directory: packages/indexer
+        run: |
+          docker build \
+            --build-arg JINN_INDEXER_COMMIT=${{ github.sha }} \
+            -f deploy/Dockerfile \
+            -t jinn-indexer:ci \
+            .

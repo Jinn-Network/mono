@@ -7,7 +7,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM"],
-    "types": []
+    "types": ["node"]
   },
   "include": [
     "ponder-env.d.ts",
