@@ -1,4 +1,5 @@
 import type { Address, WalletClient } from 'viem';
+import type { DiscoveryAPI } from '../../discovery/types.js';
 
 export interface EvictionRecoveryConfig {
   serviceId: number;
@@ -24,7 +25,11 @@ export interface MechAdapterConfig {
    * the adapter still verifies claimability on-chain before yielding work.
    */
   taskDiscovery?: {
-    subgraphUrl?: string;
+    /**
+     * DiscoveryAPI instance for finding claimable tasks. When provided,
+     * replaces direct subgraph calls in discoverSubgraphRestorationTasks.
+     */
+    discoveryApi?: DiscoveryAPI;
     solverNetManifestCids?: string[];
     /**
      * Lower bound for the canonical on-chain TaskCreated scan. The subgraph is

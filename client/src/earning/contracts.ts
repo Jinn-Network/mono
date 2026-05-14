@@ -141,7 +141,6 @@ export interface ChainConfig {
   distributorAddress?: string;
   /**
    * ERC-8004 IdentityRegistry contract — operator agent NFT mint target.
-   * See subgraph/networks.json + /tmp/erc8004-ref/IdentityRegistry.json.
    * Resolved per chainId from `IDENTITY_REGISTRY_ADDRESSES` below.
    */
   identityRegistry?: string;
@@ -665,29 +664,25 @@ export const EVENT_TOPICS = {
 // ERC-8004 IdentityRegistry (vanity 0x8004… on every supported chain)
 // ---------------------------------------------------------------------------
 //
-// Source of truth: subgraph/networks.json (cross-checked against
-// erc-8004/erc-8004-contracts/scripts/addresses.ts and used by
-// jinn-mono-fud's subgraph). Only the chains the client compiles for
-// are mirrored here; the registry is also deployed on Sepolia/Mainnet
-// for completeness, but the bootstrap currently runs against Base or
-// Base Sepolia.
+// Source of truth: erc-8004/erc-8004-contracts/scripts/addresses.ts. Only the
+// chains the client compiles for are mirrored here; the registry is also
+// deployed on Sepolia/Mainnet for completeness, but the bootstrap currently
+// runs against Base or Base Sepolia.
 
 export const IDENTITY_REGISTRY_ADDRESSES: Record<number, string> = {
   8453: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',  // Base mainnet
   84532: '0x8004A818BFB912233c491871b3d84c89A494BD9e', // Base Sepolia
   // Mainnet (1) and Sepolia (11155111) share the Base mainnet / Base
-  // Sepolia vanity addresses respectively; recorded in subgraph/networks.json
-  // but not currently consumed from the client.
+  // Sepolia vanity addresses respectively; not currently consumed from
+  // the client.
   1: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
   11155111: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
 };
 
 /**
- * Minimal ABI surface used by the bootstrap mint step. The full
- * subgraph/abis/IdentityRegistry.json carries the same definitions —
- * we keep only what the bootstrap touches to avoid drift if the
- * subgraph ABI is regenerated. Per-execution `setMetadata` lives in
- * a separate client (`jinn-mono-3zk`) and re-derives its own ABI.
+ * Minimal ABI surface used by the bootstrap mint step — only what the
+ * bootstrap touches. Per-execution `setMetadata` lives in a separate
+ * client (`jinn-mono-3zk`) and re-derives its own ABI.
  */
 export const IDENTITY_REGISTRY_ABI = [
   // Mint without an agentURI — emits Registered(agentId, "", owner).

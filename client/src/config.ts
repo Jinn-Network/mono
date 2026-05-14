@@ -131,8 +131,9 @@ export const JinnConfigSchema = z.object({
   claudeModel: z.string().default('claude-haiku-4-5-20251001'),
 
   /**
-   * How the operator runs the daemon. Set once at `jinn auth`, read by every
-   * command that probes the Claude CLI or spawns a subprocess. Leaving it
+   * How the operator runs the daemon. Set once by app-guided setup or the
+   * legacy `jinn auth` compatibility command, then read by every command that
+   * probes the Claude CLI or spawns a subprocess. Leaving it
    * unset falls back to filesystem-based detection (docker-compose.yml near
    * cwd, /.dockerenv, etc.) which is error-prone inside a checkout of the
    * repo itself.
@@ -146,8 +147,31 @@ export const JinnConfigSchema = z.object({
     z.array(z.string()),
   ]).default([]),
 
-  /** The Graph subgraph URL for artifact discovery */
-  subgraphUrl: z.string().optional(),
+  /**
+   * Discovery backend configuration.
+   *
+   * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §9.1.
+   *
+   * mode:
+   *   'http'      — HTTP client pointing at a shared Ponder indexer (ships in 280n.4).
+   *   'embedded'  — embedded Ponder in-process (ships in 280n.5 — throws until then).
+   *   'onchain'   — direct RPC getLogs; always-live floor; no indexer required.
+   *
+   * Default URLs for mode='http' (intentionally undefined until the maintainer's VPS is live):
+   *   // TODO: set once maintainer's VPS is live (jinn-mono-280n.4 deployment)
+   *   // DEFAULT_TESTNET_DISCOVERY_URL = 'https://...'  // Base Sepolia
+   *   // DEFAULT_MAINNET_DISCOVERY_URL = 'https://...'  // Base mainnet
+   *
+   * Env overrides: JINN_DISCOVERY_MODE, JINN_DISCOVERY_URL,
+   * JINN_DISCOVERY_FALLBACK (1|true|yes to enable, 0|false|no to disable).
+   */
+  discovery: z
+    .object({
+      mode: z.enum(['http', 'embedded', 'onchain']).optional(),
+      url: z.string().optional(),
+      fallbackToOnchain: z.boolean().optional(),
+    })
+    .optional(),
 
   /**
    * Narrow task discovery to specific on-chain task ids. This is primarily
@@ -627,8 +651,16 @@ export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'task
 
 const DEFAULT_DIR = join(homedir(), '.jinn-client');
 export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
-export const DEFAULT_TESTNET_SUBGRAPH_URL =
-  'https://api.studio.thegraph.com/query/1749489/jinn-testnet/capture-live-20260508183750';
+
+/**
+ * Default discovery indexer for Base Sepolia testnet daemons — the
+ * privately-operated Ponder instance (jinn-mono-280n.4). Operators override
+ * via `discovery.url` / `JINN_DISCOVERY_URL`, or pin `discovery.mode: 'onchain'`
+ * for RPC-only. No mainnet default yet (the public mainnet RPC can't sustain the
+ * historical sync — see ponder.config.ts).
+ */
+export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
+
 
 export type ConfigLoadErrorCode =
   | 'config_file_not_found'
@@ -702,7 +734,31 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
   if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
   if (env['JINN_PEERS'])             merged.peers = env['JINN_PEERS'];
-  if (env['JINN_SUBGRAPH_URL'])      merged.subgraphUrl = env['JINN_SUBGRAPH_URL'];
+  // Discovery block env overrides
+  if (env['JINN_DISCOVERY_MODE'] || env['JINN_DISCOVERY_URL'] || env['JINN_DISCOVERY_FALLBACK'] !== undefined) {
+    const prevDiscovery = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+      ? (merged['discovery'] as Record<string, unknown>)
+      : {};
+    const fallbackRaw = env['JINN_DISCOVERY_FALLBACK'];
+    const fallbackToOnchain = fallbackRaw !== undefined
+      ? !(['0', 'false', 'no'].includes(fallbackRaw.trim().toLowerCase()))
+      : undefined;
+    // A URL only makes sense in http mode — when the operator points
+    // JINN_DISCOVERY_URL at a host but doesn't say JINN_DISCOVERY_MODE,
+    // default mode to 'http' so the URL is actually consulted (and isn't
+    // silently dropped by the on-chain default in createDiscoveryAPI). In that
+    // inferred-http case, also default fallbackToOnchain on (http without a
+    // floor is a footgun) unless JINN_DISCOVERY_FALLBACK overrides.
+    const inferredHttp = !!env['JINN_DISCOVERY_URL'] && !env['JINN_DISCOVERY_MODE'] && !prevDiscovery['mode'];
+    const mode = env['JINN_DISCOVERY_MODE'] ?? (inferredHttp ? 'http' : undefined);
+    const resolvedFallback = fallbackToOnchain ?? (inferredHttp ? true : undefined);
+    merged['discovery'] = {
+      ...prevDiscovery,
+      ...(mode ? { mode } : {}),
+      ...(env['JINN_DISCOVERY_URL'] ? { url: env['JINN_DISCOVERY_URL'] } : {}),
+      ...(resolvedFallback !== undefined ? { fallbackToOnchain: resolvedFallback } : {}),
+    };
+  }
   if (env['JINN_NODE_ENDPOINT'])     merged.nodeEndpoint = env['JINN_NODE_ENDPOINT'];
   if (env['JINN_IPFS_REGISTRY_URL']) merged.ipfsRegistryUrl = env['JINN_IPFS_REGISTRY_URL'];
   if (env['JINN_IPFS_GATEWAY_URL'])  merged.ipfsGatewayUrl = env['JINN_IPFS_GATEWAY_URL'];
@@ -821,8 +877,28 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
-  if (resolvedNetwork === 'testnet' && merged.subgraphUrl === undefined) {
-    merged.subgraphUrl = DEFAULT_TESTNET_SUBGRAPH_URL;
+
+  // Testnet default: point discovery at the privately-operated Ponder indexer
+  // (jinn-mono-280n.4), unless the operator has set their own `discovery` block.
+  // The on-chain RPC floor stays as the fallback.
+  //
+  // Only fill fields the operator left absent — never overwrite an
+  // operator-set `url` / `mode` / `fallbackToOnchain`. A bare
+  // `discovery: { url: '...' }` (or `JINN_DISCOVERY_URL` alone) keeps the
+  // operator's URL and gets `mode: 'http'` defaulted in (a URL is only
+  // meaningful in http mode).
+  const explicitDiscoveryMode = (typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+    && typeof (merged['discovery'] as { mode?: unknown }).mode === 'string');
+  if (resolvedNetwork === 'testnet' && !explicitDiscoveryMode) {
+    const existing = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+      ? (merged['discovery'] as { mode?: string; url?: string; fallbackToOnchain?: boolean })
+      : undefined;
+    merged['discovery'] = {
+      ...(existing ?? {}),
+      mode: existing?.mode ?? 'http',
+      url: existing?.url ?? DEFAULT_TESTNET_DISCOVERY_URL,
+      fallbackToOnchain: existing?.fallbackToOnchain ?? true,
+    };
   }
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
@@ -948,7 +1024,9 @@ const TRACKED_ENV_VARS = [
   'JINN_CLAUDE_MODEL',
   'JINN_RUNTIME_MODE',
   'JINN_PEERS',
-  'JINN_SUBGRAPH_URL',
+  'JINN_DISCOVERY_MODE',
+  'JINN_DISCOVERY_URL',
+  'JINN_DISCOVERY_FALLBACK',
   'JINN_NODE_ENDPOINT',
   'JINN_IPFS_REGISTRY_URL',
   'JINN_IPFS_GATEWAY_URL',

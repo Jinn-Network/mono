@@ -9,8 +9,8 @@
  *     decode the contract return shape into the typed `ValidationRecord`
  *     surface and handle the "unknown requestHash" revert + the
  *     REQUESTED → RESPONDED transition.
- *   - Address constants for Base / Base Sepolia mirror
- *     subgraph/networks.json.
+ *   - Address constants for Base / Base Sepolia mirror the canonical
+ *     ERC-8004 deployments.
  *   - Validator-selection model is open at this layer (no caller-side
  *     gating), per DR §4.4.
  */
@@ -70,7 +70,7 @@ function makeWalletClient(impl: Partial<WalletClient> = {}): WalletClient {
 // ── Address book ─────────────────────────────────────────────────────────────
 
 describe('VALIDATION_REGISTRY_ADDRESSES', () => {
-  it('matches subgraph/networks.json on Base + Base Sepolia', () => {
+  it('matches the canonical ERC-8004 deployments on Base + Base Sepolia', () => {
     // Base mainnet (chainId 8453)
     expect(VALIDATION_REGISTRY_ADDRESSES[8453]).toBe(
       '0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58',

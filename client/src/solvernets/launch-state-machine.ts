@@ -162,10 +162,15 @@ export class LaunchAction {
 
     // Phase 2 — recording. Atomic-write the record before any on-chain side
     // effect. From here on, all retries flow through `resume()`.
+    const manifestPath = await this.deps.store.writeManifestCache(
+      manifestCid,
+      args.manifest,
+    );
     const initialRecord: LaunchedSolverNetRecord = {
       schemaVersion: 'solvernet.launched.v1',
       solverNetId: args.manifest.solverNetId,
       manifestCid,
+      manifestPath,
       manifestHash: manifestHash(args.manifest),
       launcherAgentId: args.signer.agentId,
       launcherSafeAddress: args.manifest.launcher.safeAddress,

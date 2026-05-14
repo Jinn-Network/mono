@@ -41,12 +41,12 @@
  * deferred to `resolveAgentIdForManifest` in `./identity.js`. The hook here
  * takes `harnessAgentId` as a direct input. The two natural resolution paths:
  *
- *   (b) subgraph query: `Operator { agentId } where executions_some: { manifestHash: <evidenceHash> }`
+ *   (b) DiscoveryAPI: `queryEnvelopes({ manifestHash })` → operator.agentId
  *   (c) on-chain scan of `IdentityRegistry.Registered` events for the
  *       harness's Safe (`getAgentByWallet` is not exposed on-chain).
  *
- * Subgraph (b) is the cheapest and aligns with the rest of the discovery
- * surface; (c) is the fallback when the subgraph is unavailable.
+ * Path (b) via the Ponder indexer is O(1) and the recommended route;
+ * (c) is the fallback when the discovery indexer is unavailable.
  *
  * ── Score-mapping policy ─────────────────────────────────────────────────────
  *
@@ -68,8 +68,8 @@
  * If the impl emits a numeric score in `[0, 1]` separate from verdict, the
  * caller should pre-multiply it by 100 and pass `scoreDecimals=2`.
  *
- * Address constants (cross-checked against `subgraph/networks.json` and
- * `client/src/earning/contracts.ts` IdentityRegistry entries):
+ * Address constants (cross-checked against `client/src/earning/contracts.ts`
+ * IdentityRegistry entries):
  *
  *   Base mainnet  0x8004BAa17C55a88189AE136b182e5fdA19dE9b63
  *   Base Sepolia  0x8004B663056A597Dffe9eCcC1965A193B7388713

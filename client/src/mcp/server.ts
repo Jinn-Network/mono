@@ -20,9 +20,11 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
+import { createHttpDiscoveryAPI } from '../discovery/http.js';
 import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
 import { SOLVER_TYPE_PAYLOADS } from '../types/payloads/index.js';
+import { CanonicalRoleSchema, normalizeEnvelopeRole } from '../types/envelope.js';
 
 const server = new McpServer({
   name: 'jinn-client',
@@ -73,7 +75,11 @@ const daemonApiToken = process.env['DAEMON_API_TOKEN'] ?? '';
 // to this closure and never escape via the returned object.
 function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
   if (!store) return null;
-  const subgraphUrl = process.env['JINN_CORPUS_SUBGRAPH_URL'] ?? '';
+  // Discovery config: prefer JINN_DISCOVERY_URL (Ponder indexer) over the
+  // legacy JINN_CORPUS_SUBGRAPH_URL. JINN_DISCOVERY_MODE defaults to 'http'
+  // when a URL is present, 'onchain' otherwise.
+  const discoveryUrl = process.env['JINN_DISCOVERY_URL'] ?? '';
+  const discoveryMode = process.env['JINN_DISCOVERY_MODE'] ?? (discoveryUrl ? 'http' : 'onchain');
   const ipfsGatewayUrl = process.env['JINN_CORPUS_IPFS_GATEWAY_URL'] ?? '';
   const rpcUrl = process.env['JINN_CORPUS_RPC_URL'] ?? '';
   const chainIdRaw = process.env['JINN_CORPUS_CHAIN_ID'] ?? '';
@@ -82,11 +88,18 @@ function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
   const fromBlockRaw = process.env['JINN_CORPUS_FROM_BLOCK'] ?? '';
   const fromBlock = fromBlockRaw ? Number.parseInt(fromBlockRaw, 10) : undefined;
   const hasOnchainCorpus = Boolean(rpcUrl && chainId && identityRegistryAddress);
-  if (!ipfsGatewayUrl || (!subgraphUrl && !hasOnchainCorpus)) {
+  const hasDiscovery = Boolean(discoveryUrl && discoveryMode === 'http');
+  if (!ipfsGatewayUrl || (!hasDiscovery && !hasOnchainCorpus)) {
     return null;
   }
+
+  // Build a DiscoveryAPI from the discovery env when a URL is available.
+  const discovery = hasDiscovery
+    ? createHttpDiscoveryAPI({ url: discoveryUrl, fetchImpl: globalThis.fetch })
+    : undefined;
+
   const full = createCorpus({
-    ...(subgraphUrl ? { subgraphUrl } : {}),
+    ...(discovery ? { discovery } : {}),
     ipfsGatewayUrl,
     store,
     signer: { privateKey: '0x0' },
@@ -232,7 +245,7 @@ server.tool(
       ),
   },
   async ({ payload }) => {
-    const role = task.role === 'evaluation' ? 'verdict' : 'restoration';
+    const role = task.role === 'evaluation' ? 'verdict' : 'solution';
     if (!task.solverType) {
       return mcpError({
         kind: 'missing_solver_type',
@@ -248,7 +261,7 @@ server.tool(
         solverType: task.solverType,
       });
     }
-    const schema = bucket[role];
+    const schema = bucket[normalizeEnvelopeRole(role)];
     if (!schema) {
       return mcpError({
         kind: 'unknown_role',
@@ -361,7 +374,7 @@ server.tool(
     solverType: z.string().optional().describe('SolverType filter, e.g. "prediction.v1"'),
     artifactType: z.string().optional().describe('Artifact type filter, e.g. "output.prediction.v1"'),
     taskCid: z.string().optional().describe('Filter to a specific task CID'),
-    role: z.enum(['restoration', 'verdict']).optional().describe('Envelope role filter'),
+    role: z.preprocess(normalizeEnvelopeRole, CanonicalRoleSchema).optional().describe('Envelope role filter'),
     taskId: z.string().optional().describe('Runtime task id filter for local envelope projections'),
     requestId: z.string().optional().describe('On-chain request id filter'),
     participant: z.object({

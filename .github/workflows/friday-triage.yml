@@ -73,14 +73,9 @@ jobs:
           if [ -n "$INPUT" ]; then
             DATE="$INPUT"
           else
-            # Default: next Monday from today.
-            DATE="$(date -u -d 'next Monday' +%Y-%m-%d 2>/dev/null || python3 -c "
-import datetime
-today = datetime.datetime.utcnow().date()
-days_ahead = (0 - today.weekday()) % 7
-days_ahead = days_ahead if days_ahead != 0 else 7
-print((today + datetime.timedelta(days=days_ahead)).isoformat())
-")"
+            # Default: next Monday from today. The runner is ubuntu-latest (GNU date),
+            # which handles relative-date strings natively — no fallback needed.
+            DATE="$(date -u -d 'next Monday' +%Y-%m-%d)"
           fi
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
 

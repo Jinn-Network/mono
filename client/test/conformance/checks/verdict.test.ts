@@ -20,7 +20,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
 // ─── checkVerdictBackReference ────────────────────────────────────────────────
 
 describe('checkVerdictBackReference', () => {
-  it('skips on restoration-role envelope', async () => {
+  it('skips on solution-role envelope', async () => {
     const rfx = await buildGoodRestorationFixture();
     const ctx: ConformanceContext = {
       envelope: rfx.envelope,
@@ -33,12 +33,12 @@ describe('checkVerdictBackReference', () => {
     expect(result.id).toBe('verdict.back-ref');
   });
 
-  it('passes when restorationEnvelope.sha256 matches fetched bytes', async () => {
+  it('passes when solutionEnvelope.sha256 matches fetched bytes', async () => {
     const vfx = await buildGoodVerdictFixture();
     const ctx: ConformanceContext = {
       envelope: vfx.envelope,
       envelopeCid: vfx.envelopeCid,
-      restorationEnvelopeBytes: vfx.restorationEnvelopeBytes,
+      solutionEnvelopeBytes: vfx.solutionEnvelopeBytes,
       options: {},
     };
     const result = checkVerdictBackReference(ctx);
@@ -48,11 +48,11 @@ describe('checkVerdictBackReference', () => {
 
   it('fails when sha256 does not match (tampered bytes)', async () => {
     const vfx = await buildGoodVerdictFixture();
-    const tampered = new Uint8Array([...vfx.restorationEnvelopeBytes, 0x00]);
+    const tampered = new Uint8Array([...vfx.solutionEnvelopeBytes, 0x00]);
     const ctx: ConformanceContext = {
       envelope: vfx.envelope,
       envelopeCid: vfx.envelopeCid,
-      restorationEnvelopeBytes: tampered,
+      solutionEnvelopeBytes: tampered,
       options: {},
     };
     const result = checkVerdictBackReference(ctx);
@@ -60,12 +60,12 @@ describe('checkVerdictBackReference', () => {
     expect(result.detail).toMatch(/sha256/i);
   });
 
-  it('fails when restoration bytes not provided (did not resolve)', async () => {
+  it('fails when solution bytes not provided (did not resolve)', async () => {
     const vfx = await buildGoodVerdictFixture();
     const ctx: ConformanceContext = {
       envelope: vfx.envelope,
       envelopeCid: vfx.envelopeCid,
-      // no restorationEnvelopeBytes
+      // no solutionEnvelopeBytes
       options: {},
     };
     const result = checkVerdictBackReference(ctx);
@@ -73,17 +73,17 @@ describe('checkVerdictBackReference', () => {
     expect(result.detail).toMatch(/resolve/i);
   });
 
-  it('fails when payload.restorationEnvelope is missing', async () => {
+  it('fails when payload.solutionEnvelope is missing', async () => {
     const vfx = await buildGoodVerdictFixture();
     const env = {
       ...vfx.envelope,
       payload: { ...vfx.envelope.payload as Record<string, unknown> },
     };
-    delete (env.payload as Record<string, unknown>).restorationEnvelope;
+    delete (env.payload as Record<string, unknown>).solutionEnvelope;
     const ctx: ConformanceContext = {
       envelope: env as any,
       envelopeCid: vfx.envelopeCid,
-      restorationEnvelopeBytes: vfx.restorationEnvelopeBytes,
+      solutionEnvelopeBytes: vfx.solutionEnvelopeBytes,
       options: {},
     };
     const result = checkVerdictBackReference(ctx);
@@ -102,7 +102,7 @@ describe('checkVerdictBackReference', () => {
 // ─── checkVerificationRecord ──────────────────────────────────────────────────
 
 describe('checkVerificationRecord', () => {
-  it('skips on restoration-role envelope', async () => {
+  it('skips on solution-role envelope', async () => {
     const rfx = await buildGoodRestorationFixture();
     const ctx: ConformanceContext = {
       envelope: rfx.envelope,

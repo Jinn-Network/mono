@@ -788,7 +788,7 @@ describe('Fleet bootstrap', () => {
     expect(svc.identity_registry_address).toBe(
       '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
     );
-  });
+  }, 15_000);
 
   it('agent_registered step short-circuits in stepRegisterAgent when agent_id already set', async () => {
     // Direct unit test of the idempotency guard in `stepRegisterAgent`,

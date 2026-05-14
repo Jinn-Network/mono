@@ -46,14 +46,14 @@ If a bd issue does not fit one of these shapes, it is mis-scoped — split or re
 5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open; see `jinn-mono-8qbc`.)_
 6. **Integration tests > mocks for migration / contract surfaces.**
 7. **TDD for new features, regression test for fixes.**
-8. **Auto-canary on main merge; Monday-only named minor.** Cadence policy.
+8. **Auto-canary on main merge; Monday-only named stable cut.** Cadence policy.
 9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy.
 
 ### Cadence
 
 - Every merge to main → npm `canary` (`<v>-canary.<sha>`).
 - Every Monday 09:00 UTC → GitHub Release draft (Hermes-style); Captain publishes; publish triggers npm `latest` + CHANGELOG auto-mirror.
-- Pre-v1: weekly minor (`v0.N.0 → v0.N+1.0`). `v1.0.0` = the Monday cut that ships `jinn-mono-uy6v`. Post-v1 epic close = major bump.
+- Pre-v1: weekly Build Notes cuts patch by default (`v0.1.3 → v0.1.4`). A Monday cut that lands an epic or significant capability can bump the minor (`v0.1.x → v0.2.0`). `v1.0.0` is reserved for far-future graduation (mainnet / exit-testnet / Phase 2), not `jinn-mono-uy6v`.
 
 ### Daily entry point
 
@@ -98,9 +98,12 @@ client/          TypeScript daemon — the main runnable component
       server.ts          Hono HTTP API for artifact search/publish
       peers.ts           Background peer sync
     auth/erc8128.ts      ERC-8128 HTTP message signatures
-    discovery/
-      registry.ts        ERC-8004 on-chain artifact registration
-      subgraph.ts        The Graph subgraph queries
+    discovery/           Read-side data access (spec/2026-05-11-discovery-api-and-shared-indexer.md)
+      types.ts           DiscoveryAPI interface + result shapes
+      http.ts            HttpDiscoveryAPI — GraphQL against the Ponder indexer (default)
+      onchain.ts         OnchainDiscoveryAPI — RPC getLogs/multicall floor (always live)
+      with-fallback.ts   Health-tracking wrapper: primary → floor on failure
+      factory.ts         Builds the configured DiscoveryAPI from config
     mcp/server.ts        MCP tools exposed to Claude subprocess
     x402/                Payment-gated artifact access
     types/               DesiredState, errors, core types
@@ -258,14 +261,19 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | dbPath           | JINN_DB_PATH             | ~/.jinn-client/jinn.db            |
 | earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
 | peers            | JINN_PEERS               | []                                |
-| subgraphUrl      | JINN_SUBGRAPH_URL        | (none)                            |
 | tasks            | JINN_TASKS               | []                                |
+| discovery.mode   | JINN_DISCOVERY_MODE      | mainnet: unset → `onchain` RPC floor; testnet: `http` |
+| discovery.url    | JINN_DISCOVERY_URL       | testnet only: `DEFAULT_TESTNET_DISCOVERY_URL` (Ponder indexer); mainnet: unset |
+| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | true (only relevant when mode is `http`/`embedded`) |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
+| _(none — env-only)_  | JINN_EVAL_IMAGE_CACHE_MAX | 20 (cap on the swe-rebench-v2 per-instance Docker image LRU) |
 
 `JINN_PASSWORD` is env-only — never in config files.
+
+Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`) with `fallbackToOnchain: true`. Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
 
 ## On-Chain Addresses (Base)
 

@@ -8,7 +8,7 @@ export function renderTopLevelHelp(commands: CommandModule[]): string {
   lines.push('Use `--human` for readable terminal output. Help stays human-readable.');
   lines.push('');
   lines.push('Verbs:');
-  const visible = commands.filter(c => c.name !== 'fleet-manage');
+  const visible = commands.filter(c => !['fleet-manage', 'auth', 'quickstart'].includes(c.name));
   const invocations = visible.map(c => `jinn ${c.name}`);
   const maxInvocationLen =
     invocations.length > 0 ? Math.max(...invocations.map(s => s.length)) : 1;
@@ -22,11 +22,11 @@ export function renderTopLevelHelp(commands: CommandModule[]): string {
   lines.push('  fleet retire <index>                  Retire one service');
   lines.push('');
   lines.push('Operator map:');
-  lines.push('  New operator: run `jinn auth`, then `jinn run`.');
+  lines.push('  New operator: install the client, then run `jinn run`.');
   lines.push('');
   lines.push('  First run:');
-  lines.push('  jinn auth                             Authenticate Claude and set runtime mode (one-time)');
-  lines.push('  jinn run                              Zero-to-running: init, bootstrap, start daemon');
+  lines.push('  jinn run                              Open the app, init, bootstrap, start daemon');
+  lines.push('                                        Complete Claude/runtime setup in the app if prompted');
   lines.push('');
   lines.push('  Day-to-day:');
   lines.push('  jinn run                              Start the daemon or fail with a structured next step');

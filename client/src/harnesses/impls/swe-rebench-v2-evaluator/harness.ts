@@ -19,6 +19,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawn, type SpawnOptions } from 'node:child_process';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   SweRebenchV2TaskSchema,
@@ -34,18 +35,28 @@ import type {
   ReadyStatus,
   Solution,
 } from '../../types.js';
-import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from '../../types.js';
 import type { Task } from '../../../types/task.js';
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import { uploadToIpfs } from '../../../adapters/mech/ipfs.js';
 import { SweRebenchV2Evaluator, type EvalRunner, type HfFetcher } from './index.js';
-import { PythonEvalRunner } from './eval-runner.js';
+import {
+  PythonEvalRunner,
+  EvalCouldNotGradeError,
+  type PythonEvalRunnerOptions,
+} from './eval-runner.js';
 import { HttpHfFetcher } from './hf-fetcher.js';
 
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 const UPSTREAM_REPO_URL = 'https://github.com/SWE-rebench/SWE-rebench-V2.git';
 const STATE_FILE = 'state.json';
 const ENABLE_CLI = 'jinn harnesses enable swe-rebench-v2-evaluator';
+
+/** The two verdict values emitted by this evaluator. The broader registry
+ *  shape (`reputation.ts`) also recognises `'INDETERMINATE'` / `'REJECTED'`,
+ *  but swe-rebench v2 grades are binary: the gold tests either resolve or
+ *  they don't. Mirrors the pattern in `prediction-v0-evaluator/types.ts`. */
+type SweRebenchVerdict = 'PASS' | 'FAIL';
 
 interface EnabledState {
   schemaVersion: 'swe-rebench-v2-evaluator-state.v1';
@@ -72,7 +83,21 @@ export interface SweRebenchV2EvaluatorHarnessOptions {
   _testDeps?: {
     runCommand?: typeof runCommand;
     fetcher?: HfFetcher;
+    /**
+     * Per-call runner override. When set, used directly on every `run()` —
+     * the harness skips the lazy/cached path. Tests that need a fresh mock
+     * per call typically also rebuild the harness per call, so this is
+     * effectively a single-runner override.
+     */
     runner?: EvalRunner;
+    /**
+     * Factory used to construct the cached runner the first time `run()`
+     * fires (and only then). Tests use this to verify the runner is reused
+     * across `run()` calls — the {@link runner} instance-injection point
+     * makes that test invisible because it short-circuits caching entirely.
+     * Defaults to `(opts) => new PythonEvalRunner(opts)`.
+     */
+    makeRunner?: (opts: PythonEvalRunnerOptions) => EvalRunner;
     uploadToIpfs?: typeof uploadToIpfs;
   };
 }
@@ -85,12 +110,55 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
   private readonly implStateDir: string | undefined;
   private readonly ipfsRegistryUrl: string;
   private readonly deps: NonNullable<SweRebenchV2EvaluatorHarnessOptions['_testDeps']>;
+  /** The engine's claim-eligibility check calls `isReady()` per candidate
+   *  task per tick (~17 Hz potential). Cache the live `docker info` result
+   *  for a short TTL so we don't spawn `docker` in a tight loop. */
+  private dockerCheckCache: { at: number; ok: boolean } | null = null;
+  private static readonly DOCKER_CHECK_TTL_MS = 5_000;
+  /**
+   * Lazily-constructed runner reused across every `run()` call for the
+   * lifetime of this harness instance. The harness is registered once at
+   * boot (`buildHarnesses()` in `impls/index.ts`), so a cached runner here
+   * persists for the daemon lifetime. The runner holds the in-process LRU
+   * of eval-image tags; without this caching the LRU is rebuilt empty per
+   * call and the disk-budget bead (jinn-mono-uy6v.11) is a no-op.
+   */
+  private cachedRunner: EvalRunner | undefined;
 
   constructor(opts: SweRebenchV2EvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
     this.implStateDir = opts.implStateDir;
     this.ipfsRegistryUrl = opts.ipfsRegistryUrl ?? DEFAULT_IPFS_REGISTRY_URL;
     this.deps = opts._testDeps ?? {};
+  }
+
+  /**
+   * Resolve the {@link EvalRunner} used for a `run()` invocation. The
+   * runner is constructed lazily on the first call and reused thereafter so
+   * the LRU image cache (`jinn-mono-uy6v.11`) actually accumulates across
+   * evaluations. A {@link _testDeps.runner} override bypasses caching for
+   * tests that want a fresh mock per call.
+   */
+  private getRunner(upstreamRepoDir: string): EvalRunner {
+    if (this.deps.runner) return this.deps.runner;
+    if (!this.cachedRunner) {
+      const make =
+        this.deps.makeRunner ??
+        ((opts: PythonEvalRunnerOptions) => new PythonEvalRunner(opts));
+      this.cachedRunner = make({ upstreamRepoDir });
+    }
+    return this.cachedRunner;
+  }
+
+  private async isDockerReachable(now: number = Date.now()): Promise<boolean> {
+    const cached = this.dockerCheckCache;
+    if (cached && now - cached.at < SweRebenchV2EvaluatorHarness.DOCKER_CHECK_TTL_MS) {
+      return cached.ok;
+    }
+    const run = this.deps.runCommand ?? runCommand;
+    const r = await run('docker', ['info']);
+    this.dockerCheckCache = { at: now, ok: r.exitCode === 0 };
+    return this.dockerCheckCache.ok;
   }
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
@@ -142,6 +210,23 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
           description:
             `Re-run \`${ENABLE_CLI}\` to re-clone the upstream eval harness.`,
           cli: ENABLE_CLI,
+        },
+      };
+    }
+    // Live Docker probe (TTL-cached): the eval shells out to per-instance
+    // `docker run` images. Docker is validated at `jinn harnesses enable` time,
+    // but it can stop afterwards — re-check periodically so the daemon does
+    // not claim evaluation tasks it cannot grade. (Without this, a stopped
+    // Docker daemon turns every claimed eval into a bogus `passed_match:false`
+    // verdict — see jinn-mono-uy6v.8.)
+    if (!(await this.isDockerReachable())) {
+      return {
+        ready: false,
+        reason: 'Docker daemon not reachable',
+        nextStep: {
+          description:
+            'Start Docker Desktop (or the docker daemon) — the SWE-rebench v2 evaluator runs per-instance Docker images. Once Docker is up the evaluator becomes ready automatically.',
+          url: 'https://docs.docker.com/get-docker/',
         },
       };
     }
@@ -264,22 +349,39 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
 
     const task = SweRebenchV2TaskSchema.parse(ctx.task.spec);
 
-    // Parse the solver's restoration envelope and pull out the patch.
+    // Parse the solver's solution envelope and pull out the patch.
     const manifestJson = ctx.task.context!['restorationResult'] as string;
     const envelope = SignedEnvelopeSchema.parse(JSON.parse(manifestJson));
-    if (envelope.solverType !== 'swe-rebench-v2.v1' || envelope.role !== 'restoration') {
+    if (
+      envelope.solverType !== 'swe-rebench-v2.v1' ||
+      normalizeEnvelopeRole(envelope.role) !== 'solution'
+    ) {
       throw new Error(
-        `swe-rebench-v2-evaluator: expected swe-rebench-v2.v1/restoration envelope, got ${envelope.solverType}/${envelope.role}`,
+        `swe-rebench-v2-evaluator: expected swe-rebench-v2.v1/solution envelope, got ${envelope.solverType}/${envelope.role}`,
       );
     }
     const solutionPayload = SweRebenchV2SolutionPayloadSchema.parse(envelope.payload);
 
     const fetcher: HfFetcher = this.deps.fetcher ?? new HttpHfFetcher();
-    const runner: EvalRunner =
-      this.deps.runner ?? new PythonEvalRunner({ upstreamRepoDir: state.upstreamRepoDir });
+    const runner: EvalRunner = this.getRunner(state.upstreamRepoDir);
     const evaluator = new SweRebenchV2Evaluator({ fetcher, runner });
 
-    const graded = await evaluator.grade({ task, solutionPayload });
+    let graded: Awaited<ReturnType<SweRebenchV2Evaluator['grade']>>;
+    try {
+      graded = await evaluator.grade({ task, solutionPayload });
+    } catch (err) {
+      if (err instanceof EvalCouldNotGradeError) {
+        // The eval never actually graded the solution (Docker down, patch
+        // failed to apply, install/test-setup failed, arch-incompatible
+        // image, …). There is no signal about the solver — emit no verdict.
+        // SkippableError → engine records a skip, nothing is delivered.
+        throw new SkippableError(
+          `eval_not_gradeable:${err.reason}`,
+          `${err.message}${err.logExcerpt ? `\n${err.logExcerpt}` : ''}`,
+        );
+      }
+      throw err;
+    }
 
     // Pin the test log to IPFS so anyone (evaluator dispute, audit, model
     // training) can fetch it anonymously by CID. The CID is surfaced via the
@@ -314,11 +416,19 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       'utf8',
     );
 
+    // Derive the engine-facing `verdict` from `passed_match`. The engine's
+    // reputation-feedback hook (and `verdictCodeForTask` for the on-chain
+    // verdict tag in `claimDelivery`) keys on `gating.verdict`. Before this
+    // mapping, the hook silently no-op'd on every swe-rebench-v2 delivery and
+    // every verdict tag defaulted to PASS — see jinn-mono-uy6v.10.
+    const verdict: SweRebenchVerdict = verdictPayload.passed_match ? 'PASS' : 'FAIL';
+
     return {
       venueRef: { name: 'swe-rebench-v2' },
       gating: {
         score: verdictPayload.score,
         passed_match: verdictPayload.passed_match,
+        verdict,
       },
       informational: {
         instance_id: task.instance_id,
@@ -372,7 +482,17 @@ async function runCommand(
   });
 }
 
-function readEnabledState(implStateDir: string): EnabledState | null {
+/**
+ * The default `implStateDir` for the swe-rebench-v2 evaluator. The daemon
+ * normally injects this via `engine.implStateDirRoot`; consumers (e.g. the
+ * `validate-pool` CLI command) that need to locate the upstream eval repo
+ * without going through the daemon use this default.
+ */
+export function defaultSweRebenchV2EvaluatorImplStateDir(): string {
+  return join(process.env['HOME'] ?? homedir(), '.jinn-client', 'engine', 'impl-state', 'swe-rebench-v2-evaluator');
+}
+
+export function readEnabledState(implStateDir: string): EnabledState | null {
   const path = join(implStateDir, STATE_FILE);
   if (!existsSync(path)) return null;
   try {

@@ -13,7 +13,8 @@ export interface CodexCodeHarnessAdapterConfig {
   daemonApiUrl?: string;
   daemonApiToken?: string;
   corpusEnv?: {
-    subgraphUrl?: string;
+    /** Discovery indexer URL (Ponder). Sets JINN_DISCOVERY_URL on the MCP subprocess. */
+    discoveryUrl?: string;
     ipfsGatewayUrl?: string;
     rpcUrl?: string;
     chainId?: number;
@@ -121,6 +122,8 @@ function sweRebenchV2Guidance(inputs: TaskSessionInputs): string[] {
     '- Before planning, use Network Tools to search donated SWE execution data: call search_records, inspect_record, and acquire_artifact for useful donated IPFS records.',
     `- Submit the final swe-rebench-v2-solution.v1 payload by calling submit_typed_payload. Do not write ${inputs.workingDir}/.execute/solution-payload.json directly unless submit_typed_payload is unavailable; if fallback is required, write {"schemaVersion":"swe-rebench-v2-solution.v1","patch":"<unified diff>"} to that path.`,
     `- If you rely on the harvester git-diff fallback, the patch must be present as git diff output under ${inputs.workingDir}/repo.`,
+    `- Edit source files only. You may write tests to verify your fix locally, but test-file changes are discarded before grading — do not rely on them landing. The submitted patch must change source, not tests.`,
+    `- Your patch must apply cleanly with \`git apply\` from the base commit, so make the fix by editing files under ${inputs.workingDir}/repo and let the harness derive the diff via \`git diff\` rather than hand-writing the unified diff yourself.`,
   ];
 }
 
@@ -197,7 +200,8 @@ export class CodexCodeHarnessAdapter implements HarnessAdapter {
       STORE_PATH: this.storePath ?? '',
       DAEMON_API_URL: this.daemonApiUrl ?? '',
       DAEMON_API_TOKEN: this.daemonApiToken ?? '',
-      JINN_CORPUS_SUBGRAPH_URL: this.corpusEnv?.subgraphUrl ?? '',
+      JINN_DISCOVERY_URL: this.corpusEnv?.discoveryUrl ?? '',
+      JINN_DISCOVERY_MODE: this.corpusEnv?.discoveryUrl ? 'http' : 'onchain',
       JINN_CORPUS_IPFS_GATEWAY_URL: this.corpusEnv?.ipfsGatewayUrl ?? '',
       JINN_CORPUS_RPC_URL: this.corpusEnv?.rpcUrl ?? '',
       JINN_CORPUS_CHAIN_ID: this.corpusEnv?.chainId != null ? String(this.corpusEnv.chainId) : '',

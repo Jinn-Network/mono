@@ -14,10 +14,10 @@ import type {
   ArtifactContent,
   ReadArgs,
 } from './types.js';
-import { runCorpusQuery } from './query.js';
 import { runOnchainCorpusQuery } from './onchain-query.js';
 import { fetchManifest } from './fetch.js';
 import { acquireArtifactContent } from './acquire.js';
+import type { AcquireWithPaymentResult } from '../x402/acquire.js';
 import type { ArtifactSource } from '../types/envelope.js';
 
 export type {
@@ -64,7 +64,7 @@ export {
 interface InternalDeps {
   fetch?: typeof globalThis.fetch;
   fetchFromIpfs?: (gatewayUrl: string, cid: string) => Promise<unknown>;
-  acquireFn?: (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null>;
+  acquireFn?: (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null | AcquireWithPaymentResult>;
 }
 
 export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corpus {
@@ -73,17 +73,25 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
   const acquireFn = deps.acquireFn;
 
   async function query(q: CorpusQuery): Promise<EnvelopeRef[]> {
+    // When a DiscoveryAPI is injected, delegate entirely — the DiscoveryAPI
+    // owns the primary-vs-floor split (Ponder HTTP + onchain floor via withFallback).
+    if (opts.discovery) {
+      try {
+        const refs = await opts.discovery.queryEnvelopes(q);
+        const deduped = new Map<string, EnvelopeRef>();
+        for (const ref of refs) {
+          if (!deduped.has(ref.manifestCid)) deduped.set(ref.manifestCid, ref);
+        }
+        return [...deduped.values()];
+      } catch (err) {
+        throw new Error(`corpus query failed (discovery): ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Legacy path: onchain option.
     const refs: EnvelopeRef[] = [];
     const warnings: string[] = [];
     let successfulSources = 0;
-    if (opts.subgraphUrl) {
-      try {
-        refs.push(...await runCorpusQuery(opts.subgraphUrl, q, fetchImpl));
-        successfulSources += 1;
-      } catch (err) {
-        warnings.push(`subgraph: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
     if (opts.onchain) {
       try {
         refs.push(...await runOnchainCorpusQuery(q, opts.onchain));

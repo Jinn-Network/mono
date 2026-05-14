@@ -12,7 +12,7 @@ related-decisions: DR-2026-05-11-a (Prediction freeze), DR-2026-05-11-b (Enginee
 
 ## Context
 
-The 2026-05-11 backlog narrowing pass filed jinn-mono-2cl (engineering handbook v1) as a peer of v1 release work (jinn-mono-uy6v) and sibling epics (jinn-mono-9iq3 Prediction freeze, jinn-mono-8psp Hermes harness, jinn-mono-jnw9 self-modifying learner). A subsequent gap analysis found that 2cl and the epics are entangled in five concrete ways: 2cl.1's CI gate consumes uy6v.2's vitest list, 2cl.2's runbook reference overlaps with uy6v.5's evidence bundle, 2cl.5's CONTRIBUTING file is the same artifact as 9iq3.3's review guardrail, 2cl.4's handbook index needs 9iq3.2's freeze-note to be ratified first, and 2cl's AI-workflow rules include decisions (supervised-diff, agent PR review parity) that the jnw9 / 8psp design beads must close before promotion.
+The 2026-05-11 backlog narrowing pass filed jinn-mono-2cl (engineering handbook v1) as a peer of public-testnet release work (jinn-mono-uy6v) and sibling epics (jinn-mono-9iq3 Prediction freeze, jinn-mono-8psp Hermes harness, jinn-mono-jnw9 self-modifying learner). A subsequent gap analysis found that 2cl and the epics are entangled in five concrete ways: 2cl.1's CI gate consumes uy6v.2's vitest list, 2cl.2's runbook reference overlaps with uy6v.5's evidence bundle, 2cl.5's CONTRIBUTING file is the same artifact as 9iq3.3's review guardrail, 2cl.4's handbook index needs 9iq3.2's freeze-note to be ratified first, and 2cl's AI-workflow rules include decisions (supervised-diff, agent PR review parity) that the jnw9 / 8psp design beads must close before promotion.
 
 Designing 2cl in isolation produces generic OSS-AI rules. Designing it as the consolidation of decisions the epics force produces a handbook grounded in the work this team is actually shipping. This document is that consolidation.
 
@@ -22,17 +22,17 @@ The handbook is **Jinn-flavored**, not generic. Per BRAND.md the engineering sub
 
 The eight threads in jinn-mono-pgjj are closed as follows:
 
-1. **Daily intent discipline.** Sprint container is a GitHub Project (v2) on `Jinn-Network/mono` with a Status board (Open / In Progress / In Review / Shipped), a custom Sprint field keyed to the upcoming Monday's date, and an Epic field (`uy6v` / `8psp` / `jnw9` / `9iq3` / `2cl`). A secondary Roadmap view groups by Epic in Now / Next / Later. The bd remains the internal system of record; only sprint-scoped bd issues mirror to public GitHub Issues, which are the Project board's items. The daily brief is the `eng-day` skill, modeled on `growth-day`.
+1. **Daily intent discipline.** Sprint container is a GitHub Project (v2) on `Jinn-Network/mono` with a Status board (Todo / In Progress / In Review / Done), a Sprint iteration field keyed to the current Monday week, and an Epic single-select field with human option names whose descriptions carry internal bd ids. A secondary Roadmap view groups by Epic in Now / Next / Later. The bd remains the internal system of record; only sprint-scoped bd issues mirror to public GitHub Issues, which are the Project board's items. The daily brief is the `eng-day` skill, modeled on `growth-day`.
 
 2. **Cross-references.** Merge 2cl.5 + 9iq3.3 (same artifact: CONTRIBUTING.md). Add blocks edges 2cl.1 → uy6v.2 (acceptance-gate vitest list) and 2cl.4 → 9iq3.2 (handbook cites ratified freeze note). Add a relates edge 2cl.2 ↔ uy6v.5 (same runbook §Evidence list, different artifacts).
 
 3. **AI workflow rule promotion.** Rules 1–4 + 6–9 are battle-tested and promote into AGENTS.md / docs/engineering/ immediately. Rule 5 (supervised-diff for the self-modifying learner) waits on jinn-mono-8qbc (the jnw9 design bead); until then the handbook records rule 5 as a placeholder pointing at the open design.
 
-4. **Gap-close shape.** Tighten 2cl.1 acceptance (absorb: replace manual `release:client`, add acceptance-gate invocation to publish path). Tighten 2cl.2 acceptance (absorb: cron schedule, scaffold content matches Hermes-style, drift mitigation). File two new sibling beads: 2cl.6 (tag-format dual policy `v2026.MM.DD` + `v0.N.0`) and 2cl.7 (`prepublishOnly` hardening — full release-gate suite). No new sub-epic; flat under 2cl.
+4. **Gap-close shape.** Tighten 2cl.1 acceptance (absorb: replace manual `release:client`, add acceptance-gate invocation to publish path). Tighten 2cl.2 acceptance (absorb: cron schedule, scaffold content matches Hermes-style, drift mitigation). File two new sibling beads: 2cl.6 (tag-format dual policy `v2026.MM.DD` + `vX.Y.Z`) and 2cl.7 (`prepublishOnly` hardening — full release-gate suite). No new sub-epic; flat under 2cl.
 
-5. **Bump heuristic.** The Monday cron always suggests a minor bump. Captain manually overrides to major. Pre-v1 Monday cuts go v0.N → v0.N+1.0. v1.0.0 is the Monday cut that ships uy6v. Post-v1 epic close = major (8psp → v2.0.0, jnw9 → v3.0.0); other Mondays minor.
+5. **Bump heuristic.** The Monday cron always suggests a patch bump. Captain manually overrides to the next minor when an epic or significant capability closes in the window. Pre-v1 weekly Build Notes cuts go v0.1.3 → v0.1.4 by default; milestone cuts can go v0.1.x → v0.2.0. v1.0.0 is reserved for far-future graduation (mainnet / exit-testnet / Phase 2), not uy6v.
 
-6. **Release-notes scaffold.** Trigger: Monday cron (09:00 UTC). Output: a GitHub Release **draft** with mechanical inputs (merged PRs + authors, closed bd issues, contributors, line stats, suggested semver=minor) and placeholders for build-name + highlights + known-issues. Captain edits in the GitHub Release draft UI and clicks Publish. Release publish triggers npm `latest` (already wired in `cargo/.github/workflows/npm-publish.yml`).
+6. **Release-notes scaffold.** Trigger: Monday cron (09:00 UTC). Output: a GitHub Release **draft** with mechanical inputs (merged PRs + authors, closed bd issues, contributors, line stats, suggested semver=patch) and placeholders for build-name + highlights + known-issues. Captain edits in the GitHub Release draft UI and clicks Publish. Release publish triggers npm `latest` (already wired in `cargo/.github/workflows/npm-publish.yml`).
 
 7. **CHANGELOG mirroring.** Workflow on Release publish appends the Release body as a new section in `cargo/client/CHANGELOG.md` under Unreleased. Existing per-release sections (0.1.3, 0.1.2, …) stay verbatim. No root CHANGELOG; the GitHub Releases page is the repo-wide narrative; the per-package CHANGELOG is the npm-consumer mirror only.
 
@@ -65,17 +65,17 @@ Then:
 
 6. **Merge → auto-ship canary.** `cargo/.github/workflows/npm-publish.yml` fires on every merge to main with paths matching `client/**` and publishes `<package.version>-canary.<sha8>` under the `canary` dist-tag. Operators on `npm i -g @jinn-network/client@canary` receive it within minutes.
 
-7. **Close bd.** `bd close <id>`. The Project board's mirrored GitHub Issue moves to the Shipped column (via Project automation on Issue close; the GitHub Issue is auto-closed via PR linking).
+7. **Close bd.** `bd close <id>`. The Project board's mirrored GitHub Issue moves to the Done column (via Project automation on Issue close; the GitHub Issue is auto-closed via PR linking).
 
 ### Weekly retrace
 
-**Friday afternoon — triage.** A Friday cron (jinn-mono-2cl.11 — to file) reads the bd ready queue, picks the top-N priority issues (P0 + P1, capped at sprint capacity), and auto-mirrors each to a public GitHub Issue with sprint label `sprint:<next-monday-date>`, epic label, and a footer `Internal tracking: jinn-mono-<id>`. The cron also adds the Issue to the Project board with `Sprint = <next-monday-date>`. Captain reviews on Friday afternoon and **rejects** any that don't belong (closing the GH Issue and removing the sprint label). Captain only adds Issues by exception. Default flow is *reject, not select*.
+**Friday afternoon — triage.** A Friday cron (jinn-mono-2cl.11 — to file) reads the bd ready queue, picks the top-N priority issues (P0 + P1, capped at sprint capacity), and auto-mirrors each to a public GitHub Issue with sprint label `sprint:<next-monday-date>`, epic label, and a footer `Internal tracking: jinn-mono-<id>`. The cron also adds the Issue to the Project board with the current Sprint iteration. Captain reviews on Friday afternoon and **rejects** any that don't belong (closing the GH Issue and removing the sprint label). Captain only adds Issues by exception. Default flow is *reject, not select*.
 
-**Monday morning — cut.** The Monday cron (09:00 UTC) computes the window since the last `v0.N.0` tag and opens a GitHub Release **draft** shaped like Hermes Agent's:
+**Monday morning — cut.** The Monday cron (09:00 UTC) computes the window since the last stable client semver tag and opens a GitHub Release **draft** shaped like Hermes Agent's:
 
 ```
-# v0.4.0 — "<build name placeholder>"
-2026-05-18 · Suggested bump: minor
+# v0.4.1 — "<build name placeholder>"
+2026-05-18 · Suggested bump: patch
 
 ## Highlights
 - <placeholder — Captain edits>
@@ -98,9 +98,9 @@ Then:
 
 Captain reviews, fills in build-name + highlights + known-issues, clicks Publish. Publish triggers:
 
-- `npm-publish.yml` (release branch of the workflow) → publishes `v0.4.0` under `latest`.
+- `npm-publish.yml` (release branch of the workflow) → publishes `v0.4.1` under `latest`.
 - The CHANGELOG mirror workflow (jinn-mono-2cl.10) → appends the Release body to `cargo/client/CHANGELOG.md` under the Unreleased section.
-- Tags created: `client-v0.4.0` (current format) and `v2026.05.18` (date tag — once jinn-mono-2cl.6 ships dual tagging).
+- Tags created: `v0.4.1` (semver tag) and `v2026.05.18` (date tag).
 
 The Project board's Sprint view resets to the new Monday's sprint; shipped items move to the Roadmap view's Done column.
 
@@ -108,7 +108,7 @@ The Project board's Sprint view resets to the new Monday's sprint; shipped items
 
 The handbook recognises seven shapes of work plus one emergency sub-flow. Each shape has a distinct **disposition** — when it applies, what kind of discipline its container demands, what design ceremony fits. The shape is declared in the bd issue's `Run-mode` field and replicated in the PR title prefix (Conventional Commits) so it propagates through to Release notes section grouping. If a bd issue does not fit one of these shapes, it is mis-scoped — split it or reshape it.
 
-The taxonomy is keyed to Conventional Commits prefixes so it composes with existing tooling: PR title → Release section grouping → CHANGELOG entry. Note that the bump heuristic remains the one locked in Thread 5 (weekly named-minor; Captain overrides to major on epic close) — Conventional Commits here drives section grouping in Release notes and Release-notes scaffold readability, **not** per-merge semver bumps. The canary channel handles per-merge patch publishing implicitly (`<v>-canary.<sha>`).
+The taxonomy is keyed to Conventional Commits prefixes so it composes with existing tooling: PR title → Release section grouping → CHANGELOG entry. Note that the bump heuristic remains the one locked in Thread 5 (weekly patch by default; Captain overrides to minor on epic or significant-capability close) — Conventional Commits here drives section grouping in Release notes and Release-notes scaffold readability, **not** per-merge semver bumps. The canary channel handles per-merge patch publishing implicitly (`<v>-canary.<sha>`).
 
 **Important — the per-shape skill chains below are v0 defaults, not canon.** They are starting heuristics derived from current practice (existing superpowers skills, recurring patterns Captain has noticed in 2026-Q2 work). They will be wrong in places we haven't shipped yet. The handbook treats them as inputs to an iterative refinement loop — see §Iterative refinement of shape flows at the end of this section. The shape *taxonomy* (which shapes exist, when each applies) is more stable than the *flows* (which skills, in what order, with which checkpoints).
 
@@ -180,7 +180,7 @@ The 2cl umbrella locked nine rules. Eight promote to `cargo/CLAUDE.md` (the cano
 5. **(Deferred)** Supervised-diff for the self-modifying learner. The Phase A.5+ learner ships proposed changes as PRs against the repo; designated reviewer approves before merge. The concrete mechanism is open until jinn-mono-8qbc closes; until then, the handbook records this as a placeholder.
 6. **Integration tests > mocks for migration / contract surfaces.** Mock policy stays for the unit-test pyramid; migration tests must hit a real database or a forked chain.
 7. **TDD for new features, regression test for fixes.** Per `superpowers:test-driven-development`.
-8. **Auto-canary on main merge; Monday-only named minor.** Cadence policy from the 2cl umbrella, refined in this design's Thread 5.
+8. **Auto-canary on main merge; Monday-only named stable cut.** Cadence policy from the 2cl umbrella, refined in this design's Thread 5.
 9. **`canary` for rolling patches, `latest` for Monday named.** Updated from the umbrella's original `next` proposal per this design's Thread 8.
 
 Rule 5 lands as a stub when 2cl.4 (docs/engineering/ index) writes, with `Status: open — see jinn-mono-8qbc` and a link to the design bead. It promotes to a full rule when 8qbc ratifies.
@@ -197,7 +197,7 @@ The following actions land as part of this design closure:
 | Add blocks edge | 2cl.1 → uy6v.2 | acceptance-gate vitest list defined by uy6v.2 |
 | Add blocks edge | 2cl.4 → 9iq3.2 | handbook cites DR-2026-05-11-a after 9iq3.2 ratifies the freeze note |
 | Add relates edge | 2cl.2 ↔ uy6v.5 | same runbook §Evidence list, different artifacts |
-| New | jinn-mono-2cl.6 | Tag format dual policy (`v2026.MM.DD` date + `v0.N.0` semver) |
+| New | jinn-mono-2cl.6 | Tag format dual policy (`v2026.MM.DD` date + `vX.Y.Z` semver) |
 | New | jinn-mono-2cl.7 | `prepublishOnly` hardening (invoke `release:operator-gate` + `release:donation-consumption`) |
 | New | jinn-mono-2cl.8 | `eng-day` skill modeled on `growth-day`, P2 (after uy6v ships) |
 | New | jinn-mono-2cl.9 | GH Project (v2) board setup: Status board + Sprint field + Epic field + Roadmap view |

@@ -326,8 +326,8 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
   server.tool(
     'jinn_auth',
     [
-      'Read-only: check Claude authentication status and the resolved runtime mode (bare/docker-compose/container).',
-      'Does NOT attempt login — it only probes and reports. Use this as the first call to verify the agent path is ready.',
+      'Read-only diagnostic: check Claude authentication status and the resolved runtime mode (bare/docker-compose/container).',
+      'Does NOT attempt login — it only probes and reports. Do not use this as first-run setup; call jinn_run and complete auth in the app if prompted.',
       'Returns authenticated:true + context + email on success; returns an error envelope if not authenticated.',
       'Fast (<1s).',
     ].join(' '),

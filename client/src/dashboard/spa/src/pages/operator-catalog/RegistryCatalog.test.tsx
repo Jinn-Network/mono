@@ -55,7 +55,7 @@ describe('RegistryCatalog', () => {
       expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy(),
     );
     expect(
-      screen.getByText(/no unjoined solvernets available\./i),
+      screen.getByText(/no launched solvernets available\./i),
     ).toBeTruthy();
   });
 
@@ -190,6 +190,45 @@ describe('RegistryCatalog', () => {
     expect(screen.getByText('Not Joined')).toBeTruthy();
   });
 
+  it('shows the unjoined empty-state copy when all SolverNets are already joined', async () => {
+    listJoinedMock.mockResolvedValue({
+      joinedSolverNets: {
+        bafybeiaaa: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
+      },
+    });
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        {
+          manifestCid: 'bafybeiaaa',
+          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
+          name: 'Already Joined',
+          network: 'base-sepolia',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          solutionPriceWei: '10000000000',
+          verdictPriceWei: '5000000000',
+          openRoles: ['solver'],
+          anchorBlock: 1,
+        },
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(/no unjoined solvernets available\./i),
+    ).toBeTruthy();
+  });
+
   it('formats tiny live prices as gwei instead of scientific ETH notation', async () => {
     listRegistryMock.mockResolvedValue({
       summaries: [
@@ -267,6 +306,38 @@ describe('RegistryCatalog', () => {
     );
     expect(screen.getByText(/upstream subgraph error/i)).toBeTruthy();
     expect(screen.getByTestId('registry-catalog-retry')).toBeTruthy();
+  });
+
+  it('explains subsystem_not_ready registry errors as startup lag', async () => {
+    listRegistryMock.mockRejectedValue(
+      Object.assign(new Error('503 Service Unavailable: SolverNet subsystem still initialising'), {
+        status: 503,
+        code: 'subsystem_not_ready',
+      }),
+    );
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByText(/solvernet subsystem is still starting/i)).toBeTruthy(),
+    );
+    expect(screen.getByText(/wait a few seconds, then retry/i)).toBeTruthy();
+  });
+
+  it('explains registry_unavailable errors as registry cache failures', async () => {
+    listRegistryMock.mockRejectedValue(
+      Object.assign(new Error('503 Service Unavailable: registry_unavailable'), {
+        status: 503,
+        code: 'registry_unavailable',
+      }),
+    );
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByText(/registry cache is unavailable/i)).toBeTruthy(),
+    );
+    expect(screen.getByText(/check daemon logs/i)).toBeTruthy();
   });
 
   it('surfaces lastRefreshedAt and lastError from the response envelope', async () => {

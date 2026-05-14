@@ -43,7 +43,7 @@ export function queryPredictionBrierScoreboardProjections(
   const solutions = store.queryEnvelopeProjections({
     envelopeRefs: solutionRefs,
     solverType: 'prediction.v1',
-    role: 'restoration',
+    role: 'solution',
     limit: solutionRefs.length,
   });
   return dedupeProjections([...verdicts, ...solutions]);

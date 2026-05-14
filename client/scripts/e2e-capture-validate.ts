@@ -4,32 +4,30 @@
  * Live capture acceptance runner.
  *
  * Defaults are loaded from the same local operator state used by the UI:
- *   ~/.jinn-client/.env.testnet   deploy slug/key + optional env overrides
- *   ~/.jinn-client/config.json    apiPort, subgraphUrl, ipfsGatewayUrl
+ *   ~/.jinn-client/.env.testnet   optional env overrides
+ *   ~/.jinn-client/config.json    apiPort, discovery.url, ipfsGatewayUrl
  *   ~/.jinn-client/ui-token       UI token accepted by /api/captures/*
  *
  * Environment overrides:
  *   JINN_DAEMON_URL        default http://127.0.0.1:<config.apiPort || 7331>
  *   JINN_UI_TOKEN          default ~/.jinn-client/ui-token
- *   JINN_SUBGRAPH_URL      default config.subgraphUrl
+ *   JINN_DISCOVERY_URL     default config.discovery.url, else the testnet
+ *                          Ponder indexer (DEFAULT_TESTNET_DISCOVERY_URL)
  *
  * Optional:
  *   JINN_CAPTURE_SESSION_ID     approve this pending session; otherwise first pending row
  *   JINN_IPFS_GATEWAY_URL       verify the signed envelope is fetchable from IPFS
- *   JINN_CAPTURE_DEPLOY_SUBGRAPH=1  run subgraph deploy:base-sepolia before validation
- *   JINN_SUBGRAPH_STUDIO_SLUG   Studio slug used when deploying the subgraph
- *   GRAPH_STUDIO_DEPLOY_KEY     optional deploy key passed to graph deploy
- *   JINN_SUBGRAPH_VERSION_LABEL optional graph deploy version label
+ *   JINN_CAPTURE_INDEX_TIMEOUT_MS  how long to wait for the indexer to pick the envelope up
  */
 
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { normalizeIpfsGatewayBase } from '../src/adapters/mech/ipfs.js';
 import { distillCaptureToTasks } from '../src/solver-types/_session-derived-distill.js';
+import { createHttpDiscoveryAPI } from '../src/discovery/index.js';
+import { DEFAULT_TESTNET_DISCOVERY_URL } from '../src/config.js';
 
 interface CaptureSummary {
   sessionId: string;
@@ -87,19 +85,14 @@ async function main(): Promise<void> {
   if (!uiToken) {
     throw new Error(`JINN_UI_TOKEN is required for live capture acceptance; set it or start the daemon so ${DEFAULT_UI_TOKEN_PATH} exists`);
   }
-  const subgraphUrl = optionalEnv('JINN_SUBGRAPH_URL') ?? stringConfig(localConfig, 'subgraphUrl');
-  if (!subgraphUrl) {
-    throw new Error(`JINN_SUBGRAPH_URL is required for live capture acceptance; set it or add subgraphUrl to ${DEFAULT_CONFIG_PATH}`);
-  }
+  const discoveryUrl =
+    optionalEnv('JINN_DISCOVERY_URL') ??
+    discoveryUrlFromConfig(localConfig) ??
+    DEFAULT_TESTNET_DISCOVERY_URL;
   const ipfsGatewayUrl =
     optionalEnv('JINN_IPFS_GATEWAY_URL') ??
     stringConfig(localConfig, 'ipfsGatewayUrl') ??
     DEFAULT_IPFS_GATEWAY_URL;
-
-  if (process.env['JINN_CAPTURE_DEPLOY_SUBGRAPH'] === '1') {
-    deploySubgraph();
-    steps.push({ step: 'subgraph.deploy', ok: true });
-  }
 
   const pending = await daemonJson<{ captures: CaptureSummary[] }>(
     daemonUrl,
@@ -168,9 +161,9 @@ async function main(): Promise<void> {
     });
   }
 
-  const indexed = await waitForCaptureIndex(subgraphUrl, approved.envelopeCid);
+  const indexed = await waitForCaptureIndex(discoveryUrl, approved.envelopeCid);
   steps.push({
-    step: 'subgraph.capture_index',
+    step: 'indexer.capture_index',
     ok: true,
     detail: indexed,
   });
@@ -236,12 +229,6 @@ async function main(): Promise<void> {
 function optionalEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value || undefined;
-}
-
-function requiredSetting(name: string): string {
-  const value = optionalEnv(name);
-  if (!value) throw new Error(`${name} is required for this live capture acceptance step`);
-  return value;
 }
 
 function loadLocalEnvFile(path: string): void {
@@ -420,71 +407,50 @@ function sha256Hex(input: Uint8Array): string {
   return createHash('sha256').update(input).digest('hex');
 }
 
+function discoveryUrlFromConfig(config: Record<string, unknown>): string | undefined {
+  const discovery = config['discovery'];
+  if (discovery && typeof discovery === 'object' && !Array.isArray(discovery)) {
+    const url = (discovery as Record<string, unknown>)['url'];
+    if (typeof url === 'string' && url.trim().length > 0) return url.trim();
+  }
+  return undefined;
+}
+
+/**
+ * Wait for the published capture envelope to show up in the Ponder discovery
+ * indexer. `queryEnvelopes` returns recent envelopes across all SolverNets
+ * (the indexer has no server-side filter for a single CID — solverType lives
+ * in the IPFS manifest, not the on-chain payload), so we scan the most-recent
+ * page for the matching `manifestCid` and retry until it lands.
+ */
 async function waitForCaptureIndex(
-  subgraphUrl: string,
+  discoveryUrl: string,
   envelopeCid: string,
   timeoutMs = Number(process.env['JINN_CAPTURE_INDEX_TIMEOUT_MS'] ?? 120_000),
 ): Promise<Record<string, unknown>> {
+  const discovery = createHttpDiscoveryAPI({ url: discoveryUrl });
   const started = Date.now();
-  let lastError = '';
+  let lastError = 'not indexed yet';
   while (Date.now() - started < timeoutMs) {
-    const response = await fetch(subgraphUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        query: `query Capture($id: ID!) {
-          captureEnvelope(id: $id) {
-            id
-            manifestCid
-            publishedAt
-            operator { id }
-          }
-        }`,
-        variables: { id: envelopeCid },
-      }),
-    });
-    const body = await response.json() as {
-      data?: { captureEnvelope?: Record<string, unknown> | null };
-      errors?: Array<{ message: string }>;
-    };
-    if (body.data?.captureEnvelope) return body.data.captureEnvelope;
-    lastError = body.errors?.map((err) => err.message).join('; ') ?? 'not indexed yet';
+    try {
+      const refs = await discovery.queryEnvelopes({ limit: 500 });
+      const match = refs.find((ref) => ref.manifestCid === envelopeCid);
+      if (match) {
+        return {
+          manifestCid: match.manifestCid,
+          manifestHash: match.manifestHash,
+          agentId: match.operator.agentId,
+          evidenceTier: match.evidenceTier,
+          publishedAt: match.publishedAt,
+        };
+      }
+      lastError = `not indexed yet (scanned ${refs.length} recent envelopes)`;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
     await new Promise((resolve) => setTimeout(resolve, 5_000));
   }
-  throw new Error(`capture:${envelopeCid} was not indexed before timeout: ${lastError}`);
-}
-
-function deploySubgraph(): void {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const subgraphDir = resolve(here, '..', '..', 'subgraph');
-  const slug = requiredSetting('JINN_SUBGRAPH_STUDIO_SLUG');
-  const args = [
-    'exec',
-    'graph',
-    'deploy',
-    slug,
-    '--node',
-    'https://api.studio.thegraph.com/deploy/',
-    '--ipfs',
-    'https://api.thegraph.com/ipfs/',
-    '--network',
-    'base-sepolia',
-    '--network-file',
-    'networks.json',
-  ];
-  const deployKey = process.env['GRAPH_STUDIO_DEPLOY_KEY']?.trim();
-  if (deployKey) args.push(`--deploy-key=${deployKey}`);
-  const versionLabel = process.env['JINN_SUBGRAPH_VERSION_LABEL']?.trim();
-  if (versionLabel) args.push('--version-label', versionLabel);
-
-  const result = spawnSync('yarn', args, {
-    cwd: subgraphDir,
-    stdio: 'inherit',
-    env: process.env,
-  });
-  if (result.status !== 0) {
-    throw new Error(`subgraph deploy failed with exit code ${result.status ?? 'unknown'}`);
-  }
+  throw new Error(`capture envelope ${envelopeCid} was not indexed before timeout: ${lastError}`);
 }
 
 main().catch((err) => {

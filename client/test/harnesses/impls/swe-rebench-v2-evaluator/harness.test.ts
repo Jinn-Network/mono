@@ -48,13 +48,13 @@ function buildEvaluationTask(restorationEnvelopeJson: string): Task {
 
 function buildSolverEnvelope(overrides: Record<string, unknown> = {}): string {
   // Syntactically-valid SignedEnvelope (jinn.execution.v1) for a swe-rebench-v2
-  // restoration. The harness does not verify signature integrity in v1 — it
+  // solution. The harness does not verify signature integrity in v1 — it
   // parses the envelope, asserts solverType+role, and passes the payload to
   // the grading library. We hand-roll a fixed-shape signed envelope here.
   const base = {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'swe-rebench-v2.v1',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: Date.parse('2026-05-08T00:00:00.000Z'),
     task: {
       cid: 'bafy-task',
@@ -164,11 +164,53 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
     expect(r.reason).toBe('implStateDir not configured');
   });
 
-  it('reports ready when state file + upstream repo are present', async () => {
+  function dockerOk() {
+    return vi.fn(async (bin: string) =>
+      bin === 'docker'
+        ? { exitCode: 0, stdout: 'Server Version: 27.0.0', stderr: '' }
+        : { exitCode: 0, stdout: '', stderr: '' },
+    );
+  }
+
+  it('reports ready when state file + upstream repo are present and Docker is reachable', async () => {
     makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
-    const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand: dockerOk() },
+    });
     const r = await h.isReady();
     expect(r.ready).toBe(true);
+  });
+
+  it('reports not-ready when Docker is unreachable, even with a valid enable marker', async () => {
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    const runCommand = vi.fn(async (bin: string) =>
+      bin === 'docker'
+        ? { exitCode: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock.' }
+        : { exitCode: 0, stdout: '', stderr: '' },
+    );
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+    const r = await h.isReady();
+    expect(r.ready).toBe(false);
+    expect(r.reason).toMatch(/docker/i);
+    expect(r.nextStep?.description).toMatch(/docker/i);
+    expect(runCommand).toHaveBeenCalledWith('docker', ['info']);
+  });
+
+  it('caches the docker info probe across rapid isReady() calls (claim-loop hot path)', async () => {
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    const runCommand = vi.fn(async (bin: string) =>
+      bin === 'docker' ? { exitCode: 0, stdout: 'ok', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' },
+    );
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+    for (let i = 0; i < 25; i++) {
+      const r = await h.isReady();
+      expect(r.ready).toBe(true);
+    }
+    expect(runCommand).toHaveBeenCalledTimes(1);
   });
 
   it('reports not-ready when upstream repo dir is missing despite a marker', async () => {
@@ -344,7 +386,10 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
 
     const sol = await harness.run(ctx);
 
-    expect(sol.gating).toEqual({ score: 1, passed_match: true });
+    // gating MUST include `verdict` ('PASS'|'FAIL') — the engine's reputation
+    // feedback hook keys on this field (jinn-mono-uy6v.10). passed_match=true
+    // → 'PASS'; passed_match=false → 'FAIL'.
+    expect(sol.gating).toEqual({ score: 1, passed_match: true, verdict: 'PASS' });
     expect(sol.verdictPayload).toMatchObject({
       schemaVersion: 'swe-rebench-v2-verdict.v1',
       score: 1,
@@ -412,9 +457,43 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     const sol = await harness.run(ctx);
     expect((sol.verdictPayload as Record<string, unknown>)['score']).toBe(0);
     expect((sol.verdictPayload as Record<string, unknown>)['passed_match']).toBe(false);
+    // Failing-grade gating MUST carry `verdict: 'FAIL'` so the engine's
+    // reputation feedback hook records a 0-score on the harness's agent NFT
+    // (jinn-mono-uy6v.10). Before this fix the field was missing and the hook
+    // silently no-op'd on every verdict.
+    expect(sol.gating).toEqual({ score: 0, passed_match: false, verdict: 'FAIL' });
   });
 
-  it('throws when the envelope is not swe-rebench-v2.v1/restoration', async () => {
+  it('does not produce a verdict when the eval could not grade the solution (skips instead)', async () => {
+    const { EvalCouldNotGradeError } = await import(
+      '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js'
+    );
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const uploadToIpfs = vi.fn().mockResolvedValue('bafy-should-not-be-called');
+    const runner = {
+      runEval: vi
+        .fn()
+        .mockRejectedValue(
+          new EvalCouldNotGradeError(
+            'docker_unavailable',
+            'docker: Cannot connect to the Docker daemon',
+          ),
+        ),
+    };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { fetcher: makeFakeFetcher(), runner, uploadToIpfs },
+    });
+    const ctx = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    await expect(harness.run(ctx)).rejects.toBeInstanceOf(SkippableError);
+    expect(uploadToIpfs).not.toHaveBeenCalled();
+    expect(existsSync(join(ctx.workingDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
+  });
+
+  it('throws when the envelope is not swe-rebench-v2.v1/solution', async () => {
     const wrongEnvelope = buildSolverEnvelope({ solverType: 'prediction.v1' });
     const harness = new SweRebenchV2EvaluatorHarness({
       implStateDir,
@@ -425,7 +504,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
       },
     });
     const ctx = buildHarnessContext(implStateDir, buildEvaluationTask(wrongEnvelope));
-    await expect(harness.run(ctx)).rejects.toThrow(/expected swe-rebench-v2\.v1\/restoration/);
+    await expect(harness.run(ctx)).rejects.toThrow(/expected swe-rebench-v2\.v1\/solution/);
   });
 
   it('throws when the harness is not enabled', async () => {
@@ -436,5 +515,53 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
       buildEvaluationTask(buildSolverEnvelope()),
     );
     await expect(harness.run(ctx)).rejects.toThrow(/not enabled/);
+  });
+
+  it('reuses a single EvalRunner across run() calls so the LRU image cache accumulates (jinn-mono-uy6v.11)', async () => {
+    // Regression: pre-fix, `new PythonEvalRunner(...)` was constructed inside
+    // each `run()` call, so the in-process LRU image cache was rebuilt empty
+    // every invocation and `cleanupImage` never fired in production. The
+    // existing LRU-eviction tests didn't catch this because they exercise
+    // PythonEvalRunner directly. This test pins the harness→runner wiring:
+    // the runner factory must be invoked exactly once across multiple run()
+    // calls, regardless of how many distinct tasks the harness grades.
+    const makeRunner = vi.fn(() => ({
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a', 'test_b'],
+        failed: [],
+        log: 'ok',
+        exitCode: 0,
+      }),
+    }));
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        fetcher: makeFakeFetcher(),
+        makeRunner,
+        uploadToIpfs: vi.fn().mockResolvedValue('bafy-test-log'),
+      },
+    });
+    const ctx1 = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    const ctx2 = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    await harness.run(ctx1);
+    await harness.run(ctx2);
+    expect(makeRunner).toHaveBeenCalledTimes(1);
+    // The factory is also expected to receive the upstream repo dir from the
+    // enabled state — guards against a future refactor that passes the wrong
+    // path and silently creates a broken runner.
+    expect(makeRunner).toHaveBeenCalledWith(
+      expect.objectContaining({ upstreamRepoDir: expect.any(String) }),
+    );
+    // Sanity: both runs actually invoked runEval — proves the harness is
+    // exercising the cached runner, not falling back to anything else.
+    const runner = makeRunner.mock.results[0]?.value as { runEval: ReturnType<typeof vi.fn> };
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
   });
 });

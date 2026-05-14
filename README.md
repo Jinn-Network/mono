@@ -21,8 +21,7 @@ TL;DR for human operators:
 
 ```bash
 npm install -g @jinn-network/client@latest
-jinn auth           # one-time: pick runtime mode + authenticate Claude
-jinn run            # creates wallet, funds via CDP faucet, starts the daemon
+jinn run            # opens the app, creates wallet, funds via CDP faucet, starts the daemon
 ```
 
 TL;DR for agent-assisted operators (Claude Code / Codex / Cursor / Gemini):

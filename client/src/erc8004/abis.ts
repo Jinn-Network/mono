@@ -6,7 +6,6 @@
  *   - `/tmp/erc8004-ref/IdentityRegistryUpgradeable.sol`
  *   - `/tmp/erc8004-ref/ReputationRegistryUpgradeable.sol`
  *   - `/tmp/erc8004-ref/ValidationRegistryUpgradeable.sol`
- *   - `subgraph/abis/{Identity,Reputation,Validation}Registry.json`
  *
  * Keep the slices tight: typed-ABI inference from viem/abitype is what makes
  * the client surface stay sharp, and full ABIs widen the inferred types

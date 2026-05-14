@@ -29,8 +29,15 @@
 # - gh (GitHub CLI) authenticated with project scope (`gh auth refresh -s project`).
 # - jq.
 #
-# Status: v0. The Project board (jinn-mono-2cl.9) must exist for the Project-add steps to
-# succeed; until then this script falls back to "Issue created, Project add skipped" mode.
+# Status: v0.1. The Project board (jinn-mono-2cl.9) exists as of 2026-05-11
+# (https://github.com/orgs/Jinn-Network/projects/1). The Project-add steps will succeed when
+# the gh CLI token has the `project` scope; otherwise this script falls back to
+# "Issue created, Project add skipped" mode.
+#
+# Changelog:
+# - v0.1 (jinn-mono-2cl.13, 2026-05-11): fix bd JSON parsing — `bd show --json` returns an array
+#   not a bare object (index with .[0]); `.parent` not `.parent_id`; fall back through
+#   .assignee → .owner → "human" for the agent: label.
 
 set -euo pipefail
 
@@ -85,16 +92,27 @@ if ! [[ "$SPRINT_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
 fi
 
 # Read the bd issue.
-if ! BD_JSON="$(bd show "$BD_ID" --json 2>/dev/null)"; then
+# Note: `bd show --json` returns a JSON ARRAY of one element, not a bare object.
+# Use jq's `.[0]` to extract the single element before reading fields.
+if ! BD_JSON="$(bd show "$BD_ID" --json 2>/dev/null | jq '.[0]')"; then
   echo "error: bd show $BD_ID failed — does the bead exist?" >&2
   exit 1
 fi
+if [[ -z "$BD_JSON" || "$BD_JSON" == "null" ]]; then
+  echo "error: bd show $BD_ID returned no data — does the bead exist?" >&2
+  exit 1
+fi
 
-BD_TITLE="$(echo "$BD_JSON" | jq -r '.title')"
+BD_TITLE="$(echo "$BD_JSON" | jq -r '.title // ""')"
 BD_DESCRIPTION="$(echo "$BD_JSON" | jq -r '.description // ""')"
-BD_PRIORITY="$(echo "$BD_JSON" | jq -r '.priority // "P2"')"
-BD_PARENT="$(echo "$BD_JSON" | jq -r '.parent_id // ""')"
-BD_OWNER="$(echo "$BD_JSON" | jq -r '.assignee // "human"')"
+BD_PRIORITY="$(echo "$BD_JSON" | jq -r '.priority // 2')"
+# Parent is the top-level `.parent` field (not `.parent_id`). It's null on epics/orphans.
+BD_PARENT="$(echo "$BD_JSON" | jq -r '.parent // ""')"
+# `.assignee` is set by `bd update <id> --claim` and bd's CLI flows; falls back to the legacy
+# email-shaped `.owner` and finally to "human" so the agent: label always has a value.
+# Note: jq's `//` only triggers on null/false, not empty strings. Some bd versions may emit
+# `""` for unset string fields; the explicit filter handles both `null` and `""`.
+BD_OWNER="$(echo "$BD_JSON" | jq -r '[.assignee, .owner, "human"] | map(select(. != null and . != "")) | .[0]')"
 BD_EXTERNAL_REF="$(echo "$BD_JSON" | jq -r '.external_ref // ""')"
 
 # Idempotency check: if external-ref points at a Jinn-Network/mono Issue, no-op.

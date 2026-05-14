@@ -10,7 +10,10 @@ on:
 # Trusted publishing (OIDC): register this single workflow on npmjs for
 # @jinn-network/client. npm allows one trusted publisher config per package.
 permissions:
-  contents: read
+  # contents: write is required for the dual-tag step (jinn-mono-2cl.6) which creates
+  # and pushes the v2026.MM.DD date tag alongside the v<semver> tag. id-token: write
+  # remains for npm trusted publishing OIDC.
+  contents: write
   id-token: write
 
 defaults:
@@ -20,8 +23,13 @@ defaults:
 jobs:
   publish:
     name: Publish package
-    if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'client-v')
+    if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
+    # Stable publish reruns the CI-safe release gates. The live donation-consumption
+    # and app-first testnet gates require a producer daemon, UI auth/handshake, and
+    # local operator evidence; those stay in `yarn release:client --prepare` before
+    # Captain publishes the GitHub Release.
+    timeout-minutes: 90
     environment: npm-publish
     env:
       JINN_BUILD_COMMIT: ${{ github.sha }}
@@ -52,12 +60,26 @@ jobs:
             DIST_TAG="canary"
           else
             RELEASE_TAG="${{ github.event.release.tag_name }}"
+            # Two accepted tag formats per the engineering handbook §Cadence:
+            # - v<semver>    (new format, used by the Monday scaffold workflow — jinn-mono-2cl.2)
+            # - client-v<semver>  (legacy format, kept for backwards-compatibility)
+            # The companion v2026.MM.DD date tag (jinn-mono-2cl.6) is created in a separate
+            # step after publish — it is NOT used as the npm-publish trigger.
             case "${RELEASE_TAG}" in
               client-v*)
                 PUBLISH_VERSION="${RELEASE_TAG#client-v}"
                 ;;
+              v*)
+                PUBLISH_VERSION="${RELEASE_TAG#v}"
+                # Guard against `v<garbage>` tags slipping through the `startsWith(v)` filter
+                # in the job-level `if:` (e.g. `vbeta`, `v-foo`). Require semver-shaped suffix.
+                if ! [[ "${PUBLISH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  echo "::error::Release tag ${RELEASE_TAG} does not look like v<semver>; got version: ${PUBLISH_VERSION}"
+                  exit 1
+                fi
+                ;;
               *)
-                echo "::error::Stable client releases must use tags shaped like client-vX.Y.Z"
+                echo "::error::Stable client releases must use tags shaped like v<semver> or client-v<semver>"
                 exit 1
                 ;;
             esac
@@ -84,6 +106,7 @@ jobs:
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
+      - run: yarn typecheck
       - run: yarn build
       - run: yarn test
 
@@ -93,8 +116,104 @@ jobs:
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag canary
 
+      - name: Verify stable release evidence marker
+        if: steps.meta.outputs.dist_tag == 'latest'
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const body = process.env.RELEASE_BODY ?? '';
+          const required = [
+            ['schema marker', '<!-- jinn-release-evidence:v1'],
+            ['release tag', `release-tag=${process.env.RELEASE_TAG}`],
+            ['release commit', `release-commit=${process.env.RELEASE_SHA}`],
+            ['release client prepare', 'release-client-prepare=passed'],
+            ['donation consumption', 'donation-consumption=passed'],
+            ['app-first testnet acceptance', 'app-first-testnet-acceptance=passed'],
+            ['marker close', '-->'],
+          ];
+          const missing = required
+            .filter(([, needle]) => !body.includes(needle))
+            .map(([label, needle]) => `${label}: ${needle}`);
+          if (missing.length > 0) {
+            console.error('Stable publish requires a jinn-release-evidence:v1 marker in the GitHub Release body.');
+            console.error('Missing required evidence entries:');
+            for (const item of missing) console.error(`- ${item}`);
+            process.exit(1);
+          }
+          NODE
+
+      # CI-safe release gate (jinn-mono-2cl.7, per the engineering handbook §Cadence).
+      # The package's `prepublishOnly` script stays cheap; this workflow reruns the
+      # deterministic Anvil gate before stable npm publish. The live donation and
+      # app-first acceptance gates are release-prep evidence, not GitHub Actions
+      # steps, because they need an operator daemon and local credentials.
+      - name: Install contracts dependencies for release gate
+        if: steps.meta.outputs.dist_tag == 'latest'
+        working-directory: contracts
+        run: yarn install --immutable
+
+      - name: Release gate — operator-gate (staking + e2e on Anvil fork)
+        if: steps.meta.outputs.dist_tag == 'latest'
+        run: yarn release:operator-gate
+
       - name: Publish stable
         if: steps.meta.outputs.dist_tag == 'latest'
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public
+
+      # Dual-tag policy (jinn-mono-2cl.6, per the engineering handbook §Cadence): the published
+      # release commit also receives a v2026.MM.DD date tag for human-readable build identification
+      # alongside the v<semver> tag that triggered this publish.
+      #
+      # Scoped to `v*` tags only (the new format from the Monday scaffold workflow). Legacy
+      # `client-v*` releases are manual/pre-cadence and do not get a date tag — the dual-tag
+      # policy is intentionally part of the new cadence, not retrofitted.
+      #
+      # Idempotent: if the date tag already exists pointing at the same SHA, the step is a no-op.
+      # If it exists at a different SHA (two named releases on the same calendar day), the step
+      # errors and asks for manual reconciliation.
+      - name: Create v2026.MM.DD date tag
+        if: steps.meta.outputs.dist_tag == 'latest' && startsWith(github.event.release.tag_name, 'v')
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        env:
+          PUBLISHED_AT: ${{ github.event.release.published_at }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          # Format the date from the release's published_at (ISO 8601 from GitHub).
+          # Use leading-zero %Y.%m.%d so May 18 is v2026.05.18, not v2026.5.18.
+          DATE_TAG="$(date -u -d "$PUBLISHED_AT" +"v%Y.%m.%d")"
+
+          # actions/checkout@v5 does a shallow clone and may not have fetched the just-created
+          # release tag into refs/tags/. Fetch it explicitly before resolving.
+          git fetch --tags --depth=1 origin "${RELEASE_TAG}"
+
+          # Resolve the SHA the release points at. The release event sets tag_name on the published
+          # release, so the v<semver> tag was just created. We tag the same SHA with the date tag.
+          # `^{commit}` peels annotated tags (gh release create creates lightweight tags by default,
+          # but this is safe either way).
+          SHA="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+
+          if git rev-parse --verify --quiet "refs/tags/${DATE_TAG}" >/dev/null; then
+            EXISTING_SHA="$(git rev-parse "${DATE_TAG}^{commit}")"
+            if [ "${EXISTING_SHA}" = "${SHA}" ]; then
+              echo "::notice::date tag ${DATE_TAG} already exists at the same SHA (${SHA}); no-op"
+              exit 0
+            else
+              echo "::error::date tag ${DATE_TAG} already exists but points at ${EXISTING_SHA}, not ${SHA}. Manual reconciliation required (likely two named releases on the same calendar day)."
+              exit 1
+            fi
+          fi
+
+          # Configure git identity for the tag push. Use github-actions[bot] so the tag is
+          # attributed to CI, not a human.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag "${DATE_TAG}" "${SHA}"
+          git push origin "${DATE_TAG}"
+          echo "::notice::Created date tag ${DATE_TAG} pointing at ${SHA} (alongside ${RELEASE_TAG})"

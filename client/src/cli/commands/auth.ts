@@ -94,7 +94,7 @@ async function run(ctx: CommandContext): Promise<void> {
       {
         code: 'invalid_invocation',
         message: err instanceof Error ? err.message : String(err),
-        exampleCli: 'jinn auth',
+        exampleCli: 'jinn run',
         details: { field: 'flags' },
       },
       { writer: ctx.writer, exit: ctx.exit },
@@ -137,7 +137,7 @@ async function run(ctx: CommandContext): Promise<void> {
         {
           code: 'invalid_invocation',
           message: `--mode must be one of bare, docker-compose, container (got ${modeFlag})`,
-          exampleCli: 'jinn auth --mode bare',
+          exampleCli: 'jinn run',
           details: { field: 'mode' },
         },
         { writer: ctx.writer, exit: ctx.exit },
@@ -187,8 +187,8 @@ async function run(ctx: CommandContext): Promise<void> {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: `Claude is not authenticated ${contextLabel}. Run \`jinn auth\` in a TTY to log in.`,
-        exampleCli: 'jinn auth',
+        message: `Claude is not authenticated ${contextLabel}. Run \`jinn run\` and complete setup in the operator app.`,
+        exampleCli: 'jinn run',
         details: { field: 'auth', context },
       },
       { writer: ctx.writer, exit: ctx.exit },
@@ -199,7 +199,7 @@ async function run(ctx: CommandContext): Promise<void> {
   // TTY — prompt and run interactive login
   const contextLabel = CONTEXT_LABELS[context] ?? context;
   process.stderr.write(
-    `Claude is not authenticated ${contextLabel}. Starting login…\n`,
+    `Claude is not authenticated ${contextLabel}. Starting legacy CLI login…\n`,
   );
 
   if (context === 'docker-compose') {
@@ -216,7 +216,7 @@ async function run(ctx: CommandContext): Promise<void> {
       {
         code: 'fatal',
         message: `Login command exited with code ${result.status ?? 'null'}.`,
-        exampleCli: 'jinn auth',
+        exampleCli: 'jinn run',
         details: { context },
       },
       { writer: ctx.writer, exit: ctx.exit },
@@ -249,8 +249,8 @@ async function run(ctx: CommandContext): Promise<void> {
   emitEnvelope(
     {
       code: 'fatal',
-      message: 'Login completed but Claude is still not authenticated. Try running `jinn auth` again.',
-      exampleCli: 'jinn auth',
+      message: 'Login completed but Claude is still not authenticated. Run `jinn run` and complete setup in the operator app.',
+      exampleCli: 'jinn run',
       details: { context },
     },
     { writer: ctx.writer, exit: ctx.exit },
@@ -259,19 +259,22 @@ async function run(ctx: CommandContext): Promise<void> {
 
 const command: CommandModule = {
   name: 'auth',
-  summary: 'Check Claude authentication and persist how the operator runs the daemon',
+  summary: 'Legacy compatibility: check Claude authentication and persist daemon runtime mode',
   helpText: `Usage: jinn auth [--mode <bare|docker-compose|container>] [--human] [--json] [--config <path>]
 
-Two concerns in one command:
+Compatibility command. New operators should install the client and run \`jinn run\`;
+the operator app handles Claude auth and runtime setup if needed.
+
+This command still supports two legacy/scripted concerns:
 
 1. Runtime mode — how the operator wants to run the daemon. Persisted to
    config once (so downstream commands don't re-detect by cwd heuristics).
-2. Claude authentication — verified, and in a TTY launched interactively
-   if missing.
+2. Claude authentication — verified; in a TTY this command can still launch
+   the legacy interactive login flow if missing.
 
 Runtime-mode resolution order:
   --mode flag          > scripted / CI
-  config.runtimeMode   > persisted from a prior \`jinn auth\`
+  config.runtimeMode   > persisted from app setup or legacy \`jinn auth\`
   interactive prompt   > TTY fallback — asks the operator to pick
   filesystem heuristic > last-resort: container (/.dockerenv) → docker-compose (cwd jinn-daemon compose) → bare
 
@@ -289,8 +292,8 @@ Flags:
   --human      Force human-readable output.
 
 Examples:
-  jinn auth                          # interactive: picks mode + authenticates
-  jinn auth --mode bare              # scripted: set mode + authenticate
+  jinn run                           # public first-run path
+  jinn auth --mode bare --json       # compatibility: set mode and report auth status
   jinn auth --mode docker-compose --json
 `,
   run,

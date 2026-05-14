@@ -37,13 +37,18 @@ describe('donation consumption acceptance config', () => {
       },
       consumerHome: '/tmp/jinn-consumer',
       consumerPort: 7333,
-      subgraphUrl: 'https://subgraph.example',
+      indexerUrl: 'https://jinn-indexer-production.up.railway.app',
       ipfsGatewayUrl: 'https://gateway.example',
     });
 
     expect(config.dbPath).toBe('/tmp/jinn-consumer/.jinn-client/jinn.db');
     expect(config.earningDir).toBe('/tmp/jinn-consumer/.jinn-client/earning');
     expect(config.apiPort).toBe(7333);
+    expect(config.discovery).toEqual({
+      mode: 'http',
+      url: 'https://jinn-indexer-production.up.railway.app',
+      fallbackToOnchain: true,
+    });
     expect(config.operator).toMatchObject({
       publicEndpoint: 'http://localhost:7333',
       donation: { enabled: true },
@@ -115,7 +120,7 @@ describe('donation consumption acceptance config', () => {
     });
   });
 
-  it('scopes the managed consumer to the producer task id resolved from the subgraph', async () => {
+  it('scopes the managed consumer to the producer task id resolved from the Ponder indexer', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-donation-consumer-scope-'));
     const configPath = join(root, 'config.json');
     const consumerConfig = {
@@ -128,7 +133,9 @@ describe('donation consumption acceptance config', () => {
       ok: true,
       json: async () => ({
         data: {
-          tasks: [{ taskId: '109', createdAtTx: '0xabc' }],
+          tasks: {
+            items: [{ id: '109', taskCidDigest: '0xaaaa', createdAtTx: '0xabc' }],
+          },
         },
       }),
     } as unknown as Response);
@@ -136,7 +143,7 @@ describe('donation consumption acceptance config', () => {
       const taskId = await scopeConsumerConfigToProducerTask({
         consumerConfig,
         consumerConfigPath: configPath,
-        subgraphUrl: 'https://subgraph.example/graphql',
+        indexerUrl: 'https://jinn-indexer-production.up.railway.app',
         proof: {
           artifact: {
             sha256: 'producer-sha',
@@ -159,9 +166,10 @@ describe('donation consumption acceptance config', () => {
       });
 
       expect(taskId).toBe('109');
-      expect(fetchSpy).toHaveBeenCalledWith('https://subgraph.example/graphql', expect.objectContaining({
-        method: 'POST',
-      }));
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://jinn-indexer-production.up.railway.app/graphql',
+        expect.objectContaining({ method: 'POST' }),
+      );
       expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
         taskDiscoveryAllowedTaskIds: ['109'],
       });
