@@ -384,13 +384,50 @@ describe('cold-start-builder E2E (52x3.7 / r83r)', () => {
 // Uses viem getLogs to count AgentRegistered events. Task 12 (failing) leaves
 // this as a stub that throws. Task 13 wires the real implementation.
 
+/**
+ * Count the number of IdentityRegistry.register() transactions for a given
+ * owner address by filtering AgentRegistered events where `owner === ownerAddress`.
+ *
+ * Uses viem's public client `getLogs` with the AgentRegistered event ABI so
+ * we count the actual on-chain register() calls, not any subsequent
+ * setAgentWallet / setMetadata writes. This is the load-bearing assertion for
+ * the dual-role test: if ensureStage1 short-circuits correctly, the count
+ * stays at the pre-publish value.
+ */
 async function countRegisterTxs(
   rpcUrl: string,
   registryAddress: `0x${string}`,
   ownerAddress: `0x${string}`,
 ): Promise<number> {
-  // Task 13: implement via getLogs(AgentRegistered, filter by owner).
-  throw new Error('countRegisterTxs: not implemented — Task 13 pending');
+  const chain = defineChain({
+    id: 31337,
+    name: 'anvil-count',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    rpcUrls: { default: { http: [rpcUrl] } },
+  });
+
+  const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+
+  // The AgentRegistered event has `owner` as an indexed topic so we can filter
+  // on it without fetching all events.
+  const agentRegisteredEvent = IDENTITY_REGISTRY_STUB_ABI.find(
+    (x) => x.type === 'event' && x.name === 'AgentRegistered',
+  );
+  if (!agentRegisteredEvent) {
+    throw new Error('AgentRegistered event not found in IDENTITY_REGISTRY_STUB_ABI');
+  }
+
+  const logs = await publicClient.getLogs({
+    address: registryAddress,
+    event: agentRegisteredEvent as Parameters<typeof publicClient.getLogs>[0]['event'],
+    args: {
+      owner: getAddress(ownerAddress) as Address,
+    },
+    fromBlock: 0n,
+    toBlock: 'latest',
+  });
+
+  return logs.length;
 }
 
 // ── Dual-role: operator-then-builder, one identity ────────────────────────────
