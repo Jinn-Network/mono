@@ -1,5 +1,6 @@
 // client/test/e2e/_daemon-harness-helpers.ts
-import { createServer, type Server } from 'node:http';
+import { createHash } from 'node:crypto';
+import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -21,9 +22,11 @@ import {
   type Hex,
   type Log,
   type PublicClient,
+  type WalletClient,
 } from 'viem';
 import { base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
+import { SignedEnvelopeSchema, type SignedEnvelope } from '../../src/types/envelope.js';
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const CONTRACTS_DIR = resolve(E2E_DIR, '..', '..', '..', 'contracts');
@@ -160,6 +163,17 @@ export interface DaemonClaim {
   txHash: `0x${string}`;
 }
 
+export interface DeliveredTask {
+  /** RequestId from the daemon claim. */
+  requestId: `0x${string}`;
+  /** Tx hash of the Deliver event on the mock mech. */
+  deliveryTxHash: `0x${string}`;
+  /** Signed envelope assembled by the daemon and uploaded to mock IPFS. */
+  envelope: SignedEnvelope;
+  /** Solver harness name from envelope.executor.implName. */
+  solverHarnessName: string;
+}
+
 /**
  * Locally-deployed V3 task stack.
  *
@@ -201,9 +215,9 @@ export interface BootstrappedOperator {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Pick the harness from JINN_E2E_HARNESS, default `hermes-agent`. */
+/** Pick the harness from JINN_E2E_HARNESS, default `prediction-v1-baseline`. */
 export function harnessSelectorFromEnv(): HarnessSelector {
-  const raw = (process.env['JINN_E2E_HARNESS'] ?? 'hermes-agent').trim();
+  const raw = (process.env['JINN_E2E_HARNESS'] ?? 'prediction-v1-baseline').trim();
   if (raw === 'hermes-agent' || raw === 'claude-code' || raw === 'codex' || raw === 'prediction-v1-baseline') {
     return raw;
   }
@@ -511,12 +525,18 @@ export async function bootstrapStakedOperator(
 // ── Mock IPFS server ───────────────────────────────────────────────────────────
 
 /**
- * A minimal in-process HTTP server that acts as an IPFS gateway for the daemon.
+ * A minimal in-process HTTP server that acts as both an IPFS gateway and
+ * registry for the daemon.
  *
  * Serves task JSON at `GET /ipfs/{cid}` paths. The daemon's
  * `fetchSignedTaskFromIpfs` constructs a CID from the on-chain `taskCidDigest`
  * and fetches from `${ipfsGatewayUrl}/ipfs/{cid}`. Point `ipfsGatewayUrl` at
  * this server's `baseUrl` to intercept those fetches without network I/O.
+ *
+ * Also handles `POST /api/v0/add` uploads (Kubo API format) so the daemon's
+ * `uploadToIpfs` call succeeds. Uploaded content is stored in the same map as
+ * registered content — the CID returned is a deterministic sha256-based CIDv1
+ * hex string (`f01551220{sha256hex}`).
  *
  * Also exposes `register(digest, json)` so you can pre-populate the store
  * before posting a task on-chain.
@@ -530,6 +550,11 @@ export interface MockIpfsServer {
    * `taskCidDigest`; the server serves it at `/ipfs/f01551220{digest.slice(2)}`.
    */
   register(digest: `0x${string}`, json: unknown): void;
+  /**
+   * Look up uploaded content by CID string (e.g. `f01551220{hex}`).
+   * Returns the parsed JSON or undefined if not found.
+   */
+  getUploaded(cid: string): unknown | undefined;
   /** Tear down the HTTP server. */
   close(): Promise<void>;
 }
@@ -558,6 +583,40 @@ function closeServer(server: Server): Promise<void> {
   });
 }
 
+/**
+ * Read the full body of an IncomingMessage as a Buffer.
+ */
+function readBody(req: IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Parse a multipart/form-data body (minimal — only extracts the first `file` part).
+ * Returns the raw bytes of the file part.
+ */
+function parseMultipartBody(body: Buffer, contentType: string): Buffer | null {
+  const boundaryMatch = contentType.match(/boundary=([^\s;]+)/);
+  if (!boundaryMatch) return null;
+  const boundary = `--${boundaryMatch[1]}`;
+  const bodyStr = body.toString('binary');
+  const parts = bodyStr.split(boundary);
+  for (const part of parts) {
+    if (!part.includes('Content-Disposition')) continue;
+    const headerEnd = part.indexOf('\r\n\r\n');
+    if (headerEnd === -1) continue;
+    // Strip leading \r\n and trailing --\r\n
+    const content = part.slice(headerEnd + 4);
+    const trimmed = content.replace(/\r\n--$/, '').replace(/\r\n$/, '');
+    return Buffer.from(trimmed, 'binary');
+  }
+  return null;
+}
+
 export async function startMockIpfsServer(): Promise<MockIpfsServer> {
   // Map from CID path (e.g. `f01551220{hex}`) → serialised JSON string.
   const store = new Map<string, string>();
@@ -576,6 +635,37 @@ export async function startMockIpfsServer(): Promise<MockIpfsServer> {
           res.end(`not found: ${cidPath}`);
           return;
         }
+
+        // Handle IPFS registry upload: POST /api/v0/add (Kubo API format).
+        // The daemon's `uploadToIpfs` sends a multipart/form-data POST with a
+        // single `file` field containing JCS-encoded JSON bytes. We:
+        //   1. Parse the multipart body to extract the file bytes.
+        //   2. Compute a sha256 digest of the bytes.
+        //   3. Derive a CIDv1 hex key: `f01551220{sha256hex}`.
+        //   4. Store the raw content under that CID path.
+        //   5. Return `{"Hash": "<cidPath>"}` so the daemon can reference it.
+        if (req.method === 'POST' && req.url?.startsWith('/api/v0/add')) {
+          const contentType = req.headers['content-type'] ?? '';
+          const body = await readBody(req);
+          let fileBytes: Buffer;
+          if (contentType.includes('multipart/form-data')) {
+            const parsed = parseMultipartBody(body, contentType);
+            fileBytes = parsed ?? body;
+          } else {
+            fileBytes = body;
+          }
+          const sha256hex = createHash('sha256').update(fileBytes).digest('hex');
+          const cidPath = `f01551220${sha256hex}`;
+          const serialised = fileBytes.toString('utf8');
+          store.set(cidPath, serialised);
+          // Also store under dag-pb variant so gateway fetches succeed either way.
+          store.set(`f01701220${sha256hex}`, serialised);
+          console.log(`[mock-ipfs] uploaded cid=${cidPath} bytes=${fileBytes.length}`);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ Hash: cidPath, Size: fileBytes.length, Name: 'content.json' }));
+          return;
+        }
+
         res.writeHead(404, { 'content-type': 'text/plain' });
         res.end('not found');
       } catch (err) {
@@ -598,6 +688,11 @@ export async function startMockIpfsServer(): Promise<MockIpfsServer> {
       const serialised = JSON.stringify(json);
       store.set(raw, serialised);
       store.set(dagPb, serialised);
+    },
+    getUploaded(cid: string): unknown | undefined {
+      const serialised = store.get(cid);
+      if (!serialised) return undefined;
+      try { return JSON.parse(serialised) as unknown; } catch { return undefined; }
     },
     close() {
       return closeServer(server);
@@ -652,6 +747,13 @@ export async function startDaemon(
   _harnessSelector: HarnessSelector,
   ipfsGatewayUrl?: string,
   v3Env?: TaskV3Env,
+  /**
+   * When provided, used as the IPFS registry URL for uploads (POST /api/v0/add).
+   * The mock IPFS server accepts uploads at its baseUrl + /api/v0/add — pass
+   * mockIpfs.baseUrl here so the daemon's uploadToIpfs calls hit the mock.
+   * Falls back to the real Autonolas registry when absent.
+   */
+  ipfsRegistryUrl?: string,
 ): Promise<RunningDaemon> {
   const rpcUrl = fixture.anvil.rpcUrl;
   const chainCfg = getChainConfig('base');
@@ -664,21 +766,15 @@ export async function startDaemon(
   //    Using 0 avoids a TOCTOU race — no pre-allocation window where another
   //    process could grab the port between our close() and the daemon's bind.
   const apiPort = 0;
-  // WARNING — TASK 5+: this URL is http://127.0.0.1:0, which is NOT a usable
-  // endpoint. Harnesses constructed below will bake this value into their
-  // adapter env at construction time. Task 3 is safe because no harness is
-  // invoked. Before Task 5 spawns a harness, the URL must be rebuilt from the
-  // ACTUAL bound port after `daemon.start()` returns — read it from
-  // `daemon.apiServer?.port` (see src/api/server.ts:683-687) and rebuild the
-  // URL, or restructure to build harnesses post-daemon-start.
+  // NOTE: daemonApiUrl uses port 0 before daemon.start(). After daemon.start()
+  // the actual port is bound and can be read from `daemon.apiServer?.port`.
+  // The prediction-v1-baseline harness runs fully in-process and does not use
+  // this URL at all, so the placeholder is safe for Task 5.
   const daemonApiUrl = `http://127.0.0.1:${apiPort}`;
-  // API token: Daemon will generate a random one when not supplied; match that
-  // by not supplying one here — the test doesn't call cost-mutating routes.
 
   // 3. Build harnesses. Mirror the HarnessEnv shape from main.ts §1614.
   //    - claudePath / claudeModel: use env vars with production defaults
-  //      (harnesses just need valid path strings; they won't be invoked in Task 3)
-  //    - runner: omitted → LegacyClaudeImpl is not constructed (OK for Task 3)
+  //    - runner: omitted → LegacyClaudeImpl is not constructed
   //    - storePath: wired so harnesses can hand off artifacts through SQLite
   //    - implStateDirRoot: use fixture.implStateRoot so harness state is isolated
   const claudePath = process.env['JINN_CLAUDE_PATH'] ?? 'claude';
@@ -690,12 +786,13 @@ export async function startDaemon(
     claudeModel,
     pk: operator.agentPrivateKey,
     safe: operator.safeAddress,
-    // runner omitted → no LegacyClaudeImpl (acceptable for Task 3)
+    // runner omitted → no LegacyClaudeImpl
     storePath,
     daemonApiUrl,
     // daemonApiToken omitted → harnesses will handle missing token gracefully
     implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
-    // ipfsRegistryUrl omitted — harnesses that need IPFS won't be invoked in Task 3
+    // ipfsRegistryUrl wired so harnesses that upload artifacts use the mock
+    ipfsRegistryUrl: ipfsRegistryUrl ?? process.env['JINN_IPFS_REGISTRY_URL'] ?? 'https://registry.autonolas.tech',
     // externalImpls omitted — no operator-supplied harnesses
     // disabledNames omitted — use production defaults
   });
@@ -729,6 +826,13 @@ export async function startDaemon(
     : chainCfg.mechMarketplace as `0x${string}`;
   const routerClaimDeliveryVariant = v3Env ? 'v3' : chainCfg.routerClaimDeliveryVersion;
 
+  const resolvedIpfsRegistryUrl = ipfsRegistryUrl
+    ?? process.env['JINN_IPFS_REGISTRY_URL']
+    ?? 'https://registry.autonolas.tech';
+  const resolvedIpfsGatewayUrl = ipfsGatewayUrl
+    ?? process.env['JINN_IPFS_GATEWAY_URL']
+    ?? 'https://gateway.autonolas.tech';
+
   const mechAdapter = new MechAdapter({
     rpcUrl,
     mechMarketplaceAddress,
@@ -736,8 +840,8 @@ export async function startDaemon(
     mechContractAddress,
     safeAddress: operator.safeAddress,
     agentEoaPrivateKey: operator.agentPrivateKey,
-    ipfsRegistryUrl: process.env['JINN_IPFS_REGISTRY_URL'] ?? 'https://registry.autonolas.tech',
-    ipfsGatewayUrl: ipfsGatewayUrl ?? process.env['JINN_IPFS_GATEWAY_URL'] ?? 'https://gateway.autonolas.tech',
+    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+    ipfsGatewayUrl: resolvedIpfsGatewayUrl,
     pollIntervalMs: 300,
     chainId: 8453,
     routerClaimDeliveryVariant,
@@ -747,16 +851,49 @@ export async function startDaemon(
   }, store);
 
   // 5. Build agent viem clients for deliveryDeps (mirrors main.ts §1513 + §1699).
-  //    Omitting packagingDeps / envelopeDeps / deliveryDeps in Task 3 because:
-  //    - pack() falls back to NotImplementedError (acceptable — no deliveries yet)
-  //    - Task 4+ will wire these as needed for the full delivery path
+  //    These are required for the full delivery path (Task 5+).
+  const { createClients } = await import('../../src/adapters/mech/safe.js');
+  const agentClients = createClients(rpcUrl, operator.agentPrivateKey, base);
 
-  // 6. Construct Daemon. Translation of main.ts §2046.
+  // 6. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
+  //    - packagingDeps: operatorEndpoint + pricing config for artifact serving.
+  //      No artifact donation in tests; donation.enabled = false.
+  //    - envelopeDeps: agent EOA private key + IPFS registry URL for envelope upload.
+  //    - deliveryDeps: viem clients + contract addresses for on-chain delivery.
+  //    The safeAddress in envelopeDeps matches the operator Safe so the
+  //    envelope's participant.safeAddress is correct.
+  const packagingDeps = {
+    operatorEndpoint: daemonApiUrl,
+    defaultPriceUsdc: '0',
+    perArtifactTypePrice: {} as Record<string, string>,
+    donation: {
+      enabled: false,
+      ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+    },
+  };
+
+  const envelopeDeps = {
+    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+    agentEoaPrivateKey: operator.agentPrivateKey,
+    safeAddress: operator.safeAddress,
+  };
+
+  const deliveryDeps = {
+    publicClient: agentClients.publicClient,
+    walletClient: agentClients.walletClient as unknown as WalletClient,
+    safeAddress: operator.safeAddress as Address,
+    mechContractAddress: (v3Env ? v3Env.mockMechAddress : operator.mechAddress) as Address,
+    routerAddress: (v3Env ? v3Env.routerAddress : routerAddress) as Address,
+    claimDeliveryVariant: routerClaimDeliveryVariant as 'v1' | 'v2' | 'v3',
+    // evictionRecovery: omitted — no master wallet in test
+  };
+
+  // 7. Construct Daemon. Translation of main.ts §2046.
   //    - store: injected so Daemon does NOT own it (our stop() closes it explicitly)
-  //    - taskSources: omitted (no creator-side tasks in Task 3)
+  //    - taskSources: omitted (no creator-side tasks in Task 5)
   //    - peers / subgraphUrl / nodeEndpoint: omitted (test environment)
   //    - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → no loops)
-  //    - status: omitted (GET /v1/status not exercised in Task 3)
+  //    - status: omitted (GET /v1/status not exercised in Task 5)
   //    - corpusFactory: omitted (no subgraph configured)
   const daemon = new Daemon({
     adapter: mechAdapter,
@@ -780,7 +917,9 @@ export async function startDaemon(
         implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
       },
       implRegistry,
-      // packagingDeps / envelopeDeps / deliveryDeps: omitted in Task 3
+      packagingDeps,
+      envelopeDeps,
+      deliveryDeps,
       // joinedSolverNets: omitted — engine falls back to legacy solverType gate
       // manifestResolver / identityPublisher / reputationFeedback: omitted
       operatorConfig: {
@@ -793,7 +932,7 @@ export async function startDaemon(
     },
   });
 
-  // 7. Start the daemon (kicks off all configured loops).
+  // 8. Start the daemon (kicks off all configured loops).
   await daemon.start();
 
   let stopped = false;
@@ -997,6 +1136,182 @@ export async function postPredictionV1Task(
   const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
 
   return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
+}
+
+// ── Deliver event ABI for MockTaskMechWithDelivery ───────────────────────────
+
+/**
+ * Minimal ABI covering the Deliver event emitted by MockTaskMechWithDelivery.
+ *
+ * event Deliver(
+ *   address indexed mech,
+ *   address indexed mechServiceMultisig,
+ *   bytes32 requestId,       ← non-indexed
+ *   uint256 deliveryRate,    ← non-indexed
+ *   bytes data               ← non-indexed (contains the delivery digest)
+ * )
+ */
+const MOCK_MECH_DELIVER_ABI = [
+  {
+    name: 'Deliver',
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'mech', type: 'address', indexed: true },
+      { name: 'mechServiceMultisig', type: 'address', indexed: true },
+      { name: 'requestId', type: 'bytes32', indexed: false },
+      { name: 'deliveryRate', type: 'uint256', indexed: false },
+      { name: 'data', type: 'bytes', indexed: false },
+    ],
+  },
+] as const;
+
+/**
+ * Poll the MockTaskMechWithDelivery for a `Deliver` event matching
+ * `claim.requestId`. When found, fetches the signed envelope from the
+ * mock IPFS server (the daemon uploads on settle) and parses it via
+ * `SignedEnvelopeSchema`.
+ *
+ * The delivery tx hash comes from the on-chain Deliver event. The
+ * envelope CID is derived from the event's `data` field: the daemon
+ * uploads via `POST /api/v0/add` and the returned CID is
+ * `f01551220{sha256hex}`; `deliverToMarketplace` passes
+ * `cidToDigestHex(manifestCid)` = `0x{sha256hex}` as the delivery digest,
+ * so the CID path is `f01551220${deliveryDigest.slice(2)}`.
+ *
+ * Resolves when delivery is on-chain and the envelope is parsed.
+ * Rejects after `timeoutMs` (default 180s).
+ */
+export async function waitForDelivery(
+  fixture: DaemonHarnessFixture,
+  claim: DaemonClaim,
+  v3Env: TaskV3Env,
+  mockIpfs: MockIpfsServer,
+  timeoutMs = 180_000,
+): Promise<DeliveredTask> {
+  const mechAddress = v3Env.mockMechAddress;
+  const deadline = Date.now() + timeoutMs;
+
+  // Start scanning from the current block at call time — Deliver can only happen
+  // after the claim (which is already on-chain). Using the current tip as the
+  // floor avoids the 10,000-block getLogs range limit when scanning an Anvil
+  // fork of Base mainnet (which starts at block ~46M).
+  const startBlock = await fixture.publicClient.getBlockNumber();
+  let scannedUpTo = startBlock > 1n ? startBlock - 1n : 0n;
+
+  while (Date.now() < deadline) {
+    const currentBlock = await fixture.publicClient.getBlockNumber();
+    const fromBlock = scannedUpTo + 1n;
+
+    if (fromBlock <= currentBlock) {
+      const logs = await fixture.publicClient.getLogs({
+        address: mechAddress,
+        fromBlock,
+        toBlock: currentBlock,
+      });
+
+      let foundDeliverButNoEnvelope = false;
+
+      for (const log of logs as Log[]) {
+        try {
+          const decoded = decodeEventLog({
+            abi: MOCK_MECH_DELIVER_ABI,
+            data: log.data,
+            topics: log.topics,
+          });
+          if (decoded.eventName !== 'Deliver') continue;
+          const args = decoded.args as {
+            requestId: `0x${string}`;
+            deliveryRate: bigint;
+            data: `0x${string}`;
+          };
+          // Filter: the non-indexed requestId must match our claim.
+          if (args.requestId.toLowerCase() !== claim.requestId.toLowerCase()) continue;
+
+          // Found the Deliver event for our requestId.
+          const deliveryTxHash = (log.transactionHash ?? '0x') as `0x${string}`;
+
+          // Derive the envelope CID from the delivery data field.
+          // The daemon calls cidToDigestHex(manifestCid) = 0x{sha256hex} as the
+          // delivery data. But `deliverToMarketplace` passes it as a `bytes` arg,
+          // so `args.data` is the ABI-encoded bytes value which is exactly the
+          // 32-byte sha256 digest when the daemon passes bytes32 cast to bytes.
+          // The CID in mock IPFS is `f01551220{sha256hex}` where sha256hex =
+          // args.data.slice(2) (the raw 32-byte hex, no leading 0x).
+          const deliveryDataHex = (args.data ?? '').startsWith('0x')
+            ? (args.data as string).slice(2)
+            : (args.data as string);
+
+          // args.data is the decoded hex of the 32-byte delivery digest
+          // (viem's decodeEventLog already ABI-decoded the bytes parameter).
+          // Slice the last 64 hex chars to defensively recover the digest even
+          // if a future contract change wraps it in additional padding.
+          const digestHex = deliveryDataHex.length >= 64
+            ? deliveryDataHex.slice(-64)
+            : deliveryDataHex;
+
+          const candidateCids = [
+            `f01551220${digestHex}`,
+            `f01701220${digestHex}`,
+          ];
+
+          let envelopeJson: unknown | undefined;
+          for (const cid of candidateCids) {
+            const found = mockIpfs.getUploaded(cid);
+            if (found !== undefined) {
+              envelopeJson = found;
+              break;
+            }
+          }
+
+          if (envelopeJson === undefined) {
+            // Envelope not yet in mock IPFS store — daemon may still be uploading.
+            // Mark so we don't advance scannedUpTo past this block (we need to re-check).
+            foundDeliverButNoEnvelope = true;
+            break;
+          }
+
+          // Parse and validate as SignedEnvelope.
+          const envelope = SignedEnvelopeSchema.parse(envelopeJson);
+          const solverHarnessName = envelope.executor.implName;
+
+          return {
+            requestId: claim.requestId,
+            deliveryTxHash,
+            envelope,
+            solverHarnessName,
+          };
+        } catch (err) {
+          // If the event matched our ABI (i.e. we got past decodeEventLog and
+          // the requestId comparison) but envelope parsing failed, that's a
+          // hard error — re-throw rather than silently advancing the scan
+          // floor past the only block where the event will ever exist.
+          // ZodError detection: check name, not message (message holds the
+          // JSON-formatted issues array, never literally "ZodError").
+          if (err instanceof Error && err.name === 'ZodError') {
+            throw new Error(
+              `waitForDelivery: envelope failed SignedEnvelopeSchema for requestId=${claim.requestId}: ${err.message.slice(0, 400)}`,
+            );
+          }
+          // Otherwise: not our event (different ABI) — keep scanning.
+        }
+      }
+
+      // Only advance the scan floor when we fully processed all logs in range.
+      // If we found the event but IPFS isn't ready yet, keep the same floor so
+      // the next iteration re-scans the same range (harmless: Deliver is idempotent).
+      if (!foundDeliverButNoEnvelope) {
+        scannedUpTo = currentBlock;
+      }
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(
+    `waitForDelivery: timed out after ${timeoutMs}ms waiting for Deliver event ` +
+    `(requestId=${claim.requestId}, mechAddress=${mechAddress})`,
+  );
 }
 
 /**

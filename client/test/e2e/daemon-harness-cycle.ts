@@ -9,7 +9,8 @@
  *   → prediction.v1 task post → daemon claims + executes (real harness)
  *   → on-chain deliver tx → activity counter increments.
  *
- * Pick harness via JINN_E2E_HARNESS=hermes-agent|claude-code|codex.
+ * Pick harness via JINN_E2E_HARNESS=prediction-v1-baseline|hermes-agent|claude-code|codex.
+ * Defaults to prediction-v1-baseline (deterministic, no API key required).
  * Skips cleanly if the selected harness's API key isn't available.
  */
 import {
@@ -21,6 +22,7 @@ import {
   startMockIpfsServer,
   postPredictionV1Task,
   waitForDaemonClaim,
+  waitForDelivery,
   ANVIL_PRIVATE_KEYS,
 } from './_daemon-harness-helpers.js';
 import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
@@ -67,8 +69,16 @@ async function main(): Promise<void> {
 
     // Start the daemon pointing at:
     //   - mock IPFS gateway so task fetches hit our in-process server
+    //   - mock IPFS registry so envelope uploads hit our in-process server
     //   - V3 router so the daemon scans for and claims V3 tasks
-    const running = await startDaemon(fixture, operator, harness, mockIpfs.baseUrl, v3Env);
+    const running = await startDaemon(
+      fixture,
+      operator,
+      harness,
+      mockIpfs.baseUrl,  // ipfsGatewayUrl — for GET /ipfs/{cid} (task fetch)
+      v3Env,
+      mockIpfs.baseUrl,  // ipfsRegistryUrl — for POST /api/v0/add (envelope upload)
+    );
     try {
       console.log('daemon started — loops running');
 
@@ -86,7 +96,20 @@ async function main(): Promise<void> {
       const claim = await waitForDaemonClaim(fixture, posted, operator, v3Env);
       console.log(`daemon claimed task: requestId=${claim.requestId} tx=${claim.txHash}`);
 
-      console.log('\n=== Task 4 ok — daemon claimed posted task on Anvil ===');
+      // Wait for the daemon to complete the full settlement loop:
+      // harness runs → envelope assembled + uploaded → deliverToMarketplace on-chain.
+      const delivered = await waitForDelivery(fixture, claim, v3Env, mockIpfs);
+      console.log(`delivered: tx=${delivered.deliveryTxHash} solver=${delivered.solverHarnessName}`);
+
+      // Task 5 assertion: the baseline harness must have produced the envelope.
+      if (delivered.solverHarnessName !== 'prediction-v1-baseline') {
+        throw new Error(
+          `expected solver=prediction-v1-baseline got=${delivered.solverHarnessName}`,
+        );
+      }
+      console.log(`  ✓ envelope.executor.implName = ${delivered.solverHarnessName}`);
+
+      console.log('\n=== Task 5 ok — full settlement loop closed on Anvil ===');
     } finally {
       // Daemon must stop before Anvil tears down (avoids loops throwing on disconnect).
       await running.stop();
