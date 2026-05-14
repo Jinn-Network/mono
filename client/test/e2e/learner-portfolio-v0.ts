@@ -1,5 +1,5 @@
 /**
- * e2e-claude-code-learner-portfolio-v0.ts — End-to-end test for the claude-code-learner
+ * e2e-learner-portfolio-v0.ts — End-to-end test for the claude-code-learner
  * wrapper on the portfolio.v0 pipeline.
  *
  * This script is intentionally a SKELETON per Plan 3 Task 5. It:

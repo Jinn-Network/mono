@@ -1,6 +1,6 @@
 /**
  * Smoke test for the solver-side round-trip: a swe-rebench-v2.v1 Task
- * dispatched to ClaudeCodeLearnerImpl, with the Claude subprocess
+ * dispatched to LearnerHarness, with the Claude subprocess
  * simulated by NoOpHarnessAdapter. The fake "model" writes the full
  * phase pipeline + a `.execute/solution-payload.json` (matching what
  * `submit_typed_payload` would persist), and we assert the resulting
@@ -21,9 +21,9 @@ import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
-import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/index.js';
-import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/noop-adapter.js';
-import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
+import { LearnerHarness } from '../../../../src/harnesses/impls/learner/index.js';
+import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/learner/test-utils/noop-adapter.js';
+import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/learner/test-utils/fake-plugin-outputs.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import type { Task } from '../../../../src/types/task.js';
 
@@ -71,10 +71,10 @@ function writeTypedPayload(workingDir: string, payload: Record<string, unknown>)
   writeFileSync(join(dir, 'solution-payload.json'), JSON.stringify(payload, null, 2));
 }
 
-describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
+describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
   it('claude-code-learner.supports() claims swe-rebench-v2.v1 restoration', () => {
     const adapter = new NoOpHarnessAdapter();
-    const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/plugin-root' });
+    const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
     expect(harness.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
     // Evaluation goes to the dedicated SweRebenchV2EvaluatorHarness, not the learner.
     expect(harness.supports({ solverType: 'swe-rebench-v2.v1', role: 'evaluation' })).toBe(false);
@@ -99,7 +99,7 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
           cost: { totalUsd: 0.21, breakdown: { llm: 0.2, tools: 0.01 } },
         });
       });
-      const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/plugin-root' });
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
       const task = buildTask('restoration');
       const sol = await harness.run(buildContext(workingDir, implStateDir, task));
 
@@ -136,7 +136,7 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
     try {
       // Default NoOp behaviour: write phase artifacts only, no typed payload.
       const adapter = new NoOpHarnessAdapter();
-      const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/plugin-root' });
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
       const task = buildTask('restoration');
       const sol = await harness.run(buildContext(workingDir, implStateDir, task));
 
@@ -153,9 +153,14 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
       join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'plan', 'SKILL.md'),
       'utf8',
     );
-    expect(skill).toContain('submit_typed_payload');
-    expect(skill).toContain('Only if `submit_typed_payload` is not available');
-    expect(skill).toContain('Do not choose the direct file path when the tool is available');
+    // SKILL.md describes the submission action by intent, not by hardcoded tool
+    // name, so the model bridges to whichever the active harness has registered
+    // (Claude Code: `mcp__jinn-client__submit_typed_payload`, Hermes:
+    // `mcp_jinn_client_submit_typed_payload`, Codex: similar). We assert the
+    // intent language plus the fallback file path + schema-shape language.
+    expect(skill).toContain('typed structured payload');
+    expect(skill).toContain('no typed-payload submission tool at all');
+    expect(skill).toContain('Prefer the tool path whenever it exists');
     expect(skill).toContain('.execute/solution-payload.json');
 
     const workingDir = mkdtempSync(join(tmpdir(), 'jinn-swe-rebench-fallback-'));
@@ -173,14 +178,39 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
     }
   });
 
+  it('orient skill owns repo setup so the harness prompt can stay generic', () => {
+    const skill = readFileSync(
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
+      'utf8',
+    );
+    // Repo-setup guidance used to live in each harness's prompt.ts (the
+    // `sweRebenchV2Guidance` helper that was retired in favour of skill-driven
+    // dispatch). Orient now owns it. If this assertion breaks, check that
+    // nothing has reintroduced SolverNet branching in the harness prompts —
+    // the skill should be the single home for SWE-rebench-specific patterns.
+    // Backticks in the SKILL.md wrap inline code spans, so we search for the
+    // load-bearing tokens without insisting on a literal "clone https://..."
+    // run that the markdown formatting interrupts.
+    expect(skill).toContain('$workingDir/repo');
+    expect(skill).toContain('Do not reuse a repo');
+    expect(skill).toContain('https://github.com/<goal.spec.repo>.git');
+    expect(skill).toContain('<goal.spec.base_commit>');
+    expect(skill).toContain('harvester reads a `git diff`');
+  });
+
   it('documents SWE execution data retrieval through Network Tools', () => {
     const skill = readFileSync(
       join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
       'utf8',
     );
-    expect(skill).toContain('search_records');
-    expect(skill).toContain('inspect_record');
-    expect(skill).toContain('acquire_artifact');
+    // Orient describes the three corpus-tool actions (find candidates → examine
+    // index card → download bytes) by intent. We assert the workflow vocabulary
+    // and the typed-restoration filter values, not the literal tool names —
+    // those vary by harness MCP namespace.
+    expect(skill).toContain('Jinn knowledge corpus');
+    expect(skill).toContain('"swe-rebench-v2.v1"');
+    expect(skill).toContain('"swe-rebench-v2_v1_solution"');
+    expect(skill).toContain('index card');
     expect(skill).not.toContain('.execute/execution-data-retrieval.json');
     expect(skill).not.toContain('jinn.execution_data_retrieval.v1');
     expect(skill).not.toContain('corpus.read');
@@ -209,7 +239,7 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
       });
       // Bypass `supports()` (which excludes evaluation) by invoking run()
       // directly — this is testing the harvest path, not the dispatch path.
-      const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/plugin-root' });
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
       const task = buildTask('evaluation');
       const sol = await harness.run(buildContext(workingDir, implStateDir, task));
 

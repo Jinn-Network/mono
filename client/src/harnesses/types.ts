@@ -226,6 +226,13 @@ export interface Harness {
   /** semver */
   version: string;
   /**
+   * Optional implStateDir paths that are runtime-only and should not contribute
+   * to the frozen-mode state digest. Use this for generated credentials,
+   * binaries, or per-task config that a harness needs in ctx.implStateDir but
+   * that is not part of its learning/code surface.
+   */
+  freezeStateHashIgnore?: readonly string[];
+  /**
    * Return true if this Harness should handle the given (solverType, role) pair.
    *
    * `role` reflects Task.role:

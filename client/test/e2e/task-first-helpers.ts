@@ -3249,7 +3249,7 @@ export async function runFreezeFenceForkE2E(): Promise<FreezeFenceForkE2EResult>
 /**
  * A modeful mock harness that emits trajectory phase spans gated on
  * `ctx.mode`. Mirrors the SKILL-level dispatch in
- * `client/plugins/claude-code-learner/skills/coordinator/SKILL.md`:
+ * `client/plugins/learner/skills/coordinator/SKILL.md`:
  *
  *   - Always emits `orient`, `strategize`, `plan`, `execute`, `debrief`.
  *   - Only emits `improve` and `memory` when ctx.mode === 'train'.

@@ -6,14 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { SweRebenchV2SolutionPayloadSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import {
-  ClaudeCodeLearnerImpl,
+  LearnerHarness,
   CodexCodeHarnessAdapter,
-} from '../../../../src/harnesses/impls/claude-code-learner/index.js';
-import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
+} from '../../../../src/harnesses/impls/learner/index.js';
+import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/learner/test-utils/fake-plugin-outputs.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import type { Task } from '../../../../src/types/task.js';
 
-const learnerPluginRoot = fileURLToPath(new URL('../../../../plugins/claude-code-learner/', import.meta.url));
+const learnerPluginRoot = fileURLToPath(new URL('../../../../plugins/learner/', import.meta.url));
 const sweRuntimePluginRoot = fileURLToPath(new URL('../../../../plugins/swe-rebench-v2-runtime/', import.meta.url));
 const networkToolsPluginRoot = fileURLToPath(new URL('../../../../plugins/network-tools/', import.meta.url));
 
@@ -222,16 +222,19 @@ describe('CodexCodeHarnessAdapter', () => {
       expect(promptArg).toContain('You are executing a Jinn task');
       expect(promptArg).toContain('Use the available skills, plugins, tools, and runtime context exposed by this harness');
       expect(promptArg).toContain('typed SolverNet payload');
-      expect(promptArg).toContain('SWE-rebench v2 restoration requirements:');
-      expect(promptArg).toContain(`Use ${workingDir}/repo as the only task repository checkout`);
-      expect(promptArg).toContain(`clone https://github.com/Unidata/netcdf-c.git into ${workingDir}/repo`);
-      expect(promptArg).toContain('search_records, inspect_record, and acquire_artifact');
+      // Generic submission guidance lives in the prompt; SolverNet-specific
+      // pattern (repo setup, schema shape, etc.) lives in the SolverPlugin's
+      // SKILL.md files — see swe-rebench-v2-runtime/skills/{orient,plan}/.
       expect(promptArg).toContain('call submit_typed_payload');
-      expect(promptArg).toContain('Do not write');
-      expect(promptArg).toContain('"schemaVersion":"swe-rebench-v2-solution.v1"');
-      expect(promptArg).toContain(`${workingDir}/.execute/solution-payload.json`);
-      expect(promptArg).toMatch(/test files? .* discarded|discarded before grading/i);
-      expect(promptArg).toMatch(/edit source files? only|source files? only/i);
+      expect(promptArg).toContain('.execute/solution-payload.json');
+      // Regression guard: ensure no SolverNet-specific guidance leaks back
+      // into the adapter's prompt builder. The retired sweRebenchV2Guidance()
+      // helper baked these strings in; if they reappear, the plugin-driven
+      // architecture is being undone.
+      expect(promptArg).not.toContain('SWE-rebench v2 restoration requirements');
+      expect(promptArg).not.toContain('clone https://github.com/');
+      expect(promptArg).not.toContain('"schemaVersion":"swe-rebench-v2-solution.v1"');
+      // Other negative regression guards from earlier refactors.
       expect(promptArg).not.toContain('submit_typed_payload, or write');
       expect(promptArg).not.toContain('submission tool or write the expected payload file');
       expect(promptArg).not.toContain('claude-code-learner:learn');
@@ -241,6 +244,8 @@ describe('CodexCodeHarnessAdapter', () => {
       expect(promptArg).not.toContain('swe-rebench-v2-orient');
       expect(promptArg).not.toContain('swe-rebench-v2-plan');
       expect(promptArg).not.toContain('do not call spawn_agent');
+      // The full task body still rides in the prompt so SolverPlugin skills
+      // can read goal.spec.repo / goal.spec.base_commit at runtime.
       expect(promptArg).toContain('goal (full body)');
       expect(promptArg).toContain('swe-rebench-v2.v1');
 
@@ -292,7 +297,7 @@ describe('CodexCodeHarnessAdapter', () => {
         _spawnFn: spawnFn as never,
         _runSessionStartHook: false,
       });
-      const harness = new ClaudeCodeLearnerImpl({
+      const harness = new LearnerHarness({
         name: 'codex-code-learner',
         adapter,
         pluginRoot: learnerPluginRoot,

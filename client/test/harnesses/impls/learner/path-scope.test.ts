@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/index.js';
-import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/noop-adapter.js';
-import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
+import { LearnerHarness } from '../../../../src/harnesses/impls/learner/index.js';
+import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/learner/test-utils/noop-adapter.js';
+import { fakeFullPipelineRun } from '../../../../src/harnesses/impls/learner/test-utils/fake-plugin-outputs.js';
 import { makeHarnessCtx } from '@test/harness-ctx.js';
 
 function makeCtx(workingDir: string, implStateDir: string) {
@@ -57,7 +57,7 @@ describe('claude-code-learner path-scope guard', () => {
       }
     });
 
-    const impl = new ClaudeCodeLearnerImpl({ adapter });
+    const impl = new LearnerHarness({ adapter });
     const ctx = makeCtx(workingDir, implStateDir);
     const out = await impl.run(ctx);
 
@@ -75,7 +75,7 @@ describe('claude-code-learner path-scope guard', () => {
 
   it('verifies all artifact paths in Solution resolve under workingDir or implStateDir', async () => {
     const adapter = new NoOpHarnessAdapter();
-    const impl = new ClaudeCodeLearnerImpl({ adapter });
+    const impl = new LearnerHarness({ adapter });
     const ctx = makeCtx(workingDir, implStateDir);
     const out = await impl.run(ctx);
 
@@ -99,8 +99,8 @@ describe('claude-code-learner path-scope guard', () => {
     const implStateDirKindB = mkdtempSync(join(tmpdir(), 'jinn-pathscope-kind-b-'));
     try {
       const adapter = new NoOpHarnessAdapter();
-      const implA = new ClaudeCodeLearnerImpl({ adapter });
-      const implB = new ClaudeCodeLearnerImpl({ adapter });
+      const implA = new LearnerHarness({ adapter });
+      const implB = new LearnerHarness({ adapter });
 
       const ctxA = makeCtx(workingDir, implStateDirKindA);
       const ctxB = makeCtx(mkdtempSync(join(tmpdir(), 'jinn-pathscope-work-b-')), implStateDirKindB);

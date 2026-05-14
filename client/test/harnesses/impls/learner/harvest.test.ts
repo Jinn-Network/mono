@@ -6,12 +6,12 @@ import { join } from 'node:path';
 import {
   harvestOutput,
   requiredReadJson,
-} from '../../../../src/harnesses/impls/claude-code-learner/harvest.js';
+} from '../../../../src/harnesses/impls/learner/harvest.js';
 import {
   fakeLearnerFeedback,
   fakePredictionCorpusRetrieval,
   fakePredictionV1Solution,
-} from '../../../../src/harnesses/impls/claude-code-learner/test-utils/fake-plugin-outputs.js';
+} from '../../../../src/harnesses/impls/learner/test-utils/fake-plugin-outputs.js';
 import { makePredictionV1Task } from '../prediction-v1-test-helpers.js';
 
 function writePhaseArtifact(workingDir: string, phase: string, fileName: string, payload: unknown): void {

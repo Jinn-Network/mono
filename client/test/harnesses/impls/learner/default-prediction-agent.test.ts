@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { loadSolverNets } from '../../../../src/solver-nets/registry.js';
 import { HarnessRegistry } from '../../../../src/harnesses/engine/registry.js';
-import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/index.js';
-import { ClaudeCodeHarnessAdapter } from '../../../../src/harnesses/impls/claude-code-learner/adapters/claude-code.js';
-import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/claude-code-learner/test-utils/noop-adapter.js';
+import { LearnerHarness } from '../../../../src/harnesses/impls/learner/index.js';
+import { ClaudeCodeHarnessAdapter } from '../../../../src/harnesses/impls/learner/adapters/claude-code.js';
+import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/learner/test-utils/noop-adapter.js';
 import { PredictionV1BaselineImpl } from '../../../../src/harnesses/impls/prediction-v1-baseline/index.js';
 import { makePredictionV1Task } from '../prediction-v1-test-helpers.js';
 
@@ -46,7 +46,7 @@ describe('default prediction agent runtime plugins', () => {
       default: 'claude-code-learner',
     });
     const adapter = new NoOpHarnessAdapter();
-    const learner = new ClaudeCodeLearnerImpl({ adapter });
+    const learner = new LearnerHarness({ adapter });
     harnessRegistry.register(new PredictionV1BaselineImpl());
     harnessRegistry.register(learner);
 
@@ -92,11 +92,11 @@ describe('default prediction agent runtime plugins', () => {
 
   it('does not hardcode prediction retrieval policy into the learner harness', () => {
     const harnessSource = readFileSync(
-      join(process.cwd(), 'src/harnesses/impls/claude-code-learner/harness.ts'),
+      join(process.cwd(), 'src/harnesses/impls/learner/harness.ts'),
       'utf8',
     );
     const adapterSource = readFileSync(
-      join(process.cwd(), 'src/harnesses/impls/claude-code-learner/adapters/claude-code.ts'),
+      join(process.cwd(), 'src/harnesses/impls/learner/adapters/claude-code.ts'),
       'utf8',
     );
     expect(`${harnessSource}\n${adapterSource}`).not.toMatch(
@@ -153,7 +153,7 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
         msUntilEndTs: 1,
         mode: 'train',
         abort: new AbortController().signal,
-      }, '/plugins/claude-code-learner');
+      }, '/plugins/learner');
 
       expect(calls).toHaveLength(1);
       expect(calls[0]!.command).toBe('claude-test');
@@ -174,7 +174,7 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
       expect(promptArg).toContain('- mode = train');
       expect(calls[0]!.args).toEqual(expect.arrayContaining([
         '--plugin-dir',
-        '/plugins/claude-code-learner',
+        '/plugins/learner',
         '--plugin-dir',
         '/plugins/network-tools',
         '--plugin-dir',

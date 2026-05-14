@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/harness.js';
-import type { HarnessAdapter, TaskSessionInputs } from '../../../../src/harnesses/impls/claude-code-learner/types.js';
-import * as harvestModule from '../../../../src/harnesses/impls/claude-code-learner/harvest.js';
+import { LearnerHarness } from '../../../../src/harnesses/impls/learner/harness.js';
+import type { HarnessAdapter, TaskSessionInputs } from '../../../../src/harnesses/impls/learner/types.js';
+import * as harvestModule from '../../../../src/harnesses/impls/learner/harvest.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 
 class CapturingAdapter implements HarnessAdapter {
@@ -38,7 +38,7 @@ describe('claude-code-learner mode gate', () => {
     } as ReturnType<typeof harvestModule.harvestOutput>);
     try {
       const adapter = new CapturingAdapter();
-      const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/x' });
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
       await harness.run(makeMinimalCtx('train'));
       expect(adapter.lastInputs?.mode).toBe('train');
     } finally {
@@ -53,7 +53,7 @@ describe('claude-code-learner mode gate', () => {
     } as ReturnType<typeof harvestModule.harvestOutput>);
     try {
       const adapter = new CapturingAdapter();
-      const harness = new ClaudeCodeLearnerImpl({ adapter, pluginRoot: '/tmp/x' });
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
       await harness.run(makeMinimalCtx('frozen'));
       expect(adapter.lastInputs?.mode).toBe('frozen');
     } finally {

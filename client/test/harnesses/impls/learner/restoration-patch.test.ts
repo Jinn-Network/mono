@@ -7,7 +7,7 @@ import {
   isTestPath,
   stripTestPathHunks,
   gitApplyParseCheck,
-} from '../../../../src/harnesses/impls/claude-code-learner/restoration-patch.js';
+} from '../../../../src/harnesses/impls/learner/restoration-patch.js';
 
 describe('isTestPath', () => {
   it('flags conventional test directories', () => {

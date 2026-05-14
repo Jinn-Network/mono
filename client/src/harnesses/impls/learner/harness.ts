@@ -7,7 +7,7 @@ import { CLAUDE_CODE_HARNESS } from '../../names.js';
 import type {
   HarnessAdapter,
   TaskSessionInputs,
-  ClaudeCodeLearnerConfig,
+  LearnerHarnessConfig,
 } from './types.js';
 import { resolvePluginRoot } from './plugin-path.js';
 import { harvestOutput } from './harvest.js';
@@ -20,13 +20,13 @@ import { harvestOutput } from './harvest.js';
  * keeps this Harness as the default, so explicit specialists can still claim
  * their SolverTypes without being wrapped.
  */
-export class ClaudeCodeLearnerImpl implements Harness {
+export class LearnerHarness implements Harness {
   readonly name: string;
   readonly version: string;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
 
-  constructor(config: ClaudeCodeLearnerConfig) {
+  constructor(config: LearnerHarnessConfig) {
     this.adapter = config.adapter;
     this.name = config.name ?? CLAUDE_CODE_HARNESS;
     this.version = config.version ?? '0.1.0-shim';
@@ -39,6 +39,20 @@ export class ClaudeCodeLearnerImpl implements Harness {
     // typed solutionPayload objects. The learner emits phase artifacts for its
     // own pipeline; letting it claim these specialist tasks can run Claude but
     // fail packaging when the phase artifacts are absent.
+    //
+    // Architectural debt: this blocklist is the symptom — the learner can't
+    // currently handle prediction.v1 / prediction.apy.v0 generically because
+    // jinn-prediction-plugin lacks a submission-shape skill the way
+    // swe-rebench-v2-runtime has plan/SKILL.md. Once that plugin gets a
+    // submission skill and the harvest's prediction.v1 special-path
+    // (harvest.ts ~520) is migrated to the generic .execute/solution-payload.json
+    // path, this whole branch can be deleted.
+    //
+    // Related: jinn-mono-kzlj (deferred — Prediction frozen per
+    // DR-2026-05-11-a). kzlj is scoped to prediction.v1; the prediction.apy.v0
+    // path needs the same migration when the apy SolverNet's freeze lifts
+    // (file a sibling bead when that happens). Reopen kzlj + file the apy
+    // analogue when the freezes lift.
     if (spec.solverType === 'prediction.v1' || spec.solverType === 'prediction.apy.v0') {
       return false;
     }
