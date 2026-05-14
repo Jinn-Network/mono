@@ -113,28 +113,29 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
       return walClientPromise;
     };
     // Return an object that satisfies { publish, revoke } with lazy wallet init.
+    // Both methods share a single PluginRegistryPublisher constructed once
+    // after the wallet client resolves.
+    let publisherPromise: Promise<PluginRegistryPublisher> | undefined;
+    const getPublisher = async () => {
+      if (!publisherPromise) {
+        publisherPromise = getWalletClient().then((walClient) =>
+          new PluginRegistryPublisher({
+            identityRegistryAddress: args.identityRegistryAddress,
+            builderAgentId: args.builderAgentId,
+            safeAddress: args.safeAddress,
+            publicClient: pubClient,
+            walletClient: walClient,
+          }),
+        );
+      }
+      return publisherPromise;
+    };
     const publisher = {
       async publish(pArgs: { pluginCid: string; payload: import('../../erc8004/plugin-registry.js').PluginPayload }) {
-        const walClient = await getWalletClient();
-        const p = new PluginRegistryPublisher({
-          identityRegistryAddress: args.identityRegistryAddress,
-          builderAgentId: args.builderAgentId,
-          safeAddress: args.safeAddress,
-          publicClient: pubClient,
-          walletClient: walClient,
-        });
-        return p.publish(pArgs);
+        return (await getPublisher()).publish(pArgs);
       },
       async revoke(rArgs: { pluginCid: string; payload: import('../../erc8004/plugin-registry.js').RevocationPayload }) {
-        const walClient = await getWalletClient();
-        const p = new PluginRegistryPublisher({
-          identityRegistryAddress: args.identityRegistryAddress,
-          builderAgentId: args.builderAgentId,
-          safeAddress: args.safeAddress,
-          publicClient: pubClient,
-          walletClient: walClient,
-        });
-        return p.revoke(rArgs);
+        return (await getPublisher()).revoke(rArgs);
       },
     };
     return publisher;
