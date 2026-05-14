@@ -38,6 +38,9 @@ import {
   http,
   defineChain,
   encodeAbiParameters,
+  parseAbiItem,
+  getAddress,
+  type Address,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { startAnvil, FOUNDRY_ACCOUNTS, type AnvilHandle } from './_fixtures/anvil.js';
@@ -51,10 +54,13 @@ import { startStubIndexer, type StubIndexerHandle } from './_fixtures/stub-index
 import { hermesConfigFromSolverPlugins } from './_fixtures/hermes-config-shim.js';
 import { renderBuildPage } from './_fixtures/spa-harness.js';
 import { runCli } from '../../src/cli/index.js';
+import { createSolverPluginsCommand, PRODUCTION_DEPS } from '../../src/cli/commands/solver-plugins.js';
+import { publishHandler } from '../../src/cli/commands/solver-plugins-publish.js';
 import { loadSolverPluginManifest } from '../../src/plugins/manifest.js';
 import { digestDirectory } from '../../src/plugins/digest.js';
 import { PLUGIN_PAYLOAD_TUPLE } from '../../src/erc8004/abis.js';
 import { pinFileToIpfs } from '../../src/adapters/mech/ipfs-pinfile.js';
+import type { FleetState } from '../../src/earning/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STUB_HERMES = join(__dirname, '..', '..', 'scripts', 'stub-hermes.mjs');
@@ -371,4 +377,245 @@ describe('cold-start-builder E2E (52x3.7 / r83r)', () => {
       harness.cleanup();
     }
   }, 90_000);
+});
+
+// ── Helper: count IdentityRegistry.register() txs for a given owner ──────────
+//
+// Uses viem getLogs to count AgentRegistered events. Task 12 (failing) leaves
+// this as a stub that throws. Task 13 wires the real implementation.
+
+async function countRegisterTxs(
+  rpcUrl: string,
+  registryAddress: `0x${string}`,
+  ownerAddress: `0x${string}`,
+): Promise<number> {
+  // Task 13: implement via getLogs(AgentRegistered, filter by owner).
+  throw new Error('countRegisterTxs: not implemented — Task 13 pending');
+}
+
+// ── Dual-role: operator-then-builder, one identity ────────────────────────────
+
+describe('dual-role: operator-then-builder (52x3.7 r83r)', () => {
+  // Reuses the Anvil + IPFS + indexer from the outer scope if the test runner
+  // shares the module, but each describe block also declares its own shared
+  // handles so the test is self-contained within a singleFork process.
+
+  let anvil: AnvilHandle;
+  let ipfs: StubIpfsHandle;
+  let registry: IdentityRegistryHandle;
+  let indexer: StubIndexerHandle;
+  let pluginRoot2: string;
+
+  beforeAll(async () => {
+    anvil = await startAnvil();
+    ipfs = await startStubIpfs();
+    registry = await deployIdentityRegistry({ rpcUrl: anvil.rpcUrl });
+    indexer = await startStubIndexer({
+      rpcUrl: anvil.rpcUrl,
+      identityRegistryAddress: registry.address,
+    });
+    pluginRoot2 = mkdtempSync(join(tmpdir(), 'jinn-dual-plugin-'));
+  }, 60_000);
+
+  afterAll(async () => {
+    await Promise.allSettled([indexer.stop(), ipfs.stop(), anvil.stop()]);
+    rmSync(pluginRoot2, { recursive: true, force: true });
+  });
+
+  it('publishes a plug-in without re-minting Stage 1 identity', async () => {
+    // ── Pre-walk: simulate Stage 1 + 2 already complete ──────────────────────
+    //
+    // Instead of running the full FleetBootstrapper (which requires OLAS/Safe),
+    // we:
+    //   1. Register a fresh EOA directly on the stub IdentityRegistry (account #1,
+    //      different from account #0 used in the main cold-start describe).
+    //   2. Snapshot the AgentRegistered log count (= 1 after registration).
+    //   3. Run solver-plugins publish with a mocked bootstrapperFactory that reads
+    //      the pre-seeded fleet_stage='stage1' and short-circuits ensureStage1.
+    //   4. Assert the AgentRegistered log count is still 1 (no re-mint).
+
+    const chain = defineChain({
+      id: 31337,
+      name: 'anvil-dual',
+      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+      rpcUrls: { default: { http: [anvil.rpcUrl] } },
+    });
+
+    // Use account #1 for the dual-role operator (account #0 is used by the
+    // cold-start describe above to avoid tx nonce collisions when both
+    // describes share an Anvil instance).
+    const opAccount = privateKeyToAccount(FOUNDRY_ACCOUNTS[1]!.privateKey);
+    const opWallet = createWalletClient({ account: opAccount, chain, transport: http(anvil.rpcUrl) });
+    const opPublic = createPublicClient({ chain, transport: http(anvil.rpcUrl) });
+
+    // Step 1: register the operator as a fleet agent (simulating Stage 1 identity mint).
+    const regHash = await opWallet.writeContract({
+      address: registry.address,
+      abi: IDENTITY_REGISTRY_STUB_ABI,
+      functionName: 'register',
+      args: [opAccount.address],
+      account: opAccount,
+      chain,
+    });
+    await opPublic.waitForTransactionReceipt({ hash: regHash });
+
+    const fleetAgentId = await opPublic.readContract({
+      address: registry.address,
+      abi: IDENTITY_REGISTRY_STUB_ABI,
+      functionName: 'agentIdByOwner',
+      args: [opAccount.address],
+    }) as bigint;
+    expect(fleetAgentId).toBeGreaterThan(0n);
+    const fleetAgentIdStr = fleetAgentId.toString();
+
+    // Step 2: snapshot register tx count BEFORE publish.
+    const registerCountBefore = await countRegisterTxs(
+      anvil.rpcUrl,
+      registry.address,
+      opAccount.address,
+    );
+    // We expect exactly 1 register call (the one we just did above).
+    expect(registerCountBefore).toBe(1);
+
+    // Step 3: scaffold a fresh plug-in for the dual-role publish.
+    const scaffoldDir = join(pluginRoot2, 'scaffold');
+    mkdirSync(scaffoldDir, { recursive: true });
+
+    const createOutput: string[] = [];
+    await runCli([
+      'create', 'plugin', '@dual/skill',
+      '--pattern', 'solver-type-plugin',
+      '--solver-type', 'swe-rebench-v2.v1',
+      '--out-dir', scaffoldDir,
+    ], {
+      writer: { write: (s: string) => { createOutput.push(s); return true; } },
+      exit: (code: number) => {
+        if (code !== 0) throw new Error(`jinn create exited ${code}: ${createOutput.join('')}`);
+      },
+    });
+
+    const dualPluginRoot = join(scaffoldDir, '@dual', 'skill');
+    expect(existsSync(join(dualPluginRoot, 'jinn.plugin.json'))).toBe(true);
+
+    // Copy real skill content from the reference plug-in.
+    writeFileSync(
+      join(dualPluginRoot, 'skills', 'example', 'SKILL.md'),
+      readFileSync(join(__dirname, '..', '..', 'plugins', 'swe-rebench-v2-diffmin', 'skills', 'diffmin', 'SKILL.md'), 'utf8'),
+    );
+
+    // Step 4: publish via solver-plugins publish with mocked deps.
+    //
+    // The bootstrapperFactory mock returns a pre-seeded fleet_state with
+    // fleet_stage='stage1' and the agentId we minted above. This exercises
+    // the ensureStage1 short-circuit path — no new register() tx should fire.
+    //
+    // The publisherFactory mock calls setMetadata directly on the stub registry
+    // (same approach as the cold-start describe, avoiding the full Safe stack).
+
+    const preSeededFleetState: FleetState = {
+      master_address: opAccount.address,
+      chain: 'base',
+      staking_mode: 'standard',
+      services: [],
+      updated_at: new Date().toISOString(),
+      fleet_agent_id: fleetAgentIdStr,
+      fleet_safe_address: opAccount.address,       // EOA acts as Safe for stub
+      fleet_identity_registry: registry.address,
+      fleet_stage: 'stage1',
+    };
+
+    let publishedCid2: string | undefined;
+    const publishOutput: string[] = [];
+
+    const mockDeps = {
+      ...PRODUCTION_DEPS,
+      resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+      loadConfig: () => ({
+        ...PRODUCTION_DEPS.loadConfig(),
+        rpcUrl: anvil.rpcUrl,
+        earningDir: pluginRoot2,
+        ipfsRegistryUrl: ipfs.registryUrl,
+        network: 'mainnet' as const,
+        stakingMode: 'standard' as const,
+      }),
+      bootstrapperFactory: (_cfg: ReturnType<typeof PRODUCTION_DEPS.loadConfig>) => ({
+        ensureStage1: async (_password: string) => ({
+          ok: true as const,
+          fleet_state: preSeededFleetState,
+          message: `Stage 1 already complete (dual-role stub). fleet_agent_id=${fleetAgentIdStr}.`,
+        }),
+      }),
+      pinFileToIpfs: async (_registryUrl: string, tarballPath: string) => {
+        return pinFileToIpfs(ipfs.registryUrl, tarballPath);
+      },
+      publisherFactory: (args: { identityRegistryAddress: Address; builderAgentId: bigint }) => ({
+        publish: async ({ pluginCid, payload }: { pluginCid: string; payload: import('../../src/erc8004/plugin-registry.js').PluginPayload }) => {
+          // Pin → setMetadata directly (bypass Safe).
+          publishedCid2 = pluginCid;
+          const metadataKey = `plugin:${pluginCid}`;
+          const metadataValue = encodeAbiParameters(PLUGIN_PAYLOAD_TUPLE, [
+            1,
+            payload.pluginName,
+            payload.pluginVersion,
+            payload.pluginSha256,
+            payload.supports,
+            BigInt(payload.publishedAt),
+          ]);
+          const metaHash = await opWallet.writeContract({
+            address: args.identityRegistryAddress,
+            abi: IDENTITY_REGISTRY_STUB_ABI,
+            functionName: 'setMetadata',
+            args: [args.builderAgentId, metadataKey, metadataValue],
+            account: opAccount,
+            chain,
+          });
+          await opPublic.waitForTransactionReceipt({ hash: metaHash });
+          return metaHash;
+        },
+        revoke: async () => { throw new Error('revoke not implemented in stub'); },
+      }),
+      now: () => Date.now(),
+    };
+
+    const solverPluginsCmd = createSolverPluginsCommand(mockDeps);
+    await solverPluginsCmd.run({
+      argv: ['publish', dualPluginRoot],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { publishOutput.push(s); return true; } },
+      exit: (code: number) => {
+        if (code !== 0) {
+          throw new Error(`solver-plugins publish exited ${code}: ${publishOutput.join('')}`);
+        }
+      },
+      env: { JINN_PASSWORD: 'test' },
+    });
+
+    // Parse the JSON output line.
+    const publishResult = JSON.parse(publishOutput.find((l) => l.includes('"verb"')) ?? '{}') as {
+      verb: string;
+      txHash: string;
+      pluginCid: string;
+      builderAgentId: string;
+    };
+    expect(publishResult.verb).toBe('solver-plugins publish');
+    expect(publishResult.builderAgentId).toBe(fleetAgentIdStr);
+
+    // Step 5: assert register() tx count is UNCHANGED (same as before).
+    const registerCountAfter = await countRegisterTxs(
+      anvil.rpcUrl,
+      registry.address,
+      opAccount.address,
+    );
+    expect(registerCountAfter).toBe(registerCountBefore);   // no new mint
+
+    // Step 6: indexer surfaces the publication with correct builderAgentId.
+    await waitForRow(
+      () => indexer.getRows().some((r) => r.builderAgentId === fleetAgentIdStr),
+      8_000,
+    );
+    const row = indexer.getRows().find((r) => r.builderAgentId === fleetAgentIdStr);
+    expect(row, 'indexer row with fleet_agent_id should exist').toBeDefined();
+    expect(row!.name).toBe('@dual/skill');
+    expect(row!.builderAgentId).toBe(fleetAgentIdStr);
+  }, 60_000);
 });
