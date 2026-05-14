@@ -57,3 +57,17 @@ export function parseSolverNetManifestKey(key: string): string | null {
   const cid = key.slice(SOLVERNET_MANIFEST_KEY_PREFIX.length);
   return cid.length > 0 ? cid : null;
 }
+
+/**
+ * Returns the pluginCid from a `plugin:<cid>` metadata key, or null if the
+ * key does not match. Per `docs/superpowers/specs/2026-05-13-plug-in-builder-entry-point-design.md`
+ * §5.2 the textual CID after the colon is the canonical primary key for the
+ * plug-in record; a key with an empty cid is not a valid record.
+ */
+export const PLUGIN_KEY_PREFIX = 'plugin:';
+
+export function parsePluginKey(key: string): { cid: string } | null {
+  if (!key.startsWith(PLUGIN_KEY_PREFIX)) return null;
+  const cid = key.slice(PLUGIN_KEY_PREFIX.length);
+  return cid.length > 0 ? { cid } : null;
+}
