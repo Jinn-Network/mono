@@ -1,0 +1,26 @@
+{
+  "comment": "Curated Python instances expected to be scorable on the upstream swe-rebench-v2 substrate. validate-pool --seed-positive runs gold-eval against each entry below. Extend as new known-good instances surface.",
+  "source": "spike jinn-mono-fufn",
+  "instance_ids": [
+    "django__django-15400",
+    "django__django-15814",
+    "django__django-16429",
+    "django__django-16493",
+    "django__django-16527",
+    "django__django-16569",
+    "scikit-learn__scikit-learn-25500",
+    "scikit-learn__scikit-learn-25570",
+    "scikit-learn__scikit-learn-25638",
+    "scikit-learn__scikit-learn-25747",
+    "scikit-learn__scikit-learn-25931",
+    "scikit-learn__scikit-learn-26194",
+    "sympy__sympy-22914",
+    "sympy__sympy-22934",
+    "sympy__sympy-23262",
+    "sympy__sympy-23413",
+    "sympy__sympy-23534",
+    "sympy__sympy-23950",
+    "matplotlib__matplotlib-25287",
+    "matplotlib__matplotlib-25775"
+  ]
+}
