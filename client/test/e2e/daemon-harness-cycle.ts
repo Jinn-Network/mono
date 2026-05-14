@@ -25,6 +25,7 @@ import {
   postPredictionV1Task,
   waitForDaemonClaim,
   waitForDelivery,
+  readActivityCount,
   ANVIL_PRIVATE_KEYS,
 } from './_daemon-harness-helpers.js';
 import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
@@ -93,6 +94,10 @@ async function main(): Promise<void> {
     try {
       console.log('daemon started — loops running');
 
+      // Sample the activity counter BEFORE posting the task (baseline).
+      const activityBefore = await readActivityCount(fixture, operator, v3Env);
+      console.log(`activity counter before: ${activityBefore}`);
+
       // Post the task and register it with the mock IPFS server.
       const posted = await postPredictionV1Task(
         fixture,
@@ -121,7 +126,28 @@ async function main(): Promise<void> {
       }
       console.log(`  ✓ envelope.executor.implName = ${delivered.solverHarnessName}`);
 
-      console.log(`\n=== Task 6 ok — daemon + ${harness} settled prediction.v1 task on Anvil ===`);
+      // Task 7 assertion: daemon's settle tx must have incremented the operator's
+      // on-chain activity counter. The V3 router calls
+      // `recordSolutionDelivery(safeAddress, solutionDigest)` on our locally-deployed
+      // TaskActivityCheckerV3, which increments `eligibleActivityWeight[safeAddress]`.
+      // Poll for up to 60s — the claimSolutionDelivery tx may execute slightly after
+      // the Deliver event we already observed.
+      let activityAfter = activityBefore;
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline && activityAfter <= activityBefore) {
+        activityAfter = await readActivityCount(fixture, operator, v3Env);
+        if (activityAfter > activityBefore) break;
+        await new Promise<void>((r) => setTimeout(r, 1000));
+      }
+      console.log(`activity counter after:  ${activityAfter}`);
+      if (activityAfter <= activityBefore) {
+        throw new Error(
+          `activity counter did not increment (before=${activityBefore} after=${activityAfter})`,
+        );
+      }
+      console.log(`  ✓ activity counter incremented (${activityBefore} → ${activityAfter})`);
+
+      console.log(`\n=== Task 7 ok — full settlement + activity counter increment for ${harness} ===`);
     } finally {
       // Daemon must stop before Anvil tears down (avoids loops throwing on disconnect).
       await running.stop();

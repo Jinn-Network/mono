@@ -86,6 +86,13 @@ const ACTIVITY_CHECKER_ABI = [
     inputs: [{ name: 'newAuthorizedRouter', type: 'address' }],
     outputs: [],
   },
+  {
+    name: 'eligibleActivityWeight',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'operator', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
 ] as const;
 
 const TASK_COORDINATOR_ABI = [
@@ -193,6 +200,12 @@ export interface TaskV3Env {
   mockMechAddress: `0x${string}`;
   /** MockTaskMarketplace address used by the V3 router. */
   mockMarketplaceAddress: `0x${string}`;
+  /**
+   * Locally-deployed TaskActivityCheckerV3 address.
+   * Used by `readActivityCount` to read `eligibleActivityWeight[safeAddress]`
+   * and assert that the daemon's settle tx incremented the counter.
+   */
+  activityCheckerAddress: `0x${string}`;
 }
 
 export interface DaemonHarnessFixture {
@@ -408,6 +421,7 @@ export async function deployMinimalV3Stack(
     routerAddress: router,
     mockMechAddress: mockMech,
     mockMarketplaceAddress: marketplace,
+    activityCheckerAddress: activityChecker,
   };
 }
 
@@ -1490,4 +1504,35 @@ export async function waitForDaemonClaim(
     `waitForDaemonClaim: timed out after ${timeoutMs}ms waiting for TaskAttemptCreated ` +
     `(taskId=${task.taskId}, operator=${operator.safeAddress})`,
   );
+}
+
+/**
+ * Read the operator's on-chain activity counter from the locally-deployed
+ * TaskActivityCheckerV3. The counter (`eligibleActivityWeight`) increments
+ * when the V3 router calls `recordSolutionDelivery(safeAddress, solutionDigest)`
+ * during `claimSolutionDelivery`. We compare before/after values around
+ * `waitForDelivery` to assert the daemon's settle tx actually registered
+ * with the activity checker.
+ *
+ * Note: this reads from our locally-deployed TaskActivityCheckerV3 (in the V3
+ * stack deployed by `deployMinimalV3Stack`), NOT from the production OLAS
+ * staking contract. The production staking contract tracks the production
+ * JinnRouter and is unaware of our locally-deployed V3 stack — but the local
+ * activity checker IS wired to the local V3 router via `setAuthorizedRouter`,
+ * so deliveries through our test stack increment the local counter correctly.
+ *
+ * Returns the raw `eligibleActivityWeight` as a bigint.
+ */
+export async function readActivityCount(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  v3Env: TaskV3Env,
+): Promise<bigint> {
+  const result = await fixture.publicClient.readContract({
+    address: v3Env.activityCheckerAddress as Address,
+    abi: ACTIVITY_CHECKER_ABI,
+    functionName: 'eligibleActivityWeight',
+    args: [operator.safeAddress as Address],
+  });
+  return result as bigint;
 }
