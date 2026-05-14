@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { addDiscoveryRoutes } from '../../src/api/discovery-endpoint.js';
+import { requireUiToken } from '../../src/api/handshake.js';
 import type { DiscoveryAPI, PluginPublication, PublishedArtifact } from '../../src/discovery/types.js';
 
 function stubDiscovery(partial: Partial<DiscoveryAPI>): DiscoveryAPI {
@@ -98,5 +99,46 @@ describe('discovery-endpoint (hfmf)', () => {
     addDiscoveryRoutes(app, { discovery: () => discovery });
     const res = await app.request('/v1/discovery/plugin-publications');
     expect(res.status).toBe(503);
+  });
+});
+
+describe('discovery-endpoint — auth gating (jinn-mono-0nih)', () => {
+  const UI_TOKEN = 'ui-token-test';
+
+  function gatedApp(discovery: DiscoveryAPI): Hono {
+    const app = new Hono();
+    app.use('/v1/discovery', requireUiToken(UI_TOKEN));
+    app.use('/v1/discovery/*', requireUiToken(UI_TOKEN));
+    addDiscoveryRoutes(app, { discovery: () => discovery });
+    return app;
+  }
+
+  it('rejects unauthenticated requests with 401', async () => {
+    const app = gatedApp(stubDiscovery({}));
+    const res = await app.request(
+      '/v1/discovery/plugin-publications?solverType=swe-rebench-v2.v1',
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('accepts requests bearing the UI token in the header', async () => {
+    const app = gatedApp(stubDiscovery({}));
+    const res = await app.request(
+      '/v1/discovery/plugin-publications?solverType=swe-rebench-v2.v1',
+      { headers: { 'x-jinn-ui-token': UI_TOKEN } },
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('gates all three discovery sub-paths', async () => {
+    const app = gatedApp(stubDiscovery({}));
+    for (const path of [
+      '/v1/discovery/plugin-publications?solverType=foo',
+      '/v1/discovery/builder-artifacts?builderAgentId=1',
+      '/v1/discovery/plugin-scores?cid=bafy',
+    ]) {
+      const res = await app.request(path);
+      expect(res.status, `${path} should require auth`).toBe(401);
+    }
   });
 });
