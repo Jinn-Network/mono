@@ -16,6 +16,7 @@ import {
   NATIVE_PAYMENT_TYPE,
   type EvictionRecoveryConfig,
 } from './types.js';
+import { VerdictCode } from './verdict-code.js';
 import { STAKING_ABI, STOLAS_DISTRIBUTOR_ABI } from '../../earning/contracts.js';
 import { isUnauthorizedAccountError } from '../../errors/unauthorized-account.js';
 import { executeSafeTransaction } from './safe.js';
@@ -428,8 +429,8 @@ export interface ClaimDeliveryOptions {
   evidenceHash?: Hex;
   /** V3 only. Defaults to solution for Task-native V3. */
   kind?: 'solution' | 'verdict';
-  /** V3 verdict only. 1=PASS, 2=FAIL, 3=INVALID, 4=UNRESOLVED. */
-  verdictCode?: number;
+  /** V3 verdict only. 1=Pass, 2=Fail, 3=Invalid, 4=Unresolved. See VerdictCode. */
+  verdictCode?: VerdictCode;
 }
 
 async function isDeliveryAlreadyClaimed(
@@ -471,7 +472,14 @@ export async function claimDelivery(
           abi: JINN_ROUTER_ABI,
           functionName: options.kind === 'verdict' ? 'claimVerdictDelivery' : 'claimSolutionDelivery',
           args: options.kind === 'verdict'
-            ? [requestId, options.evidenceHash!, options.verdictCode ?? 1]
+            ? (() => {
+                if (options.verdictCode === undefined) {
+                  throw new Error(
+                    `claimDelivery(v3/verdict): verdictCode is required — refusing to write Pass(1) by default for requestId ${requestId}`,
+                  );
+                }
+                return [requestId, options.evidenceHash!, options.verdictCode] as const;
+              })()
             : [requestId, options.evidenceHash!],
         })
       : options.variant === 'v2'

@@ -154,4 +154,28 @@ describe('assembleAndSignEnvelope', () => {
     const result = await assembleAndSignEnvelope(baseInputs, deps);
     expect(result.envelope.schemaVersion).toBe('jinn.execution.v1');
   });
+
+  describe('executor.model stamping (jinn-mono-gbut, gh#191)', () => {
+    it('stamps executor.model when inputs.executor.model is provided', async () => {
+      const inputs: EnvelopeInputs = {
+        ...baseInputs,
+        executor: { ...baseInputs.executor, model: 'claude-haiku-4-5-20251001' },
+      };
+      const result = await assembleAndSignEnvelope(inputs, deps);
+      expect(result.envelope.executor.model).toBe('claude-haiku-4-5-20251001');
+      expect(() => SignedEnvelopeSchema.parse(result.envelope)).not.toThrow();
+    });
+
+    it('leaves executor.model undefined when inputs.executor.model is absent', async () => {
+      // baseInputs.executor has no model field
+      const result = await assembleAndSignEnvelope(baseInputs, deps);
+      expect(result.envelope.executor.model).toBeUndefined();
+      expect(() => SignedEnvelopeSchema.parse(result.envelope)).not.toThrow();
+    });
+
+    it('does not stamp empty string when model is undefined', async () => {
+      const result = await assembleAndSignEnvelope(baseInputs, deps);
+      expect(result.envelope.executor.model).not.toBe('');
+    });
+  });
 });

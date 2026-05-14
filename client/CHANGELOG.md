@@ -2,6 +2,81 @@
 
 ## Unreleased
 
+## v0.1.5 — Operator App
+
+_Released 2026-05-13_
+
+# v0.1.5 — "Operator App"
+2026-05-13 · Suggested bump: patch (first npm `@latest` cut that ships the app-first operator experience)
+
+## Highlights
+
+- Release plumbing fixed so the cut can actually ship. `npm-publish.yml` now installs `contracts/` before the operator gate, the Docker/GHCR workflow accepts the new `v<semver>` tag format alongside legacy `client-v*`, and the CHANGELOG mirror writes through a PR (no more failed direct push to protected `main`).
+- SWE-rebench v2 verdict path is structurally correct end-to-end. The eval loop no longer emits verdicts on non-gradeable evals (uy6v.8), the daemon's `verdictCode` default is `Invalid`, not `Pass` (uy6v.7), evaluator-side gating now surfaces a real verdict so the reputation feedback hook fires (uy6v.10), and the `evaluation:<cid>` MetadataSet is published on verdict delivery (n93o).
+- Per-operator disks no longer fill in a couple of weeks. The SWE-rebench v2 eval-image cache is bounded by an in-process LRU (uy6v.11).
+- Operator app feedback on issue 188 addressed across overview / launcher / catalog / configuration / shell, with dashboard tests refreshed.
+- Daemon execution envelope now carries the executor model (`gbut`), giving downstream consumers the model that produced each Solution / Verdict.
+- Discovery API no longer 404s for just-launched manifests when no subgraph is configured (#170) — important for fresh launcher records.
+
+## Recovery context
+
+v0.1.4 published as a GitHub Release at `fa8da678` but the npm-publish workflow failed before publish in `release:operator-gate` because contracts dependencies were not installed in the clean Actions checkout. The fix landed as PR #187 *after* the v0.1.4 tag was created, so the v0.1.4 release commit could not retry publish. v0.1.5 cuts from current `main` (`56e84952`) which includes that fix; `@jinn-network/client@latest` becomes `0.1.5` (replacing the stale `0.1.2`). v0.1.4 remains as a Build Notes Release; no `0.1.4` npm artifact exists.
+
+## Changes
+
+### feat
+- (#189) feat(uy6v.11): bound swe-rebench-v2 eval-image cache with in-process LRU — @ritsuKai2000
+- (#194) feat(gbut): publish executor.model in jinn.execution.v1 envelope — @ritsuKai2000
+
+### fix
+- (#170) fix: /v1/solvernets/registry/:cid 404s for just-launched manifests when no subgraph is configured — @ritsuKai2000
+- (#183) fix(uy6v.8): SWE-rebench v2 eval loop — no verdicts on non-gradeable evals; source-only patches — @ritsuKai2000
+- (#185) fix(release): unblock v0.1.4 publish — @ritsuKai2000
+- (#187) fix(release): install contracts before operator gate — @ritsuKai2000
+- (#190) fix(uy6v.10): emit verdict in swe-rebench-v2 gating so reputation hook fires — @ritsuKai2000
+- (#193) fix(uy6v.7): daemon verdictCode default — Invalid not Pass — @ritsuKai2000
+- (#197) fix(n93o): publish evaluation:<cid> MetadataSet on verdict delivery — @ritsuKai2000
+
+### chore
+- (#208) chore(2cl.20): bump client/package.json to 0.1.5 — @ritsuKai2000
+
+### docs
+- (#165) docs: clarify terminal unresolved verdicts — @ritsuKai2000
+- (#195) docs(uy6v.6): DR — keep self-eval bypass on testnet; revert is a mainnet gate — @ritsuKai2000
+
+### test
+- (#168) test: Real-daemon Playwright e2e: lifecycle + operator catalog + empty states + crash recovery (scenarios 2-5) — scenarios 2-4 — @ritsuKai2000
+- (#207) test: align verdict code fallback expectation — @ritsuKai2000
+
+### other
+- (#192) [codex] address operator dashboard issue 188 feedback — @ritsuKai2000
+
+## Closed this week
+
+- jinn-mono-uy6v.8 (SWE-rebench v2 eval loop — verdicts on non-gradeable evals)
+- jinn-mono-uy6v.6 (DR — keep self-eval bypass on testnet)
+- jinn-mono-uy6v.9 (Unscorable instances in dataset — quantified)
+- jinn-mono-2cl.20.1 (Discovery-stack scope mismatch before release draft)
+
+## Stats
+
+- Window: v0.1.4 → HEAD (2026-05-13)
+- 14 commits · 72 files changed, 4444 insertions(+), 772 deletions(-) · 15 PRs · 1 contributor
+
+## Known issues
+
+- jinn-mono-uy6v.7 (Live verdict-success + JINN reward distribution): in_progress. Verdict path is now structurally correct and emitting, but live observation of JINN reward distribution to operator wallets is still gating the v1 public-testnet ship (separate from this Build Notes cut).
+- jinn-mono-uy6v.10 (Reputation-feedback hook): PR #190 makes the feedback hook fire on swe-rebench v2 verdicts; live on-chain registry update observation still pending closure.
+- jinn-mono-uy6v.11 (Eval-image cache): PR #189 bounded the cache via in-process LRU; long-running operator disk validation still pending closure.
+
+<!-- jinn-release-evidence:v1
+release-tag=v0.1.5
+release-commit=56e849525ebdbc8efc5a99a8255cead613ef7d80
+release-client-prepare=passed
+donation-consumption=passed
+app-first-testnet-acceptance=passed
+-->
+
 ## v0.1.4 — Shipping Machine
 
 _Released 2026-05-12_

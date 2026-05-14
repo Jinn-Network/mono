@@ -44,6 +44,7 @@ import {
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
+import { VerdictCode } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
@@ -896,7 +897,7 @@ export class MechAdapter implements ExecutionAdapter {
     );
   }
 
-  async submitVerdictDelivery(requestId: RequestId, verdictDigest: Hex, verdictCode = 1): Promise<void> {
+  async submitVerdictDelivery(requestId: RequestId, verdictDigest: Hex, verdictCode: VerdictCode): Promise<void> {
     await claimDelivery(
       this.publicClient,
       this.walletClient,

@@ -189,13 +189,11 @@ function missingSolverNetStatus(
     {
       code: 'prediction_solvernet_missing',
       severity: 'error',
-      message: `No SolverNet named '${name}' is configured.`,
-      configField: `solverNets.${name}`,
+      message: 'No active SolverNet configured.',
+      configField: 'solverNets',
       nextAction: {
-        description: name === 'prediction'
-          ? 'Enable the default Prediction SolverNet.'
-          : 'Choose a configured SolverNet or add it to config.',
-        cli: name === 'prediction' ? 'jinn solver-nets enable prediction' : 'jinn solver-nets list',
+        description: 'Open Operator > SolverNets to join or configure a SolverNet.',
+        url: '/operator#solvernets',
       },
     },
   ];

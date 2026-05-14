@@ -68,6 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.location.hash = '';
   cleanup();
 });
 
@@ -89,6 +90,29 @@ describe('SolverNetsSection', () => {
       expect(screen.getByTestId('solvernets-joined-empty')).toBeTruthy(),
     );
     expect(screen.getByText(/Joined · 0/i)).toBeTruthy();
+  });
+
+  it('anchors and focuses the SolverNets section for /operator#solvernets', async () => {
+    const scrollIntoView = vi.fn();
+    const focus = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const originalFocus = HTMLElement.prototype.focus;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    HTMLElement.prototype.focus = focus;
+    window.location.hash = '';
+
+    try {
+      render(withProviders(<SolverNetsSection />));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      window.location.hash = '#solvernets';
+      window.dispatchEvent(new Event('hashchange'));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(document.getElementById('solvernets')?.getAttribute('tabindex')).toBe('-1');
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      HTMLElement.prototype.focus = originalFocus;
+    }
   });
 
   it('renders one JoinedNetCard per joined SolverNet', async () => {
