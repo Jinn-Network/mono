@@ -134,9 +134,17 @@ describe('validatePoolInstances', () => {
       a__fail: { passed_match: false, passed: [], failed: [] },
       a__ungradeable: Object.assign(new Error('eval could not grade'), { name: 'EvalCouldNotGradeError', reason: 'docker_unavailable' }),
     });
+    // commandRunner: docker returns a valid digest so substrate fields resolve;
+    // git returns exitCode 1 so upstreamEvalCommit is omitted (non-fatal).
+    const commandRunner = async (bin: string, args: string[]) => {
+      if (bin === 'docker' && args[0] === 'image') {
+        return { exitCode: 0, stdout: '["acme/widget@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"]', stderr: '' };
+      }
+      return { exitCode: 1, stdout: '', stderr: '' };
+    };
     const summary = await validatePoolInstances(
       [poolTask('a__pass'), poolTask('a__fail'), poolTask('a__ungradeable')],
-      { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION },
+      { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
     );
     expect(summary).toMatchObject({ checked: 3, scorable: 1, unscorable: 2, skipped: 0 });
     expect((await store.getEntry('a__pass', EVAL_SEMANTICS_VERSION))?.scorable).toBe(true);
@@ -150,9 +158,13 @@ describe('validatePoolInstances', () => {
     const dir = tmpDir();
     const store = new ValidatedPoolStore({ stateDir: dir });
     const runner = makeRunner({});
+    // Non-Python instance exits before substrate resolution. upstreamRepoDir is
+    // required but resolveUpstreamEvalCommit runs before the loop; use a stub
+    // commandRunner so the test doesn't spawn real git.
+    const commandRunner = async () => ({ exitCode: 1, stdout: '', stderr: '' });
     const summary = await validatePoolInstances(
       [poolTask('go__1', { language: 'go' })],
-      { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION },
+      { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
     );
     expect(summary).toMatchObject({ checked: 0, skipped: 1 });
     expect(runner.runEval).not.toHaveBeenCalled();
@@ -164,10 +176,13 @@ describe('validatePoolInstances', () => {
     const store = new ValidatedPoolStore({ stateDir: dir });
     await store.record('a__1', { scorable: true, reason: 'ok', checkedAt: '2026-05-13T00:00:00Z' }, EVAL_SEMANTICS_VERSION);
     const runner = makeRunner({ a__1: { passed_match: false } });
-    const s1 = await validatePoolInstances([poolTask('a__1')], { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION });
+    // Minimal stub: git returns null commit (non-fatal), docker returns exitCode 1
+    // so imageDigest is unresolvable → entry is scorable:false regardless.
+    const commandRunner = async () => ({ exitCode: 1, stdout: '', stderr: '' });
+    const s1 = await validatePoolInstances([poolTask('a__1')], { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner });
     expect(s1.checked).toBe(0);
     expect(runner.runEval).not.toHaveBeenCalled();
-    const s2 = await validatePoolInstances([poolTask('a__1')], { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION }, { force: true });
+    const s2 = await validatePoolInstances([poolTask('a__1')], { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner }, { force: true });
     expect(s2.checked).toBe(1);
     expect(runner.runEval).toHaveBeenCalledTimes(1);
     expect((await store.getEntry('a__1', EVAL_SEMANTICS_VERSION))?.scorable).toBe(false);
@@ -177,9 +192,12 @@ describe('validatePoolInstances', () => {
     const dir = tmpDir();
     const store = new ValidatedPoolStore({ stateDir: dir });
     const runner = makeRunner({ a__1: { passed_match: true }, a__2: { passed_match: true }, a__3: { passed_match: true } });
+    // Minimal stub: digest fails → unresolvable-image-digest (scorable:false) but
+    // checked still increments correctly — the limit assertion is unaffected.
+    const commandRunner = async () => ({ exitCode: 1, stdout: '', stderr: '' });
     const summary = await validatePoolInstances(
       [poolTask('a__1'), poolTask('a__2'), poolTask('a__3')],
-      { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION },
+      { fetcher: makeFetcher(), runner, store, semanticsVersion: EVAL_SEMANTICS_VERSION, upstreamRepoDir: '/fake/upstream', commandRunner },
       { limit: 2 },
     );
     expect(summary.checked).toBe(2);

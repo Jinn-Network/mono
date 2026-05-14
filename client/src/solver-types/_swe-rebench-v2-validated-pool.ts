@@ -192,9 +192,9 @@ export interface ValidatePoolDeps {
   runner: EvalRunner;
   store: ValidatedPoolStore;
   semanticsVersion: string;
-  /** Required v3+: used to resolve `upstreamEvalCommit`. Defaults to '' (commit not resolved). */
-  upstreamRepoDir?: string;
-  /** Required v3+: defaults to spawn-based runner; tests inject a stub. */
+  /** v3+: directory of the enabled upstream SWE-rebench repo — used to resolve `upstreamEvalCommit`. Required: every caller must opt in to v3 semantics explicitly. */
+  upstreamRepoDir: string;
+  /** Defaults to spawn-based runner; tests inject a stub. */
   commandRunner?: CommandRunner;
   log?: (msg: string) => void;
 }
@@ -226,17 +226,11 @@ export async function validatePoolInstances(
   opts: { limit?: number; force?: boolean } = {},
 ): Promise<ValidatePoolSummary> {
   const log = deps.log ?? (() => {});
-  // v3+ substrate resolution: only active when commandRunner or upstreamRepoDir
-  // is explicitly provided. Legacy callers (no commandRunner, no upstreamRepoDir)
-  // get pre-v3 behavior — scorable based on passed_match alone.
-  const substrateEnabled = deps.commandRunner != null || deps.upstreamRepoDir != null;
   const runner = deps.commandRunner ?? defaultCommandRunner;
   const summary: ValidatePoolSummary = { checked: 0, scorable: 0, unscorable: 0, skipped: 0 };
 
   // Resolve the upstream eval commit once per run — it doesn't change mid-run.
-  const upstreamEvalCommit = substrateEnabled && deps.upstreamRepoDir
-    ? await resolveUpstreamEvalCommit(deps.upstreamRepoDir, runner)
-    : null;
+  const upstreamEvalCommit = await resolveUpstreamEvalCommit(deps.upstreamRepoDir, runner);
 
   for (const task of pool) {
     if (opts.limit != null && summary.checked >= opts.limit) break;
@@ -289,23 +283,16 @@ export async function validatePoolInstances(
         pass_to_pass: row.PASS_TO_PASS,
       });
       const checkedAt = new Date().toISOString();
-      if (substrateEnabled) {
-        // Resolve digest AFTER the eval ran — that's when the image is guaranteed
-        // to be present locally with its RepoDigests populated.
-        const imageDigest = await resolveImageDigest(row.image_name, runner);
-        if (!imageDigest) {
-          // Required-mode admissions must carry a digest. No digest → not admissible.
-          entry = { scorable: false, reason: 'unresolvable-image-digest', checkedAt, rowHash, imageName: row.image_name, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) };
-        } else {
-          entry = res.passed_match
-            ? { scorable: true, reason: 'gold-patch-resolves', checkedAt, rowHash, imageName: row.image_name, imageDigest, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) }
-            : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt, rowHash, imageName: row.image_name, imageDigest, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) };
-        }
+      // Resolve digest AFTER the eval ran — that's when the image is guaranteed
+      // to be present locally with its RepoDigests populated.
+      const imageDigest = await resolveImageDigest(row.image_name, runner);
+      if (!imageDigest) {
+        // Every admission must carry a digest. No digest → not admissible.
+        entry = { scorable: false, reason: 'unresolvable-image-digest', checkedAt, rowHash, imageName: row.image_name, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) };
       } else {
-        // Legacy (pre-v3) behavior: scorable based on passed_match alone.
         entry = res.passed_match
-          ? { scorable: true, reason: 'gold-patch-resolves', checkedAt }
-          : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt };
+          ? { scorable: true, reason: 'gold-patch-resolves', checkedAt, rowHash, imageName: row.image_name, imageDigest, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) }
+          : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt, rowHash, imageName: row.image_name, imageDigest, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) };
       }
     } catch (err) {
       const reason = nameOf(err) === 'EvalCouldNotGradeError'
