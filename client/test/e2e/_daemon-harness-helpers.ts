@@ -63,83 +63,6 @@ import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { startApiServer } from '../../src/api/server.js';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
-// ── V3 task stack ABI fragments (for deploying minimal router stack) ──────────
-
-const ACTIVITY_CHECKER_ABI = [
-  {
-    name: 'initialize',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: '_livenessRatio', type: 'uint256' },
-      { name: '_owner', type: 'address' },
-      { name: '_similarityThreshold', type: 'uint256' },
-      { name: '_similarDecayMultiplier', type: 'uint256' },
-      { name: '_comparisonWindow', type: 'uint256' },
-    ],
-    outputs: [],
-  },
-  {
-    name: 'setAuthorizedRouter',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'newAuthorizedRouter', type: 'address' }],
-    outputs: [],
-  },
-  {
-    name: 'eligibleActivityWeight',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'operator', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-] as const;
-
-const TASK_COORDINATOR_ABI = [
-  {
-    name: 'initialize',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: '_owner', type: 'address' },
-      { name: '_authorizedRouter', type: 'address' },
-    ],
-    outputs: [],
-  },
-] as const;
-
-const ROUTER_V3_INIT_ABI = [
-  {
-    name: 'initialize',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: '_owner', type: 'address' },
-      { name: '_mechMarketplace', type: 'address' },
-      { name: '_taskCoordinator', type: 'address' },
-      { name: '_activityChecker', type: 'address' },
-    ],
-    outputs: [],
-  },
-] as const;
-
-const MOCK_MARKETPLACE_ABI = [
-  {
-    name: 'minResponseTimeout',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    name: 'maxResponseTimeout',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-] as const;
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
@@ -370,7 +293,7 @@ export async function deployMinimalV3Stack(
 
   const initActivity = await deployerClient.writeContract({
     address: activityChecker,
-    abi: ACTIVITY_CHECKER_ABI,
+    abi: activityArtifact.abi,
     functionName: 'initialize',
     args: [parseEther('0.001'), deployer.address, 64n, 0n, 20n],
     account: deployer,
@@ -380,7 +303,7 @@ export async function deployMinimalV3Stack(
 
   const initCoordinator = await deployerClient.writeContract({
     address: coordinator,
-    abi: TASK_COORDINATOR_ABI,
+    abi: coordinatorArtifact.abi,
     functionName: 'initialize',
     args: [deployer.address, router],
     account: deployer,
@@ -390,7 +313,7 @@ export async function deployMinimalV3Stack(
 
   const initRouter = await deployerClient.writeContract({
     address: router,
-    abi: ROUTER_V3_INIT_ABI,
+    abi: routerV3Artifact.abi,
     functionName: 'initialize',
     args: [deployer.address, marketplace, coordinator, activityChecker],
     account: deployer,
@@ -400,7 +323,7 @@ export async function deployMinimalV3Stack(
 
   const setRouter = await deployerClient.writeContract({
     address: activityChecker,
-    abi: ACTIVITY_CHECKER_ABI,
+    abi: activityArtifact.abi,
     functionName: 'setAuthorizedRouter',
     args: [router],
     account: deployer,
@@ -1527,9 +1450,12 @@ export async function readActivityCount(
   operator: BootstrappedOperator,
   v3Env: TaskV3Env,
 ): Promise<bigint> {
+  const activityArtifact = await loadContractArtifact(
+    'artifacts/src/staking/TaskActivityCheckerV3.sol/TaskActivityCheckerV3.json',
+  );
   const result = await fixture.publicClient.readContract({
     address: v3Env.activityCheckerAddress as Address,
-    abi: ACTIVITY_CHECKER_ABI,
+    abi: activityArtifact.abi,
     functionName: 'eligibleActivityWeight',
     args: [operator.safeAddress as Address],
   });
