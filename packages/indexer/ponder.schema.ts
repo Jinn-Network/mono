@@ -13,7 +13,7 @@
  *   AttemptEnvelopeMeta   — IPFS-enriched executor/provenance fields for execution envelopes,
  *                           keyed by (requestId, chainId), joined from Envelope via IPFS fetch
  *   VerdictEnvelopeMeta   — IPFS-enriched actual outcome fields for evaluation envelopes (ebu7.X),
- *                           keyed by (requestId, verdictIndex, chainId). The on-chain verdictCode
+ *                           keyed by (requestId, chainId). The on-chain verdictCode
  *                           defaults to Pass(1) for failed evaluations (daemon bug); this table
  *                           holds the evaluator's real judgment from the off-chain envelope.
  *
@@ -495,7 +495,7 @@ export const attemptEnvelopeMeta = onchainTable(
  * with key `evaluation:<cid>`). This table is the source of truth for whether
  * an evaluation actually passed or failed.
  *
- * Join: `(requestId, verdictIndex, chainId)` → `verdict`.
+ * Join: `(requestId, chainId)` → `verdict`.
  * Also joinable to `attempt` via `requestId`.
  *
  * Resilient: on IPFS fetch/parse failure no row is written (we have no PK
@@ -506,7 +506,7 @@ export const attemptEnvelopeMeta = onchainTable(
  * submitted on-chain (often defaulted to Pass). When both are present and
  * disagree, prefer `actualPassed` in UI and metrics.
  *
- * Primary key: (requestId, verdictIndex, chainId).
+ * Primary key: (requestId, chainId).
  * Index on manifestCid, evaluator, actualPassed, evaluatorVerdict, taskId.
  */
 export const verdictEnvelopeMeta = onchainTable(
@@ -515,9 +515,8 @@ export const verdictEnvelopeMeta = onchainTable(
     /** MechMarketplace requestId — equals verdict.requestId (the join key). */
     requestId: t.hex().notNull(),
     /**
-     * Verdict index within the attempt. From the envelope body or the matching
-     * on-chain Verdict row. A single attempt may have multiple verdicts;
-     * the envelope identifies which by verdictIndex.
+     * Best-effort verdict index within the attempt. Some historical envelopes
+     * omit it, so route joins use requestId as the stable verdict identity.
      */
     verdictIndex: t.integer().notNull(),
     /** Best-effort attempt index, from the envelope's task.attemptIndex if present. */
@@ -557,7 +556,7 @@ export const verdictEnvelopeMeta = onchainTable(
     chainId: t.integer().notNull(),
   }),
   (table) => ({
-    pk: primaryKey({ columns: [table.requestId, table.verdictIndex, table.chainId] }),
+    pk: primaryKey({ columns: [table.requestId, table.chainId] }),
     manifestCidIdx: index().on(table.manifestCid),
     evaluatorIdx: index().on(table.evaluator),
     actualPassedIdx: index().on(table.actualPassed),

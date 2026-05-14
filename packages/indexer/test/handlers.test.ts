@@ -70,7 +70,7 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
   [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
   [attemptEnvelopeMeta, ['requestId', 'chainId']],
-  [verdictEnvelopeMeta, ['requestId', 'verdictIndex', 'chainId']],
+  [verdictEnvelopeMeta, ['requestId', 'chainId']],
 ]);
 
 let db: InMemoryDb;
@@ -1278,7 +1278,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
-    const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, verdictIndex: 0, chainId: CHAIN_ID });
+    const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
     expect(row).toBeDefined();
     expect(row).toMatchObject({
       requestId: REQUEST_ID,
@@ -1378,5 +1378,57 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     });
     // No verdictEnvelopeMeta row from an execution envelope — that path goes to attemptEnvelopeMeta.
     expect(db.count(verdictEnvelopeMeta)).toBe(0);
+  });
+
+  it('keys verdictEnvelopeMeta by requestId so missing verdictIndex does not orphan later joins', async () => {
+    let body: unknown = {
+      ...SWE_REBENCH_FAIL_BODY,
+      verdictIndex: undefined,
+    };
+    const stubFetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => body,
+    });
+
+    await handleMetadataSet({
+      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_000n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    body = {
+      ...SWE_REBENCH_FAIL_BODY,
+      verdictIndex: 2,
+      payload: { passed_match: true, score: 1 },
+    };
+
+    await handleMetadataSet({
+      event: metadataSetEvent({ agentId: 5n, metadataKey: evalKey, metadataValue: envelopePayloadV2({ manifestHash: MANIFEST_HASH, tier: 1 }) }, { block: 41_500_001n, logIndex: 0 }),
+      context,
+      solverNetManifest,
+      envelope,
+      harnessCheckpoint,
+      attemptEnvelopeMeta,
+      verdictEnvelopeMeta,
+      enrichEnvelopes: true,
+      ipfsGateway: 'https://stub',
+      fetchImpl: stubFetch,
+    });
+
+    expect(db.count(verdictEnvelopeMeta)).toBe(1);
+    expect(db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID })).toMatchObject({
+      requestId: REQUEST_ID,
+      verdictIndex: 2,
+      actualPassed: true,
+      actualScore: '1',
+    });
   });
 });

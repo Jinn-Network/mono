@@ -578,7 +578,8 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
 
   const attemptIndex = safeInt(taskObj['attemptIndex'], 0);
   const taskId = safeStr(taskObj['taskId']) || String(taskObj['taskId'] ?? '');
-  // verdictIndex may be at the top level or under task.
+  // verdictIndex may be at the top level or under task. It is diagnostic only
+  // for older envelopes that omit it; requestId is the stable verdict join key.
   const verdictIndex = safeInt(b['verdictIndex'] ?? taskObj['verdictIndex'], 0);
 
   const solverType = safeStr(b['solverType']);
@@ -1044,6 +1045,7 @@ export async function handleMetadataSet({
               // Most-recent-wins by enrichedAtBlock. Stale replays no-op.
               if (blockNumber >= row.enrichedAtBlock) {
                 return {
+                  verdictIndex: meta.verdictIndex,
                   attemptIndex: meta.attemptIndex,
                   taskId: meta.taskId,
                   evaluator: meta.evaluator as `0x${string}`,
@@ -1060,6 +1062,7 @@ export async function handleMetadataSet({
               }
               // No-op: return existing row fields so Drizzle generates valid SQL.
               return {
+                verdictIndex: row.verdictIndex,
                 attemptIndex: row.attemptIndex,
                 taskId: row.taskId,
                 evaluator: row.evaluator,

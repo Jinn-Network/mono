@@ -128,15 +128,24 @@ function parseBigIntParam(raw: string | undefined, def: bigint, max: bigint): bi
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Returns the greatest of the maximum `createdAtBlock` values across the three
- * main event tables (task, attempt, verdict). Used as the indexer head proxy
- * for freshness middleware.
+ * Returns the greatest route-visible block across explorer tables. Used as the
+ * indexer head proxy for freshness middleware and ETags.
  *
  * Scoped to EXPLORER_CHAIN_ID so it reflects only the activity the explorer
  * surfaces.
  */
 async function getIndexedHead(): Promise<bigint> {
-  const [taskMax, attemptMax, verdictMax] = await Promise.all([
+  const [
+    taskMax,
+    attemptMax,
+    verdictMax,
+    rewardMax,
+    manifestMax,
+    envelopeMax,
+    checkpointMax,
+    attemptMetaMax,
+    verdictMetaMax,
+  ] = await Promise.all([
     db
       .select({ v: max(schema.task.createdAtBlock) })
       .from(schema.task)
@@ -152,12 +161,84 @@ async function getIndexedHead(): Promise<bigint> {
       .from(schema.verdict)
       .where(eq(schema.verdict.chainId, EXPLORER_CHAIN_ID))
       .then((r) => r[0]?.v ?? null),
+    db
+      .select({ v: max(schema.rewardDistribution.claimedAtBlock) })
+      .from(schema.rewardDistribution)
+      .then((r) => r[0]?.v ?? null),
+    db
+      .select({ v: max(schema.solverNetManifest.anchorBlock) })
+      .from(schema.solverNetManifest)
+      .where(eq(schema.solverNetManifest.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => r[0]?.v ?? null),
+    db
+      .select({ v: max(schema.envelope.publishedAtBlock) })
+      .from(schema.envelope)
+      .where(eq(schema.envelope.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => r[0]?.v ?? null),
+    db
+      .select({ v: max(schema.harnessCheckpoint.publishedAtBlock) })
+      .from(schema.harnessCheckpoint)
+      .where(eq(schema.harnessCheckpoint.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => r[0]?.v ?? null),
+    db
+      .select({ v: max(schema.attemptEnvelopeMeta.enrichedAtBlock) })
+      .from(schema.attemptEnvelopeMeta)
+      .where(eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => r[0]?.v ?? null),
+    db
+      .select({ v: max(schema.verdictEnvelopeMeta.enrichedAtBlock) })
+      .from(schema.verdictEnvelopeMeta)
+      .where(eq(schema.verdictEnvelopeMeta.chainId, EXPLORER_CHAIN_ID))
+      .then((r) => r[0]?.v ?? null),
   ]);
-  const candidates = [taskMax, attemptMax, verdictMax].filter(
-    (v): v is bigint => v !== null,
-  );
+  const candidates = [
+    taskMax,
+    attemptMax,
+    verdictMax,
+    rewardMax,
+    manifestMax,
+    envelopeMax,
+    checkpointMax,
+    attemptMetaMax,
+    verdictMetaMax,
+  ].filter((v): v is bigint => v !== null);
   if (candidates.length === 0) return 0n;
   return candidates.reduce((best, cur) => (cur > best ? cur : best), 0n);
+}
+
+type VerdictTruthRow = {
+  verdictCode: number;
+  actualPassed: boolean | null;
+  enrichmentStatus: string | null;
+};
+
+function verdictEnvelopeJoinCondition() {
+  return and(
+    eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
+    eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
+  );
+}
+
+function verdictTruth(v: VerdictTruthRow): boolean {
+  return v.enrichmentStatus === 'ok' && v.actualPassed !== null
+    ? v.actualPassed
+    : v.verdictCode === 1;
+}
+
+function verdictTruthPassCountSql() {
+  return sql`CASE
+    WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok'
+      THEN CASE WHEN ${schema.verdictEnvelopeMeta.actualPassed} = true THEN 1 END
+    WHEN ${schema.verdict.verdictCode} = 1 THEN 1
+  END`;
+}
+
+function verdictTruthDisagreementCountSql() {
+  return sql`CASE
+    WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok'
+      AND ((${schema.verdict.verdictCode} = 1) <> ${schema.verdictEnvelopeMeta.actualPassed})
+    THEN 1
+  END`;
 }
 
 /**
@@ -258,26 +339,18 @@ app.get('/network', async (c) => {
             sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
           ),
           // envelope-truth pass: prefer actualPassed when enriched; else fall back to verdictCode.
-          envelopePass: count(
-            sql`CASE WHEN (${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' AND ${schema.verdictEnvelopeMeta.actualPassed} = true) OR (${schema.verdictEnvelopeMeta.enrichmentStatus} IS NULL AND ${schema.verdict.verdictCode} = 1) THEN 1 END`,
-          ),
+          envelopePass: count(verdictTruthPassCountSql()),
           // verdicts with an enriched envelope row
           enriched: count(
             sql`CASE WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' THEN 1 END`,
           ),
           // disagreement: enriched AND on-chain != envelope
-          disagreed: count(
-            sql`CASE WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' AND ((${schema.verdict.verdictCode} = 1) <> ${schema.verdictEnvelopeMeta.actualPassed}) THEN 1 END`,
-          ),
+          disagreed: count(verdictTruthDisagreementCountSql()),
         })
         .from(schema.verdict)
         .leftJoin(
           schema.verdictEnvelopeMeta,
-          and(
-            eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
-            eq(schema.verdictEnvelopeMeta.verdictIndex, schema.verdict.verdictIndex),
-            eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
-          ),
+          verdictEnvelopeJoinCondition(),
         )
         .where(eq(schema.verdict.chainId, EXPLORER_CHAIN_ID)),
 
@@ -578,11 +651,7 @@ app.get('/solvernet/:cid', async (c) => {
             .from(schema.verdict)
             .leftJoin(
               schema.verdictEnvelopeMeta,
-              and(
-                eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
-                eq(schema.verdictEnvelopeMeta.verdictIndex, schema.verdict.verdictIndex),
-                eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
-              ),
+                verdictEnvelopeJoinCondition(),
             )
             .where(
               and(
@@ -649,15 +718,6 @@ app.get('/solvernet/:cid', async (c) => {
         : Promise.resolve([]),
     ]);
 
-  // Envelope-truth-preferring pass signal: when the verdict has a matching
-  // verdictEnvelopeMeta row (enrichmentStatus === 'ok'), use the evaluator's
-  // actualPassed; otherwise fall back to on-chain verdictCode === 1 (Pass).
-  // This makes the learning curve reflect REAL pass-rate over time rather
-  // than the daemon's currently-defaulted-to-Pass on-chain truth (ebu7.13).
-  const verdictTruth = (v: { verdictCode: number; actualPassed: boolean | null; enrichmentStatus: string | null }): boolean =>
-    v.enrichmentStatus === 'ok' && v.actualPassed !== null
-      ? v.actualPassed
-      : v.verdictCode === 1;
   const samples = verdictRows.map((v) => ({
     block: v.createdAtBlock,
     pass: verdictTruth(v),
@@ -765,7 +825,7 @@ app.get('/solvernet/:cid', async (c) => {
       }));
       const frozenVerdicts = await getVerdictsForAttempts(pairs);
       const total = frozenVerdicts.length;
-      const pass = frozenVerdicts.filter((v) => v.verdictCode === 1).length;
+      const pass = frozenVerdicts.filter(verdictTruth).length;
       frozenRateByDigest.set(digest, resolvedRateFromCounts(pass, total));
     }
   }
@@ -1163,7 +1223,7 @@ app.get('/operator/:addr', async (c) => {
     const row = snMap.get(snCid);
     if (row) {
       row.verdictsTotal += 1;
-      if (v.verdictCode === 1) row.verdictsPass += 1;
+      if (verdictTruth(v)) row.verdictsPass += 1;
     }
   }
 
@@ -1188,7 +1248,7 @@ app.get('/operator/:addr', async (c) => {
     (a) => taskMap.get(a.taskId)?.finalized,
   ).length;
   const totalVerdictsTotal = verdictRows.length;
-  const totalVerdictsPass = verdictRows.filter((v) => v.verdictCode === 1).length;
+  const totalVerdictsPass = verdictRows.filter(verdictTruth).length;
   const totalResolvedRate = resolvedRateFromCounts(totalVerdictsPass, totalVerdictsTotal);
 
   // Dominant dims across all enriched attempts for this operator
@@ -1267,12 +1327,11 @@ async function getSolverNetSparklinesBatch(
       manifestDigest: schema.task.manifestDigest,
       bucketIndex: sql<string>`${sparklineBucketExpr}`,
       total: count(),
-      pass: count(
-        sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
-      ),
+      pass: count(verdictTruthPassCountSql()),
     })
     .from(schema.verdict)
     .innerJoin(schema.task, eq(schema.verdict.taskId, schema.task.id))
+    .leftJoin(schema.verdictEnvelopeMeta, verdictEnvelopeJoinCondition())
     .where(
       and(
         inArray(schema.task.manifestDigest, cidKeccaks),
@@ -1410,25 +1469,17 @@ async function getSolverNetStatsBatch(
         sql`CASE WHEN ${schema.verdict.verdictCode} = 1 THEN 1 END`,
       ),
       // Envelope-truth pass: prefer enriched actualPassed; fall back to on-chain code.
-      envelopePass: count(
-        sql`CASE WHEN (${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' AND ${schema.verdictEnvelopeMeta.actualPassed} = true) OR (${schema.verdictEnvelopeMeta.enrichmentStatus} IS NULL AND ${schema.verdict.verdictCode} = 1) THEN 1 END`,
-      ),
+      envelopePass: count(verdictTruthPassCountSql()),
       enriched: count(
         sql`CASE WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' THEN 1 END`,
       ),
-      disagreed: count(
-        sql`CASE WHEN ${schema.verdictEnvelopeMeta.enrichmentStatus} = 'ok' AND ((${schema.verdict.verdictCode} = 1) <> ${schema.verdictEnvelopeMeta.actualPassed}) THEN 1 END`,
-      ),
+      disagreed: count(verdictTruthDisagreementCountSql()),
     })
     .from(schema.verdict)
     .innerJoin(schema.task, eq(schema.verdict.taskId, schema.task.id))
     .leftJoin(
       schema.verdictEnvelopeMeta,
-      and(
-        eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
-        eq(schema.verdictEnvelopeMeta.verdictIndex, schema.verdict.verdictIndex),
-        eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
-      ),
+      verdictEnvelopeJoinCondition(),
     )
     .where(
       and(
@@ -1479,7 +1530,7 @@ async function getSolverNetStatsBatch(
  */
 async function getVerdictsForAttempts(
   pairs: { taskId: string; attemptIndex: number }[],
-): Promise<{ taskId: string; attemptIndex: number; verdictCode: number }[]> {
+): Promise<(VerdictTruthRow & { taskId: string; attemptIndex: number })[]> {
   if (pairs.length === 0) return [];
 
   const taskIds = [...new Set(pairs.map((p) => p.taskId))];
@@ -1488,8 +1539,11 @@ async function getVerdictsForAttempts(
       taskId: schema.verdict.taskId,
       attemptIndex: schema.verdict.attemptIndex,
       verdictCode: schema.verdict.verdictCode,
+      actualPassed: schema.verdictEnvelopeMeta.actualPassed,
+      enrichmentStatus: schema.verdictEnvelopeMeta.enrichmentStatus,
     })
     .from(schema.verdict)
+    .leftJoin(schema.verdictEnvelopeMeta, verdictEnvelopeJoinCondition())
     .where(
       and(
         inArray(schema.verdict.taskId, taskIds),
@@ -1618,23 +1672,12 @@ async function buildLeaderboardRows(
       : [];
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
 
-  // All verdicts for these tasks — scoped to EXPLORER_CHAIN_ID
-  const allVerdicts =
-    allTaskIds.length > 0
-      ? await db
-          .select({
-            taskId: schema.verdict.taskId,
-            attemptIndex: schema.verdict.attemptIndex,
-            verdictCode: schema.verdict.verdictCode,
-          })
-          .from(schema.verdict)
-          .where(
-            and(
-              inArray(schema.verdict.taskId, allTaskIds),
-              eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
-            ),
-          )
-      : [];
+  const allVerdicts = await getVerdictsForAttempts(
+    allAttempts.map((a) => ({
+      taskId: a.taskId,
+      attemptIndex: a.attemptIndex,
+    })),
+  );
 
   // Reward distributions — intentionally unfiltered by chainId.
   // For mode-filtered boards, jinnEarned is 0n because reward attribution is
@@ -1670,7 +1713,7 @@ async function buildLeaderboardRows(
       attemptPairSet.has(`${v.taskId}:${v.attemptIndex}`),
     );
     const verdictsTotal = opVerdicts.length;
-    const verdictsPass = opVerdicts.filter((v) => v.verdictCode === 1).length;
+    const verdictsPass = opVerdicts.filter(verdictTruth).length;
 
     rows.push({
       operator: op as `0x${string}`,
@@ -1817,22 +1860,12 @@ async function buildLeaderboardRowsWithHarnessFilter(
       : [];
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
 
-  const allVerdicts =
-    allTaskIds.length > 0
-      ? await db
-          .select({
-            taskId: schema.verdict.taskId,
-            attemptIndex: schema.verdict.attemptIndex,
-            verdictCode: schema.verdict.verdictCode,
-          })
-          .from(schema.verdict)
-          .where(
-            and(
-              inArray(schema.verdict.taskId, allTaskIds),
-              eq(schema.verdict.chainId, EXPLORER_CHAIN_ID),
-            ),
-          )
-      : [];
+  const allVerdicts = await getVerdictsForAttempts(
+    joinedRows.map((a) => ({
+      taskId: a.taskId,
+      attemptIndex: a.attemptIndex,
+    })),
+  );
 
   const rows: LeaderboardRow[] = [];
   for (const op of operators) {
@@ -1845,7 +1878,7 @@ async function buildLeaderboardRowsWithHarnessFilter(
       attemptPairSet.has(`${v.taskId}:${v.attemptIndex}`),
     );
     const verdictsTotal = opVerdicts.length;
-    const verdictsPass = opVerdicts.filter((v) => v.verdictCode === 1).length;
+    const verdictsPass = opVerdicts.filter(verdictTruth).length;
 
     rows.push({
       operator: op as `0x${string}`,
