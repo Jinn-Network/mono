@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import type { DiscoveryPluginPublicationsResponse, PluginPublicationDto } from '../../api/types.js';
+import { PanelCard } from '../../components/PanelCard.js';
 
 const cellStyle: React.CSSProperties = {
   padding: '10px 12px',
@@ -48,30 +49,14 @@ export function PublishedPluginsPanel({ solverType }: { solverType: string }): J
 
   if (rows.length === 0) {
     return (
-      <section
-        style={{
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-3, 10px)',
-          padding: '24px',
-          background: 'var(--surface)',
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Published plug-ins for {solverType}</h3>
+      <PanelCard title={`Published plug-ins for ${solverType}`}>
         <p style={{ color: 'var(--fg-dim)' }}>No plug-ins published yet. Be the first.</p>
-      </section>
+      </PanelCard>
     );
   }
 
   return (
-    <section
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-3, 10px)',
-        padding: '24px',
-        background: 'var(--surface)',
-      }}
-    >
-      <h3 style={{ marginTop: 0 }}>Published plug-ins for {solverType}</h3>
+    <PanelCard title={`Published plug-ins for ${solverType}`}>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -102,6 +87,6 @@ export function PublishedPluginsPanel({ solverType }: { solverType: string }): J
           </tbody>
         </table>
       </div>
-    </section>
+    </PanelCard>
   );
 }

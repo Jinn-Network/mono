@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import type { DiscoveryBuilderArtifactsResponse } from '../../api/types.js';
+import { PanelCard } from '../../components/PanelCard.js';
 
 const cellStyle: React.CSSProperties = {
   padding: '10px 12px',
@@ -29,21 +30,16 @@ export function MyArtifactsPanel({ fleetAgentId }: { fleetAgentId: string | unde
 
   if (!enabled) {
     return (
-      <section
-        style={{
-          border: '1px dashed var(--border)',
-          borderRadius: 'var(--radius-3, 10px)',
-          padding: '24px',
-          background: 'var(--surface-sunken)',
-        }}
+      <PanelCard
+        title="Your published plug-ins"
+        style={{ border: '1px dashed var(--border)', background: 'var(--surface-sunken)' }}
       >
-        <h3 style={{ marginTop: 0 }}>Your published plug-ins</h3>
         <p style={{ color: 'var(--fg-muted)' }}>
           Complete identity bootstrap to see your published plug-ins. Run{' '}
           <code>jinn solver-plugins publish</code> on a plug-in and the lazy stage-ensure will provision
           your builder identity (Stage 1).
         </p>
-      </section>
+      </PanelCard>
     );
   }
 
@@ -58,30 +54,14 @@ export function MyArtifactsPanel({ fleetAgentId }: { fleetAgentId: string | unde
 
   if (rows.length === 0) {
     return (
-      <section
-        style={{
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-3, 10px)',
-          padding: '24px',
-          background: 'var(--surface)',
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Your published plug-ins</h3>
+      <PanelCard title="Your published plug-ins">
         <p style={{ color: 'var(--fg-dim)' }}>You have not published any plug-ins yet.</p>
-      </section>
+      </PanelCard>
     );
   }
 
   return (
-    <section
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-3, 10px)',
-        padding: '24px',
-        background: 'var(--surface)',
-      }}
-    >
-      <h3 style={{ marginTop: 0 }}>Your published plug-ins</h3>
+    <PanelCard title="Your published plug-ins">
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -106,6 +86,6 @@ export function MyArtifactsPanel({ fleetAgentId }: { fleetAgentId: string | unde
           </tbody>
         </table>
       </div>
-    </section>
+    </PanelCard>
   );
 }
