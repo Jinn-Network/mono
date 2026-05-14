@@ -509,4 +509,24 @@ describe('matchInfraSignature — 2026-05-14 triage fingerprints', () => {
     ].join('\n');
     expect(matchInfraSignature(normalFail)).toBeNull();
   });
+
+  it('does NOT misclassify a missing pytest plugin (pytest_asyncio) as pytest_missing', () => {
+    expect(matchInfraSignature('/opt/conda/bin/python: No module named pytest_asyncio')).not.toBe('pytest_missing');
+  });
+
+  it('does NOT match a benign mention of conftest in a passing test log', () => {
+    const benign = [
+      '=================== test session starts ===================',
+      'collected 5 items',
+      'rootdir: /testbed, configfile: pytest.ini, conftest: conftest.py',
+      'tests/test_x.py::test_foo PASSED',
+      '=================== 5 passed in 0.42s ===================',
+    ].join('\n');
+    expect(matchInfraSignature(benign)).toBeNull();
+  });
+
+  it('does NOT match a benign mention of .venv in a non-collision log', () => {
+    const benign = 'INFO: Created virtual environment at /testbed/.venv';
+    expect(matchInfraSignature(benign)).toBeNull();
+  });
 });
