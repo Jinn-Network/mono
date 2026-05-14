@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### SWE-rebench v2 admission
+
+- **Admission semantics bumped from `'2'` → `'3'`.** Operators running the
+  public/launched generator MUST re-validate before posting resumes:
+
+  ```bash
+  jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad
+  ```
+
+  Expected duration: ~1-2h (one gold-patch eval per seed instance).
+- **Required admission mode is now the default for launched generators.**
+  Local/dev users running `admissionMode: 'python-floor'` keep today's
+  behaviour. `jinn doctor` reports pool freshness and prints the exact
+  re-validation command when stale.
+- **Verdict-time substrate recheck** catches drift between admission and
+  grading. Any mismatch (rowHash, imageDigest, HF outage) skips the verdict
+  rather than emitting a misclassified FAIL.
+
 ## v0.1.5 — Operator App
 
 _Released 2026-05-13_
