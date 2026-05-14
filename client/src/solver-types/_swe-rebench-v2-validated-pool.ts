@@ -20,12 +20,25 @@
  * Refs: jinn-mono-uy6v.9.
  */
 
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, rename } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { EvalRunner, HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import { computeRowHash, resolveImageDigest, resolveUpstreamEvalCommit, type CommandRunner } from './_swe-rebench-v2-substrate.js';
+
+/** Module-level write-mutex keyed by file path. Serialises concurrent
+ *  record() calls from different store instances pointing at the same file,
+ *  preventing the last-write-wins race that occurs inside a single process. */
+const writeLocks = new Map<string, Promise<void>>();
+function withWriteLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
+  const prev = writeLocks.get(file) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>((res) => { release = res; });
+  writeLocks.set(file, next);
+  return prev.then(fn).finally(release) as Promise<T>;
+}
 
 /**
  * Bump when the eval grading semantics change (verdict re-derivation,
@@ -106,11 +119,11 @@ export class ValidatedPoolStore {
     return this.cache;
   }
 
-  private async save(): Promise<void> {
-    if (!this.cache) return;
-    this.cache.updatedAt = new Date().toISOString();
+  private async writeAtomic(file: ValidatedPoolFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
-    await writeFile(this.file, JSON.stringify(this.cache, null, 2));
+    const tmp = `${this.file}.${randomBytes(6).toString('hex')}.tmp`;
+    await writeFile(tmp, JSON.stringify(file, null, 2));
+    await rename(tmp, this.file); // POSIX rename is atomic
   }
 
   /** The set of instance ids known scorable for `evalSemanticsVersion`, or
@@ -138,9 +151,18 @@ export class ValidatedPoolStore {
   }
 
   async record(instanceId: string, entry: ValidatedPoolEntry, evalSemanticsVersion: string): Promise<void> {
-    const f = await this.loadForWrite(evalSemanticsVersion);
-    f.entries[instanceId] = entry;
-    await this.save();
+    return withWriteLock(this.file, async () => {
+      // Reload from disk so a concurrent write isn't lost. The in-memory cache
+      // is invalidated; the next read re-loads.
+      this.cache = null;
+      this.scorableIdsCache = null;
+      const raw = await this.readRaw();
+      const file = isValidFile(raw, evalSemanticsVersion) ? raw : freshFile(evalSemanticsVersion);
+      file.entries[instanceId] = entry;
+      file.updatedAt = new Date().toISOString();
+      await this.writeAtomic(file);
+      this.cache = file;
+    });
   }
 }
 

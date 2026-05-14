@@ -258,6 +258,23 @@ describe('ValidatedPoolStore — extended substrate fields (semantics v3)', () =
   });
 });
 
+describe('ValidatedPoolStore — concurrent record() does not lose entries', () => {
+  it('two concurrent record() calls for different instance ids leave both in the file', async () => {
+    const dir = tmpDir();
+    const storeA = new ValidatedPoolStore({ stateDir: dir });
+    const storeB = new ValidatedPoolStore({ stateDir: dir });
+    // Both stores load (empty), then both record concurrently.
+    await Promise.all([
+      storeA.record('a__1', { scorable: true, reason: 'ok', checkedAt: '2026-05-14T00:00:00Z' }, EVAL_SEMANTICS_VERSION),
+      storeB.record('a__2', { scorable: true, reason: 'ok', checkedAt: '2026-05-14T00:00:01Z' }, EVAL_SEMANTICS_VERSION),
+    ]);
+    // A fresh store sees both entries on disk.
+    const storeC = new ValidatedPoolStore({ stateDir: dir });
+    expect(await storeC.getEntry('a__1', EVAL_SEMANTICS_VERSION)).not.toBeNull();
+    expect(await storeC.getEntry('a__2', EVAL_SEMANTICS_VERSION)).not.toBeNull();
+  });
+});
+
 describe('validatePoolInstances — populates substrate fields', () => {
   it('records rowHash, imageName, imageDigest, upstreamEvalCommit on a successful validation', async () => {
     const dir = tmpDir();
