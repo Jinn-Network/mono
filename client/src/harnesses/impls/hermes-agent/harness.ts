@@ -18,14 +18,13 @@ export interface HermesHarnessConfig {
  * mounted via Hermes's mcp_servers + skills config.yaml surface (see
  * config-builder.ts).
  *
- * Originally scoped to SWE-rebench v2 only; extended to support any
- * restoration SolverType so operators can configure hermes-agent for
- * prediction.v1, swe-rebench-v2.v1, or future SolverTypes via the
- * joinedSolverNets harness field (jinn-mono-wyy6 Task 6).
+ * Scoped to SWE-rebench v2 while the Hermes task prompt, SolverPlugin bundle,
+ * and output harvesting are specific to `swe-rebench-v2.v1`.
  */
 export class HermesHarness implements Harness {
   readonly name = HERMES_AGENT_HARNESS;
   readonly version: string;
+  readonly freezeStateHashIgnore = ['auth', 'auth.json', 'bin', '.env', 'config.yaml'] as const;
   private readonly adapter: HermesHarnessAdapter;
 
   constructor(config: HermesHarnessConfig) {
@@ -34,14 +33,10 @@ export class HermesHarness implements Harness {
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    // Hermes handles any restoration task. Evaluation is not supported: Hermes
-    // has no evaluator-side plugins (verdict signing, checker contracts).
-    // When operator config selects hermes-agent for a specific SolverType via
-    // joinedSolverNets[<cid>].harness, the HarnessRegistry dispatch routes
-    // here via solverTypeHarnesses. First-match dispatch is suppressed for
-    // SolverTypes that have first-party specialist harnesses (e.g.
-    // prediction-v1-baseline) since those specialists register before hermes-agent.
-    return spec.role !== 'evaluation';
+    // Hermes currently ships a SWE-rebench v2 task prompt and runtime plugin.
+    // Evaluation is not supported: Hermes has no evaluator-side plugins
+    // (verdict signing, checker contracts).
+    return spec.role !== 'evaluation' && spec.solverType === 'swe-rebench-v2.v1';
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {

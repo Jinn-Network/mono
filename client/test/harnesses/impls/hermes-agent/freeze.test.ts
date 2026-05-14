@@ -6,7 +6,7 @@
 // a wrapper around the fence — the engine wires every Harness through
 // `runHarnessWithFreezeFence` directly, and we test that production path.
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -102,6 +102,54 @@ describe('runHarnessWithFreezeFence on HermesHarness', () => {
 
       expect(result.ok).toBe(true);
       expect(readFileSync(join(home, 'learned.txt'), 'utf8')).toBe('continuous learning');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('frozen mode allows Hermes runtime-only auth and config refreshes', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hermes-frozen-runtime-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-frozen-runtime-wd-'));
+    writeFileSync(join(home, 'before.txt'), 'snapshot');
+
+    try {
+      const fakeAdapter = {
+        name: 'hermes-agent',
+        runTask: async () => {
+          mkdirSync(join(home, 'auth'), { recursive: true });
+          mkdirSync(join(home, 'bin'), { recursive: true });
+          writeFileSync(join(home, 'auth', 'google_oauth.json'), '{"access_token":"refreshed"}');
+          writeFileSync(join(home, 'auth.json'), '{"pooled":true}');
+          writeFileSync(join(home, 'bin', 'tirith'), '#!/bin/sh\n');
+          writeFileSync(join(home, '.env'), 'DAEMON_API_URL=http://127.0.0.1:1\n');
+          writeFileSync(join(home, 'config.yaml'), 'terminal:\n  backend: local\n');
+        },
+      };
+      const harness = new HermesHarness({ adapter: fakeAdapter as any });
+
+      const ctx = {
+        task: {
+          id: 't',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+          window: { startTs: 0, endTs: Date.now() + 60_000 },
+          spec: {},
+        },
+        requestId: 'r',
+        implStateDir: home,
+        workingDir: work,
+        mode: 'frozen' as const,
+        abort: new AbortController().signal,
+        msUntilEndTs: () => 60_000,
+        solverPluginRoots: [],
+      } as unknown as HarnessContext;
+
+      const result = await runHarnessWithFreezeFence(harness, ctx);
+
+      expect(result.ok).toBe(true);
+      expect(readFileSync(join(home, 'auth', 'google_oauth.json'), 'utf8')).toContain('refreshed');
+      expect(readFileSync(join(home, 'before.txt'), 'utf8')).toBe('snapshot');
     } finally {
       rmSync(home, { recursive: true, force: true });
       rmSync(work, { recursive: true, force: true });

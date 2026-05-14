@@ -47,11 +47,9 @@ const TOOLSET_ALLOWLIST = [
  * first use. Without seeding, every per-Task run pays the multi-MB download
  * cost on its first shell command — long enough to blow the harness budget.
  *
- * Caveat for frozen mode: Hermes may refresh the OAuth access token mid-task,
- * which mutates `auth/google_oauth.json` and would trip the daemon hash-fence.
- * The freeze-fence-subset workstream (file `jinn-mono-8psp.6`) addresses this
- * by hashing only the learning surface (memories/, skills/, sessions/), not
- * `auth/` or `bin/`.
+ * Hermes may refresh OAuth access tokens mid-task. The HermesHarness excludes
+ * these runtime-only files from the daemon state digest while still fencing the
+ * learning surface (memories/, skills/, sessions/, and ordinary files).
  */
 const OPERATOR_STATE_TO_SEED = ['auth', 'auth.json', 'bin'] as const;
 
