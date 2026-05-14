@@ -135,7 +135,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
         N_target_successes: 1,
         N_max_postings_per_task: 1,
         cooldown_ms: 86_400_000,
-        admissionMode: 'python-floor' as AdmissionMode,
+        admissionMode: 'python-floor',
       },
     };
     const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
@@ -166,7 +166,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
         N_target_successes: 1,
         N_max_postings_per_task: 1,
         cooldown_ms: 86_400_000,
-        admissionMode: 'python-floor' as AdmissionMode,
+        admissionMode: 'python-floor',
         claimPolicy: {
           maxClaims: 10,
           maxClaimsPerOperator: 2,

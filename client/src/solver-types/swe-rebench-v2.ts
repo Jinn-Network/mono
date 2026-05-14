@@ -139,7 +139,7 @@ function nonNegativeInt(value: unknown, fallback: number): number {
 
 const DEFAULT_ADMISSION_MODE: AdmissionMode = 'required';
 
-function normalizeGeneratorConfig(raw: unknown): GeneratorConfig & { admissionMode: AdmissionMode } {
+function normalizeGeneratorConfig(raw: unknown): GeneratorConfig {
   const cfg = typeof raw === 'object' && raw !== null
     ? raw as Record<string, unknown>
     : {};
