@@ -26,7 +26,7 @@
  * Schema: ponder.schema.ts
  */
 import { ponder } from 'ponder:registry';
-import { task, attempt, solverNetManifest, envelope } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, pluginPublication } from 'ponder:schema';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -69,5 +69,6 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     context: context as unknown as HandlerContext,
     solverNetManifest,
     envelope,
+    pluginPublication,
   });
 });

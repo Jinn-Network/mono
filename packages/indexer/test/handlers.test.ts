@@ -25,7 +25,7 @@
  *      queries.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { task, attempt, solverNetManifest, envelope } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, pluginPublication } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -56,6 +56,7 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [attempt, ['taskId', 'attemptIndex', 'chainId']],
   [solverNetManifest, ['id']],
   [envelope, ['agentId', 'metadataKey', 'chainId']],
+  [pluginPublication, ['id']],
 ]);
 
 let db: InMemoryDb;
@@ -223,6 +224,7 @@ describe('MetadataSet key routing', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
     });
     expect(db.count(solverNetManifest)).toBe(1);
     expect(db.count(envelope)).toBe(0);
@@ -249,6 +251,7 @@ describe('MetadataSet key routing', () => {
         context: localCtx,
         solverNetManifest,
         envelope,
+        pluginPublication,
       });
       expect(localDb.count(envelope)).toBe(1);
       expect(localDb.count(solverNetManifest)).toBe(0);
@@ -273,6 +276,7 @@ describe('MetadataSet key routing', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
     });
     expect(db.count(solverNetManifest)).toBe(0);
     expect(db.count(envelope)).toBe(0);
@@ -292,6 +296,7 @@ describe('envelope payload decode', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
     });
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
     expect(row).toMatchObject({ manifestHash: MANIFEST_HASH, evidenceTier: 'attested' });
@@ -307,6 +312,7 @@ describe('envelope payload decode', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
     });
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
     expect(row).toMatchObject({ manifestHash: MANIFEST_HASH, evidenceTier: 'self-signed' });
@@ -323,6 +329,7 @@ describe('envelope payload decode', () => {
         context,
         solverNetManifest,
         envelope,
+        pluginPublication,
       }),
     ).resolves.toBeUndefined();
     const row = db.get(envelope, { agentId: '1', metadataKey: `envelope:${ENVELOPE_CID}`, chainId: CHAIN_ID });
@@ -342,6 +349,7 @@ describe('envelope payload decode', () => {
         context,
         solverNetManifest,
         envelope,
+        pluginPublication,
       }),
     ).resolves.toBeUndefined();
     expect(db.count(solverNetManifest)).toBe(0);
@@ -367,6 +375,7 @@ describe('solverNetManifest most-recent-wins', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
     });
 
   it('a later block overwrites an earlier one', async () => {
@@ -422,6 +431,7 @@ describe('envelope most-recent-wins', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
     });
   const get = () => db.get(envelope, { agentId: '8', metadataKey: key, chainId: CHAIN_ID });
 
