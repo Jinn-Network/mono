@@ -12,15 +12,19 @@ export interface HermesHarnessConfig {
 /**
  * Hermes Agent harness.
  *
- * v1 scope: SWE-rebench v2 solver role only. Built-in learning loop owned
- * by Hermes (skill self-improvement, memory curation, FTS5 session search);
- * Jinn-side learner plugin is NOT loaded. SolverPlugins (network-tools,
- * swe-rebench-v2-runtime) are mounted via Hermes's mcp_servers + skills
- * config.yaml surface (see config-builder.ts).
+ * Generic restoration harness backed by the Hermes agent runner. Built-in
+ * learning loop owned by Hermes (skill self-improvement, memory curation, FTS5
+ * session search); Jinn-side learner plugin is NOT loaded. SolverPlugins are
+ * mounted via Hermes's mcp_servers + skills config.yaml surface (see
+ * config-builder.ts).
+ *
+ * Scoped to SWE-rebench v2 while the Hermes task prompt, SolverPlugin bundle,
+ * and output harvesting are specific to `swe-rebench-v2.v1`.
  */
 export class HermesHarness implements Harness {
   readonly name = HERMES_AGENT_HARNESS;
   readonly version: string;
+  readonly freezeStateHashIgnore = ['auth', 'auth.json', 'bin/tirith', '.env', 'config.yaml'] as const;
   private readonly adapter: HermesHarnessAdapter;
 
   constructor(config: HermesHarnessConfig) {
@@ -29,9 +33,10 @@ export class HermesHarness implements Harness {
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    if (spec.role === 'evaluation') return false;
-    // v1 scope: SWE-rebench v2 only.
-    return spec.solverType === 'swe-rebench-v2.v1';
+    // Hermes currently ships a SWE-rebench v2 task prompt and runtime plugin.
+    // Evaluation is not supported: Hermes has no evaluator-side plugins
+    // (verdict signing, checker contracts).
+    return spec.role !== 'evaluation' && spec.solverType === 'swe-rebench-v2.v1';
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {

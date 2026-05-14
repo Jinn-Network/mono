@@ -60,7 +60,7 @@ restore.
    - Solver: `solver`
    - Evaluator: `evaluator`
    - Both: `solver` and `evaluator`
-4. For the solver role, review the supported harness and model. Claude Code is
+4. For the solver role, review the supported harness and model. Hermes Agent is
    the default. The SWE-rebench v2 runtime plugin is default-included and may
    be removed only after the app warning.
 5. Save the join. The app should show a restart-required state; restart the

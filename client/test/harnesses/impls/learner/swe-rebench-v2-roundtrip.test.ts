@@ -153,9 +153,14 @@ describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
       join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'plan', 'SKILL.md'),
       'utf8',
     );
-    expect(skill).toContain('submit_typed_payload');
-    expect(skill).toContain('Only if `submit_typed_payload` is not available');
-    expect(skill).toContain('Do not choose the direct file path when the tool is available');
+    // SKILL.md describes the submission action by intent, not by hardcoded tool
+    // name, so the model bridges to whichever the active harness has registered
+    // (Claude Code: `mcp__jinn-client__submit_typed_payload`, Hermes:
+    // `mcp_jinn_client_submit_typed_payload`, Codex: similar). We assert the
+    // intent language plus the fallback file path + schema-shape language.
+    expect(skill).toContain('typed structured payload');
+    expect(skill).toContain('no typed-payload submission tool at all');
+    expect(skill).toContain('Prefer the tool path whenever it exists');
     expect(skill).toContain('.execute/solution-payload.json');
 
     const workingDir = mkdtempSync(join(tmpdir(), 'jinn-swe-rebench-fallback-'));
@@ -173,14 +178,39 @@ describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
     }
   });
 
+  it('orient skill owns repo setup so the harness prompt can stay generic', () => {
+    const skill = readFileSync(
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
+      'utf8',
+    );
+    // Repo-setup guidance used to live in each harness's prompt.ts (the
+    // `sweRebenchV2Guidance` helper that was retired in favour of skill-driven
+    // dispatch). Orient now owns it. If this assertion breaks, check that
+    // nothing has reintroduced SolverNet branching in the harness prompts —
+    // the skill should be the single home for SWE-rebench-specific patterns.
+    // Backticks in the SKILL.md wrap inline code spans, so we search for the
+    // load-bearing tokens without insisting on a literal "clone https://..."
+    // run that the markdown formatting interrupts.
+    expect(skill).toContain('$workingDir/repo');
+    expect(skill).toContain('Do not reuse a repo');
+    expect(skill).toContain('https://github.com/<goal.spec.repo>.git');
+    expect(skill).toContain('<goal.spec.base_commit>');
+    expect(skill).toContain('harvester reads a `git diff`');
+  });
+
   it('documents SWE execution data retrieval through Network Tools', () => {
     const skill = readFileSync(
       join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
       'utf8',
     );
-    expect(skill).toContain('search_records');
-    expect(skill).toContain('inspect_record');
-    expect(skill).toContain('acquire_artifact');
+    // Orient describes the three corpus-tool actions (find candidates → examine
+    // index card → download bytes) by intent. We assert the workflow vocabulary
+    // and the typed-restoration filter values, not the literal tool names —
+    // those vary by harness MCP namespace.
+    expect(skill).toContain('Jinn knowledge corpus');
+    expect(skill).toContain('"swe-rebench-v2.v1"');
+    expect(skill).toContain('"swe-rebench-v2_v1_solution"');
+    expect(skill).toContain('index card');
     expect(skill).not.toContain('.execute/execution-data-retrieval.json');
     expect(skill).not.toContain('jinn.execution_data_retrieval.v1');
     expect(skill).not.toContain('corpus.read');
