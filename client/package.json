@@ -68,6 +68,7 @@
     "e2e:task-first-local": "tsx test/e2e/task-first-local.ts",
     "e2e:claude-code-learner": "tsx test/e2e/claude-code-learner-portfolio-v0.ts",
     "e2e:prediction": "tsx test/e2e/prediction-v1.ts",
+    "e2e:corpus": "yarn build:sdk && tsx test/e2e/corpus-x402.ts",
     "e2e:freeze-mode": "tsx test/e2e/freeze-mode.test.ts",
     "e2e:checkpoint-flow": "tsx test/e2e/checkpoint-flow.test.ts",
     "e2e:swe-rebench-v2": "tsx test/e2e/swe-rebench-v2.test.ts",
