@@ -1,8 +1,10 @@
 // client/src/harnesses/impls/hermes-agent/adapter.ts
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { finished } from 'node:stream/promises';
+import { HERMES_AGENT_HARNESS } from '../../names.js';
 import type { TaskSessionInputs } from '../learner/types.js';
 import { writePerTaskHermesConfig } from './bootstrap.js';
 import { buildInitialPrompt } from './prompt.js';
@@ -22,6 +24,13 @@ export interface HermesHarnessAdapterConfig {
   daemonApiToken: string;
   corpusEnv: ConfigBuilderEnv['corpusEnv'];
   storePath?: string;
+  /**
+   * The operator's real Hermes home — auth credentials are seeded from here
+   * into each per-Task `$HERMES_HOME`. Defaults to `process.env.HERMES_HOME`
+   * (if the operator customised it) or `~/.hermes`. Tests pass an empty dir to
+   * make the seed a no-op.
+   */
+  operatorHermesHome?: string;
   _spawnFn?: typeof spawn;
 }
 
@@ -34,7 +43,7 @@ function buildAgentEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
 }
 
 export class HermesHarnessAdapter {
-  readonly name = 'hermes-agent';
+  readonly name = HERMES_AGENT_HARNESS;
 
   private readonly hermesPath: string;
   private readonly hermesModel: string | undefined;
@@ -43,6 +52,7 @@ export class HermesHarnessAdapter {
   private readonly daemonApiToken: string;
   private readonly corpusEnv: ConfigBuilderEnv['corpusEnv'];
   private readonly storePath: string | undefined;
+  private readonly operatorHermesHome: string;
   private readonly spawnFn: typeof spawn;
 
   constructor(config: HermesHarnessAdapterConfig) {
@@ -53,6 +63,8 @@ export class HermesHarnessAdapter {
     this.daemonApiToken = config.daemonApiToken;
     this.corpusEnv = config.corpusEnv;
     this.storePath = config.storePath;
+    this.operatorHermesHome =
+      config.operatorHermesHome ?? (process.env['HERMES_HOME']?.trim() || join(homedir(), '.hermes'));
     this.spawnFn = config._spawnFn ?? spawn;
   }
 
@@ -60,7 +72,17 @@ export class HermesHarnessAdapter {
     const hermesHome = inputs.implStateDir;
     const model = inputs.model ?? inputs.claudeModel ?? this.hermesModel;
 
-    // Step 1: bootstrap — write config.yaml + .env
+    // Step 1: bootstrap — seed auth from the operator's home, write config.yaml + .env.
+    //
+    // The MCP server (`client/src/mcp/server.ts`) reads task identity from a
+    // family of `DESIRED_STATE_*` env vars; without them, `submit_typed_payload`
+    // fails with `missing_solver_type` and `get_task` returns an empty record.
+    // Mirror what claude-code-learner / codex-code-learner adapters do.
+    const taskContextJson = (() => {
+      const ctx = inputs.taskBody?.['context'];
+      if (!ctx || typeof ctx !== 'object') return '';
+      try { return JSON.stringify(ctx); } catch { return ''; }
+    })();
     writePerTaskHermesConfig({
       hermesHome,
       workingDir: inputs.workingDir,
@@ -72,19 +94,50 @@ export class HermesHarnessAdapter {
         daemonApiUrl: this.daemonApiUrl,
         daemonApiToken: this.daemonApiToken,
         corpusEnv: this.corpusEnv,
+        task: {
+          id: inputs.taskId,
+          description: typeof inputs.taskBody?.description === 'string' ? inputs.taskBody.description : '',
+          contextJson: taskContextJson,
+          role: typeof inputs.taskBody?.role === 'string' ? inputs.taskBody.role : '',
+          solverType: inputs.taskBody?.solverType ?? inputs.solverType ?? '',
+          restorationRequestId: typeof inputs.taskBody?.restorationRequestId === 'string'
+            ? inputs.taskBody.restorationRequestId : '',
+          requestId: inputs.requestId ?? inputs.taskId,
+          workingDir: inputs.workingDir,
+        },
       },
+      seedFrom: this.operatorHermesHome,
     });
 
-    // Step 2: build prompt + args
+    // Step 2: build prompt + args.
+    //
+    // `hermes chat -q <prompt> -Q --yolo --accept-hooks` —
+    //   -q PROMPT     single-query non-interactive mode
+    //   -Q            quiet/programmatic (suppress banner, spinner, tool previews)
+    //   --yolo        bypass dangerous-command approval prompts (hardline floor
+    //                 — rm -rf /, mkfs, sudo password injection, etc. — still
+    //                 blocks even with --yolo). Required for daemon-driven
+    //                 execution: there is no human at a TTY to approve, so
+    //                 without this flag any tirith "warn" or pattern-based
+    //                 "dangerous command" verdict (e.g. git reset --hard,
+    //                 chmod -R 777) drops to the default-deny prompt path and
+    //                 the agent dead-ends. The per-Task workingDir is a fresh
+    //                 sandboxed tmpdir, so blast radius is bounded.
+    //   --accept-hooks  auto-approve any unseen shell hooks (config.yaml
+    //                 `hooks:` declarations) without a TTY prompt.
+    // Model/provider passed when the daemon or SolverNet config specifies
+    // them; otherwise Hermes resolves from $HERMES_HOME/config.yaml. No `-w`
+    // flag — `hermes chat` has `--worktree` (a boolean that makes Hermes
+    // create a git worktree, which we do NOT want); the working directory is
+    // set via the spawn cwd + `terminal.cwd` in the per-Task config.yaml.
     const prompt = buildInitialPrompt(inputs);
-    const args: string[] = ['chat', '-q', prompt];
+    const args: string[] = ['chat', '-q', prompt, '-Q', '--yolo', '--accept-hooks'];
     if (model) {
       args.push('--model', model);
     }
     if (this.hermesProvider) {
       args.push('--provider', this.hermesProvider);
     }
-    args.push('-w', inputs.workingDir);
 
     const env = buildAgentEnv({
       HERMES_HOME: hermesHome,
