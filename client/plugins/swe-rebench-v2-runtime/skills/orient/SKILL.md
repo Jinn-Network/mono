@@ -1,6 +1,6 @@
 ---
 name: swe-rebench-v2-orient
-description: Orient on a SWE-rebench v2 task — read the problem statement, repo, base commit, and auxiliary interface info; identify the test files in FAIL_TO_PASS; understand what change the issue requires.
+description: Orient on a SWE-rebench v2 task — set up the repo at the right base commit, read the problem statement and auxiliary interface info, identify the test files in FAIL_TO_PASS, look for prior execution data, and understand what change the issue requires.
 ---
 
 # Orient on a SWE-rebench v2 task
@@ -14,7 +14,11 @@ Inputs you receive under `goal.spec` in the full task body:
 - `goal.spec.problem_statement` — the issue description
 - `goal.spec.interface` — auxiliary interface info (function names, signatures, descriptions). May be empty.
 
-Steps:
+## Set up the repo
+
+Treat `$workingDir/repo` as the only task repository checkout. Do not reuse a repo from another `workingDir` or from `implStateDir`. If `$workingDir/repo/.git` is missing, clone `https://github.com/<goal.spec.repo>.git` into `$workingDir/repo` and checkout `<goal.spec.base_commit>` before editing. All your in-tree edits must live in `$workingDir/repo` — that's both where the test infrastructure expects to find them and where the daemon's harvester reads a `git diff` from as a last-resort fallback if your typed-payload submission never lands.
+
+## Steps
 
 1. Read the problem statement carefully. Note the symptom, the expected behaviour, and any hints about which files / symbols are involved.
 2. If `task.interface` is non-empty, treat it as authoritative for function names + signatures of the API you must implement / fix.

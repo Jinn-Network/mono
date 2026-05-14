@@ -178,6 +178,26 @@ describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
     }
   });
 
+  it('orient skill owns repo setup so the harness prompt can stay generic', () => {
+    const skill = readFileSync(
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
+      'utf8',
+    );
+    // Repo-setup guidance used to live in each harness's prompt.ts (the
+    // `sweRebenchV2Guidance` helper that was retired in favour of skill-driven
+    // dispatch). Orient now owns it. If this assertion breaks, check that
+    // nothing has reintroduced SolverNet branching in the harness prompts —
+    // the skill should be the single home for SWE-rebench-specific patterns.
+    // Backticks in the SKILL.md wrap inline code spans, so we search for the
+    // load-bearing tokens without insisting on a literal "clone https://..."
+    // run that the markdown formatting interrupts.
+    expect(skill).toContain('$workingDir/repo');
+    expect(skill).toContain('Do not reuse a repo');
+    expect(skill).toContain('https://github.com/<goal.spec.repo>.git');
+    expect(skill).toContain('<goal.spec.base_commit>');
+    expect(skill).toContain('harvester reads a `git diff`');
+  });
+
   it('documents SWE execution data retrieval through Network Tools', () => {
     const skill = readFileSync(
       join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
