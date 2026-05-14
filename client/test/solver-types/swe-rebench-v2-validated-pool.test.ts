@@ -330,5 +330,8 @@ describe('validatePoolInstances — populates substrate fields', () => {
     );
     const entry = await store.getEntry('a__1', EVAL_SEMANTICS_VERSION);
     expect(entry).toMatchObject({ scorable: false, reason: 'unresolvable-image-digest' });
+    expect(entry!.rowHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(entry!.imageName).toBe('acme/widget:latest');
+    expect(entry!.upstreamEvalCommit).toBe('0123456789abcdef0123456789abcdef01234567');
   });
 });

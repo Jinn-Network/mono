@@ -24,7 +24,7 @@ import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
-import type { EvalRunner, HfFetcher } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import type { EvalRunner, HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import { computeRowHash, resolveImageDigest, resolveUpstreamEvalCommit, type CommandRunner } from './_swe-rebench-v2-substrate.js';
 
 /**
@@ -254,14 +254,20 @@ export async function validatePoolInstances(
     }
 
     log(`[validate-pool] ${task.instance_id} …`);
+    let row: HfRow | undefined;
+    let rowHash: string | undefined;
     let entry: ValidatedPoolEntry;
     try {
-      const row = await deps.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: task.instance_id });
-      const rowHash = computeRowHash({
+      row = await deps.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: task.instance_id });
+      rowHash = computeRowHash({
         hf_dataset: task.hf_dataset,
         hf_split: task.hf_split,
         instance_id: task.instance_id,
         repo: task.repo ?? row.repo,
+        // PoolTask.base_commit is optional in the schema but in practice is always
+        // present for SWE-rebench leaderboard rows. Falling back to '' lets the hash
+        // remain deterministic in the rare missing case, accepting that all such
+        // degenerate entries would converge to the same hash.
         base_commit: task.base_commit ?? '',
         image_name: row.image_name,
         patch: task.patch,
@@ -286,19 +292,33 @@ export async function validatePoolInstances(
       // Resolve digest AFTER the eval ran — that's when the image is guaranteed
       // to be present locally with its RepoDigests populated.
       const imageDigest = await resolveImageDigest(row.image_name, runner);
+      const substrate = {
+        checkedAt,
+        rowHash,
+        imageName: row.image_name,
+        ...(imageDigest ? { imageDigest } : {}),
+        ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
+      };
       if (!imageDigest) {
         // Every admission must carry a digest. No digest → not admissible.
-        entry = { scorable: false, reason: 'unresolvable-image-digest', checkedAt, rowHash, imageName: row.image_name, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) };
+        entry = { scorable: false, reason: 'unresolvable-image-digest', ...substrate };
+      } else if (res.passed_match) {
+        entry = { scorable: true, reason: 'gold-patch-resolves', ...substrate };
       } else {
-        entry = res.passed_match
-          ? { scorable: true, reason: 'gold-patch-resolves', checkedAt, rowHash, imageName: row.image_name, imageDigest, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) }
-          : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt, rowHash, imageName: row.image_name, imageDigest, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) };
+        entry = { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, ...substrate };
       }
     } catch (err) {
       const reason = nameOf(err) === 'EvalCouldNotGradeError'
         ? `ungradeable:${reasonOf(err)}`
         : `error:${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
-      entry = { scorable: false, reason, checkedAt: new Date().toISOString() };
+      entry = {
+        scorable: false,
+        reason,
+        checkedAt: new Date().toISOString(),
+        ...(rowHash ? { rowHash } : {}),
+        ...(row ? { imageName: row.image_name } : {}),
+        ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
+      };
     }
     await deps.store.record(task.instance_id, entry, deps.semanticsVersion);
     summary.checked += 1;
