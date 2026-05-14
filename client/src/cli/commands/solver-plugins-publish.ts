@@ -158,13 +158,15 @@ export async function publishHandler(
     );
 
     // 5. Publish setMetadata via Safe.
+    // The factory builds viem clients internally in production; tests mock the whole factory.
     const publisher = deps.publisherFactory({
       identityRegistryAddress: identityRegistry,
       builderAgentId,
       safeAddress,
-      // Production path creates real viem clients; tests inject mocks via publisherFactory.
-      publicClient: null as any,
-      walletClient: null as any,
+      rpcUrl: config.rpcUrl,
+      network: config.network === 'testnet' ? 'base-sepolia' : 'base',
+      earningDir: config.earningDir,
+      password,
     });
 
     const payload: PluginPayload = {

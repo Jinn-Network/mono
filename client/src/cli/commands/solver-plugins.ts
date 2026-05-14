@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import type { Address, PublicClient, WalletClient } from 'viem';
+import type { Address } from 'viem';
 import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import {
   digestDirectory,
@@ -27,12 +27,13 @@ import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
 } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
-import {
-  PluginRegistryPublisher,
-  type PluginRegistryPublisherConfig,
-} from '../../erc8004/plugin-registry.js';
+import { PluginRegistryPublisher } from '../../erc8004/plugin-registry.js';
 import { pinFileToIpfs as defaultPinFileToIpfs } from '../../adapters/mech/ipfs-pinfile.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
+import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from '../../earning/viem-clients.js';
+import { walletPrivateKeyAtIndex, decryptMnemonic } from '../../earning/wallet.js';
+import { FleetStateStore } from '../../earning/store.js';
+import { privateKeyToAccount } from 'viem/accounts';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 
@@ -47,7 +48,24 @@ function localRoot(target: string): string {
   return isAbsolute(stripped) ? stripped : resolve(process.cwd(), stripped);
 }
 
-export interface PublisherFactoryArgs extends PluginRegistryPublisherConfig {}
+/**
+ * Args passed to `publisherFactory`.
+ *
+ * Extends PluginRegistryPublisherConfig with the production-only fields needed
+ * to create real viem clients. The production factory reads `rpcUrl`, `network`,
+ * `earningDir`, and `password` to decrypt the agent mnemonic and build a
+ * WalletClient; the `publicClient` / `walletClient` fields are kept in the
+ * interface so tests that pass pre-built (or null) clients still compile.
+ */
+export interface PublisherFactoryArgs {
+  identityRegistryAddress: Address;
+  builderAgentId: bigint;
+  safeAddress: Address;
+  rpcUrl: string;
+  network: JinnOnchainNetwork;
+  earningDir: string;
+  password: string;
+}
 
 export interface SolverPluginsDeps extends BaseCommandDeps {
   bootstrapperFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => Pick<FleetBootstrapper, 'ensureStage1'>;
@@ -73,7 +91,54 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
       stakingMode: config.stakingMode,
     }),
   pinFileToIpfs: defaultPinFileToIpfs,
-  publisherFactory: (args) => new PluginRegistryPublisher(args),
+  publisherFactory: (args) => {
+    // Lazily create viem clients from config fields so the production path
+    // never passes null clients to PluginRegistryPublisher.
+    // Tests mock this entire factory function and never reach this code.
+    const pubClient = createJinnPublicClient(args.rpcUrl, args.network);
+    const store = new FleetStateStore(args.earningDir);
+    // Decrypt mnemonic asynchronously and return a publisher that defers
+    // actual chain writes until publish()/revoke() is called.
+    // We wrap with a lazy proxy to keep the factory synchronous.
+    let walClientPromise: Promise<ReturnType<typeof createJinnWalletClient>> | undefined;
+    const getWalletClient = async () => {
+      if (!walClientPromise) {
+        walClientPromise = (async () => {
+          const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), args.password);
+          const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
+          const account = privateKeyToAccount(agentKey);
+          return createJinnWalletClient(args.rpcUrl, args.network, account);
+        })();
+      }
+      return walClientPromise;
+    };
+    // Return an object that satisfies { publish, revoke } with lazy wallet init.
+    const publisher = {
+      async publish(pArgs: { pluginCid: string; payload: import('../../erc8004/plugin-registry.js').PluginPayload }) {
+        const walClient = await getWalletClient();
+        const p = new PluginRegistryPublisher({
+          identityRegistryAddress: args.identityRegistryAddress,
+          builderAgentId: args.builderAgentId,
+          safeAddress: args.safeAddress,
+          publicClient: pubClient,
+          walletClient: walClient,
+        });
+        return p.publish(pArgs);
+      },
+      async revoke(rArgs: { pluginCid: string; payload: import('../../erc8004/plugin-registry.js').RevocationPayload }) {
+        const walClient = await getWalletClient();
+        const p = new PluginRegistryPublisher({
+          identityRegistryAddress: args.identityRegistryAddress,
+          builderAgentId: args.builderAgentId,
+          safeAddress: args.safeAddress,
+          publicClient: pubClient,
+          walletClient: walClient,
+        });
+        return p.revoke(rArgs);
+      },
+    };
+    return publisher;
+  },
   resolveCliPassword: defaultResolveCliPassword,
   now: () => Date.now(),
 };
