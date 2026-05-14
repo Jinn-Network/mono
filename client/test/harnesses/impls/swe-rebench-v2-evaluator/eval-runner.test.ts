@@ -465,3 +465,48 @@ describe('PythonEvalRunner', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// matchInfraSignature — 2026-05-14 triage fingerprints (jinn-mono-fufn)
+// ---------------------------------------------------------------------------
+import { matchInfraSignature } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
+
+// Real fingerprints from the 2026-05-14 triage on Base Sepolia.
+const VENV_COLLISION = [
+  'error: Failed to create virtual environment.',
+  '  Caused by: A virtual environment already exists at /testbed/.venv',
+  '  Use --clear to replace it',
+].join('\n');
+
+const MISSING_PYTEST =
+  '/opt/conda/bin/python: No module named pytest';
+
+const REQUESTS_DEP_WARNING =
+  'requests.exceptions.RequestsDependencyWarning: urllib3 (2.2.2) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn\'t match a supported version!';
+
+const CONFTEST_IMPORT_ERROR =
+  'ImportError while loading conftest \'/testbed/tests/conftest.py\'.';
+
+describe('matchInfraSignature — 2026-05-14 triage fingerprints', () => {
+  it('classifies venv-collision (jinn-mono-xw6i)', () => {
+    expect(matchInfraSignature(VENV_COLLISION)).toBe('venv_collision');
+  });
+  it('classifies missing pytest in /opt/conda (jinn-mono-xw6i)', () => {
+    expect(matchInfraSignature(MISSING_PYTEST)).toBe('pytest_missing');
+  });
+  it('classifies the urllib3/charset_normalizer dependency warning (jinn-mono-y4ah)', () => {
+    expect(matchInfraSignature(REQUESTS_DEP_WARNING)).toBe('requests_dep_mismatch');
+  });
+  it('classifies conftest ImportError (jinn-mono-y4ah)', () => {
+    expect(matchInfraSignature(CONFTEST_IMPORT_ERROR)).toBe('conftest_import_error');
+  });
+
+  it('still leaves a normal pytest FAIL session alone (returns null)', () => {
+    const normalFail = [
+      '=================== test session starts ===================',
+      'tests/test_x.py::test_foo FAILED',
+      '=================== 1 failed in 0.42s ===================',
+    ].join('\n');
+    expect(matchInfraSignature(normalFail)).toBeNull();
+  });
+});

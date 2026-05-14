@@ -163,9 +163,14 @@ const INFRA_SIGNATURES: Array<{ rx: RegExp; reason: string }> = [
   { rx: /Failed building editable|Failed to build installable wheels/i, reason: 'install_build_failed' },
   { rx: /No virtual environment found/i, reason: 'venv_missing' },
   { rx: /exec format error|the requested image's platform .* does not match/i, reason: 'image_arch_mismatch' },
+  // 2026-05-14 triage (jinn-mono-fufn) — failure fingerprints from real verdicts:
+  { rx: /A virtual environment already exists at .+\.venv/i, reason: 'venv_collision' },
+  { rx: /No module named pytest/i, reason: 'pytest_missing' },
+  { rx: /RequestsDependencyWarning/i, reason: 'requests_dep_mismatch' },
+  { rx: /ImportError while loading conftest/i, reason: 'conftest_import_error' },
 ];
 
-function matchInfraSignature(log: string): string | null {
+export function matchInfraSignature(log: string): string | null {
   for (const { rx, reason } of INFRA_SIGNATURES) {
     if (rx.test(log)) return reason;
   }
