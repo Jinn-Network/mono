@@ -39,6 +39,17 @@ export class LearnerHarness implements Harness {
     // typed solutionPayload objects. The learner emits phase artifacts for its
     // own pipeline; letting it claim these specialist tasks can run Claude but
     // fail packaging when the phase artifacts are absent.
+    //
+    // Architectural debt: this blocklist is the symptom — the learner can't
+    // currently handle prediction.v1 / prediction.apy.v0 generically because
+    // jinn-prediction-plugin lacks a submission-shape skill the way
+    // swe-rebench-v2-runtime has plan/SKILL.md. Once that plugin gets a
+    // submission skill and the harvest's prediction.v1 special-path
+    // (harvest.ts ~520) is migrated to the generic .execute/solution-payload.json
+    // path, this whole branch can be deleted.
+    //
+    // Related: jinn-mono-kzlj (deferred — Prediction frozen per
+    // DR-2026-05-11-a). Reopen kzlj when the freeze lifts.
     if (spec.solverType === 'prediction.v1' || spec.solverType === 'prediction.apy.v0') {
       return false;
     }
