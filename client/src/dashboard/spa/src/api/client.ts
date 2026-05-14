@@ -24,6 +24,9 @@ import type {
   CapturesListResponse,
   CaptureDetailResponse,
   Iso8601,
+  DiscoveryPluginPublicationsResponse,
+  DiscoveryBuilderArtifactsResponse,
+  DiscoveryPluginScoresResponse,
 } from './types.js';
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -369,6 +372,38 @@ export const api = {
           body: JSON.stringify({ repoRemoteUrl, trusted }),
         },
       ),
+  },
+
+  // ── Discovery (hfmf) — proxied via daemon's /v1/discovery/* routes ──────────
+  discovery: {
+    listPluginPublications: (args?: {
+      solverType?: string;
+      builderAgentId?: string;
+      includeRevoked?: boolean;
+    }) => {
+      const q = new URLSearchParams();
+      if (args?.solverType) q.set('solverType', args.solverType);
+      if (args?.builderAgentId) q.set('builderAgentId', args.builderAgentId);
+      if (args?.includeRevoked !== undefined) q.set('includeRevoked', String(args.includeRevoked));
+      const qs = q.toString();
+      return jfetch<DiscoveryPluginPublicationsResponse>(
+        `/v1/discovery/plugin-publications${qs ? `?${qs}` : ''}`,
+      );
+    },
+    listBuilderArtifacts: (builderAgentId: string, limit?: number) => {
+      const q = new URLSearchParams({ builderAgentId });
+      if (limit !== undefined) q.set('limit', String(limit));
+      return jfetch<DiscoveryBuilderArtifactsResponse>(
+        `/v1/discovery/builder-artifacts?${q.toString()}`,
+      );
+    },
+    getPluginScores: (cid: string, limit?: number) => {
+      const q = new URLSearchParams({ cid });
+      if (limit !== undefined) q.set('limit', String(limit));
+      return jfetch<DiscoveryPluginScoresResponse>(
+        `/v1/discovery/plugin-scores?${q.toString()}`,
+      );
+    },
   },
 };
 

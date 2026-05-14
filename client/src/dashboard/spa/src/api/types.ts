@@ -38,6 +38,8 @@ export interface BootstrapState {
   }>;
   master_address?: string;
   chain?: string;
+  fleet_agent_id?: string;
+  fleet_safe_address?: string;
   funding?: {
     master_address?: string;
     eth_required?: string;
@@ -686,4 +688,53 @@ export interface CapturesListResponse {
 export interface CaptureDetailResponse {
   capture: CaptureSummary;
   spans: CaptureSpan[];
+}
+
+// ── Discovery types (hfmf) ────────────────────────────────────────────────────
+
+export interface PluginPublicationDto {
+  builderAgentId: string;
+  cid: string;
+  name: string;
+  version: string;
+  supports: string[];
+  publishedAt: number;
+  artifactType: 'plugin';
+  revoked: boolean;
+  revokedReason?: string;
+  pluginSha256: string;
+}
+
+export interface PublishedArtifactDto {
+  builderAgentId: string;
+  cid: string;
+  name: string;
+  version: string;
+  supports: string[];
+  publishedAt: number;
+  artifactType: 'plugin' | 'harness';
+  revoked: boolean;
+  revokedReason?: string;
+}
+
+export interface PluginScoreHistoryRowDto {
+  pluginCid: string;
+  taskId: string;
+  operatorAgentId: string;
+  verdict: string;
+  score?: number;
+  ts: number;
+  forkSuspected: boolean;
+}
+
+export interface DiscoveryPluginPublicationsResponse {
+  publications: PluginPublicationDto[];
+}
+
+export interface DiscoveryBuilderArtifactsResponse {
+  artifacts: PublishedArtifactDto[];
+}
+
+export interface DiscoveryPluginScoresResponse {
+  scores: PluginScoreHistoryRowDto[];
 }

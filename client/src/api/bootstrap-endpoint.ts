@@ -59,6 +59,8 @@ interface FleetStateOnDisk {
   master_address?: string;
   chain?: string;
   services?: ServiceState[];
+  fleet_agent_id?: string | null;
+  fleet_safe_address?: string | null;
 }
 
 interface FundingGateOnDisk {
@@ -136,6 +138,8 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       services,
       master_address: parsed.master_address,
       chain: parsed.chain,
+      ...(parsed.fleet_agent_id ? { fleet_agent_id: parsed.fleet_agent_id } : {}),
+      ...(parsed.fleet_safe_address ? { fleet_safe_address: parsed.fleet_safe_address } : {}),
       ...(cfg.rpcUrl !== undefined ? { rpcUrl: cfg.rpcUrl } : {}),
       ...(cfg.defaultRpcUrl !== undefined ? { defaultRpcUrl: cfg.defaultRpcUrl } : {}),
       ...(cfg.solverNets !== undefined ? { solverNets: cfg.solverNets } : {}),
