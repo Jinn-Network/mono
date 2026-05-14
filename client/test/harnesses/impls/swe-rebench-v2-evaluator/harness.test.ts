@@ -5,6 +5,12 @@ import { join } from 'node:path';
 import { SweRebenchV2EvaluatorHarness } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
+import {
+  ValidatedPoolStore,
+  EVAL_SEMANTICS_VERSION,
+  type ValidatedPoolEntry,
+} from '../../../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+import { computeRowHash } from '../../../../src/solver-types/_swe-rebench-v2-substrate.js';
 
 function makeImplStateDir(): string {
   return mkdtempSync(join(tmpdir(), 'swe-rebench-v2-evaluator-test-'));
@@ -107,6 +113,28 @@ function buildHarnessContext(implStateDir: string, task: Task): HarnessContext {
     trajectory: { addSpan: () => undefined } as unknown as HarnessContext['trajectory'],
     mode: 'train',
   };
+}
+
+/**
+ * Seed an admission entry into `stateDir`'s ValidatedPoolStore.
+ * Pre-existing tests use a scorable entry without `rowHash`/`imageDigest` so
+ * the substrate-drift checks are skipped and the normal grading path runs.
+ */
+async function seedAdmission(
+  stateDir: string,
+  instanceId: string,
+  entry: Partial<ValidatedPoolEntry> & { scorable: boolean },
+): Promise<void> {
+  const store = new ValidatedPoolStore({ stateDir });
+  await store.record(
+    instanceId,
+    {
+      reason: 'gold-patch-resolves',
+      checkedAt: new Date().toISOString(),
+      ...entry,
+    },
+    EVAL_SEMANTICS_VERSION,
+  );
 }
 
 describe('SweRebenchV2EvaluatorHarness — supports + canAttempt', () => {
@@ -340,9 +368,14 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
 
 describe('SweRebenchV2EvaluatorHarness — run', () => {
   let implStateDir: string;
-  beforeEach(() => {
+  beforeEach(async () => {
     implStateDir = makeImplStateDir();
     makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    // Seed a scorable admission without rowHash/imageDigest so the substrate-
+    // drift checks are skipped and normal grading proceeds. Tests that
+    // specifically exercise substrate-recheck behavior live in the separate
+    // describe block below and seed their own admission entries.
+    await seedAdmission(implStateDir, 'unidata__netcdf-c-1925', { scorable: true });
   });
   afterEach(() => {
     rmSync(implStateDir, { recursive: true, force: true });
@@ -377,7 +410,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     };
     const harness = new SweRebenchV2EvaluatorHarness({
       implStateDir,
-      _testDeps: { fetcher: makeFakeFetcher(), runner, uploadToIpfs },
+      _testDeps: { fetcher: makeFakeFetcher(), runner, uploadToIpfs, stateDir: implStateDir },
     });
     const ctx = buildHarnessContext(
       implStateDir,
@@ -448,6 +481,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
         fetcher: makeFakeFetcher(),
         runner,
         uploadToIpfs: vi.fn().mockResolvedValue('bafy-fail-log'),
+        stateDir: implStateDir,
       },
     });
     const ctx = buildHarnessContext(
@@ -482,7 +516,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     };
     const harness = new SweRebenchV2EvaluatorHarness({
       implStateDir,
-      _testDeps: { fetcher: makeFakeFetcher(), runner, uploadToIpfs },
+      _testDeps: { fetcher: makeFakeFetcher(), runner, uploadToIpfs, stateDir: implStateDir },
     });
     const ctx = buildHarnessContext(
       implStateDir,
@@ -501,6 +535,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
         fetcher: makeFakeFetcher(),
         runner: { runEval: vi.fn() },
         uploadToIpfs: vi.fn(),
+        stateDir: implStateDir,
       },
     });
     const ctx = buildHarnessContext(implStateDir, buildEvaluationTask(wrongEnvelope));
@@ -540,6 +575,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
         fetcher: makeFakeFetcher(),
         makeRunner,
         uploadToIpfs: vi.fn().mockResolvedValue('bafy-test-log'),
+        stateDir: implStateDir,
       },
     });
     const ctx1 = buildHarnessContext(
@@ -563,5 +599,191 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     // exercising the cached runner, not falling back to anything else.
     const runner = makeRunner.mock.results[0]?.value as { runEval: ReturnType<typeof vi.fn> };
     expect(runner.runEval).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('SweRebenchV2EvaluatorHarness — verdict-time substrate recheck', () => {
+  const INSTANCE_ID = 'unidata__netcdf-c-1925';
+  const IMAGE_NAME = 'docker.io/swerebenchv2/test:latest';
+  const IMAGE_DIGEST = 'sha256:' + 'a'.repeat(64);
+  const GOLD_PATCH = 'diff --git a/fix.c b/fix.c\n@@ -1 +1 @@\n-old\n+new\n';
+
+  // A stub HF row returned by the fetcher during verdict-time recheck.
+  const STUB_ROW = {
+    instance_id: INSTANCE_ID,
+    repo: 'Unidata/netcdf-c',
+    image_name: IMAGE_NAME,
+    FAIL_TO_PASS: ['test_a'],
+    PASS_TO_PASS: ['test_b'],
+    test_patch: 'diff --git ...',
+    install_config: { test_cmd: 'make test', log_parser: 'pytest' },
+  };
+
+  // Precompute the rowHash that matches the stub row + gold patch + task fields.
+  // This is the value that will be stored in the admission record and must
+  // match what computeRowHash produces at verdict time.
+  const MATCHING_ROW_HASH = computeRowHash({
+    hf_dataset: 'nebius/SWE-rebench-leaderboard',
+    hf_split: '2026_02',
+    instance_id: INSTANCE_ID,
+    repo: 'Unidata/netcdf-c',
+    base_commit: 'ad6bff35c39a0600fb8f2e176be4269e768e4e22',
+    image_name: IMAGE_NAME,
+    patch: GOLD_PATCH,
+    test_patch: 'diff --git ...',
+    install_config: { install: [], test_cmd: 'make test', log_parser: 'pytest' },
+    FAIL_TO_PASS: ['test_a'],
+    PASS_TO_PASS: ['test_b'],
+  });
+
+  // A pool-loader stub that returns the matching pool task with the gold patch.
+  function makeMatchingPoolLoader() {
+    return vi.fn().mockResolvedValue([{
+      instance_id: INSTANCE_ID,
+      hf_dataset: 'nebius/SWE-rebench-leaderboard',
+      hf_split: '2026_02',
+      repo: 'Unidata/netcdf-c',
+      base_commit: 'ad6bff35c39a0600fb8f2e176be4269e768e4e22',
+      patch: GOLD_PATCH,
+      test_patch: 'diff --git ...',
+    }]);
+  }
+
+  // A runCommand stub that returns the matching image digest.
+  function makeMatchingDockerInspect() {
+    return vi.fn(async (bin: string, args: string[]) => {
+      if (bin === 'docker' && args[0] === 'image') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([`${IMAGE_NAME}@${IMAGE_DIGEST}`]),
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+  }
+
+  let implStateDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    implStateDir = mkdtempSync(join(tmpdir(), 'swe-rebench-v2-recheck-impl-'));
+    stateDir = mkdtempSync(join(tmpdir(), 'swe-rebench-v2-recheck-state-'));
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+  });
+  afterEach(() => {
+    rmSync(implStateDir, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  function makeHarness(deps: NonNullable<ConstructorParameters<typeof SweRebenchV2EvaluatorHarness>[0]['_testDeps']>) {
+    return new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { stateDir, ...deps },
+    });
+  }
+
+  function makeCtx() {
+    return buildHarnessContext(implStateDir, buildEvaluationTask(buildSolverEnvelope()));
+  }
+
+  it('throws SkippableError when no admission entry exists for the instance', async () => {
+    // stateDir is empty — no validated-pool.json at all.
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn() },
+      runner: { runEval: vi.fn() },
+      uploadToIpfs: vi.fn(),
+    });
+    await expect(harness.run(makeCtx())).rejects.toBeInstanceOf(SkippableError);
+    await expect(harness.run(makeCtx())).rejects.toMatchObject({
+      reason: 'admission_missing_or_unscorable',
+    });
+    // No verdict artifact should be written.
+    expect(existsSync(join(implStateDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
+  });
+
+  it('throws SkippableError when the admission entry is unscorable', async () => {
+    await seedAdmission(stateDir, INSTANCE_ID, { scorable: false, reason: 'gold-patch-not-resolved' });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn() },
+      runner: { runEval: vi.fn() },
+      uploadToIpfs: vi.fn(),
+    });
+    await expect(harness.run(makeCtx())).rejects.toBeInstanceOf(SkippableError);
+    await expect(harness.run(makeCtx())).rejects.toMatchObject({
+      reason: 'admission_missing_or_unscorable',
+    });
+  });
+
+  it('throws SkippableError when rowHash drifted between admission and verdict time', async () => {
+    // Admission carries a rowHash that won't match current state.
+    await seedAdmission(stateDir, INSTANCE_ID, {
+      scorable: true,
+      rowHash: 'sha256:' + 'dead'.repeat(16),  // arbitrary stale hash
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn().mockResolvedValue(STUB_ROW) },
+      loadPool: makeMatchingPoolLoader(),
+      runner: { runEval: vi.fn() },
+      uploadToIpfs: vi.fn(),
+    });
+    const err = await harness.run(makeCtx()).catch((e) => e);
+    expect(err).toBeInstanceOf(SkippableError);
+    expect(err.reason).toBe('substrate_drift_rowHash');
+    expect(existsSync(join(implStateDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
+  });
+
+  it('throws SkippableError when imageDigest drifted', async () => {
+    const differentDigest = 'sha256:' + 'b'.repeat(64);
+    // Admission carries imageDigest X; resolveImageDigest returns Y.
+    await seedAdmission(stateDir, INSTANCE_ID, {
+      scorable: true,
+      // No rowHash — skip the rowHash check so we reach the imageDigest check.
+      imageDigest: differentDigest,
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    // runCommand returns the matching IMAGE_DIGEST (different from what's stored in admission).
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn().mockResolvedValue(STUB_ROW) },
+      runCommand: makeMatchingDockerInspect() as unknown as typeof import('../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js').runCommand,
+      runner: { runEval: vi.fn() },
+      uploadToIpfs: vi.fn(),
+    });
+    const err = await harness.run(makeCtx()).catch((e) => e);
+    expect(err).toBeInstanceOf(SkippableError);
+    expect(err.reason).toBe('substrate_drift_imageDigest');
+    expect(existsSync(join(implStateDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
+  });
+
+  it('grades normally when admission entry matches current substrate', async () => {
+    // Seed an admission with both rowHash and imageDigest matching current state.
+    await seedAdmission(stateDir, INSTANCE_ID, {
+      scorable: true,
+      rowHash: MATCHING_ROW_HASH,
+      imageDigest: IMAGE_DIGEST,
+    });
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({
+        passed_match: true,
+        passed: ['test_a'],
+        failed: [],
+        log: 'ok',
+        exitCode: 0,
+      }),
+    };
+    const harness = makeHarness({
+      fetcher: { fetchTaskRow: vi.fn().mockResolvedValue(STUB_ROW) },
+      loadPool: makeMatchingPoolLoader(),
+      runCommand: makeMatchingDockerInspect() as unknown as typeof import('../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js').runCommand,
+      runner,
+      uploadToIpfs: vi.fn().mockResolvedValue('bafy-ok'),
+    });
+    const sol = await harness.run(makeCtx());
+    expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    // Confirm the runner was actually invoked (grading happened).
+    expect(runner.runEval).toHaveBeenCalledTimes(1);
   });
 });

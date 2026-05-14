@@ -39,13 +39,24 @@ import { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from '../../types.js';
 import type { Task } from '../../../types/task.js';
 import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import { uploadToIpfs } from '../../../adapters/mech/ipfs.js';
-import { SweRebenchV2Evaluator, type EvalRunner, type HfFetcher } from './index.js';
+import { SweRebenchV2Evaluator, type EvalRunner, type HfFetcher, type HfRow } from './index.js';
 import {
   PythonEvalRunner,
   EvalCouldNotGradeError,
   type PythonEvalRunnerOptions,
 } from './eval-runner.js';
 import { HttpHfFetcher } from './hf-fetcher.js';
+import {
+  ValidatedPoolStore,
+  EVAL_SEMANTICS_VERSION,
+} from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
+import {
+  computeRowHash,
+  resolveImageDigest,
+  type CommandRunner,
+  type CommandResult,
+} from '../../../solver-types/_swe-rebench-v2-substrate.js';
+import type { PoolTask } from '../../../solver-types/_swe-rebench-v2-pool.js';
 
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 const UPSTREAM_REPO_URL = 'https://github.com/SWE-rebench/SWE-rebench-V2.git';
@@ -99,6 +110,18 @@ export interface SweRebenchV2EvaluatorHarnessOptions {
      */
     makeRunner?: (opts: PythonEvalRunnerOptions) => EvalRunner;
     uploadToIpfs?: typeof uploadToIpfs;
+    /**
+     * Override the state directory used for the {@link ValidatedPoolStore}
+     * substrate-recheck. Defaults to `JINN_SWE_REBENCH_V2_STATE_DIR` env
+     * var or `~/.jinn-client/solver-types/swe-rebench-v2`.
+     */
+    stateDir?: string;
+    /**
+     * Override the pool-loading function used to resolve `patch` and
+     * `base_commit` at verdict time for rowHash recomputation.
+     * Defaults to `loadSweRebenchV2Pool()`.
+     */
+    loadPool?: () => Promise<PoolTask[]>;
   };
 }
 
@@ -362,6 +385,101 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     }
     const solutionPayload = SweRebenchV2SolutionPayloadSchema.parse(envelope.payload);
 
+    // ── Verdict-time substrate recheck ───────────────────────────────────────
+    // Before grading, verify the instance's admission record is present,
+    // scorable, and that the HF row + image haven't drifted since admission.
+    // Any mismatch throws SkippableError — never fails open to a misclassified
+    // FAIL verdict. (jinn-mono-fufn Task 9)
+    const stateDir =
+      this.deps.stateDir ??
+      process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
+      join(process.env['HOME'] ?? homedir(), '.jinn-client', 'solver-types', 'swe-rebench-v2');
+    const admissionStore = new ValidatedPoolStore({ stateDir });
+    const admission = await admissionStore.getEntry(task.instance_id, EVAL_SEMANTICS_VERSION);
+
+    if (!admission || !admission.scorable) {
+      throw new SkippableError(
+        'admission_missing_or_unscorable',
+        `no scorable admission for ${task.instance_id} under semanticsVersion=${EVAL_SEMANTICS_VERSION}`,
+      );
+    }
+
+    const recheckFetcher: HfFetcher = this.deps.fetcher ?? new HttpHfFetcher();
+    let recheckRow: HfRow;
+    try {
+      recheckRow = await recheckFetcher.fetchTaskRow({
+        hf_dataset: task.hf_dataset,
+        hf_split: task.hf_split,
+        instance_id: task.instance_id,
+      });
+    } catch (err) {
+      throw new SkippableError(
+        'hf_fetch_failed',
+        `cannot verify substrate (HF unreachable): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // Load the pool task to access the gold `patch` field for rowHash
+    // recomputation. The on-chain task schema carries base_commit and repo,
+    // but not the gold patch — that lives only in the HF pool rows. Loading
+    // the pool here keeps rowHash inputs symmetric with validate-pool time.
+    // (Preferred approach per Task 9 spec; pool is small, O(hundreds) rows.)
+    if (admission.rowHash) {
+      let goldPatch: string;
+      try {
+        const poolLoader = this.deps.loadPool ?? (await import('../../../solver-types/swe-rebench-v2.js')).loadSweRebenchV2Pool;
+        const pool = await poolLoader();
+        const poolTask = pool.find((t) => t.instance_id === task.instance_id);
+        // Fall back to empty string if not found — matches validate-pool's
+        // `task.base_commit ?? ''` defensive fallback for degenerate rows.
+        goldPatch = poolTask?.patch ?? '';
+      } catch {
+        // Pool load failed (HF outage, etc.) — can't recompute rowHash.
+        throw new SkippableError(
+          'hf_fetch_failed',
+          `cannot verify substrate (pool load failed) for ${task.instance_id}`,
+        );
+      }
+
+      const currentRowHash = computeRowHash({
+        hf_dataset: task.hf_dataset,
+        hf_split: task.hf_split,
+        instance_id: task.instance_id,
+        repo: task.repo,
+        base_commit: task.base_commit,
+        image_name: recheckRow.image_name,
+        patch: goldPatch,
+        test_patch: recheckRow.test_patch,
+        install_config: { ...recheckRow.install_config, install: recheckRow.install_config.install ?? [] },
+        FAIL_TO_PASS: recheckRow.FAIL_TO_PASS,
+        PASS_TO_PASS: recheckRow.PASS_TO_PASS,
+      });
+      if (currentRowHash !== admission.rowHash) {
+        throw new SkippableError(
+          'substrate_drift_rowHash',
+          `rowHash drift for ${task.instance_id}: admitted=${admission.rowHash}, current=${currentRowHash}`,
+        );
+      }
+    }
+
+    if (admission.imageDigest) {
+      // runCommand accepts SpawnOptions (superset of { cwd? }), so it satisfies
+      // CommandRunner at the call sites resolveImageDigest uses.
+      const commandRunner: CommandRunner = (this.deps.runCommand ?? runCommand) as CommandRunner;
+      const currentDigest = await resolveImageDigest(recheckRow.image_name, commandRunner);
+      if (currentDigest && currentDigest !== admission.imageDigest) {
+        throw new SkippableError(
+          'substrate_drift_imageDigest',
+          `imageDigest drift for ${task.instance_id}: admitted=${admission.imageDigest}, current=${currentDigest}`,
+        );
+      }
+      // currentDigest === null is tolerated — the image may not be cached
+      // locally yet (the eval-runner pulls on demand). The admission already
+      // verified the digest at validate-pool time; a null here just means
+      // the image isn't present locally, not that it changed.
+    }
+    // ── End substrate recheck ─────────────────────────────────────────────────
+
     const fetcher: HfFetcher = this.deps.fetcher ?? new HttpHfFetcher();
     const runner: EvalRunner = this.getRunner(state.upstreamRepoDir);
     const evaluator = new SweRebenchV2Evaluator({ fetcher, runner });
@@ -454,11 +572,8 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-interface CommandResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
+// CommandResult is imported from _swe-rebench-v2-substrate.ts (Task 9 cleanup:
+// removed the duplicate private interface that was here).
 
 async function runCommand(
   bin: string,
