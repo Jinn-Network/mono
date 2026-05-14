@@ -7,6 +7,7 @@ import {
   EvalCouldNotGradeError,
   DEFAULT_EVAL_IMAGE_CACHE_MAX,
   resolveImageCacheMax,
+  matchInfraSignature,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 
 const tempDirs: string[] = [];
@@ -469,7 +470,6 @@ describe('PythonEvalRunner', () => {
 // ---------------------------------------------------------------------------
 // matchInfraSignature — 2026-05-14 triage fingerprints (jinn-mono-fufn)
 // ---------------------------------------------------------------------------
-import { matchInfraSignature } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 
 // Real fingerprints from the 2026-05-14 triage on Base Sepolia.
 const VENV_COLLISION = [
