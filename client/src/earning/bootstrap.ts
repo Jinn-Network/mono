@@ -382,7 +382,7 @@ export class FleetBootstrapper {
     //       because ensureStage1 already ran them.
     //   (b) at the end, if any service reached `complete`/`safe_binding_pending`
     //       we advance `fleet_stage` to `'stage1_and_2'`.
-    let state = await this.store.load(this.chain);
+    let state = stage1Result.fleet_state;
 
     try {
       // Phase 1b: Check master funding for the full operator path.
