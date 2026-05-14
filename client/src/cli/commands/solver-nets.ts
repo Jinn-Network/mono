@@ -318,6 +318,7 @@ Output flags:
           runner: new PythonEvalRunner({ upstreamRepoDir }),
           store,
           semanticsVersion: EVAL_SEMANTICS_VERSION,
+          upstreamRepoDir,
           log: (m) => process.stderr.write(`${m}\n`),
         },
         { limit, force },

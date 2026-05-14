@@ -239,3 +239,78 @@ describe('ValidatedPoolStore — extended substrate fields (semantics v3)', () =
     expect(EVAL_SEMANTICS_VERSION).toBe('3');
   });
 });
+
+describe('validatePoolInstances — populates substrate fields', () => {
+  it('records rowHash, imageName, imageDigest, upstreamEvalCommit on a successful validation', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    const summary = await validatePoolInstances(
+      [poolTask('a__1')],
+      {
+        fetcher: {
+          fetchTaskRow: async () => ({
+            instance_id: 'a__1',
+            repo: 'acme/widget',
+            image_name: 'acme/widget:latest',
+            FAIL_TO_PASS: ['t::a'],
+            PASS_TO_PASS: ['t::b'],
+            test_patch: 'diff b',
+            install_config: { install: ['pip install .'], test_cmd: ['pytest'], log_parser: 'parse_log_pytest' },
+          }),
+        },
+        runner: {
+          runEval: async () => ({ passed_match: true, passed: ['t::a'], failed: [], log: '', exitCode: 0 }),
+        },
+        store,
+        semanticsVersion: EVAL_SEMANTICS_VERSION,
+        upstreamRepoDir: '/fake/upstream',
+        commandRunner: async (bin, args) => {
+          if (bin === 'docker' && args[0] === 'image') {
+            return { exitCode: 0, stdout: '["acme/widget@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"]', stderr: '' };
+          }
+          if (bin === 'git' && args[0] === 'rev-parse') {
+            return { exitCode: 0, stdout: '0123456789abcdef0123456789abcdef01234567\n', stderr: '' };
+          }
+          return { exitCode: 1, stdout: '', stderr: 'unexpected' };
+        },
+      },
+    );
+    expect(summary.scorable).toBe(1);
+    const entry = await store.getEntry('a__1', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({
+      scorable: true,
+      imageName: 'acme/widget:latest',
+      imageDigest: 'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      upstreamEvalCommit: '0123456789abcdef0123456789abcdef01234567',
+    });
+    expect(entry!.rowHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('records the entry as unscorable when imageDigest cannot be resolved (required mode)', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await validatePoolInstances(
+      [poolTask('a__1')],
+      {
+        fetcher: {
+          fetchTaskRow: async () => ({
+            instance_id: 'a__1', repo: 'acme/widget', image_name: 'acme/widget:latest',
+            FAIL_TO_PASS: ['t::a'], PASS_TO_PASS: ['t::b'], test_patch: 'diff b',
+            install_config: { install: ['pip install .'], test_cmd: ['pytest'], log_parser: 'parse_log_pytest' },
+          }),
+        },
+        runner: { runEval: async () => ({ passed_match: true, passed: ['t::a'], failed: [], log: '', exitCode: 0 }) },
+        store,
+        semanticsVersion: EVAL_SEMANTICS_VERSION,
+        upstreamRepoDir: '/fake/upstream',
+        commandRunner: async (bin, args) => {
+          if (bin === 'docker') return { exitCode: 1, stdout: '', stderr: 'no such image' };
+          if (bin === 'git') return { exitCode: 0, stdout: '0123456789abcdef0123456789abcdef01234567\n', stderr: '' };
+          return { exitCode: 1, stdout: '', stderr: '' };
+        },
+      },
+    );
+    const entry = await store.getEntry('a__1', EVAL_SEMANTICS_VERSION);
+    expect(entry).toMatchObject({ scorable: false, reason: 'unresolvable-image-digest' });
+  });
+});

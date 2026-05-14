@@ -21,9 +21,11 @@
  */
 
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { EvalRunner, HfFetcher } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import { computeRowHash, resolveImageDigest, resolveUpstreamEvalCommit, type CommandRunner } from './_swe-rebench-v2-substrate.js';
 
 /**
  * Bump when the eval grading semantics change (verdict re-derivation,
@@ -176,11 +178,24 @@ function looksPython(patch: string | undefined): boolean {
   return /(?:^|\n)(?:---|\+\+\+|diff --git) [ab]\/\S+\.py(?:\s|$)/.test(patch);
 }
 
+const defaultCommandRunner: CommandRunner = (bin, args, opts) => new Promise((resolve, reject) => {
+  const child = spawn(bin, args, { ...(opts ?? {}), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+  child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+  child.on('error', reject);
+  child.on('close', (code: number | null) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+});
+
 export interface ValidatePoolDeps {
   fetcher: HfFetcher;
   runner: EvalRunner;
   store: ValidatedPoolStore;
   semanticsVersion: string;
+  /** Required v3+: used to resolve `upstreamEvalCommit`. Defaults to '' (commit not resolved). */
+  upstreamRepoDir?: string;
+  /** Required v3+: defaults to spawn-based runner; tests inject a stub. */
+  commandRunner?: CommandRunner;
   log?: (msg: string) => void;
 }
 
@@ -211,7 +226,18 @@ export async function validatePoolInstances(
   opts: { limit?: number; force?: boolean } = {},
 ): Promise<ValidatePoolSummary> {
   const log = deps.log ?? (() => {});
+  // v3+ substrate resolution: only active when commandRunner or upstreamRepoDir
+  // is explicitly provided. Legacy callers (no commandRunner, no upstreamRepoDir)
+  // get pre-v3 behavior — scorable based on passed_match alone.
+  const substrateEnabled = deps.commandRunner != null || deps.upstreamRepoDir != null;
+  const runner = deps.commandRunner ?? defaultCommandRunner;
   const summary: ValidatePoolSummary = { checked: 0, scorable: 0, unscorable: 0, skipped: 0 };
+
+  // Resolve the upstream eval commit once per run — it doesn't change mid-run.
+  const upstreamEvalCommit = substrateEnabled && deps.upstreamRepoDir
+    ? await resolveUpstreamEvalCommit(deps.upstreamRepoDir, runner)
+    : null;
+
   for (const task of pool) {
     if (opts.limit != null && summary.checked >= opts.limit) break;
 
@@ -237,6 +263,19 @@ export async function validatePoolInstances(
     let entry: ValidatedPoolEntry;
     try {
       const row = await deps.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: task.instance_id });
+      const rowHash = computeRowHash({
+        hf_dataset: task.hf_dataset,
+        hf_split: task.hf_split,
+        instance_id: task.instance_id,
+        repo: task.repo ?? row.repo,
+        base_commit: task.base_commit ?? '',
+        image_name: row.image_name,
+        patch: task.patch,
+        test_patch: row.test_patch ?? task.test_patch,
+        install_config: { ...row.install_config, install: row.install_config.install ?? [] },
+        FAIL_TO_PASS: row.FAIL_TO_PASS,
+        PASS_TO_PASS: row.PASS_TO_PASS,
+      });
       const res = await deps.runner.runEval({
         instance_id: task.instance_id,
         repo: task.repo ?? row.repo,
@@ -249,9 +288,25 @@ export async function validatePoolInstances(
         fail_to_pass: row.FAIL_TO_PASS,
         pass_to_pass: row.PASS_TO_PASS,
       });
-      entry = res.passed_match
-        ? { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }
-        : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt: new Date().toISOString() };
+      const checkedAt = new Date().toISOString();
+      if (substrateEnabled) {
+        // Resolve digest AFTER the eval ran — that's when the image is guaranteed
+        // to be present locally with its RepoDigests populated.
+        const imageDigest = await resolveImageDigest(row.image_name, runner);
+        if (!imageDigest) {
+          // Required-mode admissions must carry a digest. No digest → not admissible.
+          entry = { scorable: false, reason: 'unresolvable-image-digest', checkedAt, rowHash, imageName: row.image_name, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) };
+        } else {
+          entry = res.passed_match
+            ? { scorable: true, reason: 'gold-patch-resolves', checkedAt, rowHash, imageName: row.image_name, imageDigest, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) }
+            : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt, rowHash, imageName: row.image_name, imageDigest, ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}) };
+        }
+      } else {
+        // Legacy (pre-v3) behavior: scorable based on passed_match alone.
+        entry = res.passed_match
+          ? { scorable: true, reason: 'gold-patch-resolves', checkedAt }
+          : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt };
+      }
     } catch (err) {
       const reason = nameOf(err) === 'EvalCouldNotGradeError'
         ? `ungradeable:${reasonOf(err)}`
