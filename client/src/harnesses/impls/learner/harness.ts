@@ -49,7 +49,10 @@ export class LearnerHarness implements Harness {
     // path, this whole branch can be deleted.
     //
     // Related: jinn-mono-kzlj (deferred — Prediction frozen per
-    // DR-2026-05-11-a). Reopen kzlj when the freeze lifts.
+    // DR-2026-05-11-a). kzlj is scoped to prediction.v1; the prediction.apy.v0
+    // path needs the same migration when the apy SolverNet's freeze lifts
+    // (file a sibling bead when that happens). Reopen kzlj + file the apy
+    // analogue when the freezes lift.
     if (spec.solverType === 'prediction.v1' || spec.solverType === 'prediction.apy.v0') {
       return false;
     }
