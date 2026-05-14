@@ -16,6 +16,7 @@ import {
   type PredictionOperatorStatus,
 } from '../../solver-nets/prediction-operator-ux.js';
 import { EVAL_SEMANTICS_VERSION } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
+import { defaultStateDir as sweRebenchV2DefaultStateDir } from '../../solver-types/swe-rebench-v2.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -508,9 +509,7 @@ Output flags:
         return;
       }
       if (net.solverType === 'swe-rebench-v2.v1') {
-        const stateDir =
-          process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
-          join(homedir(), '.jinn-client', 'swe-rebench-v2');
+        const stateDir = process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? sweRebenchV2DefaultStateDir();
         const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
         const sanitized = sanitizeLegacySolverNet(net);
         emit(
