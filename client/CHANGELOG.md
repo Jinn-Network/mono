@@ -2,12 +2,12 @@
 
 ## Unreleased
 
-## v0.1.5 — Plumbing
+## v0.1.5 — Operator App
 
 _Released 2026-05-13_
 
-# v0.1.5 — "Plumbing"
-2026-05-13 · Suggested bump: patch (recovery + plumbing on the SWE-rebench v2 verdict/donation path)
+# v0.1.5 — "Operator App"
+2026-05-13 · Suggested bump: patch (first npm `@latest` cut that ships the app-first operator experience)
 
 ## Highlights
 
