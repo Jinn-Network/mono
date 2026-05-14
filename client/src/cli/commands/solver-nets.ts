@@ -15,6 +15,7 @@ import {
   runPredictionSample,
   type PredictionOperatorStatus,
 } from '../../solver-nets/prediction-operator-ux.js';
+import { EVAL_SEMANTICS_VERSION } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -70,6 +71,54 @@ export function resolveValidatePoolInstanceIds(flags: {
     collected.push(...readInstanceIdFile('swe-rebench-v2-known-bad.json'));
   }
   return Array.from(new Set(collected));
+}
+
+// ---------------------------------------------------------------------------
+// describeSweRebenchV2PoolFreshness — exported for unit testing
+// ---------------------------------------------------------------------------
+
+export async function describeSweRebenchV2PoolFreshness(opts: {
+  stateDir: string;
+}): Promise<
+  | { status: 'ready'; semanticsVersion: string; scorable: number; unscorable: number; total: number }
+  | { status: 'stale'; reason: string; cli: string }
+> {
+  const path = join(opts.stateDir, 'validated-pool.json');
+  let raw: unknown = null;
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return {
+      status: 'stale',
+      reason: 'validated-pool.json is absent or unreadable',
+      cli: 'jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad',
+    };
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return {
+      status: 'stale',
+      reason: 'validated-pool.json is malformed',
+      cli: 'jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad',
+    };
+  }
+  const file = raw as { evalSemanticsVersion?: string; entries?: Record<string, { scorable?: boolean }> };
+  if (file.evalSemanticsVersion !== EVAL_SEMANTICS_VERSION) {
+    return {
+      status: 'stale',
+      reason: `validated-pool.json was built for semanticsVersion=${file.evalSemanticsVersion ?? 'unknown'}, current=${EVAL_SEMANTICS_VERSION}`,
+      cli: 'jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad',
+    };
+  }
+  const entries = file.entries ?? {};
+  const scorable = Object.values(entries).filter((e) => e.scorable === true).length;
+  const unscorable = Object.values(entries).length - scorable;
+  return {
+    status: 'ready',
+    semanticsVersion: EVAL_SEMANTICS_VERSION,
+    scorable,
+    unscorable,
+    total: scorable + unscorable,
+  };
 }
 
 type SolverPluginEntry = string | { name?: string; source: string; version?: string };
@@ -455,6 +504,30 @@ Output flags:
           human,
           json,
           renderPredictionStatusHuman,
+        );
+        return;
+      }
+      if (net.solverType === 'swe-rebench-v2.v1') {
+        const stateDir =
+          process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
+          join(homedir(), '.jinn-client', 'swe-rebench-v2');
+        const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
+        const sanitized = sanitizeLegacySolverNet(net);
+        emit(
+          ctx,
+          { verb: 'solver-nets doctor', configPath, name, solverNet: sanitized, validatedPoolFreshness: freshness },
+          human,
+          json,
+          (v) => {
+            const lines = [renderSolverNetHuman(v)];
+            if (freshness.status === 'ready') {
+              lines.push(`  validated-pool: ready (semanticsVersion=${freshness.semanticsVersion}, ${freshness.scorable} scorable, ${freshness.unscorable} unscorable, ${freshness.total} total)`);
+            } else {
+              lines.push(`  validated-pool: stale — ${freshness.reason}`);
+              lines.push(`    run: ${freshness.cli}`);
+            }
+            return lines.join('\n');
+          },
         );
         return;
       }
