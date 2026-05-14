@@ -8,6 +8,7 @@ import {
   validatePoolInstances,
   EVAL_SEMANTICS_VERSION,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
+import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
 
 const tmps: string[] = [];
@@ -278,6 +279,54 @@ describe('ValidatedPoolStore — concurrent record() does not lose entries', () 
     const storeC = new ValidatedPoolStore({ stateDir: dir });
     expect(await storeC.getEntry('a__1', EVAL_SEMANTICS_VERSION)).not.toBeNull();
     expect(await storeC.getEntry('a__2', EVAL_SEMANTICS_VERSION)).not.toBeNull();
+  });
+});
+
+describe('validatePoolInstances — base_commit sentinel alignment', () => {
+  it('uses the 40-hex sentinel when PoolTask.base_commit is undefined', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await validatePoolInstances(
+      [poolTask('a__nobase', { base_commit: undefined })],
+      {
+        fetcher: {
+          fetchTaskRow: async () => ({
+            instance_id: 'a__nobase', repo: 'r', image_name: 'img:latest',
+            FAIL_TO_PASS: ['t::a'], PASS_TO_PASS: ['t::b'], test_patch: 'tp',
+            install_config: { install: ['x'], test_cmd: ['y'], log_parser: 'parse_log_pytest' },
+          }),
+        },
+        runner: { runEval: async () => ({ passed_match: true, passed: ['t::a'], failed: [], log: '', exitCode: 0 }) },
+        store,
+        semanticsVersion: EVAL_SEMANTICS_VERSION,
+        upstreamRepoDir: '/fake',
+        commandRunner: async (bin, args) => {
+          if (bin === 'docker') return { exitCode: 0, stdout: '["img@sha256:' + 'a'.repeat(64) + '"]', stderr: '' };
+          if (bin === 'git') return { exitCode: 0, stdout: '0'.repeat(40) + '\n', stderr: '' };
+          return { exitCode: 1, stdout: '', stderr: '' };
+        },
+      },
+    );
+    const entry = await store.getEntry('a__nobase', EVAL_SEMANTICS_VERSION);
+    // The entry must have been persisted.
+    expect(entry?.rowHash).toBeDefined();
+    // Recomputing with the sentinel must reproduce the stored hash.
+    // If the fallback had used '' instead, this would produce a different hash.
+    // repo: validatePoolInstances uses task.repo ?? row.repo; poolTask defaults to 'acme/widget'.
+    const expected = computeRowHash({
+      hf_dataset: 'nebius/SWE-rebench-leaderboard',
+      hf_split: '2026_02',
+      instance_id: 'a__nobase',
+      repo: 'acme/widget',
+      base_commit: '0000000000000000000000000000000000000000',
+      image_name: 'img:latest',
+      patch: poolTask('a__nobase').patch!,
+      test_patch: 'tp',
+      install_config: { install: ['x'], test_cmd: ['y'], log_parser: 'parse_log_pytest' },
+      FAIL_TO_PASS: ['t::a'],
+      PASS_TO_PASS: ['t::b'],
+    });
+    expect(entry?.rowHash).toBe(expected);
   });
 });
 

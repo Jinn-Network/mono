@@ -31,6 +31,14 @@ import { computeRowHash, resolveImageDigest, resolveUpstreamEvalCommit, type Com
 // In-process mutex map: serialises concurrent record() calls against the
 // same file. Entries are never removed; bounded by the number of distinct
 // validated-pool.json paths used in this process (typically 1).
+//
+// Cross-process safety is NOT provided: if two separate node processes run
+// `jinn solver-nets validate-pool` simultaneously against the same file,
+// the atomic POSIX rename guarantees only that the file is never
+// torn — one of the concurrent writes may still clobber the other's
+// entries. This is an acceptable limitation for a manual admin CLI;
+// operators should not run validate-pool concurrently against the same
+// state dir.
 const writeLocks: Map<string, Promise<void>> = new Map();
 function withWriteLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
   const prev = writeLocks.get(file) ?? Promise.resolve();
@@ -305,10 +313,11 @@ export async function validatePoolInstances(
         instance_id: task.instance_id,
         repo: task.repo ?? row.repo,
         // PoolTask.base_commit is optional in the schema but in practice is always
-        // present for SWE-rebench leaderboard rows. Falling back to '' lets the hash
-        // remain deterministic in the rare missing case, accepting that all such
-        // degenerate entries would converge to the same hash.
-        base_commit: task.base_commit ?? '',
+        // present for SWE-rebench leaderboard rows. Falling back to the 40-hex zero
+        // sentinel matches what the task generator stamps on-chain for rows that lack
+        // a base_commit, ensuring the stored rowHash is byte-identical to the hash
+        // recheckSubstrate recomputes at verdict time from the Zod-parsed task.
+        base_commit: task.base_commit ?? '0000000000000000000000000000000000000000',
         image_name: row.image_name,
         patch: task.patch,
         test_patch: row.test_patch ?? task.test_patch,
