@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
@@ -16,6 +17,56 @@ import {
 } from '../../solver-nets/prediction-operator-ux.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
+
+// ---------------------------------------------------------------------------
+// resolveValidatePoolInstanceIds — exported for unit testing
+// ---------------------------------------------------------------------------
+
+function readInstanceIdFile(relPath: string): string[] {
+  // Resolve relative to the repo root the client lives in. In tests this
+  // resolves to the worktree root; in production the file is bundled in
+  // the published package's scripts/ directory.
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolvePath(process.cwd(), relPath),
+    resolvePath(__dirname, '..', '..', '..', relPath),
+    resolvePath(__dirname, '..', '..', '..', '..', relPath),
+  ];
+  for (const p of candidates) {
+    try {
+      const parsed = JSON.parse(readFileSync(p, 'utf8')) as { instance_ids?: string[] };
+      if (Array.isArray(parsed.instance_ids)) return parsed.instance_ids;
+    } catch {
+      // try next candidate
+    }
+  }
+  throw new Error(`Could not locate ${relPath} (looked in ${candidates.join(', ')})`);
+}
+
+export function resolveValidatePoolInstanceIds(flags: {
+  instanceId?: string[];
+  instancesFile?: string;
+  seedPositive?: boolean;
+  knownBad?: boolean;
+}): string[] {
+  const collected: string[] = [];
+  if (flags.instanceId) collected.push(...flags.instanceId);
+  if (flags.instancesFile) {
+    const body = readFileSync(flags.instancesFile, 'utf8');
+    for (const raw of body.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      collected.push(line);
+    }
+  }
+  if (flags.seedPositive) {
+    collected.push(...readInstanceIdFile('client/scripts/swe-rebench-v2-seed-pool.json'));
+  }
+  if (flags.knownBad) {
+    collected.push(...readInstanceIdFile('client/scripts/swe-rebench-v2-known-bad.json'));
+  }
+  return Array.from(new Set(collected));
+}
 
 type SolverPluginEntry = string | { name?: string; source: string; version?: string };
 
@@ -220,10 +271,16 @@ const command: CommandModule = {
   jinn solver-nets doctor <name> [--human|--json] [--config <path>]
   jinn solver-nets sample <name> [--closed-window]
   jinn solver-nets validate-pool swe-rebench-v2 [--limit <n>] [--force]
+                                [--instance-id <id>]... [--instances-file <path>]
+                                [--seed-positive] [--known-bad]
             Run the gold patch of each pool instance through the eval harness
             and cache which instances are scorable; the generator then posts
             only those. Requires Docker + \`jinn harnesses enable
             swe-rebench-v2-evaluator\`.
+            --seed-positive runs against client/scripts/swe-rebench-v2-seed-pool.json;
+            --known-bad records instances from .../swe-rebench-v2-known-bad.json
+            as scorable:false. Repeatable --instance-id and --instances-file
+            scope the run to a specific subset.
 
 Output flags:
   --human   Render readable terminal output instead of JSON (supported by
@@ -246,6 +303,11 @@ Output flags:
         force: { type: 'boolean' },
         human: { type: 'boolean' },
         json: { type: 'boolean' },
+        // Repeatable instance-id input flags (jinn-mono-fufn Task 7):
+        'instance-id': { type: 'string', multiple: true },
+        'instances-file': { type: 'string' },
+        'seed-positive': { type: 'boolean' },
+        'known-bad': { type: 'boolean' },
       },
     });
     const human = Boolean(parsed.values['human']);
@@ -308,8 +370,20 @@ Output flags:
       const limit = Number.isFinite(limitParsed as number) && (limitParsed as number) > 0 ? (limitParsed as number) : undefined;
       const force = Boolean(parsed.values['force']);
 
+      const instanceIds = resolveValidatePoolInstanceIds({
+        instanceId: parsed.values['instance-id'] as string[] | undefined,
+        instancesFile: parsed.values['instances-file'] as string | undefined,
+        seedPositive: Boolean(parsed.values['seed-positive']),
+        knownBad: Boolean(parsed.values['known-bad']),
+      });
+
       process.stderr.write('[validate-pool] loading the SWE-rebench v2 pool…\n');
-      const poolTasks = await loadSweRebenchV2Pool();
+      let poolTasks = await loadSweRebenchV2Pool();
+      if (instanceIds.length > 0) {
+        const wanted = new Set(instanceIds);
+        poolTasks = poolTasks.filter((t) => wanted.has(t.instance_id));
+        process.stderr.write(`[validate-pool] restricted to ${poolTasks.length} of ${wanted.size} requested instance ids\n`);
+      }
       const store = getSweRebenchV2ValidatedPoolStore();
       const summary = await validatePoolInstances(
         poolTasks,
