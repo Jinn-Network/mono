@@ -12,11 +12,16 @@ export interface HermesHarnessConfig {
 /**
  * Hermes Agent harness.
  *
- * v1 scope: SWE-rebench v2 solver role only. Built-in learning loop owned
- * by Hermes (skill self-improvement, memory curation, FTS5 session search);
- * Jinn-side learner plugin is NOT loaded. SolverPlugins (network-tools,
- * swe-rebench-v2-runtime) are mounted via Hermes's mcp_servers + skills
- * config.yaml surface (see config-builder.ts).
+ * Generic restoration harness backed by the Hermes agent runner. Built-in
+ * learning loop owned by Hermes (skill self-improvement, memory curation, FTS5
+ * session search); Jinn-side learner plugin is NOT loaded. SolverPlugins are
+ * mounted via Hermes's mcp_servers + skills config.yaml surface (see
+ * config-builder.ts).
+ *
+ * Originally scoped to SWE-rebench v2 only; extended to support any
+ * restoration SolverType so operators can configure hermes-agent for
+ * prediction.v1, swe-rebench-v2.v1, or future SolverTypes via the
+ * joinedSolverNets harness field (jinn-mono-wyy6 Task 6).
  */
 export class HermesHarness implements Harness {
   readonly name = HERMES_AGENT_HARNESS;
@@ -29,9 +34,14 @@ export class HermesHarness implements Harness {
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    if (spec.role === 'evaluation') return false;
-    // v1 scope: SWE-rebench v2 only.
-    return spec.solverType === 'swe-rebench-v2.v1';
+    // Hermes handles any restoration task. Evaluation is not supported: Hermes
+    // has no evaluator-side plugins (verdict signing, checker contracts).
+    // When operator config selects hermes-agent for a specific SolverType via
+    // joinedSolverNets[<cid>].harness, the HarnessRegistry dispatch routes
+    // here via solverTypeHarnesses. First-match dispatch is suppressed for
+    // SolverTypes that have first-party specialist harnesses (e.g.
+    // prediction-v1-baseline) since those specialists register before hermes-agent.
+    return spec.role !== 'evaluation';
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {

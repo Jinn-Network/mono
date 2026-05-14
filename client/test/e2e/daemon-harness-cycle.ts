@@ -15,6 +15,8 @@
  */
 import {
   harnessSelectorFromEnv,
+  checkHarnessApiKey,
+  selectorToHarnessName,
   setupAnvilFixture,
   bootstrapStakedOperator,
   deployMinimalV3Stack,
@@ -29,6 +31,15 @@ import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
 
 async function main(): Promise<void> {
   const harness = harnessSelectorFromEnv();
+
+  // Skip cleanly (exit 0) when the selected harness's API key is absent.
+  // This avoids CI failures when only a subset of provider keys are available.
+  const keyCheck = checkHarnessApiKey(harness);
+  if (!keyCheck.ok) {
+    console.log(`\n=== daemon-harness e2e — SKIPPED: ${keyCheck.reason} ===`);
+    return;
+  }
+
   console.log(`\n=== daemon-harness e2e — harness=${harness} ===`);
   const fixture = await setupAnvilFixture();
 
@@ -101,15 +112,16 @@ async function main(): Promise<void> {
       const delivered = await waitForDelivery(fixture, claim, v3Env, mockIpfs);
       console.log(`delivered: tx=${delivered.deliveryTxHash} solver=${delivered.solverHarnessName}`);
 
-      // Task 5 assertion: the baseline harness must have produced the envelope.
-      if (delivered.solverHarnessName !== 'prediction-v1-baseline') {
+      // Task 6 assertion: the envelope must name the harness we selected.
+      const expected = selectorToHarnessName(harness);
+      if (delivered.solverHarnessName !== expected) {
         throw new Error(
-          `expected solver=prediction-v1-baseline got=${delivered.solverHarnessName}`,
+          `expected solver=${expected} got=${delivered.solverHarnessName}`,
         );
       }
       console.log(`  ✓ envelope.executor.implName = ${delivered.solverHarnessName}`);
 
-      console.log('\n=== Task 5 ok — full settlement loop closed on Anvil ===');
+      console.log(`\n=== Task 6 ok — daemon + ${harness} settled prediction.v1 task on Anvil ===`);
     } finally {
       // Daemon must stop before Anvil tears down (avoids loops throwing on disconnect).
       await running.stop();

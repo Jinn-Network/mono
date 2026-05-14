@@ -60,6 +60,7 @@ import {
   DEFAULT_DISABLED_HARNESSES,
 } from '../../src/harnesses/engine/registry.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
+import { startApiServer } from '../../src/api/server.js';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
 // ── V3 task stack ABI fragments (for deploying minimal router stack) ──────────
@@ -222,6 +223,57 @@ export function harnessSelectorFromEnv(): HarnessSelector {
     return raw;
   }
   throw new Error(`JINN_E2E_HARNESS=${raw} not recognised. Use one of: hermes-agent, claude-code, codex, prediction-v1-baseline.`);
+}
+
+export type HarnessKeyCheck = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Check whether the API key required by the selected harness is present in
+ * the environment. Returns `{ ok: true }` for `prediction-v1-baseline` (no
+ * key needed) and for every other selector when the required env var is set.
+ *
+ * Used at the top of daemon-harness-cycle.ts to skip cleanly (exit 0) when
+ * the operator has not configured credentials for the selected harness.
+ */
+export function checkHarnessApiKey(sel: HarnessSelector): HarnessKeyCheck {
+  switch (sel) {
+    case 'prediction-v1-baseline':
+      return { ok: true };
+    case 'hermes-agent':
+      if (!process.env['OPENROUTER_API_KEY'] && !process.env['ANTHROPIC_API_KEY']) {
+        return { ok: false, reason: 'OPENROUTER_API_KEY or ANTHROPIC_API_KEY required for hermes-agent' };
+      }
+      return { ok: true };
+    case 'claude-code':
+      if (!process.env['ANTHROPIC_API_KEY']) {
+        return { ok: false, reason: 'ANTHROPIC_API_KEY required for claude-code' };
+      }
+      return { ok: true };
+    case 'codex':
+      if (!process.env['OPENAI_API_KEY']) {
+        return { ok: false, reason: 'OPENAI_API_KEY required for codex' };
+      }
+      return { ok: true };
+  }
+}
+
+/**
+ * Map a HarnessSelector to the canonical registered harness name used inside
+ * the daemon's HarnessRegistry / envelope.executor.implName.
+ *
+ * Canonical names come from `client/src/harnesses/names.ts`:
+ *   CLAUDE_CODE_HARNESS = 'claude-code'
+ *   CODEX_HARNESS       = 'codex'
+ *   HERMES_AGENT_HARNESS = 'hermes-agent'
+ * PredictionV1BaselineImpl.name = 'prediction-v1-baseline' (from its index.ts).
+ */
+export function selectorToHarnessName(sel: HarnessSelector): string {
+  switch (sel) {
+    case 'hermes-agent':           return 'hermes-agent';
+    case 'claude-code':            return 'claude-code';
+    case 'codex':                  return 'codex';
+    case 'prediction-v1-baseline': return 'prediction-v1-baseline';
+  }
 }
 
 // ── Contract deployment helpers ───────────────────────────────────────────────
@@ -744,7 +796,7 @@ export interface RunningDaemon {
 export async function startDaemon(
   fixture: DaemonHarnessFixture,
   operator: BootstrappedOperator,
-  _harnessSelector: HarnessSelector,
+  harnessSelector: HarnessSelector,
   ipfsGatewayUrl?: string,
   v3Env?: TaskV3Env,
   /**
@@ -762,23 +814,45 @@ export async function startDaemon(
   const storePath = join(fixture.implStateRoot, 'daemon-jinn.db');
   const store = new Store(storePath);
 
-  // 2. Let the OS allocate a free port at daemon-startup time (apiPort: 0).
-  //    Using 0 avoids a TOCTOU race — no pre-allocation window where another
-  //    process could grab the port between our close() and the daemon's bind.
-  const apiPort = 0;
-  // NOTE: daemonApiUrl uses port 0 before daemon.start(). After daemon.start()
-  // the actual port is bound and can be read from `daemon.apiServer?.port`.
-  // The prediction-v1-baseline harness runs fully in-process and does not use
-  // this URL at all, so the placeholder is safe for Task 5.
-  const daemonApiUrl = `http://127.0.0.1:${apiPort}`;
+  // 2. Fix for the Task 3 latent daemonApiUrl: 0 bug.
+  //
+  //    The root cause: subprocess-based harnesses (hermes-agent, claude-code,
+  //    codex) bake `daemonApiUrl` at construction time inside `buildHarnesses`.
+  //    If we call `buildHarnesses` before `daemon.start()`, the URL contains
+  //    port 0 and every harness subprocess gets `DAEMON_API_URL=http://127.0.0.1:0`.
+  //
+  //    Fix chosen: **option (b) — pre-start the API server** via `startApiServer`
+  //    before constructing the daemon. `startApiServer({ port: 0 })` lets the OS
+  //    assign a free port and returns the real bound port. We then pass this
+  //    already-started server to `Daemon` via `config.apiServer` so the daemon
+  //    adopts it instead of starting its own. The pre-started server is closed in
+  //    `stop()` since `ownsApiServer=false` means Daemon won't close it.
+  //
+  //    This approach:
+  //      ✓ No TOCTOU race (OS-assigned port stays bound until daemon adopts it)
+  //      ✓ No production code changes needed (DaemonConfig.apiServer is the
+  //        established injection mechanism used by main.ts setup-mode)
+  //      ✓ Harnesses receive the real URL at construction time
+  const preStartedApiServer = await startApiServer({
+    port: 0,      // OS assigns a free port — actual port read from .port below
+    store,
+    apiToken: 'test-token-daemon-harness', // test-only; cost-mutating routes not exercised
+  });
+  const daemonApiUrl = `http://127.0.0.1:${preStartedApiServer.port}`;
+  console.log(`[startDaemon] pre-started API server on port ${preStartedApiServer.port}`);
 
-  // 3. Build harnesses. Mirror the HarnessEnv shape from main.ts §1614.
-  //    - claudePath / claudeModel: use env vars with production defaults
+  // 3. Build harnesses with the real daemonApiUrl. Mirror the HarnessEnv shape
+  //    from main.ts §1614. All subprocess-harness URL fields are populated so
+  //    hermes-agent / claude-code / codex subprocesses get a working API URL.
   //    - runner: omitted → LegacyClaudeImpl is not constructed
   //    - storePath: wired so harnesses can hand off artifacts through SQLite
   //    - implStateDirRoot: use fixture.implStateRoot so harness state is isolated
   const claudePath = process.env['JINN_CLAUDE_PATH'] ?? 'claude';
   const claudeModel = process.env['JINN_CLAUDE_MODEL'] ?? 'claude-haiku-4-5-20251001';
+
+  const resolvedIpfsRegistryUrl = ipfsRegistryUrl
+    ?? process.env['JINN_IPFS_REGISTRY_URL']
+    ?? 'https://registry.autonolas.tech';
 
   const harnessList = buildHarnesses({
     rpcUrl,
@@ -792,20 +866,49 @@ export async function startDaemon(
     // daemonApiToken omitted → harnesses will handle missing token gracefully
     implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
     // ipfsRegistryUrl wired so harnesses that upload artifacts use the mock
-    ipfsRegistryUrl: ipfsRegistryUrl ?? process.env['JINN_IPFS_REGISTRY_URL'] ?? 'https://registry.autonolas.tech',
+    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+    // Codex subprocess env defaults
+    codexPath: process.env['JINN_CODEX_PATH'] ?? 'codex',
+    codexModel: process.env['JINN_CODEX_MODEL'] ?? 'gpt-4.1-mini',
+    // Hermes subprocess env defaults
+    hermesPath: process.env['JINN_HERMES_PATH'] ?? 'hermes',
+    hermesModel: process.env['JINN_HERMES_MODEL'] ?? 'google/gemini-2.5-flash',
+    hermesProvider: process.env['JINN_HERMES_PROVIDER'] ?? 'openrouter',
     // externalImpls omitted — no operator-supplied harnesses
     // disabledNames omitted — use production defaults
   });
 
+  // 4. Wire the selected harness into HarnessRegistry dispatch.
+  //
+  //    HermesHarness.supports() now returns true for any restoration role,
+  //    but PredictionV1BaselineImpl is registered BEFORE hermes-agent in
+  //    buildHarnesses(), so prediction.v1 falls to the baseline by first-match.
+  //    LearnerHarness.supports() explicitly returns false for 'prediction.v1'
+  //    (because prediction.v1 has a first-party typed harness). So for
+  //    hermes-agent / claude-code / codex to handle prediction.v1 tasks we
+  //    must override dispatch via solverTypeHarnesses rather than first-match.
+  //
+  //    PredictionV1BaselineImpl.supports() returns true for prediction.v1, so
+  //    that stays as first-match (no solverTypeHarnesses entry needed for it).
+  //
+  //    The selected harness name is the canonical name from names.ts —
+  //    see `selectorToHarnessName` above.
+  const selectedHarnessName = selectorToHarnessName(harnessSelector);
+  const solverTypeHarnesses: Record<string, string> =
+    harnessSelector === 'prediction-v1-baseline'
+      ? {}
+      : { 'prediction.v1': selectedHarnessName };
+
   const implRegistry = new HarnessRegistry({
     default: DEFAULT_HARNESS,
     disabled: [...DEFAULT_DISABLED_HARNESSES],
+    solverTypeHarnesses,
   });
   for (const impl of harnessList) {
     implRegistry.register(impl);
   }
 
-  // 4. Build MechAdapter. Translation of main.ts §1469.
+  // 5. Build MechAdapter. Translation of main.ts §1469.
   //    - routerClaimDeliveryVariant: 'v3' when v3Env is provided (local stack);
   //      'v1' otherwise (production router).
   //    - routerAddress / mechContractAddress: use v3Env addresses when provided;
@@ -826,9 +929,6 @@ export async function startDaemon(
     : chainCfg.mechMarketplace as `0x${string}`;
   const routerClaimDeliveryVariant = v3Env ? 'v3' : chainCfg.routerClaimDeliveryVersion;
 
-  const resolvedIpfsRegistryUrl = ipfsRegistryUrl
-    ?? process.env['JINN_IPFS_REGISTRY_URL']
-    ?? 'https://registry.autonolas.tech';
   const resolvedIpfsGatewayUrl = ipfsGatewayUrl
     ?? process.env['JINN_IPFS_GATEWAY_URL']
     ?? 'https://gateway.autonolas.tech';
@@ -850,12 +950,12 @@ export async function startDaemon(
     // evictionRecovery: omitted — no master wallet in test
   }, store);
 
-  // 5. Build agent viem clients for deliveryDeps (mirrors main.ts §1513 + §1699).
+  // 6. Build agent viem clients for deliveryDeps (mirrors main.ts §1513 + §1699).
   //    These are required for the full delivery path (Task 5+).
   const { createClients } = await import('../../src/adapters/mech/safe.js');
   const agentClients = createClients(rpcUrl, operator.agentPrivateKey, base);
 
-  // 6. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
+  // 7. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
   //    - packagingDeps: operatorEndpoint + pricing config for artifact serving.
   //      No artifact donation in tests; donation.enabled = false.
   //    - envelopeDeps: agent EOA private key + IPFS registry URL for envelope upload.
@@ -888,13 +988,15 @@ export async function startDaemon(
     // evictionRecovery: omitted — no master wallet in test
   };
 
-  // 7. Construct Daemon. Translation of main.ts §2046.
+  // 8. Construct Daemon. Translation of main.ts §2046.
   //    - store: injected so Daemon does NOT own it (our stop() closes it explicitly)
-  //    - taskSources: omitted (no creator-side tasks in Task 5)
+  //    - taskSources: omitted (no creator-side tasks in Task 5+)
   //    - peers / subgraphUrl / nodeEndpoint: omitted (test environment)
   //    - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → no loops)
-  //    - status: omitted (GET /v1/status not exercised in Task 5)
+  //    - status: omitted (GET /v1/status not exercised here)
   //    - corpusFactory: omitted (no subgraph configured)
+  //    - apiServer: the pre-started server from step 2 — Daemon adopts it
+  //      (ownsApiServer=false) so our stop() must close it explicitly.
   const daemon = new Daemon({
     adapter: mechAdapter,
     // runner not passed — Daemon accepts undefined runner; LegacyClaudeImpl
@@ -903,14 +1005,12 @@ export async function startDaemon(
     store,        // Daemon adopts (ownsStore=false); our stop() handles close
     dbPath: storePath, // used only when store is absent; kept for completeness
     pollIntervalMs: 300,  // shortened from production 5000ms for test cadence
-    apiPort,
-    // apiBindHost: default 127.0.0.1 is fine
-    // apiToken: omitted → Daemon generates a random per-process token
+    apiServer: preStartedApiServer, // inject pre-started server (ownsApiServer=false)
+    // apiToken: not passed because we injected apiServer with its own token above
     peers: [],
     creatorSafeAddress: operator.safeAddress,
     // subgraphUrl / nodeEndpoint / x402 / signer: omitted
     // rewardClaim / balanceTopup / jinnClaim: omitted → those loops don't start
-    // corpusFactory / apiServer: omitted → Daemon starts its own API server
     restorationEngine: {
       paths: {
         workingDirRoot: fixture.workingDirRoot,
@@ -920,7 +1020,9 @@ export async function startDaemon(
       packagingDeps,
       envelopeDeps,
       deliveryDeps,
-      // joinedSolverNets: omitted — engine falls back to legacy solverType gate
+      // joinedSolverNets: omitted — engine falls back to legacy solverType gate.
+      // Harness dispatch for non-baseline selectors is driven by
+      // implRegistry.config.solverTypeHarnesses (wired in step 4 above).
       // manifestResolver / identityPublisher / reputationFeedback: omitted
       operatorConfig: {
         publicEndpoint: daemonApiUrl,
@@ -932,7 +1034,7 @@ export async function startDaemon(
     },
   });
 
-  // 8. Start the daemon (kicks off all configured loops).
+  // 9. Start the daemon (kicks off all configured loops).
   await daemon.start();
 
   let stopped = false;
@@ -941,6 +1043,10 @@ export async function startDaemon(
     stopped = true;
     await daemon.stop();
     store.close();
+    // Close the pre-started API server: the Daemon does NOT own it
+    // (ownsApiServer=false when config.apiServer is injected), so we
+    // are responsible for closing it here.
+    await preStartedApiServer.close().catch(() => {});
   };
 
   return { daemon, store, stop };
