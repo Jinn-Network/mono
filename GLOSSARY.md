@@ -1,6 +1,6 @@
 # GLOSSARY
 
-**What this doc is / is not.** This is the canonical dictionary of Jinn-specific terms — *vessel, vow, summon, smoke, seer, wane*, and the rest of the lexicon. It is not a place to debate naming, document deprecated terminology, or capture brand voice (see `BRAND.md`); definitions here are load-bearing and may not be redefined elsewhere in the repo. Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
+**What this doc is / is not.** This is the canonical dictionary of Jinn-specific terms — *vessel, vow, summon, smoke, seer, wane*, and the rest of the lexicon. It is not a place to debate naming or capture brand voice (see `BRAND.md`); definitions here are load-bearing and may not be redefined elsewhere in the repo. Historical and deprecated names are included so renames stay searchable and unambiguous — see "Deprecated and historical names" at the bottom. Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
 
 <!-- Sections expand as terms ratify; see GitHub Discussions for upstream proposals. -->
 
@@ -24,7 +24,7 @@ Jinn has none of these. Naming this explicitly is load-bearing in pitch and grow
 
 The role that stakes JINN to direct emissions toward task types the network should get better at — and that defines the evaluation criteria attempts are graded against. A Curator launches and configures a SolverNet.
 
-Replaces the earlier name "Trainer", which inherited the LLM-training frame.
+Replaces the earlier names "Launcher" and "Trainer" — *Trainer* inherited the LLM-training frame; *Launcher* named the act (launching a SolverNet) rather than the role.
 
 ## Network primitives and process
 
@@ -47,3 +47,13 @@ In external writing, never leave "solution" as an abstract noun without at least
 In Jinn, the network learns by doing — running attempts, scoring them, accumulating the corpus, and improving the search across it. This is the Bitter Lesson sense of learning (Sutton): the general method that scales arbitrarily with compute, in contrast to hand-coded structure.
 
 Used in place of "training" in external contexts. Builders hear "training" as gradient descent on a model; "learning" carries the same conceptual weight without the LLM collapse.
+
+## Deprecated and historical names
+
+Included so renames remain searchable and unambiguous. Do not use the deprecated forms in new writing.
+
+| Deprecated | Current | Notes |
+|------------|---------|-------|
+| Trainer | Curator | Renamed to drop the LLM-training frame. |
+| Launcher | Curator | Earlier name that described the act (launching a SolverNet) rather than the role. |
+| training | learning | In external contexts (pitch decks, marketing, growth, external docs). "Training" remains acceptable in internal / technical writing where the LLM frame is not at risk. See BRAND.md "Replace 'training' in external contexts". |

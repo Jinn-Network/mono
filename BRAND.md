@@ -28,7 +28,7 @@ The market makes its own threats. We make the case for what is structurally inev
 
 ### Personal narrative stays in the room
 
-Where you've worked, why you left, who you know — none of this belongs in deck, presenter notes, or any written artefact. Critique of other protocols in writing should be third-party and factual.
+Where you've worked, why you left, who you know — none of this belongs in deck, presenter notes, or any written artefact. Critique of other protocols in writing should be factual and structural — name the mechanism, not the people or the anecdote.
 
 Total claims ("no one else has bet on X") need softening or named specifics on demand. Default in writing: soften.
 
@@ -49,6 +49,8 @@ These phrasings landed cleanly in a builder context — keep them in active voca
 - "no exit to satisfy" — names the pressure investors create.
 - "minted only from useful network activity" — the positive framing of the same point.
 - "community pushback" — names the visible consequence of insider allocation; builders recognise it from their own experience.
+
+These phrasings live inside the once-per-piece antagonist slot from "Lead from structure, not from fear" — use them when the antagonist appears, not as a recurring drumbeat. "Minted only from useful network activity" is the exception: it's positive framing, not antagonist framing, and can recur. The others belong on a budget of one per piece.
 
 ### Drop ironic or self-deprecating subtitles
 
@@ -71,7 +73,7 @@ Coherence in a headless brand comes from *consensus across competing narratives 
 - **The loop.** Creation → Execution → Evaluation → Knowledge. This is the whole shape of Jinn.
 - **The lexicon.** *summon, bind, vow, vessel, wish, smoke, seer, wane, release, scrying, ether, bound, broken.* These are the coordination vocabulary. Definitions live in `GLOSSARY.md` (the canonical dictionary). New terms are proposals, not unilateral additions.
 - **The content non-negotiables.** No emoji. No decorative gradients. No uncoined vow-language without proposal. Plain speech on money, safety, and legal consent.
-- **The role structure.** Creator, restorer, evaluator. What they do, not how they're depicted.
+- **The role structure.** Creator, restorer, evaluator, curator. What they do, not how they're depicted. Definitions in `GLOSSARY.md`.
 
 These are the things that, if they drift, make the brand something else. Treat them like a protocol change: propose, discuss, ratify.
 
