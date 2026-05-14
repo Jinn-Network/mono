@@ -12,6 +12,10 @@ Jinn is a training protocol for agentic intents. It defines a loop (Creation →
 
 Canonical docs are the repo's stable sources of truth. They change only via approved PRs (see `spec/2026-04-28-canonical-docs.md`). Always prefer canonical docs over restated information found elsewhere in the repo, and never redefine canonical content locally — link instead.
 
+[`PRINCIPLES.md`](PRINCIPLES.md) — This document should be read by agents at the beginning of all new sessions. All decision-making should run through these principles. Agents should keep their thinking and actions, as well as attempt to keep their human users' thinking and actions, in line with the principles stated herein.
+
+Other canonical docs:
+
 - `SPEC.md` — read before reasoning about the protocol loop, roles, contracts, or phase boundaries
 - `THESIS.md` — read before writing positioning, pitch, strategic copy, or any "why Jinn" framing
 - `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)

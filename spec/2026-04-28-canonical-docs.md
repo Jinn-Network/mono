@@ -38,6 +38,7 @@ The set is intentionally small. The whole value comes from being able to point a
 
 | File | Topic | Disposition |
 |---|---|---|
+| `PRINCIPLES.md` | Principles that govern every design and operational decision in Jinn — upstream of all other canonical docs | **Privileged**: read at the start of every agent session; decision-making runs through these principles |
 | `SPEC.md` | Protocol spec — the loop, roles, on-chain primitives, current phase boundaries | New; consolidates ratified material from `spec/` |
 | `THESIS.md` | Why Jinn exists; the bet; non-goals; what we are *not* | New; supersedes `PRODUCT.md` |
 | `BRAND.md` | Visual + voice canon; lexicon-adjacent style; non-negotiables | New; supersedes `DESIGN.md` (and absorbs voice from the design system) |
@@ -64,6 +65,7 @@ Two requirements, both enforced.
 
 ```
 # Canonical docs — require canon-owner review
+/PRINCIPLES.md @oaksprout @ritsukai
 /SPEC.md       @oaksprout @ritsukai
 /THESIS.md     @oaksprout @ritsukai
 /BRAND.md      @oaksprout @ritsukai
@@ -95,12 +97,18 @@ A new top-level section is added to `CLAUDE.md`. References use **triggered** ph
 
 Canonical docs are the repo's stable sources of truth. They change only via approved PRs (CODEOWNERS review + a linked GitHub Discussion; see `spec/2026-04-28-canonical-docs.md`). Always prefer canonical docs over restated information found elsewhere in the repo, and never redefine canonical content locally — link instead.
 
+[`PRINCIPLES.md`](PRINCIPLES.md) — This document should be read by agents at the beginning of all new sessions. All decision-making should run through these principles. Agents should keep their thinking and actions, as well as attempt to keep their human users' thinking and actions, in line with the principles stated herein.
+
+Other canonical docs:
+
 - `SPEC.md` — read before reasoning about the protocol loop, roles, contracts, or phase boundaries
 - `THESIS.md` — read before writing positioning, pitch, strategic copy, or any "why Jinn" framing
 - `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)
 - `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
 - `GLOSSARY.md` — read whenever a Jinn-specific term appears; never redefine terms locally
 ```
+
+`PRINCIPLES.md` is privileged among canonical docs: every agent session begins by reading it, and every decision is expected to run through it. Other canonical docs are read on triggered phrases.
 
 The existing `## Design System` section in `CLAUDE.md` is rewritten to defer to `BRAND.md` once `BRAND.md` is populated. In the bootstrap PR (where `BRAND.md` is still a stub) the section keeps its current content with a one-line note that it is being migrated.
 

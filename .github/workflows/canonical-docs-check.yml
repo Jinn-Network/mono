@@ -11,7 +11,7 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          CANON='^(SPEC|THESIS|BRAND|GROWTH|GLOSSARY)\.md$'
+          CANON='^(PRINCIPLES|SPEC|THESIS|BRAND|GROWTH|GLOSSARY)\.md$'
           changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
           if echo "$changed" | grep -E "$CANON" > /dev/null; then
             if ! echo "$PR_BODY" | grep -E 'github\.com/Jinn-Network/mono/discussions/[0-9]+' > /dev/null; then
