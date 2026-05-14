@@ -49,7 +49,7 @@ export interface ValidatedPoolEntry {
   checkedAt: string; // ISO timestamp
   /** Canonical-JSON SHA-256 over the HF row fields used for grading. v3+. */
   rowHash?: string;
-  /** Image tag the validation pulled. v3+. */
+  /** Full image reference (`<repo>:<tag>`) the validation pulled. v3+. */
   imageName?: string;
   /** Image digest resolved from `docker image inspect` after validation. v3+. */
   imageDigest?: string;

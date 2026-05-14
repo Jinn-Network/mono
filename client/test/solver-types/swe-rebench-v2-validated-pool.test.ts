@@ -214,7 +214,28 @@ describe('ValidatedPoolStore — extended substrate fields (semantics v3)', () =
     });
   });
 
-  it('EVAL_SEMANTICS_VERSION === "3"', () => {
+  it('round-trips an entry that omits the optional substrate fields, returning them as undefined', async () => {
+    const dir = tmpDir();
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record(
+      'a__nosubstrate',
+      {
+        scorable: true,
+        reason: 'gold-patch-resolves',
+        checkedAt: '2026-05-14T00:00:00Z',
+      },
+      EVAL_SEMANTICS_VERSION,
+    );
+    const entry = await store.getEntry('a__nosubstrate', EVAL_SEMANTICS_VERSION);
+    expect(entry).not.toBeNull();
+    expect(entry!.scorable).toBe(true);
+    expect(entry!.rowHash).toBeUndefined();
+    expect(entry!.imageName).toBeUndefined();
+    expect(entry!.imageDigest).toBeUndefined();
+    expect(entry!.upstreamEvalCommit).toBeUndefined();
+  });
+
+  it('is "3" — bump this when grading semantics change, and update the JSDoc history block above', () => {
     expect(EVAL_SEMANTICS_VERSION).toBe('3');
   });
 });
