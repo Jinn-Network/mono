@@ -517,6 +517,16 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
   // directly (predates the submit_typed_payload MCP tool). To be migrated to
   // the generic path below in a follow-up; until then, prediction.v1 keeps
   // its rich gating/informational shape via buildSolutionOutput.
+  //
+  // Migration scope: once jinn-prediction-plugin gets a submission-shape
+  // skill teaching the agent to write .execute/solution-payload.json (matching
+  // PredictionV1SolutionPayloadSchema), this whole branch + the
+  // prediction.v1 blocklist in learner/harness.ts:42 can be deleted, and the
+  // specialist harnesses (PredictionV1BaselineImpl, ClaudeMcpPredictionImpl)
+  // should be updated to write the generic file path too.
+  //
+  // Related: jinn-mono-kzlj (deferred — Prediction frozen per
+  // DR-2026-05-11-a). Reopen kzlj when the freeze lifts.
   if (solverType === 'prediction.v1') {
     const predictionSolution = findPredictionV1Solution(workingDir);
     if (!predictionSolution) {

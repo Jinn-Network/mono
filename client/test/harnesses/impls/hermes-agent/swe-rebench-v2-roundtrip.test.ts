@@ -62,6 +62,7 @@ describe('hermes-agent SWE-rebench v2 roundtrip', () => {
     try {
       const adapter = new HermesHarnessAdapter({
         hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
         hermesModel: 'anthropic/claude-opus-4.6',
         hermesProvider: 'anthropic',
         daemonApiUrl: 'http://127.0.0.1:7331',

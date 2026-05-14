@@ -75,6 +75,7 @@ describe('HermesHarnessAdapter', () => {
     try {
       const adapter = new HermesHarnessAdapter({
         hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
         hermesProvider: 'anthropic',
         daemonApiUrl: 'http://127.0.0.1:7331',
         daemonApiToken: 'tok',
@@ -92,12 +93,17 @@ describe('HermesHarnessAdapter', () => {
       expect(call.command).toBe('/bin/fake-hermes');
       expect(call.args).toContain('chat');
       expect(call.args).toContain('-q');
+      // Quiet/programmatic mode — suppress banner/spinner/tool previews.
+      expect(call.args).toContain('-Q');
       expect(call.args).toContain('--model');
       expect(call.args).toContain('anthropic/claude-opus-4.6');
       expect(call.args).toContain('--provider');
       expect(call.args).toContain('anthropic');
-      expect(call.args).toContain('-w');
-      expect(call.args).toContain(work);
+      // No `-w <workingDir>` — `hermes chat` has no such flag (`--worktree` is
+      // a boolean we deliberately don't pass); the cwd comes from the spawn
+      // options + `terminal.cwd` in the per-Task config.yaml.
+      expect(call.args).not.toContain('-w');
+      expect(call.options.cwd).toBe(work);
       expect(call.options.env?.HERMES_HOME).toBe(home);
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -114,6 +120,7 @@ describe('HermesHarnessAdapter', () => {
     try {
       const adapter = new HermesHarnessAdapter({
         hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
         daemonApiUrl: 'http://127.0.0.1:7331',
         daemonApiToken: 'tok',
         corpusEnv: {},
