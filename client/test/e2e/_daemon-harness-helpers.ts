@@ -1013,9 +1013,8 @@ export async function startDaemon(
   //      (ownsApiServer=false) so our stop() must close it explicitly.
   const daemon = new Daemon({
     adapter: mechAdapter,
-    // runner not passed — Daemon accepts undefined runner; LegacyClaudeImpl
-    // was not constructed since runner was omitted from buildHarnesses above
-    runner: undefined as unknown as import('../../src/runner/runner.js').Runner,
+    // runner omitted — DaemonConfig.runner is optional and only consumed by
+    // LegacyClaudeImpl, which we didn't include in buildHarnesses.
     store,        // Daemon adopts (ownsStore=false); our stop() handles close
     dbPath: storePath, // used only when store is absent; kept for completeness
     pollIntervalMs: 300,  // shortened from production 5000ms for test cadence
