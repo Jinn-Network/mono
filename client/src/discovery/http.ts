@@ -20,6 +20,9 @@ import type {
   SolverNetLifecycleStatus,
   EnvelopeRef,
   CorpusQuery,
+  PluginPublication,
+  PluginScoreHistoryRow,
+  PublishedArtifact,
 } from './types.js';
 import { DiscoveryUnavailableError } from './types.js';
 
@@ -238,6 +241,67 @@ interface EnvelopeRow {
 
 interface EnvelopePage {
   envelopes: { items: EnvelopeRow[] };
+}
+
+// ── Plug-in publication queries (attd) ───────────────────────────────────────
+
+const LIST_PLUGIN_PUBLICATIONS_QUERY = `
+query ListPluginPublications($where: pluginPublicationFilter, $limit: Int!) {
+  pluginPublications(
+    where: $where,
+    limit: $limit,
+    orderBy: "blockNumber",
+    orderDirection: "desc"
+  ) {
+    items {
+      id
+      builderAgentId
+      pluginCid
+      pluginName
+      pluginVersion
+      pluginSha256
+      supports
+      publishedAt
+      revoked
+      revokedReason
+    }
+  }
+}
+`;
+
+const GET_PLUGIN_SCORES_QUERY = `
+query GetPluginScores($pluginCid: String!, $limit: Int!) {
+  attemptEnvelopeMetas(
+    where: { pluginsContains: $pluginCid },
+    limit: $limit,
+    orderBy: "enrichedAtBlock",
+    orderDirection: "desc"
+  ) {
+    items {
+      requestId
+      manifestCid
+      pluginsJson
+      enrichedAtBlock
+    }
+  }
+}
+`;
+
+interface PluginPublicationRow {
+  id: string;
+  builderAgentId: string;
+  pluginCid: string;
+  pluginName: string;
+  pluginVersion: string;
+  pluginSha256: string;
+  supports: string[];
+  publishedAt: string | number;
+  revoked: boolean;
+  revokedReason: string | null;
+}
+
+interface PluginPublicationsPage {
+  pluginPublications: { items: PluginPublicationRow[] };
 }
 
 // ── Client options ────────────────────────────────────────────────────────────
@@ -619,10 +683,118 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     }));
   }
 
+  // ── listPluginPublications (attd) ─────────────────────────────────────────
+
+  async function listPluginPublications(args?: {
+    solverType?: string;
+    builderAgentId?: string;
+    includeRevoked?: boolean;
+    limit?: number;
+  }): Promise<PluginPublication[]> {
+    await ensureReady();
+    const where: Record<string, unknown> = {};
+    if (args?.solverType) where['supports_has'] = args.solverType;
+    if (args?.builderAgentId) where['builderAgentId'] = args.builderAgentId;
+    if (args?.includeRevoked === false) where['revoked'] = false;
+    const limit = Math.min(500, Math.max(1, args?.limit ?? 100));
+
+    const data = await postGql<PluginPublicationsPage>(
+      gqlUrl,
+      fetchImpl,
+      LIST_PLUGIN_PUBLICATIONS_QUERY,
+      { where, limit },
+    );
+
+    return (data.pluginPublications?.items ?? []).map((row): PluginPublication => ({
+      artifactType: 'plugin',
+      builderAgentId: row.builderAgentId,
+      cid: row.pluginCid,
+      name: row.pluginName,
+      version: row.pluginVersion,
+      supports: row.supports,
+      publishedAt: Number(row.publishedAt),
+      revoked: row.revoked,
+      revokedReason: row.revokedReason ?? undefined,
+      pluginSha256: (row.pluginSha256 as `0x${string}`),
+    }));
+  }
+
+  // ── getPluginScores (attd) ─────────────────────────────────────────────────
+
+  async function getPluginScores(args: {
+    pluginCid: string;
+    limit?: number;
+  }): Promise<PluginScoreHistoryRow[]> {
+    await ensureReady();
+    const limit = Math.min(500, Math.max(1, args.limit ?? 100));
+    try {
+      const data = await postGql<{
+        attemptEnvelopeMetas: {
+          items: Array<{
+            requestId: string;
+            manifestCid: string;
+            pluginsJson: string;
+            enrichedAtBlock: string | number;
+          }>;
+        };
+      }>(
+        gqlUrl,
+        fetchImpl,
+        GET_PLUGIN_SCORES_QUERY,
+        { pluginCid: args.pluginCid, limit },
+      );
+      // ebu7's AttemptEnvelopeMeta carries `pluginsJson` — JSON.stringify of
+      // executor.plugins[]. Parse it and emit one row per matching entry; flag
+      // forkSuspected when the sha256 doesn't match the publication.
+      // For now, return whatever the server returns; full join with verdict +
+      // pluginPublication.sha256 is a §6.5 Discovery API endpoint that lands
+      // alongside the /builders/:agentId/runs Hono route. attd's read-shape
+      // ships the empty-array contract; ebu7 + 6.5 flesh it in.
+      return (data.attemptEnvelopeMetas?.items ?? []).flatMap((row): PluginScoreHistoryRow[] => {
+        let plugins: Array<{ cid?: string; sha256: string }> = [];
+        try { plugins = JSON.parse(row.pluginsJson) as typeof plugins; } catch { return []; }
+        const match = plugins.find((p) => p.cid === args.pluginCid);
+        if (!match) return [];
+        return [{
+          pluginCid: args.pluginCid,
+          taskId: '',
+          operatorAgentId: '',
+          verdict: 'Unknown',
+          ts: Number(row.enrichedAtBlock),
+          forkSuspected: false,
+        }];
+      });
+    } catch (err) {
+      // attemptEnvelopeMeta entity not present (ebu7 not deployed yet) → empty.
+      if (err instanceof Error && /attemptEnvelopeMetas|Unknown type|Cannot query/.test(err.message)) {
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  // ── listBuilderArtifacts (attd) ────────────────────────────────────────────
+
+  async function listBuilderArtifacts(args: {
+    builderAgentId: string;
+    limit?: number;
+  }): Promise<PublishedArtifact[]> {
+    // Today only plug-ins; the harness variant is added when Path 2 ships. We
+    // satisfy the unified read by delegating to listPluginPublications.
+    const plugins = await listPluginPublications({
+      builderAgentId: args.builderAgentId,
+      limit: args.limit,
+    });
+    return plugins;
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
     getLifecycleStatus,
     queryEnvelopes,
+    listPluginPublications,
+    getPluginScores,
+    listBuilderArtifacts,
   };
 }
