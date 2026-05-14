@@ -153,7 +153,7 @@ async function main() {
     const result = await harness.run(ctx);
     const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
 
-    console.log(`\n[replay] ✓ harness.run() returned in ${elapsedSec}s`);
+    console.log(`\n[replay] PASS — harness.run() returned in ${elapsedSec}s`);
     console.log(`[replay] verdict: ${(result.gating as Record<string, unknown>)?.['verdict']}`);
     console.log(`[replay] passed_match: ${(result.gating as Record<string, unknown>)?.['passed_match']}`);
     console.log(`[replay] score: ${(result.gating as Record<string, unknown>)?.['score']}`);
@@ -173,10 +173,10 @@ async function main() {
 main().catch((err) => {
   const name = (err as { name?: string })?.name;
   if (name === 'SkippableError') {
-    console.error(`\n[replay] ✗ SkippableError thrown: ${(err as { reason?: string })?.reason ?? 'unknown'}`);
+    console.error(`\n[replay] FAIL — SkippableError thrown: ${(err as { reason?: string })?.reason ?? 'unknown'}`);
     console.error(`[replay] message: ${(err as Error).message}`);
   } else {
-    console.error(`\n[replay] ✗ unexpected error:`, err);
+    console.error(`\n[replay] FAIL — unexpected error:`, err);
   }
   process.exit(1);
 });

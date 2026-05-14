@@ -117,7 +117,7 @@ export interface SweRebenchV2EvaluatorHarnessOptions {
     /**
      * Override the state directory used for the {@link ValidatedPoolStore}
      * substrate-recheck. Defaults to `JINN_SWE_REBENCH_V2_STATE_DIR` env
-     * var or `~/.jinn-client/solver-types/swe-rebench-v2`.
+     * var or `~/.jinn-client/swe-rebench-v2`.
      */
     stateDir?: string;
     /**
@@ -406,7 +406,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         const pool = await loadPool();
         const poolTask = pool.find((t) => t.instance_id === task.instance_id);
         // Fall back to empty string if not found — matches validate-pool's
-        // `task.base_commit ?? ''` defensive fallback for degenerate rows.
+        // `task.patch ?? ''` defensive fallback for degenerate rows.
         goldPatch = poolTask?.patch ?? '';
       } catch (err) {
         // Pool load failed (HF outage, cache corruption, etc.) — can't recompute rowHash.
