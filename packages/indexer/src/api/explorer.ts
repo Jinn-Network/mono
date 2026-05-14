@@ -134,76 +134,61 @@ function parseBigIntParam(raw: string | undefined, def: bigint, max: bigint): bi
  * Scoped to EXPLORER_CHAIN_ID so it reflects only the activity the explorer
  * surfaces.
  */
-async function getIndexedHead(): Promise<bigint> {
-  const [
-    taskMax,
-    attemptMax,
-    verdictMax,
-    rewardMax,
-    manifestMax,
-    envelopeMax,
-    checkpointMax,
-    attemptMetaMax,
-    verdictMetaMax,
-  ] = await Promise.all([
+async function getIndexedHead(): Promise<{ lastIndexedBlock: bigint; validator: string }> {
+  const entries = await Promise.all([
     db
       .select({ v: max(schema.task.createdAtBlock) })
       .from(schema.task)
       .where(eq(schema.task.chainId, EXPLORER_CHAIN_ID))
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['task', r[0]?.v ?? null] as const),
     db
       .select({ v: max(schema.attempt.createdAtBlock) })
       .from(schema.attempt)
       .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID))
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['attempt', r[0]?.v ?? null] as const),
     db
       .select({ v: max(schema.verdict.createdAtBlock) })
       .from(schema.verdict)
       .where(eq(schema.verdict.chainId, EXPLORER_CHAIN_ID))
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['verdict', r[0]?.v ?? null] as const),
     db
       .select({ v: max(schema.rewardDistribution.claimedAtBlock) })
       .from(schema.rewardDistribution)
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['reward', r[0]?.v ?? null] as const),
     db
       .select({ v: max(schema.solverNetManifest.anchorBlock) })
       .from(schema.solverNetManifest)
       .where(eq(schema.solverNetManifest.chainId, EXPLORER_CHAIN_ID))
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['manifest', r[0]?.v ?? null] as const),
     db
       .select({ v: max(schema.envelope.publishedAtBlock) })
       .from(schema.envelope)
       .where(eq(schema.envelope.chainId, EXPLORER_CHAIN_ID))
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['envelope', r[0]?.v ?? null] as const),
     db
       .select({ v: max(schema.harnessCheckpoint.publishedAtBlock) })
       .from(schema.harnessCheckpoint)
       .where(eq(schema.harnessCheckpoint.chainId, EXPLORER_CHAIN_ID))
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['checkpoint', r[0]?.v ?? null] as const),
     db
       .select({ v: max(schema.attemptEnvelopeMeta.enrichedAtBlock) })
       .from(schema.attemptEnvelopeMeta)
       .where(eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID))
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['attemptMeta', r[0]?.v ?? null] as const),
     db
       .select({ v: max(schema.verdictEnvelopeMeta.enrichedAtBlock) })
       .from(schema.verdictEnvelopeMeta)
       .where(eq(schema.verdictEnvelopeMeta.chainId, EXPLORER_CHAIN_ID))
-      .then((r) => r[0]?.v ?? null),
+      .then((r) => ['verdictMeta', r[0]?.v ?? null] as const),
   ]);
-  const candidates = [
-    taskMax,
-    attemptMax,
-    verdictMax,
-    rewardMax,
-    manifestMax,
-    envelopeMax,
-    checkpointMax,
-    attemptMetaMax,
-    verdictMetaMax,
-  ].filter((v): v is bigint => v !== null);
-  if (candidates.length === 0) return 0n;
-  return candidates.reduce((best, cur) => (cur > best ? cur : best), 0n);
+  const candidates = entries.map(([, v]) => v).filter((v): v is bigint => v !== null);
+  const lastIndexedBlock = candidates.length === 0
+    ? 0n
+    : candidates.reduce((best, cur) => (cur > best ? cur : best), 0n);
+  const validator = entries
+    .map(([name, v]) => `${name}:${(v ?? 0n).toString()}`)
+    .join('|');
+  return { lastIndexedBlock, validator };
 }
 
 type VerdictTruthRow = {
@@ -262,13 +247,14 @@ function verdictTruthDisagreementCountSql() {
 function explorerFreshness() {
   return withFreshness(async (c) => {
     // Parallel: DB head + chain-head RPC (cached; fast path is memory-only).
-    const [lastIndexedBlock, chainHead] = await Promise.all([
+    const [indexedHead, chainHead] = await Promise.all([
       getIndexedHead(),
       getChainHead(),
     ]);
     const meta: FreshnessMeta = {
-      lastIndexedBlock,
+      lastIndexedBlock: indexedHead.lastIndexedBlock,
       lastIndexedAt: new Date().toISOString(),
+      validator: indexedHead.validator,
     };
     // Stash for route body to read — avoids second DB / RPC round trips.
     c.set('indexedHead', meta);

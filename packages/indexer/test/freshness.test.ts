@@ -64,6 +64,27 @@ describe('withFreshness middleware', () => {
     expect(res.headers.get('etag')).toBe('W/"9999999"');
   });
 
+  it('ETag can use a composite validator instead of only lastIndexedBlock', async () => {
+    const app = new Hono();
+    app.use(
+      '*',
+      withFreshness(() => ({
+        lastIndexedBlock: 9999999n,
+        lastIndexedAt: '2026-06-01T00:00:00Z',
+        validator: 'base:9999999|reward:123',
+      })),
+    );
+    app.get('/z', (c) => c.json({ ok: true }));
+
+    const res = await app.request('/z');
+    expect(res.headers.get('etag')).toBe('W/"base:9999999|reward:123"');
+
+    const res304 = await app.request('/z', {
+      headers: { 'If-None-Match': 'W/"base:9999999|reward:123"' },
+    });
+    expect(res304.status).toBe(304);
+  });
+
   it('headers are present on 200 responses from downstream handlers', async () => {
     const app = makeApp(42n);
     const res = await app.request('/x');

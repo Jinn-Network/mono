@@ -10,11 +10,10 @@
  *
  * Cache policy:
  *   Cache-Control: public, max-age=30, stale-while-revalidate=60
- *   ETag: W/"<lastIndexedBlock>"
+ *   ETag: W/"<validator>"
  *
- * The ETag is a weak validator on the last indexed block — a change to the
- * indexed head always produces a new ETag, so clients that re-validate with
- * If-None-Match get a 304 hit when the index hasn't advanced.
+ * The ETag is a weak validator on the indexed data visible to the route. When
+ * callers omit a custom validator, lastIndexedBlock is used for compatibility.
  */
 import type { Context, MiddlewareHandler } from 'hono';
 
@@ -24,6 +23,8 @@ export interface FreshnessMeta {
   lastIndexedBlock: bigint;
   /** ISO 8601 timestamp of when that block was indexed. */
   lastIndexedAt: string;
+  /** Optional route-specific validator when one block number is not enough. */
+  validator?: string;
 }
 
 /**
@@ -35,7 +36,7 @@ export interface FreshnessMeta {
  * downstream route handler — avoiding a second DB round-trip.
  *
  * The middleware:
- * 1. Computes `ETag: W/"<lastIndexedBlock>"`.
+ * 1. Computes `ETag: W/"<validator>"`.
  * 2. If the request's `If-None-Match` header equals the current ETag,
  *    responds with `304 Not Modified` and an empty body (short-circuit).
  * 3. Otherwise, calls `next()` and then sets `ETag` and `Cache-Control` on
@@ -69,7 +70,8 @@ export function withFreshness(
 ): MiddlewareHandler {
   return async (c, next) => {
     const meta = await getMeta(c);
-    const etag = `W/"${meta.lastIndexedBlock}"`;
+    const token = (meta.validator ?? meta.lastIndexedBlock.toString()).replace(/["\\]/g, '-');
+    const etag = `W/"${token}"`;
 
     // Short-circuit with 304 if the client's cached copy is still current.
     if (c.req.header('If-None-Match') === etag) {
