@@ -155,4 +155,47 @@ describe('runHarnessWithFreezeFence on HermesHarness', () => {
       rmSync(work, { recursive: true, force: true });
     }
   });
+
+  it('frozen mode still fences non-tirith binaries in Hermes bin', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hermes-frozen-bin-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-frozen-bin-wd-'));
+    writeFileSync(join(home, 'before.txt'), 'snapshot');
+
+    try {
+      const fakeAdapter = {
+        name: 'hermes-agent',
+        runTask: async () => {
+          mkdirSync(join(home, 'bin'), { recursive: true });
+          writeFileSync(join(home, 'bin', 'unexpected-tool'), '#!/bin/sh\n');
+        },
+      };
+      const harness = new HermesHarness({ adapter: fakeAdapter as any });
+
+      const ctx = {
+        task: {
+          id: 't',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+          window: { startTs: 0, endTs: Date.now() + 60_000 },
+          spec: {},
+        },
+        requestId: 'r',
+        implStateDir: home,
+        workingDir: work,
+        mode: 'frozen' as const,
+        abort: new AbortController().signal,
+        msUntilEndTs: () => 60_000,
+        solverPluginRoots: [],
+      } as unknown as HarnessContext;
+
+      const result = await runHarnessWithFreezeFence(harness, ctx);
+
+      expect(result.ok).toBe(false);
+      expect(() => readFileSync(join(home, 'bin', 'unexpected-tool'))).toThrow();
+      expect(readFileSync(join(home, 'before.txt'), 'utf8')).toBe('snapshot');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
 });

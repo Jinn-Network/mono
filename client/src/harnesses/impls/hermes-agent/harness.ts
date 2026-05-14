@@ -24,7 +24,7 @@ export interface HermesHarnessConfig {
 export class HermesHarness implements Harness {
   readonly name = HERMES_AGENT_HARNESS;
   readonly version: string;
-  readonly freezeStateHashIgnore = ['auth', 'auth.json', 'bin', '.env', 'config.yaml'] as const;
+  readonly freezeStateHashIgnore = ['auth', 'auth.json', 'bin/tirith', '.env', 'config.yaml'] as const;
   private readonly adapter: HermesHarnessAdapter;
 
   constructor(config: HermesHarnessConfig) {

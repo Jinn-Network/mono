@@ -49,7 +49,9 @@ const TOOLSET_ALLOWLIST = [
  *
  * Hermes may refresh OAuth access tokens mid-task. The HermesHarness excludes
  * these runtime-only files from the daemon state digest while still fencing the
- * learning surface (memories/, skills/, sessions/, and ordinary files).
+ * learning surface (memories/, skills/, sessions/, and ordinary files). The
+ * binary exception is intentionally limited to Hermes's managed `bin/tirith`
+ * security scanner instead of the whole `bin/` tree.
  */
 const OPERATOR_STATE_TO_SEED = ['auth', 'auth.json', 'bin'] as const;
 
