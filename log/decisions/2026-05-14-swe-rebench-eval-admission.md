@@ -2,7 +2,7 @@
 
 Date: 2026-05-14
 Author: opus
-Resolves: `jinn-mono-fufn` (spike output); `jinn-mono-b609` (closed in favour of this approach)
+Output of: `jinn-mono-fufn` (spike); closes `jinn-mono-b609` (in favour of this approach)
 
 ## Summary
 
@@ -13,9 +13,9 @@ Do not emit `Invalid(3)` for ungradeable evals in this phase.
 ## Context
 
 The 2026-05-14 triage surfaced ~64% of recent FAIL verdicts as eval-container
-failures, not model failures. The spike `jinn-mono-fufn` (see
-`docs/superpowers/specs/2026-05-14-eval-substrate-spike.md`) explored four
-candidate properties for the eval boundary; this DR ratifies the v1
+failures, not model failures. The spike (see `docs/superpowers/specs/2026-05-14-eval-substrate-spike.md`)
+explored where the eval boundary belongs, verdict polarity, cross-SolverType
+generalisation, and upstream-forking trade-offs; this DR ratifies the v1
 implementation choice.
 
 ## Decision
@@ -64,6 +64,18 @@ implementation choice.
 - `rowHash` + `imageDigest` recheck at verdict time catches drift between
   admission and grading — the case neither pure admission gating nor pure
   classifier-fix would catch on its own.
+- The spike's §4 also recommended a polarity flip (allowlist with `Invalid`
+  default at the harness, `b609` upgraded to P1). We close `b609` rather than
+  promote it because admission-fail-closed makes the polarity flip redundant
+  for the launched generator: broken instances never become Tasks, so the
+  harness never observes them. The remaining failure mode — substrate drift
+  between admission time and verdict time — is caught by the verdict-time
+  recheck (rowHash + imageDigest) and surfaces as `SkippableError`. Local/dev
+  operators running `admissionMode: 'python-floor'` accept the absence of an
+  admission filter; for them the existing harness denylist (extended in this
+  release with the four 2026-05-14 fingerprints) continues to classify obvious
+  infra failures. If residual `SkippableError` rates climb past the trigger
+  above, the polarity flip becomes the next move.
 
 ## References
 

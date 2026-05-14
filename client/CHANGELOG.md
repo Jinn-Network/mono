@@ -12,6 +12,8 @@
   ```
 
   Expected duration: ~1-2h (one gold-patch eval per seed instance).
+  Until re-validation runs, the launched generator posts no new tasks
+  (admission required; `jinn doctor` reports the pool as stale).
 - **Required admission mode is now the default for launched generators.**
   Local/dev users running `admissionMode: 'python-floor'` keep today's
   behaviour. `jinn doctor` reports pool freshness and prints the exact
