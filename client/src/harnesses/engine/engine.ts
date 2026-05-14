@@ -1195,6 +1195,29 @@ export class TaskEngine {
       throw new NotImplementedError('pack');
     }
 
+    // jinn-mono-4tfq: if the impl was skipped (SkippableError caught during
+    // RUNNING — e.g. admission_missing_or_unscorable, substrate_drift_*,
+    // hf_fetch_failed_after_retries), there is no payload to assemble. Transition
+    // straight to FAILED and return — never enter the envelope-assembly path,
+    // never throw "did not produce verdictPayload" / "no solutionPayload".
+    // Applies symmetrically to solver and evaluator skips.
+    const earlyImplOutput = this.solutionOutputs.get(task.requestId);
+    const gatingClaim = earlyImplOutput?.gating as Record<string, unknown> | undefined;
+    if (gatingClaim?.['skipped'] === true) {
+      const reason = String(gatingClaim['reason'] ?? 'unknown');
+      const detail = String(
+        (earlyImplOutput?.informational as Record<string, unknown> | undefined)?.['detail'] ?? '',
+      );
+      console.log(
+        `[harness-engine] ${task.requestId}: PACKAGING short-circuited — impl was skipped (${reason})${detail ? `: ${detail}` : ''}`,
+      );
+      this.persistence.markFailed(
+        task.requestId,
+        `impl skipped: ${reason}${detail ? ` — ${detail}` : ''}`,
+      );
+      return;
+    }
+
     const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
 
     const implOutput = this.solutionOutputs.get(task.requestId);
