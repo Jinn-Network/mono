@@ -72,4 +72,24 @@ describe('TopTabs', () => {
     const operator = screen.getByText('Operator');
     expect(operator.getAttribute('data-active')).toBe('true');
   });
+
+  it('renders the Build tab', () => {
+    const { hook } = memoryLocation({ path: '/overview' });
+    render(
+      <Router hook={hook}>
+        <TopTabs />
+      </Router>,
+    );
+    expect(screen.getByText('Build')).toBeTruthy();
+  });
+
+  it('marks Build tab active on /build', () => {
+    const { hook } = memoryLocation({ path: '/build' });
+    render(
+      <Router hook={hook}>
+        <TopTabs />
+      </Router>,
+    );
+    expect(screen.getByText('Build').getAttribute('data-active')).toBe('true');
+  });
 });
