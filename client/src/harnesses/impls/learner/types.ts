@@ -114,4 +114,14 @@ export interface LearnerHarnessConfig {
   pluginRoot?: string;
   /** SolverPlugin roots loaded by the daemon. */
   solverPluginRoots?: string[];
+  /**
+   * Path to the `claude` executable. Passed to `probeClaudeAuth()` in
+   * `isReady()`. Defaults to 'claude' (from PATH).
+   */
+  claudePath?: string;
+  /**
+   * Runtime mode for auth context detection. Passed to `probeClaudeAuth()`.
+   * Defaults to 'bare'.
+   */
+  runtimeMode?: 'bare' | 'container' | 'docker-compose';
 }
