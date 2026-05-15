@@ -5,6 +5,7 @@ import {
   normalizeIpfsGatewayBase,
   fetchSignedTaskFromIpfs,
   fetchSourceBundleFromIpfs,
+  cidToDigestHex,
 } from '../../../src/adapters/mech/ipfs.js';
 
 const DEFAULT_CLAIM_POLICY = {
@@ -205,6 +206,68 @@ function makeSourceBundleFetchStub(
     });
   });
 }
+
+// ── cidToDigestHex ────────────────────────────────────────────────────────────
+//
+// All CIDs below encode the same 32-byte digest — the SHA-256 of the empty string:
+//   e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+//
+// Derivation:
+//   multihash = 0x12 0x20 <32 digest bytes>      (sha2-256, 32 bytes)
+//   CIDv1 raw = 0x01 0x55 <multihash>            (version=1, codec=raw)
+//
+//   f-multibase hex : f01551220<digestHex>
+//   base32 CIDv1    : bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku
+//   base58btc CIDv1 : zb2rhmy65F3REf8SZp7De11gxtECBGgUKaLdiDj7MCGCHxbDW
+//   CIDv0 (Qm)      : QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n
+
+const KNOWN_DIGEST = '0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+const KNOWN_DIGEST_HEX = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+describe('cidToDigestHex', () => {
+  it('CIDv0 (Qm base58 multihash) returns 0x-prefixed 64-char digest', () => {
+    const cid = 'QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n';
+    const result = cidToDigestHex(cid);
+    expect(result).toBe(KNOWN_DIGEST);
+    expect(result).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('CIDv1 base32 (b prefix) returns correct digest', () => {
+    // bafkrei... = CIDv1 raw codec, sha2-256, base32 multibase
+    const cid = 'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku';
+    expect(cidToDigestHex(cid)).toBe(KNOWN_DIGEST);
+  });
+
+  it('CIDv1 base58btc (z prefix) returns correct digest', () => {
+    const cid = 'zb2rhmy65F3REf8SZp7De11gxtECBGgUKaLdiDj7MCGCHxbDW';
+    expect(cidToDigestHex(cid)).toBe(KNOWN_DIGEST);
+  });
+
+  it('CIDv1 f-multibase hex (lowercase f) extracts exact digest bytes', () => {
+    const cid = `f01551220${KNOWN_DIGEST_HEX}`;
+    expect(cidToDigestHex(cid)).toBe(KNOWN_DIGEST);
+  });
+
+  it('CIDv1 f-multibase hex (uppercase F) extracts exact digest bytes', () => {
+    const cid = `F01551220${KNOWN_DIGEST_HEX.toUpperCase()}`;
+    expect(cidToDigestHex(cid)).toBe(KNOWN_DIGEST);
+  });
+
+  it('truncated f-prefix CID (f01) throws with a length-shaped error', () => {
+    // 'f01' decodes to version=0x01 with no remaining bytes for the multihash.
+    // The length-precheck should fire before the multihash-fn check, so the
+    // thrown error names the real failure (payload too short) instead of
+    // rendering an "fn=0xundefined" message from reading undefined out of
+    // an empty array.
+    expect(() => cidToDigestHex('f01')).toThrow(/CID payload too short/);
+  });
+
+  it('malformed input (non-CID garbage string) throws', () => {
+    // 'xnotacid' hits the else branch (base58Decode of 'notacid') and the resulting
+    // bytes fail the multihash check (fn !== 0x12 || len !== 0x20).
+    expect(() => cidToDigestHex('xnotacid')).toThrow();
+  });
+});
 
 describe('fetchSourceBundleFromIpfs', () => {
   afterEach(() => {

@@ -10,10 +10,13 @@ import { encodeAbiParameters, toHex } from 'viem';
 import {
   PAYLOAD_TUPLE_V1,
   PAYLOAD_TUPLE_V2,
+  type ClaimedEvent,
   type MetadataSetEvent,
   type SolutionDeliveryClaimedEvent,
   type TaskAttemptCreatedEvent,
+  type TaskBudgetRefundedEvent,
   type TaskCreatedEvent,
+  type VerdictDeliveryClaimedEvent,
 } from '../../src/handlers.js';
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
@@ -37,6 +40,7 @@ export function taskCreatedEvent(
       manifestDigest: ZERO_BYTES32,
       taskCidDigest: ZERO_BYTES32,
       maxClaims: 1,
+      requiredVerdicts: 1,
       ...args,
     },
     block: { number: o.block ?? 100n },
@@ -93,6 +97,61 @@ export function metadataSetEvent(
     },
     block: { number: o.block ?? 100n },
     transaction: { hash: o.txHash ?? ('0x' + '12'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
+export function verdictDeliveryClaimedEvent(
+  args: Partial<VerdictDeliveryClaimedEvent['args']> & { taskId: bigint },
+  o: EnvelopeOverrides = {},
+): VerdictDeliveryClaimedEvent {
+  return {
+    args: {
+      evaluator: SOME_ADDR,
+      requestId: ZERO_BYTES32,
+      attemptIndex: 0,
+      verdictIndex: 0,
+      verdictCode: 1,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'fe'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
+export function taskBudgetRefundedEvent(
+  args: Partial<TaskBudgetRefundedEvent['args']> & { taskId: bigint },
+  o: EnvelopeOverrides = {},
+): TaskBudgetRefundedEvent {
+  return {
+    args: {
+      creator: SOME_ADDR,
+      solutionAmount: 0n,
+      verdictAmount: 0n,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'a1'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
+    log: { logIndex: o.logIndex ?? 0 },
+  };
+}
+
+export function claimedEvent(
+  args: Partial<ClaimedEvent['args']> & { serviceId: bigint },
+  o: EnvelopeOverrides = {},
+): ClaimedEvent {
+  return {
+    args: {
+      multisig: SOME_ADDR,
+      operatorMinted: 0n,
+      daoMinted: 0n,
+      totalEntitledOperator: 0n,
+      totalEntitledDao: 0n,
+      ...args,
+    },
+    block: { number: o.block ?? 100n },
+    transaction: { hash: o.txHash ?? ('0x' + 'b2'.repeat(32)) as `0x${string}`, transactionIndex: o.transactionIndex ?? 0 },
     log: { logIndex: o.logIndex ?? 0 },
   };
 }

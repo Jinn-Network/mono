@@ -16,10 +16,12 @@ ARG JINN_INDEXER_COMMIT=unknown
 ENV JINN_INDEXER_COMMIT=$JINN_INDEXER_COMMIT
 
 WORKDIR /app
+ENV YARN_NODE_LINKER=node-modules
 
 # Copy dependency manifests first for layer caching. The Yarn version is pinned
 # by the `packageManager` field in package.json, so `corepack enable` resolves
-# it without a vendored `.yarn/` cache or `.yarnrc.yml`.
+# it without a vendored `.yarn/` cache or `.yarnrc.yml`. The runtime stage
+# copies node_modules directly, so force Yarn's node-modules linker in Docker.
 COPY package.json yarn.lock ./
 RUN corepack enable && yarn install --immutable
 
@@ -31,12 +33,17 @@ COPY src ./src
 # Ponder codegen (regenerates ponder-env.d.ts; validates schema).
 RUN yarn codegen
 
+# Build the explorer SPA; output goes to /app/public/.
+COPY explorer ./explorer
+RUN cd explorer && corepack yarn install && corepack yarn build
+
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM node:22-slim
 
 ARG JINN_INDEXER_COMMIT=unknown
 ENV JINN_INDEXER_COMMIT=$JINN_INDEXER_COMMIT
 ENV NODE_ENV=production
+ENV YARN_NODE_LINKER=node-modules
 
 WORKDIR /app
 
@@ -47,10 +54,11 @@ COPY --from=build /app/ponder.config.ts /app/ponder.schema.ts /app/tsconfig.json
 COPY --from=build /app/ponder-env.d.ts ./
 COPY --from=build /app/abis ./abis
 COPY --from=build /app/src ./src
+COPY --from=build /app/public ./public
 
 EXPOSE 42069
 
 # `ponder start` runs both the indexer and the HTTP server (GraphQL + built-in
 # /health and /ready endpoints). For HTTP-only replicas behind a proxy, use
 # `ponder serve` instead — see Ponder's "Horizontal scaling" docs.
-CMD ["yarn", "start"]
+CMD ["node", "node_modules/ponder/dist/esm/bin/ponder.js", "start"]

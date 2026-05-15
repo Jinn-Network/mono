@@ -18,13 +18,14 @@ describe('OperatorCard', () => {
         />
       </Router>,
     );
-    expect(screen.getByText(/your prediction/i)).toBeTruthy();
+    expect(screen.getByText(/solving on/i)).toBeTruthy();
+    expect(screen.getByText('prediction')).toBeTruthy();
     expect(screen.getByText(/^solver$/i)).toBeTruthy();
     expect(screen.queryByText(/^evaluator$/i)).toBeNull();
     expect(screen.getByText(/live/i)).toBeTruthy();
     expect(screen.getByText(/waiting for tasks/i)).toBeTruthy();
-    const link = screen.getByText(/configure/i).closest('a');
-    expect(link?.getAttribute('href')).toBe('/operator#solvernets/prediction');
+    const link = screen.getByText(/change/i).closest('a');
+    expect(link?.getAttribute('href')).toBe('/operator#solvernets');
   });
 
   it('renders both Solver and Evaluator pills when both roles are active', () => {
@@ -56,7 +57,7 @@ describe('OperatorCard', () => {
         />
       </Router>,
     );
-    const link = screen.getByText(/configure/i).closest('a');
-    expect(link?.getAttribute('href')).toBe('/operator#solvernets/bafkreiswe');
+    const link = screen.getByText(/change/i).closest('a');
+    expect(link?.getAttribute('href')).toBe('/operator#solvernets');
   });
 });

@@ -17,6 +17,7 @@ import type {
 import { runOnchainCorpusQuery } from './onchain-query.js';
 import { fetchManifest } from './fetch.js';
 import { acquireArtifactContent } from './acquire.js';
+import type { AcquireWithPaymentResult } from '../x402/acquire.js';
 import type { ArtifactSource } from '../types/envelope.js';
 
 export type {
@@ -63,7 +64,7 @@ export {
 interface InternalDeps {
   fetch?: typeof globalThis.fetch;
   fetchFromIpfs?: (gatewayUrl: string, cid: string) => Promise<unknown>;
-  acquireFn?: (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null>;
+  acquireFn?: (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null | AcquireWithPaymentResult>;
 }
 
 export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corpus {

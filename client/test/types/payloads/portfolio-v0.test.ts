@@ -28,8 +28,8 @@ describe('PortfolioV0RestorationPayloadSchema', () => {
 
 describe('PortfolioV0VerdictPayloadSchema', () => {
   const valid = {
-    restorationEnvelope: {
-      cid: 'bafy-rest',
+    solutionEnvelope: {
+      cid: 'bafy-solution',
       sha256: '0'.repeat(64),
     },
     verificationOfRestoration: {
@@ -60,5 +60,14 @@ describe('PortfolioV0VerdictPayloadSchema', () => {
   };
   it('accepts a verdict payload', () => {
     expect(() => PortfolioV0VerdictPayloadSchema.parse(valid)).not.toThrow();
+  });
+
+  it('accepts legacy restorationEnvelope as a read-compat alias', () => {
+    const { solutionEnvelope, ...rest } = valid;
+    const parsed = PortfolioV0VerdictPayloadSchema.parse({
+      ...rest,
+      restorationEnvelope: solutionEnvelope,
+    });
+    expect(parsed.solutionEnvelope).toEqual(solutionEnvelope);
   });
 });

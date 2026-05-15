@@ -14,6 +14,10 @@
 # - cargo/docs/engineering/handbook.md §The shipping machine
 # - cargo/docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md Threads 5 + 6
 # - Hermes v0.13.0 release notes for the shape reference
+#
+# Two-train cadence: this workflow targets `next` (integration branch). Captain's Publish
+# action creates a v<semver> tag on next HEAD; the promote-main.yml workflow then
+# fast-forwards main to that tag. main remains the "currently published to @latest" reference.
 
 name: Monday release-notes scaffold
 
@@ -102,14 +106,14 @@ jobs:
           PREV_DATE: ${{ steps.window.outputs.prev_date }}
         shell: bash
         run: |
-          # Query GitHub directly for PRs merged to main since the window start. This is the
+          # Query GitHub directly for PRs merged to next since the window start. This is the
           # accurate path — walking commit subjects for `#N` over-counts (old issue/PR refs in
           # commit messages aren't PRs merged in this window). `merged:><date>` filters precisely.
           # --limit 200 covers a generous weekly window; bump if a week ever exceeds it.
           # Use a strict boundary: the previous release PR belongs to the previous release,
           # even when its merge timestamp exactly equals the previous tag's commit date.
           PRS_JSON="$(gh pr list --repo "${{ github.repository }}" \
-            --search "is:merged base:main merged:>${PREV_DATE}" \
+            --search "is:merged base:next merged:>${PREV_DATE}" \
             --state merged --limit 200 \
             --json number,title,author,body 2>/dev/null || echo '[]')"
 
@@ -223,7 +227,7 @@ jobs:
               --draft \
               --title "v$SUGGESTED — Build Notes (draft)" \
               --notes-file "$BODY_FILE" \
-              --target main
+              --target next
             echo "Created new draft: $TAG"
           fi
           echo "::notice::Release draft v$SUGGESTED ready for Captain review at https://github.com/${{ github.repository }}/releases"

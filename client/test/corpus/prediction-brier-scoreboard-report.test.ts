@@ -127,7 +127,7 @@ function solutionProjection(id: string, args: {
     envelopeSha256: `sha256-solution-${id}`,
     signatureHash: `0x${id.padEnd(64, '1').slice(0, 64)}`,
     solverType: 'prediction.v1',
-    role: 'restoration',
+    role: 'solution',
     taskCid: 'bafy-task-shared',
     taskId: 'prediction-v1-polymarket-abc',
     requestId: `solution-request-${id}`,

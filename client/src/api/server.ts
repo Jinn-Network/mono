@@ -42,6 +42,7 @@ import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
+import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
 import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
@@ -128,6 +129,11 @@ export interface ApiServerConfig {
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
    */
   harnessStatus?: HarnessStatusDeps;
+  /**
+   * When set, mounts `GET /api/hermes/doctor` under the UI token gate.
+   * Powers the dashboard's Hermes install precheck panel in the join flow.
+   */
+  hermesDoctor?: HermesDoctorConfig;
   /** Operator-local artifact inventory + future-artifact pricing controls. */
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
   /** Path D local session-end hook endpoint. */
@@ -341,6 +347,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/launcher/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
+    app.use('/api/hermes/*', requireUiToken(config.ui.token));
     app.use('/api/captures/*', requireUiToken(config.ui.token));
   }
 
@@ -405,6 +412,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.harnessStatus) {
     addHarnessStatusRoutes(app, config.harnessStatus);
+  }
+
+  if (config.ui) {
+    addHermesDoctorRoutes(app, config.hermesDoctor ?? {});
   }
 
   if (config.ui) {
