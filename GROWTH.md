@@ -100,6 +100,8 @@ The closing structure when an operator is engaged: objective → why important �
 
 Track and analyse the loop itself. Propose diff-shaped amendments to GROWTH.md, skill files, or the loop's structure when accumulated evidence drifts from canon. The skill produces *proposals*, never edits canonical files; Oak applies via PRs (with a spec proposal for canonical changes). Cadence: ad-hoc, suggested every sprint postmortem, surfaced as a Tier B action by `growth-day` when a refine has not run in over thirty days.
 
+**Composition heuristic.** Periodically, as one input to Refine, the operator-set composition is sampled against a small set of diagnostic attributes (founder-proximity, founder economic alignment, financial/professional independence, jurisdiction, crypto exposure, technical savvy, skillset coverage). The attributes are heuristics, not gates: a gapped attribute surfaces a question about what upstream design or recruiting choice produced the gap, not a recruiting filter to apply per candidate. The attribute list and any working thresholds live in [`growth/composition-attributes.md`](growth/composition-attributes.md), not as canonical gates — codifying them as launch-gating numbers would add a governance surface in tension with [`PRINCIPLES.md`](PRINCIPLES.md) *Governance Minimal* and *Permissionless*.
+
 ## 6. What we will not chase
 
 The negative space is doing as much work as the positive plan.
