@@ -18,6 +18,7 @@ import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { JoinFlow } from './pages/operator-catalog/JoinFlow.js';
 import { CapturesTab } from './captures/CapturesTab.js';
+import { BuildPage } from './pages/Build.js';
 
 /**
  * App routes between two distinct phases of operator life:
@@ -82,6 +83,7 @@ export default function App(): JSX.Element {
             <LauncherLaunchedPage />
           </Route>
           <Route path="/launcher"><LauncherPage /></Route>
+          <Route path="/build"><BuildPage /></Route>
           <Route><Redirect to="/overview" /></Route>
         </Switch>
       </AppShell>

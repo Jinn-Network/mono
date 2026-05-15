@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { runCreate } from '../../../src/cli/commands/create.js';
+import { createCommand } from '../../../src/cli/commands/create.js';
 
 let TMP: string;
 
@@ -309,4 +310,26 @@ describe('runCreate (plugin target — first-run yarn test passes)', () => {
     });
     expect(testResult).toMatch(/(passed|PASS)/i);
   }, 60_000);
+});
+
+describe('createCommand run() — post-completion output (hfmf)', () => {
+  it('prints the canonical quickstart URL after scaffold', async () => {
+    let output = '';
+    const ctx = {
+      argv: ['plugin', '@example/hfmf-test', '--out-dir', TMP],
+      stdoutIsTty: false,
+      writer: {
+        write: (s: string) => {
+          output += s;
+          return true;
+        },
+      },
+      exit: (_code: number) => {},
+      env: {},
+    };
+    await createCommand.run(ctx);
+    expect(output).toContain(
+      'Quickstart: https://github.com/Jinn-Network/mono/blob/main/cargo/client/docs/build/quickstart.md',
+    );
+  });
 });

@@ -83,4 +83,14 @@ describe('TopTabs', () => {
     const settings = screen.getByText('Settings');
     expect(settings.getAttribute('data-active')).toBe('true');
   });
+
+  it('renders the Build tab', () => {
+    renderTabs('/overview');
+    expect(screen.getByText('Build')).toBeTruthy();
+  });
+
+  it('marks Build tab active on /build', () => {
+    renderTabs('/build');
+    expect(screen.getByText('Build').getAttribute('data-active')).toBe('true');
+  });
 });

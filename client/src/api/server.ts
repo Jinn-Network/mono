@@ -52,6 +52,8 @@ import {
 } from './operator-artifacts-endpoint.js';
 import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
 import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
+import { addDiscoveryRoutes } from './discovery-endpoint.js';
+import type { DiscoveryAPI } from '../discovery/types.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -146,6 +148,13 @@ export interface ApiServerConfig {
   stopHook?: StopHookRoutesDeps;
   /** Operator review API for pending captures. */
   captures?: CapturesRoutesDeps;
+  /**
+   * Discovery API instance. When set, mounts GET /v1/discovery/* routes
+   * that proxy DiscoveryAPI methods (listPluginPublications, listBuilderArtifacts,
+   * getPluginScores) so the SPA's /build route can fetch them without direct
+   * GraphQL or RPC access.
+   */
+  discovery?: DiscoveryAPI;
 }
 
 export interface ApiServer {
@@ -363,6 +372,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.bootstrap) {
     addBootstrapRoutes(app, config.bootstrap);
+  }
+
+  if (config.discovery) {
+    const discoveryInstance = config.discovery;
+    addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
   }
 
   if (config.solverNets) {
