@@ -20,6 +20,8 @@ One named target cluster at a time, with a canonical pitch and a bridge model �
 
 *During PMF search, §3 records our current bet on cluster, pitch, and bridge. Bet rotation is the rewrite-and-archive flow already specified above — the spec-proposal flow is the velocity governor, not a claim that the bet is settled. Read this section as "this is what we're testing right now," not "this is who Jinn is for."*
 
+**Rotation trigger.** A spec proposal to rewrite §3 is *required* — not merely available — when two consecutive sprint postmortems show zero Tier-A WARM advances *and* at least one substantive inbound from a non-targeted cluster shows up in the same window. The trigger does not pick the next cluster; it forces the proposal flow. Per [`PRINCIPLES.md`](PRINCIPLES.md) *Governance Minimal*, cluster rotation must not accumulate as Oak-discretion — the loop's own evidence triggers the proposal.
+
 ### Current target cluster: ecosystem builders shipping verifiable artefacts on the leading open agentic harness, plus ERC-8004 ecosystem builders
 
 The cluster is defined by *what they ship and where it lands*, not by whether they call themselves a "contributor" to a specific repo. Two qualifying populations:
@@ -41,6 +43,8 @@ Eval-as-research practitioners at institutional labs (METR, Apollo, AISI externa
 
 > *"The first SolverNet is **swe-rebench v2** — a rolling-refresh program-repair benchmark on real GitHub issues. People who ship coding agents pool their attempts on the same task stream; evaluators verify with docker-grade test gates; the corpus accrues. Help collectively train a swe-rebench v2 harness."*
 
+**Verifiable claims are not background.** No VC, no pre-sale, no team keys, no allocation — these are on-chain-checkable facts and the strongest cheap-to-signal / expensive-to-fake claim Jinn owns. When they come up — in replies, DMs, calls — they are led with and *shown* (link to chain or to the relevant address), not hedged as "and by the way." The pitches above frame the *work*; the no-pre-mine facts frame the *neutrality of the rails*. Per [`PRINCIPLES.md`](PRINCIPLES.md) *Legible* + *Neutral*, the strongest legibility claim we own should be surfaced, not buried — §6.1's *communicated plainly because it is a real differentiator* applies here, not only as a refusal of slogans.
+
 > *"If you ship skills, plugins, MCP tools, harness extensions, routers, models, or evaluators on the leading open agentic harness — or verifiable artefacts in the ERC-8004 pipeline — your work is the SolverNet's supply side. The corpus that accrues is the public record of how those artefacts perform on shared tasks."*
 
 The umbrella generalises (other SolverNets will follow); the vertical instance gives the cluster a concrete surface to recognise; the ecosystem-builder sentence names the artefact-pooling shape so the recruit hears their own work product in the pitch. swe-rebench v2 is *locked* as the operational launch SolverNet per [DR-2026-05-07-h](log/decisions/2026-05-07-swe-rebench-v2-as-operational-launch-solvernet.md) — see §7 for the rationale and the trace-harvester sequencing. Real usage of Jinn on the contributor's own coding-agent work is the conversion shape. The corpus of coding-agent runs that accumulates publicly is the public good. Talk about the work the network does and the artefacts that accrue; let participation imply ownership rather than leading with it.
@@ -54,6 +58,8 @@ The umbrella generalises (other SolverNets will follow); the vertical instance g
 **The bridge.** The methodology question that moves a cluster member across the gap, in the shape that has worked in past first-touches: *static benchmarks are last year's coding agents; live eval against rolling fresh GitHub issues is a coordination problem nobody owns. What does it look like to run the artefact you already shipped — the skill, the router, the evaluator — alongside others shipping in the same surface, and who pays for the task stream?* The question must not be answerable from the recruit's own README, post, or pinned thread.
 
 *Within this cluster, four motivation cohorts (Distribution-as-validation / Research-output / Substrate-capture / Sovereignty) carry cluster-specific bridge variants — the modal bridge above is the Distribution-cohort shape; per-cohort variants (e.g. the ERC-8004 validator-economics-gap bridge for Substrate-capture, the substrate-cannot-be-acquired bridge for the OpenClaw-diaspora Sovereignty cohort) live in [`growth/docs/2026-05-12-ecosystem-builder-motivations.md`](growth/docs/2026-05-12-ecosystem-builder-motivations.md) and are consumed by `cluster-model` and `discover-twitter-recruits` at outreach time.*
+
+**Falsifiability.** What would have to be true for this bridge to be *wrong*, not merely *underdelivered*? If sustained Teach output naming the gap produces no cluster-side resonance — no replies adopting the frame, no quote-tweets extending it, no inbound that references it — the falsification signal is the *absence*, not a counter-argument. Two consecutive sprints of zero bridge-uptake trigger a §3 Bridge model rewrite proposal, not a §5 wording tweak. Per [`PRINCIPLES.md`](PRINCIPLES.md) *Learning Maximised*, the bridge must be allowed to fail and be replaced; insulating it by treating non-uptake as "we haven't said it well yet" is encoded cleverness, not search.
 
 ## 4. GTM sequence
 
@@ -85,15 +91,23 @@ Identify audience-matched people; maintain the bridge model in §3 by sampling f
 
 Take the bridge model in §3 and produce content — threads, essays, replies, recorded walkthroughs — that names the gap and offers Jinn's frame as the next step in the cluster's own argument. One public artefact per working day on the thesis. The compounding asset: when the thesis is taught publicly, the right operators self-identify and inbound. If only one action fits in the day, it is this one. `x-algorithm-grader` scores drafts against §8 channel canon before posting.
 
+Every Teach artefact has a canonical home outside X. Long-form lands in the repo (or a self-hosted mirror); shorter form is cross-posted to at least one cluster-relevant neutral surface (Farcaster, the repo's Discussions, or equivalent). X is a distribution megaphone, not the canonical home of the work. Per [`PRINCIPLES.md`](PRINCIPLES.md) *Neutral*, the network's surfaces should not structurally benefit any single intermediary — including the one we currently rely on most for distribution.
+
 ### Engage — `discover-twitter-recruits` (find), `growth-watcher` (track), warm-contacts CSV (advance), DMs / calls / intros (Oak-driven)
 
 Create funnel paths that progressively pull people down: first contact → reply → DM → call → operator → contributor. The four-rung warm-contacts ladder (cold / touched / warm / hot, plus parking) holds the funnel state per individual. Public offer cadence can be more frequent than direct offers; direct offers to the named warm list are weekly, not daily.
 
 The closing structure when an operator is engaged: objective → why important → blockers → four ways in (full operator, light operator, contributor, advisory steward) → walk through plan. Read the specs, run the client, open a PR or an issue. *Contributor* names the maintainer-route path explicitly (per `spec/2026-05-08-growth-engage-fourth-way-in-contributor.md`): pick up or file a `good-first-issue` against `Jinn-Network/mono` without necessarily running a client. Friction-to-first-merged-PR is the load-bearing property; the path is intentionally Claude-pickable so a recruit can act in the same conversation that closes the engagement.
 
+**Out-of-cluster inbound is the cheapest path.** Operators who arrive from outside the §3 cluster — via Teach distribution that reached beyond the intended audience, or through unsolicited inbound — advance to a direct call by default, regardless of cluster fit. The warm-contacts ladder is the *push* surface into the §3 cluster; out-of-cluster inbound is *pull from anywhere*. Per [`PRINCIPLES.md`](PRINCIPLES.md) *Permissionless*, the path from outsider to participant has no privileged shortcuts — including no penalty for arriving from the "wrong" cluster.
+
+**Engage cannot outpace Teach.** Within a sprint, the count of direct-offer engagements (DMs sent, calls scheduled, intros made) must not exceed the count of public Teach artefacts shipped. The constraint enforces the prestige shape mechanically: recruiting volume that outruns visible work inverts the funnel from *operators self-identify against visible competence* into *operators agreed after sustained outreach*. Per [`PRINCIPLES.md`](PRINCIPLES.md) *Prestige*, deference must be freely conferred from demonstrated competence, not the residue of relational pressure.
+
 ### Refine — `growth-refine`
 
 Track and analyse the loop itself. Propose diff-shaped amendments to GROWTH.md, skill files, or the loop's structure when accumulated evidence drifts from canon. The skill produces *proposals*, never edits canonical files; Oak applies via PRs (with a spec proposal for canonical changes). Cadence: ad-hoc, suggested every sprint postmortem, surfaced as a Tier B action by `growth-day` when a refine has not run in over thirty days.
+
+**Composition heuristic.** Periodically, as one input to Refine, the operator-set composition is sampled against a small set of diagnostic attributes (founder-proximity, founder economic alignment, financial/professional independence, jurisdiction, crypto exposure, technical savvy, skillset coverage). The attributes are heuristics, not gates: a gapped attribute surfaces a question about what upstream design or recruiting choice produced the gap, not a recruiting filter to apply per candidate. The attribute list and any working thresholds live in [`growth/composition-attributes.md`](growth/composition-attributes.md), not as canonical gates — codifying them as launch-gating numbers would add a governance surface in tension with [`PRINCIPLES.md`](PRINCIPLES.md) *Governance Minimal* and *Permissionless*.
 
 ## 6. What we will not chase
 
@@ -132,7 +146,7 @@ These are not chased *yet*. They may move into permanent rules or get unblocked 
 
 One headline metric at a time.
 
-**Headline: external testnet operators.** Independent, identifiable, technically credible people running the client. Target ~10 before mainnet. This is the §2 bottleneck made measurable.
+**Headline: external testnet operators, on-chain derivable.** Operator legitimacy is a composite of verifiable on-chain criteria — staked service active across a defined epoch window, on-chain attestation of distinct identity (ENS / GitHub-linked attestation / equivalent), and a unique funding-source heuristic. The exact criteria and the derived view are owned by a follow-up methodology spec; until that ships, the manual count is published *with its methodology made explicit* so a third party can audit it. Target ~10 before mainnet. This is the §2 bottleneck made measurable; per [`PRINCIPLES.md`](PRINCIPLES.md) *Legible*, the count must be auditable rather than asserted, and per *Neutral*, the criteria must be cheap to verify and expensive to fake.
 
 **Supporting metrics, in order of signal strength:**
 
