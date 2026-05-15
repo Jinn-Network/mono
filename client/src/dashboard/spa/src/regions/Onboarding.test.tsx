@@ -15,13 +15,6 @@ vi.mock('../api/client.js', () => ({
       services: [],
       chain: 'base-sepolia',
     }),
-    getClaudeAuth: async () => ({
-      schemaVersion: 1,
-      authenticated: false,
-      context: 'bare',
-      detail: '',
-      binary: { ok: true, detail: '' },
-    }),
   },
 }));
 
