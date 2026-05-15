@@ -163,9 +163,14 @@ const INFRA_SIGNATURES: Array<{ rx: RegExp; reason: string }> = [
   { rx: /Failed building editable|Failed to build installable wheels/i, reason: 'install_build_failed' },
   { rx: /No virtual environment found/i, reason: 'venv_missing' },
   { rx: /exec format error|the requested image's platform .* does not match/i, reason: 'image_arch_mismatch' },
+  // 2026-05-14 triage (jinn-mono-fufn) — failure fingerprints from real verdicts:
+  { rx: /A virtual environment already exists at \S+\.venv\b/i, reason: 'venv_collision' },
+  { rx: /No module named pytest\b/i, reason: 'pytest_missing' },
+  { rx: /RequestsDependencyWarning/i, reason: 'requests_dep_mismatch' },
+  { rx: /ImportError while loading conftest/i, reason: 'conftest_import_error' },
 ];
 
-function matchInfraSignature(log: string): string | null {
+export function matchInfraSignature(log: string): string | null {
   for (const { rx, reason } of INFRA_SIGNATURES) {
     if (rx.test(log)) return reason;
   }
@@ -301,7 +306,10 @@ export class PythonEvalRunner implements EvalRunner {
     }];
     // Upstream eval.py expects --patches to be a JSON list of
     // `{instance_id, patch, test_patch?}` overrides keyed by instance_id.
-    const patchesJson = [{ instance_id: INSTANCE_ID, patch: args.patch }];
+    // jinn-mono-c52e: defensive newline-terminate before `git apply` —
+    // mid-line diffs error as "corrupt patch at line N".
+    const normalizedPatch = args.patch.endsWith('\n') ? args.patch : `${args.patch}\n`;
+    const patchesJson = [{ instance_id: INSTANCE_ID, patch: normalizedPatch }];
     const taskJsonPath = join(tmp, 'task.json');
     const patchesJsonPath = join(tmp, 'patches.json');
     const reportPath = join(tmp, 'report.json');

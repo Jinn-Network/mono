@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/task.js';
+import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { PredictionV1TaskSchema } from '../../../types/prediction.js';
 
 import { buildSessionPrompt } from './prompt.js';
@@ -37,9 +38,15 @@ export class ClaudeMcpPredictionImpl implements Harness {
     return ctx.solverType === 'prediction.v1' && ctx.role !== 'evaluation';
   }
 
-  async isReady(): Promise<ReadyStatus> {
+  async isReady(
+    ctx?: { solverType: string; role?: 'restoration' | 'evaluation' },
+  ): Promise<ReadyStatus> {
     if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    return { ready: true };
+    // TODO(vh74.2-followup): docker-compose context not threaded through HarnessEnv for prediction harnesses yet
+    return buildClaudeIsReady({
+      getClaudePath: () => this.config.claudePath ?? 'claude',
+      getContext: () => 'bare',
+    })(ctx);
   }
 
   async canAttempt(
