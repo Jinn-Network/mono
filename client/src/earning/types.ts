@@ -204,4 +204,19 @@ export interface FleetBootstrapResult {
   rawErrorMessage?: string;
   funding?: FundingRequirement;
   self_bond_funding?: SelfBondFundingRequirement;
+  /**
+   * Structured category for operator-error cases where the error type is
+   * known but comes from an exception (rather than the early-return funding
+   * gate above). Currently used to propagate `'insufficient_funds'` so the
+   * error envelope in main.ts can surface a structured `category` field
+   * instead of a prose disjunction. jinn-mono-hjex.6
+   */
+  errorCategory?: 'insufficient_funds' | 'gas_too_low' | 'nonce_conflict';
+  /**
+   * Transaction hash of the failed on-chain tx, when available.
+   * Extracted from the thrown error message in the bootstrap catch path.
+   * Surfaced in the fatal envelope `details.txHash` so the SPA can render
+   * a block-explorer link. jinn-mono-hjex reviewer fix.
+   */
+  txHash?: string | null;
 }

@@ -27,6 +27,8 @@ describe('formatBootstrapOperatorMessage', () => {
     expect(r.summary).toMatch(/ETH|eth/i);
     expect(r.hint).toBeDefined();
     expect(r.rawMessage).toBe('insufficient funds for gas * price + value');
+    // jinn-mono-hjex.6: category must be set so SPA can render structured display.
+    expect(r.category).toBe('insufficient_funds');
   });
 
   it('maps out-of-gas as a gas-supply problem, not a funding problem (jinn-mono-jz9f)', () => {
@@ -39,6 +41,8 @@ describe('formatBootstrapOperatorMessage', () => {
     expect(r.summary.toLowerCase()).not.toContain('not enough eth');
     expect(r.summary.toLowerCase()).not.toContain('paying account');
     expect(r.hint).toBeDefined();
+    // jinn-mono-hjex.6: category must be gas_too_low, not insufficient_funds.
+    expect(r.category).toBe('gas_too_low');
   });
 
   it('maps `gas required exceeds allowance (0)` as insufficient funds, not OOG (jinn-mono-u34i)', () => {

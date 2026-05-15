@@ -1653,3 +1653,132 @@ describe('computeRequiredMasterEth (jinn-mono-hjex.7)', () => {
     expect(required).toBe(MIN_ETH * 3n);
   });
 });
+
+describe('structured error envelope (jinn-mono-hjex.6)', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  it('returns errorCategory: insufficient_funds when bootstrap fails with an EVM insufficient-funds error', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-'));
+    dirs.push(earningDir);
+
+    // Enough ETH to pass the funding gate, so we get into Phase 2 and hit the exception.
+    const sufficientBalance = 100_000_000_000_000_000n; // 0.1 ETH
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(sufficientBalance);
+    // Simulate an EVM "insufficient funds for gas" revert during service creation.
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error('insufficient funds for gas * price + value: have 0 want 1000000000000000'),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCategory).toBe('insufficient_funds');
+    // The funding gate must NOT be set — this is an exception, not an early-return.
+    expect(result.funding).toBeUndefined();
+  });
+
+  it('returns errorCategory: gas_too_low when bootstrap fails with an out-of-gas error', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-oog-'));
+    dirs.push(earningDir);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(100_000_000_000_000_000n);
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error('execution reverted: out of gas while creating contract'),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCategory).toBe('gas_too_low');
+  });
+
+  it('does not set errorCategory for unclassified errors', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-unclassified-'));
+    dirs.push(earningDir);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(100_000_000_000_000_000n);
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error('some completely unrecognized blockchain error'),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCategory).toBeUndefined();
+  });
+
+  it('surfaces txHash in result when a contract-revert path embeds it in the error message', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-txhash-'));
+    dirs.push(earningDir);
+
+    const expectedTxHash = '0x' + 'ab'.repeat(32);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(100_000_000_000_000_000n);
+    // Simulate an on-chain revert that embeds the tx hash in the message,
+    // matching the pattern thrown by stepStakeService / stepSelfBond* paths.
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error(`stOLAS stake() tx failed for service 1: ${expectedTxHash}`),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.txHash).toBe(expectedTxHash);
+  });
+
+  it('does not set txHash when the error message has no embedded tx hash', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-notxhash-'));
+    dirs.push(earningDir);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(100_000_000_000_000_000n);
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error('RPC connection refused'),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.txHash).toBeUndefined();
+  });
+});

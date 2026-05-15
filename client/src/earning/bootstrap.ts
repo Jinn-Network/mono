@@ -819,7 +819,7 @@ export class FleetBootstrapper {
         message: `Fleet bootstrap complete. ${state.services.filter(s => isOperationalServiceStep(s.step)).length}/${this.targetServices} services running.`,
       };
     } catch (error) {
-      const { summary, hint, rawMessage } = formatBootstrapOperatorMessage(error);
+      const { summary, hint, rawMessage, category } = formatBootstrapOperatorMessage(error);
       const userMessage = hint !== undefined ? `${summary}\nHint: ${hint}` : summary;
       if (this.debug) {
         console.error(`[fleet-bootstrap] Bootstrap failed:`, error);
@@ -833,11 +833,21 @@ export class FleetBootstrapper {
           console.error(`[fleet-bootstrap] raw: ${rawMessage.split('\n')[0]}`);
         }
       }
+      // Extract a tx hash embedded in the error message by the on-chain revert
+      // paths (format: "...tx failed for service N: 0x<hash>" or
+      // "...tx reverted: 0x<hash>"). Surfaced in the fatal envelope so the SPA
+      // can render a block-explorer link. jinn-mono-hjex reviewer fix.
+      const txHashMatch = /(0x[a-fA-F0-9]{64})/.exec(rawMessage);
+      const txHash = txHashMatch ? txHashMatch[1] : null;
       return {
         ok: false,
         fleet_state: state,
         message: userMessage,
         rawErrorMessage: rawMessage,
+        // Preserve the structured category so the error envelope in main.ts
+        // can surface it in `details.category` for SPA consumers. jinn-mono-hjex.6
+        ...(category !== undefined ? { errorCategory: category } : {}),
+        ...(txHash !== null ? { txHash } : {}),
       };
     }
   }

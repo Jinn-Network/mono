@@ -43,6 +43,7 @@ import {
   installClaudeCodeLocally,
   type ExecFileAsync,
 } from '../setup/claude-code-install.js';
+import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -94,6 +95,13 @@ export interface SetupRoutesConfig {
    * (the "Re-stake now" dashboard CTA). jinn-mono-hjex.3
    */
   restake?: (serviceId: number) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * When set, POST /v1/setup/bootstrap/retry is enabled.
+   * Re-enters the bootstrap state machine in-process — no daemon restart
+   * required. The closure signals main()'s halt-and-resume loop to call
+   * bootstrap() again. jinn-mono-hjex.6
+   */
+  retryBootstrap?: () => Promise<void>;
 }
 
 export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void {
@@ -774,6 +782,12 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       rpcUrl: nextRpcUrl,
     });
   });
+
+  // POST /v1/setup/bootstrap/retry — re-enter the bootstrap state machine
+  // in-process. jinn-mono-hjex.6
+  if (config.retryBootstrap) {
+    addSetupRetryEndpoint(app, { retryBootstrap: config.retryBootstrap });
+  }
 
   // POST /v1/setup/restake/:serviceId — operator-triggered re-stake for an
   // evicted service. Backs the "Re-stake now" dashboard CTA. jinn-mono-hjex.3
