@@ -2,6 +2,7 @@ import type {
   Harness,
   HarnessContext,
   Solution,
+  ReadyStatus,
 } from '../../types.js';
 import { CLAUDE_CODE_HARNESS } from '../../names.js';
 import type {
@@ -11,6 +12,7 @@ import type {
 } from './types.js';
 import { resolvePluginRoot } from './plugin-path.js';
 import { harvestOutput } from './harvest.js';
+import { probeClaudeAuth } from '../../../preflight/claude-auth.js';
 
 /**
  * `Harness` shell. Bridges the engine's dispatch contract
@@ -25,12 +27,43 @@ export class ClaudeCodeLearnerImpl implements Harness {
   readonly version: string;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
+  private readonly claudePath: string;
+  private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
 
   constructor(config: ClaudeCodeLearnerConfig) {
     this.adapter = config.adapter;
     this.name = config.name ?? CLAUDE_CODE_HARNESS;
     this.version = config.version ?? '0.1.0-shim';
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
+    this.claudePath = config.claudePath ?? 'claude';
+    this.runtimeMode = config.runtimeMode ?? 'bare';
+  }
+
+  async isReady(
+    _ctx?: { solverType: string; role?: 'restoration' | 'evaluation' },
+  ): Promise<ReadyStatus> {
+    const result = probeClaudeAuth({
+      context: this.runtimeMode,
+      cwd: process.cwd(),
+      claudePath: this.claudePath,
+    });
+    if (result.authenticated) {
+      return { ready: true, reason: result.detail };
+    }
+    const binaryMissing = result.detail.includes('not found on PATH');
+    return {
+      ready: false,
+      reason: result.detail,
+      nextStep: binaryMissing
+        ? {
+            description: 'Install Claude Code from the operator app',
+            url: '/v1/setup/claude/install',
+          }
+        : {
+            description: 'Sign in to Claude from the operator app',
+            url: '/v1/auth/claude/spawn',
+          },
+    };
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
