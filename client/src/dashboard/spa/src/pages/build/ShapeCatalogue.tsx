@@ -1,4 +1,5 @@
 import { PLUGIN_SHAPE_FIELDS, PLUGIN_MODES } from './shape-fields.js';
+import { PanelCard } from '../../components/PanelCard.js';
 
 const headStyle: React.CSSProperties = {
   textAlign: 'left',
@@ -21,14 +22,7 @@ const cellStyle: React.CSSProperties = {
 
 export function ShapeCatalogue(): JSX.Element {
   return (
-    <section
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-3, 10px)',
-        padding: '24px',
-        background: 'var(--surface)',
-      }}
-    >
+    <PanelCard>
       <h2 style={{ marginTop: 0 }}>Plug-in shape</h2>
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
         <thead>
@@ -75,6 +69,6 @@ export function ShapeCatalogue(): JSX.Element {
           </div>
         ))}
       </div>
-    </section>
+    </PanelCard>
   );
 }
