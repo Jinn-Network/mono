@@ -35,6 +35,13 @@ export interface BootstrapState {
     step: string;
     safe_address?: string;
     service_id?: number;
+    /** Raw error string set when a bootstrap step fails non-fatally (e.g. safe_binding_failed). */
+    error?: string | null;
+    /**
+     * Decoded contract revert reason when `error` starts with `safe_binding_failed`.
+     * Null when the revert had no reason string; absent on older state files.
+     */
+    error_revert_reason?: string | null;
   }>;
   master_address?: string;
   chain?: string;

@@ -153,6 +153,7 @@ export function Onboarding(): JSX.Element {
                       serviceId={activeService?.service_id}
                       safeAddress={activeService?.safe_address}
                       explorer={explorer}
+                      contractRevertReason={activeService?.error_revert_reason ?? null}
                     />
                   )}
                 </PhaseRow>
@@ -535,6 +536,7 @@ function SubStateLine({
   serviceId,
   safeAddress,
   explorer,
+  contractRevertReason,
 }: {
   label: string;
   step: string;
@@ -542,12 +544,15 @@ function SubStateLine({
   serviceId?: number;
   safeAddress?: string;
   explorer: string;
+  /** Decoded contract revert reason from a failed setAgentWallet call, if any. */
+  contractRevertReason?: string | null;
 }): JSX.Element {
+  const hasRevertReason = Boolean(contractRevertReason);
   return (
     <div
       className="px-4 py-3 flex flex-col gap-3"
       style={{
-        border: '1px solid var(--border)',
+        border: hasRevertReason ? '1px solid var(--break-red)' : '1px solid var(--border)',
         borderRadius: 'var(--radius-2)',
         background: 'var(--bg-elevated)',
       }}
@@ -559,8 +564,10 @@ function SubStateLine({
             width: '6px',
             height: '6px',
             borderRadius: '50%',
-            background: 'var(--accent-sky)',
-            boxShadow: '0 0 0 0 rgba(122, 167, 220, 0.6)',
+            background: hasRevertReason ? 'var(--break-red)' : 'var(--accent-sky)',
+            boxShadow: hasRevertReason
+              ? '0 0 0 0 rgba(168, 90, 90, 0.6)'
+              : '0 0 0 0 rgba(122, 167, 220, 0.6)',
             animation: 'jinnPulse 1.6s ease-out infinite',
           }}
         />
@@ -569,9 +576,9 @@ function SubStateLine({
         </span>
         <span
           className="j-mono text-[10px] ml-auto"
-          style={{ color: 'var(--fg-dim)' }}
+          style={{ color: hasRevertReason ? 'var(--break-red)' : 'var(--fg-dim)' }}
         >
-          running · no action needed
+          {hasRevertReason ? 'binding failed · will retry' : 'running · no action needed'}
         </span>
       </div>
       <div
@@ -600,6 +607,14 @@ function SubStateLine({
             >
               {safeAddress}
             </a>
+          </>
+        )}
+        {contractRevertReason && (
+          <>
+            <span style={{ color: 'var(--fg-dim)' }}>Contract revert reason</span>
+            <code className="text-xs break-words" style={{ color: 'var(--break-red)' }}>
+              {contractRevertReason}
+            </code>
           </>
         )}
       </div>

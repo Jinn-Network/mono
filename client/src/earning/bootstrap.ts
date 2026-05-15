@@ -1293,11 +1293,16 @@ export class FleetBootstrapper {
         step: 'safe_binding_pending',
         error: null,
       });
-      // jinn-mono-h74p: bind against a freshly-deployed 1/1 Safe can revert
-      // on the first attempt (likely RPC state-lag / fresh-Safe race window)
-      // and succeed on a retry seconds later. Bound the retry budget so a
-      // real failure surfaces with the same safe_binding_pending state as
-      // before — just after N attempts instead of 1.
+      // Combined h74p (retry-on-transient-throw) + hjex.4 (Result-typed
+      // structured errors) policy:
+      //   - bindAgentWalletToSafe now returns a BindAgentWalletOutcome
+      //     (ok=true | ok=false with structured SafeBindingError).
+      //   - A returned Result.ok=false is a deterministic contract revert —
+      //     don't retry; record the structured diagnostic.
+      //   - A *thrown* exception is the freshly-deployed-Safe RPC race
+      //     window h74p targets — retry up to safeBindingMaxAttempts with a
+      //     small delay; if every attempt throws we fall through to a plain
+      //     reason log (no structured fields available).
       const maxAttempts = Math.max(1, this.safeBindingMaxAttempts);
       let bindResult: Awaited<ReturnType<typeof bindAgentWalletToSafe>> | undefined;
       let lastBindError: unknown;
@@ -1328,7 +1333,7 @@ export class FleetBootstrapper {
           }
         }
       }
-      if (bindResult) {
+      if (bindResult?.ok === true) {
         console.error(
           `[fleet-bootstrap] Service ${index}: setAgentWallet succeeded ` +
           `(tx=${bindResult.txHash}, safe=${safeAddress}).`,
@@ -1337,6 +1342,22 @@ export class FleetBootstrapper {
           safe_bound_to_agent: true,
           step: 'complete',
           error: null,
+          error_revert_reason: null,
+          error_short_message: null,
+        });
+      } else if (bindResult && !bindResult.ok) {
+        const bindErr = bindResult.error;
+        console.error(
+          `[fleet-bootstrap] Service ${index}: setAgentWallet failed; continuing with ` +
+          `safe_bound_to_agent=false (${bindErr.shortMessage}` +
+          `${bindErr.revertReason ? `, revert: ${bindErr.revertReason}` : ''}).`,
+        );
+        svc = await this.firstServiceUpdate(index, {
+          safe_bound_to_agent: false,
+          step: 'safe_binding_pending',
+          error: `safe_binding_failed: ${bindErr.shortMessage}`,
+          error_revert_reason: bindErr.revertReason,
+          error_short_message: bindErr.shortMessage,
         });
       } else {
         const reason =
@@ -1349,6 +1370,8 @@ export class FleetBootstrapper {
           safe_bound_to_agent: false,
           step: 'safe_binding_pending',
           error: `safe_binding_failed: ${reason}`,
+          error_revert_reason: null,
+          error_short_message: null,
         });
       }
     }
