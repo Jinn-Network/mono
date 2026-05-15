@@ -23,6 +23,7 @@ import type {
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/task.js';
+import { probeClaudeAuth } from '../../../preflight/claude-auth.js';
 import { PredictionApyV0TaskSchema } from '../../../types/prediction-apy.js';
 
 import { buildSessionPrompt } from './prompt.js';
@@ -45,9 +46,32 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
     return ctx.solverType === 'prediction.apy.v0' && ctx.role !== 'evaluation';
   }
 
-  async isReady(): Promise<ReadyStatus> {
+  async isReady(
+    _ctx?: { solverType: string; role?: 'restoration' | 'evaluation' },
+  ): Promise<ReadyStatus> {
     if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    return { ready: true };
+    const result = probeClaudeAuth({
+      context: 'bare',
+      cwd: process.cwd(),
+      claudePath: this.config.claudePath ?? 'claude',
+    });
+    if (result.authenticated) {
+      return { ready: true, reason: result.detail };
+    }
+    const binaryMissing = result.detail.includes('not found on PATH');
+    return {
+      ready: false,
+      reason: result.detail,
+      nextStep: binaryMissing
+        ? {
+            description: 'Install Claude Code from the operator app',
+            url: '/v1/setup/claude/install',
+          }
+        : {
+            description: 'Sign in to Claude from the operator app',
+            url: '/v1/auth/claude/spawn',
+          },
+    };
   }
 
   enableMetadata(): HarnessEnableMetadata {
