@@ -48,13 +48,13 @@ function buildEvaluationTask(restorationEnvelopeJson: string): Task {
 
 function buildSolverEnvelope(overrides: Record<string, unknown> = {}): string {
   // Syntactically-valid SignedEnvelope (jinn.execution.v1) for a swe-rebench-v2
-  // restoration. The harness does not verify signature integrity in v1 — it
+  // solution. The harness does not verify signature integrity in v1 — it
   // parses the envelope, asserts solverType+role, and passes the payload to
   // the grading library. We hand-roll a fixed-shape signed envelope here.
   const base = {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'swe-rebench-v2.v1',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: Date.parse('2026-05-08T00:00:00.000Z'),
     task: {
       cid: 'bafy-task',
@@ -493,7 +493,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     expect(existsSync(join(ctx.workingDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
   });
 
-  it('throws when the envelope is not swe-rebench-v2.v1/restoration', async () => {
+  it('throws when the envelope is not swe-rebench-v2.v1/solution', async () => {
     const wrongEnvelope = buildSolverEnvelope({ solverType: 'prediction.v1' });
     const harness = new SweRebenchV2EvaluatorHarness({
       implStateDir,
@@ -504,7 +504,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
       },
     });
     const ctx = buildHarnessContext(implStateDir, buildEvaluationTask(wrongEnvelope));
-    await expect(harness.run(ctx)).rejects.toThrow(/expected swe-rebench-v2\.v1\/restoration/);
+    await expect(harness.run(ctx)).rejects.toThrow(/expected swe-rebench-v2\.v1\/solution/);
   });
 
   it('throws when the harness is not enabled', async () => {

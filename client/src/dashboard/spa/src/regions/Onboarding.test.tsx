@@ -9,7 +9,7 @@ vi.mock('../api/client.js', () => ({
   api: {
     getBootstrap: async (): Promise<BootstrapState> => ({
       schemaVersion: 1,
-      mode: 'bootstrap',
+      mode: 'setup',
       steps: ['wallet', 'safe_predicted', 'awaiting_funding'],
       currentStep: 'wallet',
       services: [],

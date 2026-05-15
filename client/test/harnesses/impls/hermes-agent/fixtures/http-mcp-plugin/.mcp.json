@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "third-party": {
+      "url": "https://third-party.example/mcp",
+      "headers": {
+        "Authorization": "Bearer hypothetical-token"
+      }
+    }
+  }
+}

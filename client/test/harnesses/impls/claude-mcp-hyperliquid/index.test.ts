@@ -596,7 +596,7 @@ describe('envelope compatibility (portfolio.v0 restoration payload)', () => {
     );
 
     // Envelope role + solverType must be correct
-    expect(result.envelope.role).toBe('restoration');
+    expect(result.envelope.role).toBe('solution');
     expect(result.envelope.solverType).toBe('portfolio.v0');
     expect(result.envelope.schemaVersion).toBe('jinn.execution.v1');
 

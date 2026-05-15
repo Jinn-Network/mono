@@ -3,7 +3,7 @@ import type { PredictionV1Task } from '../../../../src/types/prediction.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { SignedEnvelope } from '../../../../src/types/envelope.js';
 import { signCanonical } from '../../../../src/harnesses/engine/signing.js';
-import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
+import { SOLUTION_TASK_CID_CONTEXT_KEY, SOLUTION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 
 export function makeValidTask(overrides: Partial<PredictionV1Task> = {}): PredictionV1Task {
   return {
@@ -21,7 +21,7 @@ export function makeValidTask(overrides: Partial<PredictionV1Task> = {}): Predic
 }
 
 /**
- * Build a signed jinn.execution.v1 envelope for prediction.v1/restoration.
+ * Build a signed jinn.execution.v1 envelope for prediction.v1/solution.
  * Replaces the old makeSignedManifest that produced a PredictionSubmissionManifest.
  */
 export async function makeSignedManifest(overrides: {
@@ -36,7 +36,7 @@ export async function makeSignedManifest(overrides: {
   const unsigned = {
     schemaVersion: 'jinn.execution.v1' as const,
     solverType: 'prediction.v1',
-    role: 'restoration' as const,
+    role: 'solution' as const,
     generatedAt: 1000,
 task: {
       cid: overrides.taskCid ?? 'task-cid',
@@ -81,7 +81,7 @@ task: {
 export function makeEvalTask(
   envelope: SignedEnvelope | Record<string, unknown>,
   task: PredictionV1Task,
-  options?: { omitRestorationTaskCid?: boolean; restorationEnvelopeCid?: string },
+  options?: { omitSolutionTaskCid?: boolean; solutionEnvelopeCid?: string },
 ): Task {
   const e = envelope as { task: { cid: string } };
   return {
@@ -95,11 +95,11 @@ export function makeEvalTask(
     eligibility: task.eligibility,
     context: {
       restorationResult: JSON.stringify(envelope),
-      ...(options?.omitRestorationTaskCid
+      ...(options?.omitSolutionTaskCid
         ? {}
-        : { [RESTORATION_TASK_CID_CONTEXT_KEY]: e.task.cid }),
-      ...(options?.restorationEnvelopeCid
-        ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: options.restorationEnvelopeCid }
+        : { [SOLUTION_TASK_CID_CONTEXT_KEY]: e.task.cid }),
+      ...(options?.solutionEnvelopeCid
+        ? { [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: options.solutionEnvelopeCid }
         : {}),
     },
   } as unknown as Task;

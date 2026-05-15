@@ -44,6 +44,7 @@ import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
 import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
+import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
 import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
@@ -134,6 +135,11 @@ export interface ApiServerConfig {
    * SPA polls the composed endpoint; the join flow uses the per-harness one.
    */
   harnessReadinessRegistry?: HarnessReadinessRegistry;
+  /**
+   * When set, mounts `GET /api/hermes/doctor` under the UI token gate.
+   * Powers the dashboard's Hermes install precheck panel in the join flow.
+   */
+  hermesDoctor?: HermesDoctorConfig;
   /** Operator-local artifact inventory + future-artifact pricing controls. */
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
   /** Path D local session-end hook endpoint. */
@@ -340,6 +346,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/launcher/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
+    app.use('/api/hermes/*', requireUiToken(config.ui.token));
     app.use('/api/captures/*', requireUiToken(config.ui.token));
     app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
   }
@@ -410,6 +417,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // on the exposed setupApiServer.app reference (same pattern as
   // registerSolverNetsEndpoints). No warning needed — routes are always live
   // before the first operator request that cares about harness readiness.
+
+  if (config.ui) {
+    addHermesDoctorRoutes(app, config.hermesDoctor ?? {});
+  }
 
   if (config.ui) {
     addOperatorArtifactsRoutes(app, {

@@ -130,6 +130,21 @@ export const JinnConfigSchema = z.object({
   /** Model for restoration/evaluation agent */
   claudeModel: z.string().default('claude-haiku-4-5-20251001'),
 
+  /** Path to the `hermes` executable. Defaults to `hermes` when unset. */
+  hermesPath: z.string().optional(),
+
+  /** Default Hermes model when a SolverNet does not specify one. */
+  hermesModel: z.string().optional(),
+
+  /** Hermes provider (e.g. 'anthropic'). */
+  hermesProvider: z.string().optional(),
+
+  /**
+   * Timeout in ms for `hermes doctor` health-check runs.
+   * Default 30 000 ms. Env: JINN_HERMES_DOCTOR_TIMEOUT_MS.
+   */
+  hermesDoctorTimeoutMs: z.number().int().positive().default(30_000),
+
   /**
    * How the operator runs the daemon. Set once by app-guided setup or the
    * legacy `jinn auth` compatibility command, then read by every command that
@@ -732,6 +747,12 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
+  if (env['JINN_HERMES_PATH'])       merged.hermesPath = env['JINN_HERMES_PATH'];
+  if (env['JINN_HERMES_MODEL'])      merged.hermesModel = env['JINN_HERMES_MODEL'];
+  if (env['JINN_HERMES_PROVIDER'])   merged.hermesProvider = env['JINN_HERMES_PROVIDER'];
+  if (env['JINN_HERMES_DOCTOR_TIMEOUT_MS']) {
+    merged.hermesDoctorTimeoutMs = parseInt(env['JINN_HERMES_DOCTOR_TIMEOUT_MS'], 10);
+  }
   if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
   if (env['JINN_PEERS'])             merged.peers = env['JINN_PEERS'];
   // Discovery block env overrides
@@ -1022,6 +1043,10 @@ const TRACKED_ENV_VARS = [
   'JINN_API_BIND_HOST',
   'JINN_CLAUDE_PATH',
   'JINN_CLAUDE_MODEL',
+  'JINN_HERMES_PATH',
+  'JINN_HERMES_MODEL',
+  'JINN_HERMES_PROVIDER',
+  'JINN_HERMES_DOCTOR_TIMEOUT_MS',
   'JINN_RUNTIME_MODE',
   'JINN_PEERS',
   'JINN_DISCOVERY_MODE',
