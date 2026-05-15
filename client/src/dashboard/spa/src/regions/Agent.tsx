@@ -10,9 +10,8 @@ interface SpawnError {
 }
 
 interface AgentProps {
-  /** When true, display a placeholder until claude is signed in (Phase 1 of
-   *  the onboarding flow). Doesn't affect Operating mode where it's always
-   *  false. */
+  /** When true, display a placeholder until external setup is complete (e.g.,
+   *  harness setup). Doesn't affect Operating mode where it's always false. */
   agentGated?: boolean;
 }
 
@@ -247,8 +246,7 @@ function AgentGatedPlaceholder(): JSX.Element {
           }}
         />
         <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
-          The agent will come online once you sign in to Claude (Phase 1
-          on the left).
+          The agent will come online once harness setup is complete.
         </p>
       </div>
     </div>
