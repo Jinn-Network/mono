@@ -100,7 +100,7 @@ export interface RunConformanceArgs {
  *  2. Parse with SignedEnvelopeSchema.
  *  3. Fetch task by envelope.task.cid (or use options.task).
  *  4. Fetch trajectory if envelope.trajectory?.cid is set (or use options.trajectory).
- *  5. If role === 'verdict', fetch restoration envelope bytes (or use options.restorationEnvelopeBytes).
+ *  5. If role === 'verdict', fetch solution envelope bytes (or use options.solutionEnvelopeBytes).
  *  6. If evidenceTier === 'attested' and !skipLayer2, fetch source bundle (or use options.sourceBundle).
  *  7. Run Layer 1 checks.
  *  8. If attested and !skipLayer2, run Layer 2 checks.
@@ -122,6 +122,9 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
     let parsed: unknown;
     try {
       parsed = JSON.parse(new TextDecoder().decode(bytes));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        ctx.rawEnvelope = parsed as Record<string, unknown>;
+      }
     } catch (err) {
       return buildReport(args.envelopeCid, 'self-signed', [
         {
@@ -186,21 +189,25 @@ export async function runConformance(args: RunConformanceArgs): Promise<Conforma
     }
   }
 
-  // ── Step 5: Restoration envelope (for verdict back-ref) ──────────────────
+  // ── Step 5: Solution envelope (for verdict back-ref) ──────────────────
   const envelopeRole = (ctx.envelope as { role?: string } | undefined)?.role;
   if (envelopeRole === 'verdict') {
-    if (options.restorationEnvelopeBytes !== undefined) {
-      ctx.restorationEnvelopeBytes = options.restorationEnvelopeBytes instanceof Uint8Array
-        ? options.restorationEnvelopeBytes
-        : new Uint8Array(options.restorationEnvelopeBytes);
+    if (options.solutionEnvelopeBytes !== undefined || options.restorationEnvelopeBytes !== undefined) {
+      const solutionBytes = options.solutionEnvelopeBytes ?? options.restorationEnvelopeBytes!;
+      ctx.solutionEnvelopeBytes = solutionBytes instanceof Uint8Array
+        ? solutionBytes
+        : new Uint8Array(solutionBytes);
+      ctx.restorationEnvelopeBytes = ctx.solutionEnvelopeBytes;
     } else {
-      const refCid = (
-        (ctx.envelope as { payload?: Record<string, unknown> } | undefined)?.payload
-          ?.restorationEnvelope as { cid?: string } | undefined
-      )?.cid;
+      const payload = (ctx.envelope as { payload?: Record<string, unknown> } | undefined)?.payload;
+      const ref = (payload?.solutionEnvelope ?? payload?.restorationEnvelope) as
+        | { cid?: string }
+        | undefined;
+      const refCid = ref?.cid;
       if (refCid) {
         try {
-          ctx.restorationEnvelopeBytes = await fetchEnvelopeBytes(refCid, options);
+          ctx.solutionEnvelopeBytes = await fetchEnvelopeBytes(refCid, options);
+          ctx.restorationEnvelopeBytes = ctx.solutionEnvelopeBytes;
         } catch {
           /* leave undefined — checkVerdictBackReference captures */
         }

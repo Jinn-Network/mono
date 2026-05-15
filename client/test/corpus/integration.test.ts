@@ -16,7 +16,7 @@ function fakeEnvelope(opts: { sha256: string; endpoint: string; priceUsdc: strin
   return {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'prediction.v0',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: 1745978400,
     task: { cid: 'bafyIntent', onchainCreationTx: '0x' + 'a'.repeat(64), onchainCreationBlock: 1, requestId: '0x' + 'b'.repeat(64) },
     participant: { safeAddress: opts.participantSafe, agentEoa: '0x' + '2'.repeat(40) },

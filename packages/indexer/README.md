@@ -12,6 +12,12 @@ The daemon (`@jinn-network/client`) consumes this service via the GraphQL adapte
 
 Schema definitions, event handlers, and Ponder runtime live here. The wire contract (the GraphQL queries the daemon issues) lives in the daemon's source tree. Both sides depend on the same schema shape; when the schema changes, both sides update.
 
+## Network explorer
+
+This package also serves the Jinn network explorer SPA at `/` — a React/Vite app in `explorer/` that builds to `public/` (run as part of `yarn build` and in the Dockerfile; a minimal placeholder is served if no build is present; deep links like `/solvernet/<cid>`, `/operators`, `/operator/<addr>` are SPA-fallback-served `index.html`). Aggregation JSON routes are at `/explorer/*` (network KPIs + composition, per-SolverNet learning curves + leaderboards, operator leaderboards, operator detail). Anyone running `@jinn-network/indexer` serves an explorer for free — no separate deployment needed. See `docs/superpowers/specs/2026-05-12-network-explorer-design.md` for the full design and `deploy/README.md` for the deployment guide including the `PONDER_RPC_URL_11155111` env var (required for the JinnDistributor / Sepolia-L1 source).
+
+The schema includes `harnessCheckpoint` (on-chain checkpoint anchors keyed by `harness.checkpoint:<cid>` MetadataSet events) and `attemptEnvelopeMeta` (envelope-sourced harness/mode/plugin/model per attempt, populated by an IPFS-enrichment step). The `/explorer/*` routes expose harness/mode composition, train/frozen leaderboard splits, a checkpoint timeline, and freeze-integrity diagnostics. Enrichment is gated by `JINN_INDEXER_ENRICH_ENVELOPES` (default on) and uses `JINN_IPFS_GATEWAY_URL` — see `deploy/README.md` for details.
+
 ## Running locally (PGlite, no external database)
 
 ```bash
@@ -70,18 +76,18 @@ The `/builders/:agentId/runs` route and `DiscoveryAPI.getPluginScores` return em
 
 ### No TaskFinalized / TaskRefunded events
 
-JinnRouter V3 does not emit standalone `TaskFinalized` or `TaskRefunded` events.
+JinnRouter V3 does not emit a standalone `TaskFinalized` event.
 The indexer sets `task.finalized = true` when a `SolutionDeliveryClaimed` event
-is received for that task (the terminal success state in V3). `task.refunded`
-always starts as `false`; no on-chain refund event exists at v0.1.
+is received for that task (the terminal success state in V3).
+
+`task.refunded` is populated from `JinnRouter.TaskBudgetRefunded` (wired in
+`ebu7.2`). `TaskBudgetRefunded` does exist on V3 — the prior comment claiming
+it did not was stale.
 
 The daemon compensates: its `canClaimTask` simulation (in
 `client/src/adapters/mech/contracts.ts`) is the correctness gate before any
 claim is attempted. The indexer is an acceleration path; the simulation is the
 truth.
-
-A future JinnRouter version may add explicit finalization events. When they
-land, add a handler in `src/index.ts` and update this limitation note.
 
 ### claimWindowStart / claimWindowEnd not indexed
 

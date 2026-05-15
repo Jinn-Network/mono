@@ -1,13 +1,13 @@
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import type { SignedEnvelope } from '../../../types/envelope.js';
 import { PredictionApyV0RestorationPayloadSchema } from '../../../types/payloads/prediction-apy-v0.js';
 import type { PredictionApyV0RestorationPayload } from '../../../types/payloads/prediction-apy-v0.js';
 
 /**
- * Parse a restoration submission envelope for prediction.apy.v0.
+ * Parse a solution submission envelope for prediction.apy.v0.
  *
- * Restorations are published as jinn.execution.v1 SignedEnvelopes with
- * solverType='prediction.apy.v0' and role='restoration'. The prediction payload
+ * Solutions are published as jinn.execution.v1 SignedEnvelopes with
+ * solverType='prediction.apy.v0' and role='solution'. The prediction payload
  * lives at envelope.payload per PredictionApyV0RestorationPayloadSchema.
  *
  * Returns both the envelope (for signature / task provenance) and the
@@ -19,9 +19,12 @@ export function parsePredictionApySubmissionEnvelope(manifestJson: string): {
 } {
   const raw = JSON.parse(manifestJson) as Record<string, unknown>;
   const envelope = SignedEnvelopeSchema.parse(raw);
-  if (envelope.solverType !== 'prediction.apy.v0' || envelope.role !== 'restoration') {
+  if (
+    envelope.solverType !== 'prediction.apy.v0' ||
+    normalizeEnvelopeRole(envelope.role) !== 'solution'
+  ) {
     throw new Error(
-      `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.apy.v0/restoration`,
+      `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.apy.v0/solution`,
     );
   }
   const payload = PredictionApyV0RestorationPayloadSchema.parse(envelope.payload);

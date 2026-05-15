@@ -4,6 +4,7 @@ import type {
   LaunchedSolverNetRecord,
   SolverNetManifestV1,
 } from '../../api/types.js';
+import type { CreateWizardTemplate } from '../launcher-create/templates.js';
 import { formatTimestamp } from './helpers.js';
 
 /**
@@ -28,6 +29,7 @@ const SWE_REBENCH_V2_MIN_COOLDOWN_MS = 60_000;
 export interface GeneratorPanelProps {
   record: LaunchedSolverNetRecord;
   manifest?: SolverNetManifestV1;
+  template?: CreateWizardTemplate;
   onSave: (patch: Partial<GeneratorConfig>) => Promise<void>;
 }
 
@@ -262,7 +264,13 @@ export function buildSweRebenchV2Patch(
   };
 }
 
-function isSweRebenchV2Record(record: LaunchedSolverNetRecord): boolean {
+function isSweRebenchV2Record(
+  record: LaunchedSolverNetRecord,
+  template?: CreateWizardTemplate,
+): boolean {
+  if (template) {
+    return template.id === 'swe-rebench-v2' && template.version === 'v1';
+  }
   if (
     record.summary?.contractId === 'swe-rebench-v2' &&
     record.summary.contractVersion === 'v1'
@@ -277,8 +285,13 @@ function isSweRebenchV2Record(record: LaunchedSolverNetRecord): boolean {
   );
 }
 
-export function GeneratorPanel({ record, manifest, onSave }: GeneratorPanelProps): JSX.Element {
-  if (isSweRebenchV2Record(record)) {
+export function GeneratorPanel({
+  record,
+  manifest,
+  template,
+  onSave,
+}: GeneratorPanelProps): JSX.Element {
+  if (isSweRebenchV2Record(record, template)) {
     return <SweRebenchV2GeneratorPanel record={record} manifest={manifest} onSave={onSave} />;
   }
   return <PredictionGeneratorPanel record={record} onSave={onSave} />;

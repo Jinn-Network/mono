@@ -1,0 +1,92 @@
+# .github/workflows/promote-main.yml
+#
+# Two-train cadence promotion: fast-forwards `main` to the SHA of the just-published
+# release tag. After this runs, `main` always reflects what's currently published to npm @latest.
+# Hotfix sub-flow bypasses this workflow (hotfix PRs target main directly).
+#
+# Reference: docs/engineering/handbook.md §Cadence (two-train); jinn-mono-qlol.
+
+name: Promote main on release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    name: Fast-forward main to release tag
+    runs-on: ubuntu-latest
+    # Skip pre-release tags (e.g. -canary.*, -rc.*) — only v<semver> named cuts promote main.
+    # The Monday scaffold creates v<semver> tags from `next` HEAD; this job advances main to that SHA.
+    if: ${{ !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v') }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve release SHA
+        id: sha
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          git fetch --tags --depth=1 origin "$RELEASE_TAG"
+          SHA="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          echo "release_sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if main already at release SHA
+        id: skip_check
+        env:
+          RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+        run: |
+          MAIN_SHA="$(git rev-parse HEAD)"
+          if [ "$MAIN_SHA" = "$RELEASE_SHA" ]; then
+            echo "::notice::main is already at $RELEASE_SHA — nothing to promote (hotfix path). Exiting cleanly."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify release SHA is reachable from next
+        if: steps.skip_check.outputs.skip != 'true'
+        env:
+          RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+        run: |
+          git fetch origin next
+          if ! git merge-base --is-ancestor "$RELEASE_SHA" origin/next; then
+            echo "::error::Release SHA $RELEASE_SHA is not reachable from origin/next. \
+                  Refusing to promote main — release tag must be cut from next or main \
+                  (hotfix path). Investigate the release event before retrying."
+            exit 1
+          fi
+
+      - name: Verify fast-forward only
+        if: steps.skip_check.outputs.skip != 'true'
+        env:
+          RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+        run: |
+          # main must be an ancestor of the release commit; otherwise the promotion would
+          # rewrite history. If this fails, a hotfix has landed on main since the release
+          # was drafted — Captain must resolve manually.
+          if ! git merge-base --is-ancestor HEAD "$RELEASE_SHA"; then
+            echo "::error::main is not an ancestor of release SHA $RELEASE_SHA. \
+                  Refusing non-fast-forward promotion. Captain: investigate (likely a \
+                  hotfix landed on main between draft and publish)."
+            exit 1
+          fi
+
+      - name: Fast-forward main
+        if: steps.skip_check.outputs.skip != 'true'
+        env:
+          RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --ff-only "$RELEASE_SHA"
+          git push origin main
+          echo "::notice::main advanced to $RELEASE_SHA (release $RELEASE_TAG)"

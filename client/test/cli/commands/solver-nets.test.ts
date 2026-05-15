@@ -475,6 +475,33 @@ describe('solver-nets command', () => {
     expect(status.harness).toBeUndefined();
   });
 
+  it('reports a generic operator recovery path when the legacy prediction SolverNet is missing', async () => {
+    const configPath = tempConfig({ solverNets: {} });
+    const config = loadConfig(configPath);
+    delete config.solverNets.prediction;
+
+    const status = await buildPredictionOperatorStatus({
+      config,
+      configPath,
+      ...operatorStatusDeps,
+      loadSolverNets: async () => ({
+        get: () => undefined,
+      }),
+    });
+
+    const diagnostic = status.diagnostics.find((candidate) => candidate.code === 'prediction_solvernet_missing');
+    expect(status.ok).toBe(false);
+    expect(diagnostic?.message).toBe('No active SolverNet configured.');
+    expect(diagnostic?.configField).toBe('solverNets');
+    expect(diagnostic?.nextAction).toEqual({
+      description: 'Open Operator > SolverNets to join or configure a SolverNet.',
+      url: '/operator#solvernets',
+    });
+    expect(status.nextAction).toEqual(diagnostic?.nextAction);
+    expect(JSON.stringify(status)).not.toContain("No SolverNet named 'prediction'");
+    expect(JSON.stringify(status)).not.toContain('jinn solver-nets enable prediction');
+  });
+
   it('reports insufficient sample task windows with a complete non-config diagnostic', async () => {
     const sample = await runPredictionSample({ closedWindow: true });
     const diagnostic = sample.diagnostics.find((candidate) => candidate.code === 'prediction_sample_cannot_attempt');
