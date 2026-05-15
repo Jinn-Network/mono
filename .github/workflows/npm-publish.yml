@@ -1,8 +1,11 @@
 name: npm Publish
 
+# Two-train cadence: canary publishes on every push to `next` (the integration branch).
+# `main` is advanced only by the promote-main workflow on release: published — it stays
+# in lock-step with what's currently in npm @latest. See docs/engineering/handbook.md §Cadence.
 on:
   push:
-    branches: [main]
+    branches: [next]
     paths: ['client/**']
   release:
     types: [published]

@@ -932,7 +932,7 @@ describe('Fleet bootstrap', () => {
     expect(callArgs.chainId).toBe(8453);
   });
 
-  it('agent_registered step does not block bootstrap when setAgentWallet bind reverts', async () => {
+  it('agent_registered step does not block bootstrap when setAgentWallet bind reverts (post-h74p: after retry budget)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);
 
@@ -970,6 +970,8 @@ describe('Fleet bootstrap', () => {
       chain: 'base',
       rpcUrl: 'http://127.0.0.1:8545',
       stakingMode: 'standard',
+      // h74p: skip retry sleeps so the test doesn't burn time.
+      safeBindingRetryDelayMs: 0,
     });
 
     const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
@@ -989,6 +991,142 @@ describe('Fleet bootstrap', () => {
     const svc = next.services.find((s: any) => s.index === 1);
     expect(svc.step).toBe('safe_binding_pending');
     expect(svc.agent_id).toBe('777');
+    expect(svc.safe_bound_to_agent).toBe(false);
+    expect(svc.error).toContain('safe_binding_failed');
+  });
+
+  it('agent_registered step retries setAgentWallet on transient failure and succeeds (jinn-mono-h74p)', async () => {
+    // h74p: against a freshly-deployed 1/1 Safe on Base Sepolia, the first
+    // `setAgentWallet` attempt reverts (likely RPC state-lag / freshly-deployed-
+    // Safe race window — observed empirically). A second attempt against the
+    // same Safe + same agentId after a short delay succeeds with no code change.
+    // Bootstrap must retry in-process so first-run operators don't sit at
+    // `safe_bound_to_agent=false` waiting for the bootstrap loop to re-tick.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'agent_registered',
+          error: null,
+          agent_id: '777',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'dd'.repeat(32),
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      // Fast retry delay so this test doesn't burn seconds on retry sleeps.
+      safeBindingRetryDelayMs: 0,
+    });
+
+    const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
+    const bindSpy = vi
+      .spyOn(bindingMod, 'bindAgentWalletToSafe')
+      // First attempt: simulated freshly-deployed-Safe revert.
+      .mockRejectedValueOnce(new Error('Execution reverted for an unknown reason.'))
+      // Second attempt (after short retry delay): succeeds.
+      // hjex.4 introduced the BindAgentWalletOutcome Result type — success
+      // requires `ok: true` on the resolved value.
+      .mockResolvedValueOnce({
+        ok: true as const,
+        txHash: ('0x' + 'ee'.repeat(32)) as `0x${string}`,
+        identityDigest: ('0x' + '11'.repeat(32)) as `0x${string}`,
+        safeMessageHash: ('0x' + '22'.repeat(32)) as `0x${string}`,
+        signature: ('0x' + '33'.repeat(65)) as `0x${string}`,
+        deadline: 9_999_999_999n,
+      });
+
+    const fleet = await store.load('base');
+    const next = await (bootstrapper as any).resumeServiceStandard(fleet, mnemonic, 1);
+
+    const svc = next.services.find((s: any) => s.index === 1);
+    expect(bindSpy).toHaveBeenCalledTimes(2);
+    expect(svc.safe_bound_to_agent).toBe(true);
+    expect(svc.step).toBe('complete');
+    expect(svc.error).toBe(null);
+  });
+
+  it('agent_registered step gives up after maxAttempts and persists failure (jinn-mono-h74p)', async () => {
+    // h74p: bound retry budget so a real (non-transient) failure isn't masked.
+    // After maxAttempts all-failing, bootstrap must fall through to the
+    // existing 'safe_binding_pending' persisted state — same surface error
+    // as today's no-retry behavior, just after N attempts instead of 1.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'agent_registered',
+          error: null,
+          agent_id: '777',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'dd'.repeat(32),
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      safeBindingMaxAttempts: 3,
+      safeBindingRetryDelayMs: 0,
+    });
+
+    const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
+    const bindSpy = vi
+      .spyOn(bindingMod, 'bindAgentWalletToSafe')
+      .mockRejectedValue(new Error('persistent bind revert'));
+
+    const fleet = await store.load('base');
+    const next = await (bootstrapper as any).resumeServiceStandard(fleet, mnemonic, 1);
+
+    const svc = next.services.find((s: any) => s.index === 1);
+    expect(bindSpy).toHaveBeenCalledTimes(3);
+    expect(svc.step).toBe('safe_binding_pending');
     expect(svc.safe_bound_to_agent).toBe(false);
     expect(svc.error).toContain('safe_binding_failed');
   });

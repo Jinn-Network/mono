@@ -80,6 +80,7 @@ import {
 } from './faucet.js';
 import {
   flattenErrorMessage,
+  sleep,
   viemSendTransactionWithRetry,
   waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
@@ -103,6 +104,29 @@ const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
 /** Warn when ETH above the minimum would last fewer than this many days at the daily estimate. */
 const MASTER_ETH_RUNWAY_WARN_DAYS = 7n;
+
+/**
+ * Safe → ERC-8004 agent NFT binding retry (jinn-mono-h74p).
+ *
+ * Empirical observation against fresh Base Sepolia 1/1 Safes: the first
+ * `IdentityRegistry.setAgentWallet` attempt reverts with a generic
+ * "Execution reverted for an unknown reason" — but the same Safe + same
+ * agentId + a freshly-signed message a few seconds later succeeds. The
+ * race window is likely freshly-deployed-Safe state lag on the public RPC
+ * (the simulator can't read the Safe's storage yet in the same block /
+ * eventual-consistency between sibling RPC nodes). A short bounded retry
+ * makes the operator-visible behaviour deterministic instead of relying on
+ * the "daemon exits → operator restarts → resume at safe_binding_pending"
+ * accidental safety net (which goes away when jinn-mono-vh74.2 removes the
+ * Claude-auth post-bootstrap exit gate).
+ *
+ * Defaults: 3 attempts × 3 s delay = at most ~6 s of in-process retry budget
+ * before falling through to the existing `safe_binding_pending` persisted
+ * state. Real (non-transient) failures still surface — just with a slightly
+ * higher latency tax for the diagnostic.
+ */
+const DEFAULT_SAFE_BINDING_MAX_ATTEMPTS = 3;
+const DEFAULT_SAFE_BINDING_RETRY_DELAY_MS = 3_000;
 
 export interface FleetBootstrapperOptions {
   earningDir?: string;
@@ -143,6 +167,16 @@ export interface FleetBootstrapperOptions {
    * testnet funding an explicit operator action.
    */
   autoTestnetFaucet?: boolean;
+  /**
+   * Max in-process attempts for the ERC-8004 Safe-binding step (jinn-mono-h74p).
+   * Defaults to 3. Tests pass small values to keep retry budgets predictable.
+   */
+  safeBindingMaxAttempts?: number;
+  /**
+   * Delay between Safe-binding retries (jinn-mono-h74p). Defaults to 3000 ms
+   * (~1.5 Base Sepolia blocks). Tests pass 0 to skip the sleep entirely.
+   */
+  safeBindingRetryDelayMs?: number;
 }
 
 export class FleetBootstrapper {
@@ -159,6 +193,8 @@ export class FleetBootstrapper {
   private readonly faucetLoopTimeoutMs: number;
   private readonly now: () => number;
   private readonly autoTestnetFaucet: boolean;
+  private readonly safeBindingMaxAttempts: number;
+  private readonly safeBindingRetryDelayMs: number;
 
   constructor(options: FleetBootstrapperOptions = {}) {
     this.store = new FleetStateStore(options.earningDir);
@@ -172,6 +208,10 @@ export class FleetBootstrapper {
     this.now = options.now ?? Date.now;
     this.autoTestnetFaucet =
       options.autoTestnetFaucet ?? this.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
+    this.safeBindingMaxAttempts =
+      options.safeBindingMaxAttempts ?? DEFAULT_SAFE_BINDING_MAX_ATTEMPTS;
+    this.safeBindingRetryDelayMs =
+      options.safeBindingRetryDelayMs ?? DEFAULT_SAFE_BINDING_RETRY_DELAY_MS;
     const dailyOpt = options.masterEthDailyEstimateWei;
     this.masterEthDailyEstimateWei =
       dailyOpt !== undefined
@@ -1253,17 +1293,47 @@ export class FleetBootstrapper {
         step: 'safe_binding_pending',
         error: null,
       });
-      const bindResult = await bindAgentWalletToSafe({
-        identityRegistryAddress: addr(identityRegistry),
-        agentId: BigInt(agentId),
-        safeAddress: addr(safeAddress),
-        agentEoaAccount: agentSigner,
-        agentEoaWalletClient: agentWallet,
-        publicClient: this.publicClient,
-        chainId: this.config.chainId,
-      });
-
-      if (bindResult.ok) {
+      // Combined h74p (retry-on-transient-throw) + hjex.4 (Result-typed
+      // structured errors) policy:
+      //   - bindAgentWalletToSafe now returns a BindAgentWalletOutcome
+      //     (ok=true | ok=false with structured SafeBindingError).
+      //   - A returned Result.ok=false is a deterministic contract revert —
+      //     don't retry; record the structured diagnostic.
+      //   - A *thrown* exception is the freshly-deployed-Safe RPC race
+      //     window h74p targets — retry up to safeBindingMaxAttempts with a
+      //     small delay; if every attempt throws we fall through to a plain
+      //     reason log (no structured fields available).
+      const maxAttempts = Math.max(1, this.safeBindingMaxAttempts);
+      let bindResult: Awaited<ReturnType<typeof bindAgentWalletToSafe>> | undefined;
+      let lastBindError: unknown;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          bindResult = await bindAgentWalletToSafe({
+            identityRegistryAddress: addr(identityRegistry),
+            agentId: BigInt(agentId),
+            safeAddress: addr(safeAddress),
+            agentEoaAccount: agentSigner,
+            agentEoaWalletClient: agentWallet,
+            publicClient: this.publicClient,
+            chainId: this.config.chainId,
+          });
+          break;
+        } catch (err) {
+          lastBindError = err;
+          if (attempt < maxAttempts) {
+            const reason = err instanceof Error ? err.message : String(err);
+            console.error(
+              `[fleet-bootstrap] Service ${index}: setAgentWallet attempt ` +
+              `${attempt}/${maxAttempts} failed (${reason}); retrying in ` +
+              `${this.safeBindingRetryDelayMs}ms...`,
+            );
+            if (this.safeBindingRetryDelayMs > 0) {
+              await sleep(this.safeBindingRetryDelayMs);
+            }
+          }
+        }
+      }
+      if (bindResult?.ok === true) {
         console.error(
           `[fleet-bootstrap] Service ${index}: setAgentWallet succeeded ` +
           `(tx=${bindResult.txHash}, safe=${safeAddress}).`,
@@ -1275,7 +1345,7 @@ export class FleetBootstrapper {
           error_revert_reason: null,
           error_short_message: null,
         });
-      } else {
+      } else if (bindResult && !bindResult.ok) {
         const bindErr = bindResult.error;
         console.error(
           `[fleet-bootstrap] Service ${index}: setAgentWallet failed; continuing with ` +
@@ -1288,6 +1358,20 @@ export class FleetBootstrapper {
           error: `safe_binding_failed: ${bindErr.shortMessage}`,
           error_revert_reason: bindErr.revertReason,
           error_short_message: bindErr.shortMessage,
+        });
+      } else {
+        const reason =
+          lastBindError instanceof Error ? lastBindError.message : String(lastBindError);
+        console.error(
+          `[fleet-bootstrap] Service ${index}: setAgentWallet failed after ` +
+          `${maxAttempts} attempts; continuing with safe_bound_to_agent=false (${reason}).`,
+        );
+        svc = await this.firstServiceUpdate(index, {
+          safe_bound_to_agent: false,
+          step: 'safe_binding_pending',
+          error: `safe_binding_failed: ${reason}`,
+          error_revert_reason: null,
+          error_short_message: null,
         });
       }
     }
