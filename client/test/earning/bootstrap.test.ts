@@ -909,6 +909,7 @@ describe('Fleet bootstrap', () => {
     const bindSpy = vi
       .spyOn(bindingMod, 'bindAgentWalletToSafe')
       .mockResolvedValue({
+        ok: true as const,
         txHash: ('0x' + 'ee'.repeat(32)) as `0x${string}`,
         identityDigest: ('0x' + '11'.repeat(32)) as `0x${string}`,
         safeMessageHash: ('0x' + '22'.repeat(32)) as `0x${string}`,
@@ -970,7 +971,15 @@ describe('Fleet bootstrap', () => {
     });
 
     const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
-    vi.spyOn(bindingMod, 'bindAgentWalletToSafe').mockRejectedValue(new Error('bind reverted'));
+    vi.spyOn(bindingMod, 'bindAgentWalletToSafe').mockResolvedValue({
+      ok: false as const,
+      error: {
+        kind: 'safe_binding_failed' as const,
+        message: 'bind reverted',
+        shortMessage: 'bind reverted',
+        revertReason: null,
+      },
+    });
 
     const fleet = await store.load('base');
     const next = await (bootstrapper as any).resumeServiceStandard(fleet, mnemonic, 1);

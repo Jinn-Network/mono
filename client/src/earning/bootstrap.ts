@@ -1253,35 +1253,41 @@ export class FleetBootstrapper {
         step: 'safe_binding_pending',
         error: null,
       });
-      try {
-        const result = await bindAgentWalletToSafe({
-          identityRegistryAddress: addr(identityRegistry),
-          agentId: BigInt(agentId),
-          safeAddress: addr(safeAddress),
-          agentEoaAccount: agentSigner,
-          agentEoaWalletClient: agentWallet,
-          publicClient: this.publicClient,
-          chainId: this.config.chainId,
-        });
+      const bindResult = await bindAgentWalletToSafe({
+        identityRegistryAddress: addr(identityRegistry),
+        agentId: BigInt(agentId),
+        safeAddress: addr(safeAddress),
+        agentEoaAccount: agentSigner,
+        agentEoaWalletClient: agentWallet,
+        publicClient: this.publicClient,
+        chainId: this.config.chainId,
+      });
+
+      if (bindResult.ok) {
         console.error(
           `[fleet-bootstrap] Service ${index}: setAgentWallet succeeded ` +
-          `(tx=${result.txHash}, safe=${safeAddress}).`,
+          `(tx=${bindResult.txHash}, safe=${safeAddress}).`,
         );
         svc = await this.firstServiceUpdate(index, {
           safe_bound_to_agent: true,
           step: 'complete',
           error: null,
+          error_revert_reason: null,
+          error_short_message: null,
         });
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
+      } else {
+        const bindErr = bindResult.error;
         console.error(
           `[fleet-bootstrap] Service ${index}: setAgentWallet failed; continuing with ` +
-          `safe_bound_to_agent=false (${reason}).`,
+          `safe_bound_to_agent=false (${bindErr.shortMessage}` +
+          `${bindErr.revertReason ? `, revert: ${bindErr.revertReason}` : ''}).`,
         );
         svc = await this.firstServiceUpdate(index, {
           safe_bound_to_agent: false,
           step: 'safe_binding_pending',
-          error: `safe_binding_failed: ${reason}`,
+          error: `safe_binding_failed: ${bindErr.shortMessage}`,
+          error_revert_reason: bindErr.revertReason,
+          error_short_message: bindErr.shortMessage,
         });
       }
     }
