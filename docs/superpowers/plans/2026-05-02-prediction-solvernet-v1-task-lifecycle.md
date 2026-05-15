@@ -324,7 +324,7 @@ Verdict enum:
 - `SCORED`: valid Solution, market resolved YES/NO, scores emitted.
 - `REJECTED`: invalid or late Solution; excluded from Brier aggregates.
 - `INVALID`: market cancelled, invalid, ambiguous, duplicate-mismatched, or otherwise final non-scored.
-- `INDETERMINATE`: temporary unresolved/evaluator-unavailable state; retry later.
+- `INDETERMINATE`: historical label in this plan for a delivered Unresolved verdict. As of `jinn-mono-04wq`, delivered Unresolved is terminal alongside Pass / Fail / Invalid; it is not a retry-later delivery state. Retry happens only before verdict delivery through Stage 5's off-chain `PreconditionResolverRegistry`.
 
 Brier formula:
 
@@ -519,7 +519,7 @@ Dashboard supporting metrics:
 - weekly trend
 - distinct active Solver safe addresses
 - distinct forecast rounds
-- invalid/rejected/indeterminate rates
+- terminal Invalid / Rejected / Unresolved rates (`INDETERMINATE` here is the historical Prediction v1 label for delivered terminal Unresolved)
 - per-operator and per-Harness slices
 
 Agent learning:

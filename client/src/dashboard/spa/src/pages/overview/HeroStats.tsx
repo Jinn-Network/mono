@@ -7,14 +7,70 @@ import type { LiveNowState } from './LiveNowBand.js';
 
 export interface HeroStatsProps {
   tasksDelivered: number;
-  jinnEarned: string;
+  jinnClaimable: string;
+  gasBalanceEth: string;
   gasRunwayDays: number | string;
   statusLabel: string;
   statusState: LiveNowState;
   statusDot: string;
+  activeAction: string | null;
+  onClaim: () => void;
+  onTopUp: () => void;
+  onRestart: () => void;
 }
 
-function Stat({ label, value, unit }: { label: string; value: string | number; unit?: string }): JSX.Element {
+function ActionButton({
+  children,
+  action,
+  activeAction,
+  onClick,
+}: {
+  children: string;
+  action: string;
+  activeAction: string | null;
+  onClick: () => void;
+}): JSX.Element {
+  const busy = activeAction === action;
+  const disabled = activeAction !== null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        alignSelf: 'flex-start',
+        marginTop: '14px',
+        background: 'transparent',
+        border: '1px solid var(--accent-sky)',
+        borderRadius: '6px',
+        color: 'var(--accent-sky)',
+        cursor: busy ? 'wait' : disabled ? 'not-allowed' : 'pointer',
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '11px',
+        letterSpacing: '0.14em',
+        opacity: disabled && !busy ? 0.55 : 1,
+        padding: '8px 10px',
+        textTransform: 'uppercase',
+      }}
+    >
+      {busy ? 'Working...' : children}
+    </button>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  unit,
+  sub,
+  action,
+}: {
+  label: string;
+  value: string | number;
+  unit?: string;
+  sub?: string;
+  action?: JSX.Element;
+}): JSX.Element {
   return (
     <div
       style={{
@@ -64,11 +120,35 @@ function Stat({ label, value, unit }: { label: string; value: string | number; u
           {unit}
         </span>
       )}
+      {sub && (
+        <span
+          style={{
+            color: 'var(--fg-muted)',
+            fontSize: '12px',
+            marginTop: '6px',
+            display: 'block',
+            fontFamily: "'JetBrains Mono', monospace",
+          }}
+        >
+          {sub}
+        </span>
+      )}
+      {action}
     </div>
   );
 }
 
-function StatusStat({ label, state, dot }: { label: string; state: LiveNowState; dot: string }): JSX.Element {
+function StatusStat({
+  label,
+  state,
+  dot,
+  action,
+}: {
+  label: string;
+  state: LiveNowState;
+  dot: string;
+  action: JSX.Element;
+}): JSX.Element {
   return (
     <div
       data-testid="overview-status-stat"
@@ -113,17 +193,23 @@ function StatusStat({ label, state, dot }: { label: string; state: LiveNowState;
         </span>
         {label}
       </span>
+      {action}
     </div>
   );
 }
 
 export function HeroStats({
   tasksDelivered,
-  jinnEarned,
+  jinnClaimable,
+  gasBalanceEth,
   gasRunwayDays,
   statusLabel,
   statusState,
   statusDot,
+  activeAction,
+  onClaim,
+  onTopUp,
+  onRestart,
 }: HeroStatsProps): JSX.Element {
   return (
     <div
@@ -134,9 +220,37 @@ export function HeroStats({
       }}
     >
       <Stat label="Solutions delivered" value={tasksDelivered} />
-      <Stat label="JINN earned" value={jinnEarned} unit="JINN" />
-      <Stat label="Gas runway" value={gasRunwayDays} unit="days" />
-      <StatusStat label={statusLabel} state={statusState} dot={statusDot} />
+      <Stat
+        label="JINN claimable"
+        value={jinnClaimable}
+        unit="JINN"
+        action={(
+          <ActionButton action="Claim JINN" activeAction={activeAction} onClick={onClaim}>
+            Claim now
+          </ActionButton>
+        )}
+      />
+      <Stat
+        label="Gas"
+        value={gasBalanceEth}
+        unit="ETH"
+        sub={`${gasRunwayDays} days runway`}
+        action={(
+          <ActionButton action="Top up gas" activeAction={activeAction} onClick={onTopUp}>
+            Top up
+          </ActionButton>
+        )}
+      />
+      <StatusStat
+        label={statusLabel}
+        state={statusState}
+        dot={statusDot}
+        action={(
+          <ActionButton action="Restart node" activeAction={activeAction} onClick={onRestart}>
+            Restart
+          </ActionButton>
+        )}
+      />
     </div>
   );
 }

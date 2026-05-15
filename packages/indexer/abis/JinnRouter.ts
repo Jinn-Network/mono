@@ -4,10 +4,11 @@
  *
  * NOTE: the V3 JinnRouter (task-coordinator-router-v3) is the current
  * testnet contract. The mainnet deployment uses the same event signatures.
- * TaskFinalized and TaskRefunded do not exist as standalone events on
- * JinnRouter at v0.1 — task completion state is derived from
- * SolutionDeliveryClaimed / VerdictDeliveryClaimed + canClaimTask simulation.
- * The Task.finalized and Task.refunded schema columns start as false and are
+ * TaskFinalized does not exist as a standalone event — task finalization is
+ * derived from SolutionDeliveryClaimed. `TaskBudgetRefunded` *does* exist and
+ * is now indexed → `Task.refunded`. `VerdictDeliveryClaimed` carries the
+ * per-verdict outcome (`verdictCode`: 0=None, 1=Pass, 2=Fail, 3=Invalid,
+ * 4=Unresolved). The Task.finalized schema column starts as false and is
  * updated when a SolutionDeliveryClaimed event indicates all attempts resolved.
  * See README.md §Schema-version policy for the limitation note.
  */
@@ -49,6 +50,30 @@ export const JINN_ROUTER_ABI = [
       { name: 'requestId', type: 'bytes32', indexed: true },
       { name: 'taskId', type: 'uint256', indexed: true },
       { name: 'attemptIndex', type: 'uint32', indexed: false },
+    ],
+  },
+  // ── Verdict delivery (verdict outcome — VerdictCode {None,Pass,Fail,Invalid,Unresolved}) ──
+  {
+    type: 'event',
+    name: 'VerdictDeliveryClaimed',
+    inputs: [
+      { name: 'evaluator', type: 'address', indexed: true },
+      { name: 'requestId', type: 'bytes32', indexed: true },
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'attemptIndex', type: 'uint32', indexed: false },
+      { name: 'verdictIndex', type: 'uint32', indexed: false },
+      { name: 'verdictCode', type: 'uint8', indexed: false },
+    ],
+  },
+  // ── Task budget refund (creator's unspent solution/verdict budget returned) ──
+  {
+    type: 'event',
+    name: 'TaskBudgetRefunded',
+    inputs: [
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'solutionAmount', type: 'uint256', indexed: false },
+      { name: 'verdictAmount', type: 'uint256', indexed: false },
     ],
   },
   // ── Task creation function (for claimWindowStart/End via createTask args) ─

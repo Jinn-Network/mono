@@ -147,7 +147,7 @@ A capture envelope is a `jinn.execution.v1` envelope with one new role and one n
 
 ```ts
 // client/src/types/envelope.ts — additive
-export const RoleSchema = z.enum(['restoration', 'verdict', 'capture']); // + 'capture'
+export const RoleSchema = z.enum(['solution', 'verdict', 'capture']); // + 'capture'; legacy 'restoration' normalizes to 'solution' on read
 
 const SessionProvenanceSchema = z.object({
   sessionId: z.string().min(1),               // UUID per captured session

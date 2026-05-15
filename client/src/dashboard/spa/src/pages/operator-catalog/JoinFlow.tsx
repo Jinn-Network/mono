@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { HermesPrecheckPanel } from './HermesPrecheckPanel.js';
 import { useLocation, useParams } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
@@ -15,11 +16,15 @@ import {
 import {
   canonicalHarnessName,
   CLAUDE_CODE_HARNESS,
+  HERMES_AGENT_HARNESS,
   harnessDisplayName,
   harnessOptionLabel,
 } from '../configuration/harnessNames.js';
 import { PluginPicker } from '../configuration/PluginPicker.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
+
+const HERMES_AGENT_DESCRIPTION =
+  'Self-improving agent by Nous Research. Built-in learning loop, 200+ models via OpenRouter plus Nous Portal, NVIDIA NIM, GLM, Kimi, and more.';
 
 /**
  * Operator participation flow keyed by `manifestCid`.
@@ -121,6 +126,7 @@ export function JoinFlow({
     model: defaultModel,
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [showHermesPrecheck, setShowHermesPrecheck] = useState(false);
 
   // The catalog loads independently of the manifest — when it arrives, if
   // the operator hasn't picked a harness yet (`form.harness` still equal to
@@ -400,6 +406,19 @@ export function JoinFlow({
                   <option value={form.harness}>{harnessDisplayName(form.harness)}</option>
                 )}
               </select>
+              {form.harness === HERMES_AGENT_HARNESS && (
+                <span
+                  data-testid="join-harness-hermes-description"
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '11px',
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  {HERMES_AGENT_DESCRIPTION}{' '}
+                  <span style={{ color: 'var(--break-amber)' }}>(requires separate install)</span>
+                </span>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -487,6 +506,18 @@ export function JoinFlow({
         </section>
       )}
 
+      {showHermesPrecheck && (
+        <HermesPrecheckPanel
+          onSuccess={() => {
+            setShowHermesPrecheck(false);
+            submitMutation.mutate();
+          }}
+          onCancel={() => {
+            setShowHermesPrecheck(false);
+          }}
+        />
+      )}
+
       {submitError && (
         <p
           data-testid="join-flow-submit-error"
@@ -524,6 +555,12 @@ export function JoinFlow({
           disabled={!canSubmit}
           onClick={() => {
             setSubmitError(null);
+            // If Hermes Agent is selected as the solver harness, run the install
+            // precheck before persisting the join config.
+            if (form.roles.includes('solver') && form.harness === HERMES_AGENT_HARNESS) {
+              setShowHermesPrecheck(true);
+              return;
+            }
             submitMutation.mutate();
           }}
           style={{
