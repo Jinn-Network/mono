@@ -341,7 +341,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
     app.use('/api/captures/*', requireUiToken(config.ui.token));
-    app.use('/v1/harnesses', requireUiToken(config.ui.token));
     app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
   }
 
@@ -405,6 +404,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.harnessReadinessRegistry) {
     addHarnessReadinessRoutes(app, { registry: config.harnessReadinessRegistry });
+  } else if (config.ui) {
+    console.warn(
+      '[api] harnessReadinessRegistry not wired; /v1/harnesses/* routes inactive (SPA will see 404s)',
+    );
   }
 
   if (config.ui) {

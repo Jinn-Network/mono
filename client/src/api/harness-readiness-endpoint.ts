@@ -22,7 +22,7 @@ export function addHarnessReadinessRoutes(app: Hono, config: HarnessReadinessRou
     const snapshot = config.registry.getSnapshot();
     const entry = snapshot.harnesses.find((h) => h.harnessName === name);
     if (!entry) {
-      return c.json({ error: 'harness not found in readiness snapshot', harnessName: name }, 404);
+      return c.json({ error: 'harness_not_found' }, 404);
     }
     return c.json(entry);
   });
