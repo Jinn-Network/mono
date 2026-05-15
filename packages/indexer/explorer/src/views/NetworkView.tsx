@@ -1,42 +1,53 @@
 /**
  * NetworkView — protocol-wide stats.
  *
- * Gold element: the resolved-rate KPI (one per surface rule).
- * Page headline: Instrument Serif "The ether" — not gold.
- * All numerics: tabular-nums via the data className.
+ * Layout follows the May 15 redesign (jinn-mono-ujlu):
+ *   1. Hero — gold-bordered card pairing the solve rate (big serif) with the
+ *      Posted → Attempted → Evaluated pipeline.
+ *   2. Activity — 3-cell strip (operators / SolverNets / last settled).
+ *   3. Economy — JINN distributed meter (operator/DAO split) + "how it flows".
+ *   4. What's running — HBars by mode / harness / model / plugin.
+ *   5. Enrichment coverage line + status bar.
+ *
+ * The on-chain-vs-envelope comparison previously rendered here moved to the
+ * SolverNet detail surface where the daemon's submitVerdictDelivery default is
+ * in scope. The "one gold element per surface" rule maps to the hero's solve
+ * rate; all other numerics are mono/white.
  */
 
+import type { ReactNode } from 'react';
 import { useNetwork } from '../lib/api';
+import type { NetworkResponse } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { Card } from '../components/Card';
-import { Kpi, KpiRow } from '../components/Kpi';
 import { HBars } from '../components/HBars';
 import { pct, int, block, jinn } from '../lib/format';
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
-function SkeletonTile() {
+function SkeletonHero() {
   return (
     <div
       style={{
-        padding: '18px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
+        border: '1px solid var(--border-accent)',
+        borderRadius: 'var(--radius-3)',
+        background: 'var(--bg-elevated)',
+        padding: 28,
+        display: 'grid',
+        gridTemplateColumns: '1.4fr 1fr',
+        gap: 32,
       }}
     >
       <div
         style={{
-          height: 10,
-          width: 64,
+          height: 140,
           background: 'var(--bg-sunken)',
           borderRadius: 'var(--radius-1)',
         }}
       />
       <div
         style={{
-          height: 24,
-          width: 96,
+          height: 140,
           background: 'var(--bg-sunken)',
           borderRadius: 'var(--radius-1)',
         }}
@@ -45,30 +56,512 @@ function SkeletonTile() {
   );
 }
 
-function SkeletonKpiRow() {
+// ── Hero (Solve rate + pipeline) ─────────────────────────────────────────────
+
+function SolveHero({ data }: { data: NetworkResponse }) {
+  const attemptsPerTask =
+    data.tasksPosted > 0 ? data.attempts / data.tasksPosted : 0;
+
   return (
-    <div
+    <section
+      aria-label="Solve rate"
       style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        border: '1px solid var(--border)',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)',
+        border: '1px solid var(--border-accent)',
         borderRadius: 'var(--radius-3)',
         background: 'var(--bg-elevated)',
         overflow: 'hidden',
       }}
     >
-      {Array.from({ length: 9 }).map((_, i) => (
+      {/* Left — solve-rate hero */}
+      <div
+        style={{
+          padding: '32px 36px',
+          borderRight: '1px solid var(--border)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 18,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              border: '1px solid var(--gold-500)',
+              color: 'var(--accent-gold)',
+              padding: '3px 10px',
+              borderRadius: 'var(--radius-pill)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: 999,
+                background: 'currentColor',
+              }}
+            />
+            Solve rate
+          </span>
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--fg-dim)',
+            }}
+          >
+            Cumulative
+          </span>
+        </div>
+
         <div
-          key={i}
+          className="data"
           style={{
-            flex: '1 1 140px',
-            borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
+            fontFamily: 'var(--font-display)',
+            fontSize: 'var(--text-7xl)',
+            lineHeight: 0.9,
+            color: 'var(--accent-gold)',
+            letterSpacing: '-0.01em',
+            fontVariantNumeric: 'tabular-nums',
           }}
         >
-          <SkeletonTile />
+          {pct(data.resolvedRate)}
         </div>
-      ))}
+
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--text-base)',
+            color: 'var(--fg-muted)',
+            maxWidth: 460,
+            lineHeight: 1.5,
+          }}
+        >
+          Out of{' '}
+          <b style={{ color: 'var(--fg)', fontWeight: 500 }}>
+            {int(data.tasksPosted)} tasks posted
+          </b>
+          ,{' '}
+          <b style={{ color: 'var(--fg)', fontWeight: 500 }}>
+            {int(data.tasksSettled)} settled
+          </b>
+          {data.tasksRefunded > 0 && (
+            <>; {int(data.tasksRefunded)} refunded with no passing solution</>
+          )}
+          .
+        </div>
+      </div>
+
+      {/* Right — task pipeline */}
+      <div
+        style={{
+          padding: '28px 32px',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--fg)',
+            paddingBottom: 14,
+            borderBottom: '1px solid var(--border)',
+            marginBottom: 18,
+          }}
+        >
+          Task pipeline
+        </div>
+
+        <PipelineStep n="01" label="Posted" value={int(data.tasksPosted)} />
+        <PipelineSep />
+        <PipelineStep
+          n="02"
+          label="Attempted"
+          value={int(data.attempts)}
+          delta={
+            attemptsPerTask > 0
+              ? `${attemptsPerTask.toFixed(1)}× per task`
+              : undefined
+          }
+        />
+        <PipelineSep />
+        <PipelineStep n="03" label="Evaluated" value={int(data.verdicts)} />
+      </div>
+    </section>
+  );
+}
+
+function PipelineStep({
+  n,
+  label,
+  value,
+  delta,
+}: {
+  n: string;
+  label: string;
+  value: ReactNode;
+  delta?: string;
+}) {
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          marginBottom: 6,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: 'var(--font-display)',
+            color: 'var(--fg-dim)',
+            fontSize: 18,
+            lineHeight: 1,
+          }}
+        >
+          {n}
+        </span>
+        <span
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--fg)',
+          }}
+        >
+          {label}
+        </span>
+      </div>
+      <div
+        className="data"
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 28,
+          lineHeight: 1,
+          color: 'var(--fg)',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {value}
+        {delta && (
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--vow-green)',
+              marginLeft: 10,
+              letterSpacing: '0.08em',
+            }}
+          >
+            {delta}
+          </span>
+        )}
+      </div>
     </div>
+  );
+}
+
+function PipelineSep() {
+  return (
+    <div
+      aria-hidden
+      style={{
+        height: 22,
+        display: 'flex',
+        alignItems: 'center',
+        color: 'var(--fg-dim)',
+        paddingLeft: 6,
+        margin: '8px 0',
+      }}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
+        <path d="M12 5v14M6 13l6 6 6-6" />
+      </svg>
+    </div>
+  );
+}
+
+// ── Activity strip ────────────────────────────────────────────────────────────
+
+function ActivityStrip({ data }: { data: NetworkResponse }) {
+  return (
+    <Card title="Activity">
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+        }}
+      >
+        <ActivityCell
+          k="Active operators"
+          v={int(data.distinctOperators)}
+          sub="submitting attempts"
+          first
+        />
+        <ActivityCell
+          k="SolverNets running"
+          v={int(data.solverNetsRunning)}
+          sub="launched · accepting tasks"
+        />
+        <ActivityCell
+          k="Last settlement"
+          v={block(data.mostRecentSettlementBlock)}
+          sub={data.mostRecentSettlementBlock ? 'block' : 'no settled tasks yet'}
+          smaller
+        />
+      </div>
+    </Card>
+  );
+}
+
+function ActivityCell({
+  k,
+  v,
+  sub,
+  first,
+  smaller,
+}: {
+  k: string;
+  v: ReactNode;
+  sub?: string;
+  first?: boolean;
+  smaller?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        padding: first ? '0 24px 0 0' : '0 24px',
+        borderLeft: first ? 'none' : '1px dashed var(--border)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          fontWeight: 500,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--fg-muted)',
+        }}
+      >
+        {k}
+      </div>
+      <div
+        className="data"
+        style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: smaller ? 32 : 'var(--text-4xl)',
+          lineHeight: 1,
+          color: 'var(--fg)',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {v}
+      </div>
+      {sub && (
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            color: 'var(--fg-dim)',
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Economy row ───────────────────────────────────────────────────────────────
+
+function EconomyRow({ data }: { data: NetworkResponse }) {
+  let opWei = 0n;
+  let daoWei = 0n;
+  try {
+    opWei = BigInt(data.jinnDistributedOperator || '0');
+  } catch {
+    /* leave at 0 */
+  }
+  try {
+    daoWei = BigInt(data.jinnDistributedDao || '0');
+  } catch {
+    /* leave at 0 */
+  }
+  const total = opWei + daoWei;
+  const opPctNum =
+    total === 0n ? 0 : Number((opWei * 10000n) / total) / 100;
+  const daoPctNum =
+    total === 0n ? 0 : Number((daoWei * 10000n) / total) / 100;
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+        gap: 20,
+      }}
+    >
+      <Card title="Economy">
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--fg-muted)',
+            marginBottom: 10,
+          }}
+        >
+          JINN distributed
+        </div>
+        <div
+          className="data"
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--text-4xl)',
+            lineHeight: 1,
+            color: 'var(--accent-gold)',
+            letterSpacing: '-0.01em',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {jinn(total.toString())}
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <div
+            style={{
+              height: 6,
+              background: 'var(--bg-sunken)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-pill)',
+              overflow: 'hidden',
+              display: 'flex',
+            }}
+          >
+            <div
+              aria-label="Operators share"
+              style={{
+                background: 'var(--accent-gold)',
+                width: `${opPctNum}%`,
+                height: '100%',
+              }}
+            />
+            <div
+              aria-label="DAO share"
+              style={{
+                background: 'var(--seer-violet)',
+                width: `${daoPctNum}%`,
+                height: '100%',
+                opacity: 0.75,
+              }}
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              marginTop: 10,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              color: 'var(--fg-muted)',
+            }}
+          >
+            <span>
+              <LegendSwatch color="var(--accent-gold)" />
+              {jinn(opWei.toString())} to operators
+            </span>
+            <span>
+              <LegendSwatch color="var(--seer-violet)" opacity={0.75} />
+              {jinn(daoWei.toString())} to DAO
+            </span>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--fg)',
+            marginBottom: 12,
+          }}
+        >
+          How JINN flows
+        </div>
+        <p
+          style={{
+            margin: 0,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 12,
+            color: 'var(--fg-muted)',
+            lineHeight: 1.6,
+          }}
+        >
+          Every settled task pays out from the launcher's bond. Operators earn
+          for passing solutions; the DAO collects a protocol cut to fund the
+          next epoch.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+function LegendSwatch({
+  color,
+  opacity = 1,
+}: {
+  color: string;
+  opacity?: number;
+}) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        marginRight: 8,
+        verticalAlign: 'middle',
+        borderRadius: 2,
+        background: color,
+        opacity,
+      }}
+    />
   );
 }
 
@@ -116,7 +609,7 @@ export function NetworkView() {
       </div>
 
       {/* Loading state */}
-      {isLoading && <SkeletonKpiRow />}
+      {isLoading && <SkeletonHero />}
 
       {/* Error state */}
       {isError && (
@@ -158,44 +651,15 @@ export function NetworkView() {
       {/* Data */}
       {data && (
         <>
-          {/* KPI row — resolved-rate is the ONE gold element */}
-          <KpiRow>
-            <Kpi label="Tasks posted" value={int(data.tasksPosted)} />
-            <Kpi label="Settled" value={int(data.tasksSettled)} />
-            <Kpi label="Refunded" value={int(data.tasksRefunded)} />
-            <Kpi label="Attempts" value={int(data.attempts)} />
-            <Kpi
-              label="Active operators"
-              value={int(data.distinctOperators)}
-            />
-            <Kpi
-              label="SolverNets running"
-              value={int(data.solverNetsRunning)}
-            />
-            <Kpi label="Verdicts" value={int(data.verdicts)} />
-            {/* GOLD: the single accent-gold element on this surface */}
-            <Kpi
-              label="Resolved rate"
-              value={pct(data.resolvedRate)}
-              accent
-            />
-            <Kpi
-              label="JINN distributed"
-              value={jinn(data.jinnDistributedOperator)}
-              sub={`DAO: ${jinn(data.jinnDistributedDao)}`}
-            />
-            <Kpi
-              label="Last settlement"
-              value={block(data.mostRecentSettlementBlock)}
-            />
-          </KpiRow>
+          <SolveHero data={data} />
+          <ActivityStrip data={data} />
+          <EconomyRow data={data} />
 
-          {/* Composition cards */}
           <Card title="What's running">
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
                 gap: 28,
               }}
             >
@@ -215,10 +679,9 @@ export function NetworkView() {
                   share: e.share,
                 }))}
               />
-              {/* By Model HBars: hide when the daemon hasn't yet stamped
-                  executor.model into the envelope (jinn-mono-gbut / gh#191).
-                  Today, every entry is '(unknown)' so showing it reads as
-                  broken; auto-shows once at least one real model name lands. */}
+              {/* By Model: hide until the daemon stamps executor.model into the
+                  envelope (jinn-mono-gbut / gh#191). Auto-shows once at least
+                  one real model name lands. */}
               {data.composition.byModel.some(
                 (e) => e.value && e.value !== '(unknown)',
               ) && (
@@ -241,76 +704,6 @@ export function NetworkView() {
               />
             </div>
           </Card>
-
-          {/* Verdict consistency — on-chain code vs off-chain evaluation envelope (ebu7.13).
-              Surfaces the daemon-side verdictCode = 1 (Pass) default that makes failed
-              evaluations appear as passes on-chain; envelope truth is the headline. */}
-          {data.verdictConsistency.total > 0 && (
-            <Card title="On-chain vs envelope">
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 32,
-                  alignItems: 'baseline',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-sm)',
-                }}
-              >
-                <div>
-                  <div className="label" style={{ color: 'var(--fg-muted)' }}>
-                    Envelope-truth resolved
-                  </div>
-                  <div className="data" style={{ fontSize: 22 }}>{pct(data.resolvedRate)}</div>
-                </div>
-                <div>
-                  <div className="label" style={{ color: 'var(--fg-muted)' }}>
-                    On-chain code resolved
-                  </div>
-                  <div className="data" style={{ fontSize: 22, color: 'var(--fg-muted)' }}>
-                    {pct(data.onChainResolvedRate)}
-                  </div>
-                </div>
-                <div>
-                  <div className="label" style={{ color: 'var(--fg-muted)' }}>Agreement</div>
-                  <div className="data" style={{ fontSize: 22 }}>{pct(data.verdictConsistency.agreementShare)}</div>
-                </div>
-                <div>
-                  <div className="label" style={{ color: 'var(--fg-muted)' }}>Disagreed</div>
-                  <div
-                    className="data"
-                    style={{
-                      fontSize: 22,
-                      color:
-                        data.verdictConsistency.disagreed > 0
-                          ? 'var(--break-red)'
-                          : 'var(--vow-green)',
-                    }}
-                  >
-                    {int(data.verdictConsistency.disagreed)}
-                    {' / '}
-                    {int(data.verdictConsistency.total)}
-                  </div>
-                </div>
-              </div>
-              <div
-                style={{
-                  marginTop: 12,
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--fg-dim)',
-                  maxWidth: 720,
-                }}
-              >
-                The daemon's <span className="data">submitVerdictDelivery</span> default sends
-                <span className="data"> verdictCode = 1 (Pass) </span>
-                even for failed evaluations, so on-chain pass-rate is artificially high. The
-                evaluator's real outcome lives in the off-chain evaluation envelope on IPFS; the
-                explorer now indexes it and prefers it where enriched. The headline
-                <span className="data"> resolved rate </span>uses envelope truth.
-              </div>
-            </Card>
-          )}
 
           {/* Enrichment coverage line */}
           <div
