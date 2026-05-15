@@ -202,3 +202,111 @@ describe('runCreate (alternative-harness pattern)', () => {
     ).rejects.toThrow(/unsupported pattern/);
   });
 });
+
+describe('runCreate (plugin target — solver-type-plugin)', () => {
+  it('emits a solver-type-plugin package matching the template', async () => {
+    const target = await runCreate({
+      target: 'plugin',
+      pattern: 'solver-type-plugin',
+      packageName: '@example/test-plugin',
+      solverTypeString: 'swe-rebench-v2.v1',
+      outDir: TMP,
+    });
+    expect(target).toBe(join(TMP, '@example/test-plugin'));
+    expect(existsSync(join(target, 'package.json'))).toBe(true);
+    expect(existsSync(join(target, 'jinn.plugin.json'))).toBe(true);
+    expect(existsSync(join(target, 'skills/example/SKILL.md'))).toBe(true);
+    expect(existsSync(join(target, 'test/plugin.test.ts'))).toBe(true);
+    expect(existsSync(join(target, 'README.md'))).toBe(true);
+    expect(existsSync(join(target, 'tsconfig.json'))).toBe(true);
+    expect(existsSync(join(target, '.gitignore'))).toBe(true);
+
+    const pkg = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'));
+    expect(pkg.name).toBe('@example/test-plugin');
+    expect(pkg.devDependencies.vitest).toBeDefined();
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn.plugin.json'), 'utf8'),
+    );
+    expect(manifest.name).toBe('@example/test-plugin');
+    expect(manifest.jinn.supports).toContain('swe-rebench-v2.v1');
+    expect(manifest.jinn.skills).toContain('skills/example/SKILL.md');
+
+    const skillMd = readFileSync(join(target, 'skills/example/SKILL.md'), 'utf8');
+    expect(skillMd).toContain('swe-rebench-v2.v1');
+    expect(skillMd).not.toContain('{{');
+
+    const testTs = readFileSync(join(target, 'test/plugin.test.ts'), 'utf8');
+    expect(testTs).toContain('@example/test-plugin');
+    expect(testTs).not.toContain('{{');
+  });
+});
+
+describe('runCreate (plugin target — runtime-plugin)', () => {
+  it('emits a runtime-plugin package matching the template', async () => {
+    const target = await runCreate({
+      target: 'plugin',
+      pattern: 'runtime-plugin',
+      packageName: '@example/test-runtime',
+      solverTypeString: 'jinn.runtime',
+      outDir: TMP,
+    });
+    expect(target).toBe(join(TMP, '@example/test-runtime'));
+    expect(existsSync(join(target, 'package.json'))).toBe(true);
+    expect(existsSync(join(target, 'jinn.plugin.json'))).toBe(true);
+    expect(existsSync(join(target, '.mcp.json'))).toBe(true);
+    expect(existsSync(join(target, 'mcp/server.mjs'))).toBe(true);
+    expect(existsSync(join(target, 'test/plugin.test.ts'))).toBe(true);
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn.plugin.json'), 'utf8'),
+    );
+    expect(manifest.jinn.supports).toEqual(['jinn.runtime']);
+
+    const serverJs = readFileSync(join(target, 'mcp/server.mjs'), 'utf8');
+    expect(serverJs).toContain('example-test-runtime-example');
+    expect(serverJs).not.toContain('{{');
+  });
+});
+
+describe('runCreate (plugin target — first-run yarn test passes)', () => {
+  it('scaffolded solver-type-plugin passes yarn install && yarn test', async () => {
+    const target = await runCreate({
+      target: 'plugin',
+      pattern: 'solver-type-plugin',
+      packageName: 'test-plugin-e2e',
+      solverTypeString: 'swe-rebench-v2.v1',
+      outDir: TMP,
+    });
+    // yarn install with --no-immutable so the missing lockfile doesn't fail
+    const installResult = execFileSync('yarn', ['install', '--no-immutable'], {
+      cwd: target,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    expect(installResult).toBeDefined();
+    const testResult = execFileSync('yarn', ['test'], {
+      cwd: target,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    expect(testResult).toMatch(/(passed|PASS)/i);
+  }, 60_000);
+
+  it('scaffolded runtime-plugin passes yarn install && yarn test', async () => {
+    const target = await runCreate({
+      target: 'plugin',
+      pattern: 'runtime-plugin',
+      packageName: 'test-runtime-e2e',
+      solverTypeString: 'jinn.runtime',
+      outDir: TMP,
+    });
+    execFileSync('yarn', ['install', '--no-immutable'], { cwd: target, stdio: 'pipe' });
+    const testResult = execFileSync('yarn', ['test'], {
+      cwd: target,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    expect(testResult).toMatch(/(passed|PASS)/i);
+  }, 60_000);
+});

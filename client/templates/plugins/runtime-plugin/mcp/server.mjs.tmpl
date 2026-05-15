@@ -1,0 +1,33 @@
+#!/usr/bin/env node
+
+// Minimal MCP server stub.
+//
+// Replace this body with a real MCP server implementation (e.g. via
+// @modelcontextprotocol/sdk) that exposes the tools declared in
+// jinn.plugin.json's jinn.mcpServers.example.
+
+import { createInterface } from 'node:readline';
+
+const rl = createInterface({ input: process.stdin });
+
+rl.on('line', (line) => {
+  let msg;
+  try {
+    msg = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (msg?.method === 'initialize') {
+    process.stdout.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: '{{packageNameSlug}}-example', version: '0.1.0' },
+        },
+      }) + '\n',
+    );
+  }
+});
