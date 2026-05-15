@@ -374,23 +374,38 @@ Output flags:
 
     if (!subverb || subverb === 'list') {
       const loaded = loadConfig(configPath);
+      const legacy = Object.entries(loaded.solverNets).map(([netName, net]) => ({
+        name: netName,
+        source: 'legacy' as const,
+        enabled: net.enabled,
+        solverType: net.solverType,
+        harness: net.harness,
+        pluginCount: net.plugins.length,
+        taskGeneratorEnabled: net.taskGenerator.enabled,
+      }));
+      const joined = Object.entries(loaded.joinedSolverNets ?? {}).map(([cid, net]) => ({
+        name: net.name ?? cid,
+        source: 'joined' as const,
+        manifestCid: cid,
+        enabled: true,
+        solverType: 'prediction.v1',
+        harness: net.harness,
+        pluginCount: (net.plugins ?? []).length,
+        taskGeneratorEnabled: false,
+      }));
       const value = {
         verb: 'solver-nets list',
         configPath,
-        solverNets: Object.entries(loaded.solverNets).map(([netName, net]) => ({
-          name: netName,
-          enabled: net.enabled,
-          solverType: net.solverType,
-          harness: net.harness,
-          pluginCount: net.plugins.length,
-          taskGeneratorEnabled: net.taskGenerator.enabled,
-        })),
+        solverNets: [...legacy, ...joined],
       };
       emit(ctx, value, human, json, (v) => {
         const list = v as typeof value;
         if (list.solverNets.length === 0) return 'No SolverNets configured.';
         return list.solverNets
-          .map((n) => `${n.name}  ${n.enabled ? 'enabled' : 'disabled'}  ${n.solverType}  harness=${n.harness ?? '(default)'}  plugins=${n.pluginCount}  generator=${n.taskGeneratorEnabled ? 'on' : 'off'}`)
+          .map((n) => {
+            const base = `${n.name}  ${n.enabled ? 'enabled' : 'disabled'}  ${n.solverType}  harness=${n.harness ?? '(default)'}  plugins=${n.pluginCount}  generator=${n.taskGeneratorEnabled ? 'on' : 'off'}  source=${n.source}`;
+            return 'manifestCid' in n ? `${base}  cid=${n.manifestCid}` : base;
+          })
           .join('\n');
       });
       return;

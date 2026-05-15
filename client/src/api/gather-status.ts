@@ -108,6 +108,27 @@ function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
   return network === 'testnet' ? 'base-sepolia' : 'base';
 }
 
+/**
+ * Derive the SolverNet name to use for the prediction operator diagnostic.
+ *
+ * Priority: (1) first legacy `solverNets` entry name, (2) first joined entry's
+ * `name` field, (3) first joined entry's manifestCid, (4) fallback `'prediction'`.
+ *
+ * This replaces the previous hard-coded `'prediction'` string so that operators
+ * who joined a SolverNet via the manifest-keyed flow still get a useful diagnostic
+ * (jinn-mono-hjex.2).
+ */
+function derivePredictionSolverNetName(config: JinnConfig): string {
+  const legacyNames = Object.keys(config.solverNets);
+  if (legacyNames.length > 0) return legacyNames[0]!;
+  const joinedEntries = Object.entries(config.joinedSolverNets ?? {});
+  if (joinedEntries.length > 0) {
+    const [cid, entry] = joinedEntries[0]!;
+    return entry.name ?? cid;
+  }
+  return 'prediction';
+}
+
 function predictionOperatorCacheKey(configPath: string, name: string): string {
   return `${configPath}\0${name}`;
 }
@@ -483,10 +504,11 @@ export async function gatherGatheredStatusRaw(
   let predictionOperatorError: string | undefined;
   if (status?.config) {
     try {
+      const solverNetName = derivePredictionSolverNetName(status.config);
       const raw = await getCachedPredictionOperatorStatus(
         status.config,
         status.configPath ?? '<default>',
-        'prediction',
+        solverNetName,
       );
       predictionOperator = narrowOperatorStatusForApi(raw);
     } catch (error) {

@@ -66,7 +66,7 @@ function rolesFromConfig(net: SolverNetConfig): SolverNetOperatorRole[] {
   return ['solving'];
 }
 
-function rolesFromJoinedConfig(net: JoinedSolverNetConfig): SolverNetOperatorRole[] {
+export function rolesFromJoinedConfig(net: JoinedSolverNetConfig): SolverNetOperatorRole[] {
   const roles: SolverNetOperatorRole[] = [];
   for (const role of net.roles) {
     if (role === 'solver') roles.push('solving');

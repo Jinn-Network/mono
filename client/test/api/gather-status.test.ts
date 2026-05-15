@@ -310,6 +310,61 @@ describe('gatherStatusForApi', () => {
     });
   });
 
+  it('derives SolverNet name from joinedSolverNets when solverNets is empty (jinn-mono-hjex.2)', async () => {
+    mockStatusRpc();
+    const buildPredictionOperatorStatus = vi.fn(async (): Promise<PredictionOperatorStatus> => ({
+      kind: 'prediction.v1.operatorStatus',
+      ok: true,
+      configPath: '/tmp/config.json',
+      solverNet: {
+        name: 'SWE-rebench v2',
+        enabled: true,
+        solverType: 'prediction.v1',
+        roles: ['solving'],
+        harness: 'claude-code',
+        taskGeneratorEnabled: false,
+      },
+      runtimePlugins: [],
+      diagnostics: [],
+      nextAction: { description: 'Run', cli: 'jinn run' },
+    }));
+    vi.doMock('../../src/solver-nets/prediction-operator-ux.js', () => ({
+      buildPredictionOperatorStatus,
+    }));
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    const config = {
+      solverNets: {},
+      joinedSolverNets: {
+        'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
+          manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
+          name: 'SWE-rebench v2',
+          roles: ['solver'],
+          harness: 'claude-code',
+          plugins: [],
+          disabledDefaultPlugins: [],
+        },
+      },
+    } as unknown as JinnConfig;
+
+    await withTempStore(async (store) => {
+      await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        config,
+        configPath: '/tmp/config.json',
+      });
+    });
+
+    // gather-status must have called buildPredictionOperatorStatus with the name
+    // from the joined entry ('SWE-rebench v2'), not the hard-coded 'prediction'.
+    expect(buildPredictionOperatorStatus).toHaveBeenCalledTimes(1);
+    const [callArgs] = buildPredictionOperatorStatus.mock.calls;
+    expect((callArgs as [{ name?: string }])[0].name).toBe('SWE-rebench v2');
+  });
+
   it("omits 'launching' from operator.solverNet.roles on the unavailable path", async () => {
     mockStatusRpc();
     const buildPredictionOperatorStatus = vi.fn(async () => {
