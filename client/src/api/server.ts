@@ -353,6 +353,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/operator/*', requireUiToken(config.ui.token));
     app.use('/v1/launcher', requireUiToken(config.ui.token));
     app.use('/v1/launcher/*', requireUiToken(config.ui.token));
+    app.use('/v1/discovery', requireUiToken(config.ui.token));
+    app.use('/v1/discovery/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
     app.use('/api/hermes/*', requireUiToken(config.ui.token));
