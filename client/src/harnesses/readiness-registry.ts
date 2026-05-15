@@ -125,12 +125,18 @@ export class HarnessReadinessRegistry {
           };
         }
         try {
+          let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
           const status = await Promise.race([
             harness.isReady({ solverType: '*' }),
-            new Promise<ReadyStatus>((_, reject) =>
-              setTimeout(() => reject(new Error('isReady timed out')), this.opts.isReadyTimeoutMs),
-            ),
-          ]);
+            new Promise<ReadyStatus>((_, reject) => {
+              timeoutHandle = setTimeout(
+                () => reject(new Error('isReady timed out')),
+                this.opts.isReadyTimeoutMs,
+              );
+            }),
+          ]).finally(() => {
+            if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+          });
           return {
             harnessName: name,
             manifestCids: cids,

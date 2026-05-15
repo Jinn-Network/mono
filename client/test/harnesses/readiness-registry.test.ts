@@ -92,6 +92,8 @@ describe('HarnessReadinessRegistry', () => {
     expect(snapshot.harnesses[0]?.reason).toContain('boom');
   });
 
+  // Note: start() schedules the interval but does NOT call refreshNow() immediately,
+  // so counter=0 on entry; the explicit refreshNow() below drives the first read (counter→1).
   it('background tick refreshes snapshot every interval', async () => {
     let counter = 0;
     const flaky = fakeHarness('claude-code-learner', async () => ({
