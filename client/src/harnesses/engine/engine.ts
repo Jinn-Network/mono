@@ -1191,12 +1191,9 @@ export class TaskEngine {
       }
     }
 
-    if (!this.packagingDeps || !this.envelopeDeps) {
-      throw new NotImplementedError('pack');
-    }
-
     // jinn-mono-4tfq: SkippableError caught in RUNNING leaves a skip-marker
     // Solution with no payload; short-circuit before envelope assembly.
+    // Runs BEFORE the deps guard — skipping needs nothing wired.
     const earlyImplOutput = this.solutionOutputs.get(task.requestId);
     const gatingClaim = earlyImplOutput?.gating as Record<string, unknown> | undefined;
     if (gatingClaim?.['skipped'] === true) {
@@ -1212,6 +1209,10 @@ export class TaskEngine {
         `impl skipped: ${reason}${detail ? ` — ${detail}` : ''}`,
       );
       return;
+    }
+
+    if (!this.packagingDeps || !this.envelopeDeps) {
+      throw new NotImplementedError('pack');
     }
 
     const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
