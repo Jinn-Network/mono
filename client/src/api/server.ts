@@ -42,6 +42,8 @@ import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
+import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
+import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
@@ -126,6 +128,12 @@ export interface ApiServerConfig {
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
    */
   harnessStatus?: HarnessStatusDeps;
+  /**
+   * When set, mounts `GET /v1/harnesses/readiness` and
+   * `GET /v1/harnesses/:name/readiness` under the UI token gate.
+   * SPA polls the composed endpoint; the join flow uses the per-harness one.
+   */
+  harnessReadinessRegistry?: HarnessReadinessRegistry;
   /** Operator-local artifact inventory + future-artifact pricing controls. */
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
   /** Path D local session-end hook endpoint. */
@@ -333,6 +341,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
     app.use('/api/captures/*', requireUiToken(config.ui.token));
+    app.use('/v1/harnesses', requireUiToken(config.ui.token));
+    app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
   }
 
   addEventsRoutes(app);
@@ -391,6 +401,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.harnessStatus) {
     addHarnessStatusRoutes(app, config.harnessStatus);
+  }
+
+  if (config.harnessReadinessRegistry) {
+    addHarnessReadinessRoutes(app, { registry: config.harnessReadinessRegistry });
   }
 
   if (config.ui) {
