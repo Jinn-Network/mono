@@ -78,13 +78,67 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   await rename(tmpPath, filePath);
 }
 
+/**
+ * Non-destructive migration: when a state file is loaded with the legacy
+ * shape (no `fleet_*` fields), promote `services[0]`'s identity to the
+ * fleet level. Existing operators upgrading to nghf get a coherent
+ * fleet-level identity without re-minting or re-deploying their Safe.
+ *
+ * Rules:
+ *   - If the parsed file already has `fleet_agent_id` set (nullable), do
+ *     nothing — recent state already has fleet identity.
+ *   - Else if `services[0].agent_id` is set, copy `agent_id`,
+ *     `safe_address`, `identity_registry_address` to the fleet level.
+ *     Set `fleet_stage = 'stage1_and_2'` if any service has reached
+ *     `complete`/`safe_binding_pending`, else `stage1`.
+ *   - Else if any service is operational (`complete`/`safe_binding_pending`)
+ *     but no agent_id exists yet (pre-j07), set `fleet_stage = 'stage1_and_2'`
+ *     without populating fleet_* identity — these operators run through the
+ *     legacy agent-id backfill path in main.ts and ensureStage1 becomes a
+ *     no-op (`stage1_and_2 >= stage1`).
+ *   - Else leave `fleet_stage = 'none'` (fresh fleet).
+ *
+ * Per-service identity fields on `services[]` are NOT cleared. The promotion
+ * is non-destructive and idempotent.
+ *
+ * See docs/superpowers/specs/2026-05-14-nghf-staged-bootstrap-fit-findings.md §5.
+ */
+function applyNghfMigration(state: FleetState): FleetState {
+  if (state.fleet_agent_id) return state;
+
+  const firstService = state.services[0];
+  const anyOperational = state.services.some(
+    (s) => s.step === 'complete' || s.step === 'safe_binding_pending',
+  );
+
+  if (firstService?.agent_id) {
+    return {
+      ...state,
+      fleet_agent_id: firstService.agent_id,
+      fleet_safe_address: firstService.safe_address ?? state.fleet_safe_address ?? null,
+      fleet_identity_registry:
+        firstService.identity_registry_address ?? state.fleet_identity_registry ?? null,
+      fleet_stage: anyOperational ? 'stage1_and_2' : 'stage1',
+    };
+  }
+
+  if (anyOperational) {
+    return {
+      ...state,
+      fleet_stage: 'stage1_and_2',
+    };
+  }
+
+  return state;
+}
+
 /** Parse fleet JSON without side effects (for status / read-only tools). */
 export function parseFleetStateJson(raw: string): FleetState | null {
   try {
     const parsed = JSON.parse(raw);
     const result = FleetStateSchema.safeParse(parsed);
     if (result.success) {
-      return result.data;
+      return applyNghfMigration(result.data);
     }
     return null;
   } catch {

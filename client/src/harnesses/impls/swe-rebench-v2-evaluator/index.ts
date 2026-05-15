@@ -13,11 +13,12 @@ import type {
 
 export interface HfRow {
   instance_id: string;
+  repo: string;
   image_name: string;
   FAIL_TO_PASS: string[];
   PASS_TO_PASS: string[];
   test_patch: string;
-  install_config: { test_cmd: string | string[]; log_parser: string };
+  install_config: { install?: string | string[]; test_cmd: string | string[]; log_parser: string };
 }
 
 export interface HfFetcher {
@@ -26,9 +27,12 @@ export interface HfFetcher {
 
 export interface EvalRunner {
   runEval(args: {
+    instance_id: string;
+    repo: string;
     image: string;
     patch: string;
     test_patch: string;
+    install?: string | string[];
     test_cmd: string | string[];
     log_parser: string;
     fail_to_pass: string[];
@@ -62,9 +66,12 @@ export class SweRebenchV2Evaluator {
       throw new Error(`HF row for ${args.task.instance_id} missing image_name`);
     }
     const result = await this.deps.runner.runEval({
+      instance_id: row.instance_id,
+      repo: row.repo,
       image: row.image_name,
       patch: args.solutionPayload.patch,
       test_patch: row.test_patch,
+      install: row.install_config.install,
       test_cmd: row.install_config.test_cmd,
       log_parser: row.install_config.log_parser,
       fail_to_pass: row.FAIL_TO_PASS,

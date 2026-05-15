@@ -24,6 +24,9 @@ import {
 import { dirname, isAbsolute, resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { CommandContext, CommandModule } from '../command.js';
+import { loadConfig } from '../../config.js';
+import { buildHarnesses } from '../../harnesses/impls/index.js';
+import { harnessNameMatches } from '../../harnesses/names.js';
 import {
   loadManifest,
   verifyManifestSignature,
@@ -77,6 +80,27 @@ function emitError(
 ): void {
   emitJson(ctx, { error: { code, message, ...(details ? { details } : {}) } });
   ctx.exit(1);
+}
+
+function enableArgs(argv: string[]): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    if (!arg.startsWith('--')) continue;
+    const stripped = arg.slice(2);
+    const eq = stripped.indexOf('=');
+    const key = eq >= 0 ? stripped.slice(0, eq) : stripped;
+    if (key === 'config' || key === 'json' || key === 'human') {
+      if (eq < 0 && key === 'config') i += 1;
+      continue;
+    }
+    out[key] = eq >= 0
+      ? stripped.slice(eq + 1)
+      : argv[i + 1] && !argv[i + 1]!.startsWith('--')
+        ? argv[++i]
+        : '';
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +209,43 @@ function runRemove(ctx: CommandContext, configPath: string, name: string): void 
 }
 
 // ---------------------------------------------------------------------------
+// enable
+// ---------------------------------------------------------------------------
+
+async function runEnable(ctx: CommandContext, configPath: string, name: string): Promise<void> {
+  const loaded = loadConfig(configPath);
+  const harness = buildHarnesses({
+    stub: true,
+    rpcUrl: loaded.rpcUrl,
+    archiveRpcUrl: loaded.archiveRpcUrl,
+    claudePath: loaded.claudePath,
+    claudeModel: loaded.claudeModel,
+    implStateDirRoot: loaded.engine.implStateDirRoot,
+    ipfsRegistryUrl: loaded.ipfsRegistryUrl,
+  }).find((candidate) => harnessNameMatches(candidate.name, name));
+
+  if (!harness) {
+    emitError(ctx, 'unknown_harness', `Unknown Harness: ${name}`, { name });
+    return;
+  }
+  if (!harness.onEnable) {
+    emitError(ctx, 'not_enableable', `Harness ${name} does not expose an enable flow`, { name });
+    return;
+  }
+
+  const enableResult = await harness.onEnable({
+    runtimePlugins: [],
+    args: enableArgs(ctx.argv.slice(1)),
+  });
+  emitJson(ctx, {
+    verb: 'harnesses enable',
+    configPath,
+    name,
+    enableResult,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // mode
 // ---------------------------------------------------------------------------
 
@@ -222,9 +283,9 @@ function runStatus(ctx: CommandContext, configPath: string): void {
 // ---------------------------------------------------------------------------
 
 const HELP_TEXT = `\
-jinn harnesses <list|add|remove|mode|status> [options]
+jinn harnesses <list|add|remove|enable|mode|status> [options]
 
-Manage operator-supplied external Harnesses (Path 2 plug-in surface) and harness mode.
+Manage operator-supplied external Harnesses (Path 2 plug-in surface), first-party Harness setup, and harness mode.
 
 Subcommands:
   list                   Print configured external Harnesses
@@ -232,6 +293,8 @@ Subcommands:
                          trustedImplSigners[] and append the entry to
                          harnesses.externalImpls in the config file
   remove <name>          Drop the named entry from the config file
+  enable <name>          Run a first-party Harness's idempotent setup flow
+                         (for example Docker/Python checks for evaluators)
   mode <train|frozen>    Set harness mode (train=default allows learning,
                          frozen=stable codeDigest for benchmarking)
   status                 Print harness configuration
@@ -244,6 +307,7 @@ Examples:
   jinn harnesses list
   jinn harnesses add ./node_modules/@example/forecaster
   jinn harnesses remove @example/forecaster
+  jinn harnesses enable swe-rebench-v2-evaluator
   jinn harnesses mode frozen
   jinn harnesses status
 `;
@@ -264,6 +328,7 @@ async function run(ctx: CommandContext): Promise<void> {
         json: { type: 'boolean' as const, default: true },
       },
       allowPositionals: true,
+      strict: false,
     });
   } catch (err) {
     emitError(ctx, 'invalid_invocation', (err as Error).message);
@@ -297,6 +362,15 @@ async function run(ctx: CommandContext): Promise<void> {
       runRemove(ctx, configPath, name);
       return;
     }
+    case 'enable': {
+      const name = parsed.positionals[0];
+      if (!name) {
+        emitError(ctx, 'invalid_invocation', 'usage: jinn harnesses enable <name>');
+        return;
+      }
+      await runEnable(ctx, configPath, name);
+      return;
+    }
     case 'mode': {
       const mode = parsed.positionals[0];
       if (!mode) {
@@ -313,7 +387,7 @@ async function run(ctx: CommandContext): Promise<void> {
       emitError(
         ctx,
         'invalid_invocation',
-        `Unknown harnesses subcommand: ${sub} (expected list|add|remove|mode|status)`,
+        `Unknown harnesses subcommand: ${sub} (expected list|add|remove|enable|mode|status)`,
       );
       return;
   }

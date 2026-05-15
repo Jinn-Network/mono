@@ -126,6 +126,49 @@ describe('gatherStatusForApi', () => {
     expect(buildPredictionOperatorStatus).toHaveBeenCalledTimes(1);
   });
 
+  it('exposes generic task-run status for active non-prediction work', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      persistence.insertDiscovered({
+        requestId: 'swe-request-1',
+        taskId: '15',
+        taskCid: 'bafy-swe-task',
+        onchainCreationTx: '0xabc',
+        onchainCreationBlock: 1,
+        solverType: 'swe-rebench-v2.v1',
+        taskRole: 'restoration',
+        windowStartTs: 1_000,
+        windowEndTs: 2_000,
+        task: {
+          id: 'swe-task',
+          description: 'SWE-rebench task',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+        },
+      });
+      store.db.prepare(
+        `UPDATE task_runs
+         SET state = 'RUNNING',
+             state_updated_at = ?
+         WHERE request_id = ?`,
+      ).run(1_500, 'swe-request-1');
+
+      const status = await gatherStatusForApi(store, undefined);
+
+      expect(status.taskRuns?.totals.activeTaskRuns).toBe(1);
+      expect(status.taskRuns?.inFlight[0]).toMatchObject({
+        requestId: 'swe-request-1',
+        taskId: '15',
+        solverType: 'swe-rebench-v2.v1',
+        state: 'RUNNING',
+        taskRole: 'restoration',
+      });
+      expect(status.predictionV1?.totals.activeTaskRuns).toBe(0);
+    });
+  });
+
   it('caches Prediction operator diagnostic failures for repeated status polls', async () => {
     mockStatusRpc();
     const buildPredictionOperatorStatus = vi.fn(async () => {

@@ -14,9 +14,11 @@ import type {
   ArtifactContent,
   ReadArgs,
 } from './types.js';
-import { runCorpusQuery } from './query.js';
+import { runOnchainCorpusQuery } from './onchain-query.js';
 import { fetchManifest } from './fetch.js';
 import { acquireArtifactContent } from './acquire.js';
+import type { AcquireWithPaymentResult } from '../x402/acquire.js';
+import type { ArtifactSource } from '../types/envelope.js';
 
 export type {
   Corpus,
@@ -62,7 +64,7 @@ export {
 interface InternalDeps {
   fetch?: typeof globalThis.fetch;
   fetchFromIpfs?: (gatewayUrl: string, cid: string) => Promise<unknown>;
-  acquireFn?: (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null>;
+  acquireFn?: (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null | AcquireWithPaymentResult>;
 }
 
 export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corpus {
@@ -71,7 +73,41 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
   const acquireFn = deps.acquireFn;
 
   async function query(q: CorpusQuery): Promise<EnvelopeRef[]> {
-    return runCorpusQuery(opts.subgraphUrl, q, fetchImpl);
+    // When a DiscoveryAPI is injected, delegate entirely — the DiscoveryAPI
+    // owns the primary-vs-floor split (Ponder HTTP + onchain floor via withFallback).
+    if (opts.discovery) {
+      try {
+        const refs = await opts.discovery.queryEnvelopes(q);
+        const deduped = new Map<string, EnvelopeRef>();
+        for (const ref of refs) {
+          if (!deduped.has(ref.manifestCid)) deduped.set(ref.manifestCid, ref);
+        }
+        return [...deduped.values()];
+      } catch (err) {
+        throw new Error(`corpus query failed (discovery): ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Legacy path: onchain option.
+    const refs: EnvelopeRef[] = [];
+    const warnings: string[] = [];
+    let successfulSources = 0;
+    if (opts.onchain) {
+      try {
+        refs.push(...await runOnchainCorpusQuery(q, opts.onchain));
+        successfulSources += 1;
+      } catch (err) {
+        warnings.push(`onchain: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const deduped = new Map<string, EnvelopeRef>();
+    for (const ref of refs) {
+      if (!deduped.has(ref.manifestCid)) deduped.set(ref.manifestCid, ref);
+    }
+    if (deduped.size === 0 && warnings.length > 0 && successfulSources === 0) {
+      throw new Error(`corpus query failed: ${warnings.join('; ')}`);
+    }
+    return [...deduped.values()];
   }
 
   async function fetchOne(ref: EnvelopeRef): Promise<ManifestPreview> {
@@ -90,8 +126,11 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
         privateKey: opts.signer.privateKey,
         routeResolver: opts.routeResolver,
         envelopeCid: manifest.ref.manifestCid,
+        sources: a.sources,
+        ipfsGatewayUrl: opts.ipfsGatewayUrl,
         ownerSafe: manifest.envelope.participant.safeAddress,
         acquireFn,
+        fetchFromIpfs: fetchFromIpfsImpl,
       });
       contents.set(a.sha256, ac);
     }
@@ -101,7 +140,7 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
   async function acquireBySha256(
     sha256: string,
     access: { endpoint: string; priceUsdc: string },
-    hint?: { artifactType?: string; envelopeCid?: string },
+    hint?: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[]; ownerSafe?: string },
   ): Promise<ArtifactContent> {
     return acquireArtifactContent({
       sha256,
@@ -112,7 +151,11 @@ export function createCorpus(opts: CorpusOptions, deps: InternalDeps = {}): Corp
       privateKey: opts.signer.privateKey,
       routeResolver: opts.routeResolver,
       envelopeCid: hint?.envelopeCid,
+      sources: hint?.sources,
+      ipfsGatewayUrl: opts.ipfsGatewayUrl,
+      ownerSafe: hint?.ownerSafe,
       acquireFn,
+      fetchFromIpfs: fetchFromIpfsImpl,
     });
   }
 

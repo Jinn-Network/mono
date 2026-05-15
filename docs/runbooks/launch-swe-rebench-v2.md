@@ -4,6 +4,9 @@
 
 **Spec:** `spec/2026-05-05-solvernet-creation-and-launch.md` (creation + launch experience), `docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md` (swe-rebench-v2 contract shape).
 
+**Public operator flow:** after launch, operators should use
+[`docs/runbooks/swe-rebench-v2-public-testnet.md`](./swe-rebench-v2-public-testnet.md).
+
 **Why this runbook exists:** The launcher SPA wizard supports the swe-rebench-v2 template via the `?template=swe-rebench-v2.v1` URL parameter. There is no UI affordance to discover this template — that is intentional, to avoid community-launched parallel copies that would dilute the task pool. Anyone with launcher credentials can navigate directly to the URL; this doc captures the rest of the steps so the launch is reproducible.
 
 ---
@@ -42,29 +45,36 @@
 
 ## Broadcast for operators
 
-11. **Share the `manifestCid`.** This is the canonical address of the SolverNet. Operators add an entry to their local `~/.jinn-client/config.json`:
+11. **Share the `manifestCid`.** This is the canonical address of the SolverNet.
+    Operators should join from `/operator` once the manifest appears in
+    Discover. The app writes the manifest-keyed participation entry, defaults
+    solver joins to Claude Code, default-includes the SWE-rebench v2 runtime
+    plugin, and derives evaluator harness selection from the SolverNet
+    contract.
+
+    Manual fallback, only when the app cannot write config:
     ```json
     "joinedSolverNets": {
       "<manifestCid>": {
         "manifestCid": "<manifestCid>",
         "name": "SWE-rebench v2 (Jinn)",
+        "contract": { "id": "swe-rebench-v2", "version": "v1" },
         "roles": ["solver"],
         "harness": "claude-code-learner",
-        "model": "claude-haiku-4-5-20251001",
-        "plugins": [
-          { "name": "swe-rebench-v2-runtime", "source": "bundled" }
-        ]
+        "model": "claude-haiku-4-5-20251001"
       }
     }
     ```
-    Operators must restart their daemon for the entry to take effect (the daemon does not hot-reload `joinedSolverNets`).
+    The daemon auto-loads default runtime plugins unless listed in
+    `disabledDefaultPlugins`. Operators must restart their daemon for the entry
+    to take effect (the daemon does not hot-reload `joinedSolverNets`).
 
 ## Operator setup — evaluator role
 
-12. The evaluator harness (`SweRebenchV2EvaluatorHarness`) ships in `@jinn-network/client` and is registered in `buildHarnesses()`. Operators who want to join `roles: ['evaluator']` for swe-rebench-v2 must first run:
+12. The evaluator harness (`SweRebenchV2EvaluatorHarness`) ships in `@jinn-network/client` and is registered in `buildHarnesses()`. The daemon derives evaluator dispatch from the SolverNet contract; operators do not choose a solver harness for evaluator-only participation. Operators who want to join `roles: ['evaluator']` for swe-rebench-v2 must still prepare local evaluator dependencies:
 
     ```bash
-    jinn solver-nets enable swe-rebench-v2-evaluator
+    jinn harnesses enable swe-rebench-v2-evaluator
     ```
 
     The enable flow validates that Docker is reachable (`docker info`) and `python3` is on PATH, then clones `https://github.com/SWE-rebench/SWE-rebench-V2.git` into `<engine.implStateDirRoot>/swe-rebench-v2-evaluator/upstream/`. The marker file at `<engine.implStateDirRoot>/swe-rebench-v2-evaluator/state.json` records `{ enabled: true, upstreamRepoDir }`.

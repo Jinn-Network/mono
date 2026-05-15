@@ -137,7 +137,7 @@ Two levels with distinct concerns; primitives at each level keep clean boundarie
 - **Level 1 is persistent.** A SolverNet is defined once and runs continuously. Its objective accumulates as Tasks resolve.
 - **Level 2 is ephemeral.** Each Task is posted, claimed, solved, scored, settled, indexed.
 - **The join key is the SolverType identifier (a string).** The IPFS Task payload carries top-level `solverType`; the daemon looks up the contract by that key, validates `task.spec` against the contract's schemas, and dispatches to the SolverNet's Harness (or operator-overridden Harness via `bySolverType`).
-- **Plugins are layered, not unique-per-SolverNet.** Network Tools is auto-injected. Contract `defaultRuntimePlugins` come next. Operator-configured plugins come last. De-dup by source and by name. No "one canonical plugin" lock-in — substrate composes.
+- **Plugins are layered, not unique-per-SolverNet.** Network Tools is auto-injected. Contract `defaultRuntimePlugins` come next. Operator-configured plugins come last. De-dup by source and by name. Substrate composes; no single primary-plugin slot.
 - **SolverPlugin and Harness are independent.** Plugin ships substrate; Harness owns the runtime (flow, improve-phase, tunables).
 
 The clean separation: **SolverNet contract registry supplies *shape and protocol authority*; SolverPlugin supplies *substrate (tools + skills)*; Harness supplies *how to actually run it*; SolverNet config supplies *what we're trying to improve and which substrate to add*; Task supplies *the specific thing to solve right now*.**
@@ -162,7 +162,7 @@ A SolverNet is a composition pattern declared in operator config:
 }
 ```
 
-The SolverType-level data the operator does not see in this config — the schemas, evaluator, aggregation function, and default substrate — is fixed by the SolverNet contract registry (§5.6). The operator does not declare schemas or a "canonical plugin"; the contract owns those, and the daemon auto-resolves `defaultRuntimePlugins` plus the auto-injected Network Tools plugin. The operator's `plugins[]` array adds substrate on top.
+The SolverType-level data the operator does not see in this config — the schemas, evaluator, aggregation function, and default substrate — is fixed by the SolverNet contract registry (§5.6). The operator does not declare schemas; the contract owns them, and the daemon auto-resolves `defaultRuntimePlugins` plus the auto-injected Network Tools plugin. The operator's `plugins[]` array adds substrate on top.
 
 A SolverNet is **not a protocol object**. JinnRouter doesn't know about SolverNets; it knows about Tasks with `solverType` identifiers. The SolverNet is operator-side coordination — the way a daemon decides "for a Task whose `solverType` matches a SolverNet I have enabled, here is the substrate (contract defaults + auto-injected runtime + my configured extras), the Harness to start with, and the Objective to roll the verdict score into."
 

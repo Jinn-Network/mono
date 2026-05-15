@@ -1,0 +1,6 @@
+{"role":"user","timestamp":"2026-05-07T00:00:00.000Z","parts":[{"text":"please read the file"}]}
+{"role":"model","timestamp":"2026-05-07T00:00:01.000Z","parts":[{"text":"I will read it."},{"functionCall":{"name":"read","args":{"path":"src/x.ts"}}}]}
+{"role":"user","timestamp":"2026-05-07T00:00:02.000Z","parts":[{"functionResponse":{"name":"read","response":{"content":"file contents here"}}}]}
+{"role":"model","timestamp":"2026-05-07T00:00:03.000Z","parts":[{"text":"now editing"},{"functionCall":{"name":"edit","args":{"path":"src/x.ts","old":"a","new":"b"}}}]}
+{"role":"user","timestamp":"2026-05-07T00:00:04.000Z","parts":[{"functionResponse":{"name":"edit","response":{"content":"edit applied"}}}]}
+{"role":"model","timestamp":"2026-05-07T00:00:05.000Z","parts":[{"text":"done"}]}

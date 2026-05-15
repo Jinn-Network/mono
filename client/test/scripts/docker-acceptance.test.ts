@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   buildDockerComposeEnv,
   dockerAcceptanceComposeEnvPath,
@@ -13,9 +14,10 @@ import {
   hasDockerAcceptanceClaudeToken,
   resolveDockerAcceptanceBaseEnv,
 } from '../../scripts/lib/docker-acceptance.mjs';
-import { isoToSqliteTimestamp, summarizeArtifactRows, summarizeRunWindowArtifacts } from '../../scripts/lib/acceptance-artifacts.mjs';
+import { cycleTaskId, isoToSqliteTimestamp, summarizeArtifactRows, summarizeRunWindowArtifacts } from '../../scripts/lib/acceptance-artifacts.mjs';
 
 const tempDirs: string[] = [];
+const repoClientRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function makeClientRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'jinn-docker-acceptance-'));
@@ -65,13 +67,22 @@ describe('docker acceptance helpers', () => {
     expect(composeEnv.JINN_ACCEPTANCE_IMAGE).toBe('jinn-client:test');
     expect(composeEnv.JINN_PASSWORD).toBe('secret');
     expect(composeEnv.JINN_RPC_URL).toBe('https://public.example');
-    expect(composeEnv.JINN_DISABLE_AUTO_TASKS).toBe('0');
+    expect(composeEnv.JINN_DISABLE_AUTO_TASKS).toBe('1');
     expect(composeEnv.JINN_PREDICTION_V0_WINDOW_MS).toBe('120000');
     expect(composeEnv.JINN_PREDICTION_V0_RESOLVE_GAP_MS).toBe('60000');
+    expect(composeEnv.JINN_POLYMARKET_GAMMA_BASE_URL).toBe('');
+    expect(composeEnv.JINN_POLYMARKET_CLOB_BASE_URL).toBe('');
     expect(composeEnv.JINN_ACCEPTANCE_CONFIG_FILE).toBe(dockerAcceptanceConfigPath(clientRoot));
     expect(dockerAcceptanceWorkspaceRoot(clientRoot)).toBe(join(clientRoot, '.acceptance'));
     expect(dockerAcceptanceComposeEnvPath(clientRoot)).toBe(join(clientRoot, '.acceptance', 'docker-compose.env'));
     expect(dockerAcceptanceEvidenceRoot(clientRoot)).toBe(join(clientRoot, 'acceptance-runs'));
+  });
+
+  it('maps host.docker.internal for Linux Docker acceptance fixtures', () => {
+    const compose = readFileSync(join(repoClientRoot, 'docker-compose.acceptance.yml'), 'utf8');
+
+    expect(compose).toContain('extra_hosts:');
+    expect(compose).toContain('"host.docker.internal:host-gateway"');
   });
 
   it('formats env files in sorted key order', () => {
@@ -190,6 +201,38 @@ describe('summarizeRunWindowArtifacts', () => {
     const cycle2 = summary.byTaskId.find((e) => e.taskId === 'pred-v0-auto-1714464120000');
     expect(cycle2?.restorationOk).toBe(true);
     expect(cycle2?.evaluationOk).toBe(false);
+  });
+
+  it('groups Task-native evaluation suffixes back to the restoration task id', () => {
+    const summary = summarizeRunWindowArtifacts(
+      [
+        {
+          task_id: 'release-acceptance-1',
+          request_id: '0xrestreq',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 10:03:00',
+        },
+        {
+          task_id: 'release-acceptance-1:evaluation:0',
+          request_id: '0xevalreq',
+          tags: '["evaluation-verdict"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 10:04:00',
+        },
+      ],
+      runStartAt,
+    );
+
+    expect(cycleTaskId('release-acceptance-1:evaluation:0')).toBe('release-acceptance-1');
+    expect(summary.completedCycles).toBe(1);
+    expect(summary.byTaskId).toEqual([
+      expect.objectContaining({
+        taskId: 'release-acceptance-1',
+        restorationOk: true,
+        evaluationOk: true,
+      }),
+    ]);
   });
 
   it('excludes rows created before runStartAt (SQLite TEXT format comparison)', () => {

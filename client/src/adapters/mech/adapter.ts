@@ -1,4 +1,4 @@
-import { getAddress, zeroAddress, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
+import { getAddress, zeroAddress, type Address, type Hex, type Log, type PublicClient, type WalletClient } from 'viem';
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
@@ -39,14 +39,20 @@ import {
   getMarketplaceRequestDeliveryMech,
   getTaskCidDigest,
   callDeliverToMarketplace,
+  canClaimTask,
+  canClaimEvaluation,
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
+import { VerdictCode } from './verdict-code.js';
+import { manifestDigestForCid } from './digest.js';
+import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
 import {
-  RESTORATION_ENVELOPE_CID_CONTEXT_KEY,
+  SOLUTION_ENVELOPE_CID_CONTEXT_KEY,
+  SOLUTION_TASK_CID_CONTEXT_KEY,
   RESTORATION_TASK_CID_CONTEXT_KEY,
 } from '../../harnesses/impls/evaluation-context.js';
 import { signTaskV1 } from '../../tasks/signing.js';
@@ -63,6 +69,12 @@ interface PendingEvaluationSolution {
 
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
+const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
+const DEFAULT_ROUTER_LOG_CHUNK_BLOCKS = 9_999n;
+const DEFAULT_TASK_DISCOVERY_FROM_BLOCK: Record<number, bigint> = {
+  84532: 41_153_291n,
+  8453: 25_000_000n,
+};
 const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {
   mode: 'exclusive',
   maxClaims: 1,
@@ -113,6 +125,7 @@ export class MechAdapter implements ExecutionAdapter {
   private pendingEvaluations = new Map<string, import('../../types/index.js').Task>();
   private observedTasks = new Map<string, TaskAnnouncement>();
   private requestKinds = new Map<string, 'solution' | 'verdict'>();
+  private claimedRestorationTaskIds = new Set<string>();
   private evaluationOpportunities = new Map<string, {
     taskId: string;
     attemptIndex: number;
@@ -161,6 +174,11 @@ export class MechAdapter implements ExecutionAdapter {
     if (this.store) {
       this.loadPendingEvaluationSolutions();
       await this.recoverPendingState(blockNumber);
+    } else {
+      const fromBlock = this.onchainTaskDiscoveryFromBlock();
+      if (fromBlock && fromBlock <= blockNumber) {
+        this.requestBlockCursor = fromBlock - 1n;
+      }
     }
   }
 
@@ -181,6 +199,65 @@ export class MechAdapter implements ExecutionAdapter {
     if (routerFromBlock < currentBlock) {
       this.requestBlockCursor = routerFromBlock;
     }
+
+    const scanFromBlock = this.onchainTaskDiscoveryFromBlock();
+    if (scanFromBlock && scanFromBlock <= currentBlock) {
+      const canonicalCursor = scanFromBlock - 1n;
+      if (canonicalCursor < this.requestBlockCursor) {
+        this.requestBlockCursor = canonicalCursor;
+      }
+      console.error(
+        `[mech] TaskCreated canonical backlog scan enabled from block ${scanFromBlock}; ` +
+        'subgraph discovery is optional acceleration only',
+      );
+    }
+  }
+
+  private onchainTaskDiscoveryFromBlock(): bigint | undefined {
+    const discovery = this.config.taskDiscovery;
+    const hasJoinedSolverNet = (discovery?.solverNetManifestCids?.length ?? 0) > 0;
+    if (!hasJoinedSolverNet) return undefined;
+    if (discovery?.onchainFromBlock !== undefined) {
+      const raw = discovery.onchainFromBlock;
+      const value = typeof raw === 'bigint' ? raw : BigInt(Math.max(0, Math.floor(raw)));
+      return value > 0n ? value : undefined;
+    }
+    return DEFAULT_TASK_DISCOVERY_FROM_BLOCK[this.config.chainId];
+  }
+
+  private joinedManifestDigestSet(): Set<string> {
+    const cids = this.config.taskDiscovery?.solverNetManifestCids ?? [];
+    return new Set(
+      cids
+        .filter(Boolean)
+        .map((cid) => manifestDigestForCid(cid).toLowerCase()),
+    );
+  }
+
+  private allowedDiscoveryTaskIds(): Set<string> | null {
+    const raw = this.config.taskDiscovery?.allowedTaskIds ?? [];
+    const ids = raw.map((id) => id.trim()).filter(Boolean);
+    return ids.length > 0 ? new Set(ids) : null;
+  }
+
+  private isDiscoveryTaskAllowed(taskId: string): boolean {
+    const allowed = this.allowedDiscoveryTaskIds();
+    return allowed === null || allowed.has(taskId);
+  }
+
+  private async getRouterLogsInChunks(fromBlock: bigint, toBlock: bigint): Promise<Log[]> {
+    const logs: Log[] = [];
+    for (let start = fromBlock; start <= toBlock; start += DEFAULT_ROUTER_LOG_CHUNK_BLOCKS + 1n) {
+      const end = start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > toBlock
+        ? toBlock
+        : start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
+      logs.push(...await this.publicClient.getLogs({
+        address: this.config.routerAddress,
+        fromBlock: start,
+        toBlock: end,
+      }));
+    }
+    return logs;
   }
 
   private loadPendingEvaluationSolutions(): void {
@@ -285,7 +362,7 @@ export class MechAdapter implements ExecutionAdapter {
       task: {
         ...restorationState,
         signedTask,
-        context: { ...(restorationState.context ?? {}), [RESTORATION_TASK_CID_CONTEXT_KEY]: restorationTaskCid },
+        context: { ...(restorationState.context ?? {}), [SOLUTION_TASK_CID_CONTEXT_KEY]: restorationTaskCid },
       },
       taskCid: restorationTaskCid,
       onchainCreationTx: taskSubmission.txHash,
@@ -381,7 +458,15 @@ export class MechAdapter implements ExecutionAdapter {
         passThreshold: 1,
         evaluationDeadline: submissionDeadline + BigInt(claimPolicy.claimLeaseTtlSeconds),
         maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: true,
+        // Allow the same operator to evaluate its own Solution on Base Sepolia
+        // (84532) so a single dogfood daemon can close the full
+        // post→claim→solve→grade→settle loop without standing up a second
+        // operator. Mainnet (8453) keeps the protocol-level protection.
+        // TODO: revert to unconditional `true` before mainnet launch, OR move
+        // this to a per-SolverNet manifest field so individual launchers can
+        // opt in to single-operator dogfood while the protocol default stays
+        // strict.
+        disallowSolverSelfEvaluation: this.config.chainId !== 84532,
       },
     };
   }
@@ -391,7 +476,7 @@ export class MechAdapter implements ExecutionAdapter {
     solutionRequestId: string;
     attemptIndex: number;
     resultData: string;
-    restorationEnvelopeCid: string;
+    solutionEnvelopeCid: string;
     taskCid?: string;
   }): Task {
     return {
@@ -404,9 +489,9 @@ export class MechAdapter implements ExecutionAdapter {
       context: {
         ...(params.task.context ?? {}),
         restorationResult: params.resultData,
-        [RESTORATION_TASK_CID_CONTEXT_KEY]:
-          params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
-        [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: params.restorationEnvelopeCid,
+        [SOLUTION_TASK_CID_CONTEXT_KEY]:
+          params.task.context?.[SOLUTION_TASK_CID_CONTEXT_KEY] ?? params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
+        [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: params.solutionEnvelopeCid,
       },
     };
   }
@@ -433,6 +518,92 @@ export class MechAdapter implements ExecutionAdapter {
     return announcement;
   }
 
+  private async restorationAnnouncementFromDigest(params: {
+    taskId: string;
+    taskCidDigest: string;
+    transactionHash?: Hex;
+    blockNumber?: number;
+  }): Promise<TaskAnnouncement> {
+    const digest = params.taskCidDigest.startsWith('0x')
+      ? params.taskCidDigest.slice(2)
+      : params.taskCidDigest;
+    const taskCid = `f01551220${digest}`;
+    const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+    const task = parseTask({ signedTask: signed });
+    const announcement: TaskAnnouncement = {
+      taskId: params.taskId,
+      task,
+      taskCid,
+      onchainCreationTx: params.transactionHash,
+      onchainCreationBlock: params.blockNumber,
+    };
+    this.observedTasks.set(params.taskId, announcement);
+    return announcement;
+  }
+
+  private async *discoverSubgraphRestorationTasks(): AsyncIterable<TaskAnnouncement> {
+    const discovery = this.config.taskDiscovery;
+    const discoveryApi: DiscoveryAPI | undefined = discovery?.discoveryApi;
+    const solverNetManifestCids = discovery?.solverNetManifestCids ?? [];
+
+    // Without a DiscoveryAPI or SolverNet manifest CIDs there is nothing to
+    // discover via this path. A DiscoveryAPI is injected by the daemon from
+    // the shared discovery client (Ponder HTTP or onchain floor).
+    if (!discoveryApi || solverNetManifestCids.length === 0) return;
+
+    let candidates;
+    try {
+      candidates = await discoveryApi.findClaimableTasks({
+        solverNetManifestCids,
+        operatorAddress: this.config.safeAddress,
+        pageSize: discovery?.pageSize,
+        maxPages: discovery?.maxPages,
+      });
+    } catch (err) {
+      console.error(
+        '[mech] task discovery (DiscoveryAPI) failed:',
+        err instanceof Error ? err.message : err,
+      );
+      return;
+    }
+
+    for (const candidate of candidates) {
+      if (!this.isDiscoveryTaskAllowed(candidate.taskId)) continue;
+      if (this.claimedRestorationTaskIds.has(candidate.taskId)) continue;
+
+      // Verify claimability per backend: HttpSubgraphDiscoveryAPI cannot run
+      // canClaimTask (no on-chain simulation), so this check is load-bearing
+      // for that path. OnchainDiscoveryAPI already filters internally; this
+      // is redundant there. TODO: add a DiscoveryAPI capability flag so the
+      // onchain path can skip the extra simulateContract round-trip.
+      const claimable = await canClaimTask(
+        this.publicClient,
+        this.config.safeAddress,
+        this.config.routerAddress,
+        candidate.taskId,
+        this.config.mechContractAddress,
+      );
+      if (!claimable.ok) {
+        continue;
+      }
+
+      try {
+        yield await this.restorationAnnouncementFromDigest({
+          taskId: candidate.taskId,
+          taskCidDigest: candidate.taskCidDigest,
+          transactionHash: candidate.createdAtTx,
+          blockNumber: candidate.createdAtBlock,
+        });
+        return;
+      } catch (err) {
+        console.error(
+          `[mech] failed to hydrate subgraph task ${candidate.taskId}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
   private async deliveryEnvelopeCidForSolution(solution: {
     requestId: string;
     blockNumber?: number;
@@ -445,12 +616,10 @@ export class MechAdapter implements ExecutionAdapter {
     const toBlock = solution.blockNumber != null
       ? BigInt(solution.blockNumber)
       : await this.publicClient.getBlockNumber();
-    const configuredLookback = this.config.mechDeliverBackfillLookbackBlocks;
-    const fromBlock = configuredLookback == null
-      ? 0n
-      : toBlock > configuredLookback
-      ? toBlock - configuredLookback
-      : 0n;
+    const lookback =
+      this.config.mechDeliverBackfillLookbackBlocks ??
+      DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS;
+    const fromBlock = toBlock > lookback ? toBlock - lookback : 0n;
     const deliveryDataHex = await findLatestDeliveryDataHexForRequest(
       this.publicClient,
       deliveryMech,
@@ -471,15 +640,35 @@ export class MechAdapter implements ExecutionAdapter {
   private async evaluationAnnouncementForSolution(
     solution: PendingEvaluationSolution,
   ): Promise<TaskAnnouncement | undefined> {
-    if (solution.operator.toLowerCase() === this.config.safeAddress.toLowerCase()) {
+    if (!this.isDiscoveryTaskAllowed(solution.taskId)) {
+      console.log(
+        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: outside configured task discovery scope`,
+      );
+      this.forgetPendingEvaluationSolution(solution.requestId);
       return undefined;
     }
 
     const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
-    const restorationEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
+    const claimable = await canClaimEvaluation(
+      this.publicClient,
+      this.config.safeAddress,
+      this.config.routerAddress,
+      solution.taskId,
+      solution.attemptIndex,
+      this.config.mechContractAddress,
+    );
+    if (!claimable.ok) {
+      console.log(
+        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}`,
+      );
+      this.forgetPendingEvaluationSolution(solution.requestId);
+      return undefined;
+    }
+
+    const solutionEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,
-      restorationEnvelopeCid,
+      solutionEnvelopeCid,
     ) as Record<string, unknown>;
     const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
     const evaluationTask = this.buildEvaluationTask({
@@ -487,7 +676,7 @@ export class MechAdapter implements ExecutionAdapter {
       solutionRequestId: solution.requestId,
       attemptIndex: solution.attemptIndex,
       resultData,
-      restorationEnvelopeCid,
+      solutionEnvelopeCid,
       taskCid: restoration.taskCid,
     });
     const opportunityId = `evaluation:${solution.taskId}:${solution.attemptIndex}:${solution.requestId}`;
@@ -532,14 +721,14 @@ export class MechAdapter implements ExecutionAdapter {
           yield announcement;
         }
 
+        for await (const announcement of this.discoverSubgraphRestorationTasks()) {
+          yield announcement;
+        }
+
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.requestBlockCursor) {
           const fromBlock = this.requestBlockCursor + 1n;
-          const logs = await this.publicClient.getLogs({
-            address: this.config.routerAddress,
-            fromBlock,
-            toBlock: currentBlock,
-          });
+          const logs = await this.getRouterLogsInChunks(fromBlock, currentBlock);
 
           const submittedSolutions = decodeSolutionDeliveryClaimedLogs(logs);
           for (const solution of submittedSolutions) {
@@ -550,32 +739,32 @@ export class MechAdapter implements ExecutionAdapter {
             this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
           }
 
+          const joinedManifestDigests = this.joinedManifestDigestSet();
           const createdTasks = decodeTaskCreatedLogs(logs);
-          for (const { taskId, taskCidDigest, transactionHash, blockNumber } of createdTasks) {
+          for (const { taskId, taskCidDigest, manifestDigest, transactionHash, blockNumber } of createdTasks) {
+            if (!this.isDiscoveryTaskAllowed(taskId)) continue;
+            if (this.claimedRestorationTaskIds.has(taskId) || this.observedTasks.has(taskId)) continue;
+            if (joinedManifestDigests.size > 0 && !joinedManifestDigests.has(manifestDigest.toLowerCase())) continue;
             try {
-              const digest = taskCidDigest.startsWith('0x') ? taskCidDigest.slice(2) : taskCidDigest;
-              // CIDv1 hex with raw codec (0x55) + sha2-256 (0x12) + 32-byte length (0x20).
-              // The Autonolas registry returns raw-codec CIDs when uploading files with
-              // cid-version=1 (Kubo default for files). This is confirmed by the existing
-              // IPFS_GATEWAY_PREFIX constant (f01551220) which has worked in production.
-              // If the gateway ever switches to dag-pb (0x70) the prefix would be f01701220.
-              const taskCid = `f01551220${digest}`;
-              const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
-              const task = parseTask({ signedTask: signed });
-              const announcement: TaskAnnouncement = {
+              const claimable = await canClaimTask(
+                this.publicClient,
+                this.config.safeAddress,
+                this.config.routerAddress,
                 taskId,
-                task,
-                taskCid,
-                onchainCreationTx: transactionHash,
-                onchainCreationBlock: blockNumber,
-              };
-              this.observedTasks.set(taskId, announcement);
+                this.config.mechContractAddress,
+              );
+              if (!claimable.ok) continue;
+              const announcement = await this.restorationAnnouncementFromDigest({
+                taskId,
+                taskCidDigest,
+                transactionHash,
+                blockNumber,
+              });
               yield announcement;
             } catch (err) {
               console.error(`[mech] Failed to parse task ${taskId}:`, err);
             }
           }
-
           for await (const announcement of this.retryPendingEvaluationSolutions()) {
             yield announcement;
           }
@@ -641,6 +830,7 @@ export class MechAdapter implements ExecutionAdapter {
     );
 
     const task = announcement.task;
+    this.claimedRestorationTaskIds.add(claimed.taskId);
     this.pendingEvaluations.set(claimed.requestId, task);
     this.originalStates.set(claimed.requestId, { ...task, role: task.role ?? 'restoration' });
     this.requestKinds.set(claimed.requestId, 'solution');
@@ -708,7 +898,7 @@ export class MechAdapter implements ExecutionAdapter {
     );
   }
 
-  async submitVerdictDelivery(requestId: RequestId, verdictDigest: Hex, verdictCode = 1): Promise<void> {
+  async submitVerdictDelivery(requestId: RequestId, verdictDigest: Hex, verdictCode: VerdictCode): Promise<void> {
     await claimDelivery(
       this.publicClient,
       this.walletClient,
@@ -735,7 +925,13 @@ export class MechAdapter implements ExecutionAdapter {
     );
     const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
     // Strip signature to recompute the hash over the unsigned body.
-    const { signature, ...unsignedBody } = parsed;
+    //
+    // Important: compute over the fetched wire object, not over the parsed
+    // schema result. The schema normalizes some nested objects and may strip
+    // extension metadata that was present when the envelope was signed.
+    const rawSigned = rawEnvelope as Record<string, unknown>;
+    const { signature: _rawSignature, ...unsignedBody } = rawSigned;
+    const signature = parsed.signature;
     const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
     const recomputed = keccak256(jcsBytes);
     if (recomputed !== signature.hash) {

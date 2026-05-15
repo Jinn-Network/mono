@@ -8,17 +8,14 @@ import { join } from 'node:path';
 import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/task.js';
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import { PredictionV1TaskSchema } from '../../../types/prediction-v1.js';
 import {
   PredictionV1RestorationPayloadSchema,
   type PredictionV1RestorationPayload,
 } from '../../../types/payloads/prediction-v1.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
-import {
-  RESTORATION_ENVELOPE_CID_CONTEXT_KEY,
-  RESTORATION_TASK_CID_CONTEXT_KEY,
-} from '../evaluation-context.js';
+import { resolveExpectedSolutionTaskCid, resolveSolutionEnvelopeCid } from '../evaluation-context.js';
 import {
   checkManifestSignature,
   checkTaskRef,
@@ -38,6 +35,8 @@ type Check = {
 
 export interface PredictionV1EvaluatorConfig {
   stub?: boolean;
+  gammaBaseUrl?: string;
+  clobBaseUrl?: string;
   _testDeps?: {
     getResolution?: typeof getResolution;
   };
@@ -64,8 +63,8 @@ export class PredictionV1Evaluator implements Harness {
     if (typeof task.context?.['restorationResult'] !== 'string') {
       return { ok: false, reason: 'context.restorationResult required' };
     }
-    if (typeof task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] !== 'string') {
-      return { ok: false, reason: `context.${RESTORATION_TASK_CID_CONTEXT_KEY} required` };
+    if (resolveExpectedSolutionTaskCid(task).kind === 'missing') {
+      return { ok: false, reason: 'context.solutionTaskCid required' };
     }
     return { ok: true };
   }
@@ -82,26 +81,29 @@ export class PredictionV1Evaluator implements Harness {
     const rawEnvelope = JSON.parse(manifestJson) as Record<string, unknown>;
     const solutionEnvelopeSha256 = createHash('sha256').update(canonicalJson(rawEnvelope)).digest('hex');
     const solutionEnvelopeCid =
-      (ctx.task.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+      resolveSolutionEnvelopeCid(ctx.task)
       ?? ctx.task.restorationRequestId
       ?? '';
 
     let solution: PredictionV1RestorationPayload | null = null;
     try {
       const envelope = SignedEnvelopeSchema.parse(rawEnvelope);
-      if (envelope.solverType !== 'prediction.v1' || envelope.role !== 'restoration') {
+      if (
+        envelope.solverType !== 'prediction.v1' ||
+        normalizeEnvelopeRole(envelope.role) !== 'solution'
+      ) {
         checks.push({
           name: 'solution.envelope',
           status: 'FAIL',
-          detail: `expected prediction.v1/restoration, got ${envelope.solverType}/${envelope.role}`,
+          detail: `expected prediction.v1/solution, got ${envelope.solverType}/${envelope.role}`,
         });
       } else {
         checks.push({ name: 'solution.envelope', status: 'PASS' });
       }
       checks.push(await checkManifestSignature(recomputeTopLevelSignatureHash(rawEnvelope), envelope.signature));
-      const expectedTaskCid = ctx.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] as string | undefined;
-      if (expectedTaskCid) {
-        checks.push(checkTaskRef(envelope.task.cid, expectedTaskCid));
+      const expectedTaskCid = resolveExpectedSolutionTaskCid(ctx.task);
+      if (expectedTaskCid.kind === 'resolved') {
+        checks.push(checkTaskRef(envelope.task!.cid, expectedTaskCid.cid));
       } else {
         checks.push(checkTaskRefMissingExpected());
       }
@@ -208,7 +210,13 @@ export class PredictionV1Evaluator implements Harness {
     sourceUrl: string,
   ): Promise<ResolutionSnapshot> {
     const read = this.config._testDeps?.getResolution ?? getResolution;
-    return read({ marketId, conditionId, sourceUrl });
+    return read({
+      marketId,
+      conditionId,
+      sourceUrl,
+      ...(this.config.gammaBaseUrl ? { gammaBaseUrl: this.config.gammaBaseUrl } : {}),
+      ...(this.config.clobBaseUrl ? { clobBaseUrl: this.config.clobBaseUrl } : {}),
+    });
   }
 }
 

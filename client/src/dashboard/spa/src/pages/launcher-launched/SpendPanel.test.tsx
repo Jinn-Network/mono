@@ -71,9 +71,32 @@ function buildManifest(
   };
 }
 
+function buildRecordSummary(
+  overrides: Partial<NonNullable<LaunchedSolverNetRecord['summary']>> = {},
+): NonNullable<LaunchedSolverNetRecord['summary']> {
+  return {
+    manifestCid: 'bafybeig',
+    solverNetId: 'sn-1',
+    name: 'SWE-rebench v2',
+    network: 'base-sepolia',
+    launcherAgentId: '5474',
+    launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+    status: 'launched',
+    statusUpdatedAt: '2026-05-05T15:00:00Z',
+    contractId: 'swe-rebench-v2',
+    contractVersion: 'v1',
+    solutionPriceWei: '10000000000',
+    verdictPriceWei: '5000000000',
+    openRoles: ['solver', 'evaluator'],
+    anchorBlock: 1,
+    ...overrides,
+  };
+}
+
 function buildStatusResponse(
   netName: string,
   safeBalanceWei: string,
+  solverType?: string,
 ): LauncherStatusResponse {
   return {
     schemaVersion: 1,
@@ -81,6 +104,7 @@ function buildStatusResponse(
     nets: [
       {
         name: netName,
+        ...(solverType ? { solverType } : {}),
         generator: { state: 'active', cadenceMs: 21600000, stale: false },
         openTasks: 0,
         budget: {
@@ -126,7 +150,7 @@ describe('SpendPanel', () => {
     await waitFor(() =>
       expect(
         screen.getByTestId('launcher-launched-spend-safe-balance').textContent,
-      ).toMatch(/wei/),
+      ).toContain('1.5 ETH'),
     );
     expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toContain('100 wei');
     expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toContain('50 wei');
@@ -151,6 +175,87 @@ describe('SpendPanel', () => {
     );
     // Per-Task cost = 100 + 50 = 150 wei.
     expect(screen.getByTestId('launcher-launched-spend-per-task').textContent).toContain('150 wei');
+  });
+
+  it('matches launcher status by manifest solver type when names differ', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      buildStatusResponse('swe-rebench-v2', '1500', 'swe-rebench-v2.v1'),
+    );
+    const predictionContract = buildManifest().contract;
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest({
+          name: 'SWE-rebench v2',
+          contract: {
+            ...predictionContract,
+            id: 'swe-rebench-v2',
+            version: 'v1',
+          },
+          solutionPriceWei: '100',
+          verdictPriceWei: '50',
+        })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-safe-balance').textContent,
+      ).toContain('1,500 wei'),
+    );
+  });
+
+  it('formats small live prices as gwei instead of scientific ETH notation', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      buildStatusResponse('swe-rebench-v2', '2000000000000000', 'swe-rebench-v2.v1'),
+    );
+    const predictionContract = buildManifest().contract;
+    wrap(
+      <SpendPanel
+        record={buildRecord()}
+        manifest={buildManifest({
+          name: 'SWE-rebench v2',
+          contract: {
+            ...predictionContract,
+            id: 'swe-rebench-v2',
+            version: 'v1',
+          },
+          solutionPriceWei: '10000000000',
+          verdictPriceWei: '5000000000',
+        })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-per-task').textContent,
+      ).toBe('15 gwei'),
+    );
+    expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toBe('10 gwei');
+    expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toBe('5 gwei');
+    expect(screen.getByTestId('launcher-launched-spend-per-task').textContent).not.toContain('e-');
+  });
+
+  it('uses the launched record summary for prices while the manifest is loading', async () => {
+    const fetchLauncherStatus = vi.fn().mockResolvedValue(
+      buildStatusResponse('SWE-rebench v2', '2000000000000000', 'swe-rebench-v2.v1'),
+    );
+    wrap(
+      <SpendPanel
+        record={buildRecord({ summary: buildRecordSummary() })}
+        fetchLauncherStatus={fetchLauncherStatus}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('launcher-launched-spend-per-task').textContent,
+      ).toBe('15 gwei'),
+    );
+    expect(screen.getByTestId('launcher-launched-spend-solution-price').textContent).toBe('10 gwei');
+    expect(screen.getByTestId('launcher-launched-spend-verdict-price').textContent).toBe('5 gwei');
   });
 
   it('falls back to "balance unavailable" when no matching launcher-status entry', async () => {

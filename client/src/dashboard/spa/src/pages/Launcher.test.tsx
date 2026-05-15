@@ -190,8 +190,8 @@ describe('LauncherPage', () => {
     expect(contract.textContent).toBe('prediction.v1');
     // Prices block — solution + verdict, both formatted as ETH.
     const prices = within(row).getByTestId('launcher-owned-row-prices');
-    expect(prices.textContent).toMatch(/solution\s+0\.001000\s+ETH/);
-    expect(prices.textContent).toMatch(/verdict\s+0\.000500\s+ETH/);
+    expect(prices.textContent).toMatch(/solution\s+0\.001\s+ETH/);
+    expect(prices.textContent).toMatch(/verdict\s+0\.0005\s+ETH/);
     // Open-roles chips.
     const roles = within(row).getByTestId('launcher-owned-row-roles');
     expect(within(roles).getByText('solver')).toBeTruthy();
@@ -199,6 +199,29 @@ describe('LauncherPage', () => {
     // The bare cid + launchedAt details still render alongside the summary
     // — they remain useful for debugging and click-through correlation.
     expect(within(row).getByText(/launched\s+2026-05-05 15:00 UTC/)).toBeTruthy();
+  });
+
+  it('formats tiny launched prices as gwei instead of scientific ETH notation', async () => {
+    vi.mocked(api.solvernets.listLaunched).mockResolvedValue({
+      records: [
+        buildRecord({
+          summary: buildSummary({
+            name: 'SWE-rebench v2',
+            contractId: 'swe-rebench-v2',
+            contractVersion: 'v1',
+            solutionPriceWei: '10000000000',
+            verdictPriceWei: '5000000000',
+          }),
+        }),
+      ],
+    });
+    wrap(<LauncherPage />);
+
+    const row = await screen.findByTestId('launcher-owned-row');
+    const prices = within(row).getByTestId('launcher-owned-row-prices');
+    expect(prices.textContent).toMatch(/solution\s+10\s+gwei/);
+    expect(prices.textContent).toMatch(/verdict\s+5\s+gwei/);
+    expect(prices.textContent).not.toMatch(/e-\d+/i);
   });
 
   it('falls back to solverNetId when summary is missing on some rows but not others', async () => {

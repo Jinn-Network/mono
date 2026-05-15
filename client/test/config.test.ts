@@ -1,8 +1,8 @@
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { loadConfig, buildConfigProvenance } from '../src/config.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_TESTNET_DISCOVERY_URL, loadConfig, buildConfigProvenance } from '../src/config.js';
 
 describe('loadConfig RPC override handling', () => {
   const dirs: string[] = [];
@@ -11,8 +11,13 @@ describe('loadConfig RPC override handling', () => {
   const originalJinnRpcUrl = process.env['JINN_RPC_URL'];
   const originalJinnNetwork = process.env['JINN_NETWORK'];
   const originalJinnL2ProofRpcUrl = process.env['JINN_L2_PROOF_RPC_URL'];
+  const originalJinnSubgraphUrl = process.env['JINN_SUBGRAPH_URL'];
+  const originalJinnDiscoveryMode = process.env['JINN_DISCOVERY_MODE'];
+  const originalJinnDiscoveryUrl = process.env['JINN_DISCOVERY_URL'];
+  const originalJinnDiscoveryFallback = process.env['JINN_DISCOVERY_FALLBACK'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
+  const originalOperatorDonationEnabled = process.env['JINN_OPERATOR_DONATION_ENABLED'];
 
   afterEach(async () => {
     if (originalBaseRpcUrl === undefined) {
@@ -45,6 +50,30 @@ describe('loadConfig RPC override handling', () => {
       process.env['JINN_L2_PROOF_RPC_URL'] = originalJinnL2ProofRpcUrl;
     }
 
+    if (originalJinnSubgraphUrl === undefined) {
+      delete process.env['JINN_SUBGRAPH_URL'];
+    } else {
+      process.env['JINN_SUBGRAPH_URL'] = originalJinnSubgraphUrl;
+    }
+
+    if (originalJinnDiscoveryMode === undefined) {
+      delete process.env['JINN_DISCOVERY_MODE'];
+    } else {
+      process.env['JINN_DISCOVERY_MODE'] = originalJinnDiscoveryMode;
+    }
+
+    if (originalJinnDiscoveryUrl === undefined) {
+      delete process.env['JINN_DISCOVERY_URL'];
+    } else {
+      process.env['JINN_DISCOVERY_URL'] = originalJinnDiscoveryUrl;
+    }
+
+    if (originalJinnDiscoveryFallback === undefined) {
+      delete process.env['JINN_DISCOVERY_FALLBACK'];
+    } else {
+      process.env['JINN_DISCOVERY_FALLBACK'] = originalJinnDiscoveryFallback;
+    }
+
     if (originalTestnetL2Deployment === undefined) {
       delete process.env['JINN_TESTNET_L2_DEPLOYMENT'];
     } else {
@@ -55,6 +84,12 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
     } else {
       process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'] = originalTestnetTokenDeployment;
+    }
+
+    if (originalOperatorDonationEnabled === undefined) {
+      delete process.env['JINN_OPERATOR_DONATION_ENABLED'];
+    } else {
+      process.env['JINN_OPERATOR_DONATION_ENABLED'] = originalOperatorDonationEnabled;
     }
 
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -153,6 +188,145 @@ describe('loadConfig RPC override handling', () => {
     const config = loadConfig(configPath);
 
     expect(config.rpcUrl).toBe('https://sepolia.base.org');
+  });
+
+  it('defaults testnet discovery to the privately-operated Ponder indexer (http mode)', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.url).toBe(DEFAULT_TESTNET_DISCOVERY_URL);
+    expect(config.discovery?.fallbackToOnchain).toBe(true);
+    // No legacy subgraphUrl default any more — the Railway indexer is the default.
+    expect(config.subgraphUrl).toBeUndefined();
+  });
+
+  it('does not set a discovery or subgraph default on mainnet', async () => {
+    const configPath = await writeConfigFile({ network: 'mainnet' });
+    delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.subgraphUrl).toBeUndefined();
+    expect(config.discovery?.mode).toBeUndefined();
+  });
+
+  it('JINN_DISCOVERY_URL alone on testnet → that URL with mode "http" and fallback true', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_FALLBACK'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_DISCOVERY_URL'] = 'https://my-indexer.example/graphql';
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.url).toBe('https://my-indexer.example/graphql');
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.fallbackToOnchain).toBe(true);
+  });
+
+  it('JINN_DISCOVERY_URL on mainnet → mode defaulted to "http" so the URL is consulted', async () => {
+    const configPath = await writeConfigFile({ network: 'mainnet' });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_FALLBACK'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_DISCOVERY_URL'] = 'https://mainnet-indexer.example/graphql';
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.url).toBe('https://mainnet-indexer.example/graphql');
+    expect(config.discovery?.mode).toBe('http');
+  });
+
+  it('config-file discovery: { url } without mode on testnet → url preserved, mode defaulted to "http"', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      discovery: { url: 'https://operator-indexer.example/graphql' },
+    });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
+    delete process.env['JINN_DISCOVERY_FALLBACK'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.url).toBe('https://operator-indexer.example/graphql');
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.fallbackToOnchain).toBe(true);
+  });
+
+  it('config-file discovery: { fallbackToOnchain: false } without mode → fallbackToOnchain stays false', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      discovery: { fallbackToOnchain: false },
+    });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
+    delete process.env['JINN_DISCOVERY_FALLBACK'];
+    delete process.env['JINN_NETWORK'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.fallbackToOnchain).toBe(false);
+    // mode still defaulted in, url still defaulted to the testnet indexer.
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.url).toBe(DEFAULT_TESTNET_DISCOVERY_URL);
+  });
+
+  it('JINN_DISCOVERY_FALLBACK=0 with JINN_DISCOVERY_URL disables the floor', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_DISCOVERY_URL'] = 'https://my-indexer.example/graphql';
+    process.env['JINN_DISCOVERY_FALLBACK'] = '0';
+
+    const config = loadConfig(configPath);
+
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.url).toBe('https://my-indexer.example/graphql');
+    expect(config.discovery?.fallbackToOnchain).toBe(false);
+  });
+
+  it('surfaces JINN_DISCOVERY_* in config provenance envOverrides', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_FALLBACK'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_DISCOVERY_URL'] = 'https://my-indexer.example/graphql';
+
+    const config = loadConfig(configPath);
+    const prov = buildConfigProvenance(configPath, config);
+
+    expect(prov.envOverrides['JINN_DISCOVERY_URL']).toBe('set');
+  });
+
+  it('defaults operator donation to disabled when operator config exists', async () => {
+    const configPath = await writeConfigFile({
+      operator: { publicEndpoint: 'https://op.example.com' },
+    });
+
+    const config = loadConfig(configPath);
+
+    expect(config.operator?.donation.enabled).toBe(false);
+  });
+
+  it('allows env to enable operator donation', async () => {
+    const configPath = await writeConfigFile({
+      operator: { publicEndpoint: 'https://op.example.com' },
+    });
+    process.env['JINN_OPERATOR_DONATION_ENABLED'] = 'true';
+
+    const config = loadConfig(configPath);
+
+    expect(config.operator?.donation.enabled).toBe(true);
   });
 
   it('accepts self-bond stakingMode from env', () => {
@@ -382,7 +556,6 @@ describe('loadConfig RPC override handling', () => {
     }
   });
 });
-
 describe('loadConfig solverNets roles migration', () => {
   const dirs: string[] = [];
 
@@ -414,6 +587,7 @@ describe('loadConfig solverNets roles migration', () => {
     });
     const cfg = loadConfig(configPath);
     expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+    expect(cfg.solverNets['prediction']?.harness).toBe('claude-code');
     // Loader output is the canonical shape — the singular `role` does not
     // re-appear after migration.
     expect((cfg.solverNets['prediction'] as Record<string, unknown>)?.['role']).toBeUndefined();
@@ -757,6 +931,17 @@ describe('operator config (jinn-mono-vy37.1.3)', () => {
     expect(cfg.operator?.perArtifactTypePrice).toEqual({});
   });
 
+  it('accepts donation-mode operator config without publicEndpoint', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: { donation: { enabled: true } },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.operator?.publicEndpoint).toBeUndefined();
+    expect(cfg.operator?.defaultPriceUsdc).toBe('0');
+    expect(cfg.operator?.donation.enabled).toBe(true);
+  });
+
   it('honours per-artifact-type prices from the file', async () => {
     for (const k of ENV_KEYS) delete process.env[k];
     const configPath = await writeOpConfigFile({
@@ -811,5 +996,106 @@ describe('operator config (jinn-mono-vy37.1.3)', () => {
       operator: { publicEndpoint: 'not-a-url' },
     });
     expect(() => loadConfig(configPath)).toThrow();
+  });
+});
+
+describe('capture config', () => {
+  const dirs: string[] = [];
+  const ENV_KEYS = [
+    'JINN_CAPTURES_LLM_PROXY_ENABLED',
+    'JINN_CAPTURES_LLM_PROXY_PORT',
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  for (const k of ENV_KEYS) saved[k] = process.env[k];
+
+  afterEach(async () => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeCaptureConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('defaults the LLM proxy off', () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const cfg = loadConfig();
+    expect(cfg.captures.llmProxy).toEqual({ enabled: false, port: 7342 });
+  });
+
+  it('loads LLM proxy config from file', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeCaptureConfigFile({
+      captures: { llmProxy: { enabled: true, port: 7450 } },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.captures.llmProxy).toEqual({ enabled: true, port: 7450 });
+  });
+
+  it('overrides LLM proxy config from env', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeCaptureConfigFile({
+      captures: { llmProxy: { enabled: false, port: 7450 } },
+    });
+    process.env['JINN_CAPTURES_LLM_PROXY_ENABLED'] = 'yes';
+    process.env['JINN_CAPTURES_LLM_PROXY_PORT'] = '7451';
+    const cfg = loadConfig(configPath);
+    expect(cfg.captures.llmProxy).toEqual({ enabled: true, port: 7451 });
+  });
+});
+
+describe('hermes config keys', () => {
+  const dirs: string[] = [];
+  const HERMES_ENV_KEYS = [
+    'JINN_HERMES_PATH',
+    'JINN_HERMES_MODEL',
+    'JINN_HERMES_PROVIDER',
+    'JINN_HERMES_DOCTOR_TIMEOUT_MS',
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+  for (const k of HERMES_ENV_KEYS) saved[k] = process.env[k];
+
+  afterEach(async () => {
+    for (const k of HERMES_ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-hermes-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('loads hermesPath / hermesModel / hermesProvider from config file', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      hermesPath: '/usr/local/bin/hermes',
+      hermesModel: 'anthropic/claude-opus-4.6',
+      hermesProvider: 'anthropic',
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.hermesPath).toBe('/usr/local/bin/hermes');
+    expect(cfg.hermesModel).toBe('anthropic/claude-opus-4.6');
+    expect(cfg.hermesProvider).toBe('anthropic');
+  });
+
+  it('env vars override hermes config values', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    process.env['JINN_HERMES_PATH'] = '/opt/hermes/bin/hermes';
+    const cfg = loadConfig(configPath);
+    expect(cfg.hermesPath).toBe('/opt/hermes/bin/hermes');
   });
 });

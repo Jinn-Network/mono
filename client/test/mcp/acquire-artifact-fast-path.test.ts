@@ -129,6 +129,7 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
 
   it('forwards envelopeCid + artifactType hints to the daemon route', async () => {
     const sha256 = 'e'.repeat(64);
+    const ownerSafe = '0x' + '2'.repeat(40);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(
         JSON.stringify({
@@ -148,6 +149,7 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
       access: { endpoint: 'https://op.example.com', priceUsdc: '0.01' },
       envelopeCid: 'bafyEnv',
       artifactType: 'design_document',
+      ownerSafe,
     });
     const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
     expect(body).toEqual({
@@ -155,7 +157,50 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
       access: { endpoint: 'https://op.example.com', priceUsdc: '0.01' },
       envelopeCid: 'bafyEnv',
       artifactType: 'design_document',
+      ownerSafe,
     });
+    fetchSpy.mockRestore();
+  });
+
+  it('forwards donated IPFS sources and mirrors an IPFS daemon result with ipfs provenance', async () => {
+    const sha256 = '1'.repeat(64);
+    const fetchedBytes = Buffer.from('donated-bytes');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          sha256,
+          content: fetchedBytes.toString('base64'),
+          artifactType: 'design_document',
+          source: 'ipfs',
+          paidAmountUsdc: '0',
+          fetchedAt: '2026-04-30T00:00:00.000Z',
+          sourceOperator: '0x' + '2'.repeat(40),
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const sources = [{
+      kind: 'ipfs' as const,
+      cid: 'bafy-donated',
+      sha256,
+      encoding: 'jinn.artifact.donation.v1' as const,
+    }];
+
+    const result = await handleAcquireArtifact('http://127.0.0.1:7331', store, {
+      sha256,
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+      envelopeCid: 'bafyEnv',
+      artifactType: 'design_document',
+      sources,
+    });
+
+    expect(result.ok).toBe(true);
+    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.sources).toEqual(sources);
+    const row = store.getNetworkArtifact(sha256);
+    expect(row?.sourceEndpoint).toBe('ipfs://bafy-donated');
+    expect(row?.sourceOperator).toBe('0x' + '2'.repeat(40));
     fetchSpy.mockRestore();
   });
 

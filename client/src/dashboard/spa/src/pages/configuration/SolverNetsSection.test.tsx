@@ -68,6 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.location.hash = '';
   cleanup();
 });
 
@@ -89,6 +90,29 @@ describe('SolverNetsSection', () => {
       expect(screen.getByTestId('solvernets-joined-empty')).toBeTruthy(),
     );
     expect(screen.getByText(/Joined · 0/i)).toBeTruthy();
+  });
+
+  it('anchors and focuses the SolverNets section for /operator#solvernets', async () => {
+    const scrollIntoView = vi.fn();
+    const focus = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const originalFocus = HTMLElement.prototype.focus;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    HTMLElement.prototype.focus = focus;
+    window.location.hash = '';
+
+    try {
+      render(withProviders(<SolverNetsSection />));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      window.location.hash = '#solvernets';
+      window.dispatchEvent(new Event('hashchange'));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(document.getElementById('solvernets')?.getAttribute('tabindex')).toBe('-1');
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      HTMLElement.prototype.focus = originalFocus;
+    }
   });
 
   it('renders one JoinedNetCard per joined SolverNet', async () => {
@@ -117,8 +141,8 @@ describe('SolverNetsSection', () => {
       expect(screen.getAllByTestId('joined-net-card')).toHaveLength(2),
     );
     expect(screen.getByText(/Joined · 2/i)).toBeTruthy();
-    // 'Prediction Markets' appears in both the joined card and the catalog
-    // — match by scoping to data-manifest-cid.
+    // Joined cards are keyed by manifest cid; Discover filters joined
+    // manifests out of the catalog.
     const cards = screen.getAllByTestId('joined-net-card');
     expect(cards.find((c) => c.getAttribute('data-manifest-cid') === 'bafybeiaaa')).toBeTruthy();
     expect(cards.find((c) => c.getAttribute('data-manifest-cid') === 'bafybeibbb')).toBeTruthy();

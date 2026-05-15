@@ -1,0 +1,21 @@
+{
+  "name": "{{packageName}}",
+  "version": "0.1.0",
+  "jinn": {
+    "supports": ["jinn.runtime"],
+    "capabilities": {
+      "tools": {
+        "example": [
+          "example_tool"
+        ]
+      }
+    },
+    "mcpServers": {
+      "example": {
+        "command": "node",
+        "args": ["mcp/server.mjs"]
+      }
+    },
+    "description": "Example runtime SolverPlugin exposing one MCP tool."
+  }
+}

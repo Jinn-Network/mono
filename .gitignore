@@ -1,6 +1,15 @@
 .worktrees/
 node_modules/
-.claude/
+.local/
+
+# .claude/ is operator-local (settings.json, worktrees, DS_Store) by default,
+# but shareable skill prose lives at .claude/skills/<name>/SKILL.md and must
+# be tracked so every contributor's Claude Code instance auto-discovers it
+# (jinn-mono-2cl.15). Sub-paths inside .claude/skills/ that are themselves
+# operator-local (e.g. cached state files) can be added back here with
+# explicit .claude/skills/<name>/<path> ignore rules.
+.claude/*
+!.claude/skills/
 
 # Beads / Dolt files (added by bd init)
 .beads

@@ -51,7 +51,7 @@ export function StatusHeader({
 }: StatusHeaderProps): JSX.Element {
   const tone = STATUS_TONE[record.status] ?? STATUS_TONE.launching;
   const allowed = ALLOWED_TRANSITIONS[record.status] ?? [];
-  const name = manifest?.name ?? '— unnamed';
+  const name = manifest?.name ?? record.summary?.name ?? record.solverNetId;
 
   return (
     <header

@@ -23,7 +23,7 @@
  *   2. Resume any record with `lifecycleProgress` set →
  *      `recoverInFlightLifecycleTransitions`. Same safety property.
  *   3. Load owned records → identify which ones have
- *      `status === 'launched' && generatorEnabled`; those are the
+ *      `status in {'launched','paused'} && generatorEnabled`; those are the
  *      "ready-to-spawn" set the next-task generator wiring will iterate.
  *   4. Start the operator catalog refresher loop (interval-driven) so the
  *      daemon API can hand SPA reads without a synchronous subgraph round
@@ -38,14 +38,10 @@
  *   - Removing the legacy `collectTestnetAutoTaskGenerators` path
  *     (Task 12).
  *
- * Day-1 SubgraphClient note: the canonical Jinn subgraph has not yet
- * surfaced the `solvernet-manifest:` setMetadata index (Task 25 wires the
- * extension). Until then, callers may pass `createNoopSubgraphClient()` so
- * `recoverInFlightLaunches` and `listLaunched` return empty arrays
- * gracefully — recovery only short-circuits via subgraph events on
- * mempool-drop (rare); the catalog refresher logs a one-line warning when
- * it observes the no-op path so the operator can see the wiring is
- * incomplete. Production wiring happens in Task 25.
+ * Note: the launch/lifecycle state machines use a noop subgraph client
+ * internally for the mempool-drop recovery path. A real subgraph extension
+ * (Task 25) will replace the noop; until then recovery falls back to
+ * re-broadcasting dropped transactions, which is safe and idempotent.
  */
 
 import {
@@ -76,12 +72,20 @@ import {
   type LifecycleTransitionDeps,
 } from './lifecycle-transitions.js';
 import type { SolverNetRegistryClient, SolverNetManifestSummary } from './registry-client.js';
+import type { DiscoveryAPI } from '../discovery/types.js';
 import type { LaunchedSolverNetRecord, SolverNetStore } from './store.js';
-import type { PredictionV1GeneratorRuntimeConfig } from '../solver-types/prediction-v1-auto.js';
 
 // Import viem types lazily-named — keep the runtime import scoped so unit
 // tests don't pay viem startup cost when they pass mocked publishers.
 import type { PublicClient, WalletClient } from 'viem';
+
+// Noop SubgraphClient used by launch/lifecycle state-machine recovery paths
+// (mempool-drop detection) until a real subgraph extension is wired (Task 25).
+// Not exported — callers should not depend on this implementation.
+const NOOP_SUBGRAPH_CLIENT: SubgraphClient = {
+  async fetchSetMetadataEvents() { return []; },
+  async fetchSetMetadataEventsForCid() { return []; },
+};
 
 // ── Catalog refresh defaults ────────────────────────────────────────────────
 
@@ -144,9 +148,9 @@ export interface PendingGeneratorSpawn {
    * Live mirror of the hot-applyable runtime generator config. The
    * subsystem seeds it with the record's last-saved config (or all-default
    * empty config when no per-record overrides are set yet). Task 14 mutates
-   * this when the operator edits cadence / allow-block-lists / caps.
+   * this when the operator edits the generator config.
    */
-  configRef: { current: PredictionV1GeneratorRuntimeConfig };
+  configRef: { current: unknown };
 }
 
 /**
@@ -159,9 +163,10 @@ export interface SolverNetSubsystem {
   /** All launched records currently on disk (post-recovery). */
   records: LaunchedSolverNetRecord[];
   /**
-   * Subset of `records` where `status === 'launched'` and
+   * Subset of `records` where `status` is `launched` or `paused` and
    * `generatorEnabled === true`, paired with the live refs the generator
-   * factory and the API endpoints share.
+   * factory and the API endpoints share. Paused records are intentionally
+   * wired so a lifecycle resume only has to mutate `recordRef.current`.
    */
   pendingGenerators: PendingGeneratorSpawn[];
   /** Operator catalog cache, populated on first refresh. */
@@ -194,7 +199,6 @@ export interface InitSolverNetSubsystemDeps {
   store: SolverNetStore;
   ipfs: IpfsClient;
   publisher: MetadataPublisher;
-  subgraph: SubgraphClient;
   registryClient: SolverNetRegistryClient;
   network: 'base-sepolia' | 'base';
   resolveSigner: ResolveSigner;
@@ -257,7 +261,7 @@ export async function initSolverNetSubsystem(
     store: deps.store,
     ipfs: deps.ipfs,
     publisher: deps.publisher,
-    subgraph: deps.subgraph,
+    subgraph: NOOP_SUBGRAPH_CLIENT,
     awaitTxConfirmation: deps.awaitTxConfirmation,
     resolveSigner: deps.resolveSigner,
     // The launch-recovery path needs a generator spawner. Task 11 leaves
@@ -283,7 +287,7 @@ export async function initSolverNetSubsystem(
     store: deps.store,
     registry: deps.registryClient,
     signer: deps.lifecycleSigner,
-    subgraph: deps.subgraph,
+    subgraph: NOOP_SUBGRAPH_CLIENT,
     awaitTxConfirmation: deps.awaitTxConfirmation,
     // Task 12 will wire real start/stop generator callbacks (the
     // counterparts to the launch spawner above). Until then, lifecycle
@@ -304,15 +308,15 @@ export async function initSolverNetSubsystem(
 
   // Step 3 — load post-recovery records and split into the spawn-ready set.
   // Each spawn-ready entry carries a `recordRef` and a `configRef` that the
-  // generator factory (`makePredictionV1GeneratorForLaunchedRecord`) closes
+  // generator factories close
   // over. Lifecycle transitions and the SolverNet config API endpoint mutate
   // these refs at runtime so the per-tick gate and runtime config update
   // within one cadence — no daemon restart. Defaults for the runtime config
   // are an empty object: the generator falls back to its built-in defaults
-  // until the operator edits cadence / allowlist / caps via Task 14.
+  // until the operator edits config via Task 14.
   const records = await deps.store.loadOwnedRecords();
   const pendingGenerators: PendingGeneratorSpawn[] = records
-    .filter((r) => r.status === 'launched' && r.generatorEnabled)
+    .filter((r) => (r.status === 'launched' || r.status === 'paused') && r.generatorEnabled)
     .map((record) => ({
       record,
       recordRef: { current: record },
@@ -321,7 +325,7 @@ export async function initSolverNetSubsystem(
       // endpoint), otherwise use an empty config so the generator falls back
       // to its built-in defaults.
       configRef: {
-        current: ((record.generatorConfig ?? {}) as PredictionV1GeneratorRuntimeConfig),
+        current: record.generatorConfig ?? {},
       },
     }));
   logger.info(
@@ -439,152 +443,6 @@ export function createIpfsClientAdapter(args: {
 }
 
 /**
- * Day-1 stub `SubgraphClient` returning empty arrays for both queries. The
- * real subgraph extension lands in Task 25; until then the launch state
- * machine and registry catalog still function (recovery only consults
- * the subgraph on mempool-drop, which is rare; catalog refresh produces an
- * empty list, which the SPA renders as "no SolverNets launched yet" — a
- * truthful zero state until Task 25 indexes the events).
- *
- * Exported so tests can pin a deterministic baseline.
- */
-export function createNoopSubgraphClient(): SubgraphClient {
-  return {
-    async fetchSetMetadataEvents() {
-      return [];
-    },
-    async fetchSetMetadataEventsForCid() {
-      return [];
-    },
-  };
-}
-
-/**
- * jinn-mono-{follow-up}: real subgraph adapter that queries the deployed
- * Jinn subgraph (e.g. https://api.studio.thegraph.com/query/.../jinn-testnet/...)
- * for `SolverNetManifestEvent` rows and JCS-decodes each event's payload
- * bytes into the typed lifecycle payload. Replaces `createNoopSubgraphClient`
- * for any daemon that reads `JINN_SUBGRAPH_URL`.
- *
- * The schema only stores `solvernet-manifest:<cid>` events (lifecycle and
- * launch share the prefix). `keyPrefix` is therefore an effective filter:
- * the entity itself encodes that constraint, so we do not pass it to the
- * GraphQL query. Callers passing a different prefix get an empty list.
- */
-export function createGraphqlSubgraphClient(args: { url: string }): SubgraphClient {
-  const url = args.url;
-
-  async function runQuery(
-    query: string,
-    variables: Record<string, unknown>,
-  ): Promise<{ solverNetManifestEvents: Array<Record<string, unknown>> }> {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query, variables }),
-    });
-    if (!response.ok) {
-      throw new Error(`subgraph query failed: ${response.status} ${response.statusText}`);
-    }
-    const json = (await response.json()) as {
-      data?: { solverNetManifestEvents?: Array<Record<string, unknown>> };
-      errors?: Array<{ message: string }>;
-    };
-    if (json.errors && json.errors.length > 0) {
-      throw new Error(
-        `subgraph errors: ${json.errors.map((e) => e.message).join('; ')}`,
-      );
-    }
-    return {
-      solverNetManifestEvents: json.data?.solverNetManifestEvents ?? [],
-    };
-  }
-
-  function decodePayload(rowPayloadHex: string): SetMetadataLifecyclePayload {
-    const bytes = hexToBytes(rowPayloadHex);
-    const json = new TextDecoder().decode(bytes);
-    const parsed = JSON.parse(json) as SetMetadataLifecyclePayload;
-    return parsed;
-  }
-
-  function rowToEvent(row: Record<string, unknown>): SetMetadataEvent {
-    return {
-      agentId: String(row.agentId),
-      key: String(row.metadataKey),
-      payload: decodePayload(String(row.payload)),
-      blockNumber: Number(row.blockNumber),
-      transactionIndex: Number(row.transactionIndex ?? 0),
-    };
-  }
-
-  return {
-    async fetchSetMetadataEvents(opts) {
-      if (opts.keyPrefix !== 'solvernet-manifest:') {
-        // The schema entity is hardcoded to this prefix; any other prefix
-        // would yield zero rows. Keep behaviour consistent with the noop.
-        return [];
-      }
-      const sinceBlock = typeof opts.sinceBlock === 'number' ? opts.sinceBlock : 0;
-      const query = `
-        query MetadataEventsSince($sinceBlock: BigInt!) {
-          solverNetManifestEvents(
-            where: { blockNumber_gte: $sinceBlock }
-            orderBy: blockNumber
-            orderDirection: asc
-            first: 1000
-          ) {
-            agentId
-            metadataKey
-            payload
-            blockNumber
-            transactionIndex
-          }
-        }
-      `;
-      const { solverNetManifestEvents } = await runQuery(query, {
-        sinceBlock: String(sinceBlock),
-      });
-      return solverNetManifestEvents.map(rowToEvent);
-    },
-
-    async fetchSetMetadataEventsForCid(opts) {
-      const query = `
-        query MetadataEventsForCid($manifestCid: String!) {
-          solverNetManifestEvents(
-            where: { manifestCid: $manifestCid }
-            orderBy: blockNumber
-            orderDirection: asc
-            first: 1000
-          ) {
-            agentId
-            metadataKey
-            payload
-            blockNumber
-            transactionIndex
-          }
-        }
-      `;
-      const { solverNetManifestEvents } = await runQuery(query, {
-        manifestCid: opts.manifestCid,
-      });
-      return solverNetManifestEvents.map(rowToEvent);
-    },
-  };
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-  if (clean.length % 2 !== 0) {
-    throw new Error(`invalid hex payload length: ${clean.length}`);
-  }
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
-
-/**
  * Adapter that turns a viem (walletClient, publicClient, identityRegistryAddress)
  * triple into a `MetadataPublisher` whose `value` is treated as raw bytes
  * (the JCS-encoded SolverNet lifecycle payload), bypassing the
@@ -638,13 +496,13 @@ export function createMetadataPublisherFromViem(args: {
 export function createDefaultRegistryClient(args: {
   ipfs: IpfsClient;
   publisher: MetadataPublisher;
-  subgraph: SubgraphClient;
+  discoveryApi: DiscoveryAPI;
   network: 'base-sepolia' | 'base';
 }): SolverNetRegistryClient {
   return new IdentityRegistryBackedSolverNetRegistryClient({
     ipfs: args.ipfs,
     publisher: args.publisher,
-    subgraph: args.subgraph,
+    discoveryApi: args.discoveryApi,
     network: args.network,
   });
 }

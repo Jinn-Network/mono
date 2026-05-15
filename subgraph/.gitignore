@@ -1,8 +1,0 @@
-node_modules/
-generated/
-build/
-.yarn/
-.pnp.*
-*.log
-tests/.latest.json
-tests/.bin/

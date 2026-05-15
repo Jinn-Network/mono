@@ -76,6 +76,24 @@ describe('HarnessRegistry', () => {
     expect(reg.findFor({ solverType: 'portfolio.v0' })?.name).toBe('beta');
   });
 
+  it('matches legacy learner harness aliases to canonical harness names', () => {
+    const reg = new HarnessRegistry({
+      solverTypeHarnesses: { 'swe-rebench-v2.v1': 'codex-code-learner' },
+      default: 'claude-code-learner',
+    });
+    reg.register(makeHarness('claude-code', ['prediction.v1']));
+    reg.register(makeHarness('codex', ['swe-rebench-v2.v1']));
+
+    expect(reg.findFor({ solverType: 'swe-rebench-v2.v1' })?.name).toBe('codex');
+    expect(reg.findFor({ solverType: 'prediction.v1' })?.name).toBe('claude-code');
+  });
+
+  it('honors legacy learner aliases in disabled harnesses', () => {
+    const reg = new HarnessRegistry({ disabled: ['codex-code-learner'] });
+    reg.register(makeHarness('codex', ['swe-rebench-v2.v1']));
+    expect(reg.findFor({ solverType: 'swe-rebench-v2.v1' })).toBeUndefined();
+  });
+
   it('falls through from default when default is disabled or unsupported', () => {
     const disabled = new HarnessRegistry({ default: 'beta', disabled: ['beta'] });
     disabled.register(makeHarness('alpha', ['portfolio.v0']));

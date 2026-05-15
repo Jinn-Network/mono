@@ -278,21 +278,29 @@ describe('walkArtifacts', () => {
 
 // ── Tarball env/ exclusion (security, finding #11) ───────────────────────────
 
-describe('system_snapshot tarball excludes env/ directory', () => {
+describe('system_snapshot tarball excludes non-donation execution data', () => {
   let tmp: string;
   beforeEach(() => { tmp = mkTmp(); });
   afterEach(() => cleanTmp(tmp));
 
-  it('does NOT include env/ secrets in the produced tarball', async () => {
+  it('does NOT include env secrets, task checkouts, VCS data, dependencies, or caches in the produced tarball', async () => {
     const workDir = join(tmp, 'workdir');
     mkdirSync(workDir, { recursive: true });
     mkdirSync(join(workDir, 'env'), { recursive: true });
     mkdirSync(join(workDir, 'work'), { recursive: true });
     mkdirSync(join(workDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workDir, 'repo', '.git', 'objects', 'pack'), { recursive: true });
+    mkdirSync(join(workDir, 'repo', 'node_modules', 'pkg'), { recursive: true });
+    mkdirSync(join(workDir, 'repo', '.pytest_cache'), { recursive: true });
+    mkdirSync(join(workDir, 'repo', 'src'), { recursive: true });
 
     // Secret file (mode 0600 — env vars written by provisionWorkingDir)
     writeFileSync(join(workDir, 'env', 'SECRET_KEY'), 'hunter2', { mode: 0o600 });
     writeFileSync(join(workDir, 'env', 'API_TOKEN'), 'tok123', { mode: 0o600 });
+    writeFileSync(join(workDir, 'repo', '.git', 'objects', 'pack', 'pack-1.pack'), 'git pack');
+    writeFileSync(join(workDir, 'repo', 'node_modules', 'pkg', 'index.js'), 'dependency');
+    writeFileSync(join(workDir, 'repo', '.pytest_cache', 'state'), 'cache');
+    writeFileSync(join(workDir, 'repo', 'src', 'task-source.py'), 'print("task checkout")');
 
     // Normal file that SHOULD be in the tarball
     writeFileSync(join(workDir, 'work', 'normal.json'), '{"result":true}');
@@ -309,6 +317,10 @@ describe('system_snapshot tarball excludes env/ directory', () => {
     expect([...paths].some((p) => p.startsWith('env/'))).toBe(false);
     expect([...paths].some((p) => p === 'env/SECRET_KEY')).toBe(false);
     expect([...paths].some((p) => p === 'env/API_TOKEN')).toBe(false);
+    expect([...paths].some((p) => p.includes('/.git/') || p.startsWith('.git/'))).toBe(false);
+    expect([...paths].some((p) => p.includes('/node_modules/') || p.startsWith('node_modules/'))).toBe(false);
+    expect([...paths].some((p) => p.includes('/.pytest_cache/') || p.startsWith('.pytest_cache/'))).toBe(false);
+    expect([...paths].some((p) => p.startsWith('repo/'))).toBe(false);
 
     // Normal file must still be present
     expect([...paths].some((p) => p.includes('normal.json'))).toBe(true);

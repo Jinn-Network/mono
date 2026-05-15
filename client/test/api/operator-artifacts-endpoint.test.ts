@@ -54,12 +54,15 @@ describe('GET /v1/operator/artifacts', () => {
     });
 
     const app = new Hono();
+    const configPath = join(mkdtempSync(join(tmpdir(), 'jinn-operator-artifacts-')), 'config.json');
     addOperatorArtifactsRoutes(app, {
       store,
+      configPath,
       operatorConfig: {
         publicEndpoint: 'https://op.example.com',
         defaultPriceUsdc: '0',
         perArtifactTypePrice: {},
+        donation: { enabled: false },
       },
     });
 
@@ -99,6 +102,15 @@ describe('GET /v1/operator/artifacts', () => {
       revenueUsdc: '0.002',
     });
     expect(body.recentAccesses[0]).toMatchObject({ outcome: 'paid_served', payer: '0xpayer' });
+
+    const aliasRes = await app.request('/v1/operator/execution-data?source=served&limit=1');
+    expect(aliasRes.status).toBe(200);
+    const aliasBody = await aliasRes.json() as {
+      artifacts: Array<{ source: string; priceUsdc: string }>;
+    };
+    expect(aliasBody.artifacts).toEqual([
+      expect.objectContaining({ source: 'served', priceUsdc: '0.002' }),
+    ]);
   });
 
   it('lists cached network artifacts when source=network', async () => {
@@ -151,6 +163,7 @@ describe('POST /v1/operator/pricing', () => {
         publicEndpoint: 'https://op.example.com',
         defaultPriceUsdc: '0.001',
         perArtifactTypePrice: { design_document: '0.01' },
+        donation: { enabled: true },
       }),
     });
 
@@ -167,6 +180,38 @@ describe('POST /v1/operator/pricing', () => {
       publicEndpoint: 'https://op.example.com',
       defaultPriceUsdc: '0.001',
       perArtifactTypePrice: { design_document: '0.01' },
+      donation: { enabled: true },
+    });
+  });
+
+  it('persists donation settings without requiring publicEndpoint', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        defaultPriceUsdc: '0',
+        perArtifactTypePrice: {},
+        donation: { enabled: true },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      operator: unknown;
+    };
+    expect(persisted.operator).toEqual({
+      publicEndpoint: '',
+      defaultPriceUsdc: '0',
+      perArtifactTypePrice: {},
+      donation: { enabled: true },
     });
   });
 
@@ -179,6 +224,7 @@ describe('POST /v1/operator/pricing', () => {
         publicEndpoint: 'https://op.example.com',
         defaultPriceUsdc: '0',
         perArtifactTypePrice: {},
+        donation: { enabled: false },
       },
     });
 

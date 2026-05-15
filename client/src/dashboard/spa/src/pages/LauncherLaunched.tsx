@@ -13,6 +13,10 @@ import { PauseRetireDialog } from './launcher-launched/PauseRetireDialog.js';
 import { SpendPanel } from './launcher-launched/SpendPanel.js';
 import { StatusHeader } from './launcher-launched/StatusHeader.js';
 import { TasksPanel } from './launcher-launched/TasksPanel.js';
+import {
+  TEMPLATES_BY_KEY,
+  type CreateWizardTemplate,
+} from './launcher-create/templates.js';
 
 /**
  * Post-launch dashboard for `/launcher/launched/:solverNetId`.
@@ -27,7 +31,7 @@ import { TasksPanel } from './launcher-launched/TasksPanel.js';
  *     display fields (name, description, prices). The manifest is cached
  *     forever once fetched — manifests are content-addressed.
  *   - Renders four panels stacked vertically: StatusHeader, GeneratorPanel,
- *     TasksPanel, SpendPanel. The lifecycle dialog is overlaid on top.
+ *     SpendPanel, TasksPanel. The lifecycle dialog is overlaid on top.
  *   - Exposes `pollIntervalMs` + `navigateTo` props so tests can inject
  *     deterministic state without standing up a wouter router.
  */
@@ -147,6 +151,8 @@ export function LauncherLaunchedPage({
 
   const record = recordQuery.data;
   const manifest = manifestQuery.data?.manifest;
+  const template = resolveLaunchedTemplate(record, manifest);
+  const solverNetName = manifest?.name ?? record.summary?.name ?? record.solverNetId;
 
   return (
     <main
@@ -166,14 +172,16 @@ export function LauncherLaunchedPage({
 
       <GeneratorPanel
         record={record}
+        manifest={manifest}
+        template={template}
         onSave={async (patch) => {
           await generatorMutation.mutateAsync(patch);
         }}
       />
 
-      <TasksPanel record={record} />
-
       <SpendPanel record={record} manifest={manifest} />
+
+      <TasksPanel record={record} />
 
       {manifestQuery.isError && (
         <p
@@ -186,16 +194,14 @@ export function LauncherLaunchedPage({
           }}
         >
           Failed to load manifest:{' '}
-          {manifestQuery.error instanceof Error
-            ? manifestQuery.error.message
-            : 'unknown error'}
+          {formatManifestLoadError(manifestQuery.error)}
         </p>
       )}
 
       <PauseRetireDialog
         open={dialogTarget !== null}
         target={dialogTarget ?? 'paused'}
-        solverNetName={manifest?.name ?? ''}
+        solverNetName={solverNetName}
         pending={lifecycleMutation.isPending}
         errorMessage={dialogError ?? undefined}
         onCancel={() => {
@@ -210,6 +216,27 @@ export function LauncherLaunchedPage({
       />
     </main>
   );
+}
+
+function formatManifestLoadError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown error');
+  if (/404|manifest_not_found|registry_unavailable/i.test(message)) {
+    return `Manifest unavailable from local cache or registry (${message})`;
+  }
+  return message;
+}
+
+function resolveLaunchedTemplate(
+  record: LaunchedSolverNetRecord,
+  manifest: RegistryManifestResponse['manifest'] | undefined,
+): CreateWizardTemplate | undefined {
+  const contract = manifest?.contract ?? (
+    record.summary
+      ? { id: record.summary.contractId, version: record.summary.contractVersion }
+      : undefined
+  );
+  if (!contract) return undefined;
+  return TEMPLATES_BY_KEY[`${contract.id}.${contract.version}`];
 }
 
 function ErrorBanner({

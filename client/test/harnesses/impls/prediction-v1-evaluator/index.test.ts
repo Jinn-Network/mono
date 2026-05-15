@@ -7,7 +7,7 @@ import {
   makePredictionV1Task,
   makeSignedSolutionEnvelope,
 } from '../prediction-v1-test-helpers.js';
-import { RESTORATION_TASK_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
+import { SOLUTION_TASK_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 
 describe('PredictionV1Evaluator', () => {
   it('scores valid YES resolutions with Brier loss against consensus', async () => {
@@ -120,11 +120,11 @@ describe('PredictionV1Evaluator', () => {
     }));
   });
 
-  it('does not score when restoration task CID context is missing', async () => {
+  it('does not score when solution task CID context is missing', async () => {
     const task = makePredictionV1Task();
     const envelope = await makeSignedSolutionEnvelope(task);
     const evalTask = makeEvalTask(task, envelope);
-    delete evalTask.context![RESTORATION_TASK_CID_CONTEXT_KEY];
+    delete evalTask.context![SOLUTION_TASK_CID_CONTEXT_KEY];
     const evaluator = new PredictionV1Evaluator({
       _testDeps: {
         getResolution: async () => ({
@@ -140,7 +140,7 @@ describe('PredictionV1Evaluator', () => {
 
     await expect(evaluator.canAttempt(evalTask)).resolves.toEqual({
       ok: false,
-      reason: 'context.restorationTaskCid required',
+      reason: 'context.solutionTaskCid required',
     });
     const out = await evaluator.run(makeHarnessCtx({ task: evalTask }));
     const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);

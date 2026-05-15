@@ -217,7 +217,7 @@ describe('NetCard', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Claude model'), {
+    fireEvent.change(screen.getByLabelText('Model'), {
       target: { value: 'claude-sonnet-4-6' },
     });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
@@ -245,7 +245,7 @@ describe('NetCard', () => {
       />,
     );
 
-    const select = screen.getByLabelText('Claude model') as HTMLSelectElement;
+    const select = screen.getByLabelText('Model') as HTMLSelectElement;
     const optionValues = Array.from(select.options).map((o) => o.value);
     const optionLabels = Array.from(select.options).map((o) => o.textContent);
 
@@ -269,6 +269,40 @@ describe('NetCard', () => {
     expect(apiMock.updateSolverNet).toHaveBeenCalledWith('prediction', expect.objectContaining({
       model: 'claude-sonnet-4-6',
     }));
+  });
+
+  it('shows Codex model choices when the selected harness is codex-code-learner', () => {
+    render(
+      <NetCard
+        catalog={{
+          ...baseCatalog,
+          compatibleHarnesses: [
+            { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving'] },
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving'] },
+          ],
+        }}
+        config={{
+          enabled: true,
+          roles: ['solving'],
+          harness: 'codex-code-learner',
+          model: 'gpt-5.4-mini',
+          modelExplicit: true,
+          plugins: [],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+
+    const select = screen.getByLabelText('Model') as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    const optionLabels = Array.from(select.options).map((o) => o.textContent);
+
+    expect(optionValues).toContain('gpt-5.4-mini');
+    expect(optionValues).toContain('gpt-5.5');
+    expect(optionLabels).toContain('GPT-5.4 Mini');
+    expect(optionLabels).toContain('GPT-5.5');
+    expect(optionValues).not.toContain('claude-haiku-4-5-20251001');
   });
 
   it('adds a plugin from the picker, becomes dirty, and persists on save', async () => {
@@ -445,11 +479,31 @@ describe('NetCard — manifest-keyed (joined) variant', () => {
     expect(screen.getByTestId('netcard-joined-state').textContent).toMatch(/joined/i);
     expect(screen.getByTestId('netcard-joined-roles').textContent).toBe('solver');
     expect(screen.getByTestId('netcard-joined-harness').textContent).toBe(
-      'claude-code-learner',
+      'Claude Code',
     );
     expect(screen.getByTestId('netcard-joined-manifest-cid').textContent).toBe(
       'bafybeiaaa',
     );
+  });
+
+  it('formats tiny joined manifest prices as gwei', () => {
+    render(
+      <NetCard
+        manifestCid="bafybeiaaa"
+        manifest={{
+          ...baseManifest,
+          solutionPriceWei: '10000000000',
+          verdictPriceWei: '5000000000',
+        }}
+        joined={{ roles: ['solver'] }}
+        onLeft={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('10 gwei')).toBeTruthy();
+    expect(screen.getByText('5 gwei')).toBeTruthy();
+    expect(screen.queryByText(/e-/i)).toBeNull();
   });
 
   it('shows the manifest evaluator binding when evaluator role is joined', () => {

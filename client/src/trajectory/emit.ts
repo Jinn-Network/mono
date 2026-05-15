@@ -13,8 +13,12 @@ import { keccak256, toBytes, type Hex } from 'viem';
 import { signCanonical } from '../harnesses/engine/signing.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
+import {
+  scrubArtifactBytes,
+  type ArtifactScrubConfig,
+} from '../harnesses/engine/artifact-scrub.js';
 import type { TrajectoryCollector } from './collector.js';
-import type { JinnTrajectoryV1 } from './schema.js';
+import type { JinnTrajectoryV1, Span, RedactionManifest } from './schema.js';
 
 export interface EmitTrajectoryParams {
   collector: TrajectoryCollector;
@@ -24,6 +28,7 @@ export interface EmitTrajectoryParams {
   signerPrivateKey: Hex;
   signerAddress: `0x${string}`;
   ipfsRegistryUrl: string;
+  scrub?: ArtifactScrubConfig;
 }
 
 export interface EmitTrajectoryResult {
@@ -36,16 +41,59 @@ function sha256Hex(bytes: string): string {
   return createHash('sha256').update(bytes, 'utf8').digest('hex');
 }
 
+function scrubSpan(span: Span, scrub: ArtifactScrubConfig): { span: Span; redactedKeys: string[] } {
+  const result = scrubArtifactBytes(Buffer.from(JSON.stringify(span), 'utf8'), scrub);
+  if (result.bytes.length === 0) return { span, redactedKeys: [] };
+  try {
+    return {
+      span: JSON.parse(result.bytes.toString('utf8')) as Span,
+      redactedKeys: result.redactedKeys,
+    };
+  } catch {
+    return { span, redactedKeys: [] };
+  }
+}
+
+function scrubSnapshot(
+  spans: Span[],
+  redactionManifest: RedactionManifest,
+  scrub: ArtifactScrubConfig | undefined,
+): { spans: Span[]; redactionManifest: RedactionManifest } {
+  if (!scrub) return { spans, redactionManifest };
+  const scrubbedSpans: Span[] = [];
+  const extraManifestEntries: RedactionManifest['spans'] = [];
+  let extraRedactions = 0;
+  for (const span of spans) {
+    const result = scrubSpan(span, scrub);
+    scrubbedSpans.push(result.span);
+    if (result.redactedKeys.length > 0) {
+      extraManifestEntries.push({
+        spanId: span.spanId,
+        redactedKeys: result.redactedKeys.map((key) => `trajectory.${key}`),
+      });
+      extraRedactions += result.redactedKeys.length;
+    }
+  }
+  return {
+    spans: scrubbedSpans,
+    redactionManifest: {
+      spans: [...redactionManifest.spans, ...extraManifestEntries],
+      totalRedactions: redactionManifest.totalRedactions + extraRedactions,
+    },
+  };
+}
+
 export async function emitTrajectory(
   p: EmitTrajectoryParams,
 ): Promise<EmitTrajectoryResult> {
   const snap = p.collector.snapshot();
+  const scrubbed = scrubSnapshot(snap.spans, snap.redactionManifest, p.scrub);
   const unsigned = {
     schemaVersion: 'jinn.trajectory.v1' as const,
     runId: p.runId,
     parentEnvelopeCid: p.parentEnvelopeCid ?? null,
-    spans: snap.spans,
-    redactionManifest: snap.redactionManifest,
+    spans: scrubbed.spans,
+    redactionManifest: scrubbed.redactionManifest,
   };
 
   const sig = await signCanonical(unsigned, p.signerPrivateKey, p.signerAddress);

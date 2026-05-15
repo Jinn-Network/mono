@@ -36,6 +36,7 @@ import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js'
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
 import { triggerAgentSpawn } from '../agent/agent-ws.js';
 import { DEFAULT_CONFIG_PATH, DEFAULT_SOLVER_NETS, persistTopLevelConfigValue } from '../config.js';
+import { canonicalHarnessName } from '../harnesses/names.js';
 import {
   installClaudeCodeLocally,
   type ExecFileAsync,
@@ -419,7 +420,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // `role` over `roles`.
       delete existing['role'];
     }
-    if (body.harness !== undefined) existing.harness = body.harness;
+    if (body.harness !== undefined) existing.harness = canonicalHarnessName(body.harness);
     if (body.model !== undefined) existing.model = body.model;
     if (body.plugins !== undefined) existing.plugins = body.plugins;
     solverNets[name] = existing;
@@ -476,6 +477,8 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       harness?: unknown;
       model?: unknown;
       plugins?: unknown;
+      disabledDefaultPlugins?: unknown;
+      contract?: unknown;
     };
     try {
       body = await c.req.json();
@@ -507,11 +510,39 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     if (body.model !== undefined && typeof body.model !== 'string') {
       return c.json({ error: 'invalid_body', detail: '`model` must be a string' }, 400);
     }
+    let contract: { id: string; version: string } | undefined;
+    if (body.contract !== undefined) {
+      if (
+        !isRecord(body.contract) ||
+        typeof body.contract['id'] !== 'string' ||
+        typeof body.contract['version'] !== 'string'
+      ) {
+        return c.json({
+          error: 'invalid_body',
+          detail: '`contract` must be an object with string id and version',
+        }, 400);
+      }
+      contract = {
+        id: body.contract['id'],
+        version: body.contract['version'],
+      };
+    }
     if (body.plugins !== undefined) {
       if (!Array.isArray(body.plugins) || !body.plugins.every((p): p is string => typeof p === 'string')) {
         return c.json({
           error: 'invalid_body',
           detail: '`plugins` must be an array of plugin names',
+        }, 400);
+      }
+    }
+    if (body.disabledDefaultPlugins !== undefined) {
+      if (
+        !Array.isArray(body.disabledDefaultPlugins) ||
+        !body.disabledDefaultPlugins.every((p): p is string => typeof p === 'string')
+      ) {
+        return c.json({
+          error: 'invalid_body',
+          detail: '`disabledDefaultPlugins` must be an array of plugin names',
         }, 400);
       }
     }
@@ -532,21 +563,44 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
     const joinedSolverNets: Record<string, Record<string, unknown>> = {};
     for (const [k, v] of Object.entries(rawJoined)) {
-      if (isRecord(v)) joinedSolverNets[k] = { ...v };
+      if (!isRecord(v)) continue;
+      const entry = { ...v };
+      if (typeof entry['harness'] === 'string') {
+        entry['harness'] = canonicalHarnessName(entry['harness']);
+      }
+      joinedSolverNets[k] = entry;
     }
+
+    const previous = joinedSolverNets[cid];
+    const previousContractRecord = isRecord(previous?.['contract'])
+      ? previous?.['contract']
+      : undefined;
+    const previousContract =
+      previousContractRecord &&
+      typeof previousContractRecord['id'] === 'string' &&
+      typeof previousContractRecord['version'] === 'string'
+        ? {
+            id: previousContractRecord['id'],
+            version: previousContractRecord['version'],
+          }
+        : undefined;
 
     const entry: Record<string, unknown> = {
       manifestCid: cid,
       roles,
     };
     if (typeof body.name === 'string') entry['name'] = body.name;
+    if (contract ?? previousContract) entry['contract'] = contract ?? previousContract;
     // `harness` / `model` / `plugins` are solver-side. Persist whatever the
     // SPA sent; the daemon-side runtime ignores them when only the
     // `evaluator` role is selected (evaluator harness comes from
     // `manifest.contract.evaluationFunction.implementation`).
-    if (typeof body.harness === 'string') entry['harness'] = body.harness;
+    if (typeof body.harness === 'string') entry['harness'] = canonicalHarnessName(body.harness);
     if (typeof body.model === 'string') entry['model'] = body.model;
     if (Array.isArray(body.plugins)) entry['plugins'] = body.plugins;
+    if (Array.isArray(body.disabledDefaultPlugins)) {
+      entry['disabledDefaultPlugins'] = Array.from(new Set(body.disabledDefaultPlugins));
+    }
 
     joinedSolverNets[cid] = entry;
 

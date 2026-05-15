@@ -1,0 +1,39 @@
+{
+  "name": "swe-rebench-v2-runtime",
+  "version": "0.1.0",
+  "description": "Runtime plugin for the swe-rebench-v2.v1 SolverNet - provides orientation and planning skills for code-issue resolution tasks.",
+  "author": {
+    "name": "Jinn Network",
+    "url": "https://github.com/Jinn-Network/mono"
+  },
+  "homepage": "https://github.com/Jinn-Network/mono",
+  "repository": "https://github.com/Jinn-Network/mono",
+  "license": "MIT",
+  "keywords": [
+    "jinn",
+    "swe-rebench",
+    "codex",
+    "skills"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "SWE-rebench v2 Runtime",
+    "shortDescription": "SWE-rebench v2 orient and plan skills",
+    "longDescription": "Provides Solver-side orientation and planning skills for SWE-rebench v2 code-issue tasks.",
+    "developerName": "Jinn Network",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/Jinn-Network/mono",
+    "privacyPolicyURL": "https://github.com/Jinn-Network/mono",
+    "termsOfServiceURL": "https://github.com/Jinn-Network/mono",
+    "defaultPrompt": [
+      "Solve this SWE-rebench v2 task."
+    ],
+    "brandColor": "#0F766E",
+    "screenshots": []
+  }
+}

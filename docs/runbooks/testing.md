@@ -149,6 +149,35 @@ try {
 | `yarn e2e:prediction` | prediction-v0 e2e (compiles contracts first) | < 3 min |
 | `yarn staking` | staking bootstrap e2e | < 2 min |
 | `yarn stolas` | stolas bootstrap e2e | < 2 min |
+| `yarn e2e:cold-start-builder` | acceptance tier — plug-in builder cold-start | ~90 s |
+
+## Acceptance tier (`test/acceptance/`)
+
+The acceptance tier hosts slow, real-integration tests that require external
+binaries and exercise the full CLI dispatch surface. It is **not** run by
+default — invoke it explicitly:
+
+```bash
+cd client
+yarn e2e:cold-start-builder
+```
+
+**Prerequisites:**
+- `anvil` in PATH (Foundry — `curl -L https://foundry.paradigm.xyz | bash && foundryup`)
+- Node 22+
+
+**What it covers:** The cold-start builder loop from spec §6.7 — scaffold →
+pack → publish (Stage 1 lazy ensure against a local IdentityRegistry) →
+indexer event ingest → Discovery API surface → operator install → stub-Hermes
+task run → envelope attribution → SPA panels render. A dual-role test verifies
+that a pre-bootstrapped identity is reused without re-minting.
+
+**Fixture files** live under `client/test/acceptance/_fixtures/`. See
+`client/test/acceptance/README.md` for the full fixture inventory.
+
+**CI gating:** The acceptance tier is NOT in the per-PR CI gate (which runs
+only `yarn typecheck` + `yarn test`). It is run nightly and as part of the
+release gate before a Monday named cut.
 
 ## Troubleshooting (client)
 

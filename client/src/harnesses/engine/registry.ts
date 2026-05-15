@@ -13,10 +13,16 @@
  */
 
 import type { Harness } from '../types.js';
+import {
+  canonicalHarnessName,
+  canonicalHarnessNameSet,
+  CLAUDE_CODE_HARNESS,
+  harnessNameMatches,
+} from '../names.js';
 import type { ImplRegistry } from './engine.js';
 
 // Harness dispatch defaults shared by the daemon and operator diagnostics.
-export const DEFAULT_HARNESS = 'claude-code-learner';
+export const DEFAULT_HARNESS = CLAUDE_CODE_HARNESS;
 export const DEFAULT_DISABLED_HARNESSES = ['claude-mcp-hyperliquid'] as const;
 
 // ── Operator config schema ─────────────────────────────────────────────────────
@@ -63,21 +69,21 @@ export class HarnessRegistry implements ImplRegistry {
    * support the kind, or registry is empty).
    */
   findFor(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): Harness | undefined {
-    const disabled = new Set(this.config.disabled ?? []);
-    const active = this.harnesses.filter((harness) => !disabled.has(harness.name));
+    const disabled = canonicalHarnessNameSet(this.config.disabled ?? []);
+    const active = this.harnesses.filter((harness) => !disabled.has(canonicalHarnessName(harness.name)));
 
     // 1. SolverNet-selected Harness — but ONLY honor it if the named Harness supports
     //    the requested ctx. Otherwise fall through (e.g., restoration Harness selected,
     //    but ctx asks for an evaluation).
     const harnessName = this.config.solverTypeHarnesses?.[ctx.solverType];
     if (harnessName) {
-      const named = active.find((harness) => harness.name === harnessName);
+      const named = active.find((harness) => harnessNameMatches(harness.name, harnessName));
       if (named && named.supports(ctx)) return named;
     }
 
     // 2. default fallback name
     if (this.config.default) {
-      const defaultHarness = active.find((harness) => harness.name === this.config.default);
+      const defaultHarness = active.find((harness) => harnessNameMatches(harness.name, this.config.default!));
       if (defaultHarness && defaultHarness.supports(ctx)) {
         return defaultHarness;
       }

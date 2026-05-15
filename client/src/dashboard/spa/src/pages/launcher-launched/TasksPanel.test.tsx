@@ -93,6 +93,7 @@ describe('TasksPanel', () => {
           taskId: 't2',
           state: 'fully-claimed',
           claims: { current: 3, max: 3 },
+          solverType: 'swe-rebench-v2.v1',
         }),
         buildTask({ taskId: 't3', state: 'failed' }),
       ],
@@ -105,6 +106,7 @@ describe('TasksPanel', () => {
     expect(screen.getByText('Open')).toBeTruthy();
     expect(screen.getByText('Claimed')).toBeTruthy();
     expect(screen.getByText('Failed')).toBeTruthy();
+    expect(screen.getByText('swe-rebench-v2.v1')).toBeTruthy();
     expect(screen.getByText('3 / 3')).toBeTruthy();
   });
 
@@ -136,13 +138,13 @@ describe('TasksPanel', () => {
     await waitFor(() =>
       expect(screen.getAllByTestId('launcher-launched-task-row').length).toBe(1),
     );
-    expect(fetchTasks).toHaveBeenCalledWith({ cursor: undefined, limit: 25 });
+    expect(fetchTasks).toHaveBeenCalledWith({ cursor: undefined, limit: 5 });
 
     fireEvent.click(screen.getByTestId('launcher-launched-tasks-next'));
     await waitFor(() => expect(fetchTasks).toHaveBeenCalledTimes(2));
     expect(fetchTasks).toHaveBeenLastCalledWith({
       cursor: '2026-05-05T15:00:00Z',
-      limit: 25,
+      limit: 5,
     });
   });
 

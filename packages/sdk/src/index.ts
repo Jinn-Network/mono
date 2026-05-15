@@ -19,3 +19,17 @@ export type {
   EnableResult,
 } from './types.js';
 export { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from './types.js';
+export {
+  SessionDerivedExpectedArtifactsSchema,
+  SessionDerivedSignalSchema,
+  SessionDerivedSolutionSchema,
+  SessionDerivedTaskSchema,
+  SessionDerivedVerdictSchema,
+  type SessionDerivedSolution,
+  type SessionDerivedTask,
+  type SessionDerivedVerdict,
+} from './payloads/session-derived.js';
+export {
+  SESSION_DERIVED_DISTILL_PROMPT_V1,
+  SESSION_DERIVED_DISTILL_PROMPT_V1_SHA256,
+} from './session-derived/distill-prompt-v1.js';

@@ -18,6 +18,49 @@ Canonical docs are the repo's stable sources of truth. They change only via appr
 - `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
 - `GLOSSARY.md` — read whenever a Jinn-specific term appears; never redefine terms locally
 
+## Engineering handbook
+
+How this team ships — cadence, dist-tags, work-shape taxonomy, AI workflow rules. Full text at [`docs/engineering/handbook.md`](docs/engineering/handbook.md). Always read the handbook before doing non-trivial work; it ratifies the SOPs that apply to every shape.
+
+### Work shape (declare it before executing)
+
+Seven shapes plus one emergency sub-flow, keyed to Conventional Commits prefixes. Declare the shape in the bd issue's `Run-mode` field; replicate it as the PR title prefix.
+
+- **`fix`** — bug fix. Regression test first. Skill chain: `systematic-debugging` → `executing-plans` → `verification-before-completion` → `receiving-code-review`.
+- **`feat`** — feature. TDD. Skill chain: (`brainstorming` if ambiguous) → `writing-plans` → `test-driven-development` → `executing-plans` / `dispatching-parallel-agents` → `verification-before-completion` → `receiving-code-review`.
+- **`refactor`** — architecture / migration. TDD + integration tests; required design upfront; stacked PRs required (strangler-fig).
+- **`spike`** — research / exploration. Output is a finding, not code. Spike code does not merge.
+- **`chore`** — deps, CI, dev tooling. Integration tests if touches a dep.
+- **`docs`** — documentation. Canonical-doc changes need Discussion + CODEOWNERS approval.
+- **`test`** — test-only. Meta test discipline.
+- **`fix(incident)`** — hotfix sub-flow. Relaxed review; post-hoc regression test required as a follow-up bead before closing the incident.
+
+If a bd issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a bd under `jinn-mono-2cl` when friction surfaces).
+
+### Eight ratified AI workflow rules
+
+1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses `git worktree add cargo/.tasks/<id>`.
+2. **Beads frame problems, not solutions.** bd body = context + impact + acceptance criteria. Solutions go in design sessions.
+3. **bd-as-SoR, not `MEMORY.md`.** Use `bd remember` / `bd memories`.
+4. **Agent PR review parity.** Codex / Opus / Sonnet / Claude PRs reviewed like human PRs. No agent self-merge. Exception: `fix(incident)` with reviewer justification.
+5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open; see `jinn-mono-8qbc`.)_
+6. **Integration tests > mocks for migration / contract surfaces.**
+7. **TDD for new features, regression test for fixes.**
+8. **Auto-canary on push to `next`; Monday-only named stable cut promotes `main`.** Cadence policy.
+9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy.
+
+### Cadence
+
+- Every push to `next` → npm `canary` (`<v>-canary.<sha>`).
+- Monday named cut → v<semver> tag on `next` HEAD → npm `latest` → `promote-main.yml` fast-forwards `main`.
+- Hotfix → PR to `main` directly; mandatory back-merge to `next`. See `docs/runbooks/hotfix.md`.
+- Every Monday 09:00 UTC → GitHub Release draft (Hermes-style); Captain publishes; publish triggers npm `latest` + CHANGELOG auto-mirror.
+- Pre-v1: weekly Build Notes cuts patch by default (`v0.1.3 → v0.1.4`). A Monday cut that lands an epic or significant capability can bump the minor (`v0.1.x → v0.2.0`). `v1.0.0` is reserved for far-future graduation (mainnet / exit-testnet / Phase 2), not `jinn-mono-uy6v`.
+
+### Daily entry point
+
+`eng-day` skill (in `cargo/.claude/skills/eng-day/`) is the canonical daily brief. Fallback when the GitHub Project board doesn't exist yet: `bd ready` + `gh pr list --search 'is:open draft:false'`.
+
 ## Repository Structure
 
 ```
@@ -57,9 +100,12 @@ client/          TypeScript daemon — the main runnable component
       server.ts          Hono HTTP API for artifact search/publish
       peers.ts           Background peer sync
     auth/erc8128.ts      ERC-8128 HTTP message signatures
-    discovery/
-      registry.ts        ERC-8004 on-chain artifact registration
-      subgraph.ts        The Graph subgraph queries
+    discovery/           Read-side data access (spec/2026-05-11-discovery-api-and-shared-indexer.md)
+      types.ts           DiscoveryAPI interface + result shapes
+      http.ts            HttpDiscoveryAPI — GraphQL against the Ponder indexer (default)
+      onchain.ts         OnchainDiscoveryAPI — RPC getLogs/multicall floor (always live)
+      with-fallback.ts   Health-tracking wrapper: primary → floor on failure
+      factory.ts         Builds the configured DiscoveryAPI from config
     mcp/server.ts        MCP tools exposed to Claude subprocess
     x402/                Payment-gated artifact access
     types/               DesiredState, errors, core types
@@ -217,14 +263,19 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | dbPath           | JINN_DB_PATH             | ~/.jinn-client/jinn.db            |
 | earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
 | peers            | JINN_PEERS               | []                                |
-| subgraphUrl      | JINN_SUBGRAPH_URL        | (none)                            |
 | tasks            | JINN_TASKS               | []                                |
+| discovery.mode   | JINN_DISCOVERY_MODE      | mainnet: unset → `onchain` RPC floor; testnet: `http` |
+| discovery.url    | JINN_DISCOVERY_URL       | testnet only: `DEFAULT_TESTNET_DISCOVERY_URL` (Ponder indexer); mainnet: unset |
+| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | true (only relevant when mode is `http`/`embedded`) |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
+| _(none — env-only)_  | JINN_EVAL_IMAGE_CACHE_MAX | 20 (cap on the swe-rebench-v2 per-instance Docker image LRU) |
 
 `JINN_PASSWORD` is env-only — never in config files.
+
+Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`) with `fallbackToOnchain: true`. Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
 
 ## On-Chain Addresses (Base)
 
@@ -302,6 +353,15 @@ yarn test            # vitest run
 yarn e2e             # end-to-end on Anvil fork
 yarn staking         # earning bootstrap validation on Anvil
 node dist/bin/jinn.js run    # contributor daemon launch (after `yarn build`)
+
+# Daemon + real harness + Anvil settlement loop e2e (jinn-mono-wyy6)
+yarn e2e:daemon-harness   # production Daemon + real harness + Anvil settlement loop
+                          # JINN_E2E_HARNESS=prediction-v1-baseline (default) | hermes-agent | claude-code | codex
+                          # skips cleanly when the harness's API key is absent
+                          # exercises: Anvil fork of Base, real FleetBootstrapper,
+                          # locally-deployed JinnRouterV3 stack + mock IPFS,
+                          # production Daemon class, claim → execute → deliver →
+                          # activity-counter increment
 
 # Contracts
 cd contracts

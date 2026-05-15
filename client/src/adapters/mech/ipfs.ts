@@ -90,7 +90,7 @@ export function normalizeIpfsRegistryAddUrl(registryUrl: string): string {
   return `${t}/api/v0/add`;
 }
 
-function parseRegistryUploadCid(responseText: string): string {
+export function parseRegistryUploadCid(responseText: string): string {
   let lastHash: string | undefined;
   for (const line of responseText.trim().split('\n')) {
     if (!line.trim()) continue;
@@ -266,6 +266,21 @@ export function cidToDigestHex(cid: string): Hex {
   if (cid.startsWith('Qm')) {
     // CIDv0 — base58btc encoded multihash directly
     bytes = base58Decode(cid);
+  } else if (cid.startsWith('f') || cid.startsWith('F')) {
+    // CIDv1 hex multibase ('f' prefix per multibase spec).
+    // Format: f + <hex bytes> where hex bytes = version(01) + codec(varint) + multihash.
+    // e.g. `f01551220{sha256hex}` = version 0x01, codec 0x55 (raw), multihash sha2-256.
+    const hexBody = cid.slice(1).toLowerCase();
+    const rawBytes: number[] = [];
+    for (let i = 0; i < hexBody.length; i += 2) {
+      rawBytes.push(parseInt(hexBody.slice(i, i + 2), 16));
+    }
+    const raw = new Uint8Array(rawBytes);
+    // Skip version (1 byte) and codec varint (1+ bytes)
+    let offset = 1;
+    while (raw[offset]! & 0x80) offset++;
+    offset++;
+    bytes = raw.slice(offset);
   } else {
     // CIDv1 — decode multibase, skip version byte and codec varint
     const raw = cid.startsWith('b')
@@ -274,14 +289,22 @@ export function cidToDigestHex(cid: string): Hex {
 
     // Skip version (1 byte) and codec (1-2 bytes varint)
     let offset = 1; // skip version
-    while (raw[offset] & 0x80) offset++;
+    while (raw[offset]! & 0x80) offset++;
     offset++; // skip last byte of varint
     bytes = raw.slice(offset);
   }
 
   // bytes is now the multihash: [hashFn, length, ...digest]
+  // Reject truncated inputs up front so the error message names the real
+  // failure (length) rather than reading undefined out of an empty array
+  // and rendering "fn=0xundefined, len=undefined".
+  if (bytes.length < 34) {
+    throw new Error(
+      `CID payload too short for sha2-256 multihash: expected ≥ 34 bytes (fn + len + 32 digest), got ${bytes.length} (cid=${cid.slice(0, 16)}…)`,
+    );
+  }
   if (bytes[0] !== 0x12 || bytes[1] !== 0x20) {
-    throw new Error(`Unsupported multihash: fn=0x${bytes[0].toString(16)}, len=${bytes[1]}`);
+    throw new Error(`Unsupported multihash: fn=0x${bytes[0]!.toString(16)}, len=${bytes[1]}`);
   }
 
   const digest = bytes.slice(2, 34);

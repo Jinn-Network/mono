@@ -114,6 +114,111 @@ describe('SolverNet contracts', () => {
     expect(evalNet?.roles).toEqual(['solving', 'evaluating']);
   });
 
+  it('loads manifest-joined SolverNets into the runtime registry', async () => {
+    const registry = await loadSolverNets({
+      solverNets: {},
+      joinedSolverNets: {
+        bafyfixture: {
+          manifestCid: 'bafyfixture',
+          name: 'SWE-rebench v2',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          roles: ['solver', 'evaluator'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+          disabledDefaultPlugins: [],
+        },
+      },
+    });
+
+    const restoreNet = registry.forSolverType('swe-rebench-v2.v1', 'restoration');
+    const evalNet = registry.forSolverType('swe-rebench-v2.v1', 'evaluation');
+
+    expect(restoreNet?.name).toBe('SWE-rebench v2');
+    expect(restoreNet?.harness).toBe('claude-code');
+    expect(restoreNet?.model).toBe('claude-haiku-4-5-20251001');
+    expect(restoreNet?.roles).toEqual(['solving', 'evaluating']);
+    expect(evalNet?.roles).toEqual(['solving', 'evaluating']);
+    expect(restoreNet?.runtimePlugins.map((plugin) => plugin.name)).toEqual([
+      '@jinn-network/network-tools',
+      'swe-rebench-v2-runtime',
+    ]);
+  });
+
+  it('prefers app-joined SolverNets over same-name legacy runtime config', async () => {
+    const registry = await loadSolverNets({
+      solverNets: {
+        'SWE-rebench v2': {
+          enabled: true,
+          solverType: 'swe-rebench-v2.v1',
+          roles: ['solving'],
+          harness: 'codex-code-learner',
+          model: 'gpt-5.4-mini',
+          plugins: [],
+          taskGenerator: { enabled: false },
+        },
+      },
+      joinedSolverNets: {
+        bafyfixture: {
+          manifestCid: 'bafyfixture',
+          name: 'SWE-rebench v2',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          roles: ['solver'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+        },
+      },
+    });
+
+    const net = registry.forSolverType('swe-rebench-v2.v1', 'restoration');
+    expect(net?.harness).toBe('claude-code');
+    expect(net?.model).toBe('claude-haiku-4-5-20251001');
+    expect(registry.harnessSelections()['swe-rebench-v2.v1']).toBe('claude-code');
+    expect(registry.claudeModelSelections()['swe-rebench-v2.v1']).toBe(
+      'claude-haiku-4-5-20251001',
+    );
+    expect(registry.list().filter((entry) => entry.name === 'SWE-rebench v2')).toHaveLength(2);
+  });
+
+  it('derives evaluator-only harnesses from the joined SolverNet contract', async () => {
+    const registry = await loadSolverNets({
+      solverNets: {},
+      joinedSolverNets: {
+        bafyfixture: {
+          manifestCid: 'bafyfixture',
+          name: 'SWE-rebench v2',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          roles: ['evaluator'],
+        },
+      },
+    });
+
+    expect(registry.forSolverType('swe-rebench-v2.v1', 'restoration')).toBeUndefined();
+    const evalNet = registry.forSolverType('swe-rebench-v2.v1', 'evaluation');
+    expect(evalNet?.harness).toBe('swe-rebench-v2-evaluator');
+    expect(registry.harnessSelections()['swe-rebench-v2.v1']).toBe('swe-rebench-v2-evaluator');
+  });
+
+  it('lets joined operators opt out of default SolverNet runtime plugins', async () => {
+    const registry = await loadSolverNets({
+      solverNets: {},
+      joinedSolverNets: {
+        bafyfixture: {
+          manifestCid: 'bafyfixture',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          roles: ['solver'],
+          disabledDefaultPlugins: ['swe-rebench-v2-runtime'],
+        },
+      },
+    });
+
+    expect(
+      registry
+        .forSolverType('swe-rebench-v2.v1', 'restoration')
+        ?.runtimePlugins.map((plugin) => plugin.name),
+    ).toEqual(['@jinn-network/network-tools']);
+  });
+
   it('returns the SolverNet only for restoration when only solving is active', async () => {
     const registry = await loadSolverNets({
       solverNets: {

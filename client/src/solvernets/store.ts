@@ -19,6 +19,10 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { z } from 'zod';
+import {
+  SolverNetManifestV1Schema,
+  type SolverNetManifestV1,
+} from '@jinn-network/sdk/solvernets';
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 
@@ -162,6 +166,7 @@ export const DEFAULT_JINN_CLIENT_DIR = path.join(os.homedir(), '.jinn-client');
 const SOLVERNETS_SUBDIR = 'solvernets';
 const LAUNCHED_SUBDIR = 'launched';
 const DRAFTS_SUBDIR = 'drafts';
+const MANIFESTS_SUBDIR = 'manifests';
 
 function resolveLaunchedDir(baseDir: string): string {
   return path.join(baseDir, SOLVERNETS_SUBDIR, LAUNCHED_SUBDIR);
@@ -169,6 +174,10 @@ function resolveLaunchedDir(baseDir: string): string {
 
 function resolveDraftsDir(baseDir: string): string {
   return path.join(baseDir, SOLVERNETS_SUBDIR, DRAFTS_SUBDIR);
+}
+
+function resolveManifestsDir(baseDir: string): string {
+  return path.join(baseDir, SOLVERNETS_SUBDIR, MANIFESTS_SUBDIR);
 }
 
 // ── Atomic write helper ────────────────────────────────────────────────────
@@ -276,6 +285,11 @@ export interface SolverNetStore {
   loadRecord(solverNetId: string): Promise<LaunchedSolverNetRecord | null>;
   writeRecord(record: LaunchedSolverNetRecord): Promise<void>;
   deleteRecord(solverNetId: string): Promise<void>;
+  writeManifestCache(
+    manifestCid: string,
+    manifest: SolverNetManifestV1,
+  ): Promise<string>;
+  loadManifestCache(manifestPath: string): Promise<SolverNetManifestV1 | null>;
 
   // Drafts
   loadDraft(draftId: string): Promise<DraftSolverNetRecord | null>;
@@ -297,8 +311,9 @@ export function createSolverNetStore(opts: SolverNetStoreOptions = {}): SolverNe
   const baseDir = opts.baseDir ?? DEFAULT_JINN_CLIENT_DIR;
   const launchedDir = resolveLaunchedDir(baseDir);
   const draftsDir = resolveDraftsDir(baseDir);
+  const manifestsDir = resolveManifestsDir(baseDir);
 
-  function assertSafeId(id: string, kind: 'solverNetId' | 'draftId'): void {
+  function assertSafeId(id: string, kind: 'solverNetId' | 'draftId' | 'manifestCid'): void {
     const result = SafeId.safeParse(id);
     if (!result.success) {
       const message = result.error.issues[0]?.message ?? 'invalid id';
@@ -312,6 +327,10 @@ export function createSolverNetStore(opts: SolverNetStoreOptions = {}): SolverNe
   function draftPath(draftId: string): string {
     assertSafeId(draftId, 'draftId');
     return path.join(draftsDir, `${draftId}.json`);
+  }
+  function manifestCachePath(manifestCid: string): string {
+    assertSafeId(manifestCid, 'manifestCid');
+    return path.join(manifestsDir, `${manifestCid}.json`);
   }
 
   return {
@@ -330,6 +349,29 @@ export function createSolverNetStore(opts: SolverNetStoreOptions = {}): SolverNe
 
     async deleteRecord(solverNetId) {
       await deleteIfExists(launchedPath(solverNetId));
+    },
+
+    async writeManifestCache(manifestCid, manifest) {
+      const validated = SolverNetManifestV1Schema.parse(manifest);
+      const filePath = manifestCachePath(manifestCid);
+      await writeJsonAtomic(filePath, validated);
+      return filePath;
+    },
+
+    async loadManifestCache(manifestPath) {
+      const resolved = path.resolve(manifestPath);
+      const allowedRoot = path.resolve(manifestsDir);
+      if (resolved !== allowedRoot && !resolved.startsWith(`${allowedRoot}${path.sep}`)) {
+        console.error(
+          `[solvernet-store] Refusing to read manifest cache outside ${allowedRoot}: ${manifestPath}`,
+        );
+        return null;
+      }
+      return readAndParse(
+        resolved,
+        SolverNetManifestV1Schema,
+        'solvernet manifest cache',
+      );
     },
 
     async loadDraft(draftId) {

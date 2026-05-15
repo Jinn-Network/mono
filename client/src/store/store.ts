@@ -7,6 +7,7 @@ import type {
   EnvelopeProjectionQuery,
 } from '../corpus/types.js';
 import { TASK_RUNS_SCHEMA } from '../harnesses/engine/persistence.js';
+import { normalizeEnvelopeRole, type Role } from '../types/envelope.js';
 
 export interface ActivityEventInput {
   ts: string | null;
@@ -178,6 +179,7 @@ export interface NetworkArtifactMetadataRow {
 }
 
 export type TaskPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
+type LauncherTaskProjectionState = 'open' | 'claims-in-flight' | 'fully-claimed' | 'settled' | 'failed';
 
 export interface TaskPostRecord {
   creatorSafeAddress: string;
@@ -191,6 +193,43 @@ export interface TaskPostRecord {
   firstPostedAt: string;
   lastPostedAt: string;
   postCount: number;
+}
+
+interface LocalTaskRunProjectionRow {
+  request_id: string;
+  state: string;
+  task_role: string | null;
+  task_payload: string | null;
+  delivery_tx_hash: string | null;
+  state_updated_at: number;
+}
+
+function readClaimPolicyMaxClaims(taskPayload: string | null): number | undefined {
+  if (!taskPayload) return undefined;
+  try {
+    const parsed = JSON.parse(taskPayload) as {
+      claimPolicy?: { maxClaims?: unknown };
+      signedTask?: { claimPolicy?: { maxClaims?: unknown } };
+    };
+    const value = parsed.claimPolicy?.maxClaims ?? parsed.signedTask?.claimPolicy?.maxClaims;
+    return Number.isInteger(value) && (value as number) > 0 ? (value as number) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function derivePostedTaskLocalState(args: {
+  runs: LocalTaskRunProjectionRow[];
+  localRestorationClaims: number;
+  maxClaims?: number;
+}): LauncherTaskProjectionState | undefined {
+  if (args.runs.some((run) => run.state === 'FAILED')) return 'failed';
+  if (args.runs.some((run) => run.state === 'COMPLETE' || run.delivery_tx_hash)) return 'settled';
+  if (args.maxClaims !== undefined && args.localRestorationClaims >= args.maxClaims) {
+    return 'fully-claimed';
+  }
+  if (args.localRestorationClaims > 0 || args.runs.length > 0) return 'claims-in-flight';
+  return undefined;
 }
 
 const SCHEMA = `
@@ -383,6 +422,39 @@ CREATE TABLE IF NOT EXISTS task_post_locks (
   locked_at TEXT NOT NULL,
   PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
 );
+
+CREATE TABLE IF NOT EXISTS pending_captures (
+  session_id TEXT PRIMARY KEY,
+  captured_at TEXT NOT NULL,
+  originating_tool_name TEXT NOT NULL,
+  originating_tool_version TEXT,
+  capture_path TEXT NOT NULL CHECK (capture_path IN ('A','B','C','D')),
+  status TEXT NOT NULL CHECK (status IN ('pending','approved','skipped')),
+  span_count INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  redacted_span_count INTEGER NOT NULL,
+  repo_remote_url TEXT,
+  repo_commit_hash TEXT,
+  envelope_cid TEXT,
+  published_at TEXT,
+  skipped_at TEXT
+);
+CREATE INDEX IF NOT EXISTS pending_captures_status_capturedat
+  ON pending_captures (status, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS capture_spans (
+  session_id TEXT NOT NULL,
+  span_id TEXT NOT NULL,
+  trace_id TEXT NOT NULL,
+  parent_span_id TEXT,
+  name TEXT NOT NULL,
+  start_time_unix_nano TEXT NOT NULL,
+  end_time_unix_nano TEXT NOT NULL,
+  attributes_json TEXT NOT NULL,
+  redacted_keys_json TEXT NOT NULL,
+  PRIMARY KEY (session_id, span_id)
+);
+CREATE INDEX IF NOT EXISTS capture_spans_session ON capture_spans (session_id);
 
 `;
 
@@ -653,6 +725,8 @@ export class Store {
     solverType: string | null;
     requestId: string;
     postedAt: string;
+    state?: LauncherTaskProjectionState;
+    claims?: { current?: number; max?: number };
   }> {
     const limit = Math.max(0, Math.min(args.limit, 1000));
     if (limit === 0) return [];
@@ -698,17 +772,59 @@ export class Store {
       last_posted_at: string;
       solver_type: string | null;
     }>;
-    return rows.map((r) => ({
+    const localRunsForPost = this.db.prepare(
+      `SELECT request_id, state, task_role, task_payload, delivery_tx_hash, state_updated_at
+       FROM task_runs
+       WHERE request_id = @requestId
+          OR (@taskId != '' AND task_id = @taskId)
+          OR (@protocolTaskId != '' AND task_id = @protocolTaskId)
+          OR (@taskCid != '' AND task_cid = @taskCid)
+       ORDER BY state_updated_at DESC`,
+    );
+    return rows.map((r) => {
       // task_id was added by an additive migration; the column exists on every
       // post-migration insert (posting-service.ts always writes it). Older
       // rows fall back to protocol_task_id (chain Task ID) and finally
       // request_id so the response shape's `taskId` is always populated.
-      taskId: r.task_id ?? r.protocol_task_id ?? r.request_id,
-      taskCid: r.task_cid ?? '',
-      solverType: r.solver_type,
-      requestId: r.request_id,
-      postedAt: r.last_posted_at,
-    }));
+      const taskId = r.task_id ?? r.protocol_task_id ?? r.request_id;
+      const protocolTaskId = r.protocol_task_id ?? '';
+      const taskCid = r.task_cid ?? '';
+      const runs = localRunsForPost.all({
+        requestId: r.request_id,
+        taskId,
+        protocolTaskId,
+        taskCid,
+      }) as LocalTaskRunProjectionRow[];
+      const maxClaims = runs
+        .map((run) => readClaimPolicyMaxClaims(run.task_payload))
+        .find((value): value is number => value !== undefined);
+      const localRestorationClaims = new Set(
+        runs
+          .filter((run) => run.task_role !== 'evaluation')
+          .map((run) => run.request_id),
+      ).size;
+      const state = derivePostedTaskLocalState({
+        runs,
+        localRestorationClaims,
+        maxClaims,
+      });
+      return {
+        taskId,
+        taskCid,
+        solverType: r.solver_type,
+        requestId: r.request_id,
+        postedAt: r.last_posted_at,
+        ...(state ? { state } : {}),
+        ...(runs.length > 0 || maxClaims !== undefined
+          ? {
+              claims: {
+                current: localRestorationClaims,
+                ...(maxClaims !== undefined ? { max: maxClaims } : {}),
+              },
+            }
+          : {}),
+      };
+    });
   }
 
   /** Count of posted Tasks for this creator with the given solver_type. v1
@@ -1783,7 +1899,7 @@ export class Store {
         envelopeSha256: p.envelopeSha256,
         signatureHash: p.signatureHash,
         solverType: p.solverType,
-        role: p.role,
+        role: normalizeEnvelopeRole(p.role),
         taskCid: p.taskCid,
         taskId: p.taskId,
         requestId: p.requestId,
@@ -1840,8 +1956,14 @@ export class Store {
       params['solverType'] = query.solverType;
     }
     if (query.role) {
-      conditions.push('role = @role');
-      params['role'] = query.role;
+      const role = normalizeEnvelopeRole(query.role) as Role;
+      if (role === 'solution') {
+        conditions.push('(role = @role OR role = @legacyRole)');
+        params['legacyRole'] = 'restoration';
+      } else {
+        conditions.push('role = @role');
+      }
+      params['role'] = role;
     }
     if (query.taskCid) {
       conditions.push('task_cid = @taskCid');
@@ -1923,7 +2045,7 @@ interface EnvelopeProjectionRow {
   envelope_sha256: string | null;
   signature_hash: string;
   solver_type: string;
-  role: 'restoration' | 'verdict';
+  role: string;
   task_cid: string | null;
   task_id: string | null;
   request_id: string | null;
@@ -1948,7 +2070,7 @@ function rowToEnvelopeProjection(row: EnvelopeProjectionRow): EnvelopeProjection
     envelopeSha256: row.envelope_sha256,
     signatureHash: row.signature_hash,
     solverType: row.solver_type,
-    role: row.role,
+    role: normalizeEnvelopeRole(row.role) as Role,
     taskCid: row.task_cid,
     taskId: row.task_id,
     requestId: row.request_id,

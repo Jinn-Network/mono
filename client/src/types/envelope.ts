@@ -4,13 +4,14 @@
  * Scope: docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md
  * §3.1 (D5 + K1 knowledge tree), §3.2 (K3 executor provenance), §3.4 migration.
  *
- * One envelope shape covers restoration manifests (role='restoration') and
+ * One envelope shape covers solution manifests (role='solution') and
  * verdict manifests (role='verdict'). Payload is typed per (solverType, role) via
  * the registry in `./payloads/`.
  */
 
 import { z } from 'zod';
 import { WindowSchema } from './window.js';
+import { SessionProvenanceSchema } from './session-provenance.js';
 
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/);
 
@@ -21,8 +22,20 @@ export const EvidenceTierSchema = z.enum([
 ]);
 export type EvidenceTier = z.infer<typeof EvidenceTierSchema>;
 
-export const RoleSchema = z.enum(['restoration', 'verdict']);
-export type Role = z.infer<typeof RoleSchema>;
+export const CanonicalRoleSchema = z.enum(['solution', 'verdict', 'capture']);
+export type CanonicalRole = z.infer<typeof CanonicalRoleSchema>;
+export type LegacyEnvelopeRole = 'restoration';
+export type RawEnvelopeRole = CanonicalRole | LegacyEnvelopeRole;
+export type Role = CanonicalRole;
+export const RawRoleSchema = z.union([CanonicalRoleSchema, z.literal('restoration')]);
+
+export function normalizeEnvelopeRole(role: RawEnvelopeRole): CanonicalRole;
+export function normalizeEnvelopeRole(role: unknown): unknown;
+export function normalizeEnvelopeRole(role: unknown): unknown {
+  return role === 'restoration' ? 'solution' : role;
+}
+
+export const RoleSchema = z.preprocess(normalizeEnvelopeRole, CanonicalRoleSchema);
 
 const TaskProvenanceSchema = z.object({
   cid: z.string().min(1),
@@ -78,6 +91,15 @@ const ExecutorSchema = z.object({
    * treat undefined as 'train' (the legacy behaviour).
    */
   mode: z.enum(['train', 'frozen']).optional(),
+  /**
+   * Underlying LLM model identifier this attempt was run against (e.g.
+   * 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'codex-defaults').
+   * Optional for back-compat: envelopes produced before this field was
+   * introduced lack it. Sourced from solverNet.model / claudeModel runtime
+   * config; stamped at envelope-assembly time. Indexer reads this for the
+   * network explorer's composition.byModel facet (jinn-mono-gbut, gh#191).
+   */
+  model: z.string().optional(),
 });
 
 const AttestationSchema = z.object({
@@ -87,12 +109,20 @@ const AttestationSchema = z.object({
   measurement: HexStringSchema,
 });
 
+export const ArtifactSourceSchema = z.object({
+  kind: z.literal('ipfs'),
+  cid: z.string().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  encoding: z.literal('jinn.artifact.donation.v1'),
+});
+
 const TrajectoryRefSchema = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   access: z.object({
     endpoint: z.string().url(),
     priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
   }),
+  sources: z.array(ArtifactSourceSchema).optional(),
 });
 
 const ArtifactSchema = z.object({
@@ -114,8 +144,10 @@ const ArtifactSchema = z.object({
     endpoint: z.string().url(),
     priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
   }),
+  sources: z.array(ArtifactSourceSchema).optional(),
 });
 
+export type ArtifactSource = z.infer<typeof ArtifactSourceSchema>;
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
 const SignatureSchema = z.object({
@@ -130,7 +162,8 @@ const BaseEnvelopeFields = {
   solverType: z.string().min(1),
   role: RoleSchema,
   generatedAt: z.number().int(),
-  task: TaskProvenanceSchema,
+  task: TaskProvenanceSchema.optional(),
+  sessionProvenance: SessionProvenanceSchema.optional(),
   participant: ParticipantSchema,
   window: WindowSchema,
   executor: ExecutorSchema,
@@ -150,12 +183,18 @@ export const UnsignedEnvelopeSchema = z
   .refine(
     (e) => e.evidenceTier !== 'attested' || e.attestation !== null,
     { message: 'attested tier requires attestation', path: ['attestation'] },
+  )
+  .refine(
+    (e) => (e.role === 'capture'
+      ? e.sessionProvenance !== undefined && e.task === undefined
+      : e.task !== undefined && e.sessionProvenance === undefined),
+    { message: 'role=capture requires sessionProvenance and no task; other roles require task and no sessionProvenance' },
   );
 
 export type UnsignedEnvelope = z.infer<typeof UnsignedEnvelopeSchema>;
 
 export const SignedEnvelopeSchema = z
-  .object({ ...BaseEnvelopeFields, signature: SignatureSchema })
+  .object({ ...BaseEnvelopeFields, role: RawRoleSchema, signature: SignatureSchema })
   .refine(
     (e) => e.evidenceTier !== 'attested' || e.executor.source !== undefined,
     { message: 'attested tier requires executor.source', path: ['executor', 'source'] },
@@ -163,6 +202,12 @@ export const SignedEnvelopeSchema = z
   .refine(
     (e) => e.evidenceTier !== 'attested' || e.attestation !== null,
     { message: 'attested tier requires attestation', path: ['attestation'] },
+  )
+  .refine(
+    (e) => (e.role === 'capture'
+      ? e.sessionProvenance !== undefined && e.task === undefined
+      : e.task !== undefined && e.sessionProvenance === undefined),
+    { message: 'role=capture requires sessionProvenance and no task; other roles require task and no sessionProvenance' },
   );
 
 export type SignedEnvelope = z.infer<typeof SignedEnvelopeSchema>;

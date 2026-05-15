@@ -6,7 +6,7 @@
  *   - jinn-mono-u59: takePreSnapshot resolves impl.name via registry for implStateDir
  *   - jinn-mono-cmb: session-orchestrator ignores undefined config overrides
  */
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -75,6 +75,35 @@ function fullTask(id: string, windowStartTs: number, windowEndTs: number): Task 
     },
     eligibility: { minEquityUsd: 100 },
     window: { startTs: windowStartTs, endTs: windowEndTs },
+  };
+}
+
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function timeout<T>(ms: number, value: T): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+
+function testSolution(): Solution {
+  const baseSnapshot = { capturedAt: Date.now(), hlTime: 0, payload: {} };
+  return {
+    venueRef: { name: 'test' },
+    gating: { ok: true },
+    preSnapshot: baseSnapshot,
+    postSnapshot: baseSnapshot,
+    fills: [],
   };
 }
 
@@ -395,5 +424,88 @@ describe('jinn-mono-eci: tick advances WAITING intents past windowStartTs', () =
     // to runImpl which throws NotImplementedError → FAILED — but in any case
     // the intent has advanced past WAITING).
     expect(after.state).not.toBe(TaskRunState.WAITING);
+  });
+});
+
+// ── Canary blocker: one long run must not starve later in-flight tasks ───────
+
+describe('runTickLoop schedules other in-flight tasks while a harness is still running', () => {
+  let store: Store;
+  beforeEach(() => { store = new Store(':memory:'); });
+  afterEach(() => { store.close(); });
+
+  it('does not wait for a long RUNNING task before processing a later WAITING task', async () => {
+    const now = Date.now();
+    const longRelease = deferred<Solution>();
+    const longStarted = deferred<'long-started'>();
+    const laterStarted = deferred<'later-started'>();
+    const impl: Harness = {
+      name: 'nonblocking-test-impl',
+      version: '0.0.1',
+      supports: () => true,
+      async run(ctx) {
+        if (ctx.requestId === 'long-running') {
+          longStarted.resolve('long-started');
+          return longRelease.promise;
+        }
+        laterStarted.resolve('later-started');
+        return testSolution();
+      },
+    };
+
+    const opts: TaskEngineOptions = {
+      ...makeOpts(store, { findFor: () => impl }),
+    };
+    const engine = new TaskEngine(opts);
+    const persistence = new TaskRunPersistence(store.db);
+
+    const longWorkingDir = join(engTestRoot, 'work', 'long-running');
+    const longImplStateDir = join(engTestRoot, 'impl', 'nonblocking-test-impl', 'portfolio_v0');
+    mkdirSync(longWorkingDir, { recursive: true });
+    mkdirSync(longImplStateDir, { recursive: true });
+
+    persistence.insertDiscovered({
+      requestId: 'long-running',
+      taskCid: 'cid-long-running',
+      onchainCreationTx: '0xlong',
+      onchainCreationBlock: 10,
+      solverType: 'portfolio.v0',
+      windowStartTs: now - 1_000,
+      windowEndTs: now + 86_400_000,
+      task: fullTask('long-running', now - 1_000, now + 86_400_000),
+    });
+    persistence.transition('long-running', TaskRunState.CLAIMED);
+    persistence.transition('long-running', TaskRunState.WAITING);
+    persistence.transition('long-running', TaskRunState.PRE_SNAPSHOT);
+    persistence.transition('long-running', TaskRunState.RUNNING, {
+      workingDir: longWorkingDir,
+      implStateDir: longImplStateDir,
+      preSnapshotCapturedAt: now,
+      preSnapshotPayload: { provisioned: true },
+    });
+
+    const loop = engine.runTickLoop(5);
+    await expect(Promise.race([longStarted.promise, timeout(300, 'timeout' as const)]))
+      .resolves.toBe('long-started');
+
+    persistence.insertDiscovered({
+      requestId: 'later-waiting',
+      taskCid: 'cid-later-waiting',
+      onchainCreationTx: '0xlater',
+      onchainCreationBlock: 11,
+      solverType: 'portfolio.v0',
+      windowStartTs: now - 1_000,
+      windowEndTs: now + 86_400_000,
+      task: fullTask('later-waiting', now - 1_000, now + 86_400_000),
+    });
+    persistence.transition('later-waiting', TaskRunState.CLAIMED);
+    persistence.transition('later-waiting', TaskRunState.WAITING);
+
+    await expect(Promise.race([laterStarted.promise, timeout(500, 'timeout' as const)]))
+      .resolves.toBe('later-started');
+
+    engine.stop();
+    longRelease.resolve(testSolution());
+    await Promise.race([loop, timeout(500, undefined)]);
   });
 });

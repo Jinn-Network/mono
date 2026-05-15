@@ -24,7 +24,7 @@ import { formatTimestamp, truncateCid } from './helpers.js';
  * this is a faithful copy of the predecessor `PostedTasksList` ergonomic.
  */
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 5;
 
 const STATE_TONE: Record<LauncherTaskState, { fg: string; label: string }> = {
   open: { fg: 'var(--accent-sky)', label: 'Open' },
@@ -127,6 +127,7 @@ export function TasksPanel({ record, fetchTasks }: TasksPanelProps): JSX.Element
           >
             <div role="row" style={tableHeaderStyle}>
               <span>Task</span>
+              <span>SolverType</span>
               <span>Posted</span>
               <span>State</span>
               <span style={{ textAlign: 'right' }}>Claims</span>
@@ -202,6 +203,19 @@ function TaskRow({ task }: { task: LauncherTaskEntry }): JSX.Element {
         }}
       >
         {task.summary?.title ?? truncateCid(task.taskCid)}
+      </span>
+      <span
+        title={task.solverType ?? task.solverNet}
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '12px',
+          color: 'var(--fg-muted)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {task.solverType ?? task.solverNet}
       </span>
       <span
         style={{
@@ -283,7 +297,7 @@ const titleStyle: React.CSSProperties = {
 
 const tableHeaderStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '2fr 1.4fr 1fr 0.8fr',
+  gridTemplateColumns: '2fr minmax(130px, 0.9fr) 1.4fr 1fr 0.8fr',
   gap: '12px',
   padding: '8px 14px',
   background: 'var(--bg)',
@@ -297,7 +311,7 @@ const tableHeaderStyle: React.CSSProperties = {
 
 const tableRowStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '2fr 1.4fr 1fr 0.8fr',
+  gridTemplateColumns: '2fr minmax(130px, 0.9fr) 1.4fr 1fr 0.8fr',
   gap: '12px',
   alignItems: 'center',
   padding: '10px 14px',

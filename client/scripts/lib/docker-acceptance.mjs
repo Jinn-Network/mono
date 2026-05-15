@@ -73,13 +73,14 @@ export function buildDockerComposeEnv({
     JINN_POLL_INTERVAL_MS: String(pollIntervalMs),
     JINN_REWARD_CLAIM_INTERVAL_MS: String(rewardClaimIntervalMs),
     JINN_TARGET_SERVICES: String(targetServices),
-    // Release acceptance gates on prediction.v0 cycles produced by the
-    // testnet auto-task generator (solverType=prediction.v0, id prefix
-    // `pred-v0-auto-…`). Leaving auto-tasks enabled is required for the
-    // gate to observe the protocol loop end-to-end.
-    JINN_DISABLE_AUTO_TASKS: merged['JINN_DISABLE_AUTO_TASKS'] ?? '0',
+    // Release acceptance submits a manifest-backed prediction.v1 task from a
+    // one-off CLI process, then the daemon discovers and completes it through
+    // the normal Task-native path. Auto generators are not required.
+    JINN_DISABLE_AUTO_TASKS: merged['JINN_DISABLE_AUTO_TASKS'] ?? '1',
     JINN_PREDICTION_V0_WINDOW_MS: merged['JINN_PREDICTION_V0_WINDOW_MS'] ?? '120000',
     JINN_PREDICTION_V0_RESOLVE_GAP_MS: merged['JINN_PREDICTION_V0_RESOLVE_GAP_MS'] ?? '60000',
+    JINN_POLYMARKET_GAMMA_BASE_URL: merged['JINN_POLYMARKET_GAMMA_BASE_URL'] ?? '',
+    JINN_POLYMARKET_CLOB_BASE_URL: merged['JINN_POLYMARKET_CLOB_BASE_URL'] ?? '',
     // Non-interactive Claude auth: output of `claude setup-token`. When set,
     // the daemon inside the container uses it directly and no keychain /
     // libsecret / browser login is required.

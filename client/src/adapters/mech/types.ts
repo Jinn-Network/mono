@@ -1,4 +1,5 @@
 import type { Address, WalletClient } from 'viem';
+import type { DiscoveryAPI } from '../../discovery/types.js';
 
 export interface EvictionRecoveryConfig {
   serviceId: number;
@@ -19,6 +20,28 @@ export interface MechAdapterConfig {
   pollIntervalMs: number;
   /** Optional cap for delivery-log scans; omit for full-history recovery. */
   mechDeliverBackfillLookbackBlocks?: bigint;
+  /**
+   * Optional task-discovery index. The subgraph is a candidate source only:
+   * the adapter still verifies claimability on-chain before yielding work.
+   */
+  taskDiscovery?: {
+    /**
+     * DiscoveryAPI instance for finding claimable tasks. When provided,
+     * replaces direct subgraph calls in discoverSubgraphRestorationTasks.
+     */
+    discoveryApi?: DiscoveryAPI;
+    solverNetManifestCids?: string[];
+    /**
+     * Lower bound for the canonical on-chain TaskCreated scan. The subgraph is
+     * only an acceleration path; this scan is the correctness path.
+     */
+    onchainFromBlock?: number | bigint;
+    /** Optional release/acceptance guard: only discover these on-chain task ids. */
+    allowedTaskIds?: string[];
+    pageSize?: number;
+    maxPages?: number;
+    fetchImpl?: typeof fetch;
+  };
   chainId: number;
   /** Base mainnet V1, Phase 1b V2, or Task-native V3 delivery claim ABI. */
   routerClaimDeliveryVariant: 'v1' | 'v2' | 'v3';

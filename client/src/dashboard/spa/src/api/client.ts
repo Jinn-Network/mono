@@ -21,7 +21,34 @@ import type {
   OperatorArtifactSource,
   OperatorArtifactsResponse,
   OperatorPricingConfig,
+  CapturesListResponse,
+  CaptureDetailResponse,
+  Iso8601,
+  DiscoveryPluginPublicationsResponse,
+  DiscoveryBuilderArtifactsResponse,
+  DiscoveryPluginScoresResponse,
 } from './types.js';
+
+interface JsonErrorPayload {
+  error?: string;
+  message?: string;
+}
+
+async function readJsonErrorPayload(res: Response): Promise<JsonErrorPayload | null> {
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) return null;
+  try {
+    const body = await res.json() as unknown;
+    if (typeof body !== 'object' || body === null) return null;
+    const record = body as Record<string, unknown>;
+    return {
+      error: typeof record.error === 'string' ? record.error : undefined,
+      message: typeof record.message === 'string' ? record.message : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -30,7 +57,16 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText} on ${path}`);
+    const payload = await readJsonErrorPayload(res);
+    const detail = payload?.message ?? payload?.error;
+    const error = new Error(
+      detail
+        ? `${res.status} ${res.statusText}: ${detail} on ${path}`
+        : `${res.status} ${res.statusText} on ${path}`,
+    ) as Error & { status?: number; code?: string };
+    error.status = res.status;
+    error.code = payload?.error;
+    throw error;
   }
   return res.json() as Promise<T>;
 }
@@ -142,6 +178,11 @@ export const api = {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mode }),
       },
+    ),
+
+  hermesDoctor: () =>
+    jfetch<{ installed: boolean; exitCode: number | null; stdout: string; stderr: string }>(
+      '/api/hermes/doctor',
     ),
 
   // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----
@@ -268,7 +309,7 @@ export const api = {
 
   // ---- Operator participation flow (Task 21) ----
   // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12. Writes a
-  // manifest-keyed entry to `config.solverNets[<cid>]`; restart-required
+  // manifest-keyed entry to `config.joinedSolverNets[<cid>]`; restart-required
   // — the daemon does not hot-reload SolverNet config.
   operator: {
     listArtifacts: (opts: { source?: OperatorArtifactSource; artifactType?: string; limit?: number } = {}) => {
@@ -278,7 +319,7 @@ export const api = {
       if (opts.limit !== undefined) q.set('limit', String(opts.limit));
       const qs = q.toString();
       return jfetch<OperatorArtifactsResponse>(
-        `/v1/operator/artifacts${qs ? `?${qs}` : ''}`,
+        `/v1/operator/execution-data${qs ? `?${qs}` : ''}`,
       );
     },
     updatePricing: (pricing: OperatorPricingConfig) =>
@@ -294,10 +335,12 @@ export const api = {
       manifestCid: string,
       body: {
         name?: string;
+        contract?: { id: string; version: string };
         roles: Array<'solver' | 'evaluator'>;
         harness?: string;
         model?: string;
         plugins?: string[];
+        disabledDefaultPlugins?: string[];
       },
     ) =>
       jfetch<{
@@ -307,10 +350,12 @@ export const api = {
         config: {
           manifestCid: string;
           name?: string;
+          contract?: { id: string; version: string };
           roles: Array<'solver' | 'evaluator'>;
           harness?: string;
           model?: string;
           plugins?: string[];
+          disabledDefaultPlugins?: string[];
         };
       }>(`/v1/operator/join/${encodeURIComponent(manifestCid)}`, {
         method: 'POST',
@@ -329,13 +374,71 @@ export const api = {
           {
             manifestCid: string;
             name?: string;
+            contract?: { id: string; version: string };
             roles: Array<'solver' | 'evaluator'>;
             harness?: string;
             model?: string;
             plugins?: string[];
+            disabledDefaultPlugins?: string[];
           }
         >;
       }>('/v1/operator/joined'),
+  },
+  captures: {
+    listPending: () => jfetch<CapturesListResponse>('/api/captures/pending'),
+    get: (sessionId: string) =>
+      jfetch<CaptureDetailResponse>(`/api/captures/${encodeURIComponent(sessionId)}`),
+    approve: (sessionId: string) =>
+      jfetch<{ ok: boolean; sessionId: string; envelopeCid: string; publishedAt: Iso8601 }>(
+        `/api/captures/${encodeURIComponent(sessionId)}/approve`,
+        { method: 'POST' },
+      ),
+    skip: (sessionId: string) =>
+      jfetch<{ ok: boolean; sessionId: string; skippedAt: Iso8601 }>(
+        `/api/captures/${encodeURIComponent(sessionId)}/skip`,
+        { method: 'POST' },
+      ),
+    trustRepo: (repoRemoteUrl: string, trusted: boolean) =>
+      jfetch<{ ok: boolean; repoRemoteUrl: string; trusted: boolean }>(
+        '/api/captures/trust-repos',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repoRemoteUrl, trusted }),
+        },
+      ),
+  },
+
+  // ── Discovery (hfmf) — proxied via daemon's /v1/discovery/* routes ──────────
+  discovery: {
+    listPluginPublications: (args?: {
+      solverType?: string;
+      builderAgentId?: string;
+      includeRevoked?: boolean;
+    }) => {
+      const q = new URLSearchParams();
+      if (args?.solverType) q.set('solverType', args.solverType);
+      if (args?.builderAgentId) q.set('builderAgentId', args.builderAgentId);
+      if (args?.includeRevoked !== undefined) q.set('includeRevoked', String(args.includeRevoked));
+      const qs = q.toString();
+      return jfetch<DiscoveryPluginPublicationsResponse>(
+        `/v1/discovery/plugin-publications${qs ? `?${qs}` : ''}`,
+      );
+    },
+    listBuilderArtifacts: (builderAgentId: string, limit?: number) => {
+      const q = new URLSearchParams({ builderAgentId });
+      if (limit !== undefined) q.set('limit', String(limit));
+      return jfetch<DiscoveryBuilderArtifactsResponse>(
+        `/v1/discovery/builder-artifacts?${q.toString()}`,
+      );
+    },
+    getPluginScores: (cid: string, limit?: number) => {
+      const q = new URLSearchParams({ cid });
+      if (limit !== undefined) q.set('limit', String(limit));
+      return jfetch<DiscoveryPluginScoresResponse>(
+        `/v1/discovery/plugin-scores?${q.toString()}`,
+      );
+    },
   },
 };
 

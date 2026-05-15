@@ -15,10 +15,16 @@ import { PredictionApyV0BaselineImpl } from './prediction-apy-v0-baseline/index.
 import { ClaudeMcpPredictionApyImpl } from './claude-mcp-prediction-apy/index.js';
 import { PredictionApyV0Evaluator } from './prediction-apy-v0-evaluator/index.js';
 import {
-  ClaudeCodeLearnerImpl,
-} from './claude-code-learner/index.js';
-import { ClaudeCodeHarnessAdapter } from './claude-code-learner/index.js';
+  LearnerHarness,
+} from './learner/index.js';
+import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
+import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
+import {
+  canonicalHarnessName,
+  canonicalHarnessNameSet,
+  CODEX_HARNESS,
+} from '../names.js';
 
 /**
  * Environment passed to {@link buildHarnesses} — same shape for daemon
@@ -58,6 +64,14 @@ export interface HarnessEnv {
    * and artifact acquisition tools.
    */
   corpusEnv?: RunnerContext['corpusEnv'];
+  /** Path to the `codex` executable. Defaults to `codex`. */
+  codexPath?: string;
+  /** Default Codex model when a SolverNet does not specify one. */
+  codexModel?: string;
+  /** Optional Polymarket Gamma API override for acceptance or private mirrors. */
+  polymarketGammaBaseUrl?: string;
+  /** Optional Polymarket CLOB API override for acceptance or private mirrors. */
+  polymarketClobBaseUrl?: string;
   /**
    * Root for impl-scoped state dirs (e.g. hyperliquid api-wallet). Defaults under
    * `~/.jinn-client/engine/impl-state` when unset — wired from `config.engine` in main.
@@ -84,7 +98,12 @@ export interface HarnessEnv {
    * impl that has external deps.
    */
   disabledNames?: readonly string[];
-  /** Resolved SolverPlugin package roots passed to plugin-aware Harnesses. */
+  /** Path to the `hermes` executable. Defaults to `hermes`. */
+  hermesPath?: string;
+  /** Default Hermes model when a SolverNet does not specify one. */
+  hermesModel?: string;
+  /** Hermes provider (e.g. 'anthropic'). */
+  hermesProvider?: string;
 }
 
 /**
@@ -92,7 +111,7 @@ export interface HarnessEnv {
  * Registration order is stable: it matches historical `main.ts` first-match
  * behavior for `HarnessRegistry`.
  *
- * The claude-code-learner Harness is registered as the default peer Harness;
+ * The claude-code Harness is registered as the default peer Harness;
  * it no longer wraps specialists.
  */
 export function buildHarnesses(env: HarnessEnv): Harness[] {
@@ -151,7 +170,10 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(
     isStub
       ? new PredictionV1Evaluator({ stub: true })
-      : new PredictionV1Evaluator(),
+      : new PredictionV1Evaluator({
+          ...(env.polymarketGammaBaseUrl ? { gammaBaseUrl: env.polymarketGammaBaseUrl } : {}),
+          ...(env.polymarketClobBaseUrl ? { clobBaseUrl: env.polymarketClobBaseUrl } : {}),
+        }),
   );
   out.push(
     new PredictionApyV0BaselineImpl({
@@ -205,13 +227,42 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     daemonApiToken: env.daemonApiToken,
     corpusEnv: env.corpusEnv,
   });
-  out.push(new ClaudeCodeLearnerImpl({
+  out.push(new LearnerHarness({
     adapter: learnerAdapter,
+    claudePath: env.claudePath,
   }));
 
+  // Codex-backed peer Harness. It supports the same restoration surface as
+  // claude-code, but is selected only by explicit SolverNet harness config so
+  // historical first-match fallback stays unchanged.
+  const codexLearnerAdapter = new CodexCodeHarnessAdapter({
+    codexPath: env.codexPath,
+    codexModel: env.codexModel,
+    storePath: env.storePath,
+    daemonApiUrl: env.daemonApiUrl,
+    daemonApiToken: env.daemonApiToken,
+    corpusEnv: env.corpusEnv,
+  });
+  out.push(new LearnerHarness({
+    name: CODEX_HARNESS,
+    adapter: codexLearnerAdapter,
+    claudePath: env.claudePath,
+  }));
+
+  const hermesAdapter = new HermesHarnessAdapter({
+    hermesPath: env.hermesPath,
+    hermesModel: env.hermesModel,
+    hermesProvider: env.hermesProvider,
+    daemonApiUrl: env.daemonApiUrl ?? 'http://127.0.0.1:7331',
+    daemonApiToken: env.daemonApiToken ?? '',
+    storePath: env.storePath,
+    corpusEnv: env.corpusEnv ?? {},
+  });
+  out.push(new HermesHarness({ adapter: hermesAdapter }));
+
   if (env.disabledNames && env.disabledNames.length > 0) {
-    const disabled = new Set(env.disabledNames);
-    return out.filter((impl) => !disabled.has(impl.name));
+    const disabled = canonicalHarnessNameSet(env.disabledNames);
+    return out.filter((impl) => !disabled.has(canonicalHarnessName(impl.name)));
   }
   return out;
 }

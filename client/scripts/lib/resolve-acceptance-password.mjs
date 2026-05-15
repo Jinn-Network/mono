@@ -2,7 +2,7 @@
  * Password resolution for release acceptance / setup scripts (Node .mjs).
  *
  * Mirrors `src/cli/password.ts` `resolveCliPassword` so operators who use
- * `jinn quickstart` (keystore-password file) do not need to export
+ * `jinn run` (keystore-password file) do not need to export
  * JINN_PASSWORD every time they run acceptance gates.
  *
  * Priority:
@@ -46,4 +46,4 @@ export function resolveAcceptancePassword(env, opts = {}) {
 
 export const PASSWORD_RESOLUTION_HINT =
   'Set JINN_PASSWORD or JINN_TESTNET_ACCEPTANCE_PASSWORD, or ensure '
-  + '~/.jinn-client/keystore-password exists (from `jinn quickstart`).';
+  + '~/.jinn-client/keystore-password exists (from `jinn run`).';

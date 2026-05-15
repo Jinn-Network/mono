@@ -1,34 +1,40 @@
 /**
- * Tests for `resolveAgentIdForManifest` (jinn-mono-yg4).
+ * Tests for `resolveAgentIdForManifest` (jinn-mono-280n.6 part A).
  *
- * Pins the subgraph-path resolution semantics:
+ * The resolver now delegates to `discoveryApi.queryEnvelopes` instead of
+ * querying the hosted subgraph directly. These tests mock the DiscoveryAPI
+ * and assert the same semantic contract as before:
  *   - Returns the operator's agentId on a clean match.
- *   - Returns null when the subgraph has no row for the manifestHash.
- *   - Returns null when subgraphUrl is undefined (no on-chain fallback wired).
- *   - Fails closed (null + warn) on transport / GraphQL errors.
+ *   - Returns null when the indexer has no envelope for the manifestHash.
+ *   - Returns null when discoveryApi is undefined (no resolver query attempted).
+ *   - Fails closed (null + warn) on errors from the DiscoveryAPI.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveAgentIdForManifest } from '../../src/erc8004/identity.js';
+import type { DiscoveryAPI } from '../../src/discovery/types.js';
+import type { EnvelopeRef } from '../../src/corpus/types.js';
 
 const MANIFEST_HASH =
   '0xfeedfacedeadbeef00000000000000000000000000000000000000000000beef' as `0x${string}`;
-const SUBGRAPH_URL = 'http://example.test/subgraph';
 
-function makeFetch(responseInit: {
-  ok?: boolean;
-  status?: number;
-  body: unknown;
-  throwOnFetch?: Error;
-}): typeof fetch {
-  return vi.fn(async () => {
-    if (responseInit.throwOnFetch) throw responseInit.throwOnFetch;
-    return {
-      ok: responseInit.ok ?? true,
-      status: responseInit.status ?? 200,
-      json: async () => responseInit.body,
-    } as Response;
-  });
+function makeEnvelopeRef(args: { agentId: string; manifestCid: string }): EnvelopeRef {
+  return {
+    manifestCid: args.manifestCid,
+    manifestHash: MANIFEST_HASH,
+    operator: { agentId: args.agentId, safeAddress: '' },
+    evidenceTier: 'self-signed',
+    publishedAt: 0,
+  };
+}
+
+function makeDiscoveryApi(refs: EnvelopeRef[]): DiscoveryAPI {
+  return {
+    async queryEnvelopes() { return refs; },
+    async listLaunchedSolverNets() { return []; },
+    async getLifecycleStatus() { return undefined; },
+    async findClaimableTasks() { return []; },
+  };
 }
 
 beforeEach(() => {
@@ -36,24 +42,14 @@ beforeEach(() => {
 });
 
 describe('resolveAgentIdForManifest', () => {
-  it('returns the operator agentId from the first execution row', async () => {
-    const fetchImpl = makeFetch({
-      body: {
-        data: {
-          executions: [
-            {
-              manifestCid: 'bafyharnessCid123',
-              operator: { agentId: '42' },
-            },
-          ],
-        },
-      },
-    });
+  it('returns the operator agentId from the first envelope ref', async () => {
+    const discoveryApi = makeDiscoveryApi([
+      makeEnvelopeRef({ agentId: '42', manifestCid: 'bafyharnessCid123' }),
+    ]);
 
     const resolved = await resolveAgentIdForManifest({
       manifestHash: MANIFEST_HASH,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
+      discoveryApi,
     });
 
     expect(resolved).not.toBeNull();
@@ -61,146 +57,91 @@ describe('resolveAgentIdForManifest', () => {
     expect(resolved!.manifestCid).toBe('bafyharnessCid123');
   });
 
-  it('lower-cases manifestHash before sending it to the subgraph (Bytes filter)', async () => {
-    let capturedBody: { variables?: { manifestHash?: string } } | null = null;
-    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-      capturedBody = JSON.parse((init?.body as string) ?? '{}') as typeof capturedBody;
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ data: { executions: [] } }),
-      } as Response;
-    });
-    const mixedCase =
-      '0xFEEDFACEdeadbeef00000000000000000000000000000000000000000000BEEF' as `0x${string}`;
+  it('passes manifestHash to queryEnvelopes with limit: 1', async () => {
+    let capturedQuery: Parameters<DiscoveryAPI['queryEnvelopes']>[0] | null = null;
+    const discoveryApi: DiscoveryAPI = {
+      async queryEnvelopes(q) { capturedQuery = q; return []; },
+      async listLaunchedSolverNets() { return []; },
+      async getLifecycleStatus() { return undefined; },
+      async findClaimableTasks() { return []; },
+    };
+
     await resolveAgentIdForManifest({
-      manifestHash: mixedCase,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
+      manifestHash: MANIFEST_HASH,
+      discoveryApi,
     });
-    expect(capturedBody!.variables!.manifestHash).toBe(mixedCase.toLowerCase());
+
+    expect(capturedQuery).not.toBeNull();
+    expect(capturedQuery!.manifestHash).toBe(MANIFEST_HASH);
+    expect(capturedQuery!.limit).toBe(1);
   });
 
-  it('returns null when the subgraph reports no executions', async () => {
-    const fetchImpl = makeFetch({
-      body: { data: { executions: [] } },
-    });
+  it('returns null when the indexer has no envelope for the manifestHash', async () => {
+    const discoveryApi = makeDiscoveryApi([]);
 
     const resolved = await resolveAgentIdForManifest({
       manifestHash: MANIFEST_HASH,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
+      discoveryApi,
     });
 
     expect(resolved).toBeNull();
   });
 
-  it('returns null when subgraphUrl is undefined (no resolver query attempted)', async () => {
-    const fetchImpl = vi.fn();
+  it('returns null when discoveryApi is undefined (no resolver query attempted)', async () => {
     const resolved = await resolveAgentIdForManifest({
       manifestHash: MANIFEST_HASH,
-      fetchImpl,
-    });
-    expect(resolved).toBeNull();
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it('returns null when the subgraph returns operator: null (malformed row)', async () => {
-    const fetchImpl = makeFetch({
-      body: {
-        data: {
-          executions: [{ manifestCid: 'bafy...', operator: null }],
-        },
-      },
-    });
-    const resolved = await resolveAgentIdForManifest({
-      manifestHash: MANIFEST_HASH,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
+      // discoveryApi intentionally absent
     });
     expect(resolved).toBeNull();
   });
 
-  it('returns null when GraphQL returns errors', async () => {
+  it('returns null when the envelope ref has no agentId (malformed row)', async () => {
+    const ref: EnvelopeRef = {
+      manifestCid: 'bafy...',
+      manifestHash: MANIFEST_HASH,
+      operator: { agentId: '', safeAddress: '' },
+      evidenceTier: 'self-signed',
+      publishedAt: 0,
+    };
+    const discoveryApi = makeDiscoveryApi([ref]);
+    const resolved = await resolveAgentIdForManifest({ manifestHash: MANIFEST_HASH, discoveryApi });
+    expect(resolved).toBeNull();
+  });
+
+  it('returns null and warns when queryEnvelopes throws', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const fetchImpl = makeFetch({
-      body: { errors: [{ message: 'bad query' }] },
-    });
-    const resolved = await resolveAgentIdForManifest({
-      manifestHash: MANIFEST_HASH,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
-    });
-    expect(resolved).toBeNull();
-    expect(warn).toHaveBeenCalled();
-  });
+    const discoveryApi: DiscoveryAPI = {
+      async queryEnvelopes() { throw new Error('indexer unavailable'); },
+      async listLaunchedSolverNets() { return []; },
+      async getLifecycleStatus() { return undefined; },
+      async findClaimableTasks() { return []; },
+    };
 
-  it('returns null on non-2xx HTTP response', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const fetchImpl = makeFetch({
-      ok: false,
-      status: 503,
-      body: '',
-    });
-    const resolved = await resolveAgentIdForManifest({
-      manifestHash: MANIFEST_HASH,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
-    });
-    expect(resolved).toBeNull();
-    expect(warn).toHaveBeenCalled();
-  });
-
-  it('returns null when fetch throws (network error)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const fetchImpl = makeFetch({
-      throwOnFetch: new Error('ECONNREFUSED'),
-      body: null,
-    });
-    const resolved = await resolveAgentIdForManifest({
-      manifestHash: MANIFEST_HASH,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
-    });
+    const resolved = await resolveAgentIdForManifest({ manifestHash: MANIFEST_HASH, discoveryApi });
     expect(resolved).toBeNull();
     expect(warn).toHaveBeenCalled();
   });
 
   it('returns null when agentId is non-numeric (defensive)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const fetchImpl = makeFetch({
-      body: {
-        data: {
-          executions: [
-            { manifestCid: 'bafy', operator: { agentId: 'not-a-number' } },
-          ],
-        },
-      },
-    });
-    const resolved = await resolveAgentIdForManifest({
+    const ref: EnvelopeRef = {
+      manifestCid: 'bafy',
       manifestHash: MANIFEST_HASH,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
-    });
+      operator: { agentId: 'not-a-number', safeAddress: '' },
+      evidenceTier: 'self-signed',
+      publishedAt: 0,
+    };
+    const discoveryApi = makeDiscoveryApi([ref]);
+    const resolved = await resolveAgentIdForManifest({ manifestHash: MANIFEST_HASH, discoveryApi });
     expect(resolved).toBeNull();
     expect(warn).toHaveBeenCalled();
   });
 
-  it('preserves manifestCid: null when subgraph row omits it', async () => {
-    const fetchImpl = makeFetch({
-      body: {
-        data: {
-          executions: [
-            { manifestCid: null, operator: { agentId: '7' } },
-          ],
-        },
-      },
-    });
-    const resolved = await resolveAgentIdForManifest({
-      manifestHash: MANIFEST_HASH,
-      subgraphUrl: SUBGRAPH_URL,
-      fetchImpl,
-    });
-    expect(resolved).toEqual({ agentId: 7n, manifestCid: null });
+  it('preserves manifestCid from the envelope ref', async () => {
+    const discoveryApi = makeDiscoveryApi([
+      makeEnvelopeRef({ agentId: '7', manifestCid: 'bafySpecificCid' }),
+    ]);
+    const resolved = await resolveAgentIdForManifest({ manifestHash: MANIFEST_HASH, discoveryApi });
+    expect(resolved).toEqual({ agentId: 7n, manifestCid: 'bafySpecificCid' });
   });
 });

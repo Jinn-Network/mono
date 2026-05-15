@@ -40,6 +40,23 @@ describe('Fleet bootstrap faucet cap', () => {
       queueMicrotask(cb);
       return 0 as unknown as ReturnType<typeof setTimeout>;
     });
+    // Stage 1 must short-circuit so the faucet loop in ensureStage1And2 runs.
+    // Mock ensureStage1 to return ok: true with fleet_stage='stage1' (nghf).
+    vi.spyOn(bootstrapper as any, 'ensureStage1').mockResolvedValue({
+      ok: true,
+      fleet_state: {
+        master_address: null,
+        chain: 'base-sepolia',
+        staking_mode: 'standard',
+        services: [],
+        updated_at: new Date().toISOString(),
+        fleet_agent_id: null,
+        fleet_safe_address: null,
+        fleet_identity_registry: null,
+        fleet_stage: 'stage1',
+      },
+      message: 'Stage 1 already complete.',
+    });
     vi.spyOn(bootstrapper as any, 'reconcileFleetWithChain').mockImplementation(async () => {
       throw new Error('reconcile_short_circuit');
     });
@@ -68,6 +85,22 @@ describe('Fleet bootstrap faucet cap', () => {
     vi.spyOn(globalThis, 'setTimeout').mockImplementation((cb: (...args: unknown[]) => void) => {
       queueMicrotask(cb);
       return 0 as unknown as ReturnType<typeof setTimeout>;
+    });
+    // Stage 1 must short-circuit so the faucet loop in ensureStage1And2 runs.
+    vi.spyOn(bootstrapper as any, 'ensureStage1').mockResolvedValue({
+      ok: true,
+      fleet_state: {
+        master_address: null,
+        chain: 'base-sepolia',
+        staking_mode: 'standard',
+        services: [],
+        updated_at: new Date().toISOString(),
+        fleet_agent_id: null,
+        fleet_safe_address: null,
+        fleet_identity_registry: null,
+        fleet_stage: 'stage1',
+      },
+      message: 'Stage 1 already complete.',
     });
 
     const result = await bootstrapper.bootstrap('test-password');
@@ -104,6 +137,22 @@ describe('Fleet bootstrap faucet cap', () => {
       now = 3;
       queueMicrotask(cb);
       return 0 as unknown as ReturnType<typeof setTimeout>;
+    });
+    // Stage 1 must short-circuit so the faucet loop in ensureStage1And2 runs.
+    vi.spyOn(bootstrapper as any, 'ensureStage1').mockResolvedValue({
+      ok: true,
+      fleet_state: {
+        master_address: null,
+        chain: 'base-sepolia',
+        staking_mode: 'standard',
+        services: [],
+        updated_at: new Date().toISOString(),
+        fleet_agent_id: null,
+        fleet_safe_address: null,
+        fleet_identity_registry: null,
+        fleet_stage: 'stage1',
+      },
+      message: 'Stage 1 already complete.',
     });
 
     const result = await bootstrapper.bootstrap('test-password');

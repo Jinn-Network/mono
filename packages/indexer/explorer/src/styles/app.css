@@ -1,0 +1,65 @@
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* ── Grain overlay ─────────────────────────────────────────────────────────────
+   A near-invisible scanline texture on the body — adds depth without deviation
+   from the softened-brutalist aesthetic. Truly subtle: opacity 0.025.
+   ──────────────────────────────────────────────────────────────────────────── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.025) 2px,
+    rgba(0, 0, 0, 0.025) 3px
+  );
+}
+
+/* ── KPI tile page-load animation ─────────────────────────────────────────────
+   Staggered fade-up for KPI tiles. Apply animation-delay per tile in JSX:
+     style={{ animationDelay: `${i * 40}ms` }}
+   The .kpi-animate class is added to each Kpi wrapper element.
+   ──────────────────────────────────────────────────────────────────────────── */
+@keyframes kpi-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.kpi-animate {
+  animation: kpi-fade-up var(--dur-slow) var(--ease-linear) both;
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────────
+   Disables ALL animation and transition globally when the OS preference is set.
+   This also covers useCountUp (which reads the media query directly).
+   ──────────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -184,7 +184,7 @@ describe('GET /v1/bootstrap', () => {
     expect(body.error).toBeUndefined();
   });
 
-  it('includes rpcUrl, defaultRpcUrl, and solverNets when configReader is supplied', async () => {
+  it('includes rpcUrl, defaultRpcUrl, solverNets, and joinedSolverNets when configReader is supplied', async () => {
     const earningDir = makeFixtureEarningDir({
       master_address: '0xabc',
       chain: 'base-sepolia',
@@ -197,6 +197,9 @@ describe('GET /v1/bootstrap', () => {
         rpcUrl: 'https://my-tenderly.example/abc',
         defaultRpcUrl: 'https://sepolia.base.org',
         solverNets: { prediction: { enabled: true, role: 'solving' } },
+        joinedSolverNets: {
+          bafkreiswe: { name: 'SWE-rebench v2', roles: ['solver', 'evaluator'] },
+        },
       }),
     });
     const res = await app.request('/v1/bootstrap');
@@ -205,9 +208,13 @@ describe('GET /v1/bootstrap', () => {
       rpcUrl?: string;
       defaultRpcUrl?: string;
       solverNets?: Record<string, unknown>;
+      joinedSolverNets?: Record<string, unknown>;
     };
     expect(body.rpcUrl).toBe('https://my-tenderly.example/abc');
     expect(body.defaultRpcUrl).toBe('https://sepolia.base.org');
     expect(body.solverNets).toMatchObject({ prediction: { enabled: true, role: 'solving' } });
+    expect(body.joinedSolverNets).toMatchObject({
+      bafkreiswe: { name: 'SWE-rebench v2', roles: ['solver', 'evaluator'] },
+    });
   });
 });

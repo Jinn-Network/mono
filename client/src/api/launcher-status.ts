@@ -43,6 +43,7 @@ export interface LauncherStatusBudgetView {
 
 export interface LauncherStatusNetEntry {
   name: string;
+  solverType?: string;
   generator: LauncherStatusGeneratorView;
   openTasks: number;
   budget: LauncherStatusBudgetView;
@@ -134,7 +135,7 @@ export async function gatherLauncherStatus(
   const now = deps.now?.() ?? Date.now();
   const nets: LauncherStatusNetEntry[] = [];
 
-  for (const [name, _net] of Object.entries(deps.config.solverNets ?? {})) {
+  for (const [name, net] of Object.entries(deps.config.solverNets ?? {})) {
     // Task 22 of spec/2026-05-05-solvernet-creation-and-launch.md removed
     // the operator-config `'launching'` role; surface every loaded SolverNet
     // entry. Launched-record ownership filters happen at the launched-record
@@ -159,8 +160,10 @@ export async function gatherLauncherStatus(
     if (snapshot?.lastError) generator.lastError = { ...snapshot.lastError };
 
     const safeAddress = typeof deps.safeAddress === 'function' ? deps.safeAddress() : deps.safeAddress;
+    const solverType = (net as { solverType?: unknown } | undefined)?.solverType;
     nets.push({
       name,
+      ...(typeof solverType === 'string' && solverType.length > 0 ? { solverType } : {}),
       generator,
       openTasks,
       budget: {

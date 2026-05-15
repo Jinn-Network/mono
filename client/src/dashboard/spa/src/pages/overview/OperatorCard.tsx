@@ -11,6 +11,8 @@ export type OperatorCardRole = 'solving' | 'evaluating';
 
 export interface OperatorCardProps {
   name: string;
+  /** Stable config key for the joined SolverNet, preferably its manifest CID. */
+  configId?: string;
   /** Active operator roles. Empty array renders a placeholder rather than
    *  inventing a role — that situation indicates a misconfigured net. */
   roles: OperatorCardRole[];
@@ -49,7 +51,7 @@ export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCar
             color: 'var(--fg-muted)',
           }}
         >
-          Your {name}
+          Solving on
         </span>
         <span
           style={{
@@ -63,7 +65,9 @@ export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCar
         </span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--fg)', fontSize: '14px' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--fg)', fontSize: '14px', flexWrap: 'wrap' }}>
+          <span>{name}</span>
+          <span style={{ color: 'var(--fg-muted)' }}>·</span>
           <span style={{ color: 'var(--fg-muted)' }}>{roles.length > 1 ? 'Roles' : 'Role'}</span>
           <span style={{ color: 'var(--fg-muted)' }}>·</span>
           {roles.length === 0 ? (
@@ -90,7 +94,7 @@ export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCar
           )}
         </span>
         <Link
-          href={`/operator#solvernets/${name}`}
+          href="/operator#solvernets"
           style={{
             color: 'var(--accent-sky)',
             fontSize: '11px',
@@ -99,7 +103,7 @@ export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCar
             textTransform: 'uppercase',
           }}
         >
-          Configure →
+          Change →
         </Link>
       </div>
       {waitingMessage && (

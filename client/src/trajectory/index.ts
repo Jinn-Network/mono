@@ -23,6 +23,8 @@ export {
   RedactionManifestSchema,
   JinnTrajectoryV1Schema,
   UnsignedTrajectorySchema,
+  CaptureManifestSchema,
+  EMPTY_BUNDLE_SHA256,
 } from './schema.js';
 export type {
   JinnSpanKind,
@@ -30,7 +32,15 @@ export type {
   RedactionManifest,
   JinnTrajectoryV1,
   UnsignedTrajectory,
+  CaptureManifest,
 } from './schema.js';
+
+// Harness bundle manifest (artifact-type harness-bundle.v1)
+export {
+  HarnessBundleManifestSchema,
+  HARNESS_BUNDLE_ARTIFACT_TYPE,
+} from './harness-bundle-schema.js';
+export type { HarnessBundleManifest } from './harness-bundle-schema.js';
 
 // Secret scrub helpers
 export {
@@ -62,3 +72,9 @@ export type { TracedMcpCallParams } from './wrappers/mcp.js';
 
 export { tracedSpawn } from './wrappers/subprocess.js';
 export type { TracedSpawnParams, TracedSpawnResult } from './wrappers/subprocess.js';
+
+// Path C LLM API proxy
+export { createLlmProxyApp, startLlmProxyServer } from './llm-proxy.js';
+export type { LlmProxyConfig, LlmProxyServer } from './llm-proxy.js';
+export { exchangeToSpanAttributes, emitLlmProxyExchange } from './llm-proxy-spans.js';
+export type { LlmProxyExchange, LlmProxyProvider } from './llm-proxy-spans.js';

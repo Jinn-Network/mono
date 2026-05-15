@@ -26,6 +26,28 @@ How to apply:
 
 The market makes its own threats. We make the case for what is structurally inevitable.
 
+### Stake-claiming and white space
+
+Most positioning vocabulary in the decentralised-AI cluster is already owned. Leading from a phrase a competitor has earned reads as imitation, regardless of intent.
+
+Crowded territory — avoid leading copy with these phrases:
+
+- **"Decentralised network for AI"** — Bittensor.
+- **"Decentralised training"** / **"Open Stack for Self-Improving Agents"** — Prime Intellect.
+- **"Self-improving"** / **"collective intelligence"** / **"intelligence layer"** — Allora.
+- **"Co-own AI"** / **"unified network for off-chain services"** — Olas.
+- **"AI agent launchpad"** / **"tokenise agents"** — Virtuals.
+- **"Encrypted data"** / tournament framing — Numerai.
+
+White space Jinn plants in:
+
+- **Economy** as the category noun (not marketplace, stack, layer, or network).
+- **Solve** as the verb (not train, predict, aggregate, or orchestrate).
+- **Outcomes** as the noun for what gets solved.
+- The **network-runs-without-us** property — only Jinn can credibly stress-test this; the six competitors above are all VC-backed companies, multisigs, or hedge funds.
+
+How to apply: when writing positioning copy, run a thirty-second collision check against the territory above. If the lead phrase belongs to a competitor, refactor before publishing. If a desired claim sits in their territory, demote it — subordinate clause, second sentence, or move it to a downstream artifact entirely. The competitive landscape moves; revisit this list on the same cadence as canonical-doc reviews.
+
 ### Personal narrative stays in the room
 
 Where you've worked, why you left, who you know — none of this belongs in deck, presenter notes, or any written artefact. Critique of other protocols in writing should be factual and structural — name the mechanism, not the people or the anecdote.
@@ -55,6 +77,16 @@ These phrasings live inside the once-per-piece antagonist slot from "Lead from s
 ### Drop ironic or self-deprecating subtitles
 
 Subtitles like "boring on purpose" add a register a builder audience reads as too clever. Prefer plain description. The voice can be dry; it should not be arch.
+
+## Canonical introduction
+
+The smallest user-facing artifact Jinn ships is its self-description in ≤160 characters. Treat the canonical line as a Schelling point in the same sense the loop and the lexicon are: forkable surfaces converge on it because the cost of fragmentation outweighs the upside of a personal variant, not because anyone is enforcing it. The line is canon, not protocol — proposing a replacement is a normal canonical-doc PR, not a structural change.
+
+> The decentralised economy where agents learn to solve. As your agent learns, the network learns.
+
+This line travels everywhere Jinn is introduced in compressed form: X bio, link previews, conference chyrons, slide footers, the first sentence of cold outreach, the lede of explainer posts. Operators producing user-facing surfaces should converge on it; if a community-driven variant gains real adoption, propose it as a replacement here rather than ship a quiet alternative.
+
+Longer canonical formats (one-sentence, one-paragraph, one-page) are deferred to a future spec — likely paired with `THESIS.md` once that doc is populated.
 
 ## Posture: headless and co-created
 
@@ -113,3 +145,16 @@ Visual canon currently lives in:
 - [`docs/design/jinn-design-system/`](docs/design/jinn-design-system/) — long-form design system; appendix to this doc.
 
 Folding `DESIGN.md` and `DESIGN.json` into the canonical `BRAND.md` is a separate spec; until then, treat the above as authoritative for visual tokens but read `BRAND.md` first to know what is protocol and what is narrative.
+
+## Appendix: orphan claims
+
+Strong claims that the canonical introduction deliberately does not carry. Each has an assigned home so the bio does not sprawl and the claim does not go homeless.
+
+| Claim | Lives in |
+|---|---|
+| "Solve any problem" — the ambition | `THESIS.md` (when populated) and pinned X post |
+| "Open data" — system property of the loop | Long-form pitch / explainer thread / docs |
+| "Bonded / staked economy" — operator lens | Operator-recruitment copy, runbook intro |
+| "Go alone fast, go together far" — culture line | Manifesto opener, closing line of thesis posts |
+
+Bio names what Jinn is. Properties live one click deeper.

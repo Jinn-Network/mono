@@ -53,14 +53,15 @@ The SPA at `src/dashboard/spa/` has two distinct modes, switched by `App.tsx` ba
 
 ### 3.1 Onboarding — bootstrap not yet running
 
-Full-screen takeover that narrates the [11-step fleet bootstrap state machine](../docs/superpowers/specs/2026-04-09-hd-wallet-fleet-design.md) as four operator-meaningful phases:
+Full-screen takeover that narrates the [11-step fleet bootstrap state machine](../docs/superpowers/specs/2026-04-09-hd-wallet-fleet-design.md) as three operator-meaningful phases:
 
-1. **Sign in to Claude** — `jinn auth` equivalent, gated until Claude is authenticated. The daemon refuses to start without it because Harnesses spawn `claude` subprocesses.
-2. **Provisioning your wallet** — `wallet`, `safe_predicted` substeps. Generates the encrypted keystore + predicts the Safe address.
-3. **Fund your wallet** — `awaiting_funding`. The blocking step. The daemon polls every 15s and surfaces the funding gate via `/v1/bootstrap`; the panel renders the address card. On testnet, the daemon can drain the Coinbase Developer Platform faucet automatically; on mainnet, the operator funds manually.
-4. **Joining Jinn** — everything from `safe_deployed` through `mech_deployed`, `agent_registered`, `safe_binding_pending`. Non-blocking; the panel shows progress.
+1. **Provisioning your wallet** — `wallet`, `safe_predicted` substeps. Generates the encrypted keystore + predicts the Safe address.
+2. **Fund your wallet** — `awaiting_funding`. The blocking step. The daemon polls every 15s and surfaces the funding gate via `/v1/bootstrap`; the panel renders the address card. On testnet, the daemon can drain the Coinbase Developer Platform faucet automatically; on mainnet, the operator funds manually.
+3. **Joining Jinn** — everything from `safe_deployed` through `mech_deployed`, `agent_registered`, `safe_binding_pending`. Non-blocking; the panel shows progress.
 
-When bootstrap reaches `complete`, the daemon flips into running mode and the SPA transitions to Operating. There is no Phase 5 — onboarding is one-time, not a permanent dashboard region.
+When bootstrap reaches `complete`, the daemon flips into running mode and the SPA transitions to Operating. There is no Phase 4 — onboarding is one-time, not a permanent dashboard region.
+
+**Claude auth and the per-harness gate.** The daemon runs regardless of whether Claude is authenticated. Auth state is surfaced per-harness: each Harness that spawns a `claude` subprocess (currently `claude-code-learner`, `claude-mcp-prediction`, and `claude-mcp-prediction-apy`) implements `isReady()` via `probeClaudeAuth`. The engine-watcher skips claiming Tasks on SolverNets whose Harness returns `ready: false`; all other loops (reward-claim, delivery-watcher, peer-sync, etc.) continue normally. Per-harness auth setup is handled in the `/operator/join` flow (Stage B of the per-harness auth spec), where the SPA's `HarnessPrecheckPanel` reads the `isReady()` response and surfaces the appropriate `nextStep` action — install or sign-in.
 
 ### 3.2 Operating — bootstrap complete
 

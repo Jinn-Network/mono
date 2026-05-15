@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { HermesPrecheckPanel } from './HermesPrecheckPanel.js';
 import { useLocation, useParams } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
@@ -7,7 +8,23 @@ import type {
   SolverNetCatalogEntry,
   SolverNetsCatalogResponse,
 } from '../../api/types.js';
-import { CLAUDE_MODELS, resolveModelOption } from '../configuration/claudeModels.js';
+import {
+  defaultModelForHarness,
+  modelOptionsForHarness,
+  resolveModelOption,
+} from '../configuration/claudeModels.js';
+import {
+  canonicalHarnessName,
+  CLAUDE_CODE_HARNESS,
+  HERMES_AGENT_HARNESS,
+  harnessDisplayName,
+  harnessOptionLabel,
+} from '../configuration/harnessNames.js';
+import { PluginPicker } from '../configuration/PluginPicker.js';
+import { formatWeiAmount } from '../launcher-launched/helpers.js';
+
+const HERMES_AGENT_DESCRIPTION =
+  'Self-improving agent by Nous Research. Built-in learning loop, 200+ models via OpenRouter plus Nous Portal, NVIDIA NIM, GLM, Kimi, and more.';
 
 /**
  * Operator participation flow keyed by `manifestCid`.
@@ -18,13 +35,13 @@ import { CLAUDE_MODELS, resolveModelOption } from '../configuration/claudeModels
  *
  * Loads the manifest body via the registry endpoint, lets the operator pick
  * which open roles to take + (for the solver role only) harness / plugins /
- * model, and writes the manifest-keyed entry to `config.solverNets[<cid>]`
+ * model, and writes the manifest-keyed entry to `config.joinedSolverNets[<cid>]`
  * via `POST /v1/operator/join/:cid`. The evaluator role binds harness from
  * the manifest's `contract.evaluationFunction.implementation` — the harness
  * picker is hidden when only `evaluator` is selected.
  */
 
-const DEFAULT_HARNESS = 'claude-code-learner';
+const DEFAULT_HARNESS = CLAUDE_CODE_HARNESS;
 
 export interface JoinFlowProps {
   /** Override the manifest cid for tests (skips wouter route param lookup). */
@@ -39,6 +56,7 @@ interface JoinFormState {
   roles: Role[];
   harness: string;
   plugins: string[];
+  disabledDefaultPlugins: string[];
   model: string;
 }
 
@@ -56,19 +74,6 @@ function findCatalogEntry(
   return catalog?.nets.find(
     (n) => n.contract.id === contract.id && n.contract.version === contract.version,
   );
-}
-
-function formatEthFromWei(wei: string | undefined): string {
-  if (!wei || !/^\d+$/.test(wei)) return '—';
-  try {
-    const n = BigInt(wei);
-    const eth = Number(n) / 1e18;
-    if (eth === 0) return '0 ETH';
-    if (eth < 0.0001) return `${eth.toExponential(3)} ETH`;
-    return `${eth.toFixed(eth < 1 ? 6 : 4)} ETH`;
-  } catch {
-    return '—';
-  }
 }
 
 function truncateAddress(address: string): string {
@@ -105,17 +110,23 @@ export function JoinFlow({
   const catalogEntry = manifest
     ? findCatalogEntry(catalogQuery.data, manifest.contract)
     : undefined;
+  const solverCompatibleHarnesses = (catalogEntry?.compatibleHarnesses ?? [])
+    .filter((h) => h.supportsRoles.includes('solving'))
+    .map((h) => ({ ...h, name: canonicalHarnessName(h.name) }))
+    .filter((h, index, all) => all.findIndex((candidate) => candidate.name === h.name) === index);
   const defaultHarness =
-    catalogEntry?.compatibleHarnesses[0]?.name ?? DEFAULT_HARNESS;
-  const defaultModel = CLAUDE_MODELS[0]!.id;
+    solverCompatibleHarnesses[0]?.name ?? DEFAULT_HARNESS;
+  const defaultModel = defaultModelForHarness(defaultHarness);
 
   const [form, setForm] = useState<JoinFormState>({
     roles: [],
     harness: defaultHarness,
     plugins: [],
+    disabledDefaultPlugins: [],
     model: defaultModel,
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [showHermesPrecheck, setShowHermesPrecheck] = useState(false);
 
   // The catalog loads independently of the manifest — when it arrives, if
   // the operator hasn't picked a harness yet (`form.harness` still equal to
@@ -123,25 +134,33 @@ export function JoinFlow({
   // shift to that. This is render-time-safe because we only call setForm
   // when the values are unequal — React queues the re-render and bails out
   // from infinite loops automatically.
-  const catalogPreferredHarness = catalogEntry?.compatibleHarnesses[0]?.name;
+  const catalogPreferredHarness = solverCompatibleHarnesses[0]?.name;
   if (
     catalogPreferredHarness &&
     form.harness === DEFAULT_HARNESS &&
-    catalogPreferredHarness !== DEFAULT_HARNESS &&
-    !catalogEntry?.compatibleHarnesses.some((h) => h.name === DEFAULT_HARNESS)
+    catalogPreferredHarness !== DEFAULT_HARNESS
   ) {
-    setForm({ ...form, harness: catalogPreferredHarness });
+    setForm({
+      ...form,
+      harness: catalogPreferredHarness,
+      model: defaultModelForHarness(catalogPreferredHarness),
+    });
   }
+  const modelOptions = modelOptionsForHarness(form.harness);
 
   const submitMutation = useMutation({
     mutationFn: () =>
       api.operator.join(cid!, {
         ...(manifest?.name !== undefined ? { name: manifest.name } : {}),
+        ...(manifest?.contract !== undefined
+          ? { contract: { id: manifest.contract.id, version: manifest.contract.version } }
+          : {}),
         roles: form.roles,
         ...(form.roles.includes('solver')
           ? {
               harness: form.harness,
               plugins: form.plugins,
+              disabledDefaultPlugins: form.disabledDefaultPlugins,
               model: form.model,
             }
           : {}),
@@ -206,18 +225,6 @@ export function JoinFlow({
     });
   };
 
-  const togglePlugin = (name: string): void => {
-    setForm((prev) => {
-      const has = prev.plugins.includes(name);
-      return {
-        ...prev,
-        plugins: has
-          ? prev.plugins.filter((p) => p !== name)
-          : [...prev.plugins, name],
-      };
-    });
-  };
-
   const showSolverFields = form.roles.includes('solver');
   const showEvaluatorInfo = form.roles.includes('evaluator');
   const canSubmit = form.roles.length > 0 && !submitMutation.isPending;
@@ -268,11 +275,11 @@ export function JoinFlow({
           </span>
           <span>Solution price</span>
           <span style={{ color: 'var(--fg)' }}>
-            {formatEthFromWei(manifest.solutionPriceWei)}
+            {formatWeiAmount(manifest.solutionPriceWei)}
           </span>
           <span>Verdict price</span>
           <span style={{ color: 'var(--fg)' }}>
-            {formatEthFromWei(manifest.verdictPriceWei)}
+            {formatWeiAmount(manifest.verdictPriceWei)}
           </span>
           <span>Open roles</span>
           <span data-testid="join-flow-open-roles" style={{ color: 'var(--fg)' }}>
@@ -380,36 +387,56 @@ export function JoinFlow({
                 aria-label="Harness"
                 data-testid="join-harness-select"
                 value={form.harness}
-                onChange={(e) => setForm({ ...form, harness: e.target.value })}
+                onChange={(e) => {
+                  const harness = e.target.value;
+                  setForm({
+                    ...form,
+                    harness,
+                    model: defaultModelForHarness(harness),
+                  });
+                }}
                 style={selectStyle}
               >
-                {(catalogEntry?.compatibleHarnesses ?? []).map((h) => (
+                {solverCompatibleHarnesses.map((h) => (
                   <option key={h.name} value={h.name}>
-                    {h.name}@{h.version}
+                    {harnessOptionLabel(h.name, h.version)}
                   </option>
                 ))}
-                {(!catalogEntry || catalogEntry.compatibleHarnesses.length === 0) && (
-                  <option value={form.harness}>{form.harness}</option>
+                {(!catalogEntry || solverCompatibleHarnesses.length === 0) && (
+                  <option value={form.harness}>{harnessDisplayName(form.harness)}</option>
                 )}
               </select>
+              {form.harness === HERMES_AGENT_HARNESS && (
+                <span
+                  data-testid="join-harness-hermes-description"
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '11px',
+                    color: 'var(--fg-muted)',
+                  }}
+                >
+                  {HERMES_AGENT_DESCRIPTION}{' '}
+                  <span style={{ color: 'var(--break-amber)' }}>(requires separate install)</span>
+                </span>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={fieldLabelStyle}>Claude model</span>
+              <span style={fieldLabelStyle}>Model</span>
               <select
-                aria-label="Claude model"
+                aria-label="Model"
                 data-testid="join-model-select"
                 value={form.model}
                 onChange={(e) => setForm({ ...form, model: e.target.value })}
                 style={selectStyle}
               >
-                {CLAUDE_MODELS.map((m) => (
+                {modelOptions.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
                   </option>
                 ))}
                 {(() => {
-                  const resolved = resolveModelOption(form.model);
+                  const resolved = resolveModelOption(form.model, form.harness);
                   if (resolved.isCustom) {
                     return (
                       <option key={form.model} value={form.model}>
@@ -425,57 +452,16 @@ export function JoinFlow({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <span style={fieldLabelStyle}>Plugins</span>
-            {(catalogEntry?.compatiblePlugins ?? []).length === 0 ? (
-              <span
-                data-testid="join-plugins-empty"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '12px',
-                  color: 'var(--fg-dim)',
-                }}
-              >
-                No plugins available for this SolverNet
-              </span>
-            ) : (
-              (catalogEntry?.compatiblePlugins ?? []).map((p) => {
-                const checked = form.plugins.includes(p.name);
-                const checkboxId = `join-plugin-${p.name}`;
-                return (
-                  <label
-                    key={p.name}
-                    htmlFor={checkboxId}
-                    data-testid="join-plugin-option"
-                    data-plugin={p.name}
-                    data-plugin-active={checked ? 'true' : 'false'}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      padding: '10px 14px',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-2)',
-                      fontFamily: "'JetBrains Mono', monospace",
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      id={checkboxId}
-                      type="checkbox"
-                      aria-label={`Plugin: ${p.name}`}
-                      checked={checked}
-                      onChange={() => togglePlugin(p.name)}
-                      style={{ accentColor: 'var(--accent-sky)' }}
-                    />
-                    <span style={{ fontSize: '14px', color: 'var(--fg)', flex: 1 }}>
-                      {p.name}
-                    </span>
-                    <span style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
-                      {p.source} · {p.version}
-                    </span>
-                  </label>
-                );
-              })
-            )}
+            <PluginPicker
+              available={catalogEntry?.compatiblePlugins ?? []}
+              selected={form.plugins}
+              disabledDefaultPlugins={form.disabledDefaultPlugins}
+              onChange={(plugins, disabledDefaultPlugins) =>
+                setForm({ ...form, plugins, disabledDefaultPlugins })
+              }
+              rowTestId="join-plugin-option"
+              searchTestId="join-plugin-search"
+            />
           </div>
         </section>
       )}
@@ -520,6 +506,18 @@ export function JoinFlow({
         </section>
       )}
 
+      {showHermesPrecheck && (
+        <HermesPrecheckPanel
+          onSuccess={() => {
+            setShowHermesPrecheck(false);
+            submitMutation.mutate();
+          }}
+          onCancel={() => {
+            setShowHermesPrecheck(false);
+          }}
+        />
+      )}
+
       {submitError && (
         <p
           data-testid="join-flow-submit-error"
@@ -557,6 +555,12 @@ export function JoinFlow({
           disabled={!canSubmit}
           onClick={() => {
             setSubmitError(null);
+            // If Hermes Agent is selected as the solver harness, run the install
+            // precheck before persisting the join config.
+            if (form.roles.includes('solver') && form.harness === HERMES_AGENT_HARNESS) {
+              setShowHermesPrecheck(true);
+              return;
+            }
             submitMutation.mutate();
           }}
           style={{

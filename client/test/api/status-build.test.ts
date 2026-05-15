@@ -188,4 +188,44 @@ describe('assembleStatusV1', () => {
     expect(j.predictionV1?.totals.solutions).toBe(1);
     expect(j.predictionV1?.latest.solutionAt).toBe(100);
   });
+
+  it('passes generic task-run status through when present', () => {
+    const raw: GatheredStatusRaw = {
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+      taskRuns: {
+        totals: { observedTasks: 1, activeTaskRuns: 1, completed: 0, solutions: 0, verdicts: 0, failed: 0 },
+        inFlight: [{
+          requestId: 'req-1',
+          taskId: '15',
+          taskCid: 'bafkre...',
+          solverType: 'swe-rebench-v2.v1',
+          state: 'RUNNING',
+          taskRole: 'restoration',
+          implName: 'codex',
+          windowStartTs: 1,
+          windowEndTs: 2,
+          stateUpdatedAt: 100,
+          manifestCid: null,
+          deliveryTxHash: null,
+          failureReason: null,
+        }],
+        recentTasks: [],
+      },
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.taskRuns?.totals.activeTaskRuns).toBe(1);
+    expect(j.taskRuns?.totals.solutions).toBe(0);
+    expect(j.taskRuns?.totals.verdicts).toBe(0);
+    expect(j.taskRuns?.inFlight[0]?.solverType).toBe('swe-rebench-v2.v1');
+  });
 });

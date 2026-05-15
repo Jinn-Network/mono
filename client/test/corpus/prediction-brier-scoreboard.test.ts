@@ -305,7 +305,7 @@ function solutionProjection(args: {
     envelopeSha256: `sha256-solution-${args.id}`,
     signatureHash: `0x${args.id.padEnd(64, '1').slice(0, 64)}`,
     solverType: 'prediction.v1',
-    role: 'restoration',
+    role: 'solution',
     taskCid: TASK_CID,
     taskId: TASK_ID,
     requestId: `request-${args.id}`,

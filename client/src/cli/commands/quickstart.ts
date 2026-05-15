@@ -117,11 +117,11 @@ const PRODUCTION_DEPS: QuickstartDeps = {
 export function createQuickstartCommand(deps: QuickstartDeps = PRODUCTION_DEPS): CommandModule {
   return {
     name: 'quickstart',
-    summary: 'Zero-to-running in one command: init, fund, bootstrap, run',
+    summary: 'Legacy compatibility alias for zero-to-running setup; prefer jinn run',
     helpText: `Usage: jinn quickstart [--no-daemon] [--json-progress] [--config <path>]
 
-Prerequisite: run \`jinn auth\` once first to set your runtime mode and
-authenticate Claude. quickstart picks up where auth leaves off.
+Compatibility command. New operators should run \`jinn run\`; it opens the
+operator app and walks Claude/runtime setup there when needed.
 
 One command to go from nothing to a running Jinn daemon:
   1. Generate a keystore password (or use JINN_PASSWORD)
@@ -141,13 +141,9 @@ Flags:
                     Automatically enabled in --json mode on non-TTY stdout.
   --config <path>   Path to config file.
 
-New operator path (recommended):
-  jinn auth          # check/set runtime mode + Claude auth
-  jinn quickstart    # zero-to-running
-
 Runtime mode:
-  Set once by \`jinn auth\` and persisted to ~/.jinn-client/config.json.
-  quickstart reads that value; you do not need to pass it again.
+  New operators do not need to choose a runtime mode at the CLI. Complete any
+  required Claude/runtime setup in the app opened by \`jinn run\`.
 
 Password handling:
   If JINN_PASSWORD is set in the environment, that value is used — no file
@@ -181,7 +177,10 @@ Agent/script mode (--json / --no-daemon / --json-progress):
   terminal-readable output.
 
 Examples:
-  # Interactive first run (after jinn auth)
+  # Recommended first run
+  jinn run
+
+  # Legacy compatibility
   jinn quickstart
 
   # Skip the daemon — emit JSON and exit (agent/script mode)
@@ -189,9 +188,8 @@ Examples:
   JINN_PASSWORD=mysecret jinn quickstart
   jinn quickstart --json-progress 2>/dev/null
 
-  # CI: supply password via env, set mode non-interactively, no daemon
-  JINN_PASSWORD=mysecret jinn auth --mode bare && \\
-    JINN_PASSWORD=mysecret jinn quickstart --no-daemon
+  # CI: supply password via env, no daemon
+  JINN_PASSWORD=mysecret jinn quickstart --no-daemon
 
   # Custom config
   jinn quickstart --config /etc/jinn/config.json

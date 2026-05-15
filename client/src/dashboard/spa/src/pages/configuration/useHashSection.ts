@@ -6,7 +6,10 @@ import { useEffect, useState } from 'react';
  * → expand the SolverNets section).
  */
 export function useHashSection(): string | null {
-  const [hash, setHash] = useState<string | null>(null);
+  const [hash, setHash] = useState<string | null>(() => {
+    const h = window.location.hash.replace(/^#/, '');
+    return h.length > 0 ? h : null;
+  });
   useEffect(() => {
     const update = (): void => {
       const h = window.location.hash.replace(/^#/, '');

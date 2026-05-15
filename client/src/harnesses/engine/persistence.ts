@@ -574,6 +574,33 @@ export class TaskRunPersistence {
     return rows.map(rowToTaskRun);
   }
 
+  hasInFlightFor(args: {
+    solverType: string;
+    taskRole: 'restoration' | 'evaluation';
+    excludeRequestId?: string;
+  }): boolean {
+    const terminalList = [...TERMINAL_STATES];
+    const placeholders = terminalList.map((_, i) => `@terminal${i}`).join(', ');
+    const params: Record<string, string> = {
+      solverType: args.solverType,
+      taskRole: args.taskRole,
+      excludeRequestId: args.excludeRequestId ?? '',
+    };
+    terminalList.forEach((state, i) => {
+      params[`terminal${i}`] = state;
+    });
+    const row = this.db.prepare(`
+      SELECT 1
+      FROM task_runs
+      WHERE solver_type = @solverType
+        AND COALESCE(task_role, 'restoration') = @taskRole
+        AND state NOT IN (${placeholders})
+        AND request_id != @excludeRequestId
+      LIMIT 1
+    `).get(params) as { 1: number } | undefined;
+    return row !== undefined;
+  }
+
   /**
    * Persist `deliveryTxHash` without triggering a state transition (state
    * remains DELIVERING). Called after deliverToMarketplace lands on-chain but

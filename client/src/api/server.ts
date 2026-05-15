@@ -29,6 +29,7 @@ import {
 import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
+import type { ArtifactSource } from '../types/envelope.js';
 import { addEventsRoutes } from './events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
 import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
@@ -41,11 +42,18 @@ import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
+import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
+import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
+import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
 import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
   type OperatorArtifactsRoutesConfig,
 } from './operator-artifacts-endpoint.js';
+import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
+import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
+import { addDiscoveryRoutes } from './discovery-endpoint.js';
+import type { DiscoveryAPI } from '../discovery/types.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -83,10 +91,10 @@ export interface ApiServerConfig {
    * payment dance.
    *
    * Asymmetry with `search_records` / `inspect_record`: record discovery is
-   * keyless (subgraph + IPFS gateway only) and stays client-side in the MCP
-   * server. Artifact acquisition is the only path that needs the signing key
-   * for x402 payments, so it's the only one that moves to the daemon. See
-   * spec/2026-04-30-phase-a-umbrella.md §4.
+   * keyless (subgraph/on-chain reads + IPFS gateway) and stays client-side in
+   * the MCP server. Artifact acquisition is the only path that needs the
+   * signing key for x402 payments, so it's the only one that moves to the
+   * daemon. See spec/2026-04-30-phase-a-umbrella.md §4.
    */
   corpus?: Corpus | (() => Corpus | undefined);
   /** When set, GET /v1/bootstrap reads <earningDir>/earning_state.json. */
@@ -123,8 +131,30 @@ export interface ApiServerConfig {
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
    */
   harnessStatus?: HarnessStatusDeps;
+  /**
+   * When set, mounts `GET /v1/harnesses/readiness` and
+   * `GET /v1/harnesses/:name/readiness` under the UI token gate.
+   * SPA polls the composed endpoint; the join flow uses the per-harness one.
+   */
+  harnessReadinessRegistry?: HarnessReadinessRegistry;
+  /**
+   * When set, mounts `GET /api/hermes/doctor` under the UI token gate.
+   * Powers the dashboard's Hermes install precheck panel in the join flow.
+   */
+  hermesDoctor?: HermesDoctorConfig;
   /** Operator-local artifact inventory + future-artifact pricing controls. */
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
+  /** Path D local session-end hook endpoint. */
+  stopHook?: StopHookRoutesDeps;
+  /** Operator review API for pending captures. */
+  captures?: CapturesRoutesDeps;
+  /**
+   * Discovery API instance. When set, mounts GET /v1/discovery/* routes
+   * that proxy DiscoveryAPI methods (listPluginPublications, listBuilderArtifacts,
+   * getPluginScores) so the SPA's /build route can fetch them without direct
+   * GraphQL or RPC access.
+   */
+  discovery?: DiscoveryAPI;
 }
 
 export interface ApiServer {
@@ -209,6 +239,32 @@ const ASSET_MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
 };
+
+function parseArtifactSources(value: unknown): ArtifactSource[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const sources: ArtifactSource[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+    const source = raw as Record<string, unknown>;
+    if (
+      source['kind'] !== 'ipfs' ||
+      typeof source['cid'] !== 'string' ||
+      typeof source['sha256'] !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(source['sha256']) ||
+      source['encoding'] !== 'jinn.artifact.donation.v1'
+    ) {
+      return undefined;
+    }
+    sources.push({
+      kind: 'ipfs',
+      cid: source['cid'],
+      sha256: source['sha256'],
+      encoding: 'jinn.artifact.donation.v1',
+    });
+  }
+  return sources;
+}
 
 export async function startApiServer(config: ApiServerConfig): Promise<ApiServer> {
   const { store } = config;
@@ -297,14 +353,32 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/operator/*', requireUiToken(config.ui.token));
     app.use('/v1/launcher', requireUiToken(config.ui.token));
     app.use('/v1/launcher/*', requireUiToken(config.ui.token));
+    app.use('/v1/discovery', requireUiToken(config.ui.token));
+    app.use('/v1/discovery/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
+    app.use('/api/hermes/*', requireUiToken(config.ui.token));
+    app.use('/api/captures/*', requireUiToken(config.ui.token));
+    app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
   }
 
   addEventsRoutes(app);
 
+  if (config.stopHook) {
+    addStopHookRoutes(app, config.stopHook);
+  }
+
+  if (config.captures) {
+    addCapturesRoutes(app, config.captures);
+  }
+
   if (config.bootstrap) {
     addBootstrapRoutes(app, config.bootstrap);
+  }
+
+  if (config.discovery) {
+    const discoveryInstance = config.discovery;
+    addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
   }
 
   if (config.solverNets) {
@@ -349,6 +423,19 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.harnessStatus) {
     addHarnessStatusRoutes(app, config.harnessStatus);
+  }
+
+  if (config.harnessReadinessRegistry) {
+    addHarnessReadinessRoutes(app, { registry: config.harnessReadinessRegistry });
+  }
+  // When harnessReadinessRegistry is absent at startApiServer time, main.ts
+  // mounts the routes post-bootstrap via addHarnessReadinessRoutes(app, ...)
+  // on the exposed setupApiServer.app reference (same pattern as
+  // registerSolverNetsEndpoints). No warning needed — routes are always live
+  // before the first operator request that cares about harness readiness.
+
+  if (config.ui) {
+    addHermesDoctorRoutes(app, config.hermesDoctor ?? {});
   }
 
   if (config.ui) {
@@ -477,7 +564,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // daemon will sign x402 payments on the caller's behalf.
   //
   // Asymmetry with `search_records` / `inspect_record`: record lookup stays
-  // client-side because subgraph queries and IPFS manifest fetches are keyless.
+  // client-side because subgraph/on-chain queries and IPFS manifest fetches are
+  // keyless.
   // Only the buyer side of x402 needs the signing key, so only the buyer path
   // moves here.
   // See spec/2026-04-30-phase-a-umbrella.md §4.
@@ -508,6 +596,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       const access = body['access'] as { endpoint?: unknown; priceUsdc?: unknown } | undefined;
       const envelopeCid = body['envelopeCid'];
       const artifactType = body['artifactType'];
+      const ownerSafe = body['ownerSafe'];
+      const sources = parseArtifactSources(body['sources']);
 
       if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) {
         return c.json(
@@ -525,11 +615,30 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
           400,
         );
       }
+      if (body['sources'] !== undefined && sources === undefined) {
+        return c.json(
+          { ok: false, reason: 'invalid_args', error: 'sources must be donation IPFS artifact source objects', sha256, retryable: false },
+          400,
+        );
+      }
+      if (sources?.some((source) => source.sha256 !== sha256)) {
+        return c.json(
+          { ok: false, reason: 'invalid_args', error: 'source sha256 must match requested artifact sha256', sha256, retryable: false },
+          400,
+        );
+      }
 
       const accessNormalized = { endpoint: access.endpoint, priceUsdc: access.priceUsdc };
-      const hint: { artifactType?: string; envelopeCid?: string } = {};
+      const hint: {
+        artifactType?: string;
+        envelopeCid?: string;
+        sources?: ArtifactSource[];
+        ownerSafe?: string;
+      } = {};
       if (typeof artifactType === 'string') hint.artifactType = artifactType;
       if (typeof envelopeCid === 'string') hint.envelopeCid = envelopeCid;
+      if (sources && sources.length > 0) hint.sources = sources;
+      if (typeof ownerSafe === 'string') hint.ownerSafe = ownerSafe;
 
       const existing = inFlight.get(sha256);
       const acquirePromise = existing ?? corpus.acquireBySha256(sha256, accessNormalized, hint);
@@ -612,12 +721,37 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         const handshakeUrl = `http://127.0.0.1:${actualPort}/?k=${config.ui.handshakeKey}`;
         console.log(`[api] UI handshake URL: ${handshakeUrl}`);
       }
+      const httpServer = server as HttpServer;
       resolve({
         port: actualPort,
-        close: () => new Promise<void>((res) => server.close(() => res())),
+        close: () =>
+          new Promise<void>((res) => {
+            let settled = false;
+            const done = () => {
+              if (settled) return;
+              settled = true;
+              res();
+            };
+            const timer = setTimeout(done, 2_000);
+            timer.unref?.();
+            try {
+              httpServer.close(() => {
+                clearTimeout(timer);
+                done();
+              });
+              // Shutdown should not wait for dashboard keep-alive/SSE clients.
+              // Once the daemon is stopping, close existing sockets after the
+              // listener has stopped accepting new connections.
+              httpServer.closeIdleConnections();
+              httpServer.closeAllConnections();
+            } catch {
+              clearTimeout(timer);
+              done();
+            }
+          }),
         // serve() returns Server | Http2Server | Http2SecureServer; we never
         // pass http2/https opts so it's always a node http.Server at runtime.
-        server: server as HttpServer,
+        server: httpServer,
         app,
       });
     });

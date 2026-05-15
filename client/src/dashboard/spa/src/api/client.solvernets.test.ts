@@ -137,9 +137,9 @@ describe('api.solvernets — owned launched + registry', () => {
 });
 
 describe('api.operator — artifact store', () => {
-  it('listArtifacts: GET /v1/operator/artifacts with source and limit', async () => {
+  it('listArtifacts: GET /v1/operator/execution-data with source and limit', async () => {
     await api.operator.listArtifacts({ source: 'network', limit: 25 });
-    expect(lastCall().url).toBe('/v1/operator/artifacts?source=network&limit=25');
+    expect(lastCall().url).toBe('/v1/operator/execution-data?source=network&limit=25');
   });
 
   it('updatePricing: POST /v1/operator/pricing with full pricing config', async () => {
@@ -147,6 +147,7 @@ describe('api.operator — artifact store', () => {
       publicEndpoint: 'https://op.example.com',
       defaultPriceUsdc: '0.001',
       perArtifactTypePrice: { design_document: '0.01' },
+      donation: { enabled: true },
     });
     const c = lastCall();
     expect(c.url).toBe('/v1/operator/pricing');
@@ -155,6 +156,7 @@ describe('api.operator — artifact store', () => {
       publicEndpoint: 'https://op.example.com',
       defaultPriceUsdc: '0.001',
       perArtifactTypePrice: { design_document: '0.01' },
+      donation: { enabled: true },
     });
   });
 });
