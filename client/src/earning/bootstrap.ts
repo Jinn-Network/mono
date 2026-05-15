@@ -1387,6 +1387,34 @@ export class FleetBootstrapper {
       }
     }
 
+    // Pre-stake precondition: if migration cleared service_id but kept agent_address,
+    // check the EOA is not already registered on-chain as an agent instance. If it is,
+    // calling stake() again would revert with AgentInstanceRegistered (selector 0x631695bd)
+    // and there is nothing useful the operator can do without rotating the agent EOA.
+    // Fail fast with a typed error instead of letting the contract revert.
+    if (svc.agent_address && svc.service_id === null && this.config.serviceRegistry) {
+      let alreadyBound = false;
+      try {
+        const boundServiceId = (await this.publicClient.readContract({
+          address: getAddress(this.config.serviceRegistry) as Address,
+          abi: SERVICE_REGISTRY_L2_ABI,
+          functionName: 'mapAgentInstances',
+          args: [getAddress(svc.agent_address) as Address],
+        })) as bigint;
+        alreadyBound = boundServiceId > 0n;
+      } catch {
+        // Registry read failure is non-fatal — proceed and let stake() surface
+        // the error if the agent really is bound.
+      }
+      if (alreadyBound) {
+        throw new Error(
+          `agent_already_bound: agent EOA ${svc.agent_address} is already registered as an agent instance on-chain. ` +
+          `The previous setup retirement may have been incomplete. ` +
+          `Contact support or rotate the agent EOA to continue.`,
+        );
+      }
+    }
+
     // Fresh distributor stake() creates a new on-chain service. If state still
     // references an old Safe (e.g. hand-edited JSON), sweep it before replacing.
     if (svc.service_id === null && svc.safe_address && state.master_address) {

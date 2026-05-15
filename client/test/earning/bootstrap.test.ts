@@ -1454,4 +1454,146 @@ describe('Fleet bootstrap', () => {
     const svc = next.services.find((s: any) => s.index === 1);
     expect(svc.safe_bound_to_agent).toBe(true);
   });
+
+  it('refuses to stake when agent_address is already registered on-chain (jinn-mono-hjex.1)', async () => {
+    // Simulates the scenario after a failed migration: service_id was cleared
+    // but agent_address kept. mapAgentInstances returns non-zero on-chain,
+    // so calling stake() would revert with AgentInstanceRegistered (0x631695bd).
+    // stepStolasStake must detect this and fail fast with a typed error.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    // State after a failed migration: service_id null but agent_address present
+    await store.save({
+      ...createDefaultFleetState('base-sepolia'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: null,
+          service_id: null,
+          mech_address: null,
+          staking_address: null,
+          step: 'awaiting_stake',
+          error: null,
+          agent_id: null,
+          agent_uri: null,
+          identity_registry_address: null,
+          agent_registered_tx: null,
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      autoTestnetFaucet: false,
+    });
+
+    // Master is funded
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+
+    // mapAgentInstances returns 47n — agent EOA is already bound on-chain (service 47 from the dogfood case)
+    vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
+      async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'mapAgentInstances') return 47n;
+        // Other readContract calls (e.g., staking state checks) return safe defaults
+        return 0n;
+      },
+    );
+
+    // reconcileFleetWithChain uses gatherChainSignals — stub it so we get to stepStolasStake
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: null,
+      stakingMultisig: null,
+      registryState: null,
+      registryMultisig: null,
+      safeDeployed: false,
+    });
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('agent_already_bound');
+    expect(result.message).toContain(agentAddr);
+  });
+
+  it('does NOT trip the agent_already_bound guard when mapAgentInstances returns 0n (unregistered)', async () => {
+    // Simulates a clean state after migration: service_id null, agent_address present,
+    // but the agent EOA is NOT registered on-chain (mapAgentInstances returns 0n).
+    // stepStolasStake should proceed past the precondition without throwing.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base-sepolia'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: null,
+          service_id: null,
+          mech_address: null,
+          staking_address: null,
+          step: 'awaiting_stake',
+          error: null,
+          agent_id: null,
+          agent_uri: null,
+          identity_registry_address: null,
+          agent_registered_tx: null,
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      autoTestnetFaucet: false,
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+
+    // mapAgentInstances returns 0n — agent EOA is NOT registered on-chain
+    vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
+      async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'mapAgentInstances') return 0n;
+        return 0n;
+      },
+    );
+
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: null,
+      stakingMultisig: null,
+      registryState: null,
+      registryMultisig: null,
+      safeDeployed: false,
+    });
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    // Guard did not fire — error must NOT contain agent_already_bound
+    expect(result.message).not.toContain('agent_already_bound');
+  });
 });

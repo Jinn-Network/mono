@@ -13,6 +13,7 @@ import type { Hono } from 'hono';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readBootstrapError } from '../errors/persisted-bootstrap-error.js';
+import { MIGRATIONS_FILE } from '../earning/store.js';
 
 export interface BootstrapEndpointConfig {
   earningDir: string;
@@ -61,6 +62,45 @@ interface FleetStateOnDisk {
   services?: ServiceState[];
   fleet_agent_id?: string | null;
   fleet_safe_address?: string | null;
+}
+
+interface MigrationArchiveEntryOnDisk {
+  retire_status?: string;
+  retire_error?: string | null;
+  retire_tx_hash?: string | null;
+  state_reset_at?: string | null;
+}
+
+interface MigrationArchiveOnDisk {
+  entries?: MigrationArchiveEntryOnDisk[];
+}
+
+/**
+ * Reads the migration archive and returns the most recent retire_error from
+ * any entry whose retire_status is 'failed' and state_reset_at is null
+ * (i.e. the wipe was suppressed because retire failed).
+ */
+function readLatestRetireError(earningDir: string): { retire_error: string; tx_hash: string | null } | null {
+  const archivePath = join(earningDir, MIGRATIONS_FILE);
+  if (!existsSync(archivePath)) return null;
+  let archive: MigrationArchiveOnDisk;
+  try {
+    archive = JSON.parse(readFileSync(archivePath, 'utf-8')) as MigrationArchiveOnDisk;
+  } catch {
+    return null;
+  }
+  const entries = archive.entries ?? [];
+  // Find the most recent failed retire where the wipe did not proceed
+  // (state_reset_at null means the guard preserved local state)
+  const failed = entries.filter(
+    e => e.retire_status === 'failed' && !e.state_reset_at && e.retire_error,
+  );
+  if (failed.length === 0) return null;
+  const latest = failed[failed.length - 1]!;
+  return {
+    retire_error: latest.retire_error!,
+    tx_hash: latest.retire_tx_hash ?? null,
+  };
 }
 
 interface FundingGateOnDisk {
@@ -139,6 +179,11 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
     // the last persisted step. Cleared at the start of each bootstrap attempt.
     const error = readBootstrapError(config.earningDir);
 
+    // Surface a retire_failed envelope when migration archived a failure but
+    // preserved local state. The BootstrapErrorCard (PR-6) will render it;
+    // for now we just expose the field so the dashboard can act on it.
+    const retireFailed = readLatestRetireError(config.earningDir);
+
     const cfg = config.configReader?.() ?? {};
 
     return c.json({
@@ -164,6 +209,13 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
         },
       } : {}),
       ...(error ? { error } : {}),
+      ...(retireFailed ? {
+        retire_failed: {
+          retire_error: retireFailed.retire_error,
+          tx_hash: retireFailed.tx_hash,
+          message: 'We could not retire your previous setup. Your service state is preserved; resolve the retire failure before upgrading.',
+        },
+      } : {}),
     });
   });
 }
