@@ -46,20 +46,24 @@ export async function runHarnessWithFreezeFence(
   harness: Harness,
   ctx: HarnessContext,
 ): Promise<FenceResult> {
+  const hashOpts = harness.freezeStateHashIgnore?.length
+    ? { ignoreRelPaths: harness.freezeStateHashIgnore }
+    : undefined;
+
   if (ctx.mode === 'train') {
     const output = await harness.run(ctx);
-    const codeDigest = await hashImplStateDir(ctx.implStateDir);
+    const codeDigest = await hashImplStateDir(ctx.implStateDir, hashOpts);
     return { ok: true, output, codeDigest };
   }
 
   // Frozen mode: snapshot, run, verify, rollback if needed.
-  const stateHashBefore = await hashImplStateDir(ctx.implStateDir);
+  const stateHashBefore = await hashImplStateDir(ctx.implStateDir, hashOpts);
   const snapDir = await mkdtemp(join(tmpdir(), 'jinn-freeze-snap-'));
   await cp(ctx.implStateDir, snapDir, { recursive: true });
 
   try {
     const output = await harness.run(ctx);
-    const stateHashAfter = await hashImplStateDir(ctx.implStateDir);
+    const stateHashAfter = await hashImplStateDir(ctx.implStateDir, hashOpts);
 
     if (stateHashAfter !== stateHashBefore) {
       // Violation: rollback and return error.

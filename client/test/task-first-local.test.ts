@@ -27,6 +27,7 @@ describe('Task-first local lifecycle', () => {
     expect(result.attempts.map((attempt) => attempt.request.attemptIndex)).toEqual([0, 1]);
     for (const attempt of result.attempts) {
       expect(attempt.solutionPayload).toHaveProperty('probabilityYes');
+      expect(attempt.solutionEnvelope.role).toBe('solution');
       expect(attempt.solutionEnvelope.payload).toEqual(attempt.solutionPayload);
       expect(attempt.verdict).toBe('SCORED');
       expect(attempt.verdictPayload).toMatchObject({

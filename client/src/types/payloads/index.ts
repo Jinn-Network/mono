@@ -19,7 +19,7 @@ import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
-import type { Role } from '../envelope.js';
+import { normalizeEnvelopeRole, type LegacyEnvelopeRole, type Role } from '../envelope.js';
 
 /**
  * Passthrough payload schema for legacy / untyped tasks.
@@ -33,42 +33,42 @@ const LegacyPassthroughSchema = z.record(z.unknown());
  */
 export const SOLVER_TYPE_PAYLOADS: Record<string, Partial<Record<Role, z.ZodSchema>>> = {
   'portfolio.v0': {
-    restoration: PortfolioV0RestorationPayloadSchema,
+    solution: PortfolioV0RestorationPayloadSchema,
     verdict: PortfolioV0VerdictPayloadSchema,
   },
   'prediction.v0': {
-    restoration: PredictionV0RestorationPayloadSchema,
+    solution: PredictionV0RestorationPayloadSchema,
     verdict: PredictionV0VerdictPayloadSchema,
   },
   'prediction.v1': {
-    restoration: PredictionV1RestorationPayloadSchema,
+    solution: PredictionV1RestorationPayloadSchema,
     verdict: PredictionV1VerdictPayloadSchema,
   },
   'prediction.apy.v0': {
-    restoration: PredictionApyV0RestorationPayloadSchema,
+    solution: PredictionApyV0RestorationPayloadSchema,
     verdict: PredictionApyV0VerdictPayloadSchema,
   },
-  // SWE-rebench v2 SolverNet. Solution maps to the `restoration` role,
-  // Verdict to the `verdict` role; the SolverNet's "solving" / "evaluating"
-  // role labels are surface-level synonyms in the daemon's two-role model.
+  // SWE-rebench v2 SolverNet. The task role is still restoration/evaluation,
+  // but execution envelopes use solution/verdict.
   'swe-rebench-v2.v1': {
-    restoration: SweRebenchV2SolutionPayloadSchema,
+    solution: SweRebenchV2SolutionPayloadSchema,
     verdict: SweRebenchV2VerdictPayloadSchema,
   },
   // Passthrough SolverType for legacy / untyped tasks.
   // Produced by the legacy-claude impl; no structural validation on payload.
   'legacy.v0': {
-    restoration: LegacyPassthroughSchema,
+    solution: LegacyPassthroughSchema,
     verdict: LegacyPassthroughSchema,
   },
 };
 
-export function validatePayload(solverType: string, role: Role, payload: unknown): void {
-  if (role === 'capture') return;  // capture payloads are free-form; no structural validation in v0
+export function validatePayload(solverType: string, role: Role | LegacyEnvelopeRole, payload: unknown): void {
+  const normalizedRole = normalizeEnvelopeRole(role);
+  if (normalizedRole === 'capture') return;  // capture payloads are free-form; no structural validation in v0
   const bucket = SOLVER_TYPE_PAYLOADS[solverType];
   if (!bucket) throw new Error(`Unknown solverType: ${solverType}`);
-  const schema = bucket[role];
-  if (!schema) throw new Error(`No payload schema for (${solverType}, ${role})`);
+  const schema = bucket[normalizedRole];
+  if (!schema) throw new Error(`No payload schema for (${solverType}, ${normalizedRole})`);
   schema.parse(payload);
 }
 

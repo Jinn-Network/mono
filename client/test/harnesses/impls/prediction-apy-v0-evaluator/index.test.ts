@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionApyV0Evaluator } from '../../../../src/harnesses/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/harnesses/engine/signing.js';
-import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
+import { SOLUTION_TASK_CID_CONTEXT_KEY, SOLUTION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 import { PredictionApyV0VerdictPayloadSchema } from '../../../../src/types/payloads/prediction-apy-v0.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
@@ -28,7 +28,7 @@ async function makeSignedApyManifestJson(overrides: { submittedAt?: number; task
   const unsigned: Record<string, unknown> = {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'prediction.apy.v0',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: 1_000,
     task: intentProv(overrides.taskCid ?? 'expected-cid'),
     participant: { safeAddress: '0x' + '44'.repeat(20), agentEoa: account.address },
@@ -69,7 +69,7 @@ async function makeSignedApyManifestJson(overrides: { submittedAt?: number; task
 
 function makeEvalIntent(
   manifestJson: string,
-  options?: { omitRestorationTaskCid?: boolean; restorationTaskCid?: string; restorationEnvelopeCid?: string },
+  options?: { omitSolutionTaskCid?: boolean; solutionTaskCid?: string; solutionEnvelopeCid?: string },
 ): Task {
   return {
     id: 'eval-apy',
@@ -91,11 +91,11 @@ function makeEvalIntent(
     eligibility: {},
     context: {
       restorationResult: manifestJson,
-      ...(options?.omitRestorationTaskCid
+      ...(options?.omitSolutionTaskCid
         ? {}
-        : { [RESTORATION_TASK_CID_CONTEXT_KEY]: options?.restorationTaskCid ?? 'expected-cid' }),
-      ...(options?.restorationEnvelopeCid
-        ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: options.restorationEnvelopeCid }
+        : { [SOLUTION_TASK_CID_CONTEXT_KEY]: options?.solutionTaskCid ?? 'expected-cid' }),
+      ...(options?.solutionEnvelopeCid
+        ? { [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: options.solutionEnvelopeCid }
         : {}),
     },
   } as unknown as Task;
@@ -147,7 +147,7 @@ describe('PredictionApyV0Evaluator', () => {
     expect(out.gating.verdict).toBe('REJECTED');
   });
 
-  it('FAIL when manifest task cid does not match context.restorationTaskCid', async () => {
+  it('FAIL when manifest task cid does not match context.solutionTaskCid', async () => {
     const manifest = await makeSignedApyManifestJson({ taskCid: 'wrong' });
     const evalTask = makeEvalIntent(manifest);
     const ev = new PredictionApyV0Evaluator({
@@ -162,9 +162,9 @@ describe('PredictionApyV0Evaluator', () => {
     expect(out.gating.verdict).toBe('FAIL');
   });
 
-  it('uses context.restorationTaskCid when it differs from ctx.taskCid (eval job vs restoration)', async () => {
-    const manifest = await makeSignedApyManifestJson({ taskCid: 'restoration-cid' });
-    const evalTask = makeEvalIntent(manifest, { restorationTaskCid: 'restoration-cid' });
+  it('uses context.solutionTaskCid when it differs from ctx.taskCid (eval job vs solution)', async () => {
+    const manifest = await makeSignedApyManifestJson({ taskCid: 'solution-cid' });
+    const evalTask = makeEvalIntent(manifest, { solutionTaskCid: 'solution-cid' });
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
@@ -177,9 +177,9 @@ describe('PredictionApyV0Evaluator', () => {
     expect(out.gating.verdict).toBe('PASS');
   });
 
-  it('INDETERMINATE when context.restorationTaskCid is missing (legacy eval payload)', async () => {
+  it('INDETERMINATE when context.solutionTaskCid is missing', async () => {
     const manifest = await makeSignedApyManifestJson();
-    const evalTask = makeEvalIntent(manifest, { omitRestorationTaskCid: true });
+    const evalTask = makeEvalIntent(manifest, { omitSolutionTaskCid: true });
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
@@ -257,9 +257,9 @@ describe('PredictionApyV0Evaluator', () => {
     if (parsed.success) {
       expect(parsed.data.verdict).toBe('PASS');
       expect(parsed.data.scoreBasis).toBe('absolute-error-linear.v1');
-      expect(parsed.data.restorationEnvelope.cid).toBe('bafy-unknown');
+      expect(parsed.data.solutionEnvelope.cid).toBe('bafy-unknown');
       // sha256 is now computed from the restoration envelope JSON (not a placeholder)
-      expect(parsed.data.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(parsed.data.solutionEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(parsed.data.verificationOfRestoration.claimedTier).toBe('self-signed');
       expect(parsed.data.verificationOfRestoration.overall).toBe('valid');
       expect(parsed.data.claimed.predictedBps).toBe('100');
@@ -267,10 +267,10 @@ describe('PredictionApyV0Evaluator', () => {
     }
   });
 
-  it('restorationEnvelope.cid uses threaded context key + sha256 matches manifest JSON', async () => {
+  it('solutionEnvelope.cid uses threaded context key + sha256 matches manifest JSON', async () => {
     const manifest = await makeSignedApyManifestJson();
     const envelopeCid = 'f01551220deadbeef1234567890abcdef';
-    const evalTask = makeEvalIntent(manifest, { restorationEnvelopeCid: envelopeCid });
+    const evalTask = makeEvalIntent(manifest, { solutionEnvelopeCid: envelopeCid });
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
@@ -280,10 +280,10 @@ describe('PredictionApyV0Evaluator', () => {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );
-    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
-    expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
+    const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
+    expect(vp.solutionEnvelope.cid).toBe(envelopeCid);
     // Evaluator uses JCS canonical bytes (canonicalJson) to match the upload pipeline.
     const expectedSha256 = createHash('sha256').update(canonicalJson(JSON.parse(manifest))).digest('hex');
-    expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+    expect(vp.solutionEnvelope.sha256).toBe(expectedSha256);
   });
 });

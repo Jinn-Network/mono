@@ -1,12 +1,18 @@
 /**
  * Ponder event handlers for the Jinn protocol indexer.
  *
- * Four event sources, each mapped to one entity in ponder.schema.ts:
+ * Seven event sources, each mapped to one or more entities in ponder.schema.ts:
  *
- *   JinnRouter:TaskCreated          → task
- *   JinnRouter:TaskAttemptCreated   → attempt
+ *   JinnRouter:TaskCreated             → task
+ *   JinnRouter:TaskAttemptCreated      → attempt
  *   JinnRouter:SolutionDeliveryClaimed → task.finalized = true
- *   IdentityRegistry:MetadataSet    → solverNetManifest OR envelope (routed by key)
+ *   JinnRouter:VerdictDeliveryClaimed  → verdict
+ *   JinnRouter:TaskBudgetRefunded      → task.refunded = true
+ *   IdentityRegistry:MetadataSet       → solverNetManifest OR harnessCheckpoint OR envelope (routed by key)
+ *                                        the `envelope:` handler also does an IPFS enrichment fetch
+ *                                        → attemptEnvelopeMeta (config-gated by JINN_INDEXER_ENRICH_ENVELOPES,
+ *                                        IPFS gateway from JINN_IPFS_GATEWAY_URL)
+ *   JinnDistributor:Claimed            → rewardDistribution
  *
  * Handlers are pure event-to-row mappings with no business logic. The
  * correctness gate (canClaimTask simulation) lives in the daemon adapter,
@@ -26,17 +32,34 @@
  * Schema: ponder.schema.ts
  */
 import { ponder } from 'ponder:registry';
-import { task, attempt, solverNetManifest, envelope } from 'ponder:schema';
+import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from 'ponder:schema';
+
+// ── Enrichment config (read once at module scope) ─────────────────────────────
+// JINN_INDEXER_ENRICH_ENVELOPES: set false/0 to skip per-envelope IPFS fetch
+// and sync faster — the explorer's harness/mode/plugin/model facets, checkpoint
+// timeline, and freeze integrity won't populate. Default: enabled.
+const enrichEnvelopes =
+  process.env['JINN_INDEXER_ENRICH_ENVELOPES'] !== 'false' &&
+  process.env['JINN_INDEXER_ENRICH_ENVELOPES'] !== '0';
+// JINN_IPFS_GATEWAY_URL: IPFS gateway for envelope enrichment.
+// Empty → fetchIpfsJson falls back to https://gateway.autonolas.tech.
+const ipfsGateway = process.env['JINN_IPFS_GATEWAY_URL'] ?? '';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
   handleSolutionDeliveryClaimed,
   handleMetadataSet,
+  handleVerdictDeliveryClaimed,
+  handleTaskBudgetRefunded,
+  handleClaimed,
   type HandlerContext,
   type TaskCreatedEvent,
   type TaskAttemptCreatedEvent,
   type SolutionDeliveryClaimedEvent,
   type MetadataSetEvent,
+  type VerdictDeliveryClaimedEvent,
+  type TaskBudgetRefundedEvent,
+  type ClaimedEvent,
 } from './handlers.js';
 
 ponder.on('JinnRouter:TaskCreated', async ({ event, context }) => {
@@ -63,11 +86,40 @@ ponder.on('JinnRouter:SolutionDeliveryClaimed', async ({ event, context }) => {
   });
 });
 
+ponder.on('JinnRouter:VerdictDeliveryClaimed', async ({ event, context }) => {
+  await handleVerdictDeliveryClaimed({
+    event: event as unknown as VerdictDeliveryClaimedEvent,
+    context: context as unknown as HandlerContext,
+    verdict,
+  });
+});
+
+ponder.on('JinnRouter:TaskBudgetRefunded', async ({ event, context }) => {
+  await handleTaskBudgetRefunded({
+    event: event as unknown as TaskBudgetRefundedEvent,
+    context: context as unknown as HandlerContext,
+    task,
+  });
+});
+
 ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
   await handleMetadataSet({
     event: event as unknown as MetadataSetEvent,
     context: context as unknown as HandlerContext,
     solverNetManifest,
     envelope,
+    harnessCheckpoint,
+    attemptEnvelopeMeta,
+    verdictEnvelopeMeta,
+    enrichEnvelopes,
+    ipfsGateway,
+  });
+});
+
+ponder.on('JinnDistributor:Claimed', async ({ event, context }) => {
+  await handleClaimed({
+    event: event as unknown as ClaimedEvent,
+    context: context as unknown as HandlerContext,
+    rewardDistribution,
   });
 });
