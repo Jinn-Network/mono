@@ -1195,12 +1195,8 @@ export class TaskEngine {
       throw new NotImplementedError('pack');
     }
 
-    // jinn-mono-4tfq: if the impl was skipped (SkippableError caught during
-    // RUNNING — e.g. admission_missing_or_unscorable, substrate_drift_*,
-    // hf_fetch_failed_after_retries), there is no payload to assemble. Transition
-    // straight to FAILED and return — never enter the envelope-assembly path,
-    // never throw "did not produce verdictPayload" / "no solutionPayload".
-    // Applies symmetrically to solver and evaluator skips.
+    // jinn-mono-4tfq: SkippableError caught in RUNNING leaves a skip-marker
+    // Solution with no payload; short-circuit before envelope assembly.
     const earlyImplOutput = this.solutionOutputs.get(task.requestId);
     const gatingClaim = earlyImplOutput?.gating as Record<string, unknown> | undefined;
     if (gatingClaim?.['skipped'] === true) {

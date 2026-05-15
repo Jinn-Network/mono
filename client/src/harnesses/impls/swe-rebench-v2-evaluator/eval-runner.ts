@@ -306,13 +306,8 @@ export class PythonEvalRunner implements EvalRunner {
     }];
     // Upstream eval.py expects --patches to be a JSON list of
     // `{instance_id, patch, test_patch?}` overrides keyed by instance_id.
-    //
-    // jinn-mono-c52e: ensure the patch terminates with a newline. `git apply`
-    // inside the eval container rejects diffs that end mid-line with "corrupt
-    // patch at line N" even when the diff is otherwise structurally valid.
-    // Defensive normalisation here (in addition to the producer-side invariant
-    // at restoration-patch.ts) means even a regression in the producer can't
-    // silently misclassify every evaluator attempt as patch_corrupt.
+    // jinn-mono-c52e: defensive newline-terminate before `git apply` —
+    // mid-line diffs error as "corrupt patch at line N".
     const normalizedPatch = args.patch.endsWith('\n') ? args.patch : `${args.patch}\n`;
     const patchesJson = [{ instance_id: INSTANCE_ID, patch: normalizedPatch }];
     const taskJsonPath = join(tmp, 'task.json');

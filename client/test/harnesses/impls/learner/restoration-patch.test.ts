@@ -116,7 +116,6 @@ describe('stripTestPathHunks', () => {
     expect(stripTestPathHunks(patch)).toBe(patch);
   });
 
-  // jinn-mono-c52e: producer-side trailing-newline invariant
   it('appends a trailing newline when the source patch ends mid-line', () => {
     const patch = [
       'diff --git a/src/a.py b/src/a.py',
@@ -125,7 +124,7 @@ describe('stripTestPathHunks', () => {
       '@@ -1 +1 @@',
       '-1',
       '+2',
-    ].join('\n');  // NOTE: no trailing '' → no trailing \n
+    ].join('\n');
     expect(patch.endsWith('\n')).toBe(false);
     const out = stripTestPathHunks(patch);
     expect(out.endsWith('\n')).toBe(true);
@@ -141,9 +140,7 @@ describe('stripTestPathHunks', () => {
       '-1',
       '+2',
       '',
-    ].join('\n');  // trailing '' → trailing \n
-    expect(patch.endsWith('\n')).toBe(true);
-    expect(patch.endsWith('\n\n')).toBe(false);
+    ].join('\n');
     const out = stripTestPathHunks(patch);
     expect(out.endsWith('\n')).toBe(true);
     expect(out.endsWith('\n\n')).toBe(false);

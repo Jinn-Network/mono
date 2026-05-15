@@ -105,12 +105,8 @@ export function stripTestPathHunks(unifiedDiff: string): string {
   // If every kept section is empty-path preamble only, treat as empty too.
   if (!kept.some((s) => s.lines.some((l) => l.startsWith('diff --git ')))) return '';
   const out = kept.flatMap((s) => s.lines).join('\n');
-  // jinn-mono-c52e: enforce trailing-newline invariant. `git apply` rejects
-  // diffs that end mid-line with "corrupt patch at line N" even when the diff
-  // is otherwise structurally valid. Producer-side enforcement here keeps the
-  // on-chain solution envelope well-formed; the evaluator's eval-runner.ts
-  // applies the same normalisation defensively for any envelope that slipped
-  // through pre-fix.
+  // jinn-mono-c52e: `git apply` rejects diffs that end mid-line with
+  // "corrupt patch at line N" — enforce trailing newline on the envelope.
   return out.endsWith('\n') ? out : `${out}\n`;
 }
 
