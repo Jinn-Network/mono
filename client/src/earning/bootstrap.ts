@@ -89,6 +89,7 @@ import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
 import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
+import { displayFleetServiceIndex } from './fleet-display-index.js';
 import { rpcHostForDisplay } from '../preflight/rpc-network.js';
 import {
   detectDeprecatedTestnetSetup,
@@ -1470,46 +1471,20 @@ export class FleetBootstrapper {
     const svc = state.services.find(s => s.index === index)!;
     const serviceId = svc.service_id!;
     const stakingAddress = this.stakingAddressForService(svc);
+    const di = displayFleetServiceIndex(svc);
 
-    // `reStake()` is operator-scoped: the master EOA must match the
-    // distributor's recorded `mapServiceIdCuratingAgents[serviceId]` entry.
-    // If it doesn't, the operator is likely using the wrong earning dir or
-    // password, or the service needs owner / managing-agent recovery.
-    const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
-
-    const reStakeData = encodeFunctionData({
-      abi: STOLAS_DISTRIBUTOR_ABI,
-      functionName: 'reStake',
-      args: [stakingAddress, BigInt(serviceId)],
-    }) as Hex;
-
-    console.error(`[fleet-bootstrap] Service ${index}: calling distributor.reStake() for evicted service ${serviceId}`);
-    let reStakeHash: Hex;
-    try {
-      reStakeHash = await viemSendTransactionWithRetry(masterWallet, this.publicClient, {
-        account: masterAccount as Account,
-        to: addr(this.config.distributorAddress),
-        data: reStakeData,
-        gas: 1_500_000n,
-      });
-    } catch (err) {
-      const message = flattenErrorMessage(err);
-      if (isUnauthorizedAccountError(message)) {
-        throw new Error(
-          `Service ${index} (service_id ${serviceId}) is evicted on the staking proxy, but master EOA ${masterAccount.address} is not authorized to reStake it. ` +
-          `The distributor only permits the recorded service operator, a managing agent, or the owner. ` +
-          `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service, then re-run jinn bootstrap; otherwise request owner / managing-agent recovery or abandon-and-rebootstrap. ` +
-          `reStake revert: ${message}`,
-        );
-      }
-      throw err;
-    }
-    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, reStakeHash);
-    if (receipt.status !== 'success') {
-      throw new Error(`reStake failed for service ${index}: ${reStakeHash}`);
-    }
-    console.error(`[fleet-bootstrap] Service ${index}: reStake confirmed (tx: ${reStakeHash})`);
+    // Delegate to the standalone exported helper (shared with EvictionLoop /
+    // the dashboard "Re-stake now" CTA). This eliminates the duplicate
+    // implementation (jinn-mono-hjex.3).
+    await recoverEvictedService({
+      serviceDisplayIndex: di,
+      serviceId,
+      stakingAddress: stakingAddress,
+      distributorAddress: this.config.distributorAddress,
+      rpcUrl: this.config.rpcUrl,
+      chain: this.chain,
+      mnemonic,
+    });
 
     // Service is now Staked again with the same service_id, safe_address, and mech_address.
     // Step back to `mech_deployed` so the resume loop advances through
@@ -2448,3 +2423,83 @@ export class FleetBootstrapper {
 
 /** @deprecated Use FleetBootstrapper */
 export const EarningBootstrapper = FleetBootstrapper;
+
+// ---------------------------------------------------------------------------
+// Standalone recovery helper — callable from the eviction loop (hjex.3)
+// ---------------------------------------------------------------------------
+
+export interface RecoverEvictedServiceOptions {
+  /** Display index of the service (used only for log messages). */
+  serviceDisplayIndex: number;
+  serviceId: number;
+  stakingAddress: string;
+  distributorAddress: string;
+  rpcUrl: string;
+  chain: JinnOnchainNetwork;
+  mnemonic: string;
+}
+
+/**
+ * Re-stake an evicted service by calling `distributor.reStake(stakingProxy, serviceId)`.
+ *
+ * Extracted from `FleetBootstrapper.recoverEvictedService` so it can be called
+ * from the in-process `EvictionLoop` without requiring a full bootstrapper
+ * context (jinn-mono-hjex.3).
+ *
+ * The caller is responsible for advancing the local service step back to
+ * `mech_deployed` after this returns (just like the bootstrapper resume path does).
+ */
+export async function recoverEvictedService(
+  opts: RecoverEvictedServiceOptions,
+): Promise<void> {
+  const {
+    serviceDisplayIndex,
+    serviceId,
+    stakingAddress,
+    distributorAddress,
+    rpcUrl,
+    chain,
+    mnemonic,
+  } = opts;
+
+  const masterAccount = deriveMasterSigner(mnemonic);
+  const publicClient = createJinnPublicClient(rpcUrl, chain);
+  const masterWallet = createJinnWalletClient(rpcUrl, chain, masterAccount);
+
+  const reStakeData = encodeFunctionData({
+    abi: STOLAS_DISTRIBUTOR_ABI,
+    functionName: 'reStake',
+    args: [addr(stakingAddress), BigInt(serviceId)],
+  }) as Hex;
+
+  console.error(
+    `[eviction-recovery] Service ${serviceDisplayIndex}: calling distributor.reStake() for evicted service ${serviceId}`,
+  );
+  let reStakeHash: Hex;
+  try {
+    reStakeHash = await viemSendTransactionWithRetry(masterWallet, publicClient, {
+      account: masterAccount as Account,
+      to: addr(distributorAddress),
+      data: reStakeData,
+      gas: 1_500_000n,
+    });
+  } catch (err) {
+    const message = flattenErrorMessage(err);
+    if (isUnauthorizedAccountError(message)) {
+      throw new Error(
+        `Service ${serviceDisplayIndex} (service_id ${serviceId}) is evicted on the staking proxy, but master EOA ` +
+        `${masterAccount.address} is not authorized to reStake it. ` +
+        `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service. ` +
+        `reStake revert: ${message}`,
+      );
+    }
+    throw err;
+  }
+  const receipt = await waitForTransactionReceiptWithRetry(publicClient, reStakeHash);
+  if (receipt.status !== 'success') {
+    throw new Error(`reStake failed for service ${serviceDisplayIndex}: ${reStakeHash}`);
+  }
+  console.error(
+    `[eviction-recovery] Service ${serviceDisplayIndex}: reStake confirmed (tx: ${reStakeHash})`,
+  );
+}

@@ -7,6 +7,7 @@ import {
   isStakedLikeServiceStep,
   type FleetState,
 } from '../earning/types.js';
+import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import type { EarningMigrationArchive } from '../earning/store.js';
 import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
@@ -78,6 +79,18 @@ export interface GatheredStatusRaw {
   pendingByService?: Record<number, string>;
   claimedByService?: Record<number, { total: string; lastAt: string; lastTxHash: string }>;
   migrationArchive?: EarningMigrationArchive;
+  /**
+   * Per-service eviction state keyed by display index.
+   * Populated by gather-status via on-chain getStakingState reads.
+   * `true` means the staking proxy reports state === 2 (Evicted).
+   */
+  evictedByServiceIndex?: Record<number, boolean>;
+  /**
+   * Per-service inactivity seconds keyed by display index.
+   * Populated by gather-status via on-chain getServiceInfo reads (jinn-mono-hjex.3).
+   * Value is the `inactivity` field from the ServiceInfo struct (seconds).
+   */
+  inactivityByServiceIndex?: Record<number, number>;
 }
 
 export interface StatusV1Response {
@@ -105,6 +118,8 @@ export interface StatusV1Response {
       identityRegistryAddress: string | null;
       safeBoundToAgent: boolean;
       identityBindingStatus: 'bound' | 'pending' | 'not_applicable';
+      /** True when the staking proxy reports this service as evicted (getStakingState === 2). */
+      evicted: boolean;
     }>;
     stakedLikeCount: number;
     completeCount: number;
@@ -160,7 +175,10 @@ export function resolveMasterDailyEstimateWei(
   return fromPoll > DEFAULT_MASTER_ETH_DAILY_WEI ? fromPoll : DEFAULT_MASTER_ETH_DAILY_WEI;
 }
 
-function fleetSummary(fleet: FleetState | null): StatusV1Response['fleet'] {
+function fleetSummary(
+  fleet: FleetState | null,
+  evictedByServiceIndex?: Record<number, boolean>,
+): StatusV1Response['fleet'] {
   if (!fleet) {
     return {
       loaded: false,
@@ -169,8 +187,10 @@ function fleetSummary(fleet: FleetState | null): StatusV1Response['fleet'] {
       completeCount: 0,
     };
   }
-  const services = fleet.services.map(s => ({
-    index: s.index,
+  const services = fleet.services.map(s => {
+    const di = displayFleetServiceIndex(s);
+    return {
+    index: di,
     step: s.step,
     serviceId: s.service_id,
     safeAddress: s.safe_address,
@@ -186,7 +206,9 @@ function fleetSummary(fleet: FleetState | null): StatusV1Response['fleet'] {
           ? 'pending'
           : 'not_applicable'
     ) as 'bound' | 'pending' | 'not_applicable',
-  }));
+    evicted: evictedByServiceIndex?.[di] ?? false,
+    };
+  });
   const stakedLikeCount = fleet.services.filter(s => isStakedLikeServiceStep(s.step)).length;
   const completeCount = fleet.services.filter(s => isOperationalServiceStep(s.step)).length;
   return {
@@ -311,7 +333,7 @@ function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fl
 }
 
 export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
-  const fleetSum = fleetSummary(raw.fleet);
+  const fleetSum = fleetSummary(raw.fleet, raw.evictedByServiceIndex);
   const mode: 'full' | 'sqlite_only' = raw.hintsScope === 'sqlite_only' ? 'sqlite_only' : 'full';
   const claimedRewardsWei = sumClaimedRewardsWei(raw);
   let pendingRewardsWei: bigint | undefined;

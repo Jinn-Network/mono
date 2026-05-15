@@ -3,6 +3,7 @@
  * rule); labels are ALL-CAPS-MONO eyebrows. The full live activity surface
  * lives on /operator; Overview keeps only a compact status tile.
  */
+import { useState } from 'react';
 import type { LiveNowState } from './LiveNowBand.js';
 
 export interface HeroStatsProps {
@@ -14,9 +15,15 @@ export interface HeroStatsProps {
   statusState: LiveNowState;
   statusDot: string;
   activeAction: string | null;
+  /** When true, the service has been evicted from the staking proxy. */
+  evicted?: boolean;
+  /** Service ID of the evicted service. Required when evicted=true to wire the Re-stake CTA. */
+  evictedServiceId?: number | null;
   onClaim: () => void;
   onTopUp: () => void;
   onRestart: () => void;
+  /** Called when the operator clicks "Re-stake now". Should POST to /v1/setup/restake/:serviceId. */
+  onRestake?: (serviceId: number) => Promise<void> | void;
 }
 
 function ActionButton({
@@ -24,14 +31,16 @@ function ActionButton({
   action,
   activeAction,
   onClick,
+  forceDisabled,
 }: {
   children: string;
   action: string;
   activeAction: string | null;
   onClick: () => void;
+  forceDisabled?: boolean;
 }): JSX.Element {
   const busy = activeAction === action;
-  const disabled = activeAction !== null;
+  const disabled = activeAction !== null || (forceDisabled ?? false);
   return (
     <button
       type="button"
@@ -55,6 +64,62 @@ function ActionButton({
     >
       {busy ? 'Working...' : children}
     </button>
+  );
+}
+
+function EvictionNotice({
+  serviceId,
+  onRestake,
+}: {
+  serviceId?: number | null;
+  onRestake?: (serviceId: number) => Promise<void> | void;
+}): JSX.Element {
+  const [restaking, setRestaking] = useState(false);
+
+  function handleRestake(): void {
+    if (!serviceId || !onRestake || restaking) return;
+    setRestaking(true);
+    Promise.resolve(onRestake(serviceId)).finally(() => setRestaking(false));
+  }
+
+  return (
+    <div style={{ marginTop: '10px' }}>
+      <span
+        style={{
+          display: 'block',
+          color: 'var(--fg-warning, #e8a028)',
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '11px',
+          letterSpacing: '0.1em',
+        }}
+      >
+        Service evicted — restoring liveness
+      </span>
+      {serviceId != null && onRestake && (
+        <button
+          type="button"
+          data-testid="restake-button"
+          onClick={handleRestake}
+          disabled={restaking}
+          style={{
+            marginTop: '8px',
+            background: 'transparent',
+            border: '1px solid var(--fg-warning, #e8a028)',
+            borderRadius: '6px',
+            color: 'var(--fg-warning, #e8a028)',
+            cursor: restaking ? 'wait' : 'pointer',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '11px',
+            letterSpacing: '0.14em',
+            opacity: restaking ? 0.55 : 1,
+            padding: '6px 10px',
+            textTransform: 'uppercase',
+          }}
+        >
+          {restaking ? 'Working...' : 'Re-stake now'}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -207,9 +272,12 @@ export function HeroStats({
   statusState,
   statusDot,
   activeAction,
+  evicted = false,
+  evictedServiceId,
   onClaim,
   onTopUp,
   onRestart,
+  onRestake,
 }: HeroStatsProps): JSX.Element {
   return (
     <div
@@ -225,9 +293,17 @@ export function HeroStats({
         value={jinnClaimable}
         unit="JINN"
         action={(
-          <ActionButton action="Claim JINN" activeAction={activeAction} onClick={onClaim}>
-            Claim now
-          </ActionButton>
+          <>
+            <ActionButton
+              action="Claim JINN"
+              activeAction={activeAction}
+              onClick={onClaim}
+              forceDisabled={evicted}
+            >
+              Claim now
+            </ActionButton>
+            {evicted ? <EvictionNotice serviceId={evictedServiceId} onRestake={onRestake} /> : null}
+          </>
         )}
       />
       <Stat

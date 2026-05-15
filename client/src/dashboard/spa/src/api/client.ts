@@ -161,6 +161,11 @@ export const api = {
         body: JSON.stringify(patch),
       },
     ),
+  restake: (serviceId: number) =>
+    jfetch<{ ok: boolean; error?: string }>(
+      `/v1/setup/restake/${encodeURIComponent(String(serviceId))}`,
+      { method: 'POST' },
+    ),
   retryAgentBinding: (patch?: { serviceIndex?: number }) =>
     jfetch<{
       ok: boolean;

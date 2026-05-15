@@ -46,8 +46,8 @@ import {
 import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
-import { FleetBootstrapper } from './earning/bootstrap.js';
-import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
+import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
+import { DEFAULT_TESTNET_ARTIFACTS, STAKING_ABI, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
 import {
@@ -930,6 +930,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./discovery/types.js').DiscoveryAPI | undefined;
   } = { current: undefined };
 
+  // hjex.3: holder for the restake callback. Populated in running mode after
+  // bootstrap completes (when mnemonic + distributorAddress are available).
+  const restakeCallbackRef: { current: ((serviceId: number) => Promise<{ ok: boolean; error?: string }>) | undefined } = {
+    current: undefined,
+  };
+
   let setupApiServer: ApiServer;
   try {
     setupApiServer = await startApiServer({
@@ -1132,6 +1138,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           // (and thus Overview's `solverNet.enabled` gating) reflects the
           // toggle immediately. (jinn-mono-l2zl.15.4.12)
           invalidatePredictionOperatorStatusCache(config);
+        },
+        // hjex.3: delegate to the live callback populated once running mode starts.
+        restake: (serviceId) => {
+          if (!restakeCallbackRef.current) {
+            return Promise.resolve({ ok: false, error: 'restake_not_available_in_setup_mode' });
+          }
+          return restakeCallbackRef.current(serviceId);
         },
       },
       status: {
@@ -1458,6 +1471,31 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
   publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
+
+  // hjex.3: populate the restake callback now that mnemonic is available.
+  if (config.stakingMode === 'standard' && CHAIN_CONFIG.distributorAddress) {
+    const fleetStore = earningStore;
+    restakeCallbackRef.current = async (serviceId: number) => {
+      try {
+        const state = await fleetStore.load(NETWORK_CHAIN);
+        const svc = state.services.find(s => s.service_id === serviceId);
+        if (!svc) return { ok: false, error: `service_not_found:${serviceId}` };
+        if (!svc.staking_address) return { ok: false, error: 'staking_address_missing' };
+        await recoverEvictedServiceFn({
+          serviceDisplayIndex: Math.max(0, svc.index - 1),
+          serviceId,
+          stakingAddress: svc.staking_address,
+          distributorAddress: CHAIN_CONFIG.distributorAddress!,
+          rpcUrl: config.rpcUrl,
+          chain: NETWORK_CHAIN,
+          mnemonic: mnemonicForMaster,
+        });
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    };
+  }
 
   const evictionRecovery =
     config.stakingMode === 'standard' &&
@@ -2245,6 +2283,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             eoaTopupTarget: CHAIN_CONFIG.minEoaGasEth,
             safeTopupTrigger: CHAIN_CONFIG.safeTopupTrigger,
             safeTopupTarget: CHAIN_CONFIG.minSafeEth,
+          }
+        : undefined,
+    // Eviction-check loop — only in standard staking mode (requires distributorAddress).
+    // Running mode only: setup-halted daemons must not try to restake services that
+    // haven't been staked yet (hjex.3).
+    evictionCheck:
+      config.evictionCheckIntervalMs > 0 &&
+      config.stakingMode === 'standard' &&
+      CHAIN_CONFIG.distributorAddress
+        ? {
+            intervalMs: config.evictionCheckIntervalMs,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            readContract: (opts) => publicClient.readContract(opts as Parameters<typeof publicClient.readContract>[0]) as Promise<bigint>,
+            recoverEvictedService: async (svc) => {
+              if (!svc.service_id || !svc.staking_address) return;
+              await recoverEvictedServiceFn({
+                serviceDisplayIndex: Math.max(0, svc.index - 1),
+                serviceId: svc.service_id,
+                stakingAddress: svc.staking_address,
+                distributorAddress: CHAIN_CONFIG.distributorAddress!,
+                rpcUrl: config.rpcUrl,
+                chain: NETWORK_CHAIN,
+                mnemonic: mnemonicForMaster,
+              });
+            },
           }
         : undefined,
   });

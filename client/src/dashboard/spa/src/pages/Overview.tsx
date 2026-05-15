@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
@@ -15,9 +15,11 @@ interface OverviewStatusV1 {
     services?: Array<{
       index: number;
       step: string;
+      serviceId?: number | null;
       safeAddress?: string | null;
       agentId?: number | null;
       safeBoundToAgent?: boolean;
+      evicted?: boolean;
     }>;
   };
   rewards?: {
@@ -236,6 +238,7 @@ function operatorWaitingMessage(
 export function OverviewPage(): JSX.Element {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const queryClient = useQueryClient();
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
@@ -275,6 +278,11 @@ export function OverviewPage(): JSX.Element {
     agentId: s.agentId ?? null,
     safeBoundToAgent: s.safeBoundToAgent ?? false,
   }));
+
+  // Eviction state — derived from the first evicted service in the fleet.
+  const firstEvictedService = (status?.fleet?.services ?? []).find((s) => s.evicted === true);
+  const isEvicted = firstEvictedService != null;
+  const evictedServiceId = firstEvictedService?.serviceId ?? null;
 
   const tasksDelivered = totals.solutions;
   const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
@@ -316,6 +324,8 @@ export function OverviewPage(): JSX.Element {
         statusState={liveNow.state}
         statusDot={LIVE_NOW_TONE[liveNow.state].dot}
         activeAction={activeAction}
+        evicted={isEvicted}
+        evictedServiceId={evictedServiceId}
         onClaim={() =>
           runAction('Claim JINN', async () => {
             const res = await api.claimRewards();
@@ -347,6 +357,14 @@ export function OverviewPage(): JSX.Element {
             }
             return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
           })}
+        onRestake={async (serviceId) => {
+          const res = await api.restake(serviceId);
+          if (!res.ok) {
+            throw new Error(res.error ?? 'Re-stake failed.');
+          }
+          // Optimistically refetch status so the eviction notice clears.
+          await queryClient.invalidateQueries({ queryKey: ['status'] });
+        }}
       />
       {notice && (
         <div

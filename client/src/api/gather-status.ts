@@ -652,6 +652,51 @@ export async function gatherGatheredStatusRaw(
     } else {
       raw.pendingRewardsError = pr.error;
     }
+
+    // Eviction state + inactivity — best-effort; never blocks the rest of status assembly.
+    try {
+      const evictedByServiceIndex: Record<number, boolean> = {};
+      const inactivityByServiceIndex: Record<number, number> = {};
+      await Promise.all(
+        fleet.services.map(async (svc) => {
+          const serviceId = svc.service_id;
+          const stakingProxy = svc.staking_address;
+          if (!serviceId || !stakingProxy) return;
+          const di = displayFleetServiceIndex(svc);
+          try {
+            const [state, info] = await Promise.all([
+              client.readContract({
+                address: stakingProxy as `0x${string}`,
+                abi: JINN_STAKING_ABI,
+                functionName: 'getStakingState',
+                args: [BigInt(serviceId)],
+              }),
+              client.readContract({
+                address: stakingProxy as `0x${string}`,
+                abi: JINN_STAKING_ABI,
+                functionName: 'getServiceInfo',
+                args: [BigInt(serviceId)],
+              }).catch(() => null),
+            ]);
+            // getStakingState returns uint8; 2 = Evicted enum value
+            evictedByServiceIndex[di] = Number(state) === 2;
+            // getServiceInfo returns a struct — inactivity is seconds of accumulated inactivity
+            if (info != null) {
+              const inactivity = (info as { inactivity: bigint }).inactivity;
+              if (typeof inactivity === 'bigint') {
+                inactivityByServiceIndex[di] = Number(inactivity);
+              }
+            }
+          } catch {
+            // Transient RPC errors: skip silently; evicted defaults to false
+          }
+        }),
+      );
+      raw.evictedByServiceIndex = evictedByServiceIndex;
+      raw.inactivityByServiceIndex = inactivityByServiceIndex;
+    } catch {
+      // Non-fatal: staking state reads should not prevent status from returning
+    }
   }
 
   if (fleet) {
