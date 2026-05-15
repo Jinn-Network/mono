@@ -33,7 +33,7 @@ import { db } from 'ponder:api';
 import schema, { pluginPublication } from 'ponder:schema';
 import { graphql } from 'ponder';
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { and, eq, arrayContains } from 'drizzle-orm';
 import { attributeRuns } from '../builder-attribution.js';
 import {
   listPluginsByNetwork,
@@ -152,13 +152,25 @@ app.get('/plugins', async (c) => {
   }
 
   try {
-    const rows = (await db.select().from(pluginPublication)) as PluginPublicationRow[];
-
     if (solverNet) {
-      return c.json(listPluginsByNetwork({ publications: rows, solverNet, includeRevoked }));
+      // Push solverNet filter: supports array must contain the requested value.
+      // Also push includeRevoked=false filter into the DB query.
+      const conditions = [arrayContains(pluginPublication.supports, [solverNet])];
+      if (!includeRevoked) conditions.push(eq(pluginPublication.revoked, false));
+      const rows = (await db
+        .select()
+        .from(pluginPublication)
+        .where(and(...conditions))) as PluginPublicationRow[];
+      return c.json(listPluginsByNetwork({ publications: rows, solverNet, includeRevoked: true }));
     }
-    // builder branch
-    return c.json(listPluginsByBuilder({ publications: rows, builderAgentId: builder!, includeRevoked }));
+    // builder branch — push builderAgentId + optional revoked filter into DB.
+    const conditions = [eq(pluginPublication.builderAgentId, builder!)];
+    if (!includeRevoked) conditions.push(eq(pluginPublication.revoked, false));
+    const rows = (await db
+      .select()
+      .from(pluginPublication)
+      .where(and(...conditions))) as PluginPublicationRow[];
+    return c.json(listPluginsByBuilder({ publications: rows, builderAgentId: builder!, includeRevoked: true }));
   } catch (err) {
     return c.json({ error: 'plugin-list unavailable', detail: String(err) }, 503);
   }

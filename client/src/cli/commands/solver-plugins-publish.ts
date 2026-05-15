@@ -29,15 +29,11 @@ import { getAddress, type Address } from 'viem';
 import type { CommandContext } from '../command.js';
 import {
   digestDirectory,
-  loadSolverPluginManifest,
   resolveSolverPlugin,
 } from '../../plugins/index.js';
 import type { PluginPayload } from '../../erc8004/plugin-registry.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
-
-function writeJson(ctx: CommandContext, value: unknown): void {
-  ctx.writer.write(JSON.stringify(value) + '\n');
-}
+import { writeJson } from './solver-plugins.js';
 
 export interface PublishOptions {
   source: string;
@@ -99,9 +95,8 @@ export async function publishHandler(
   let tarballPath: string;
   let pluginSha256Hex: string;
   try {
-    const { manifest } = loadSolverPluginManifest(loaded.root);
     pluginSha256Hex = digestDirectory(loaded.root);
-    tarballPath = join(packDir, `${manifest.name.replace(/[@/]/g, '_')}-${manifest.version}.tgz`);
+    tarballPath = join(packDir, `${loaded.manifest.name.replace(/[@/]/g, '_')}-${loaded.manifest.version}.tgz`);
     const tar = spawnSync(
       'tar',
       ['-czf', tarballPath, '-C', dirname(loaded.root), basename(loaded.root)],

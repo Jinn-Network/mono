@@ -90,7 +90,7 @@ export function normalizeIpfsRegistryAddUrl(registryUrl: string): string {
   return `${t}/api/v0/add`;
 }
 
-function parseRegistryUploadCid(responseText: string): string {
+export function parseRegistryUploadCid(responseText: string): string {
   let lastHash: string | undefined;
   for (const line of responseText.trim().split('\n')) {
     if (!line.trim()) continue;

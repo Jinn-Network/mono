@@ -8,6 +8,7 @@
 import { getAddress, type Address } from 'viem';
 import type { CommandContext } from '../command.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
+import { writeJson } from './solver-plugins.js';
 import type { RevocationPayload } from '../../erc8004/plugin-registry.js';
 
 export interface RevokeOptions {
@@ -15,10 +16,6 @@ export interface RevokeOptions {
   reason: string;
   configPath: string | undefined;
   builderAgentIdOverride: bigint | undefined;
-}
-
-function writeJson(ctx: CommandContext, value: unknown): void {
-  ctx.writer.write(JSON.stringify(value) + '\n');
 }
 
 export async function revokeHandler(

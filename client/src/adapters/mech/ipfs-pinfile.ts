@@ -11,29 +11,12 @@
  * from `./ipfs.ts` for endpoint resolution and response parsing.
  */
 
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { basename } from 'node:path';
 import { Readable } from 'node:stream';
-import { normalizeIpfsRegistryAddUrl } from './ipfs.js';
+import { normalizeIpfsRegistryAddUrl, parseRegistryUploadCid } from './ipfs.js';
 
 const IPFS_UPLOAD_TIMEOUT_MS = 120_000;
-
-function parseRegistryUploadCid(responseText: string): string {
-  let lastHash: string | undefined;
-  for (const line of responseText.trim().split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line) as { Hash?: unknown };
-      if (typeof entry.Hash === 'string' && entry.Hash.length > 0) {
-        lastHash = entry.Hash;
-      }
-    } catch {
-      // ignore non-JSON lines
-    }
-  }
-  if (!lastHash) throw new Error('IPFS registry upload did not return a CID');
-  return lastHash;
-}
 
 /**
  * Upload a local file to the IPFS registry and return its CID.
@@ -50,16 +33,11 @@ export async function pinFileToIpfs(registryUrl: string, filePath: string): Prom
   url.searchParams.set('cid-version', '1');
   url.searchParams.set('wrap-with-directory', 'false');
 
-  const stat = statSync(filePath);
   const stream = createReadStream(filePath);
   const blob = await new Response(Readable.toWeb(stream) as ReadableStream).blob();
 
   const formData = new FormData();
-  formData.append(
-    'file',
-    new Blob([await blob.arrayBuffer()], { type: 'application/octet-stream' }),
-    basename(filePath),
-  );
+  formData.append('file', blob, basename(filePath));
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), IPFS_UPLOAD_TIMEOUT_MS);
@@ -72,7 +50,7 @@ export async function pinFileToIpfs(registryUrl: string, filePath: string): Prom
     const responseText = await response.text();
     if (response.status !== 200) {
       throw new Error(
-        `IPFS registry upload failed with status ${response.status} (${stat.size} bytes): ${responseText.slice(0, 200)}`,
+        `IPFS registry upload failed with status ${response.status}: ${responseText.slice(0, 200)}`,
       );
     }
     return parseRegistryUploadCid(responseText);

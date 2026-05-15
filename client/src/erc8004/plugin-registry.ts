@@ -149,12 +149,19 @@ export function encodeRevocationPayload(payload: RevocationPayload): Hex {
 
 // ── Metadata key ─────────────────────────────────────────────────────────────
 
+/**
+ * Canonical prefix for plug-in metadata keys on the IdentityRegistry.
+ * Duplicated as `PLUGIN_KEY_PREFIX` in packages/indexer/src/types.ts
+ * (cross-package imports are not wired in this codebase).
+ */
+export const PLUGIN_METADATA_KEY_PREFIX = 'plugin:';
+
 /** Build `plugin:<cid>` per spec §5.2. Never strips, never normalises. */
 export function buildPluginMetadataKey(pluginCid: string): string {
   if (typeof pluginCid !== 'string' || pluginCid.length === 0) {
     throw new PluginPayloadValidationError('pluginCid must be a non-empty string');
   }
-  return `plugin:${pluginCid}`;
+  return `${PLUGIN_METADATA_KEY_PREFIX}${pluginCid}`;
 }
 
 // ── Publisher ────────────────────────────────────────────────────────────────
