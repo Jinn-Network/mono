@@ -6,12 +6,13 @@
  */
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 
-interface GateLogger {
+export interface GateLogger {
   warn(msg: string): void;
   info(msg: string): void;
 }
 
 // Per-manifestCid status memo so we only log once per ready ↔ not-ready transition.
+// MODULE-LEVEL STATE — see _resetReadinessGateMemoForTests below for the test contract.
 const lastReadyByCid = new Map<string, boolean>();
 
 export function gateClaimByReadiness(args: {
@@ -37,7 +38,14 @@ export function gateClaimByReadiness(args: {
   return { proceed: false, reason: status.reason ?? 'harness not ready' };
 }
 
-/** Test-only: reset the per-cid memo between tests. */
+/**
+ * Test-only: reset the per-cid memo between tests.
+ *
+ * IMPORTANT: any test file that imports `gateClaimByReadiness` must call this
+ * in a `beforeEach` hook — the `lastReadyByCid` map is module-level state that
+ * persists across tests in the same Vitest worker. Without the reset, the
+ * transition-memo logic will produce false positives based on prior test runs.
+ */
 export function _resetReadinessGateMemoForTests(): void {
   lastReadyByCid.clear();
 }

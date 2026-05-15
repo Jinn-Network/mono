@@ -433,7 +433,7 @@ export class Daemon {
           const gate = gateClaimByReadiness({
             manifestCid,
             registry: this.harnessReadinessRegistry,
-            logger: { warn: (msg) => console.error(msg), info: (msg) => console.error(msg) },
+            logger: { warn: (msg) => console.warn(msg), info: (msg) => console.log(msg) },
           });
           if (!gate.proceed) continue;
         }
