@@ -48,6 +48,7 @@ export class HarnessReadinessRegistry {
     harnesses: [],
   };
   private timer: ReturnType<typeof setInterval> | null = null;
+  private refreshInFlight = false;
 
   constructor(opts: HarnessReadinessRegistryOptions) {
     this.opts = {
@@ -94,6 +95,16 @@ export class HarnessReadinessRegistry {
   }
 
   async refreshNow(): Promise<void> {
+    if (this.refreshInFlight) return;
+    this.refreshInFlight = true;
+    try {
+      await this._doRefresh();
+    } finally {
+      this.refreshInFlight = false;
+    }
+  }
+
+  private async _doRefresh(): Promise<void> {
     // Group joined entries by harnessName so we only call isReady() once per harness.
     const harnessToCids = new Map<string, string[]>();
     for (const [cid, joined] of Object.entries(this.opts.joinedHarnessesByCid)) {

@@ -162,7 +162,6 @@ export class Daemon {
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
   private jinnClaimLoop?: JinnClaimLoop;
-  private readonly harnessReadinessRegistry?: HarnessReadinessRegistry;
 
   constructor(private readonly config: DaemonConfig) {
     if (config.store) {
@@ -215,7 +214,6 @@ export class Daemon {
         jinnStore: this.store,
       });
     }
-    this.harnessReadinessRegistry = config.harnessReadinessRegistry;
   }
 
   async start(): Promise<void> {
@@ -427,12 +425,12 @@ export class Daemon {
 
       // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),
       // skip this task without blocking other loops. Logs once per ready↔not-ready transition.
-      if (this.harnessReadinessRegistry) {
+      if (this.config.harnessReadinessRegistry) {
         const manifestCid = taskAnnouncement.task.solverNetManifestCid;
         if (manifestCid) {
           const gate = gateClaimByReadiness({
             manifestCid,
-            registry: this.harnessReadinessRegistry,
+            registry: this.config.harnessReadinessRegistry,
             logger: { warn: (msg) => console.warn(msg), info: (msg) => console.log(msg) },
           });
           if (!gate.proceed) continue;

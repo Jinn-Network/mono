@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/task.js';
-import { probeClaudeAuth } from '../../../preflight/claude-auth.js';
+import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { PredictionV1TaskSchema } from '../../../types/prediction.js';
 
 import { buildSessionPrompt } from './prompt.js';
@@ -39,31 +39,14 @@ export class ClaudeMcpPredictionImpl implements Harness {
   }
 
   async isReady(
-    _ctx?: { solverType: string; role?: 'restoration' | 'evaluation' },
+    ctx?: { solverType: string; role?: 'restoration' | 'evaluation' },
   ): Promise<ReadyStatus> {
     if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    const result = probeClaudeAuth({
-      context: 'bare',
-      cwd: process.cwd(),
-      claudePath: this.config.claudePath ?? 'claude',
-    });
-    if (result.authenticated) {
-      return { ready: true, reason: result.detail };
-    }
-    const binaryMissing = result.detail.includes('not found on PATH');
-    return {
-      ready: false,
-      reason: result.detail,
-      nextStep: binaryMissing
-        ? {
-            description: 'Install Claude Code from the operator app',
-            url: '/v1/setup/claude/install',
-          }
-        : {
-            description: 'Sign in to Claude from the operator app',
-            url: '/v1/auth/claude/spawn',
-          },
-    };
+    // TODO(vh74.2-followup): docker-compose context not threaded through HarnessEnv for prediction harnesses yet
+    return buildClaudeIsReady({
+      getClaudePath: () => this.config.claudePath ?? 'claude',
+      getContext: () => 'bare',
+    })(ctx);
   }
 
   async canAttempt(
