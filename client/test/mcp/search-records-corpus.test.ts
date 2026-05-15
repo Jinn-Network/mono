@@ -23,7 +23,7 @@ function makeEnvelope(overrides: Partial<SignedEnvelope> = {}): SignedEnvelope {
   return {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'prediction.v1',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: 1745978500,
     task: {
       cid: 'bafyTask',
@@ -233,7 +233,7 @@ describe('search_records (corpus-backed)', () => {
     const donatedSha = '2'.repeat(64);
     const corpus = makeReadOnlyCorpus(makePreview(envelopeRef, makeEnvelope({
       solverType: 'swe-rebench-v2.v1',
-      role: 'restoration',
+      role: 'solution',
       artifacts: [{
         artifactType: 'swe-rebench-v2_v1_solution',
         sha256: donatedSha,
@@ -249,7 +249,7 @@ describe('search_records (corpus-backed)', () => {
 
     const out = await handleSearchRecords(corpus, store, {
       solverType: 'swe-rebench-v2.v1',
-      role: 'restoration',
+      role: 'solution',
       artifactType: 'swe-rebench-v2_v1_solution',
       limit: 10,
     });
@@ -278,10 +278,10 @@ describe('search_records (corpus-backed)', () => {
   it('post-filters network records after fetching manifests', async () => {
     const store = new Store(':memory:');
     const matchingRef = { ...envelopeRef, manifestCid: 'bafyVerdict' };
-    const restorationRef = { ...envelopeRef, manifestCid: 'bafyRestoration' };
+    const solutionRef = { ...envelopeRef, manifestCid: 'bafySolution' };
     const corpus = makeReadOnlyCorpus([
-      makePreview(restorationRef, makeEnvelope({
-        role: 'restoration',
+      makePreview(solutionRef, makeEnvelope({
+        role: 'solution',
         task: {
           cid: 'bafyOtherTask',
           onchainCreationTx: '0x' + '1'.repeat(64),
@@ -344,7 +344,7 @@ describe('search_records (corpus=null fallback)', () => {
     try {
       const store = new Store(':memory:');
       store.saveEnvelopeProjection(makeProjection({ envelopeId: 'projection-verdict', role: 'verdict' }));
-      store.saveEnvelopeProjection(makeProjection({ envelopeId: 'projection-restoration', role: 'restoration' }));
+      store.saveEnvelopeProjection(makeProjection({ envelopeId: 'projection-solution', role: 'solution' }));
 
       const out = await handleSearchRecords(null, store, { role: 'verdict', limit: 10 });
 

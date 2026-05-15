@@ -394,6 +394,71 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
     expect(publishContentV2Mock).not.toHaveBeenCalled();
   });
 
+  // ── jinn-mono-n93o: evaluation role publishes `evaluation:<cid>` ────────────
+
+  it('deliver() publishes evaluation:<cid> when taskRole=evaluation (jinn-mono-n93o)', async () => {
+    const publishContentMock = vi.fn().mockResolvedValue('0xpubtxhash' as Hex);
+    const publishContentV2Mock = vi.fn().mockResolvedValue('0xpubtxhashv2' as Hex);
+    const mockPublisher = {
+      publishContent: publishContentMock,
+      publishContentV2: publishContentV2Mock,
+    } as unknown as IdentityPublisher;
+
+    const engine = new TestEngine(makeOpts(store, tmp, mockPublisher));
+    const requestId = 'req-deliver-eval-pub';
+
+    // Seed an evaluation-role intent in DELIVERING with the v2 fields populated
+    // so we exercise the same payload-v2 path restoration uses; the only
+    // difference under test is the metadataKey prefix.
+    const now = Date.now() - 1000;
+    const input = makeIntentInput(requestId);
+    input.taskRole = 'evaluation';
+    await engine.observe(input);
+    const p = engine.testPersistence;
+    p.transition(requestId, TaskRunState.CLAIMED, { implName: 'claude-code-learner' });
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
+      workingDir: '/tmp/wd',
+      implStateDir: '/tmp/impl',
+      preSnapshotCapturedAt: now,
+      preSnapshotPayload: { capturedAt: now, hlTime: 0 },
+    });
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: now,
+      postSnapshotPayload: { capturedAt: now, hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: {},
+    });
+    const v2CodeDigestSha256 = `sha256:${'cd'.repeat(32)}`;
+    p.transition(requestId, TaskRunState.PACKAGING, {
+      manifestCid: PACK_MANIFEST_CID,
+      artifactCids: {},
+      evidenceHash: PACK_EVIDENCE_HASH,
+      executorMode: 'frozen',
+      executorCodeDigest: v2CodeDigestSha256,
+    });
+    p.transition(requestId, TaskRunState.DELIVERING);
+
+    await engine.process(requestId);
+
+    const intent = engine.testPersistence.getByRequestId(requestId)!;
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
+
+    // v2 path was used — v1 mock untouched.
+    expect(publishContentV2Mock).toHaveBeenCalledTimes(1);
+    expect(publishContentMock).not.toHaveBeenCalled();
+    const arg = publishContentV2Mock.mock.calls[0]![0] as {
+      kind: string;
+      cid: string;
+      payload: { version: number; manifestHash: Hex };
+    };
+    expect(arg.kind).toBe('evaluation');
+    expect(arg.cid).toBe(PACK_MANIFEST_CID);
+    expect(arg.payload.version).toBe(2);
+    expect(arg.payload.manifestHash).toBe(PACK_EVIDENCE_HASH);
+  });
+
   it('setMetadata is idempotent on retry — publishContent called with same evidenceHash on repeated deliver()', async () => {
     // setMetadata (publishContent on IdentityRegistry) is a pure key-value write;
     // calling it a second time with the same payload is safe. This test seeds two

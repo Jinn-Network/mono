@@ -59,11 +59,12 @@ describe('x402 handler — dynamic per-row price', () => {
 
     const res = await app.request(`/v1/artifacts/${sha256}/content`);
     expect(res.status).toBe(402);
-    const body = (await res.json()) as { accepts: Array<{ price: string }> };
+    expect(res.headers.get('PAYMENT-REQUIRED')).toBeTruthy();
+    const body = (await res.json()) as { accepts: Array<{ amount: string; asset: string }> };
     expect(body.accepts).toBeDefined();
     expect(body.accepts.length).toBeGreaterThan(0);
-    // The 402 response carries this artifact's price, not a server-static one.
-    expect(body.accepts.some((a) => a.price.includes('0.001'))).toBe(true);
+    // USDC has 6 decimals; 0.001 USDC is 1000 base units.
+    expect(body.accepts.some((a) => a.amount === '1000' && a.asset)).toBe(true);
     expect(store.listArtifactAccessEvents({ sha256 })).toEqual([
       expect.objectContaining({
         sha256,

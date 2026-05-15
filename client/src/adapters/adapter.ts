@@ -8,6 +8,7 @@ import type {
   DeliveredResult,
 } from '../types/index.js';
 import type { Hex } from 'viem';
+import type { VerdictCode } from './mech/verdict-code.js';
 
 export interface ExecutionAdapter {
   readonly name: string;
@@ -42,7 +43,7 @@ export interface ExecutionAdapter {
     blockNumber?: number;
   }>;
   submitSolutionDelivery?(requestId: RequestId, solutionDigest: Hex): Promise<void>;
-  submitVerdictDelivery?(requestId: RequestId, verdictDigest: Hex, verdictCode?: number): Promise<void>;
+  submitVerdictDelivery?(requestId: RequestId, verdictDigest: Hex, verdictCode: VerdictCode): Promise<void>;
 
   // Deliveries
   watchForDeliveries(): AsyncIterable<DeliveredResult>;
