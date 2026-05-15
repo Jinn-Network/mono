@@ -404,11 +404,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.harnessReadinessRegistry) {
     addHarnessReadinessRoutes(app, { registry: config.harnessReadinessRegistry });
-  } else if (config.ui) {
-    console.warn(
-      '[api] harnessReadinessRegistry not wired; /v1/harnesses/* routes inactive (SPA will see 404s)',
-    );
   }
+  // When harnessReadinessRegistry is absent at startApiServer time, main.ts
+  // mounts the routes post-bootstrap via addHarnessReadinessRoutes(app, ...)
+  // on the exposed setupApiServer.app reference (same pattern as
+  // registerSolverNetsEndpoints). No warning needed — routes are always live
+  // before the first operator request that cares about harness readiness.
 
   if (config.ui) {
     addOperatorArtifactsRoutes(app, {
