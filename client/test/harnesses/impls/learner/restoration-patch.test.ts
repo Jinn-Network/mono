@@ -115,6 +115,39 @@ describe('stripTestPathHunks', () => {
     const patch = '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n';
     expect(stripTestPathHunks(patch)).toBe(patch);
   });
+
+  // jinn-mono-c52e: producer-side trailing-newline invariant
+  it('appends a trailing newline when the source patch ends mid-line', () => {
+    const patch = [
+      'diff --git a/src/a.py b/src/a.py',
+      '--- a/src/a.py',
+      '+++ b/src/a.py',
+      '@@ -1 +1 @@',
+      '-1',
+      '+2',
+    ].join('\n');  // NOTE: no trailing '' → no trailing \n
+    expect(patch.endsWith('\n')).toBe(false);
+    const out = stripTestPathHunks(patch);
+    expect(out.endsWith('\n')).toBe(true);
+    expect(out).toContain('src/a.py');
+  });
+
+  it('preserves a single trailing newline (does not double-add)', () => {
+    const patch = [
+      'diff --git a/src/a.py b/src/a.py',
+      '--- a/src/a.py',
+      '+++ b/src/a.py',
+      '@@ -1 +1 @@',
+      '-1',
+      '+2',
+      '',
+    ].join('\n');  // trailing '' → trailing \n
+    expect(patch.endsWith('\n')).toBe(true);
+    expect(patch.endsWith('\n\n')).toBe(false);
+    const out = stripTestPathHunks(patch);
+    expect(out.endsWith('\n')).toBe(true);
+    expect(out.endsWith('\n\n')).toBe(false);
+  });
 });
 
 describe('gitApplyParseCheck', () => {

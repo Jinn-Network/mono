@@ -465,6 +465,40 @@ describe('PythonEvalRunner', () => {
       expect(cleanupWarn).toContain('exited 1');
     });
   });
+
+  // jinn-mono-c52e: trailing-newline normalisation on patches.json
+  describe('patch trailing-newline normalisation', () => {
+    it('appends \\n when args.patch ends mid-line (defensive guard against producer-side regression)', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
+      // Source patch ends mid-line — reproduces the 2026-05-14 patch_corrupt
+      // observed on bafkreiggeeb45ricooagdji6lewdzossfiedfobhs4isw7hwh2anllk2dm.
+      const sourcePatch = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y';
+      expect(sourcePatch.endsWith('\n')).toBe(false);
+
+      await runner.runEval({ ...REQUEST, patch: sourcePatch });
+
+      const observedPatches = JSON.parse(
+        readFileSync(join(upstreamRepoDir, 'observed-patches.json'), 'utf8'),
+      ) as Array<{ instance_id: string; patch: string }>;
+      expect(observedPatches[0]!.patch).toBe(`${sourcePatch}\n`);
+      expect(observedPatches[0]!.patch.endsWith('\n')).toBe(true);
+    });
+
+    it('preserves a single trailing newline (no double-add)', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
+      const sourcePatch = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\n';
+
+      await runner.runEval({ ...REQUEST, patch: sourcePatch });
+
+      const observedPatches = JSON.parse(
+        readFileSync(join(upstreamRepoDir, 'observed-patches.json'), 'utf8'),
+      ) as Array<{ instance_id: string; patch: string }>;
+      expect(observedPatches[0]!.patch).toBe(sourcePatch);
+      expect(observedPatches[0]!.patch.endsWith('\n\n')).toBe(false);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
