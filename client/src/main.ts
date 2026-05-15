@@ -2120,6 +2120,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
     corpusFactory,
+    harnessReadinessRegistry,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,

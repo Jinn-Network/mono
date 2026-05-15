@@ -18,6 +18,8 @@ import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
 import type { Task } from '../types/index.js';
+import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
+import { gateClaimByReadiness } from './readiness-gate.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -131,6 +133,15 @@ export interface DaemonConfig {
      */
     packagingDeps?: Omit<NonNullable<TaskEngineOptions['packagingDeps']>, 'store'>;
   };
+
+  /**
+   * Per-harness readiness registry for pre-claim gating.
+   * When present, the engine-watcher loop checks harness readiness before
+   * claiming each task and skips tasks whose harness reports not-ready.
+   * Constructed and started by main.ts; omitted in unit-test contexts that
+   * don't exercise the cost-mutating claim path.
+   */
+  harnessReadinessRegistry?: HarnessReadinessRegistry;
 }
 
 export class Daemon {
@@ -151,6 +162,7 @@ export class Daemon {
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
   private jinnClaimLoop?: JinnClaimLoop;
+  private readonly harnessReadinessRegistry?: HarnessReadinessRegistry;
 
   constructor(private readonly config: DaemonConfig) {
     if (config.store) {
@@ -203,6 +215,7 @@ export class Daemon {
         jinnStore: this.store,
       });
     }
+    this.harnessReadinessRegistry = config.harnessReadinessRegistry;
   }
 
   async start(): Promise<void> {
@@ -410,6 +423,20 @@ export class Daemon {
       if (!accept.ok) {
         console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
         continue;
+      }
+
+      // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),
+      // skip this task without blocking other loops. Logs once per ready↔not-ready transition.
+      if (this.harnessReadinessRegistry) {
+        const manifestCid = taskAnnouncement.task.solverNetManifestCid;
+        if (manifestCid) {
+          const gate = gateClaimByReadiness({
+            manifestCid,
+            registry: this.harnessReadinessRegistry,
+            logger: { warn: (msg) => console.error(msg), info: (msg) => console.error(msg) },
+          });
+          if (!gate.proceed) continue;
+        }
       }
 
       let request;
