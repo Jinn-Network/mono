@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { probeClaudeAuth } from '../../../../src/preflight/claude-auth.js';
-import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/harness.js';
+import { ClaudeCodeLearnerImpl } from '../../../../src/harnesses/impls/claude-code-learner/index.js';
 import type { HarnessAdapter, TaskSessionInputs } from '../../../../src/harnesses/impls/claude-code-learner/types.js';
 
 vi.mock('../../../../src/preflight/claude-auth.js', () => ({

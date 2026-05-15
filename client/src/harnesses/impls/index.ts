@@ -223,6 +223,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   });
   out.push(new ClaudeCodeLearnerImpl({
     adapter: learnerAdapter,
+    claudePath: env.claudePath,
   }));
 
   // Codex-backed peer Harness. It supports the same restoration surface as
@@ -239,6 +240,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(new ClaudeCodeLearnerImpl({
     name: CODEX_HARNESS,
     adapter: codexLearnerAdapter,
+    claudePath: env.claudePath,
   }));
 
   if (env.disabledNames && env.disabledNames.length > 0) {
