@@ -105,7 +105,9 @@ export function stripTestPathHunks(unifiedDiff: string): string {
   // If every kept section is empty-path preamble only, treat as empty too.
   if (!kept.some((s) => s.lines.some((l) => l.startsWith('diff --git ')))) return '';
   const out = kept.flatMap((s) => s.lines).join('\n');
-  return out;
+  // jinn-mono-c52e: `git apply` rejects diffs that end mid-line with
+  // "corrupt patch at line N" — enforce trailing newline on the envelope.
+  return out.endsWith('\n') ? out : `${out}\n`;
 }
 
 /**

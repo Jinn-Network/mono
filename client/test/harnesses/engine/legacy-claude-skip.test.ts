@@ -14,6 +14,10 @@ class ExposedEngine extends TaskEngine {
     const intent = this.persistence.getOrThrow(requestId);
     await this.runImpl(intent);
   }
+  async invokePack(requestId: string): Promise<void> {
+    const intent = this.persistence.getOrThrow(requestId);
+    await this.pack(intent);
+  }
 }
 
 async function buildEngineWith(store: Store, run: Harness['run'], implName = 'legacy-claude') {
@@ -154,6 +158,28 @@ describe('legacy-claude skip handling', () => {
       const intent = persistence.getOrThrow('req-1');
       expect(intent.state).toBe(TaskRunState.POST_SNAPSHOT);
       expect(intent.gatingClaim).toMatchObject({ skipped: true, reason: 'claude_unavailable' });
+    });
+  });
+
+  // jinn-mono-4tfq: pack() must transition a skipped Solution to FAILED
+  // before the packagingDeps guard fires. The skip path needs no deps.
+  it('pack() short-circuits to FAILED on a skipped Solution even when no packagingDeps are wired', async () => {
+    await withTempStore(async (store) => {
+      const { engine, persistence } = await buildEngineWith(store, async () => {
+        throw new SkippableError('admission_missing_or_unscorable', 'no scorable admission for foo');
+      });
+      // RUNNING → POST_SNAPSHOT (skipped Solution persisted).
+      await engine.invokeRunImpl('req-1');
+      expect(persistence.getOrThrow('req-1').state).toBe(TaskRunState.POST_SNAPSHOT);
+
+      // Walk POST_SNAPSHOT → PACKAGING then invoke pack(). With no
+      // packagingDeps wired, the pre-fix ordering would throw NotImplementedError.
+      persistence.transition('req-1', TaskRunState.PACKAGING);
+      await engine.invokePack('req-1');
+
+      const intent = persistence.getOrThrow('req-1');
+      expect(intent.state).toBe(TaskRunState.FAILED);
+      expect(intent.failureReason).toContain('admission_missing_or_unscorable');
     });
   });
 });

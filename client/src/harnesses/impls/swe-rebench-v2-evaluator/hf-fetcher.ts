@@ -20,21 +20,50 @@ export interface HttpHfFetcherOptions {
   maxRows?: number;
   /** Fetch implementation. Defaults to global fetch (allows test injection). */
   fetchImpl?: typeof fetch;
+  /**
+   * Per-page retry backoff schedule (ms) for transient HTTP 5xx or network
+   * errors. Default: [200, 800, 3200]. Each entry is the delay before the
+   * Nth retry; an empty array disables retries. Non-5xx responses (e.g.
+   * 404) are not retried — they're not transient.
+   */
+  retryBackoffMs?: number[];
 }
 
 const DEFAULT_BASE_URL = 'https://datasets-server.huggingface.co/rows';
+const DEFAULT_RETRY_BACKOFF_MS = [200, 800, 3200];
 
 export class HttpHfFetcher implements HfFetcher {
   private readonly baseUrl: string;
   private readonly pageSize: number;
   private readonly maxRows: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly retryBackoffMs: number[];
 
   constructor(opts: HttpHfFetcherOptions = {}) {
     this.baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
     this.pageSize = Math.min(opts.pageSize ?? 100, 100);
     this.maxRows = opts.maxRows ?? 1000;
     this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
+    this.retryBackoffMs = opts.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+  }
+
+  private async fetchWithRetry(url: string): Promise<Response> {
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt <= this.retryBackoffMs.length; attempt += 1) {
+      try {
+        const res = await this.fetchImpl(url);
+        if (res.ok || (res.status >= 400 && res.status < 500)) return res;
+        // 5xx → retry-eligible
+        lastErr = new Error(`HF returned ${res.status}`);
+      } catch (err) {
+        lastErr = err;
+      }
+      if (attempt < this.retryBackoffMs.length) {
+        await new Promise((r) => setTimeout(r, this.retryBackoffMs[attempt]));
+      }
+    }
+    if (lastErr instanceof Error) throw lastErr;
+    throw new Error('HF fetch failed after retries');
   }
 
   async fetchTaskRow(args: {
@@ -51,7 +80,7 @@ export class HttpHfFetcher implements HfFetcher {
       url.searchParams.set('offset', String(offset));
       url.searchParams.set('length', String(this.pageSize));
 
-      const res = await this.fetchImpl(url.toString());
+      const res = await this.fetchWithRetry(url.toString());
       if (!res.ok) {
         throw new Error(
           `HF datasets-server returned ${res.status} for ${args.hf_dataset}/${args.hf_split}`,
