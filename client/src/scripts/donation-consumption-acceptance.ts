@@ -1528,7 +1528,7 @@ async function main(): Promise<void> {
       name: 'search_records',
       args: {
         solverType: 'swe-rebench-v2.v1',
-        role: 'restoration',
+        role: 'solution',
         artifactType: SWE_SOLUTION_ARTIFACT_TYPE,
         limit: 50,
       },

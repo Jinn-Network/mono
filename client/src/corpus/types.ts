@@ -6,7 +6,7 @@
  */
 
 import type { Store } from '../store/store.js';
-import type { ArtifactSource, EvidenceTier, Role, SignedEnvelope } from '../types/envelope.js';
+import type { ArtifactSource, EvidenceTier, LegacyEnvelopeRole, Role, SignedEnvelope } from '../types/envelope.js';
 
 export interface CorpusOptions {
   ipfsGatewayUrl: string;
@@ -69,7 +69,7 @@ export interface EnvelopeProjection {
 export interface EnvelopeProjectionQuery {
   envelopeRefs?: readonly string[];
   solverType?: string;
-  role?: Role;
+  role?: Role | LegacyEnvelopeRole;
   taskCid?: string;
   taskId?: string;
   requestId?: string;

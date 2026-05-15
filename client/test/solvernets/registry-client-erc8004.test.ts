@@ -411,6 +411,8 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishManifest', () => 
 
 // ── Tests: publishLifecycleTransition ───────────────────────────────────────
 
+const LIFECYCLE_TEST_TIMESTAMP = '2026-05-06T01:00:00.000Z';
+
 describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransition', () => {
   let ipfs: ReturnType<typeof makeMockIpfs>;
   let publisher: ReturnType<typeof makeMockPublisher>;
@@ -425,6 +427,7 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
       ipfs,
       publisher,
       network: 'base-sepolia',
+      now: () => new Date(LIFECYCLE_TEST_TIMESTAMP),
     });
   });
 
@@ -448,8 +451,15 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
     expect(lifecycleCall.key).toBe(`solvernet-manifest:${cid}`);
     expect(lifecycleCall.agentId).toBe(signer.agentId);
 
-    const json = JSON.parse(new TextDecoder().decode(lifecycleCall.value)) as Record<string, unknown>;
-    expect(json.status).toBe('paused');
+    const payloadText = new TextDecoder().decode(lifecycleCall.value);
+    const expectedPayload = {
+      schemaVersion: 'solvernet.lifecycle.v1',
+      status: 'paused',
+      at: LIFECYCLE_TEST_TIMESTAMP,
+      hash: manifestHash(manifest),
+    };
+    expect(JSON.parse(payloadText)).toEqual(expectedPayload);
+    expect(payloadText).toBe(canonicalJson(expectedPayload));
   });
 
   it('rejects when signer.agentId does not match launcherAgentId arg', async () => {

@@ -1,4 +1,5 @@
 import type { EnvelopeProjection } from './types.js';
+import { normalizeEnvelopeRole } from '../types/envelope.js';
 
 export const DEFAULT_PREDICTION_BRIER_SCOREBOARD_WINDOW_DAYS = 84;
 
@@ -296,7 +297,10 @@ function indexSolutionProjections(projections: readonly EnvelopeProjection[]): M
   const byRef = new Map<string, EnvelopeProjection>();
 
   for (const projection of projections) {
-    if (projection.solverType !== 'prediction.v1' || projection.role !== 'restoration') continue;
+    if (
+      projection.solverType !== 'prediction.v1' ||
+      normalizeEnvelopeRole(projection.role) !== 'solution'
+    ) continue;
     for (const ref of solutionProjectionRefs(projection)) {
       if (!byRef.has(ref)) byRef.set(ref, projection);
     }

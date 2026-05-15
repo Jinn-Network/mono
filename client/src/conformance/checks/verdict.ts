@@ -4,13 +4,13 @@
  * Scope: docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md §3.3.
  *
  * Verdict envelopes must carry:
- *   - payload.restorationEnvelope: { cid, sha256 } — back-reference to the
- *     restoration envelope being evaluated. V1: CID shape-only check; sha256
- *     verified against ctx.restorationEnvelopeBytes when provided.
+ *   - payload.solutionEnvelope: { cid, sha256 } — back-reference to the
+ *     solution envelope being evaluated. V1: CID shape-only check; sha256
+ *     verified against ctx.solutionEnvelopeBytes when provided.
  *   - payload.verificationOfRestoration: { claimedTier, sdkVersion, timestamp,
  *     checks[], overall } — structural validity.
  *
- * Both checks skip silently on restoration-role envelopes.
+ * Both checks skip silently on solution-role envelopes.
  */
 
 import { createHash } from 'node:crypto';
@@ -23,13 +23,13 @@ import type { CheckResult, ConformanceContext } from '../types.js';
  * Layer: 1
  *
  * For verdict-role envelopes:
- *   1. payload.restorationEnvelope must be present with string `cid` + `sha256`.
- *   2. If ctx.restorationEnvelopeBytes is provided, sha256(bytes) must match
- *      payload.restorationEnvelope.sha256.
- *   3. If ctx.restorationEnvelopeBytes is NOT provided, fail — restoration
+ *   1. payload.solutionEnvelope must be present with string `cid` + `sha256`.
+ *   2. If ctx.solutionEnvelopeBytes is provided, sha256(bytes) must match
+ *      payload.solutionEnvelope.sha256.
+ *   3. If ctx.solutionEnvelopeBytes is NOT provided, fail — solution
  *      CID did not resolve.
  *
- * Skipped on restoration-role envelopes.
+ * Skipped on solution-role envelopes.
  */
 export function checkVerdictBackReference(ctx: ConformanceContext): CheckResult {
   const id = 'verdict.back-ref';
@@ -42,7 +42,7 @@ export function checkVerdictBackReference(ctx: ConformanceContext): CheckResult 
   }
 
   const payload = env.payload as Record<string, unknown>;
-  const ref = payload?.restorationEnvelope as
+  const ref = (payload?.solutionEnvelope ?? payload?.restorationEnvelope) as
     | { cid?: unknown; sha256?: unknown }
     | null
     | undefined;
@@ -52,20 +52,21 @@ export function checkVerdictBackReference(ctx: ConformanceContext): CheckResult 
       id,
       layer,
       passed: false,
-      detail: 'payload.restorationEnvelope missing or malformed (requires cid + sha256 strings)',
+      detail: 'payload.solutionEnvelope missing or malformed (requires cid + sha256 strings)',
     };
   }
 
-  if (!ctx.restorationEnvelopeBytes) {
+  const solutionEnvelopeBytes = ctx.solutionEnvelopeBytes ?? ctx.restorationEnvelopeBytes;
+  if (!solutionEnvelopeBytes) {
     return {
       id,
       layer,
       passed: false,
-      detail: `restoration CID ${ref.cid} did not resolve from IPFS`,
+      detail: `solution CID ${ref.cid} did not resolve from IPFS`,
     };
   }
 
-  const actualSha = createHash('sha256').update(ctx.restorationEnvelopeBytes).digest('hex');
+  const actualSha = createHash('sha256').update(solutionEnvelopeBytes).digest('hex');
   if (actualSha !== ref.sha256.toLowerCase()) {
     return {
       id,
@@ -92,7 +93,7 @@ export function checkVerdictBackReference(ctx: ConformanceContext): CheckResult 
  *     - checks: nonempty array
  *     - overall: 'valid' | 'invalid'
  *
- * Skipped on restoration-role envelopes.
+ * Skipped on solution-role envelopes.
  */
 export function checkVerificationRecord(ctx: ConformanceContext): CheckResult {
   const id = 'verdict.verification-record';
