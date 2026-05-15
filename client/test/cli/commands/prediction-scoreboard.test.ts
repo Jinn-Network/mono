@@ -70,7 +70,7 @@ function solutionProjection(id: string): EnvelopeProjection {
     envelopeSha256: null,
     signatureHash: `0x${id.padEnd(64, '1').slice(0, 64)}`,
     solverType: 'prediction.v1',
-    role: 'restoration',
+    role: 'solution',
     taskCid: 'bafy-task-shared',
     taskId: 'prediction-v1-polymarket-abc',
     requestId: `solution-request-${id}`,

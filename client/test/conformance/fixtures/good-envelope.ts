@@ -1,12 +1,12 @@
 /**
  * Fixture builders for conformance tests.
  *
- * buildGoodRestorationFixture() — a portfolio.v0 restoration envelope with
+ * buildGoodRestorationFixture() — a portfolio.v0 solution envelope with
  *   all required artifact types: trajectory, system_snapshot, output.portfolio.v0.
  *   One artifact is linked to the emit span from buildGoodTrajectoryFixture.
  *
  * buildGoodVerdictFixture() — a portfolio.v0 verdict envelope that references
- *   the companion restoration envelope via payload.restorationEnvelope.
+ *   the companion solution envelope via payload.solutionEnvelope.
  */
 
 import { vi } from 'vitest';
@@ -31,7 +31,7 @@ export const TEST_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 const STUB_TASK_CID = 'bafy-test-task-001';
 const STUB_TRAJ_CID = 'bafy-test-trajectory-001';
 
-// ─── Restoration fixture ─────────────────────────────────────────────────────
+// ─── Solution fixture ────────────────────────────────────────────────────────
 
 export interface RestorationFixture {
   task: Task;
@@ -42,7 +42,7 @@ export interface RestorationFixture {
 
 const restorationInputs: EnvelopeInputs = {
   solverType: 'portfolio.v0',
-  role: 'restoration',
+  role: 'solution',
   task: {
     cid: STUB_TASK_CID,
     onchainCreationTx: '0x' + 'ab'.repeat(32),
@@ -112,7 +112,7 @@ const deps: EnvelopeAssemblyDeps = {
   agentEoaPrivateKey: TEST_PK,
 };
 
-/** Build a well-formed portfolio.v0 restoration fixture. */
+/** Build a well-formed portfolio.v0 solution fixture. */
 export async function buildGoodRestorationFixture(): Promise<RestorationFixture> {
   const result = await assembleAndSignEnvelope(restorationInputs, deps);
   const envelopeBytes = new TextEncoder().encode(JSON.stringify(result.envelope));
@@ -131,7 +131,7 @@ export async function buildGoodRestorationFixture(): Promise<RestorationFixture>
     task: stubTask,
     envelope: result.envelope,
     envelopeBytes,
-    envelopeCid: 'bafy-test-restoration-001',
+    envelopeCid: 'bafy-test-solution-001',
   };
 }
 
@@ -141,21 +141,21 @@ export interface VerdictFixture {
   envelope: SignedEnvelope;
   envelopeBytes: Uint8Array;
   envelopeCid: string;
-  restorationEnvelopeBytes: Uint8Array;
-  restorationEnvelopeCid: string;
+  solutionEnvelopeBytes: Uint8Array;
+  solutionEnvelopeCid: string;
 }
 
 /** Build a well-formed portfolio.v0 verdict fixture. */
 export async function buildGoodVerdictFixture(): Promise<VerdictFixture> {
-  // First build the restoration envelope to get its bytes and sha256
-  const restorationResult = await assembleAndSignEnvelope(restorationInputs, deps);
-  const restorationEnvelopeBytes = new TextEncoder().encode(
-    JSON.stringify(restorationResult.envelope),
+  // First build the solution envelope to get its bytes and sha256.
+  const solutionResult = await assembleAndSignEnvelope(restorationInputs, deps);
+  const solutionEnvelopeBytes = new TextEncoder().encode(
+    JSON.stringify(solutionResult.envelope),
   );
-  const restorationSha256 = createHash('sha256')
-    .update(restorationEnvelopeBytes)
+  const solutionSha256 = createHash('sha256')
+    .update(solutionEnvelopeBytes)
     .digest('hex');
-  const restorationCid = 'bafy-test-restoration-001';
+  const solutionCid = 'bafy-test-solution-001';
 
   const verdictInputs: EnvelopeInputs = {
     solverType: 'portfolio.v0',
@@ -182,9 +182,9 @@ export async function buildGoodVerdictFixture(): Promise<VerdictFixture> {
     },
     artifacts: [],
     payload: {
-      restorationEnvelope: {
-        cid: restorationCid,
-        sha256: restorationSha256,
+      solutionEnvelope: {
+        cid: solutionCid,
+        sha256: solutionSha256,
       },
       verificationOfRestoration: {
         claimedTier: 'self-signed',
@@ -222,7 +222,7 @@ export async function buildGoodVerdictFixture(): Promise<VerdictFixture> {
     envelope: result.envelope,
     envelopeBytes,
     envelopeCid: 'bafy-test-verdict-001',
-    restorationEnvelopeBytes,
-    restorationEnvelopeCid: restorationCid,
+    solutionEnvelopeBytes,
+    solutionEnvelopeCid: solutionCid,
   };
 }

@@ -23,7 +23,14 @@ const DEFAULT_API_PORT = 7331;
 
 export interface DaemonConfig {
   adapter: ExecutionAdapter;
-  runner: Runner;
+  /**
+   * Legacy Runner only consumed by `LegacyClaudeImpl` via `buildHarnesses`.
+   * Daemon itself never reads this field; it's declared here only so that
+   * production wiring in main.ts can fail loudly when LegacyClaudeImpl
+   * needs a runner the caller forgot to supply. Tests and Phase-1+ harness
+   * callers that don't construct LegacyClaudeImpl can omit it.
+   */
+  runner?: Runner;
   dbPath: string;
   shutdownTimeoutMs?: number;
   /** Engine tick interval (ms) for re-driving in-flight tasks. Defaults to 5000. */

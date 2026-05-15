@@ -75,3 +75,17 @@ export function parsePluginKey(key: string): { cid: string } | null {
   const cid = key.slice(PLUGIN_KEY_PREFIX.length);
   return cid.length > 0 ? { cid } : null;
 }
+
+// ── HarnessCheckpoint key parsing ─────────────────────────────────────────────
+
+export const HARNESS_CHECKPOINT_KEY_PREFIX = 'harness.checkpoint:';
+
+/**
+ * Returns the manifest CID from a `harness.checkpoint:<cid>` key, or null.
+ * Mirrors parseSolverNetManifestKey.
+ */
+export function parseHarnessCheckpointKey(key: string): string | null {
+  if (!key.startsWith(HARNESS_CHECKPOINT_KEY_PREFIX)) return null;
+  const cid = key.slice(HARNESS_CHECKPOINT_KEY_PREFIX.length);
+  return cid.length > 0 ? cid : null;
+}

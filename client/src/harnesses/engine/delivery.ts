@@ -12,6 +12,7 @@
 
 import type { Hex, PublicClient, WalletClient, Address } from 'viem';
 import type { EvictionRecoveryConfig } from '../../adapters/mech/types.js';
+import type { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import {
   cidToDigestHex,
 } from '../../adapters/mech/ipfs.js';
@@ -50,7 +51,7 @@ export interface DeliveryResult {
 
 export interface DeliveryClaimOptions {
   kind?: 'solution' | 'verdict';
-  verdictCode?: number;
+  verdictCode?: VerdictCode;
 }
 
 /**

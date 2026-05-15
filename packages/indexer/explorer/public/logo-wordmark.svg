@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 60" fill="none">
+  
+  <g transform="translate(0,6)">
+    <circle cx="24" cy="24" r="22" stroke="currentColor" stroke-width="1.5" fill="none"></circle>
+    <path d="M24 5 L42.5 37 L5.5 37 Z" stroke="currentColor" stroke-width="1.5" fill="none"></path>
+    <line x1="2" y1="24" x2="46" y2="24" stroke="currentColor" stroke-width="1.5"></line>
+    <circle cx="24" cy="24" r="1.6" fill="currentColor"></circle>
+  </g>
+  
+  <text x="60" y="40" font-family="Instrument Serif, Times New Roman, serif" font-size="42" font-style="italic" fill="currentColor" letter-spacing="0.5">jinn</text>
+</svg>

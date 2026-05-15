@@ -118,6 +118,32 @@ describe('deriveLiveNow', () => {
     expect(result.cta.href).toBe('/operator#solvernets');
   });
 
+  it('routes the missing legacy prediction SolverNet state to Operator SolverNets', () => {
+    const result = deriveLiveNow({
+      fleet: { services: [{ index: 0, step: 'complete' }] },
+      predictionV1: {
+        totals: { activeTaskRuns: 0 },
+        operator: {
+          diagnostics: [
+            {
+              code: 'prediction_solvernet_missing',
+              severity: 'error',
+              message: 'No active SolverNet configured.',
+              configField: 'solverNets',
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.state).toBe('attention');
+    expect(result.line).toBe('No active SolverNet configured.');
+    expect(result.cta).toEqual({
+      label: 'Configure SolverNet',
+      href: '/operator#solvernets',
+    });
+  });
+
   it('excludes prediction_solvernet_disabled from attention triggers', () => {
     const result = deriveLiveNow({
       fleet: { services: [{ index: 0, step: 'complete' }] },
@@ -262,6 +288,9 @@ describe('<LiveNowBand />', () => {
     // operator goes to /operator#solvernets where the per-net harness
     // editor lives.
     expect(screen.getByTestId('live-now-cta').textContent).toMatch(/Configure SolverNet/);
+    expect(screen.getByTestId('live-now-cta').getAttribute('style')).toContain(
+      'border: 1px solid var(--accent-sky)',
+    );
   });
 
   it('renders the "N more" pill when multiple attention diagnostics exist', async () => {
