@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { SectionCard } from '../../components/SectionCard.js';
@@ -90,15 +90,30 @@ function DonationStatusPanel({
   error: string | null;
   onSave: (pricing: OperatorPricingConfig) => void;
 }): JSX.Element {
+  // Optimistic local state: starts from persisted value; reverts if the write-through fails.
   const [donationEnabled, setDonationEnabled] = useState(pricing.donation.enabled);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
 
+  // Track whether we initiated a donation write-through so we can revert on error.
+  const writeThroughPending = useRef(false);
+  const prevError = useRef(error);
+  useEffect(() => {
+    const errorJustArrived = error !== null && prevError.current === null;
+    prevError.current = error;
+    if (errorJustArrived && writeThroughPending.current) {
+      writeThroughPending.current = false;
+      setDonationEnabled(pricing.donation.enabled);
+    }
+  }, [error, pricing.donation.enabled]);
+
+  // Build a draft for the non-donation pricing fields — Save covers those.
+  // Donation writes through immediately so it is always "in sync" with server.
   const draft = useMemo<OperatorPricingConfig>(() => ({
     publicEndpoint: pricing.publicEndpoint,
     defaultPriceUsdc: pricing.defaultPriceUsdc,
     perArtifactTypePrice: pricing.perArtifactTypePrice,
-    donation: { enabled: donationEnabled },
-  }), [donationEnabled, pricing.defaultPriceUsdc, pricing.perArtifactTypePrice, pricing.publicEndpoint]);
+    donation: { enabled: pricing.donation.enabled },
+  }), [pricing.defaultPriceUsdc, pricing.donation.enabled, pricing.perArtifactTypePrice, pricing.publicEndpoint]);
 
   const dirty = !samePricing(pricing, draft);
   const requestDonationChange = (enabled: boolean): void => {
@@ -107,6 +122,15 @@ function DonationStatusPanel({
       return;
     }
     setDonationEnabled(enabled);
+  };
+
+  const confirmDonationEnable = (): void => {
+    // Optimistically show "on" immediately; revert in the useEffect above if mutation fails.
+    setDonationEnabled(true);
+    setConfirmationOpen(false);
+    writeThroughPending.current = true;
+    prevError.current = null; // reset so the next error is treated as fresh
+    onSave({ ...pricing, donation: { enabled: true } });
   };
 
   return (
@@ -377,10 +401,7 @@ function DonationStatusPanel({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setDonationEnabled(true);
-                  setConfirmationOpen(false);
-                }}
+                onClick={confirmDonationEnable}
                 style={{
                   border: '1px solid var(--accent-sky)',
                   background: 'var(--accent-sky)',
