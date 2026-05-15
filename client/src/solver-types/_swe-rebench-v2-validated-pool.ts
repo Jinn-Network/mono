@@ -20,19 +20,48 @@
  * Refs: jinn-mono-uy6v.9.
  */
 
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile, writeFile, mkdir, stat, rename, unlink } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { resolve as resolvePath, dirname, join } from 'node:path';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
-import type { EvalRunner, HfFetcher } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import type { EvalRunner, HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import { computeRowHash, resolveImageDigest, resolveUpstreamEvalCommit, type CommandRunner } from './_swe-rebench-v2-substrate.js';
+
+// In-process mutex map: serialises concurrent record() calls against the
+// same file. Entries are never removed; bounded by the number of distinct
+// validated-pool.json paths used in this process (typically 1).
+//
+// Cross-process safety is NOT provided: if two separate node processes run
+// `jinn solver-nets validate-pool` simultaneously against the same file,
+// the atomic POSIX rename guarantees only that the file is never
+// torn — one of the concurrent writes may still clobber the other's
+// entries. This is an acceptable limitation for a manual admin CLI;
+// operators should not run validate-pool concurrently against the same
+// state dir.
+const writeLocks: Map<string, Promise<void>> = new Map();
+function withWriteLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
+  const prev = writeLocks.get(file) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>((res) => { release = res; });
+  writeLocks.set(file, next);
+  return prev.then(fn).finally(release) as Promise<T>;
+}
 
 /**
  * Bump when the eval grading semantics change (verdict re-derivation,
  * ungradeable classification, test-command construction) so cached validation
- * results from an older harness are treated as stale and re-checked. `'2'` =
- * the SWE-bench "resolved" semantics + run-the-named-tests `test_cmd` override
- * (jinn-mono-uy6v.8); `'1'` was the original exact-set `passed_match`.
+ * results from an older harness are treated as stale and re-checked.
+ *
+ *   '1' — original exact-set `passed_match`.
+ *   '2' — SWE-bench "resolved" semantics + run-the-named-tests `test_cmd`
+ *         override (jinn-mono-uy6v.8).
+ *   '3' — adds verdict-time substrate recheck (`rowHash`, `imageDigest`,
+ *         `upstreamEvalCommit`) and extended ungradeable classifier
+ *         (venv collision, missing pytest, dependency warnings, conftest
+ *         import/setup failures) — jinn-mono-fufn.
  */
-export const EVAL_SEMANTICS_VERSION = '2';
+export const EVAL_SEMANTICS_VERSION = '3';
 
 const SCHEMA_VERSION = 'swe-rebench-v2-validated-pool.v1' as const;
 
@@ -41,6 +70,14 @@ export interface ValidatedPoolEntry {
   /** Why scorable/unscorable — `'gold-patch-resolves'`, `'ungradeable:<reason>'`, etc. */
   reason: string;
   checkedAt: string; // ISO timestamp
+  /** Canonical-JSON SHA-256 over the HF row fields used for grading. v3+. */
+  rowHash?: string;
+  /** Full image reference (`<repo>:<tag>`) the validation pulled. v3+. */
+  imageName?: string;
+  /** Image digest resolved from `docker image inspect` after validation. v3+. */
+  imageDigest?: string;
+  /** `git rev-parse HEAD` of the enabled upstream SWE-rebench repo at validation time. v3+. */
+  upstreamEvalCommit?: string;
 }
 
 interface ValidatedPoolFile {
@@ -72,7 +109,7 @@ export class ValidatedPoolStore {
   private scorableIdsCache: { mtimeMs: number; semanticsVersion: string; ids: Set<string> | null } | null = null;
 
   constructor(opts: { stateDir: string }) {
-    this.file = join(opts.stateDir, 'validated-pool.json');
+    this.file = resolvePath(join(opts.stateDir, 'validated-pool.json'));
   }
 
   private async readRaw(): Promise<unknown> {
@@ -90,11 +127,17 @@ export class ValidatedPoolStore {
     return this.cache;
   }
 
-  private async save(): Promise<void> {
-    if (!this.cache) return;
-    this.cache.updatedAt = new Date().toISOString();
+  private async writeAtomic(file: ValidatedPoolFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
-    await writeFile(this.file, JSON.stringify(this.cache, null, 2));
+    const tmp = `${this.file}.${randomBytes(6).toString('hex')}.tmp`;
+    await writeFile(tmp, JSON.stringify(file, null, 2));
+    try {
+      await rename(tmp, this.file); // POSIX rename is atomic
+    } catch (err) {
+      // Best-effort tempfile cleanup — don't mask the original error.
+      await unlink(tmp).catch(() => undefined);
+      throw err;
+    }
   }
 
   /** The set of instance ids known scorable for `evalSemanticsVersion`, or
@@ -122,18 +165,35 @@ export class ValidatedPoolStore {
   }
 
   async record(instanceId: string, entry: ValidatedPoolEntry, evalSemanticsVersion: string): Promise<void> {
-    const f = await this.loadForWrite(evalSemanticsVersion);
-    f.entries[instanceId] = entry;
-    await this.save();
+    return withWriteLock(this.file, async () => {
+      // Reload from disk so a concurrent write isn't lost. The in-memory cache
+      // is invalidated; the next read re-loads.
+      this.cache = null;
+      this.scorableIdsCache = null;
+      const raw = await this.readRaw();
+      const file = isValidFile(raw, evalSemanticsVersion) ? raw : freshFile(evalSemanticsVersion);
+      file.entries[instanceId] = entry;
+      file.updatedAt = new Date().toISOString();
+      await this.writeAtomic(file);
+      this.cache = file;
+    });
   }
 }
 
+export type AdmissionMode = 'required' | 'python-floor';
+
 /**
- * Restrict the generator's posting pool to instances we can actually score.
- * With validation data (`scorableIds` non-null): keep only the scorable set.
- * Without it: fall back to Python-only instances — the conservative floor our
- * pytest `test_cmd` override supports — and the caller should warn that the
- * full gate (`jinn solver-nets validate-pool swe-rebench-v2`) hasn't been run.
+ * Restrict the generator's posting pool.
+ *
+ * Required mode (default for launched/public generators): only admitted
+ * scorable instances are eligible. Absent or stale admission data → empty
+ * pool. The generator is expected to surface a startup warning instructing
+ * the operator to run `jinn solver-nets validate-pool`.
+ *
+ * Python-floor mode (local/dev opt-in): if admission data is present, use
+ * it; otherwise fall back to Python-only instances (today's pre-fufn
+ * behaviour). Preserved so contributors can iterate without running a
+ * full validation pass.
  *
  * The `nebius/SWE-rebench-leaderboard` rows don't carry an explicit `language`
  * field (it's `undefined`/`null` on every row), so we also infer from the
@@ -142,11 +202,15 @@ export class ValidatedPoolStore {
 export function filterToScorablePool(
   pool: PoolTask[],
   scorableIds: Set<string> | null,
-): { pool: PoolTask[]; mode: 'validated' | 'python-floor' } {
+  admissionMode: AdmissionMode = 'required',
+): { pool: PoolTask[]; mode: 'validated' | 'python-floor' | 'admission-required-no-data' } {
   if (scorableIds) {
     return { pool: pool.filter((t) => scorableIds.has(t.instance_id)), mode: 'validated' };
   }
-  return { pool: pool.filter(isPythonInstance), mode: 'python-floor' };
+  if (admissionMode === 'python-floor') {
+    return { pool: pool.filter(isPythonInstance), mode: 'python-floor' };
+  }
+  return { pool: [], mode: 'admission-required-no-data' };
 }
 
 function isPythonInstance(task: PoolTask): boolean {
@@ -162,11 +226,24 @@ function looksPython(patch: string | undefined): boolean {
   return /(?:^|\n)(?:---|\+\+\+|diff --git) [ab]\/\S+\.py(?:\s|$)/.test(patch);
 }
 
+const defaultCommandRunner: CommandRunner = (bin, args, opts) => new Promise((resolve, reject) => {
+  const child = spawn(bin, args, { ...(opts ?? {}), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+  child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+  child.on('error', reject);
+  child.on('close', (code: number | null) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+});
+
 export interface ValidatePoolDeps {
   fetcher: HfFetcher;
   runner: EvalRunner;
   store: ValidatedPoolStore;
   semanticsVersion: string;
+  /** v3+: directory of the enabled upstream SWE-rebench repo — used to resolve `upstreamEvalCommit`. Required: every caller must opt in to v3 semantics explicitly. */
+  upstreamRepoDir: string;
+  /** Defaults to spawn-based runner; tests inject a stub. */
+  commandRunner?: CommandRunner;
   log?: (msg: string) => void;
 }
 
@@ -197,7 +274,12 @@ export async function validatePoolInstances(
   opts: { limit?: number; force?: boolean } = {},
 ): Promise<ValidatePoolSummary> {
   const log = deps.log ?? (() => {});
+  const runner = deps.commandRunner ?? defaultCommandRunner;
   const summary: ValidatePoolSummary = { checked: 0, scorable: 0, unscorable: 0, skipped: 0 };
+
+  // Resolve the upstream eval commit once per run — it doesn't change mid-run.
+  const upstreamEvalCommit = await resolveUpstreamEvalCommit(deps.upstreamRepoDir, runner);
+
   for (const task of pool) {
     if (opts.limit != null && summary.checked >= opts.limit) break;
 
@@ -220,9 +302,29 @@ export async function validatePoolInstances(
     }
 
     log(`[validate-pool] ${task.instance_id} …`);
+    let row: HfRow | undefined;
+    let rowHash: string | undefined;
     let entry: ValidatedPoolEntry;
     try {
-      const row = await deps.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: task.instance_id });
+      row = await deps.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: task.instance_id });
+      rowHash = computeRowHash({
+        hf_dataset: task.hf_dataset,
+        hf_split: task.hf_split,
+        instance_id: task.instance_id,
+        repo: task.repo ?? row.repo,
+        // PoolTask.base_commit is optional in the schema but in practice is always
+        // present for SWE-rebench leaderboard rows. Falling back to the 40-hex zero
+        // sentinel matches what the task generator stamps on-chain for rows that lack
+        // a base_commit, ensuring the stored rowHash is byte-identical to the hash
+        // recheckSubstrate recomputes at verdict time from the Zod-parsed task.
+        base_commit: task.base_commit ?? '0000000000000000000000000000000000000000',
+        image_name: row.image_name,
+        patch: task.patch,
+        test_patch: row.test_patch ?? task.test_patch,
+        install_config: { ...row.install_config, install: row.install_config.install ?? [] },
+        FAIL_TO_PASS: row.FAIL_TO_PASS,
+        PASS_TO_PASS: row.PASS_TO_PASS,
+      });
       const res = await deps.runner.runEval({
         instance_id: task.instance_id,
         repo: task.repo ?? row.repo,
@@ -235,14 +337,37 @@ export async function validatePoolInstances(
         fail_to_pass: row.FAIL_TO_PASS,
         pass_to_pass: row.PASS_TO_PASS,
       });
-      entry = res.passed_match
-        ? { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }
-        : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt: new Date().toISOString() };
+      const checkedAt = new Date().toISOString();
+      // Resolve digest AFTER the eval ran — that's when the image is guaranteed
+      // to be present locally with its RepoDigests populated.
+      const imageDigest = await resolveImageDigest(row.image_name, runner);
+      const substrate = {
+        checkedAt,
+        rowHash,
+        imageName: row.image_name,
+        ...(imageDigest ? { imageDigest } : {}),
+        ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
+      };
+      if (!imageDigest) {
+        // Every admission must carry a digest. No digest → not admissible.
+        entry = { scorable: false, reason: 'unresolvable-image-digest', ...substrate };
+      } else if (res.passed_match) {
+        entry = { scorable: true, reason: 'gold-patch-resolves', ...substrate };
+      } else {
+        entry = { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, ...substrate };
+      }
     } catch (err) {
       const reason = nameOf(err) === 'EvalCouldNotGradeError'
         ? `ungradeable:${reasonOf(err)}`
         : `error:${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
-      entry = { scorable: false, reason, checkedAt: new Date().toISOString() };
+      entry = {
+        scorable: false,
+        reason,
+        checkedAt: new Date().toISOString(),
+        ...(rowHash ? { rowHash } : {}),
+        ...(row ? { imageName: row.image_name } : {}),
+        ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
+      };
     }
     await deps.store.record(task.instance_id, entry, deps.semanticsVersion);
     summary.checked += 1;

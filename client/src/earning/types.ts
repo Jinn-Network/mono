@@ -101,6 +101,14 @@ export const ServiceStateSchema = z.object({
   // Currently always `false` — wallet binding is deferred to jinn-mono-aev
   // (Safe ERC-1271 wrapping).
   safe_bound_to_agent: z.boolean().nullable().optional().default(false),
+
+  // Structured diagnostics for safe_binding_failed errors (jinn-mono-hjex.4).
+  // Optional — absent on state files written before this field was added.
+  // `error_revert_reason` is the decoded contract Error(string) payload or
+  // named custom error name; null when the revert had no reason data.
+  // `error_short_message` is the concise one-liner from viem's BaseError.
+  error_revert_reason: z.string().nullable().optional().default(null),
+  error_short_message: z.string().nullable().optional().default(null),
 });
 
 export type ServiceState = z.infer<typeof ServiceStateSchema>;
@@ -162,6 +170,8 @@ export function createDefaultServiceState(index: number, agentAddress: string): 
     identity_registry_address: null,
     agent_registered_tx: null,
     safe_bound_to_agent: false,
+    error_revert_reason: null,
+    error_short_message: null,
   };
 }
 
