@@ -43,6 +43,21 @@ const CheckSchema = z.object({
   detail: z.union([z.string(), z.record(z.unknown())]).optional(),
 });
 
+const EnvelopeRefSchema = z.object({
+  cid: z.string().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
+function normalizeLegacySolutionEnvelopePayload(value: unknown): unknown {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const payload = value as Record<string, unknown>;
+    if (payload['solutionEnvelope'] === undefined && payload['restorationEnvelope'] !== undefined) {
+      return { ...payload, solutionEnvelope: payload['restorationEnvelope'] };
+    }
+  }
+  return value;
+}
+
 const VerificationCheckSchema = z.object({
   name: z.string(),
   passed: z.boolean(),
@@ -57,11 +72,8 @@ const VerificationOfRestorationSchema = z.object({
   overall: z.enum(['valid', 'invalid']),
 });
 
-export const PredictionV0VerdictPayloadSchema = z.object({
-  restorationEnvelope: z.object({
-    cid: z.string().min(1),
-    sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  }),
+export const PredictionV0VerdictPayloadSchema = z.preprocess(normalizeLegacySolutionEnvelopePayload, z.object({
+  solutionEnvelope: EnvelopeRefSchema,
   verificationOfRestoration: VerificationOfRestorationSchema,
   verdict: z.enum(['PASS', 'FAIL', 'REJECTED', 'INDETERMINATE']),
   score: z.string(),
@@ -82,6 +94,6 @@ export const PredictionV0VerdictPayloadSchema = z.object({
   }),
   groundTruth: z.enum(['YES', 'NO']),
   checks: z.array(CheckSchema),
-});
+}));
 
 export type PredictionV0VerdictPayload = z.infer<typeof PredictionV0VerdictPayloadSchema>;

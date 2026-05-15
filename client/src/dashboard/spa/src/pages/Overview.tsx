@@ -1,12 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { useLocation } from 'wouter';
+import { useState } from 'react';
 import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
 import { AlertBand } from './overview/AlertBand.js';
 import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/LiveNowBand.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard, type OperatorCardRole } from './overview/OperatorCard.js';
-import { QuickActions } from './overview/QuickActions.js';
 import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
 import { AdvancedDetails } from './overview/AdvancedDetails.js';
 import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
@@ -235,7 +234,8 @@ function operatorWaitingMessage(
 }
 
 export function OverviewPage(): JSX.Element {
-  const [, navigate] = useLocation();
+  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
@@ -277,21 +277,93 @@ export function OverviewPage(): JSX.Element {
   }));
 
   const tasksDelivered = totals.solutions;
-  const jinnEarned = formatEth(status?.rewards?.pendingStakingRewardsWei);
+  const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
+  const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
   const liveNow = deriveLiveNow(status);
   const waitingMessage = operatorWaitingMessage(joined, taskRunTotals, operator?.nextAction?.description);
+  const runAction = (
+    label: string,
+    action: () => Promise<{ message?: string } | void> | { message?: string } | void,
+  ): void => {
+    setActiveAction(label);
+    setNotice(null);
+    Promise.resolve()
+      .then(action)
+      .then((result) => {
+        setNotice({
+          tone: 'success',
+          text: result?.message ?? `${label} requested.`,
+        });
+      })
+      .catch((err) => {
+        setNotice({
+          tone: 'error',
+          text: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => setActiveAction(null));
+  };
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <HeroStats
         tasksDelivered={tasksDelivered}
-        jinnEarned={jinnEarned}
+        jinnClaimable={jinnClaimable}
+        gasBalanceEth={gasBalanceEth}
         gasRunwayDays={gasRunwayDays}
         statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
         statusState={liveNow.state}
         statusDot={LIVE_NOW_TONE[liveNow.state].dot}
+        activeAction={activeAction}
+        onClaim={() =>
+          runAction('Claim JINN', async () => {
+            const res = await api.claimRewards();
+            if (!res.ok) {
+              throw new Error(res.error ?? 'Reward claim failed.');
+            }
+            return { message: 'JINN claim command completed.' };
+          })}
+        onTopUp={() =>
+          runAction('Top up gas', async () => {
+            const res = await api.triggerDrip();
+            if (!res.ok) {
+              throw new Error(res.reason ?? 'Gas top-up failed.');
+            }
+            const txCount = res.txHashes?.length ?? (res.txHash ? 1 : 0);
+            if (txCount > 0) {
+              return { message: `Gas top-up requested (${txCount} ${txCount === 1 ? 'transaction' : 'transactions'}).` };
+            }
+            if (res.attempts === 0) {
+              return { message: 'Gas balance is already above the testnet top-up target.' };
+            }
+            return { message: 'Gas top-up checked; no additional funding was needed.' };
+          })}
+        onRestart={() =>
+          runAction('Restart node', async () => {
+            const res = await api.restartDaemon();
+            if (!res.ok) {
+              throw new Error('Restart request failed.');
+            }
+            return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
+          })}
       />
+      {notice && (
+        <div
+          role={notice.tone === 'error' ? 'alert' : 'status'}
+          data-testid="dashboard-action-notice"
+          style={{
+            border: `1px solid ${notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)'}`,
+            color: notice.tone === 'error' ? 'var(--break-red)' : 'var(--vow-green)',
+            borderRadius: '6px',
+            padding: '10px 12px',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+          }}
+        >
+          {notice.text}
+        </div>
+      )}
 
       {/* Public counters for the active SolverNet surfaced by this operator. */}
       <NetworkCard name={joined?.name ?? 'SolverNet'} totals={totals} />
@@ -324,42 +396,6 @@ export function OverviewPage(): JSX.Element {
         />
       )}
 
-      <QuickActions
-        claimableJinn={formatEth(status?.rewards?.pendingStakingRewardsWei)}
-        gasEth={formatEth(status?.masterGas?.balanceWei)}
-        onClaim={async () => {
-          const res = await api.claimRewards();
-          if (!res.ok) {
-            throw new Error(res.error ?? 'Reward claim failed.');
-          }
-          return { message: 'JINN claim command completed.' };
-        }}
-        onTopUp={async () => {
-          const res = await api.triggerDrip();
-          if (!res.ok) {
-            throw new Error(res.reason ?? 'Gas top-up failed.');
-          }
-          const txCount = res.txHashes?.length ?? (res.txHash ? 1 : 0);
-          if (txCount > 0) {
-            return { message: `Gas top-up requested (${txCount} ${txCount === 1 ? 'transaction' : 'transactions'}).` };
-          }
-          if (res.attempts === 0) {
-            return { message: 'Gas balance is already above the testnet top-up target.' };
-          }
-          return { message: 'Gas top-up checked; no additional funding was needed.' };
-        }}
-        onManage={() => {
-          navigate('/operator#security');
-          return { message: 'Opening wallet settings.' };
-        }}
-        onRestart={async () => {
-          const res = await api.restartDaemon();
-          if (!res.ok) {
-            throw new Error('Restart request failed.');
-          }
-          return { message: 'Restart requested. The dashboard will reconnect when the daemon is back.' };
-        }}
-      />
       <AdvancedDetails>
         <IdentityCard
           agentId={services[0]?.agentId ?? null}

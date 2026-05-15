@@ -12,21 +12,24 @@ Canonical references:
 
 ## Cadence
 
-Two-track release model:
+Two-train release model:
 
-- **Continuous canary on every merge to `main`.** GitHub Actions (`cargo/.github/workflows/npm-publish.yml`) publishes `<package.version>-canary.<sha8>` under the npm dist-tag `canary` within minutes of any PR merge that touches `client/**`. Operators on `npm install -g @jinn-network/client@canary` receive the rolling build.
-- **Weekly named Build Notes cut every Monday.** A Monday cron creates a GitHub Release **draft** at 09:00 UTC. Captain reviews the draft (Hermes-style: build-name + highlights + known-issues + auto-aggregated PRs/closed-bd/stats), then publishes. Publish triggers npm `latest` and the CHANGELOG auto-mirror. Default `npm install -g @jinn-network/client` (no tag) gets the weekly named stable build.
+- **`next` is the integration branch.** Every PR targets `next`. Every push to `next` that touches `client/**` publishes `<package.version>-canary.<sha8>` to npm under the `canary` dist-tag within minutes (`cargo/.github/workflows/npm-publish.yml`). Operators on `npm install -g @jinn-network/client@canary` receive the rolling build.
+- **`main` is the released-train head.** It is advanced only by `cargo/.github/workflows/promote-main.yml`, which fast-forwards main to the v<semver> tag on `release: published`. `main` HEAD therefore always reflects what is currently in npm `@latest`.
+- **Weekly named Build Notes cut every Monday.** A Monday cron creates a GitHub Release **draft** at 09:00 UTC against `next` HEAD. Captain reviews (Hermes-style: build-name + highlights + known-issues + auto-aggregated PRs/closed-bd/stats), then publishes. Publish triggers (a) npm `latest`, (b) `promote-main.yml` to fast-forward main, (c) CHANGELOG auto-mirror. Default `npm install -g @jinn-network/client` gets the weekly named stable build.
 
 Tag format on Monday cuts: dual — `v2026.MM.DD` (the human-readable build identifier) and `vX.Y.Z` (the semver for npm). Pre-v1 weekly Build Notes cuts usually patch (`v0.1.3 → v0.1.4`). A Monday cut where an epic or significant capability lands can bump the minor (`v0.1.x → v0.2.0`). **v1.0.0 is reserved for far-future graduation** (mainnet / exit-testnet / Phase 2), explicitly not `jinn-mono-uy6v`.
 
 **Bump heuristic** (cron's suggestion, Captain overrides): the Monday cron always suggests a patch bump. Captain manually overrides to the next minor when an epic or significant capability closes in the window. Conventional Commits drives section grouping in Release notes (Features / Fixes / Refactors / Chore / Docs / Tests), **not** per-merge semver bumps. Canary handles per-merge implicit patching.
 
+**Hotfix sub-flow** — see [`docs/runbooks/hotfix.md`](../runbooks/hotfix.md). Critical fixes to `@latest` may target `main` directly; the hotfix PR is published as an out-of-cadence release; a back-merge `main → next` chore PR is mandatory before closing the incident.
+
 ## Dist-tags
 
-- `canary` — rolling, every-merge build (`<v>-canary.<sha>`).
-- `latest` — Monday named stable build.
+- `canary` — rolling, every-push-to-next build (`<v>-canary.<sha>`). Sourced from `next` (integration).
+- `latest` — Monday named stable build, sourced from a v<semver> tag on `next` HEAD that `promote-main.yml` then fast-forwards into `main`.
 
-There is no `next` channel; `canary` is the rolling channel name we use. Operators who want the rolling build use `@canary`; operators who want stable get `latest` by default.
+There is no `@next` dist-tag. The branch named `next` exists; the dist-tag does not. Operators who want the rolling build use `@canary`; operators who want stable get `latest` by default.
 
 ## The shipping machine — process
 
@@ -45,7 +48,7 @@ then:
 3. **Execute according to shape** — the bd issue's `Run-mode` field declares the shape; the shape determines the skill chain, test discipline, design ceremony, and stacking policy (see §The shapes of work below).
 4. **Open PR(s).** PR title format: `<shape>(<optional scope>): <one-line summary>` (Conventional Commits). Template in `cargo/.github/PULL_REQUEST_TEMPLATE.md` prompts for problem-not-solution body, test plan, agent identity, Co-Authored-By trailer.
 5. **Review.** Human eyes on every PR (rule 4). No agent self-merge. Exception: `fix(incident)` allows reviewer relaxation with documented justification.
-6. **Merge → auto-canary.** `npm-publish.yml` fires on merge to main, publishes `<v>-canary.<sha>` under `canary`.
+6. **Merge to `next` → auto-canary.** `npm-publish.yml` fires on push to `next`, publishes `<v>-canary.<sha>` under `canary`. `main` advances only on the Monday cut's release publish (or via the hotfix sub-flow).
 7. **Close bd.** `bd close <id>`. The mirrored GitHub Issue (if any) auto-closes via PR linking.
 
 ### Weekly retrace
@@ -55,6 +58,7 @@ then:
 **Monday morning — cut.** The Monday cron (`cargo/.github/workflows/release-notes-scaffold.yml`, currently `workflow_dispatch` only) creates a GitHub Release **draft** at 09:00 UTC. Captain edits build-name + highlights + known-issues, clicks Publish. Publish triggers:
 
 - `npm-publish.yml` (release event branch) → npm `latest`.
+- `cargo/.github/workflows/promote-main.yml` → fast-forwards `main` to the tagged commit on `next`. After this runs, `git log main` shows exactly the named-cut commit.
 - `cargo/.github/workflows/changelog-mirror.yml` → appends Release body to `cargo/client/CHANGELOG.md` under Unreleased.
 
 The Project board's Sprint view resets to the new Monday; shipped items move to the Roadmap view's Done column.
@@ -108,7 +112,7 @@ The eight rules below land in this handbook + [`cargo/CLAUDE.md`](../../CLAUDE.m
 5. **(Deferred — open)** Supervised-diff for the self-modifying learner. Phase A.5+ learner ships proposed changes as PRs against the repo; designated reviewer approves before merge. Concrete mechanism is open until `jinn-mono-8qbc` closes. **Status: open — see `jinn-mono-8qbc`.**
 6. **Integration tests > mocks for migration / contract surfaces.** Mock policy stays for the unit-test pyramid; migration tests must hit a real database or a forked chain (per `superpowers:test-driven-development`'s position on the test pyramid).
 7. **TDD for new features, regression test for fixes.** Per `superpowers:test-driven-development`. TDD on `feat` / `refactor`; regression-first on `fix`; deferred-not-waived on `fix(incident)`.
-8. **Auto-canary on main merge; Monday-only named stable cut.** Cadence policy from §Cadence above.
+8. **Auto-canary on every push to `next`; Monday-only named stable cut promotes `main`.** Cadence policy from §Cadence above. Hotfix sub-flow may bypass `next`; back-merge is mandatory.
 9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy from §Dist-tags above.
 
 Rule-to-shape wiring is in §The shapes of work; the mapping is the load-bearing piece. Rules in the abstract are guidance; rules wired to shapes are operational.

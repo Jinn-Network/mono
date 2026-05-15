@@ -46,12 +46,14 @@ If a bd issue does not fit one of these shapes, it is mis-scoped — split or re
 5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open; see `jinn-mono-8qbc`.)_
 6. **Integration tests > mocks for migration / contract surfaces.**
 7. **TDD for new features, regression test for fixes.**
-8. **Auto-canary on main merge; Monday-only named stable cut.** Cadence policy.
+8. **Auto-canary on push to `next`; Monday-only named stable cut promotes `main`.** Cadence policy.
 9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy.
 
 ### Cadence
 
-- Every merge to main → npm `canary` (`<v>-canary.<sha>`).
+- Every push to `next` → npm `canary` (`<v>-canary.<sha>`).
+- Monday named cut → v<semver> tag on `next` HEAD → npm `latest` → `promote-main.yml` fast-forwards `main`.
+- Hotfix → PR to `main` directly; mandatory back-merge to `next`. See `docs/runbooks/hotfix.md`.
 - Every Monday 09:00 UTC → GitHub Release draft (Hermes-style); Captain publishes; publish triggers npm `latest` + CHANGELOG auto-mirror.
 - Pre-v1: weekly Build Notes cuts patch by default (`v0.1.3 → v0.1.4`). A Monday cut that lands an epic or significant capability can bump the minor (`v0.1.x → v0.2.0`). `v1.0.0` is reserved for far-future graduation (mainnet / exit-testnet / Phase 2), not `jinn-mono-uy6v`.
 
@@ -269,6 +271,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
+| _(none — env-only)_  | JINN_EVAL_IMAGE_CACHE_MAX | 20 (cap on the swe-rebench-v2 per-instance Docker image LRU) |
 
 `JINN_PASSWORD` is env-only — never in config files.
 
@@ -350,6 +353,15 @@ yarn test            # vitest run
 yarn e2e             # end-to-end on Anvil fork
 yarn staking         # earning bootstrap validation on Anvil
 node dist/bin/jinn.js run    # contributor daemon launch (after `yarn build`)
+
+# Daemon + real harness + Anvil settlement loop e2e (jinn-mono-wyy6)
+yarn e2e:daemon-harness   # production Daemon + real harness + Anvil settlement loop
+                          # JINN_E2E_HARNESS=prediction-v1-baseline (default) | hermes-agent | claude-code | codex
+                          # skips cleanly when the harness's API key is absent
+                          # exercises: Anvil fork of Base, real FleetBootstrapper,
+                          # locally-deployed JinnRouterV3 stack + mock IPFS,
+                          # production Daemon class, claim → execute → deliver →
+                          # activity-counter increment
 
 # Contracts
 cd contracts

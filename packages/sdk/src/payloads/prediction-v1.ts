@@ -3,6 +3,21 @@ import { DecimalProbabilitySchema, IsoDateTimeSchema } from '../prediction-v1.js
 
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 
+const EnvelopeRefSchema = z.object({
+  cid: z.string(),
+  sha256: Sha256Schema,
+});
+
+function normalizeLegacySolutionEnvelopePayload(value: unknown): unknown {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const payload = value as Record<string, unknown>;
+    if (payload['solutionEnvelope'] === undefined && payload['restorationEnvelope'] !== undefined) {
+      return { ...payload, solutionEnvelope: payload['restorationEnvelope'] };
+    }
+  }
+  return value;
+}
+
 const CheckSchema = z.object({
   name: z.string().min(1),
   status: z.enum(['PASS', 'FAIL', 'SKIP', 'INDETERMINATE']),
@@ -30,7 +45,7 @@ export const PredictionV1RestorationPayloadSchema = z.object({
 
 export type PredictionV1RestorationPayload = z.infer<typeof PredictionV1RestorationPayloadSchema>;
 
-export const PredictionV1VerdictPayloadSchema = z.object({
+export const PredictionV1VerdictPayloadSchema = z.preprocess(normalizeLegacySolutionEnvelopePayload, z.object({
   verdict: z.enum(['SCORED', 'REJECTED', 'INVALID', 'INDETERMINATE']),
   outcome: z.enum(['YES', 'NO', 'INVALID']).optional(),
   resolvedAt: IsoDateTimeSchema.optional(),
@@ -44,10 +59,7 @@ export const PredictionV1VerdictPayloadSchema = z.object({
     cid: z.string(),
     id: z.string().min(1),
   }),
-  solutionEnvelope: z.object({
-    cid: z.string(),
-    sha256: Sha256Schema,
-  }),
+  solutionEnvelope: EnvelopeRefSchema,
   claimed: z
     .object({
       probabilityYes: DecimalProbabilitySchema,
@@ -69,6 +81,6 @@ export const PredictionV1VerdictPayloadSchema = z.object({
     })
     .optional(),
   checks: z.array(CheckSchema),
-});
+}));
 
 export type PredictionV1VerdictPayload = z.infer<typeof PredictionV1VerdictPayloadSchema>;

@@ -11,7 +11,7 @@ describe('projectEnvelope', () => {
   it('projects prediction.v1 Solution metadata from envelope and Task context', () => {
     const task = makePredictionTask();
     const projection = projectEnvelope(makeEnvelope({
-      role: 'restoration',
+      role: 'solution',
       taskCid: TASK_CID,
       requestId: REQUEST_ID,
       signatureHash: `0x${'a'.repeat(64)}`,
@@ -31,7 +31,7 @@ describe('projectEnvelope', () => {
     expect(projection).toMatchObject({
       envelopeId: 'bafy-solution-envelope',
       solverType: 'prediction.v1',
-      role: 'restoration',
+      role: 'solution',
       taskCid: TASK_CID,
       taskId: TASK_ID,
       requestId: REQUEST_ID,
@@ -86,7 +86,7 @@ describe('projectEnvelope', () => {
         ...makePredictionTask(),
         id: 'eval-task-local',
         role: 'evaluation',
-        context: { restorationTaskCid: TASK_CID },
+        context: { solutionTaskCid: TASK_CID },
       },
       taskId: TASK_ID,
     });
@@ -112,7 +112,7 @@ describe('projectEnvelope', () => {
   it('projects generic non-prediction envelopes without prediction metadata', () => {
     const projection = projectEnvelope(makeEnvelope({
       solverType: 'portfolio.v0',
-      role: 'restoration',
+      role: 'solution',
       taskCid: 'bafy-portfolio-task',
       requestId: `0x${'5'.repeat(64)}`,
       signatureHash: `0x${'c'.repeat(64)}`,
@@ -162,7 +162,7 @@ function makePredictionTask(): Task {
 
 function makeEnvelope(overrides: {
   solverType?: string;
-  role: 'restoration' | 'verdict';
+  role: 'solution' | 'verdict';
   taskCid: string;
   requestId: string;
   signatureHash: `0x${string}`;

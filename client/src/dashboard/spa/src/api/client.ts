@@ -26,6 +26,27 @@ import type {
   Iso8601,
 } from './types.js';
 
+interface JsonErrorPayload {
+  error?: string;
+  message?: string;
+}
+
+async function readJsonErrorPayload(res: Response): Promise<JsonErrorPayload | null> {
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) return null;
+  try {
+    const body = await res.json() as unknown;
+    if (typeof body !== 'object' || body === null) return null;
+    const record = body as Record<string, unknown>;
+    return {
+      error: typeof record.error === 'string' ? record.error : undefined,
+      message: typeof record.message === 'string' ? record.message : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: 'same-origin',
@@ -33,7 +54,16 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText} on ${path}`);
+    const payload = await readJsonErrorPayload(res);
+    const detail = payload?.message ?? payload?.error;
+    const error = new Error(
+      detail
+        ? `${res.status} ${res.statusText}: ${detail} on ${path}`
+        : `${res.status} ${res.statusText} on ${path}`,
+    ) as Error & { status?: number; code?: string };
+    error.status = res.status;
+    error.code = payload?.error;
+    throw error;
   }
   return res.json() as Promise<T>;
 }
@@ -145,6 +175,11 @@ export const api = {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mode }),
       },
+    ),
+
+  hermesDoctor: () =>
+    jfetch<{ installed: boolean; exitCode: number | null; stdout: string; stderr: string }>(
+      '/api/hermes/doctor',
     ),
 
   // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----

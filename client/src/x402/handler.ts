@@ -13,6 +13,10 @@
 
 import type { Hono, Context } from 'hono';
 import type { Network } from '@x402/core/types';
+import type { PaymentPayload, PaymentRequired, PaymentRequirements } from '@x402/core/types';
+import { x402ResourceServer } from '@x402/core/server';
+import { decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader } from '@x402/core/http';
+import { registerExactEvmScheme as registerExactEvmServerScheme } from '@x402/evm/exact/server';
 import type { ArtifactAccessEventInput, ArtifactAccessOutcome, Store } from '../store/store.js';
 import { createLocalFacilitatorClient } from './facilitator.js';
 
@@ -63,7 +67,9 @@ function stringFromRecord(value: unknown, keys: string[]): string | null {
 
 function payerFromPayload(payload: unknown): string | null {
   return (
-    stringFromRecord(payload, ['payload', 'authorization', 'from'])
+    stringFromRecord(payload, ['authorization', 'from'])
+    ?? stringFromRecord(payload, ['permit2Authorization', 'owner'])
+    ?? stringFromRecord(payload, ['payload', 'authorization', 'from'])
     ?? stringFromRecord(payload, ['payload', 'permit2Authorization', 'owner'])
     ?? stringFromRecord(payload, ['payer'])
   );
@@ -93,8 +99,47 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
     network: config.network,
     rpcUrl: config.rpcUrl,
   });
+  const resourceServer = new x402ResourceServer(facilitator);
 
   const network = (config.network ?? 'eip155:8453') as Network;
+  registerExactEvmServerScheme(resourceServer, { networks: [network] });
+  const resourceServerReady = resourceServer.initialize();
+
+  async function paymentRequiredFor(
+    c: Context,
+    sha256: string,
+    priceUsdc: string,
+  ): Promise<{ requirements: PaymentRequirements[]; response: PaymentRequired }> {
+    await resourceServerReady;
+    const requirements = await resourceServer.buildPaymentRequirements({
+      scheme: 'exact',
+      payTo: config.recipientAddress,
+      price: dollarStringFromUsdc(priceUsdc),
+      network,
+      maxTimeoutSeconds: 300,
+    });
+    const response = await resourceServer.createPaymentRequiredResponse(
+      requirements,
+      {
+        url: c.req.url,
+        description: `artifact ${sha256.slice(0, 12)}`,
+        mimeType: 'application/octet-stream',
+      },
+      'Payment required',
+    );
+    return { requirements, response };
+  }
+
+  function paymentRequiredResponse(response: PaymentRequired): Response {
+    return new Response(JSON.stringify(response), {
+      status: 402,
+      headers: {
+        'Content-Type': 'application/json',
+        'PAYMENT-REQUIRED': encodePaymentRequiredHeader(response),
+        'Access-Control-Expose-Headers': 'PAYMENT-REQUIRED,X-PAYMENT-RESPONSE',
+      },
+    });
+  }
 
   app.get('/v1/artifacts/:sha256/content', async (c: Context) => {
     const sha256 = c.req.param('sha256');
@@ -128,17 +173,11 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
       return c.body(new Uint8Array(row.content));
     }
 
-    // Paid path
-    const accepts = [{
-      scheme: 'exact',
-      payTo: config.recipientAddress,
-      price: dollarStringFromUsdc(row.priceUsdc),
-      network,
-      description: `artifact ${sha256.slice(0, 12)}…`,
-    }];
+    // Paid path.
+    const { requirements, response: paymentRequired } = await paymentRequiredFor(c, sha256, row.priceUsdc);
 
-    const xPayment = c.req.header('X-Payment');
-    if (!xPayment) {
+    const paymentSignature = c.req.header('PAYMENT-SIGNATURE') ?? c.req.header('X-Payment');
+    if (!paymentSignature) {
       safeRecordAccess(store, {
         sha256,
         artifactType: row.artifactType,
@@ -148,16 +187,13 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
         createdAt: new Date().toISOString(),
         ...requestMeta(c),
       });
-      return c.json({ accepts }, 402);
+      return paymentRequiredResponse(paymentRequired);
     }
 
-    let decoded: { scheme: string; payload: unknown };
+    let decoded: PaymentPayload;
     try {
-      decoded = JSON.parse(Buffer.from(xPayment, 'base64').toString('utf-8')) as {
-        scheme: string;
-        payload: unknown;
-      };
-      const requirement = accepts.find((a) => a.scheme === decoded.scheme);
+      decoded = decodePaymentSignatureHeader(paymentSignature);
+      const requirement = resourceServer.findMatchingRequirements(requirements, decoded);
       if (!requirement) {
         safeRecordAccess(store, {
           sha256,
@@ -170,9 +206,9 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
           createdAt: new Date().toISOString(),
           ...requestMeta(c),
         });
-        return c.json({ error: 'Unsupported payment scheme', accepts }, 402);
+        return paymentRequiredResponse(paymentRequired);
       }
-      const verification = await facilitator.verify(decoded.payload as never, requirement as never);
+      const verification = await resourceServer.verifyPayment(decoded, requirement);
       if (!verification.isValid) {
         const reason = verification.invalidReason ?? 'Payment verification failed';
         safeRecordAccess(store, {
@@ -186,9 +222,9 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
           createdAt: new Date().toISOString(),
           ...requestMeta(c),
         });
-        return c.json({ error: reason, accepts }, 402);
+        return paymentRequiredResponse(paymentRequired);
       }
-      const settlement = await facilitator.settle(decoded.payload as never, requirement as never);
+      const settlement = await resourceServer.settlePayment(decoded, requirement);
       if (!settlement.success) {
         const reason = settlement.errorReason ?? 'Settlement failed';
         safeRecordAccess(store, {
@@ -203,7 +239,7 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
           createdAt: new Date().toISOString(),
           ...requestMeta(c),
         });
-        return c.json({ error: reason, accepts }, 402);
+        return paymentRequiredResponse(paymentRequired);
       }
       safeRecordAccess(store, {
         sha256,
@@ -216,6 +252,9 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
         createdAt: new Date().toISOString(),
         ...requestMeta(c),
       });
+      const paymentResponse = encodePaymentResponseHeader(settlement);
+      c.header('PAYMENT-RESPONSE', paymentResponse);
+      c.header('X-PAYMENT-RESPONSE', paymentResponse);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       safeRecordAccess(store, {
@@ -228,7 +267,7 @@ export function addX402Routes(app: Hono, store: Store, config: X402Config): void
         createdAt: new Date().toISOString(),
         ...requestMeta(c),
       });
-      return c.json({ error: `Payment validation error: ${msg}`, accepts }, 402);
+      return paymentRequiredResponse(paymentRequired);
     }
 
     c.header('Content-Type', mimeForArtifactType(row.artifactType));

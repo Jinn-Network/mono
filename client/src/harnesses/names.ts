@@ -1,5 +1,6 @@
 export const CLAUDE_CODE_HARNESS = 'claude-code';
 export const CODEX_HARNESS = 'codex';
+export const HERMES_AGENT_HARNESS = 'hermes-agent';
 
 const HARNESS_ALIASES: Record<string, string> = {
   'claude-code-learner': CLAUDE_CODE_HARNESS,
@@ -22,5 +23,6 @@ export function harnessStateDirName(name: string): string {
   const canonical = canonicalHarnessName(name);
   if (canonical === CLAUDE_CODE_HARNESS) return 'claude-code-learner';
   if (canonical === CODEX_HARNESS) return 'codex-code-learner';
+  if (canonical === HERMES_AGENT_HARNESS) return 'hermes-agent';
   return canonical;
 }

@@ -48,7 +48,14 @@ function pkOf(pks: PkMap, table: unknown): string[] {
 }
 
 function pkKey(cols: string[], row: Row): string {
-  return cols.map((c) => JSON.stringify(row[c])).join('|');
+  return cols
+    .map((c) => {
+      const v = row[c];
+      // JSON.stringify does not handle BigInt; serialize explicitly.
+      if (typeof v === 'bigint') return `bigint:${v}`;
+      return JSON.stringify(v);
+    })
+    .join('|');
 }
 
 export function createInMemoryDb(pks: PkMap): InMemoryDb {
