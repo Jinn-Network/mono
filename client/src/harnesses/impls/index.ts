@@ -229,6 +229,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   });
   out.push(new LearnerHarness({
     adapter: learnerAdapter,
+    claudePath: env.claudePath,
   }));
 
   // Codex-backed peer Harness. It supports the same restoration surface as
@@ -245,6 +246,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(new LearnerHarness({
     name: CODEX_HARNESS,
     adapter: codexLearnerAdapter,
+    claudePath: env.claudePath,
   }));
 
   const hermesAdapter = new HermesHarnessAdapter({

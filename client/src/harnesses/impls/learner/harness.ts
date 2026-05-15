@@ -11,6 +11,7 @@ import type {
 } from './types.js';
 import { resolvePluginRoot } from './plugin-path.js';
 import { harvestOutput } from './harvest.js';
+import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 
 /**
  * `Harness` shell. Bridges the engine's dispatch contract
@@ -25,13 +26,22 @@ export class LearnerHarness implements Harness {
   readonly version: string;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
+  private readonly claudePath: string;
+  private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
 
   constructor(config: LearnerHarnessConfig) {
     this.adapter = config.adapter;
     this.name = config.name ?? CLAUDE_CODE_HARNESS;
     this.version = config.version ?? '0.1.0-shim';
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
+    this.claudePath = config.claudePath ?? 'claude';
+    this.runtimeMode = config.runtimeMode ?? 'bare';
   }
+
+  isReady = buildClaudeIsReady({
+    getClaudePath: () => this.claudePath,
+    getContext: () => this.runtimeMode,
+  });
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
     if (spec.role === 'evaluation') return false;

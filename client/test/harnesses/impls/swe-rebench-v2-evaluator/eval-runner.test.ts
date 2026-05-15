@@ -7,6 +7,7 @@ import {
   EvalCouldNotGradeError,
   DEFAULT_EVAL_IMAGE_CACHE_MAX,
   resolveImageCacheMax,
+  matchInfraSignature,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 
 const tempDirs: string[] = [];
@@ -463,5 +464,101 @@ describe('PythonEvalRunner', () => {
       expect(cleanupWarn).toBeTruthy();
       expect(cleanupWarn).toContain('exited 1');
     });
+  });
+
+  describe('patch trailing-newline normalisation (jinn-mono-c52e)', () => {
+    it('appends \\n when args.patch ends mid-line', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
+      // Reproduces 2026-05-14 patch_corrupt observed on
+      // bafkreiggeeb45ricooagdji6lewdzossfiedfobhs4isw7hwh2anllk2dm.
+      const sourcePatch = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y';
+      expect(sourcePatch.endsWith('\n')).toBe(false);
+
+      await runner.runEval({ ...REQUEST, patch: sourcePatch });
+
+      const observedPatches = JSON.parse(
+        readFileSync(join(upstreamRepoDir, 'observed-patches.json'), 'utf8'),
+      ) as Array<{ instance_id: string; patch: string }>;
+      expect(observedPatches[0]!.patch).toBe(`${sourcePatch}\n`);
+    });
+
+    it('preserves a single trailing newline (no double-add)', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
+      const sourcePatch = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\n';
+
+      await runner.runEval({ ...REQUEST, patch: sourcePatch });
+
+      const observedPatches = JSON.parse(
+        readFileSync(join(upstreamRepoDir, 'observed-patches.json'), 'utf8'),
+      ) as Array<{ instance_id: string; patch: string }>;
+      expect(observedPatches[0]!.patch).toBe(sourcePatch);
+      expect(observedPatches[0]!.patch.endsWith('\n\n')).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchInfraSignature — 2026-05-14 triage fingerprints (jinn-mono-fufn)
+// ---------------------------------------------------------------------------
+
+// Real fingerprints from the 2026-05-14 triage on Base Sepolia.
+const VENV_COLLISION = [
+  'error: Failed to create virtual environment.',
+  '  Caused by: A virtual environment already exists at /testbed/.venv',
+  '  Use --clear to replace it',
+].join('\n');
+
+const MISSING_PYTEST =
+  '/opt/conda/bin/python: No module named pytest';
+
+const REQUESTS_DEP_WARNING =
+  'requests.exceptions.RequestsDependencyWarning: urllib3 (2.2.2) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn\'t match a supported version!';
+
+const CONFTEST_IMPORT_ERROR =
+  'ImportError while loading conftest \'/testbed/tests/conftest.py\'.';
+
+describe('matchInfraSignature — 2026-05-14 triage fingerprints', () => {
+  it('classifies venv-collision (jinn-mono-xw6i)', () => {
+    expect(matchInfraSignature(VENV_COLLISION)).toBe('venv_collision');
+  });
+  it('classifies missing pytest in /opt/conda (jinn-mono-xw6i)', () => {
+    expect(matchInfraSignature(MISSING_PYTEST)).toBe('pytest_missing');
+  });
+  it('classifies the urllib3/charset_normalizer dependency warning (jinn-mono-y4ah)', () => {
+    expect(matchInfraSignature(REQUESTS_DEP_WARNING)).toBe('requests_dep_mismatch');
+  });
+  it('classifies conftest ImportError (jinn-mono-y4ah)', () => {
+    expect(matchInfraSignature(CONFTEST_IMPORT_ERROR)).toBe('conftest_import_error');
+  });
+
+  it('still leaves a normal pytest FAIL session alone (returns null)', () => {
+    const normalFail = [
+      '=================== test session starts ===================',
+      'tests/test_x.py::test_foo FAILED',
+      '=================== 1 failed in 0.42s ===================',
+    ].join('\n');
+    expect(matchInfraSignature(normalFail)).toBeNull();
+  });
+
+  it('does NOT misclassify a missing pytest plugin (pytest_asyncio) as pytest_missing', () => {
+    expect(matchInfraSignature('/opt/conda/bin/python: No module named pytest_asyncio')).not.toBe('pytest_missing');
+  });
+
+  it('does NOT match a benign mention of conftest in a passing test log', () => {
+    const benign = [
+      '=================== test session starts ===================',
+      'collected 5 items',
+      'rootdir: /testbed, configfile: pytest.ini, conftest: conftest.py',
+      'tests/test_x.py::test_foo PASSED',
+      '=================== 5 passed in 0.42s ===================',
+    ].join('\n');
+    expect(matchInfraSignature(benign)).toBeNull();
+  });
+
+  it('does NOT match a benign mention of .venv in a non-collision log', () => {
+    const benign = 'INFO: Created virtual environment at /testbed/.venv';
+    expect(matchInfraSignature(benign)).toBeNull();
   });
 });
