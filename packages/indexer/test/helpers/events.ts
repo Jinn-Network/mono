@@ -207,3 +207,56 @@ export function envelopePayloadV1(opts: {
     opts.sourceMeasurement ?? ZERO_BYTES32,
   ]);
 }
+
+// ── Plug-in publication payloads (attd) ───────────────────────────────────────
+
+/**
+ * Byte-identical to PLUGIN_PAYLOAD_TUPLE in client/src/erc8004/abis.ts. Re-stated
+ * here so tests are self-contained — the indexer package cannot import from
+ * client/. A drift-guard test in handlers.plugin.test.ts compares this tuple to
+ * the canonical one via a hex-encoded fixture.
+ */
+export const PLUGIN_PAYLOAD_TUPLE_TEST = [
+  { name: 'version', type: 'uint8' },
+  { name: 'pluginName', type: 'string' },
+  { name: 'pluginVersion', type: 'string' },
+  { name: 'pluginSha256', type: 'bytes32' },
+  { name: 'supports', type: 'string[]' },
+  { name: 'publishedAt', type: 'uint64' },
+] as const;
+
+export const REVOCATION_PAYLOAD_TUPLE_TEST = [
+  { name: 'version', type: 'uint8' },
+  { name: 'revoked', type: 'bool' },
+  { name: 'reason', type: 'string' },
+] as const;
+
+export function pluginPayload(opts: {
+  version?: number;
+  pluginName: string;
+  pluginVersion: string;
+  pluginSha256: `0x${string}`;
+  supports: string[];
+  publishedAt: bigint;
+}): `0x${string}` {
+  return encodeAbiParameters(PLUGIN_PAYLOAD_TUPLE_TEST, [
+    opts.version ?? 1,
+    opts.pluginName,
+    opts.pluginVersion,
+    opts.pluginSha256,
+    opts.supports,
+    opts.publishedAt,
+  ]);
+}
+
+export function revocationPayload(opts: {
+  version?: number;
+  revoked?: boolean;
+  reason: string;
+}): `0x${string}` {
+  return encodeAbiParameters(REVOCATION_PAYLOAD_TUPLE_TEST, [
+    opts.version ?? 2,
+    opts.revoked ?? true,
+    opts.reason,
+  ]);
+}

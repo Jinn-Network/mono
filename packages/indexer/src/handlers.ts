@@ -20,6 +20,7 @@
 import { decodeAbiParameters, keccak256, toBytes, type Hex } from 'viem';
 import {
   parseEnvelopeKey,
+  parsePluginKey,
   parseHarnessCheckpointKey,
   parseSolverNetManifestKey,
   tierFromRaw,
@@ -185,6 +186,77 @@ export function decodeEnvelopePayload(value: Hex): {
     };
   } catch {
     return { manifestHash: '', evidenceTier: 'unknown' };
+  }
+}
+
+// ── Plug-in publication tuples (attd) ────────────────────────────────────────
+// Byte-identical to PLUGIN_PAYLOAD_TUPLE / REVOCATION_PAYLOAD_TUPLE in
+// client/src/erc8004/abis.ts — the indexer package cannot import from client/,
+// so these are duplicated here and guarded by the drift test in
+// test/handlers.plugin.test.ts.
+
+export const PLUGIN_PAYLOAD_TUPLE = [
+  { name: 'version', type: 'uint8' },
+  { name: 'pluginName', type: 'string' },
+  { name: 'pluginVersion', type: 'string' },
+  { name: 'pluginSha256', type: 'bytes32' },
+  { name: 'supports', type: 'string[]' },
+  { name: 'publishedAt', type: 'uint64' },
+] as const;
+
+export const REVOCATION_PAYLOAD_TUPLE = [
+  { name: 'version', type: 'uint8' },
+  { name: 'revoked', type: 'bool' },
+  { name: 'reason', type: 'string' },
+] as const;
+
+export interface DecodedPluginPayload {
+  version: number;
+  pluginName: string;
+  pluginVersion: string;
+  pluginSha256: `0x${string}`;
+  supports: readonly string[];
+  publishedAt: bigint;
+}
+
+export interface DecodedRevocationPayload {
+  version: number;
+  revoked: boolean;
+  reason: string;
+}
+
+/**
+ * Decodes a plug-in publication v1 payload. Returns null on decode failure
+ * (the handler skips the event — same shape as decodeEnvelopePayload, which
+ * returns a sentinel rather than throwing, but here we use null because the
+ * payload is the entire row, not just two fields).
+ */
+export function decodePluginPayload(value: Hex): DecodedPluginPayload | null {
+  try {
+    const decoded = decodeAbiParameters(PLUGIN_PAYLOAD_TUPLE, value);
+    return {
+      version: Number(decoded[0]),
+      pluginName: decoded[1],
+      pluginVersion: decoded[2],
+      pluginSha256: decoded[3],
+      supports: decoded[4],
+      publishedAt: decoded[5],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function decodeRevocationPayload(value: Hex): DecodedRevocationPayload | null {
+  try {
+    const decoded = decodeAbiParameters(REVOCATION_PAYLOAD_TUPLE, value);
+    return {
+      version: Number(decoded[0]),
+      revoked: decoded[1],
+      reason: decoded[2],
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -653,6 +725,7 @@ export async function handleMetadataSet({
   context,
   solverNetManifest,
   envelope,
+  pluginPublication,
   harnessCheckpoint,
   attemptEnvelopeMeta,
   verdictEnvelopeMeta,
@@ -664,7 +737,8 @@ export async function handleMetadataSet({
   context: HandlerContext;
   solverNetManifest: unknown;
   envelope: unknown;
-  harnessCheckpoint: unknown;
+  pluginPublication?: unknown;
+  harnessCheckpoint?: unknown;
   attemptEnvelopeMeta?: unknown;
   verdictEnvelopeMeta?: unknown;
   enrichEnvelopes?: boolean;
@@ -1084,6 +1158,119 @@ export async function handleMetadataSet({
       }
     }
 
+    return;
+  }
+
+  // ── Plug-in publication (attd) ───────────────────────────────────────────
+  const pluginKey = parsePluginKey(key);
+  if (pluginKey !== null) {
+    const txIndex = typeof event.transaction.transactionIndex === 'number'
+      ? event.transaction.transactionIndex
+      : 0;
+    const logIndexResolved = typeof event.log.logIndex === 'number' ? event.log.logIndex : 0;
+    const txHash = event.transaction.hash;
+
+    // Try v1 first. If v1 decode fails, try v2 revocation. Decoders return null
+    // on failure — that is the dispatch signal.
+    const v1 = decodePluginPayload(event.args.metadataValue as Hex);
+    const v2 = v1 ? null : decodeRevocationPayload(event.args.metadataValue as Hex);
+
+    if (v1 && v1.version === 1) {
+      // v1 publish — full insert/overwrite (revoked resets to false even if a
+      // previous payload had set it true; republishing un-revokes).
+      const id = `${agentId}:${pluginKey.cid}`;
+      await context.db
+        .insert(pluginPublication)
+        .values({
+          id,
+          builderAgentId: agentId,
+          pluginCid: pluginKey.cid,
+          pluginName: v1.pluginName,
+          pluginVersion: v1.pluginVersion,
+          pluginSha256: v1.pluginSha256,
+          supports: [...v1.supports],
+          publishedAt: v1.publishedAt,
+          revoked: false,
+          revokedReason: null,
+          txHash,
+          blockNumber,
+          txIndex,
+          logIndex: logIndexResolved,
+          chainId,
+        })
+        .onConflictDoUpdate((row) => {
+          const incomingIsNewer =
+            blockNumber > row.blockNumber ||
+            (blockNumber === row.blockNumber && txIndex > row.txIndex) ||
+            (blockNumber === row.blockNumber &&
+              txIndex === row.txIndex &&
+              logIndexResolved > row.logIndex);
+          if (incomingIsNewer) {
+            return {
+              pluginName: v1.pluginName,
+              pluginVersion: v1.pluginVersion,
+              pluginSha256: v1.pluginSha256,
+              supports: [...v1.supports],
+              publishedAt: v1.publishedAt,
+              revoked: false,
+              revokedReason: null,
+              txHash,
+              blockNumber,
+              txIndex,
+              logIndex: logIndexResolved,
+              chainId,
+            };
+          }
+          return {
+            pluginName: row.pluginName,
+            pluginVersion: row.pluginVersion,
+            pluginSha256: row.pluginSha256,
+            supports: row.supports,
+            publishedAt: row.publishedAt,
+            revoked: row.revoked,
+            revokedReason: row.revokedReason,
+            txHash: row.txHash,
+            blockNumber: row.blockNumber,
+            txIndex: row.txIndex,
+            logIndex: row.logIndex,
+            chainId: row.chainId,
+          };
+        });
+      return;
+    }
+
+    if (v2 && v2.version === 2 && v2.revoked) {
+      // v2 revocation — only valid if a v1 row already exists. Find the row;
+      // if missing, no-op (a revocation for a never-published key is meaningless).
+      const id = `${agentId}:${pluginKey.cid}`;
+      const existing = await context.db.find(pluginPublication, { id });
+      if (!existing) return;
+      // Most-recent-wins gate — only apply if the incoming event beats the
+      // stored anchor on (block, txIndex, logIndex).
+      const row = existing as {
+        blockNumber: bigint;
+        txIndex: number;
+        logIndex: number;
+      };
+      const incomingIsNewer =
+        blockNumber > row.blockNumber ||
+        (blockNumber === row.blockNumber && txIndex > row.txIndex) ||
+        (blockNumber === row.blockNumber &&
+          txIndex === row.txIndex &&
+          logIndexResolved > row.logIndex);
+      if (!incomingIsNewer) return;
+      await context.db.update(pluginPublication, { id }).set({
+        revoked: true,
+        revokedReason: v2.reason,
+        txHash,
+        blockNumber,
+        txIndex,
+        logIndex: logIndexResolved,
+      });
+      return;
+    }
+
+    // Garbage / unknown-version payload — no row written.
     return;
   }
 

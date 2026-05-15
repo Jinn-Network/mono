@@ -26,7 +26,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { keccak256, toBytes } from 'viem';
-import { task, attempt, solverNetManifest, envelope, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from '../ponder.schema.js';
+import { task, attempt, solverNetManifest, envelope, pluginPublication, verdict, rewardDistribution, harnessCheckpoint, attemptEnvelopeMeta, verdictEnvelopeMeta } from '../ponder.schema.js';
 import {
   handleTaskCreated,
   handleTaskAttemptCreated,
@@ -66,6 +66,7 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [attempt, ['taskId', 'attemptIndex', 'chainId']],
   [solverNetManifest, ['id']],
   [envelope, ['agentId', 'metadataKey', 'chainId']],
+  [pluginPublication, ['id']],
   [verdict, ['taskId', 'attemptIndex', 'verdictIndex', 'chainId']],
   [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
   [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
@@ -240,6 +241,7 @@ describe('MetadataSet key routing', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
       harnessCheckpoint,
       attemptEnvelopeMeta,
       enrichEnvelopes: false,
@@ -270,6 +272,7 @@ describe('MetadataSet key routing', () => {
         context: localCtx,
         solverNetManifest,
         envelope,
+        pluginPublication,
         harnessCheckpoint,
         attemptEnvelopeMeta,
         enrichEnvelopes: false,
@@ -297,6 +300,7 @@ describe('MetadataSet key routing', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
       harnessCheckpoint,
       attemptEnvelopeMeta,
       enrichEnvelopes: false,
@@ -319,6 +323,7 @@ describe('envelope payload decode', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
       harnessCheckpoint,
       attemptEnvelopeMeta,
       enrichEnvelopes: false,
@@ -337,6 +342,7 @@ describe('envelope payload decode', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
       harnessCheckpoint,
       attemptEnvelopeMeta,
       enrichEnvelopes: false,
@@ -356,6 +362,7 @@ describe('envelope payload decode', () => {
         context,
         solverNetManifest,
         envelope,
+        pluginPublication,
         harnessCheckpoint,
         attemptEnvelopeMeta,
         enrichEnvelopes: false,
@@ -378,6 +385,7 @@ describe('envelope payload decode', () => {
         context,
         solverNetManifest,
         envelope,
+        pluginPublication,
         harnessCheckpoint,
         attemptEnvelopeMeta,
         enrichEnvelopes: false,
@@ -406,6 +414,7 @@ describe('solverNetManifest most-recent-wins', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
       harnessCheckpoint,
       attemptEnvelopeMeta,
       enrichEnvelopes: false,
@@ -596,6 +605,7 @@ describe('envelope most-recent-wins', () => {
       context,
       solverNetManifest,
       envelope,
+      pluginPublication,
       harnessCheckpoint,
       attemptEnvelopeMeta,
       enrichEnvelopes: false,

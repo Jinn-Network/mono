@@ -49,6 +49,93 @@ export interface ClaimableTaskCandidate {
   operatorAttemptCount: number;
 }
 
+// ── PublishedArtifact base (attd) ────────────────────────────────────────────
+//
+// A common read-shape for builder-published artifacts. Today only plug-ins
+// are published (kind `plugin:<cid>` on the IdentityRegistry); a future Path 2
+// publishing epic adds `harness:<cid>` as a sibling kind with its own payload
+// schema (the `client/schemas/jinn-manifest-v1.json` shape) and adds it to the
+// `artifactType` union below. The unified shape is the read-layer integration
+// point per spec §5.6 — the on-chain layer stays per-artifact-type with
+// distinct payload tuples; this interface unifies the read API.
+
+/**
+ * Base shape for a builder-published artifact. Discriminated on `artifactType`
+ * so future kinds (`harness`) add without breaking consumers.
+ */
+export interface PublishedArtifact {
+  /** Builder agentId (decimal string of the uint256). */
+  builderAgentId: string;
+  /** IPFS CID of the published artifact tarball / manifest. */
+  cid: string;
+  /** Display name from the payload (e.g. npm package name, or harness name). */
+  name: string;
+  /** Display version (semver or harness version string). */
+  version: string;
+  /** SolverType ids the artifact supports. */
+  supports: readonly string[];
+  /** Publish time — unix seconds, from the payload's payload-stamped time. */
+  publishedAt: number;
+  /** Discriminator. Today only `'plugin'`; future: `| 'harness'`. */
+  artifactType: 'plugin';
+  /** True when the most-recent record is a revocation. */
+  revoked: boolean;
+  /** Reason from the revocation record, when revoked. */
+  revokedReason?: string;
+}
+
+/**
+ * The plug-in flavour of `PublishedArtifact`. Adds `pluginSha256` which is the
+ * fork-attribution join key against envelope `executor.plugins[].sha256`.
+ */
+export interface PluginPublication extends PublishedArtifact {
+  artifactType: 'plugin';
+  /** digestDirectory output for the packed tarball. */
+  pluginSha256: `0x${string}`;
+}
+
+/**
+ * One row of score history for a published plug-in. The join key is the cid
+ * — the indexer matches envelope `executor.plugins[].cid` against
+ * `pluginPublication.pluginCid`. When the envelope's sha256 mismatches the
+ * publication's sha256, `forkSuspected` is true and the row is excluded from
+ * builder-credit aggregations per spec §5.3.
+ */
+export interface PluginScoreHistoryRow {
+  pluginCid: string;
+  taskId: string;
+  /** Operator agentId of the daemon that ran the task. */
+  operatorAgentId: string;
+  /** 'Pass' | 'Fail' | 'Rejected' | 'Indeterminate' | 'Unknown'. */
+  verdict: string;
+  /** Numeric score when the verdict is graded (Pass=100, Fail=0); undefined when not. */
+  score?: number;
+  /** Unix seconds the verdict envelope was published. */
+  ts: number;
+  /** True when the envelope's plug-in sha256 did not match the publication's sha256. */
+  forkSuspected: boolean;
+}
+
+/**
+ * One read-time row of a builder-attributed task run. Joins `pluginPublication`
+ * against `attemptEnvelopeMeta` and `verdict` in the indexer. Fork-suspected
+ * rows are flagged but still returned so the SPA can render them with a
+ * "modified plug-in" badge per spec §5.3.
+ */
+export interface BuilderAttributedRun {
+  builderAgentId: string;
+  pluginCid: string;
+  pluginName: string;
+  pluginVersion: string;
+  taskId: string;
+  attemptRequestId: `0x${string}`;
+  operatorAgentId: string;
+  verdict: string;
+  score?: number;
+  forkSuspected: boolean;
+  ts: number;
+}
+
 // ── Interface ────────────────────────────────────────────────────────────────
 
 /**
@@ -101,6 +188,48 @@ export interface DiscoveryAPI {
    * Replaces the subgraph branch of `corpus/index.ts::query`.
    */
   queryEnvelopes(query: CorpusQuery): Promise<EnvelopeRef[]>;
+
+  /**
+   * Returns published plug-ins, optionally filtered by SolverType (`supports`)
+   * or builder agentId. Used by the `/build` SPA route's "browse published
+   * plug-ins" panel and the operator app's plug-in discovery surface.
+   *
+   * Backed by the `pluginPublication` indexer entity. Revoked rows are
+   * included by default; pass `includeRevoked: false` to exclude them.
+   */
+  listPluginPublications(args?: {
+    solverType?: string;
+    builderAgentId?: string;
+    includeRevoked?: boolean;
+    limit?: number;
+  }): Promise<PluginPublication[]>;
+
+  /**
+   * Returns score history for a published plug-in by cid. Each row is a
+   * verdict-attached envelope where `executor.plugins[].cid === pluginCid`.
+   * Rows where the envelope's sha256 did not match the publication's sha256
+   * are flagged with `forkSuspected: true` and excluded from builder-credit
+   * aggregations per spec §5.3.
+   *
+   * Today this surface requires the `attemptEnvelopeMeta` indexer enrichment
+   * shipped under `jinn-mono-ebu7`. When that enrichment is not present in the
+   * deployed indexer, this method returns an empty array.
+   */
+  getPluginScores(args: {
+    pluginCid: string;
+    limit?: number;
+  }): Promise<PluginScoreHistoryRow[]>;
+
+  /**
+   * Returns all published artifacts for a builder agentId, typed by
+   * `artifactType`. Today only plug-ins; the `harness` variant will appear
+   * here when the Path 2 publishing epic ships, without changes to the
+   * call-site.
+   */
+  listBuilderArtifacts(args: {
+    builderAgentId: string;
+    limit?: number;
+  }): Promise<PublishedArtifact[]>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────

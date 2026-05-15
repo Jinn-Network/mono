@@ -1,7 +1,7 @@
 /**
  * Ponder schema for the Jinn protocol indexer.
  *
- * Nine entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6 + ebu7.X:
+ * Ten entities, per spec/2026-05-11-discovery-api-and-shared-indexer.md §7 + ebu7.6 + ebu7.X + attd:
  *
  *   Task                  — from JinnRouter.TaskCreated / SolutionDeliveryClaimed
  *   Attempt               — from JinnRouter.TaskAttemptCreated
@@ -9,6 +9,8 @@
  *   RewardDistribution    — from JinnDistributor.Claimed on Sepolia L1
  *   SolverNetManifest     — from IdentityRegistry.MetadataSet (key prefix solvernet-manifest:)
  *   Envelope              — from IdentityRegistry.MetadataSet (envelope key patterns)
+ *   PluginPublication     — from IdentityRegistry.MetadataSet (key prefix plugin:) per attd /
+ *                           2026-05-13-plug-in-builder-entry-point-design.md
  *   HarnessCheckpoint     — from IdentityRegistry.MetadataSet (key prefix harness.checkpoint:)
  *   AttemptEnvelopeMeta   — IPFS-enriched executor/provenance fields for execution envelopes,
  *                           keyed by (requestId, chainId), joined from Envelope via IPFS fetch
@@ -349,6 +351,84 @@ export const envelope = onchainTable(
     manifestCidIdx: index().on(table.manifestCid),
     evidenceTierIdx: index().on(table.evidenceTier),
     blockIdx: index().on(table.publishedAtBlock),
+  }),
+);
+
+// ── PluginPublication ─────────────────────────────────────────────────────────
+
+/**
+ * A published plug-in record. Populated from IdentityRegistry.MetadataSet
+ * events where the key starts with `plugin:` per
+ * `docs/superpowers/specs/2026-05-13-plug-in-builder-entry-point-design.md`
+ * §5.2 / §5.6.
+ *
+ * Primary key: composite `<builderAgentId>:<pluginCid>`. The textual `pluginCid`
+ * stays primary across overwrites — version updates ship a new tarball (new cid,
+ * new row), revocations overwrite the same key with a v2 revoked-marker payload
+ * (same row, `revoked: true`).
+ *
+ * Most-recent-wins on overwrite, ordered by (blockNumber, txIndex, logIndex)
+ * — matches the existing envelope tiebreak in handleMetadataSet. The
+ * `publishedAt` column is the *payload-claimed* unix timestamp (from the v1
+ * payload field index 5); `blockNumber` is the on-chain anchor and the
+ * authoritative recency signal.
+ *
+ * Note on `supports`: stored as `text[]` so consumers can query for plug-ins
+ * that target a specific SolverType (e.g. `swe-rebench-v2.v1`). Ponder 0.16.x
+ * exposes Postgres arrays as `_in` / `_has` filter operators in its GraphQL
+ * layer, satisfying the per-SolverNet browse panel in spec §6.6.
+ */
+export const pluginPublication = onchainTable(
+  'plugin_publication',
+  (t) => ({
+    /** `<builderAgentId>:<pluginCid>` — composite primary key as a derived id. */
+    id: t.text().primaryKey(),
+    /** agentId of the builder (decimal string of the uint256). */
+    builderAgentId: t.text().notNull(),
+    /** IPFS CID of the packed plug-in tarball — the textual cid from the metadata key. */
+    pluginCid: t.text().notNull(),
+    /** npm package name from the decoded payload. */
+    pluginName: t.text().notNull(),
+    /** semver string from the decoded payload. */
+    pluginVersion: t.text().notNull(),
+    /**
+     * digestDirectory output as a 32-byte hex string. Persisted as text (not
+     * `t.hex()`) because the column also serves as the fork-attribution join
+     * key against envelope.plugins[].sha256, which is a hex string per
+     * client/src/types/envelope.ts.
+     */
+    pluginSha256: t.text().notNull(),
+    /** SolverType ids — indexed for SolverNet browse. */
+    supports: t.text().array().notNull(),
+    /** Unix seconds from the v1 payload — distinct from `blockNumber`. */
+    publishedAt: t.bigint().notNull(),
+    /**
+     * True when the most-recent payload was a v2 revoked-marker. Defaults to
+     * false on v1 inserts; flipped by a subsequent v2 overwrite to the same
+     * key. A v1 re-publish to the same key (republishing a previously-revoked
+     * record) is permitted and flips revoked back to false.
+     */
+    revoked: t.boolean().notNull().default(false),
+    /** Reason string from the v2 revocation payload, nullable. */
+    revokedReason: t.text(),
+    /** Provenance — tx hash of the winning MetadataSet event. */
+    txHash: t.hex().notNull(),
+    /** Block number of the winning MetadataSet event. Used for recency ordering. */
+    blockNumber: t.bigint().notNull(),
+    /** Transaction index of the winning MetadataSet event. */
+    txIndex: t.integer().notNull(),
+    /** Log index within the block. Final tiebreaker on same-block, same-tx writes. */
+    logIndex: t.integer().notNull(),
+    /** Chain ID. */
+    chainId: t.integer().notNull(),
+  }),
+  (table) => ({
+    builderIdx: index().on(table.builderAgentId),
+    pluginCidIdx: index().on(table.pluginCid),
+    pluginNameIdx: index().on(table.pluginName),
+    supportsIdx: index().on(table.supports),
+    revokedIdx: index().on(table.revoked),
+    blockIdx: index().on(table.blockNumber),
   }),
 );
 
