@@ -85,22 +85,12 @@ describe('TopTabs', () => {
   });
 
   it('renders the Build tab', () => {
-    const { hook } = memoryLocation({ path: '/overview' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
+    renderTabs('/overview');
     expect(screen.getByText('Build')).toBeTruthy();
   });
 
   it('marks Build tab active on /build', () => {
-    const { hook } = memoryLocation({ path: '/build' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
+    renderTabs('/build');
     expect(screen.getByText('Build').getAttribute('data-active')).toBe('true');
   });
 });

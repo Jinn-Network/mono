@@ -1,0 +1,26 @@
+{
+  "comment": "Real Python instance IDs that exist in the current nebius/SWE-rebench-leaderboard pool (split 2025_01). validate-pool --seed-positive runs gold-eval against each. Not every entry is guaranteed to record scorable:true — some leaderboard rows have nondeterministic gold patches or upstream-substrate issues. The team prunes this list over time as empirical admit-rates surface. See DR 2026-05-14-swe-rebench-eval-admission.",
+  "source": "spike jinn-mono-fufn — initial set sampled from loadSweRebenchV2Pool() on 2026-05-14",
+  "instance_ids": [
+    "tobymao__sqlglot-4661",
+    "Blaizzy__mlx-vlm-179",
+    "pydata__xarray-9974",
+    "probabl-ai__skore-1133",
+    "brightway-lca__brightway2-io-294",
+    "sphinx-doc__sphinx-13261",
+    "vyperlang__vyper-4462",
+    "CrossGL__crosstl-257",
+    "qBraid__pyqasm-120",
+    "gerlero__foamlib-315",
+    "zarr-developers__VirtualiZarr-410",
+    "unionai-oss__pandera-1898",
+    "pandas-dev__pandas-60736",
+    "pgmpy__pgmpy-1905",
+    "carsdotcom__skelebot-280",
+    "ipython__ipython-14695",
+    "DS4SD__docling-824",
+    "pymc-devs__pymc-7658",
+    "Toloka__crowd-kit-128",
+    "lmfit__lmfit-py-989"
+  ]
+}

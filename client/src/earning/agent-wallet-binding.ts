@@ -45,6 +45,8 @@ import {
   encodeFunctionData,
   hashTypedData,
   hexToBytes,
+  BaseError,
+  ContractFunctionRevertedError,
   type Address,
   type Hex,
   type PublicClient,
@@ -90,6 +92,7 @@ export interface BindAgentWalletArgs {
 }
 
 export interface BindAgentWalletResult {
+  ok: true;
   txHash: Hex;
   /** Final EIP-712 digest the IdentityRegistry checks against. */
   identityDigest: Hex;
@@ -100,6 +103,27 @@ export interface BindAgentWalletResult {
   /** Deadline actually used. */
   deadline: bigint;
 }
+
+export interface SafeBindingError {
+  kind: 'safe_binding_failed';
+  /** Full error message (from BaseError.message). */
+  message: string;
+  /** Concise one-liner (from BaseError.shortMessage, falls back to message). */
+  shortMessage: string;
+  /**
+   * Decoded contract revert reason. Set when the revert carries an
+   * `Error(string)` payload or a named custom error. `null` when the
+   * transaction reverted without a reason string (e.g. plain `revert`).
+   */
+  revertReason: string | null;
+}
+
+export interface BindAgentWalletFailure {
+  ok: false;
+  error: SafeBindingError;
+}
+
+export type BindAgentWalletOutcome = BindAgentWalletResult | BindAgentWalletFailure;
 
 /**
  * Build the IdentityRegistry EIP-712 digest exactly as the contract's
@@ -209,7 +233,7 @@ export function packSafeOwnerSignature(rawSig: Hex): Hex {
  */
 export async function bindAgentWalletToSafe(
   args: BindAgentWalletArgs,
-): Promise<BindAgentWalletResult> {
+): Promise<BindAgentWalletOutcome> {
   const {
     identityRegistryAddress,
     agentId,
@@ -268,28 +292,70 @@ export async function bindAgentWalletToSafe(
     args: [agentId, safeAddress, deadline, signature],
   }) as Hex;
 
-  const txHash = await viemSendTransactionWithRetry(
-    agentEoaWalletClient,
-    publicClient,
-    {
-      account: agentEoaAccount,
-      to: identityRegistryAddress,
-      data,
-    },
-  );
-
-  const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash);
-  if (receipt.status !== 'success') {
-    throw new Error(
-      `IdentityRegistry.setAgentWallet() reverted (agentId=${agentId}, safe=${safeAddress}, tx=${txHash})`,
+  try {
+    const txHash = await viemSendTransactionWithRetry(
+      agentEoaWalletClient,
+      publicClient,
+      {
+        account: agentEoaAccount,
+        to: identityRegistryAddress,
+        data,
+      },
     );
-  }
 
-  return {
-    txHash,
-    identityDigest,
-    safeMessageHash,
-    signature,
-    deadline,
-  };
+    const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash);
+    if (receipt.status !== 'success') {
+      return {
+        ok: false,
+        error: {
+          kind: 'safe_binding_failed',
+          message: `IdentityRegistry.setAgentWallet() reverted (agentId=${agentId}, safe=${safeAddress}, tx=${txHash})`,
+          shortMessage: `setAgentWallet reverted (tx=${txHash})`,
+          revertReason: null,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      txHash,
+      identityDigest,
+      safeMessageHash,
+      signature,
+      deadline,
+    };
+  } catch (err) {
+    const e = err instanceof BaseError ? err : new BaseError(String(err));
+    const reverted = e.walk(
+      (x): x is ContractFunctionRevertedError =>
+        x instanceof ContractFunctionRevertedError,
+    ) as ContractFunctionRevertedError | null;
+
+    // Prefer `.reason` (set for `Error(string)` and Panic reverts by viem),
+    // then fall back to `.data.errorName` for named custom errors, then the
+    // BaseError shortMessage of the ContractFunctionRevertedError itself.
+    const revertReason: string | null =
+      reverted?.reason ??
+      (reverted?.data
+        ? reverted.data.errorName !== 'Error'
+          ? reverted.data.errorName
+          : (reverted.data.args?.[0] as string | undefined) ?? null
+        : null) ??
+      null;
+
+    // Use the inner ContractFunctionRevertedError's shortMessage when
+    // available — it contains the decoded reason ("reverted with reason: X")
+    // which is more useful than the outer wrapper's shortMessage.
+    const shortMessage = reverted?.shortMessage ?? e.shortMessage ?? e.message;
+
+    return {
+      ok: false,
+      error: {
+        kind: 'safe_binding_failed',
+        message: e.message,
+        shortMessage,
+        revertReason,
+      },
+    };
+  }
 }

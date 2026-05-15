@@ -8,11 +8,17 @@
 
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { TaskCounters } from './_swe-rebench-v2-state.js';
+import type { AdmissionMode } from './_swe-rebench-v2-validated-pool.js';
 
 export interface GeneratorConfig {
   N_target_successes: number;
   N_max_postings_per_task: number;
   cooldown_ms: number;
+  /** Controls pool filtering before posting. 'required' (default) blocks if no
+   *  validation data exists; 'python-floor' falls back to Python-only subset.
+   *  Set to 'python-floor' for local dev before running `jinn solver-nets
+   *  validate-pool swe-rebench-v2 --seed-positive`. */
+  admissionMode?: AdmissionMode;
 }
 
 export const DEFAULT_GENERATOR_CONFIG: GeneratorConfig = {
