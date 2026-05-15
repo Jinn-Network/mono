@@ -330,6 +330,18 @@ describe('Fleet bootstrap', () => {
 
     // Master is funded
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
+
+    // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).
+    vi.spyOn(bootstrapper as any, 'stepFleetSafePredict').mockImplementation(async () => {
+      await store.patchFleet({ fleet_safe_address: '0xF1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1' });
+      return store.load('base');
+    });
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockImplementation(async () => store.load('base'));
+    vi.spyOn(bootstrapper as any, 'stepFleetIdentityRegister').mockImplementation(async () => {
+      await store.patchFleet({ fleet_agent_id: '1', fleet_stage: 'stage1' });
+      return store.load('base');
+    });
 
     // Mock the service bootstrap steps.
     // bootstrapService() adds a service with step='awaiting_stake' first, then calls resumeService().
@@ -378,6 +390,18 @@ describe('Fleet bootstrap', () => {
     });
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
+
+    // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).
+    vi.spyOn(bootstrapper as any, 'stepFleetSafePredict').mockImplementation(async () => {
+      await store.patchFleet({ fleet_safe_address: '0xF2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2' });
+      return store.load('base');
+    });
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockImplementation(async () => store.load('base'));
+    vi.spyOn(bootstrapper as any, 'stepFleetIdentityRegister').mockImplementation(async () => {
+      await store.patchFleet({ fleet_agent_id: '2', fleet_stage: 'stage1' });
+      return store.load('base');
+    });
 
     let serviceCounter = 100;
     vi.spyOn(bootstrapper as any, 'stepStolasStake').mockImplementation(async (_s: any, _m: any, index: number) => {
@@ -636,6 +660,22 @@ describe('Fleet bootstrap', () => {
     });
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
+
+    // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).
+    // Note: fleet_agent_id is left unset so stepRegisterAgent falls through to its
+    // legacy mint path (no fleet identity to reuse), exercising the ERC-8004 mint spy.
+    vi.spyOn(bootstrapper as any, 'stepFleetSafePredict').mockImplementation(async () => {
+      await store.patchFleet({ fleet_safe_address: '0xF3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3' });
+      return store.load('base');
+    });
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockImplementation(async () => store.load('base'));
+    vi.spyOn(bootstrapper as any, 'stepFleetIdentityRegister').mockImplementation(async () => {
+      // Do NOT set fleet_agent_id here — this test asserts that stepRegisterAgent
+      // is called for the service row (legacy mint path when fleet_agent_id is absent).
+      await store.patchFleet({ fleet_stage: 'stage1' });
+      return store.load('base');
+    });
 
     // Stub the upstream OLAS steps; let the real `stepRegisterAgent` run.
     vi.spyOn(bootstrapper as any, 'stepStolasStake').mockImplementation(async (_s: any, _m: any, index: number) => {

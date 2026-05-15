@@ -5,6 +5,19 @@ import { z } from 'zod';
 export const StakingModeSchema = z.enum(['standard', 'self-bond']);
 export type StakingMode = z.infer<typeof StakingModeSchema>;
 
+// ── Fleet bootstrap stage marker (nghf) ─────────────────────────────────────
+//
+// `none`         — fresh fleet; no identity provisioned yet.
+// `stage1`       — fleet-level identity is provisioned (Safe deployed, agentId
+//                  minted, setAgentWallet bound). Builder-only completion.
+// `stage1_and_2` — at least one service row has reached `complete` /
+//                  `safe_binding_pending`. Full operator completion.
+//
+// See docs/superpowers/specs/2026-05-13-plug-in-builder-entry-point-design.md §5.1
+// and docs/superpowers/specs/2026-05-14-nghf-staged-bootstrap-fit-findings.md.
+export const FleetStageSchema = z.enum(['none', 'stage1', 'stage1_and_2']);
+export type FleetStage = z.infer<typeof FleetStageSchema>;
+
 // ── Service step progression ─────────────────────────────────────────────────
 //
 // Standard (stOLAS) mode:
@@ -108,6 +121,20 @@ export const FleetStateSchema = z.object({
   staking_mode: StakingModeSchema.default('standard'),
   services: z.array(ServiceStateSchema),
   updated_at: z.string(),
+
+  // ── Fleet-level Stage 1 identity (nghf) ─────────────────────────────────
+  //
+  // These four fields are added so a fleet can carry ERC-8004 identity
+  // independently of any service row, enabling builder-only (services: [])
+  // operation. Stage 1 always uses the self-bond Safe topology
+  // (deterministic prediction from the HD-index-1 agent EOA) regardless of
+  // the eventual staking mode — in standard mode, Stage 2 later creates a
+  // separate staking Safe via `distributor.stake()`, so dual-role operators
+  // end up with two Safes. See findings §8 (Option A).
+  fleet_agent_id: z.string().nullable().optional().default(null),
+  fleet_safe_address: z.string().nullable().optional().default(null),
+  fleet_identity_registry: z.string().nullable().optional().default(null),
+  fleet_stage: FleetStageSchema.optional().default('none'),
 });
 
 export type FleetState = z.infer<typeof FleetStateSchema>;
@@ -121,6 +148,10 @@ export function createDefaultFleetState(chain: 'base' | 'base-sepolia' = 'base')
     staking_mode: 'standard',
     services: [],
     updated_at: new Date().toISOString(),
+    fleet_agent_id: null,
+    fleet_safe_address: null,
+    fleet_identity_registry: null,
+    fleet_stage: 'none',
   };
 }
 
