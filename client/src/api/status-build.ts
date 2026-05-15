@@ -10,6 +10,7 @@ import {
 import type { EarningMigrationArchive } from '../earning/store.js';
 import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
+import type { TaskRunsStatus } from './task-runs-build.js';
 
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
 
@@ -24,6 +25,12 @@ export interface GatheredStatusRaw {
   /** sqlite_only: only SQLite-backed fields (e2e / API without fleet context). */
   hintsScope?: StatusHintsScope;
   shutdownState: string | null;
+  daemonRuntime?: {
+    pidPath: string;
+    pid: number | null;
+    alive: boolean;
+    stale: boolean;
+  };
   daemonStartedAt?: string | null;
   dbPath: string;
   earningDir?: string;
@@ -59,6 +66,8 @@ export interface GatheredStatusRaw {
   portfolioV0?: PortfolioV0Status;
   /** prediction.v1 operator/lifecycle data — populated by gather-status from the SQLite store. */
   predictionV1?: PredictionV1Status;
+  /** Generic task-run lifecycle data across all SolverNets. */
+  taskRuns?: TaskRunsStatus;
   serviceBalances?: Record<number, { agentNativeWei: string; safeNativeWei: string; safeBondWei: string }>;
   /** Last balance fetch error per service (display index). Present when a fetch failed. */
   serviceBalanceErrors?: Record<number, ServiceBalanceErrorEntry>;
@@ -129,6 +138,8 @@ export interface StatusV1Response {
   portfolioV0?: PortfolioV0Status;
   /** prediction.v1 operator/lifecycle data — optional, absent when not available. */
   predictionV1?: PredictionV1Status;
+  /** Generic task-run lifecycle data across all SolverNets. */
+  taskRuns?: TaskRunsStatus;
 }
 
 /**
@@ -360,5 +371,6 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     nextActions: buildNextActions(raw, fleetSum),
     ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
     ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),
+    ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
   };
 }

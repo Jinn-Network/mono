@@ -28,6 +28,7 @@ import {
 } from '../impls/prediction-v1-test-helpers.js';
 import {
   buildPredictionV1ManifestStub,
+  buildSweRebenchV2ManifestStub,
   makeStubManifestResolver,
 } from './manifest-resolver-stub.js';
 
@@ -36,6 +37,7 @@ import {
 // them by `manifestDigest = keccak256(cid)`.
 const LAUNCHER_A_CID = TEST_PREDICTION_V1_MANIFEST_CID;
 const LAUNCHER_B_CID = 'bafy-prediction-v1-launcher-b-test';
+const SWE_REBENCH_CID = 'bafy-swe-rebench-v2-test-manifest';
 
 function stubHarness(overrides: Partial<Harness> = {}): Harness {
   return {
@@ -73,6 +75,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
         solverNetId: 'prediction-v1-launcher-b',
         name: 'Prediction (launcher B)',
       }),
+      [SWE_REBENCH_CID]: buildSweRebenchV2ManifestStub(),
     });
     return new TaskEngine({
       store,
@@ -182,6 +185,44 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
         } as Task,
       });
       expect(evaluation).toEqual({ ok: true });
+    });
+
+    it('validates swe-rebench-v2 task.spec payloads against the manifest contract schema', async () => {
+      const view = joinedSolverNetsViewFromConfig({
+        [SWE_REBENCH_CID]: { manifestCid: SWE_REBENCH_CID, roles: ['solver'] },
+      });
+      const engine = makeEngine({ joinedSolverNets: view });
+      const task: Task = {
+        id: 'swe-rebench-task',
+        description: 'SWE-rebench v2: example__repo-1',
+        solverType: 'swe-rebench-v2.v1',
+        contractId: 'swe-rebench-v2',
+        contractVersion: 'v1',
+        solverNetManifestCid: SWE_REBENCH_CID,
+        role: 'restoration',
+        window: {
+          startTs: Date.parse('2026-05-02T00:00:00.000Z'),
+          endTs: Date.parse('2026-05-09T00:00:00.000Z'),
+        },
+        spec: {
+          schemaVersion: 'swe-rebench-v2.v1',
+          instance_id: 'example__repo-1',
+          repo: 'example/repo',
+          base_commit: '0123456789abcdef0123456789abcdef01234567',
+          language: 'python',
+          problem_statement: 'Fix the bug.',
+          interface: '',
+          hf_dataset: 'nebius/SWE-rebench-leaderboard',
+          hf_split: '2026_02',
+          deadline_unix: 1778284800,
+          round_month: '2026-02',
+        },
+        eligibility: {},
+      };
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept).toEqual({ ok: true });
     });
 
     it('rejects every task when operator has joined nothing', async () => {

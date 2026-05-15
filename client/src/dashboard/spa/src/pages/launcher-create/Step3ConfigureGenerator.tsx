@@ -481,7 +481,7 @@ function SweRebenchV2GeneratorForm({
     <StepShell
       step={3}
       title="Configure generator"
-      blurb="The generator pulls instances from the SWE-rebench v2 HuggingFace pool and posts each Task until enough score=1 Verdicts accumulate or the per-Task posting cap is hit."
+      blurb="The generator pulls SWE-rebench v2 instances from the HuggingFace pool and posts Tasks until enough successful Verdicts accumulate or the posting cap is hit."
       error={error}
       footer={
         <StepNav
@@ -494,8 +494,8 @@ function SweRebenchV2GeneratorForm({
     >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
         <FieldShell
-          label="Target successes per Task"
-          helperText="How many score=1 Verdicts saturate a Task and stop further reposting."
+          label="Target successful Verdicts per instance"
+          helperText="How many score=1 Verdicts saturate a SWE instance and stop further Task posting."
           error={fieldErrors.N_target_successes ?? null}
         >
           <input
@@ -509,8 +509,8 @@ function SweRebenchV2GeneratorForm({
           />
         </FieldShell>
         <FieldShell
-          label="Max postings per Task"
-          helperText="Hard ceiling on repostings to bound spend on impossible tasks."
+          label="Max Task postings per instance"
+          helperText="Hard ceiling on Task postings to bound spend on impossible SWE instances."
           error={fieldErrors.N_max_postings_per_task ?? null}
         >
           <input
@@ -524,8 +524,8 @@ function SweRebenchV2GeneratorForm({
           />
         </FieldShell>
         <FieldShell
-          label="Cooldown between repostings (ms)"
-          helperText="Minimum gap before reposting the same Task. Minimum 60s."
+          label="Cooldown between task postings (ms)"
+          helperText="Minimum gap before posting another Task for the same SWE instance. Minimum 60s."
           error={fieldErrors.cooldown_ms ?? null}
         >
           <input

@@ -7,16 +7,11 @@ import { LiveNowBand } from './overview/LiveNowBand.js';
  * /overview/activity — the canonical activity surface. Reached from the
  * "View activity →" link on the LiveNowBand. Two sections:
  *
- *   • In flight — per-task list of currently-active task runs (filtered
- *     from predictionV1.recentTasks by non-terminal state).
+ *   • In flight — per-task list of currently-active task runs across SolverNets.
  *   • Recent — full activity event stream (activity.recent from /v1/status).
  *
  * v1 limitations (see plan §"Out of scope"):
- *   • predictionV1.recentTasks is capped at 5 by the daemon. Operators
- *     with more than 5 in-flight tasks won't see them all here. Practical
- *     max in-flight is single-digit on today's daemons.
  *   • activity.recent is capped at 12 events. Pagination is a follow-up.
- *   • predictionV1 only — portfolioV0 in-flight runs are not surfaced here.
  */
 
 const TERMINAL_STATES = new Set(['COMPLETE', 'FAILED']);
@@ -42,17 +37,23 @@ interface ActivityStatusV1 {
       outcome: string | null;
     }>;
   };
-  predictionV1?: {
-    recentTasks?: Array<{
-      requestId: string;
-      taskId: string | null;
-      taskCid: string;
-      state: string;
-      taskRole: 'restoration' | 'evaluation' | null;
-      stateUpdatedAt: number;
-      deliveryTxHash: string | null;
-    }>;
+  taskRuns?: {
+    inFlight?: ActivityTaskRun[];
   };
+  predictionV1?: {
+    recentTasks?: ActivityTaskRun[];
+  };
+}
+
+interface ActivityTaskRun {
+  requestId: string;
+  taskId: string | null;
+  taskCid: string;
+  solverType?: string | null;
+  state: string;
+  taskRole: 'restoration' | 'evaluation' | null;
+  stateUpdatedAt: number;
+  deliveryTxHash: string | null;
 }
 
 function formatElapsed(ms: number): string {
@@ -117,7 +118,7 @@ export function OverviewActivityPage({
     refetchInterval: pollIntervalMs,
   });
 
-  const inFlight = (data?.predictionV1?.recentTasks ?? []).filter(
+  const inFlight = data?.taskRuns?.inFlight ?? (data?.predictionV1?.recentTasks ?? []).filter(
     (t) => !TERMINAL_STATES.has(t.state),
   );
   const events = data?.activity?.recent ?? [];
@@ -252,7 +253,7 @@ export function OverviewActivityPage({
                   {task.taskRole ?? '—'}
                 </span>
                 <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {truncateRequestId(task.requestId)}
+                  {task.solverType ? `${task.solverType} · ` : ''}{truncateRequestId(task.requestId)}
                 </span>
                 <span style={{ color: 'var(--fg-muted)', textAlign: 'right' }}>
                   {formatElapsed(Date.now() - task.stateUpdatedAt)}

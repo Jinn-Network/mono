@@ -456,7 +456,7 @@ describe('Engine packaging integration', () => {
 
     // Build a minimal valid PortfolioV0VerdictPayload
     const verdictPayload = {
-      restorationEnvelope: { cid: 'bafy-rest', sha256: '0'.repeat(64) },
+      solutionEnvelope: { cid: 'bafy-solution', sha256: '0'.repeat(64) },
       verificationOfRestoration: {
         claimedTier: 'self-signed',
         sdkVersion: '0.0.0-stub',
@@ -549,7 +549,7 @@ describe('Engine packaging integration', () => {
     // payload must contain the verdict fields (not restoration snapshot fields)
     const payload = envelope['payload'] as Record<string, unknown>;
     expect(payload['verdict']).toBe('PASS');
-    expect(payload['restorationEnvelope']).toBeDefined();
+    expect(payload['solutionEnvelope']).toBeDefined();
     expect(payload['verificationOfRestoration']).toBeDefined();
     expect(payload['rederived']).toBeDefined();
     expect(payload['claimed']).toBeDefined();
@@ -739,6 +739,92 @@ describe('Engine pack() — trajectory↔artifact bidirectional linkage', () => 
       // The trajectoryCid must be the value returned by the trajectory upload
       expect(pb['trajectoryCid']).toBe('bafy-trajectory-cid');
     }
+  });
+
+  it('adds donated IPFS sources to the envelope trajectory reference in donation mode', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockClear();
+    uploadMock.mockImplementation(async (_url: string, payload: unknown) => {
+      const record = payload as Record<string, unknown>;
+      if (record?.['schemaVersion'] === 'jinn.trajectory.v1') return 'bafy-trajectory-raw';
+      if (record?.['schemaVersion'] === 'jinn.artifact.donation.v1' && record?.['artifactType'] === 'jinn.trajectory.v1') {
+        return 'bafy-trajectory-wrapper';
+      }
+      if (record?.['schemaVersion'] === 'jinn.execution.v1') return 'bafy-envelope';
+      return 'bafy-artifact-wrapper';
+    });
+
+    const donatedEngine = new TrajectoryTestEngine({
+      ...makeOpts(store, tmp),
+      packagingDeps: {
+        ...makeOpts(store, tmp).packagingDeps!,
+        donation: {
+          enabled: true,
+          ipfsRegistryUrl: 'http://ipfs.test',
+        },
+      },
+    });
+
+    const requestId = 'req-traj-donation-source';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+    writeFileSync(join(workingDir, 'sessions', 'session.jsonl'), '{"msg":"hi"}');
+
+    await donatedEngine.observe(makeInput(requestId, tmp));
+    const p = donatedEngine.testPersistence;
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'test'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
+    });
+    p.transition(requestId, TaskRunState.PACKAGING);
+
+    const collector = new TrajectoryCollector({ taskCid: 'bafyintent123', runId: 'run-test-donation' });
+    collector.addSpan({
+      name: 'phase.run',
+      kind: 'INTERNAL',
+      startTimeUnixNano: '1000000000',
+      endTimeUnixNano: '2000000000',
+      attributes: { 'jinn.span.kind': 'jinn.phase', 'jinn.phase.name': 'run' },
+      events: [],
+      status: { code: 'OK' },
+    });
+    donatedEngine.injectCollector(requestId, collector);
+
+    await donatedEngine.process(requestId);
+
+    const envelopeCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>)['schemaVersion'] === 'jinn.execution.v1',
+    );
+    expect(envelopeCall).toBeDefined();
+    const envelope = envelopeCall![1] as Record<string, unknown>;
+    const trajectory = envelope['trajectory'] as Record<string, unknown>;
+    const sources = trajectory['sources'] as Array<Record<string, unknown>>;
+    expect(trajectory['sha256']).toMatch(/^[0-9a-f]{64}$/);
+    expect(sources).toEqual([
+      {
+        kind: 'ipfs',
+        cid: 'bafy-trajectory-wrapper',
+        sha256: trajectory['sha256'],
+        encoding: 'jinn.artifact.donation.v1',
+      },
+    ]);
   });
 
   it('pack() works without a collector — no producedBy on artifacts', async () => {

@@ -7,15 +7,18 @@ This package is published from the monorepo, but operators consume it as a stand
 - legacy no-install form (still supported): `npx -p @jinn-network/client@latest jinn <verb>`
 - container: `ghcr.io/jinn-network/client:<version>`
 
-The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `client-vX.Y.Z`.
+The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `v<semver>` (new, produced by the Monday scaffold workflow) or `client-v<semver>` (legacy). The engineering handbook (`cargo/docs/engineering/handbook.md`) is the canonical reference for the cadence.
 
-The release flow has four layers:
+The release flow has six layers:
 
 1. fast CI in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
-2. the fork-based local operator gate (`yarn release:operator-gate`)
-3. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
-4. the manual real testnet Docker acceptance gate (`yarn release:testnet-acceptance`; first-time setup: `yarn setup:testnet-acceptance-operator`, see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
-5. the GitHub Release workflows for npm `latest` and GHCR
+2. the fork-based local operator gate (`yarn release:operator-gate`) — **now runs automatically in `npm-publish.yml` on stable publishes** (jinn-mono-2cl.7); previously manual
+3. the cross-operator donated SWE execution-data gate (`yarn release:donation-consumption`) — **runs during `yarn release:client --prepare` and must be attached as release evidence before publishing** (jinn-mono-2cl.7); it is not rerun inside GitHub Actions because it requires a live producer daemon and local operator credentials
+4. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
+5. the manual app-first SWE-rebench v2 and data-donation testnet acceptance gate, with Docker diagnostics retained as supporting evidence (see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
+6. the GitHub Release workflows for npm `latest` and GHCR
+
+The package's `prepublishOnly` script (`yarn typecheck`) runs on every `npm publish` as a final type-check safety net. The workflow (`npm-publish.yml`) explicitly runs `yarn typecheck`, `yarn build`, and `yarn test` as unconditional steps before publish, and on stable publishes additionally reruns layer 2 above. Layer 3 remains mandatory release-prep evidence because it depends on live local operator state. Keeping `prepublishOnly` to just `yarn typecheck` avoids a redundant rebuild in CI between the gate steps and the actual `npm publish` call — the artifact npm packs is the same one the gates validated. **If you run `npm publish` locally (e.g. from a clean checkout), make sure to `yarn build` first** — the workflow handles this automatically.
 
 The old host-installed full acceptance run remains available only as a secondary debug path:
 
@@ -37,6 +40,7 @@ Do this once because the package did not exist on npm initially.
    yarn build
    yarn pack:smoke
    yarn release:operator-gate
+   yarn release:donation-consumption
    cd ../contracts
    yarn test
    forge install foundry-rs/forge-std --no-git
@@ -88,15 +92,35 @@ npx @jinn-network/client@canary --help
    cd client
    yarn release:client --prepare
    ```
-   This runs the local client gates, contract gates, Docker testnet acceptance
-   setup with bootstrap, the Docker acceptance gate itself, and writes a report
-   under `client/release-runs/<version>-<timestamp>/`.
+   This runs the local client gates, the fork-based operator gate, contract
+   gates, Docker testnet acceptance setup with bootstrap, the Docker diagnostic
+   gate, the donation-consumption gate, and writes a report under
+   `client/release-runs/<version>-<timestamp>/`. The app-first SWE-rebench v2
+   and donated-data proof in [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md)
+   must be attached to the release evidence before publishing.
 4. Publish from that report:
    ```bash
    yarn release:client --publish --resume release-runs/<version>-<timestamp>
    ```
    The publish step creates `client-vX.Y.Z`, pushes it, creates the GitHub
    release, waits for npm/GHCR workflows, and verifies the published artifacts.
+
+For Captain-driven GitHub Release publishes, add this exact evidence marker to
+the Release body before clicking Publish. `release-commit` must be the commit
+the `vX.Y.Z` tag points at:
+
+```text
+<!-- jinn-release-evidence:v1
+release-tag=vX.Y.Z
+release-commit=<git sha>
+release-client-prepare=passed
+donation-consumption=passed
+app-first-testnet-acceptance=passed
+-->
+```
+
+`npm-publish.yml` refuses stable publishes when this marker is absent or points
+at a different commit.
 
 For command-flow validation without the live testnet gate:
 
@@ -105,7 +129,7 @@ yarn release:client --prepare --skip-acceptance
 ```
 
 `--skip-acceptance` is not a stable-release gate; it exists to test the runner
-itself. The Docker acceptance gate is documented in
+itself. The current app-first testnet acceptance gate is documented in
 [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md).
 
 Release workflow contract:

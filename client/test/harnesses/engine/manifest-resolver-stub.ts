@@ -70,6 +70,60 @@ export function buildPredictionV1ManifestStub(
   return manifest;
 }
 
+export function buildSweRebenchV2ManifestStub(
+  overrides: Partial<SolverNetManifestV1> = {},
+): SolverNetManifestV1 {
+  const manifest: SolverNetManifestV1 = {
+    schemaVersion: 'solvernet.manifest.v1',
+    solverNetId: 'swe-rebench-v2-test',
+    network: 'base-sepolia',
+    name: 'SWE-rebench v2 (test)',
+    description: 'Test manifest for the swe-rebench-v2.v1 contract.',
+    launcher: {
+      safeAddress: `0x${'a'.repeat(40)}`,
+      agentEoa: `0x${'b'.repeat(40)}`,
+      agentId: 'test-launcher-agent',
+    },
+    contract: {
+      id: 'swe-rebench-v2',
+      version: 'v1',
+      schemas: { task: {}, solution: {}, verdict: {} },
+      claimPolicyDefaults: {
+        mode: 'parallel',
+        maxClaims: 50,
+        maxClaimsPerOperator: 5,
+        claimLeaseTtlSeconds: 60 * 60,
+      },
+      credentialRequirements: { creator: [], solver: [], evaluator: [] },
+      evaluationFunction: {
+        id: 'swe-rebench-v2.eval.v1',
+        deterministic: true,
+        inputs: [],
+        output: 'verdict',
+        implementation: 'client/src/harnesses/impls/swe-rebench-v2-evaluator',
+      },
+      aggregationFunction: {
+        id: 'swe-rebench-v2.success-rate.v1',
+        deterministic: true,
+        inputs: [],
+        output: 'aggregate',
+      },
+    },
+    solutionPriceWei: '0',
+    verdictPriceWei: '0',
+    openRoles: ['solver', 'evaluator'],
+    createdAt: '2026-05-02T00:00:00.000Z',
+    launchedAt: '2026-05-02T00:00:00.000Z',
+    signature: {
+      alg: 'eip-191',
+      signer: `0x${'c'.repeat(40)}`,
+      value: `0x${'d'.repeat(64)}`,
+    },
+    ...overrides,
+  };
+  return manifest;
+}
+
 /**
  * A `ManifestResolver` that returns the prediction.v1 stub for the
  * canonical test CID and throws "manifest not found" for anything else.

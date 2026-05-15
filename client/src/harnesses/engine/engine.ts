@@ -21,6 +21,7 @@ import {
   uploadArtifacts,
   type PackagingDeps,
 } from './packaging.js';
+import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
 import {
   assembleAndSignEnvelope,
   type EnvelopeAssemblyDeps,
@@ -47,9 +48,11 @@ import {
   codeDigestSha256ToBytes32,
   modeStringToFlag,
 } from '../../erc8004/index.js';
-import type { Role } from '../../types/envelope.js';
+import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
+import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
+import { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import { buildInfo } from '../../build-info.js';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
@@ -57,6 +60,7 @@ import {
   runHarnessWithFreezeFence,
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
+import { harnessStateDirName } from '../names.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -283,6 +287,13 @@ export interface TaskEngineOptions {
     publicEndpoint: string;
     defaultPriceUsdc: string;
     perArtifactTypePrice: Record<string, string>;
+    donation?: { enabled: boolean };
+    /**
+     * Daemon-wide default LLM model identifier (from JinnConfig.claudeModel).
+     * Used as the fallback when a SolverNet does not specify its own model.
+     * Stamped into executor.model in the assembled envelope (jinn-mono-gbut).
+     */
+    claudeModel?: string;
   };
   /**
    * Harness execution mode from operator config (JinnConfig.harness.mode).
@@ -303,6 +314,22 @@ export interface TaskEngineOptions {
 
 /** Per-task outcome from a recovery pass. */
 export interface RecoveryReport {
+  requestId: string;
+  outcome: 'ok' | 'failed';
+  error?: string;
+}
+
+interface TickOptions {
+  /**
+   * When true, wait for newly scheduled task processing to settle before
+   * returning. Direct callers keep the historical behavior. The daemon's
+   * periodic loop uses wait=false so one long harness run cannot starve
+   * other in-flight tasks discovered later.
+   */
+  wait?: boolean;
+}
+
+interface ProcessReport {
   requestId: string;
   outcome: 'ok' | 'failed';
   error?: string;
@@ -355,11 +382,16 @@ export class TaskEngine {
 
   // Transient storage for trajectory CID+sha256 refs produced by runImpl.
   // Keyed by requestId; cleared after successful pack.
-  private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string } | null>();
+  private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string; sources?: ArtifactSource[] } | null>();
   private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
+  private readonly processingRequestIds = new Set<string>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
   private stopped = false;
+  private stopResolve?: () => void;
+  private readonly stopPromise = new Promise<void>((resolve) => {
+    this.stopResolve = resolve;
+  });
 
   constructor(opts: TaskEngineOptions) {
     this.persistence = new TaskRunPersistence(opts.store.db);
@@ -438,18 +470,24 @@ export class TaskEngine {
    *
    * Errors from individual tasks are logged but do not stop the loop.
    */
-  async tick(): Promise<void> {
+  async tick(options: TickOptions = {}): Promise<void> {
+    const wait = options.wait ?? true;
     const inflight = this.persistence.getInFlight();
-    const results = await Promise.allSettled(
-      inflight.map((task) => this.process(task.requestId)),
-    );
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i]!;
-      if (r.status === 'rejected') {
-        const requestId = inflight[i]!.requestId;
-        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
-        console.warn(`[harness-engine] tick: process(${requestId}) failed: ${reason}`);
+    const scheduled: Array<Promise<ProcessReport>> = [];
+    for (const task of inflight) {
+      const processPromise = this.scheduleProcess(task.requestId);
+      if (!processPromise) continue;
+      scheduled.push(processPromise);
+      if (!wait) {
+        void processPromise.then((report) => this.logProcessReport('tick', report));
       }
+    }
+
+    if (!wait) return;
+
+    const reports = await Promise.all(scheduled);
+    for (const report of reports) {
+      this.logProcessReport('tick', report);
     }
   }
 
@@ -460,18 +498,44 @@ export class TaskEngine {
   async runTickLoop(intervalMs: number): Promise<void> {
     while (!this.stopped) {
       try {
-        await this.tick();
+        await this.tick({ wait: false });
       } catch (err) {
         console.error('[harness-engine] tick loop error (continuing):', err instanceof Error ? err.message : err);
       }
       if (this.stopped) break;
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      await Promise.race([
+        new Promise((resolve) => setTimeout(resolve, intervalMs)),
+        this.stopPromise,
+      ]);
     }
   }
 
   /** Signal `runTickLoop` to exit at the next iteration. */
   stop(): void {
     this.stopped = true;
+    this.stopResolve?.();
+  }
+
+  private scheduleProcess(requestId: string): Promise<ProcessReport> | null {
+    if (this.processingRequestIds.has(requestId)) {
+      return null;
+    }
+    this.processingRequestIds.add(requestId);
+    return this.process(requestId)
+      .then((): ProcessReport => ({ requestId, outcome: 'ok' }))
+      .catch((err: unknown): ProcessReport => ({
+        requestId,
+        outcome: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      .finally(() => {
+        this.processingRequestIds.delete(requestId);
+      });
+  }
+
+  private logProcessReport(source: string, report: ProcessReport): void {
+    if (report.outcome !== 'failed') return;
+    console.warn(`[harness-engine] ${source}: process(${report.requestId}) failed: ${report.error ?? 'unknown error'}`);
   }
 
   /**
@@ -593,6 +657,7 @@ export class TaskEngine {
       task.solverType ?? undefined,
       task.taskRole ?? 'restoration',
       task.task as Task | undefined,
+      task.requestId,
     );
     if (reason) {
       this.persistence.markFailed(task.requestId, reason);
@@ -700,10 +765,23 @@ export class TaskEngine {
     }
     const parsed = sdkContract.schemas.task.zod.safeParse(task);
     if (!parsed.success) {
-      const issues = parsed.error.issues
+      const parsedSpec = task.spec !== undefined
+        ? sdkContract.schemas.task.zod.safeParse(task.spec)
+        : undefined;
+      if (parsedSpec?.success) return null;
+
+      const specIssuesLookLikeWholeTask =
+        parsedSpec !== undefined &&
+        parsedSpec.error.issues.some((issue: ZodIssue) => {
+          const head = issue.path[0];
+          return typeof head === 'string' && ['id', 'description', 'solverType', 'window', 'claimPolicy', 'spec'].includes(head);
+        });
+      const selected = parsedSpec !== undefined && !specIssuesLookLikeWholeTask ? parsedSpec : parsed;
+      const issues = selected.error.issues
         .map((issue: ZodIssue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
         .join('; ');
-      return `${ref.id}.${ref.version} task failed validation: ${issues}`;
+      const scope = selected === parsedSpec ? 'task.spec' : 'task';
+      return `${ref.id}.${ref.version} ${scope} failed validation: ${issues}`;
     }
     return null;
   }
@@ -788,6 +866,7 @@ export class TaskEngine {
     solverType: string | undefined,
     role: 'restoration' | 'evaluation',
     task?: Task,
+    currentRequestId?: string,
   ): Promise<string | null> {
     // Per-launch operator-eligibility filter (Task 28 of
     // `spec/2026-05-05-solvernet-creation-and-launch.md` §14). When the
@@ -809,6 +888,13 @@ export class TaskEngine {
     // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
     // rows that pre-date `contractId`. See `routingKeyForTask`.
     const routingKey = this.routingKeyForTask(task, solverType);
+    if (routingKey && this.persistence.hasInFlightFor({
+      solverType: routingKey,
+      taskRole: role,
+      excludeRequestId: currentRequestId,
+    })) {
+      return `another ${routingKey}/${role} task is already in flight`;
+    }
     const solverNet = this.solverNetRegistry && routingKey
       ? this.solverNetRegistry.forSolverType(routingKey, role)
       : undefined;
@@ -869,7 +955,7 @@ export class TaskEngine {
     const resolvedImpl = run.solverType
       ? this.implRegistry?.findFor({ solverType: run.solverType, role: run.taskRole ?? 'restoration' }) ?? null
       : null;
-    const implStateName = run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default';
+    const implStateName = harnessStateDirName(run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default');
     const kindSeg = (run.solverType ?? '').replace(/[.:]/g, '_');
     const implStateDir = kindSeg
       ? join(this.paths.implStateDirRoot, implStateName, kindSeg)
@@ -932,8 +1018,8 @@ export class TaskEngine {
     const kindSeg = solverType.replace(/[.:]/g, '_');
     const implStateDir = task.implStateDir ?? (
       kindSeg
-        ? join(this.paths.implStateDirRoot, impl.name, kindSeg)
-        : join(this.paths.implStateDirRoot, impl.name)
+        ? join(this.paths.implStateDirRoot, harnessStateDirName(impl.name), kindSeg)
+        : join(this.paths.implStateDirRoot, harnessStateDirName(impl.name))
     );
     const windowEndTs = task.windowEndTs;
 
@@ -1105,6 +1191,26 @@ export class TaskEngine {
       }
     }
 
+    // jinn-mono-4tfq: SkippableError caught in RUNNING leaves a skip-marker
+    // Solution with no payload; short-circuit before envelope assembly.
+    // Runs BEFORE the deps guard — skipping needs nothing wired.
+    const earlyImplOutput = this.solutionOutputs.get(task.requestId);
+    const gatingClaim = earlyImplOutput?.gating as Record<string, unknown> | undefined;
+    if (gatingClaim?.['skipped'] === true) {
+      const reason = String(gatingClaim['reason'] ?? 'unknown');
+      const detail = String(
+        (earlyImplOutput?.informational as Record<string, unknown> | undefined)?.['detail'] ?? '',
+      );
+      console.log(
+        `[harness-engine] ${task.requestId}: PACKAGING short-circuited — impl was skipped (${reason})${detail ? `: ${detail}` : ''}`,
+      );
+      this.persistence.markFailed(
+        task.requestId,
+        `impl skipped: ${reason}${detail ? ` — ${detail}` : ''}`,
+      );
+      return;
+    }
+
     if (!this.packagingDeps || !this.envelopeDeps) {
       throw new NotImplementedError('pack');
     }
@@ -1124,25 +1230,48 @@ export class TaskEngine {
       requestId: task.requestId,
       ...(collector ? { collector } : {}),
     };
-    const rawArtifacts = await walkArtifacts(workingDir, implArtifacts);
+    const rawArtifacts = await walkArtifacts(
+      workingDir,
+      implArtifacts,
+      packagingDepsWithReq.donation?.enabled
+        ? { scrub: packagingDepsWithReq.donation.scrub }
+        : {},
+    );
     const uploadedArtifacts = await uploadArtifacts(rawArtifacts, packagingDepsWithReq);
 
     // 1b. Emit trajectory to IPFS now that all artifact spans have been added.
     // Non-fatal — envelope assembly continues with envelope.trajectory = null if upload fails.
-    let trajectoryRef: { cid: string; sha256: string } | null =
+    let trajectoryRef: { cid: string; sha256: string; sources?: ArtifactSource[] } | null =
       this.trajectoryRefs.get(task.requestId) ?? null;
     if (!trajectoryRef && collector && this.envelopeDeps) {
       try {
         const { privateKeyToAccount } = await import('viem/accounts');
         const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
-        const { cid, sha256 } = await emitTrajectory({
+        const { cid, sha256, signed } = await emitTrajectory({
           collector,
           runId: collector.runId,
           signerPrivateKey: this.envelopeDeps.agentEoaPrivateKey,
           signerAddress: account.address as `0x${string}`,
           ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
+          scrub: packagingDepsWithReq.donation?.scrub,
         });
-        trajectoryRef = { cid, sha256 };
+        const sources: ArtifactSource[] = [];
+        if (packagingDepsWithReq.donation?.enabled) {
+          const sourceCid = await uploadToIpfs(packagingDepsWithReq.donation.ipfsRegistryUrl, {
+            schemaVersion: DONATION_ARTIFACT_ENCODING,
+            artifactType: 'jinn.trajectory.v1',
+            sha256,
+            encoding: DONATION_ARTIFACT_ENCODING,
+            data: Buffer.from(JSON.stringify(signed), 'utf8').toString('base64'),
+          });
+          sources.push({
+            kind: 'ipfs',
+            cid: sourceCid,
+            sha256,
+            encoding: DONATION_ARTIFACT_ENCODING,
+          });
+        }
+        trajectoryRef = { cid, sha256, ...(sources.length > 0 ? { sources } : {}) };
         console.log(`[harness-engine] ${task.requestId}: trajectory emitted cid=${cid}`);
       } catch (err) {
         console.warn(
@@ -1193,9 +1322,9 @@ export class TaskEngine {
     const solverType = task.solverType ?? 'legacy.v0';
 
     // Derive role from Task.role. Evaluator tasks produce 'verdict' envelopes;
-    // all other tasks produce 'restoration' envelopes.
+    // all other tasks produce 'solution' envelopes.
     const isEvaluation = task.taskRole === 'evaluation';
-    const role: Role = isEvaluation ? 'verdict' : 'restoration';
+    const role: Role = isEvaluation ? 'verdict' : 'solution';
 
     let envelopePayload: Record<string, unknown>;
 
@@ -1210,7 +1339,7 @@ export class TaskEngine {
       // with a wrong shape — validatePayload will catch schema mismatches.
       //
       // verificationOfRestoration: stubbed — Plan D will connect the real SDK.
-      // restorationEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
+      // solutionEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
       const verdictPayload = implOutput?.verdictPayload;
       if (!verdictPayload) {
         throw new Error(
@@ -1289,6 +1418,9 @@ export class TaskEngine {
       ? {
           sha256: trajectoryRef.sha256,
           access: { endpoint: operatorEndpointForTraj, priceUsdc: '0' },
+          ...(trajectoryRef.sources && trajectoryRef.sources.length > 0
+            ? { sources: trajectoryRef.sources }
+            : {}),
         }
       : null;
 
@@ -1360,6 +1492,10 @@ export class TaskEngine {
         // Propagate the harness execution mode (train | frozen) so the
         // envelope records whether implStateDir was locked during this run.
         mode: executorMode,
+        // LLM model: prefer SolverNet-specific override, fall back to daemon-wide
+        // default from operatorConfig.claudeModel (jinn-mono-gbut, gh#191).
+        // Left undefined when neither is set — the field is optional in the schema.
+        model: solverNet?.model ?? this.operatorConfig?.claudeModel,
       },
       evidenceTier,
       trajectory: envelopeTrajectory,
@@ -1491,73 +1627,76 @@ export class TaskEngine {
     // DELIVERING state by pack()); idempotent on retry (setMetadata is a pure
     // key-value write; re-running with the same payload is safe).
     //
-    // Restoration-only for now. Evaluator setMetadata lands with jinn-mono-2ff.
+    // Both roles publish (jinn-mono-n93o): restoration runs emit
+    // `envelope:<cid>`; evaluation runs emit `evaluation:<cid>`. The indexer's
+    // verdictEnvelopeMeta enrichment branch (ebu7.13) listens for the
+    // `evaluation:` prefix to surface verdicts in the explorer.
     if (this.identityPublisher) {
       const taskRoleRaw = task.taskRole ?? 'restoration';
-      if (taskRoleRaw === 'restoration') {
-        const signatureHash = evidenceHash as `0x${string}` | null | undefined;
-        // v0 tier rule: with an evidenceHash on chain we declare `committed` (tier=1);
-        // higher tiers (`attested`, `proved`) come later when TEE work lands.
-        const tier: ExecutionTier = signatureHash ? 1 : 0;
-        const manifestHashHex = signatureHash ?? ('0x' as `0x${string}`);
+      const metadataKind: 'envelope' | 'evaluation' =
+        taskRoleRaw === 'evaluation' ? 'evaluation' : 'envelope';
+      const signatureHash = evidenceHash as `0x${string}` | null | undefined;
+      // v0 tier rule: with an evidenceHash on chain we declare `committed` (tier=1);
+      // higher tiers (`attested`, `proved`) come later when TEE work lands.
+      const tier: ExecutionTier = signatureHash ? 1 : 0;
+      const manifestHashHex = signatureHash ?? ('0x' as `0x${string}`);
 
-        // Prefer v2 when the harness identity is available — the engine
-        // captures executorMode + executorCodeDigest in pack(). For legacy
-        // rows that completed before payload v2 wiring (or for solver paths
-        // that don't produce a fence digest), executorCodeDigest is null and
-        // we fall back to the v1 encoder so the indexer still sees envelope
-        // metadata, just without harness identity. v1 envelopes are decoded
-        // by the subgraph as mode='train' with empty codeDigest/implName.
-        const harnessImplName = task.implName;
-        const canEmitV2 =
-          !!task.executorMode &&
-          !!task.executorCodeDigest &&
-          !!harnessImplName;
-        try {
-          let pubTxHash: `0x${string}`;
-          if (canEmitV2) {
-            const v2Payload: ExecutionPayloadV2 = {
-              version: 2,
-              tier,
-              manifestHash: manifestHashHex,
-              attestationQuoteCid: '0x',
-              sourceMeasurement:
-                '0x0000000000000000000000000000000000000000000000000000000000000000',
-              codeDigest: codeDigestSha256ToBytes32(task.executorCodeDigest),
-              implName: harnessImplName as string,
-              modeFlag: modeStringToFlag(task.executorMode as 'train' | 'frozen'),
-            };
-            pubTxHash = await this.identityPublisher.publishContentV2({
-              kind: 'envelope',
-              cid: manifestCid,
-              payload: v2Payload,
-            });
-            console.log(
-              `[harness-engine] ${requestId}: setMetadata envelope:${manifestCid} tx=${pubTxHash} (payload v2 mode=${task.executorMode} impl=${harnessImplName})`,
-            );
-          } else {
-            const v1Payload: ExecutionPayload = {
-              version: 1,
-              tier,
-              manifestHash: manifestHashHex,
-              attestationQuoteCid: '0x',
-              sourceMeasurement:
-                '0x0000000000000000000000000000000000000000000000000000000000000000',
-            };
-            pubTxHash = await this.identityPublisher.publishContent({
-              kind: 'envelope',
-              cid: manifestCid,
-              payload: v1Payload,
-            });
-            console.log(
-              `[harness-engine] ${requestId}: setMetadata envelope:${manifestCid} tx=${pubTxHash} (payload v1)`,
-            );
-          }
-        } catch (err) {
-          console.warn(
-            `[harness-engine] ${requestId}: setMetadata envelope publish failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+      // Prefer v2 when the harness identity is available — the engine
+      // captures executorMode + executorCodeDigest in pack(). For legacy
+      // rows that completed before payload v2 wiring (or for solver paths
+      // that don't produce a fence digest), executorCodeDigest is null and
+      // we fall back to the v1 encoder so the indexer still sees envelope
+      // metadata, just without harness identity. v1 envelopes are decoded
+      // by the subgraph as mode='train' with empty codeDigest/implName.
+      const harnessImplName = task.implName;
+      const canEmitV2 =
+        !!task.executorMode &&
+        !!task.executorCodeDigest &&
+        !!harnessImplName;
+      try {
+        let pubTxHash: `0x${string}`;
+        if (canEmitV2) {
+          const v2Payload: ExecutionPayloadV2 = {
+            version: 2,
+            tier,
+            manifestHash: manifestHashHex,
+            attestationQuoteCid: '0x',
+            sourceMeasurement:
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+            codeDigest: codeDigestSha256ToBytes32(task.executorCodeDigest),
+            implName: harnessImplName as string,
+            modeFlag: modeStringToFlag(task.executorMode as 'train' | 'frozen'),
+          };
+          pubTxHash = await this.identityPublisher.publishContentV2({
+            kind: metadataKind,
+            cid: manifestCid,
+            payload: v2Payload,
+          });
+          console.log(
+            `[harness-engine] ${requestId}: setMetadata ${metadataKind}:${manifestCid} tx=${pubTxHash} (payload v2 mode=${task.executorMode} impl=${harnessImplName})`,
+          );
+        } else {
+          const v1Payload: ExecutionPayload = {
+            version: 1,
+            tier,
+            manifestHash: manifestHashHex,
+            attestationQuoteCid: '0x',
+            sourceMeasurement:
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+          };
+          pubTxHash = await this.identityPublisher.publishContent({
+            kind: metadataKind,
+            cid: manifestCid,
+            payload: v1Payload,
+          });
+          console.log(
+            `[harness-engine] ${requestId}: setMetadata ${metadataKind}:${manifestCid} tx=${pubTxHash} (payload v1)`,
           );
         }
+      } catch (err) {
+        console.warn(
+          `[harness-engine] ${requestId}: setMetadata ${metadataKind} publish failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
       }
     }
 
@@ -1643,23 +1782,28 @@ export class TaskEngine {
     });
   }
 
-  private verdictCodeForTask(task: PersistedTaskRun): number {
+  private verdictCodeForTask(task: PersistedTaskRun): VerdictCode {
     const gating = task.gatingClaim as { verdict?: unknown } | null;
     const raw = gating?.verdict;
     switch (raw) {
       case 'PASS':
       case 'SCORED':
-        return 1;
+        return VerdictCode.Pass;
       case 'FAIL':
       case 'REJECTED':
-        return 2;
+        return VerdictCode.Fail;
       case 'INVALID':
-        return 3;
+        return VerdictCode.Invalid;
       case 'INDETERMINATE':
       case 'UNRESOLVED':
-        return 4;
+        return VerdictCode.Unresolved;
       default:
-        return 1;
+        // gatingClaim is null, verdict is absent, or the string is unrecognized.
+        // Return Invalid(3) — not Pass(1). Pass must come from an explicit PASS/SCORED verdict.
+        console.warn(
+          `[harness-engine] verdictCodeForTask: unrecognized gatingClaim.verdict (got=${String(raw)}); defaulting to Invalid(3) — should never happen, indicates the evaluator harness didn't set gatingClaim.verdict before submission`,
+        );
+        return VerdictCode.Invalid;
     }
   }
 

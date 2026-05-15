@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
+import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,8 @@ export interface DefaultSolverNetConfig extends Record<string, unknown> {
  * `joinedSolverNets` block).
  */
 export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {};
+
+const HarnessNameSchema = z.string().transform((name) => canonicalHarnessName(name));
 
 export const JinnConfigSchema = z.object({
   /**
@@ -127,9 +130,25 @@ export const JinnConfigSchema = z.object({
   /** Model for restoration/evaluation agent */
   claudeModel: z.string().default('claude-haiku-4-5-20251001'),
 
+  /** Path to the `hermes` executable. Defaults to `hermes` when unset. */
+  hermesPath: z.string().optional(),
+
+  /** Default Hermes model when a SolverNet does not specify one. */
+  hermesModel: z.string().optional(),
+
+  /** Hermes provider (e.g. 'anthropic'). */
+  hermesProvider: z.string().optional(),
+
   /**
-   * How the operator runs the daemon. Set once at `jinn auth`, read by every
-   * command that probes the Claude CLI or spawns a subprocess. Leaving it
+   * Timeout in ms for `hermes doctor` health-check runs.
+   * Default 30 000 ms. Env: JINN_HERMES_DOCTOR_TIMEOUT_MS.
+   */
+  hermesDoctorTimeoutMs: z.number().int().positive().default(30_000),
+
+  /**
+   * How the operator runs the daemon. Set once by app-guided setup or the
+   * legacy `jinn auth` compatibility command, then read by every command that
+   * probes the Claude CLI or spawns a subprocess. Leaving it
    * unset falls back to filesystem-based detection (docker-compose.yml near
    * cwd, /.dockerenv, etc.) which is error-prone inside a checkout of the
    * repo itself.
@@ -143,8 +162,38 @@ export const JinnConfigSchema = z.object({
     z.array(z.string()),
   ]).default([]),
 
-  /** The Graph subgraph URL for artifact discovery */
-  subgraphUrl: z.string().optional(),
+  /**
+   * Discovery backend configuration.
+   *
+   * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §9.1.
+   *
+   * mode:
+   *   'http'      — HTTP client pointing at a shared Ponder indexer (ships in 280n.4).
+   *   'embedded'  — embedded Ponder in-process (ships in 280n.5 — throws until then).
+   *   'onchain'   — direct RPC getLogs; always-live floor; no indexer required.
+   *
+   * Default URLs for mode='http' (intentionally undefined until the maintainer's VPS is live):
+   *   // TODO: set once maintainer's VPS is live (jinn-mono-280n.4 deployment)
+   *   // DEFAULT_TESTNET_DISCOVERY_URL = 'https://...'  // Base Sepolia
+   *   // DEFAULT_MAINNET_DISCOVERY_URL = 'https://...'  // Base mainnet
+   *
+   * Env overrides: JINN_DISCOVERY_MODE, JINN_DISCOVERY_URL,
+   * JINN_DISCOVERY_FALLBACK (1|true|yes to enable, 0|false|no to disable).
+   */
+  discovery: z
+    .object({
+      mode: z.enum(['http', 'embedded', 'onchain']).optional(),
+      url: z.string().optional(),
+      fallbackToOnchain: z.boolean().optional(),
+    })
+    .optional(),
+
+  /**
+   * Narrow task discovery to specific on-chain task ids. This is primarily
+   * for live acceptance gates that must avoid claiming unrelated public
+   * backlog while proving one fresh task path.
+   */
+  taskDiscoveryAllowedTaskIds: z.array(z.string()).optional(),
 
   /** This node's public HTTP endpoint (for 8004 registration) */
   nodeEndpoint: z.string().optional(),
@@ -304,8 +353,8 @@ export const JinnConfigSchema = z.object({
    */
   harnesses: z
     .object({
-      default: z.string().optional(),
-      disabled: z.array(z.string()).optional(),
+      default: HarnessNameSchema.optional(),
+      disabled: z.array(HarnessNameSchema).optional(),
       /**
        * Operator-supplied external harness impls.
        *
@@ -401,7 +450,7 @@ export const JinnConfigSchema = z.object({
         .default(['solving'])
         // Deduplicate to keep downstream consumers simple.
         .transform((arr) => Array.from(new Set(arr))),
-      harness: z.string().default('claude-code-learner'),
+      harness: HarnessNameSchema.default(CLAUDE_CODE_HARNESS),
       model: z.string().optional(),
       plugins: z.array(z.union([
         z.string(),
@@ -427,10 +476,10 @@ export const JinnConfigSchema = z.object({
    * (CIDv0 / CIDv1) — the only stable identifier that maps back to a
    * launched-instance authority across launchers.
    *
-   * Kept structurally separate from `solverNets` for now — Task 22 collapses
-   * the two branches into a single manifest-keyed shape. The daemon-side
-   * runtime does not consume this block yet; it is round-trip-only at this
-   * stage so the SPA's join/leave actions persist correctly across restarts.
+   * Kept structurally separate from legacy `solverNets` for now. The daemon
+   * narrows this block into runtime SolverNet registry entries on restart, and
+   * Task 22 collapses both branches into a single manifest-keyed shape once
+   * the legacy block is fully drained.
    */
   joinedSolverNets: z
     .record(
@@ -438,12 +487,19 @@ export const JinnConfigSchema = z.object({
       z.object({
         manifestCid: z.string().min(1),
         name: z.string().optional(),
+        contract: z
+          .object({
+            id: z.string().min(1),
+            version: z.string().min(1),
+          })
+          .optional(),
         roles: z
           .array(z.enum(['solver', 'evaluator']))
           .min(1, 'each joined SolverNet must enable at least one role'),
-        harness: z.string().optional(),
+        harness: HarnessNameSchema.optional(),
         model: z.string().optional(),
         plugins: z.array(z.string()).default([]),
+        disabledDefaultPlugins: z.array(z.string()).default([]),
       }),
     )
     .optional(),
@@ -479,18 +535,16 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
-   * Operator-local artifact serving configuration (Phase A.1, jinn-mono-vy37.1).
+   * Operator-local artifact and donation configuration.
    *
-   * Per spec/2026-04-30-phase-a-umbrella.md §1, restoration artifact bytes
-   * stay on the operator's filesystem (served_artifacts) and are dispensed
-   * via the operator's HTTP API with x402 gating when `priceUsdc > 0`. The
-   * envelope's `artifact.access.endpoint` field tells consumers where to
-   * fetch each artifact; `priceUsdc` declares the asking price.
+   * Public testnet donation is IPFS-first: when `donation.enabled` is true,
+   * scrubbed solver/evaluator artifacts are pinned to IPFS and advertised in
+   * signed metadata so peers can discover, verify, and reuse them without an
+   * operator-hosted public endpoint.
    *
-   * `publicEndpoint` is the externally-reachable base URL that gets stamped
-   * into every artifact descriptor. `defaultPriceUsdc` is the fallback price
-   * when neither OUTPUTS.json nor `perArtifactTypePrice` provides a value.
-   * `perArtifactTypePrice` lets operators charge per artifactType.
+   * `publicEndpoint`, `defaultPriceUsdc`, and `perArtifactTypePrice` are kept
+   * as compatibility and future data-market fallback plumbing. They are not
+   * required for the free IPFS donation path used by this release.
    *
    * Resolution precedence in `uploadArtifacts`:
    *   OUTPUTS.json `access.priceUsdc` > `perArtifactTypePrice[artifactType]`
@@ -499,10 +553,11 @@ export const JinnConfigSchema = z.object({
    * Env overrides:
    *   JINN_OPERATOR_PUBLIC_ENDPOINT
    *   JINN_OPERATOR_DEFAULT_PRICE_USDC
+   *   JINN_OPERATOR_DONATION_ENABLED
    */
   operator: z
     .object({
-      publicEndpoint: z.string().url(),
+      publicEndpoint: z.string().url().optional(),
       defaultPriceUsdc: z
         .string()
         .regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string')
@@ -513,8 +568,35 @@ export const JinnConfigSchema = z.object({
           z.string().regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string'),
         )
         .default({}),
+      donation: z
+        .object({
+          enabled: z.boolean().default(false),
+        })
+        .default({ enabled: false }),
     })
     .optional(),
+
+  /**
+   * Operator-local capture configuration.
+   *
+   * Path C (LLM API proxy) is disabled by default. Operators opt in by
+   * enabling this block and pointing ANTHROPIC_BASE_URL / OPENAI_BASE_URL at
+   * the local proxy port.
+   *
+   * Env:
+   *   JINN_CAPTURES_LLM_PROXY_ENABLED=1|true|yes
+   *   JINN_CAPTURES_LLM_PROXY_PORT=7342
+   */
+  captures: z
+    .object({
+      llmProxy: z
+        .object({
+          enabled: z.boolean().default(false),
+          port: z.number().int().positive().default(7342),
+        })
+        .default({ enabled: false, port: 7342 }),
+    })
+    .default({ llmProxy: { enabled: false, port: 7342 } }),
 
   /**
    * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
@@ -584,6 +666,16 @@ export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'task
 
 const DEFAULT_DIR = join(homedir(), '.jinn-client');
 export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
+
+/**
+ * Default discovery indexer for Base Sepolia testnet daemons — the
+ * privately-operated Ponder instance (jinn-mono-280n.4). Operators override
+ * via `discovery.url` / `JINN_DISCOVERY_URL`, or pin `discovery.mode: 'onchain'`
+ * for RPC-only. No mainnet default yet (the public mainnet RPC can't sustain the
+ * historical sync — see ponder.config.ts).
+ */
+export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
+
 
 export type ConfigLoadErrorCode =
   | 'config_file_not_found'
@@ -655,9 +747,39 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
+  if (env['JINN_HERMES_PATH'])       merged.hermesPath = env['JINN_HERMES_PATH'];
+  if (env['JINN_HERMES_MODEL'])      merged.hermesModel = env['JINN_HERMES_MODEL'];
+  if (env['JINN_HERMES_PROVIDER'])   merged.hermesProvider = env['JINN_HERMES_PROVIDER'];
+  if (env['JINN_HERMES_DOCTOR_TIMEOUT_MS']) {
+    merged.hermesDoctorTimeoutMs = parseInt(env['JINN_HERMES_DOCTOR_TIMEOUT_MS'], 10);
+  }
   if (env['JINN_RUNTIME_MODE'])      merged.runtimeMode = env['JINN_RUNTIME_MODE'];
   if (env['JINN_PEERS'])             merged.peers = env['JINN_PEERS'];
-  if (env['JINN_SUBGRAPH_URL'])      merged.subgraphUrl = env['JINN_SUBGRAPH_URL'];
+  // Discovery block env overrides
+  if (env['JINN_DISCOVERY_MODE'] || env['JINN_DISCOVERY_URL'] || env['JINN_DISCOVERY_FALLBACK'] !== undefined) {
+    const prevDiscovery = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+      ? (merged['discovery'] as Record<string, unknown>)
+      : {};
+    const fallbackRaw = env['JINN_DISCOVERY_FALLBACK'];
+    const fallbackToOnchain = fallbackRaw !== undefined
+      ? !(['0', 'false', 'no'].includes(fallbackRaw.trim().toLowerCase()))
+      : undefined;
+    // A URL only makes sense in http mode — when the operator points
+    // JINN_DISCOVERY_URL at a host but doesn't say JINN_DISCOVERY_MODE,
+    // default mode to 'http' so the URL is actually consulted (and isn't
+    // silently dropped by the on-chain default in createDiscoveryAPI). In that
+    // inferred-http case, also default fallbackToOnchain on (http without a
+    // floor is a footgun) unless JINN_DISCOVERY_FALLBACK overrides.
+    const inferredHttp = !!env['JINN_DISCOVERY_URL'] && !env['JINN_DISCOVERY_MODE'] && !prevDiscovery['mode'];
+    const mode = env['JINN_DISCOVERY_MODE'] ?? (inferredHttp ? 'http' : undefined);
+    const resolvedFallback = fallbackToOnchain ?? (inferredHttp ? true : undefined);
+    merged['discovery'] = {
+      ...prevDiscovery,
+      ...(mode ? { mode } : {}),
+      ...(env['JINN_DISCOVERY_URL'] ? { url: env['JINN_DISCOVERY_URL'] } : {}),
+      ...(resolvedFallback !== undefined ? { fallbackToOnchain: resolvedFallback } : {}),
+    };
+  }
   if (env['JINN_NODE_ENDPOINT'])     merged.nodeEndpoint = env['JINN_NODE_ENDPOINT'];
   if (env['JINN_IPFS_REGISTRY_URL']) merged.ipfsRegistryUrl = env['JINN_IPFS_REGISTRY_URL'];
   if (env['JINN_IPFS_GATEWAY_URL'])  merged.ipfsGatewayUrl = env['JINN_IPFS_GATEWAY_URL'];
@@ -713,11 +835,18 @@ export function loadConfig(configPath?: string): JinnConfig {
 
   if (
     env['JINN_OPERATOR_PUBLIC_ENDPOINT'] ||
-    env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
+    env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] ||
+    env['JINN_OPERATOR_DONATION_ENABLED'] !== undefined
   ) {
     const prevOp = typeof merged['operator'] === 'object' && merged['operator'] !== null
       ? (merged['operator'] as Record<string, unknown>)
       : {};
+    const prevDonation = typeof prevOp['donation'] === 'object' && prevOp['donation'] !== null
+      ? (prevOp['donation'] as Record<string, unknown>)
+      : {};
+    const donationEnabled = env['JINN_OPERATOR_DONATION_ENABLED'] !== undefined
+      ? ['1', 'true', 'yes'].includes(env['JINN_OPERATOR_DONATION_ENABLED'].trim().toLowerCase())
+      : undefined;
     merged['operator'] = {
       ...prevOp,
       ...(env['JINN_OPERATOR_PUBLIC_ENDPOINT']
@@ -726,6 +855,34 @@ export function loadConfig(configPath?: string): JinnConfig {
       ...(env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
         ? { defaultPriceUsdc: env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] }
         : {}),
+      ...(donationEnabled !== undefined
+        ? { donation: { ...prevDonation, enabled: donationEnabled } }
+        : {}),
+    };
+  }
+
+  if (
+    env['JINN_CAPTURES_LLM_PROXY_ENABLED'] !== undefined ||
+    env['JINN_CAPTURES_LLM_PROXY_PORT'] !== undefined
+  ) {
+    const prevCaptures = typeof merged['captures'] === 'object' && merged['captures'] !== null
+      ? (merged['captures'] as Record<string, unknown>)
+      : {};
+    const prevProxy = typeof prevCaptures['llmProxy'] === 'object' && prevCaptures['llmProxy'] !== null
+      ? (prevCaptures['llmProxy'] as Record<string, unknown>)
+      : {};
+    const enabled = env['JINN_CAPTURES_LLM_PROXY_ENABLED'] !== undefined
+      ? ['1', 'true', 'yes'].includes(env['JINN_CAPTURES_LLM_PROXY_ENABLED'].trim().toLowerCase())
+      : undefined;
+    merged['captures'] = {
+      ...prevCaptures,
+      llmProxy: {
+        ...prevProxy,
+        ...(enabled !== undefined ? { enabled } : {}),
+        ...(env['JINN_CAPTURES_LLM_PROXY_PORT']
+          ? { port: Number.parseInt(env['JINN_CAPTURES_LLM_PROXY_PORT'], 10) }
+          : {}),
+      },
     };
   }
 
@@ -741,6 +898,29 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
+
+  // Testnet default: point discovery at the privately-operated Ponder indexer
+  // (jinn-mono-280n.4), unless the operator has set their own `discovery` block.
+  // The on-chain RPC floor stays as the fallback.
+  //
+  // Only fill fields the operator left absent — never overwrite an
+  // operator-set `url` / `mode` / `fallbackToOnchain`. A bare
+  // `discovery: { url: '...' }` (or `JINN_DISCOVERY_URL` alone) keeps the
+  // operator's URL and gets `mode: 'http'` defaulted in (a URL is only
+  // meaningful in http mode).
+  const explicitDiscoveryMode = (typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+    && typeof (merged['discovery'] as { mode?: unknown }).mode === 'string');
+  if (resolvedNetwork === 'testnet' && !explicitDiscoveryMode) {
+    const existing = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+      ? (merged['discovery'] as { mode?: string; url?: string; fallbackToOnchain?: boolean })
+      : undefined;
+    merged['discovery'] = {
+      ...(existing ?? {}),
+      mode: existing?.mode ?? 'http',
+      url: existing?.url ?? DEFAULT_TESTNET_DISCOVERY_URL,
+      fallbackToOnchain: existing?.fallbackToOnchain ?? true,
+    };
+  }
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
   // not silently inherit a mainnet RPC from client/.env during bootstrap.
@@ -863,9 +1043,15 @@ const TRACKED_ENV_VARS = [
   'JINN_API_BIND_HOST',
   'JINN_CLAUDE_PATH',
   'JINN_CLAUDE_MODEL',
+  'JINN_HERMES_PATH',
+  'JINN_HERMES_MODEL',
+  'JINN_HERMES_PROVIDER',
+  'JINN_HERMES_DOCTOR_TIMEOUT_MS',
   'JINN_RUNTIME_MODE',
   'JINN_PEERS',
-  'JINN_SUBGRAPH_URL',
+  'JINN_DISCOVERY_MODE',
+  'JINN_DISCOVERY_URL',
+  'JINN_DISCOVERY_FALLBACK',
   'JINN_NODE_ENDPOINT',
   'JINN_IPFS_REGISTRY_URL',
   'JINN_IPFS_GATEWAY_URL',
@@ -902,6 +1088,9 @@ const TRACKED_ENV_VARS = [
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',
   'JINN_OPERATOR_DEFAULT_PRICE_USDC',
+  'JINN_OPERATOR_DONATION_ENABLED',
+  'JINN_CAPTURES_LLM_PROXY_ENABLED',
+  'JINN_CAPTURES_LLM_PROXY_PORT',
   'JINN_BUILD_COMMIT',
 ] as const;
 

@@ -1,6 +1,6 @@
 ---
 name: jinn-operator
-description: Set up and operate a Jinn Network agent. Use when the user wants to install the jinn client, configure MCP tools, run `jinn run` or `jinn quickstart`, manage a running daemon, submit Tasks, or understand the Jinn protocol. Activates on mentions of "jinn", "jinn agent", "jinn network", "jinn run", "jinn quickstart", "Task", "SolverNet", "restoration", or "SolverPlugin" in the context of operating an agent.
+description: Set up and operate a Jinn Network agent. Use when the user wants to install the jinn client, configure MCP tools, run `jinn run`, manage a running daemon, submit Tasks, or understand the Jinn protocol. Activates on mentions of "jinn", "jinn agent", "jinn network", "jinn run", "Task", "SolverNet", "restoration", or "SolverPlugin" in the context of operating an agent.
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 
@@ -23,7 +23,7 @@ Creation  -->  Execution  -->  Evaluation  -->  Knowledge
 3. **Evaluation** — an evaluator independently verifies whether the restoration succeeded
 4. **Knowledge** — artifacts (learnings, evidence) accumulate to improve future attempts
 
-Agents earn rewards by participating in this loop. The protocol runs on Base (mainnet) and Base Sepolia (testnet).
+Agents earn rewards by participating in this loop. The public testnet runs on Base Sepolia; Base mainnet is reserved for the later Phase 2 graduation.
 
 ## Phase 1: Installation
 
@@ -44,7 +44,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 ### Prerequisites
 
 - **Node.js 22+** — `node --version` to check
-- **Claude Code CLI** — the daemon spawns Claude as a subprocess for restoration work. Must be installed and authenticated separately.
+- **Claude Code CLI** — the daemon spawns Claude as a subprocess for restoration work. It must be installed; if auth or runtime setup is needed, `jinn run` opens the operator app and guides the user through it.
 
 ### CLI verb reference
 
@@ -54,7 +54,6 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn version` | Print client version, protocol phase, and resolved token map |
 | `jinn doctor` | Preflight checks: answers "would jinn run work?" without running it |
 | `jinn init` | Generate the master wallet and write the encrypted keystore |
-| `jinn auth` | Check Claude authentication and persist how the operator runs the daemon |
 | `jinn bootstrap` | Advance the fleet state machine toward a running daemon |
 | `jinn fund-requirements` | List addresses that need funding before the next bootstrap step |
 | `jinn run` | Zero-to-running in one command: init, fund, bootstrap, then start the daemon in the foreground (stops on SIGINT/SIGTERM) |
@@ -112,7 +111,7 @@ Once configured, these MCP tools become available:
 <!-- skill:mcp-table:start -->
 | Tool | What it does |
 |------|--------------|
-| `jinn_auth` | Read-only: check Claude authentication status and the resolved runtime mode (bare/docker-compose/container). Does NOT attempt login — it only probes and reports. Use this as the first call to verify the agent path is ready. Returns authenticated:true + context + email on success; returns an error envelope if not authenticated. Fast (<1s). |
+| `jinn_auth` | Read-only diagnostic: check Claude authentication status and resolved runtime mode. Do not use this as first-run setup; call `jinn_run` and complete auth in the app if prompted. Fast (<1s). |
 | `jinn_doctor` | Preflight checks: node version, claude binary, keystore, deployment config. Read-only. Fast (<5s). |
 | `jinn_fund_requirements` | Read-only: list addresses and amounts that need funding before bootstrap can advance. Note: the underlying command may hydrate wallet state as a side effect of checking funding. Returns an array of funding gaps; empty array means all funded. |
 | `jinn_status` | Daemon liveness and fleet health roll-up. Read-only. Poll this to monitor progress. Fast (<2s). |
@@ -137,18 +136,16 @@ Once configured, these MCP tools become available:
 
 ## Phase 3: Zero to Running
 
-The canonical first-run path — run these two commands in order:
+The canonical first-run path:
 
 ```bash
-# Step 1 — one-time: pick runtime mode and authenticate Claude Code (interactive TTY required).
-jinn auth
-
-# Step 2 — zero-to-running: auto-generates a keystore password, then init → fund → bootstrap → run.
+# Zero-to-running: opens the app, auto-generates a keystore password,
+# then init → fund → bootstrap → run.
 jinn run
 ```
 
-`jinn auth` persists the runtime-mode choice so all subsequent commands agree on how to spawn Claude.
-`jinn run` then:
+If Claude Code authentication or runtime setup is needed, complete it in the
+operator app that `jinn run` opens. `jinn run` then:
 1. Generates a random keystore password (saved to `~/.jinn-client/keystore-password`, mode 0600)
 2. Creates the master wallet
 3. Funds via Coinbase CDP faucet (automatic on testnet)
@@ -204,7 +201,7 @@ SolverPlugins are scoped to SolverNets, not injected globally into Harnesses:
 
 - `jinn solver-nets set-harness prediction <harness>` changes the Harness used for restoration Tasks.
 - `jinn solver-nets add-plugin prediction <source>` attaches an extra SolverPlugin to only that SolverNet.
-- `jinn solver-nets doctor prediction` validates the canonical plugin, extra plugins, schemas, and Harness wiring.
+- `jinn solver-nets doctor prediction` validates the configured runtime plugins, the schemas the SolverNet contract registry pins, and Harness wiring. Add `--human` for a readable summary instead of JSON.
 
 ### Disabling
 

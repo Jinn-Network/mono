@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto';
 import { Store } from '../../src/store/store.js';
 import { createCorpus } from '../../src/corpus/index.js';
 import type { SignedEnvelope } from '../../src/types/envelope.js';
+import type { DiscoveryAPI } from '../../src/discovery/types.js';
+import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
+import { withFallback } from '../../src/discovery/with-fallback.js';
+import type { EnvelopeRef } from '../../src/corpus/types.js';
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
@@ -12,7 +16,7 @@ function fakeEnvelope(opts: { sha256: string; endpoint: string; priceUsdc: strin
   return {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'prediction.v0',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: 1745978400,
     task: { cid: 'bafyIntent', onchainCreationTx: '0x' + 'a'.repeat(64), onchainCreationBlock: 1, requestId: '0x' + 'b'.repeat(64) },
     participant: { safeAddress: opts.participantSafe, agentEoa: '0x' + '2'.repeat(40) },
@@ -31,6 +35,25 @@ function fakeEnvelope(opts: { sha256: string; endpoint: string; priceUsdc: strin
   };
 }
 
+function fakeEnvelopeRef(opts: { manifestCid: string; opSafe: string }): EnvelopeRef {
+  return {
+    manifestCid: opts.manifestCid,
+    manifestHash: '0x' + 'a'.repeat(64),
+    operator: { agentId: '1', safeAddress: opts.opSafe },
+    evidenceTier: 'committed',
+    publishedAt: 1745978400,
+  };
+}
+
+function stubDiscovery(envelopeRefs: EnvelopeRef[] = []): DiscoveryAPI {
+  return {
+    findClaimableTasks: vi.fn().mockResolvedValue([]),
+    listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+    getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+    queryEnvelopes: vi.fn().mockResolvedValue(envelopeRefs),
+  };
+}
+
 describe('createCorpus.read (integration)', () => {
   let store: Store;
   beforeEach(() => { store = new Store(':memory:'); });
@@ -41,20 +64,7 @@ describe('createCorpus.read (integration)', () => {
     const realSha = sha256(realBytes);
     const opSafe = '0x' + 'a'.repeat(40);
 
-    const fakeFetch = vi.fn(async () => {
-      return new Response(JSON.stringify({
-        data: {
-          executions: [{
-            id: '1-0xabc',
-            manifestCid: 'bafyM',
-            manifestHash: '0x' + 'a'.repeat(64),
-            tier: 'COMMITTED',
-            publishedAt: '1745978400',
-            operator: { id: '1', agentId: '1', owner: opSafe, agentWallet: opSafe },
-          }],
-        },
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
-    });
+    const discovery = stubDiscovery([fakeEnvelopeRef({ manifestCid: 'bafyM', opSafe })]);
 
     const fetchFromIpfs = vi.fn(async (_g: string, cid: string) => {
       if (cid === 'bafyM') return fakeEnvelope({ sha256: realSha, endpoint: 'https://op.example.com', priceUsdc: '0', participantSafe: opSafe });
@@ -67,12 +77,12 @@ describe('createCorpus.read (integration)', () => {
     });
 
     const corpus = createCorpus({
-      subgraphUrl: 'https://subgraph.test/graphql',
+      discovery,
       ipfsGatewayUrl: 'https://gateway.test',
       store,
       signer: { privateKey: TEST_KEY },
       selfSafeAddress: '0x' + 'b'.repeat(40),
-    }, { fetch: fakeFetch, fetchFromIpfs, acquireFn });
+    }, { fetchFromIpfs, acquireFn });
 
     const envelopes = await corpus.read({ query: { solverType: 'prediction.v0', limit: 5 } });
     expect(envelopes).toHaveLength(1);
@@ -88,23 +98,73 @@ describe('createCorpus.read (integration)', () => {
     const realSha = sha256(realBytes);
     const opSafe = '0x' + 'a'.repeat(40);
 
-    const fakeFetch = vi.fn(async () => new Response(JSON.stringify({
-      data: { executions: [{ id: '1', manifestCid: 'bafyM', manifestHash: '0x' + 'a'.repeat(64), tier: 'COMMITTED', publishedAt: '1745978400', operator: { id: '1', agentId: '1', owner: opSafe, agentWallet: opSafe } }] },
-    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const discovery = stubDiscovery([fakeEnvelopeRef({ manifestCid: 'bafyM', opSafe })]);
     const fetchFromIpfs = vi.fn(async () => fakeEnvelope({ sha256: realSha, endpoint: 'https://op.example.com', priceUsdc: '0.001', participantSafe: opSafe }));
     const acquireFn = vi.fn(async () => realBytes);
 
     const corpus = createCorpus({
-      subgraphUrl: 'https://subgraph.test/graphql',
+      discovery,
       ipfsGatewayUrl: 'https://gateway.test',
       store,
       signer: { privateKey: TEST_KEY },
       selfSafeAddress: '0x' + 'b'.repeat(40),
-    }, { fetch: fakeFetch, fetchFromIpfs, acquireFn });
+    }, { fetchFromIpfs, acquireFn });
 
     await corpus.read({ query: { solverType: 'prediction.v0', limit: 5 } });
     await corpus.read({ query: { solverType: 'prediction.v0', limit: 5 } });
 
     expect(acquireFn).toHaveBeenCalledTimes(1); // second read served from cache
+  });
+
+  it('falls back to an empty successful on-chain result when the discovery indexer is unavailable', async () => {
+    // Primary throws DiscoveryUnavailableError; floor returns empty.
+    // withFallback routes to the floor after 1 failure (unhealthyThreshold=1).
+    const failingPrimary: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValue([]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockRejectedValue(new DiscoveryUnavailableError('indexer HTTP 429')),
+    };
+    const emptyFloor: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValue([]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    const discovery = withFallback(failingPrimary, emptyFloor, { unhealthyThreshold: 1 });
+
+    const corpus = createCorpus({
+      discovery,
+      ipfsGatewayUrl: 'https://gateway.test',
+      store,
+      signer: { privateKey: TEST_KEY },
+      selfSafeAddress: '0x' + 'b'.repeat(40),
+    });
+
+    await expect(corpus.query({ limit: 5 })).resolves.toEqual([]);
+    expect(failingPrimary.queryEnvelopes).toHaveBeenCalled();
+    expect(emptyFloor.queryEnvelopes).toHaveBeenCalled();
+  });
+
+  it('surfaces an actionable error when all configured corpus indexes fail', async () => {
+    // discovery throws a non-transient error — corpus re-throws it.
+    const discovery: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValue([]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockRejectedValue(new Error('rpc unavailable')),
+    };
+
+    const corpus = createCorpus({
+      discovery,
+      ipfsGatewayUrl: 'https://gateway.test',
+      store,
+      signer: { privateKey: TEST_KEY },
+      selfSafeAddress: '0x' + 'b'.repeat(40),
+    });
+
+    await expect(corpus.query({ limit: 5 })).rejects.toThrow(
+      /corpus query failed.*rpc unavailable/,
+    );
   });
 });

@@ -30,6 +30,7 @@ import {
   LaunchAction,
   type LaunchActionDeps,
 } from '../../src/solvernets/launch-state-machine.js';
+import { manifestHash } from '../../src/solvernets/manifest.js';
 import {
   LifecycleTransition,
   type LifecycleTransitionDeps,
@@ -1139,6 +1140,233 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     expect(onDisk?.generatorConfig).toEqual({ cadenceMs: 12345 });
   });
 
+  it('accepts swe-rebench-v2 generator config keys and hot-applies them', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({
+        solverNetId: '5474_swe-rebench-v2-v1_edb172d3',
+        status: 'paused',
+      }),
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+        claimPolicy: {
+          maxClaims: 50,
+          maxClaimsPerOperator: 5,
+          claimLeaseTtlSeconds: 3_600,
+        },
+      },
+    };
+    await store.writeRecord(launched);
+    const recordRef = { current: launched };
+    const configRef = { current: launched.generatorConfig };
+    pendingGenerators.current.push({ record: launched, recordRef, configRef });
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          cooldown_ms: 300_000,
+          claimPolicy: {
+            maxClaims: 10,
+            claimLeaseTtlSeconds: 1_800,
+          },
+        }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      N_target_successes: 5,
+      N_max_postings_per_task: 15,
+      cooldown_ms: 300_000,
+      claimPolicy: {
+        maxClaims: 10,
+        maxClaimsPerOperator: 5,
+        claimLeaseTtlSeconds: 1_800,
+      },
+    });
+    expect(configRef.current).toEqual({
+      N_target_successes: 5,
+      N_max_postings_per_task: 15,
+      cooldown_ms: 300_000,
+      claimPolicy: {
+        maxClaims: 10,
+        maxClaimsPerOperator: 5,
+        claimLeaseTtlSeconds: 1_800,
+      },
+    });
+    const onDisk = await store.loadRecord(launched.solverNetId);
+    expect(onDisk?.generatorConfig?.cooldown_ms).toBe(300_000);
+    expect(onDisk?.generatorConfig?.claimPolicy).toEqual({
+      maxClaims: 10,
+      maxClaimsPerOperator: 5,
+      claimLeaseTtlSeconds: 1_800,
+    });
+  });
+
+  it('uses the manifest contract before solverNetId when validating generator config patches', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const solverNetId = 'legacy-swe-record';
+    const cid = 'bafylegacyswemanifest1234567890';
+    const baseManifest = makeManifest({ solverNetId, manifestCid: cid });
+    const sweManifest: SolverNetManifestV1 = {
+      ...baseManifest,
+      contract: {
+        ...baseManifest.contract,
+        id: 'swe-rebench-v2',
+        version: 'v1',
+      },
+    };
+    const manifestPath = await store.writeManifestCache(cid, sweManifest);
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({ solverNetId, status: 'paused' }),
+      manifestCid: cid,
+      manifestHash: manifestHash(sweManifest),
+      manifestPath,
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ cooldown_ms: 300_000 }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      N_target_successes: 5,
+      N_max_postings_per_task: 15,
+      cooldown_ms: 300_000,
+    });
+  });
+
+  it('rejects swe-rebench-v2 claim policy with per-operator claims above max claims', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({
+        solverNetId: '5474_swe-rebench-v2-v1_edb172d3',
+        status: 'paused',
+      }),
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ claimPolicy: { maxClaims: 3 } }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message?: string };
+    expect(body.message).toMatch(/maxClaimsPerOperator/);
+  });
+
+  it('rejects partial swe-rebench-v2 patches that violate merged posting invariants', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({
+        solverNetId: '5474_swe-rebench-v2-v1_edb172d3',
+        status: 'paused',
+      }),
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ N_target_successes: 20 }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      message?: string;
+      issues?: Array<{ path: string; message: string }>;
+    };
+    expect(body.message).toMatch(/N_target_successes/);
+    expect(body.issues).toContainEqual({
+      path: 'N_max_postings_per_task',
+      message: 'must be >= N_target_successes',
+    });
+    const onDisk = await store.loadRecord(launched.solverNetId);
+    expect(onDisk?.generatorConfig).toEqual(launched.generatorConfig);
+  });
+
+  it('rejects prediction-shaped patches for swe-rebench-v2 records with schema issues', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({
+        solverNetId: '5474_swe-rebench-v2-v1_edb172d3',
+        status: 'paused',
+      }),
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ cadenceMs: 60_000, maxOpenRounds: 3 }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      kind?: string;
+      issues?: Array<{ message: string }>;
+    };
+    expect(body.kind).toBe('schema_validation_failed');
+    expect(body.issues?.some((issue) => issue.message.includes('cadenceMs'))).toBe(true);
+  });
+
   it('rejects unknown record id with 404', async () => {
     const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
     const launchBundle = makeLaunchDeps({ store, pendingGenerators });
@@ -1421,22 +1649,40 @@ function makeManifest(args: {
       id: 'prediction',
       version: 'v1',
       schemas: { task: {}, solution: {}, verdict: {} },
-      claimPolicyDefaults: {},
-      credentialRequirements: [],
-      evaluationFunction: { name: 'eq', inputs: [] },
-      aggregationFunction: { name: 'majority', inputs: [] },
+      claimPolicyDefaults: {
+        mode: 'parallel',
+        maxClaims: 10,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+      },
+      credentialRequirements: { creator: [], solver: [], evaluator: [] },
+      evaluationFunction: {
+        id: 'prediction.brier-loss.v1',
+        deterministic: true,
+        inputs: ['solution', 'resolution'],
+        output: 'verdict',
+        implementation: 'jinn:harness:prediction-v1-evaluator',
+      },
+      aggregationFunction: {
+        id: 'prediction.trailing-mean-brier-spread.v1',
+        deterministic: true,
+        inputs: ['verdict[]'],
+        output: 'score',
+        windowDays: 30,
+      },
     },
     solutionPriceWei: '1000000000000000',
     verdictPriceWei: '500000000000000',
     openRoles: ['solver', 'evaluator'],
+    ...(args.manifestCid ? { registry: { manifestCid: args.manifestCid } } : {}),
     createdAt: '2026-05-06T00:00:00.000Z',
     launchedAt: '2026-05-06T00:00:00.000Z',
     signature: {
-      scheme: 'eip191',
+      alg: 'eip-191',
       signer: '0x2222222222222222222222222222222222222222',
-      signature: `0x${'cc'.repeat(65)}`,
+      value: `0x${'cc'.repeat(65)}`,
     },
-  } as unknown as SolverNetManifestV1;
+  };
 }
 
 /**
@@ -1877,6 +2123,106 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('registry_unavailable');
   });
+
+  it('returns an owned cached manifest without requiring the registry client', async () => {
+    const cid = 'bafyownedmanifestcache1234567890';
+    const manifest = makeManifest({
+      solverNetId: 'owned-local',
+      manifestCid: cid,
+    });
+    const manifestPath = await store.writeManifestCache(cid, manifest);
+    await store.writeRecord({
+      ...makeOwnedRecord({ solverNetId: 'owned-local', status: 'launched' }),
+      manifestCid: cid,
+      manifestHash: manifestHash(manifest),
+      manifestPath,
+    });
+
+    const registry = makeMockRegistryGet({
+      getManifestError: new Error('registry should not be touched'),
+    });
+    const { app } = buildTestApp({ store, registry });
+
+    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      manifest: SolverNetManifestV1;
+      lifecycle: { status: string; sourceBlock: number };
+    };
+    expect(body.manifest.name).toBe('owned-local');
+    expect(body.manifest.solutionPriceWei).toBe('1000000000000000');
+    expect(body.lifecycle).toEqual({
+      status: 'launched',
+      statusUpdatedAt: '2026-05-06T00:00:00.000Z',
+      sourceBlock: 100,
+    });
+    expect(registry.getManifestCalls).toEqual([]);
+  });
+
+  it('ignores an owned cached manifest whose canonical hash does not match the record', async () => {
+    const cid = 'bafyownedhashmismatch1234567890';
+    const manifest = makeManifest({
+      solverNetId: 'owned-hash-mismatch',
+      manifestCid: cid,
+    });
+    const manifestPath = await store.writeManifestCache(cid, manifest);
+    await store.writeRecord({
+      ...makeOwnedRecord({ solverNetId: 'owned-hash-mismatch', status: 'launched' }),
+      manifestCid: cid,
+      manifestHash: `0x${'11'.repeat(32)}`,
+      manifestPath,
+    });
+
+    const { app } = buildTestApp({ store });
+
+    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('registry_unavailable');
+  });
+
+  it.each(['launching', 'failed'] as const)(
+    'does not serve an owned cached %s manifest before the lifecycle is anchored',
+    async (status) => {
+      const cid = `bafyowned${status}prebroadcast1234567890`;
+      const solverNetId = `owned-${status}-prebroadcast`;
+      const manifest = makeManifest({ solverNetId, manifestCid: cid });
+      const manifestPath = await store.writeManifestCache(cid, manifest);
+      await store.writeRecord({
+        ...makeOwnedRecord({ solverNetId, status }),
+        manifestCid: cid,
+        manifestHash: manifestHash(manifest),
+        manifestPath,
+        registry: {},
+        launchProgress: {
+          phase: 'broadcasting',
+          attemptCount: status === 'failed' ? 3 : 0,
+          ...(status === 'failed'
+            ? { txError: { message: 'setMetadata failed', at: '2026-05-06T00:00:00.000Z' } }
+            : {}),
+        },
+      });
+
+      const { app } = buildTestApp({ store });
+
+      const res = await app.request(`/v1/solvernets/registry/${cid}`, {
+        method: 'GET',
+        headers: authHeaders(),
+      });
+
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('registry_unavailable');
+    },
+  );
 
   it('happy path: returns the manifest + lifecycle status', async () => {
     const cid = 'bafyabcdef1234567890';

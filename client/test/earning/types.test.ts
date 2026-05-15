@@ -95,3 +95,58 @@ describe('Fleet state types', () => {
     expect(result.data.step).toBe('agent_registered');
   });
 });
+
+describe('FleetStateSchema — staged-bootstrap fields (nghf)', () => {
+  it('defaults to fleet_stage="none" and null fleet identity fields', () => {
+    const state = createDefaultFleetState('base');
+    expect(state.fleet_agent_id).toBeNull();
+    expect(state.fleet_safe_address).toBeNull();
+    expect(state.fleet_identity_registry).toBeNull();
+    expect(state.fleet_stage).toBe('none');
+  });
+
+  it('parses persisted state with the new fleet fields populated', () => {
+    const parsed = FleetStateSchema.parse({
+      master_address: '0x1111111111111111111111111111111111111111',
+      chain: 'base',
+      staking_mode: 'standard',
+      services: [],
+      updated_at: new Date().toISOString(),
+      fleet_agent_id: '42',
+      fleet_safe_address: '0x2222222222222222222222222222222222222222',
+      fleet_identity_registry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+      fleet_stage: 'stage1',
+    });
+    expect(parsed.fleet_agent_id).toBe('42');
+    expect(parsed.fleet_safe_address).toBe('0x2222222222222222222222222222222222222222');
+    expect(parsed.fleet_identity_registry).toBe('0x8004A169FB4a3325136EB29fA0ceB6D2e539a432');
+    expect(parsed.fleet_stage).toBe('stage1');
+  });
+
+  it('accepts legacy state without the new fleet fields and supplies defaults', () => {
+    const parsed = FleetStateSchema.parse({
+      master_address: '0x1111111111111111111111111111111111111111',
+      chain: 'base',
+      staking_mode: 'standard',
+      services: [],
+      updated_at: new Date().toISOString(),
+    });
+    expect(parsed.fleet_agent_id).toBeNull();
+    expect(parsed.fleet_safe_address).toBeNull();
+    expect(parsed.fleet_identity_registry).toBeNull();
+    expect(parsed.fleet_stage).toBe('none');
+  });
+
+  it('rejects an unknown fleet_stage enumerant', () => {
+    expect(() =>
+      FleetStateSchema.parse({
+        master_address: null,
+        chain: 'base',
+        staking_mode: 'standard',
+        services: [],
+        updated_at: new Date().toISOString(),
+        fleet_stage: 'stage2-only',
+      }),
+    ).toThrow();
+  });
+});

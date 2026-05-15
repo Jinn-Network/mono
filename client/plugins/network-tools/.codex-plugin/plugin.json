@@ -1,0 +1,39 @@
+{
+  "name": "network-tools",
+  "version": "0.1.0",
+  "description": "Network Tools for agent harnesses. Exposes the Jinn client MCP tools as a Codex plugin.",
+  "author": {
+    "name": "Jinn Network",
+    "url": "https://github.com/Jinn-Network/mono"
+  },
+  "homepage": "https://github.com/Jinn-Network/mono",
+  "repository": "https://github.com/Jinn-Network/mono",
+  "license": "MIT",
+  "keywords": [
+    "jinn",
+    "mcp",
+    "codex",
+    "tools"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Network Tools",
+    "shortDescription": "Jinn client MCP tools for runtime agents",
+    "longDescription": "Exposes the Jinn client MCP tool surface to Codex-backed harness sessions.",
+    "developerName": "Jinn Network",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/Jinn-Network/mono",
+    "privacyPolicyURL": "https://github.com/Jinn-Network/mono",
+    "termsOfServiceURL": "https://github.com/Jinn-Network/mono",
+    "defaultPrompt": [
+      "Use Jinn network tools."
+    ],
+    "brandColor": "#0F766E",
+    "screenshots": []
+  }
+}

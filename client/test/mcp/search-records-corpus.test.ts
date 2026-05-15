@@ -23,7 +23,7 @@ function makeEnvelope(overrides: Partial<SignedEnvelope> = {}): SignedEnvelope {
   return {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'prediction.v1',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: 1745978500,
     task: {
       cid: 'bafyTask',
@@ -194,6 +194,82 @@ describe('search_records (corpus-backed)', () => {
         access: { endpoint: 'https://operator.example.com/artifacts/b', priceUsdc: '0.25' },
         envelopeCid: 'bafyManifest',
         artifactType: 'output.prediction.v1',
+        ownerSafe: '0x' + '4'.repeat(40),
+      },
+    });
+    store.close();
+  });
+
+  it('includes donated IPFS sources in acquire_artifact arguments', async () => {
+    const store = new Store(':memory:');
+    const donatedSha = '1'.repeat(64);
+    const corpus = makeReadOnlyCorpus(makePreview(envelopeRef, makeEnvelope({
+      artifacts: [{
+        artifactType: 'output.prediction.v1',
+        sha256: donatedSha,
+        access: { endpoint: 'https://operator.example.com/artifacts/donated', priceUsdc: '0' },
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-donated',
+          sha256: donatedSha,
+          encoding: 'jinn.artifact.donation.v1',
+        }],
+      }],
+    })));
+
+    const out = await handleSearchRecords(corpus, store, { solverType: 'prediction.v1', limit: 10 });
+
+    expect(out.records[0]?.artifactRefs[0]?.acquisition?.arguments.sources).toEqual([{
+      kind: 'ipfs',
+      cid: 'bafy-donated',
+      sha256: donatedSha,
+      encoding: 'jinn.artifact.donation.v1',
+    }]);
+    store.close();
+  });
+
+  it('returns SWE donated execution data with IPFS acquisition arguments', async () => {
+    const store = new Store(':memory:');
+    const donatedSha = '2'.repeat(64);
+    const corpus = makeReadOnlyCorpus(makePreview(envelopeRef, makeEnvelope({
+      solverType: 'swe-rebench-v2.v1',
+      role: 'solution',
+      artifacts: [{
+        artifactType: 'swe-rebench-v2_v1_solution',
+        sha256: donatedSha,
+        access: { endpoint: 'http://localhost:7332/v1/artifacts/content', priceUsdc: '0' },
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-swe-donated',
+          sha256: donatedSha,
+          encoding: 'jinn.artifact.donation.v1',
+        }],
+      }],
+    })));
+
+    const out = await handleSearchRecords(corpus, store, {
+      solverType: 'swe-rebench-v2.v1',
+      role: 'solution',
+      artifactType: 'swe-rebench-v2_v1_solution',
+      limit: 10,
+    });
+
+    expect(out.records).toHaveLength(1);
+    expect(out.records[0]?.solverType).toBe('swe-rebench-v2.v1');
+    expect(out.records[0]?.artifactRefs[0]?.acquisition).toEqual({
+      tool: 'acquire_artifact',
+      arguments: {
+        sha256: donatedSha,
+        access: { endpoint: 'http://localhost:7332/v1/artifacts/content', priceUsdc: '0' },
+        envelopeCid: envelopeRef.manifestCid,
+        artifactType: 'swe-rebench-v2_v1_solution',
+        ownerSafe: '0x' + '4'.repeat(40),
+        sources: [{
+          kind: 'ipfs',
+          cid: 'bafy-swe-donated',
+          sha256: donatedSha,
+          encoding: 'jinn.artifact.donation.v1',
+        }],
       },
     });
     store.close();
@@ -202,10 +278,10 @@ describe('search_records (corpus-backed)', () => {
   it('post-filters network records after fetching manifests', async () => {
     const store = new Store(':memory:');
     const matchingRef = { ...envelopeRef, manifestCid: 'bafyVerdict' };
-    const restorationRef = { ...envelopeRef, manifestCid: 'bafyRestoration' };
+    const solutionRef = { ...envelopeRef, manifestCid: 'bafySolution' };
     const corpus = makeReadOnlyCorpus([
-      makePreview(restorationRef, makeEnvelope({
-        role: 'restoration',
+      makePreview(solutionRef, makeEnvelope({
+        role: 'solution',
         task: {
           cid: 'bafyOtherTask',
           onchainCreationTx: '0x' + '1'.repeat(64),
@@ -268,7 +344,7 @@ describe('search_records (corpus=null fallback)', () => {
     try {
       const store = new Store(':memory:');
       store.saveEnvelopeProjection(makeProjection({ envelopeId: 'projection-verdict', role: 'verdict' }));
-      store.saveEnvelopeProjection(makeProjection({ envelopeId: 'projection-restoration', role: 'restoration' }));
+      store.saveEnvelopeProjection(makeProjection({ envelopeId: 'projection-solution', role: 'solution' }));
 
       const out = await handleSearchRecords(null, store, { role: 'verdict', limit: 10 });
 
@@ -388,6 +464,7 @@ describe('MCP record tool registration source', () => {
       'evidenceTier',
       'generatedAfter',
       'generatedBefore',
+      'ownerSafe',
       'limit',
     ]) {
       expect(source).toContain(field);

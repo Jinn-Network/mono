@@ -21,13 +21,15 @@
 
 import { config as dotenvConfig } from 'dotenv';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync as writeFileSyncMain } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname, userInfo } from 'node:os';
 import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
+import { addHarnessReadinessRoutes } from './api/harness-readiness-endpoint.js';
+import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
@@ -43,7 +45,6 @@ import {
 import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
-import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
@@ -61,6 +62,7 @@ import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getAddress, type Address } from 'viem';
 import {
   DEFAULT_DISABLED_HARNESSES,
   DEFAULT_HARNESS,
@@ -69,15 +71,36 @@ import {
 import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
 import type { Harness } from './harnesses/types.js';
+import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
+import type { JinnConfig } from './config.js';
 import { createClients } from './adapters/mech/safe.js';
 import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
+import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from './corpus/onchain-query.js';
+import { CapturesStore } from './store/captures.js';
+import { createLiveCapturePublisher } from './captures/live-publisher.js';
+import { startReceiver, type Receiver } from './trajectory/receiver.js';
+import { startSyntheticSpanProvider, emitSyntheticSpan } from './trajectory/synthetic-span-builder.js';
+import { CredentialScrubProcessor } from './trajectory/processors/credential-scrub.js';
+import { TranscriptContentScrubProcessor } from './trajectory/processors/transcript-content-scrub.js';
+import { IdentityScrubProcessor } from './trajectory/processors/identity-scrub.js';
+import { PathScrubProcessor } from './trajectory/processors/path-scrub.js';
+import { SqliteExporterProcessor } from './trajectory/processors/sqlite-exporter.js';
+import { ClaudeCodeJsonlParser } from './trajectory/transcript-parsers/claude-code-jsonl.js';
+import { CodexSessionParser } from './trajectory/transcript-parsers/codex-session.js';
+import { GeminiSessionParser } from './trajectory/transcript-parsers/gemini-session.js';
+import { CursorSqliteParser } from './trajectory/transcript-parsers/cursor-sqlite.js';
+import type { TranscriptParser } from './trajectory/transcript-parsers/types.js';
+import type { StopHookPayload, StopHookTool } from './api/stop-hook.js';
+import { buildInfo } from './build-info.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
   dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -90,7 +113,7 @@ if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'dev
 //   2. ~/.jinn-client/keystore-password (file from a previous auto-gen)
 //   3. Auto-generate a 32-byte hex string, persist mode 0600, and reuse next run
 //
-// Auto-generation matches what `jinn quickstart` used to do so a brand-new
+// Auto-generation matches `jinn run` CLI password behavior so a brand-new
 // operator can run `jinn run` with no env var, no setup, no input. The
 // known security trade-off is documented in client/src/cli/password.ts:
 // plaintext on disk + encrypted keystore on the same disk only defends
@@ -189,6 +212,140 @@ function configFileHasTopLevelKey(configPath: string | undefined, key: string): 
     return !!raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key);
   } catch {
     return false;
+  }
+}
+
+class EnsurePendingCaptureProcessor implements SpanProcessor {
+  constructor(private readonly captures: CapturesStore) {}
+
+  forceFlush() { return Promise.resolve(); }
+  shutdown() { return Promise.resolve(); }
+  onStart() {}
+
+  onEnd(span: ReadableSpan): void {
+    const sessionId = stringAttribute(span.attributes['jinn.session.id']);
+    if (!sessionId || this.captures.getBySession(sessionId)) return;
+
+    try {
+      this.captures.savePending({
+        sessionId,
+        capturedAt: hrTimeToIso(span.startTime),
+        originatingTool: { name: inferCaptureTool(span) },
+        capturePath: 'A',
+        status: 'pending',
+        spanCount: 0,
+        durationMs: 0,
+        redactedSpanCount: 0,
+        ...repoMetadataFromSpan(span),
+      });
+    } catch (err) {
+      if (!this.captures.getBySession(sessionId)) throw err;
+    }
+  }
+}
+
+function stringAttribute(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}
+
+function hrTimeToIso(time: ReadableSpan['startTime']): string {
+  const millis = (time[0] * 1000) + Math.floor(time[1] / 1_000_000);
+  return new Date(millis).toISOString();
+}
+
+function inferCaptureTool(span: ReadableSpan): string {
+  return stringAttribute(span.attributes['transcript.tool'])
+    ?? stringAttribute(span.resource.attributes['service.name'])
+    ?? 'otel';
+}
+
+function repoMetadataFromSpan(span: ReadableSpan): { repoRemoteUrl?: string; repoCommitHash?: string } {
+  const attrs = span.attributes;
+  const repoRemoteUrl = stringAttribute(attrs['repo.remote_url'])
+    ?? stringAttribute(attrs['vcs.repository.url'])
+    ?? stringAttribute(attrs['git.remote_url']);
+  const repoCommitHash = stringAttribute(attrs['repo.commit_hash'])
+    ?? stringAttribute(attrs['vcs.ref.head.revision'])
+    ?? stringAttribute(attrs['git.commit']);
+  return {
+    ...(repoRemoteUrl ? { repoRemoteUrl } : {}),
+    ...(repoCommitHash ? { repoCommitHash } : {}),
+  };
+}
+
+function parserForStopHookTool(tool: StopHookTool): TranscriptParser {
+  switch (tool) {
+    case 'claude-code':
+      return new ClaudeCodeJsonlParser();
+    case 'codex':
+      return new CodexSessionParser();
+    case 'gemini-cli':
+      return new GeminiSessionParser();
+    case 'cursor':
+      return new CursorSqliteParser();
+    default: {
+      const exhaustive: never = tool;
+      throw new Error(`No transcript parser for stop-hook tool: ${String(exhaustive)}`);
+    }
+  }
+}
+
+function ensurePendingStopHookCapture(
+  captures: CapturesStore,
+  payload: StopHookPayload,
+): void {
+  if (captures.getBySession(payload.sessionId)) return;
+  try {
+    captures.savePending({
+      sessionId: payload.sessionId,
+      capturedAt: payload.stoppedAt,
+      originatingTool: { name: payload.tool },
+      capturePath: 'D',
+      status: 'pending',
+      spanCount: 0,
+      durationMs: 0,
+      redactedSpanCount: 0,
+    });
+  } catch (err) {
+    if (!captures.getBySession(payload.sessionId)) throw err;
+  }
+}
+
+async function ingestStopHookCapture(
+  captures: CapturesStore,
+  receiver: Receiver | undefined,
+  payload: StopHookPayload,
+): Promise<void> {
+  ensurePendingStopHookCapture(captures, payload);
+  if (!payload.transcriptPath) return;
+  if (!receiver) {
+    console.warn('[main] stop-hook capture received but OTLP receiver is unavailable; pending capture has no transcript spans.');
+    return;
+  }
+
+  const parser = parserForStopHookTool(payload.tool);
+  let events;
+  try {
+    events = await parser.parseFull({ sessionId: payload.sessionId, path: payload.transcriptPath });
+  } catch (err) {
+    console.warn(
+      `[main] stop-hook transcript import failed for ${payload.transcriptPath}: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+  if (events.length === 0) return;
+
+  const provider = startSyntheticSpanProvider({
+    otlpHttpEndpoint: `http://127.0.0.1:${receiver.httpPort}/v1/traces`,
+  });
+  try {
+    for (const event of events) {
+      emitSyntheticSpan(provider, { tool: parser.tool, sessionId: payload.sessionId, event });
+    }
+    await provider.flush();
+  } finally {
+    await provider.shutdown();
   }
 }
 
@@ -342,10 +499,10 @@ async function bootstrap(): Promise<{
   });
 
   const fundingStartedAt = Date.now();
-  let result: Awaited<ReturnType<typeof bootstrapper.bootstrap>>;
+  let result: Awaited<ReturnType<typeof bootstrapper.ensureStage1And2>>;
   let lastFundingMessage = '';
   const fundingGatePath = join(config.earningDir, 'bootstrap-funding.json');
-  const persistFundingGate = (funding: NonNullable<Awaited<ReturnType<typeof bootstrapper.bootstrap>>['funding']>): void => {
+  const persistFundingGate = (funding: NonNullable<Awaited<ReturnType<typeof bootstrapper.ensureStage1And2>>['funding']>): void => {
     mkdirSync(config.earningDir, { recursive: true, mode: 0o700 });
     writeFileSyncMain(fundingGatePath, `${JSON.stringify({
       schemaVersion: 1,
@@ -363,7 +520,7 @@ async function bootstrap(): Promise<{
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    result = await bootstrapper.bootstrap(PASSWORD);
+    result = await bootstrapper.ensureStage1And2(PASSWORD);
     if (!result.funding) {
       clearFundingGate();
       break;
@@ -670,6 +827,41 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // /v1/bootstrap + /v1/events + /v1/status here. The same Store instance is
   // later passed into Daemon so we don't double-open the SQLite file.
   const sharedStore = new Store(config.dbPath);
+  const capturesStore = new CapturesStore(sharedStore);
+  let captureReceiver: Receiver | undefined;
+  try {
+    captureReceiver = await startReceiver({
+      grpcPort: 4317,
+      httpPort: 4318,
+      processors: [
+        new CredentialScrubProcessor(),
+        new TranscriptContentScrubProcessor(),
+        new IdentityScrubProcessor({
+          username: userInfo().username,
+          hostname: hostname(),
+        }),
+        new PathScrubProcessor({ home: homedir() }),
+        new EnsurePendingCaptureProcessor(capturesStore),
+        new SqliteExporterProcessor({ captures: capturesStore }),
+      ],
+    });
+    console.log(
+      `[main] Capture OTLP receiver listening on grpc=:${captureReceiver.grpcPort} http=:${captureReceiver.httpPort}`,
+    );
+  } catch (err) {
+    console.warn(
+      '[main] Capture OTLP receiver disabled; path-A telemetry capture unavailable: ' +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const closeCaptureReceiver = async () => {
+    const receiver = captureReceiver;
+    captureReceiver = undefined;
+    await receiver?.shutdown().catch(() => undefined);
+  };
+  const capturePublishRef: {
+    current: ((sessionId: string) => Promise<{ envelopeCid: string }>) | undefined;
+  } = { current: undefined };
   const earningStateStore = new FleetStateStore(config.earningDir);
   const initialFleet = await earningStateStore.tryLoadExisting();
   const initialServices = initialFleet?.services ?? [];
@@ -687,6 +879,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     publicEndpoint: config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`,
     defaultPriceUsdc: config.operator?.defaultPriceUsdc ?? '0',
     perArtifactTypePrice: config.operator?.perArtifactTypePrice ?? {},
+    donation: {
+      enabled: config.network === 'testnet' && config.operator?.donation?.enabled === true,
+    },
   };
   let corpusForApi: ReturnType<typeof createCorpus> | undefined;
   // Launcher mode wiring (Task 6 of spec/2026-05-05-launcher-role-and-mode.md).
@@ -697,7 +892,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   let predictionGeneratorRef:
     | { getState(): import('./solver-types/prediction-v1-auto.js').PredictionV1GeneratorStateSnapshot }
     | undefined;
+  const launchedGeneratorStateBySolverType = new Map<
+    string,
+    () => import('./api/launcher-status.js').LauncherGeneratorStateSnapshot | undefined
+  >();
   let safeAddressForLauncher: `0x${string}` | undefined;
+  let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
 
   // jinn-mono-hqz0: holder for SolverNet creation/launch endpoint deps.
   // The routes register eagerly in startApiServer (Hono freezes its matcher
@@ -714,8 +914,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       store: sharedStore,
       apiToken,
       bindHost: apiBindHost,
-      corpus: config.subgraphUrl?.trim() ? () => corpusForApi : undefined,
+      corpus: () => corpusForApi,
       ui: { token: uiToken, handshakeKey },
+      hermesDoctor: {
+        hermesPath: config.hermesPath,
+        hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
+      },
       admin: {
         onRestartRequested: () => {
           console.log('[main] Restart requested via operator MCP. Exiting...');
@@ -726,7 +930,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         getStatus: async () => {
           const mode = config.harness.mode;
           const defaultHarness = config.harnesses?.default ?? DEFAULT_HARNESS;
-          const implStateDir = join(config.engine.implStateDirRoot, defaultHarness);
+          const implStateDir = join(config.engine.implStateDirRoot, harnessStateDirName(defaultHarness));
           let codeDigest = '';
           try {
             codeDigest = await hashImplStateDir(implStateDir);
@@ -750,12 +954,33 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           config.operator = operator;
         },
       },
+      captures: {
+        captures: capturesStore,
+        publishCapture: async (sessionId) => {
+          const publish = capturePublishRef.current;
+          if (!publish) {
+            throw new CapturePublishUnavailableError(
+              'Capture publisher is waiting for bootstrap to finish.',
+            );
+          }
+          return publish(sessionId);
+        },
+        setTrustedRepo: (repoRemoteUrl, trusted) => {
+          console.log(`[main] captures trust-repo ${trusted ? 'enabled' : 'disabled'} for ${repoRemoteUrl}`);
+        },
+      },
+      stopHook: {
+        onStopHook: async (payload) => {
+          await ingestStopHookCapture(capturesStore, captureReceiver, payload);
+        },
+      },
       bootstrap: {
         earningDir: config.earningDir,
         configReader: () => ({
           rpcUrl: config.rpcUrl,
           defaultRpcUrl: CHAIN_CONFIG.rpcUrl,
           solverNets: config.solverNets as Record<string, unknown> | undefined,
+          joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
         }),
       },
       // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
@@ -771,10 +996,30 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               state: 'live' as const,
               supportedRoles: ['solving' as const, 'evaluating' as const],
               compatibleHarnesses: [
-                { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
               ],
               compatiblePlugins: [
                 { name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' },
+              ],
+            },
+            {
+              name: 'swe-rebench-v2',
+              description: 'Code-issue benchmark tasks from SWE-rebench v2. Solvers submit unified-diff patches; evaluators run the per-instance Docker harness.',
+              contract: { id: 'swe-rebench-v2', version: 'v1' },
+              state: 'live' as const,
+              supportedRoles: ['solving' as const, 'evaluating' as const],
+              // Order matters: the dashboard pre-selects compatibleHarnesses[0]
+              // as the default solver harness. Hermes Agent is the SWE-rebench v2
+              // default per the 2026-05-12 decision (jinn-mono-8psp.2 / spec §10);
+              // operators may switch to Claude Code or Codex.
+              compatibleHarnesses: [
+                { name: HERMES_AGENT_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: CODEX_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: 'swe-rebench-v2-evaluator', version: '0.1.0', supportsRoles: ['evaluating' as const] },
+              ],
+              compatiblePlugins: [
+                { name: 'swe-rebench-v2-runtime', version: '0.1.0', source: 'bundled' },
               ],
             },
           ],
@@ -874,16 +1119,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // the creator Safe with the SolverNet's solver_type. The result is a
       // strict superset of the in-flight count (we don't yet drop settled or
       // failed Tasks; that lifecycle tracking lands with the router-watcher
-      // hardening lane, jinn-mono-l2zl.12). Reserved-budget and Safe-balance
-      // remain stubbed and are tracked for Task 8+.
+      // hardening lane, jinn-mono-l2zl.12). Safe balance is read live through
+      // the daemon's viem public client once bootstrap has created it.
+      // Reserved-budget remains unavailable until per-Task payment lifecycle
+      // state is persisted; return an empty string rather than a fake zero so
+      // the UI does not project runway from placeholder data.
       //
       // TODO(jinn-mono-l2zl.12): once Task lifecycle events are persisted,
       // narrow `getOpenTaskCount` to states in
       // ('open', 'claims-in-flight', 'fully-claimed') so the operator's
       // "open Tasks" stat doesn't drift upward across the daemon's lifetime.
       // TODO(jinn-mono launcher Task 8): real `getReservedBudgetWei`
-      // (sum of unconsumed claim payments across open Tasks) and
-      // `getSafeBalanceWei` (live `eth_getBalance` against the creator Safe).
+      // (sum of unconsumed claim payments across open Tasks).
       launcher: {
         getConfig: () => ({ solverNets: config.solverNets }),
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
@@ -896,8 +1143,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           invalidatePredictionOperatorStatusCache(config);
         },
         getGeneratorState: (netName) => {
-          if (netName !== 'prediction') return undefined;
-          return predictionGeneratorRef?.getState();
+          if (netName === 'prediction') {
+            return predictionGeneratorRef?.getState();
+          }
+          const solverType = config.solverNets?.[netName]?.solverType;
+          if (!solverType) return undefined;
+          return launchedGeneratorStateBySolverType.get(solverType)?.();
         },
         getOpenTaskCount: (netName) => {
           const net = config.solverNets?.[netName];
@@ -908,8 +1159,24 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             solverType,
           });
         },
-        getReservedBudgetWei: () => '0',
-        getSafeBalanceWei: () => '0',
+        getReservedBudgetWei: () => '',
+        getSafeBalanceWei: async () => {
+          const safeAddress = safeAddressForLauncher;
+          const publicClient = publicClientForLauncher;
+          if (!safeAddress || !publicClient) return '';
+          try {
+            return (await publicClient.getBalance({
+              address: getAddress(safeAddress) as Address,
+            })).toString();
+          } catch (err) {
+            console.warn(
+              `[main] launcher status Safe balance read failed for ${safeAddress}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+            return '';
+          }
+        },
         safeAddress: () =>
           safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000',
         tasksDeps: {
@@ -936,12 +1203,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               taskCid: r.taskCid,
               solverType: r.solverType ?? undefined,
               postedAt: r.postedAt,
+              ...(r.state ? { state: r.state } : {}),
+              ...(r.claims ? { claims: r.claims } : {}),
             }));
           },
         },
       },
     });
   } catch (error) {
+    await closeCaptureReceiver();
     sharedStore.close();
     const err = error as NodeJS.ErrnoException;
     if (err?.code === 'EADDRINUSE') {
@@ -1042,6 +1312,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     if (initExitCode !== 0) {
       console.error('[main] init failed; cannot continue.');
       await setupApiServer.close().catch(() => undefined);
+      await closeCaptureReceiver();
       sharedStore.close();
       process.exit(initExitCode);
     }
@@ -1071,6 +1342,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // If bootstrap throws (vs. emitEnvelope-exits), tear down the API we
     // just started so we don't leave a dangling listener on the port.
     await setupApiServer.close().catch(() => undefined);
+    await closeCaptureReceiver();
     sharedStore.close();
     throw err;
   }
@@ -1089,6 +1361,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   if (process.env['JINN_NO_DAEMON'] === '1') {
     console.log('[main] --no-daemon: bootstrap complete, exiting before daemon loops.');
     await setupApiServer.close().catch(() => undefined);
+    await closeCaptureReceiver();
     sharedStore.close();
     const summary = {
       schemaVersion: 1,
@@ -1117,6 +1390,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // mode endpoint so `/v1/launcher/status.budget.safeAddress` is accurate
   // on the very first SPA poll. (Task 6 of the launcher plan.)
   safeAddressForLauncher = safeAddress;
+  const agentEoaAddress = privateKeyToAccount(agentPrivateKey).address as `0x${string}`;
 
   if (!mechAddress) {
     emitEnvelope({
@@ -1127,31 +1401,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       details: {
         network: config.network,
         expected: 'configured mech deployment with a non-zero mech marketplace address',
-      },
-    });
-  }
-
-  const preflight = await checkClaudeBinary(activeClaudePath);
-  if (!preflight.ok) {
-    emitClaudeBinaryPreflightFailure(preflight.detail, activeClaudePath);
-  }
-
-  const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
-  const authProbe = probeClaudeAuth({
-    context: authContext,
-    cwd: process.cwd(),
-    claudePath: activeClaudePath,
-  });
-  if (!authProbe.authenticated) {
-    emitEnvelope({
-      code: 'invalid_invocation',
-      message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
-      hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
-      exampleCli: 'jinn auth',
-      details: {
-        field: 'claude_auth',
-        context: authContext,
-        authenticated: false,
       },
     });
   }
@@ -1168,6 +1417,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   );
   const masterAccount = deriveMasterSigner(mnemonicForMaster);
   const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
+  publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
 
   const evictionRecovery =
@@ -1183,6 +1433,48 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         }
       : undefined;
 
+  const taskDiscoveryManifestCids = Object.values(config.joinedSolverNets ?? {})
+    .filter((entry) => entry.roles.includes('solver'))
+    .map((entry) => entry.manifestCid);
+
+  // ── DiscoveryAPI construction ─────────────────────────────────────────────
+  // Build the shared DiscoveryAPI used by MechAdapter (task discovery),
+  // the SolverNet registry client (lifecycle status), and the corpus library
+  // (envelope discovery). See spec/2026-05-11-discovery-api-and-shared-indexer.md §9.
+  let sharedDiscoveryApi: import('./discovery/types.js').DiscoveryAPI | undefined;
+  {
+    const onchainFloorOpts = {
+      rpcUrl: config.rpcUrl,
+      chainId: config.network === 'testnet' ? 84532 : 8453,
+      routerAddress: ROUTER_ADDRESS,
+      identityRegistryAddress: identityRegistryAddress ?? undefined,
+      safeAddress,
+      mechAddress: mechAddress ?? undefined,
+      taskDiscoveryFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
+    } as const;
+    async function buildOnchainFloor(): Promise<import('./discovery/types.js').DiscoveryAPI> {
+      const { createOnchainDiscoveryAPI } = await import('./discovery/onchain.js');
+      return createOnchainDiscoveryAPI(onchainFloorOpts);
+    }
+
+    const discoveryConfig = config.discovery;
+    if (discoveryConfig) {
+      // A discovery block was explicitly set.
+      try {
+        const { createDiscoveryAPI } = await import('./discovery/factory.js');
+        sharedDiscoveryApi = createDiscoveryAPI(discoveryConfig, { ...onchainFloorOpts });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[main] DiscoveryAPI construction failed: ${msg} — falling back to onchain discovery`);
+        sharedDiscoveryApi = await buildOnchainFloor();
+      }
+    } else {
+      // No discovery config (mainnet without an explicit discovery block) —
+      // default to the always-live onchain floor.
+      sharedDiscoveryApi = await buildOnchainFloor();
+    }
+  }
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrl,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1196,7 +1488,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
-  });
+    taskDiscovery: taskDiscoveryManifestCids.length > 0
+      ? {
+          discoveryApi: sharedDiscoveryApi,
+          solverNetManifestCids: taskDiscoveryManifestCids,
+          onchainFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
+          ...(config.taskDiscoveryAllowedTaskIds?.length
+            ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
+            : {}),
+        }
+      : undefined,
+  }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
 
@@ -1304,11 +1606,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   }
 
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) tasks
+  const corpusChainId = config.network === 'testnet' ? 84532 : 8453;
+  const corpusFromBlock = Number(DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[corpusChainId] ?? 0n);
+  // The MCP subprocess reads JINN_DISCOVERY_URL.
+  const corpusDiscoveryUrl = config.discovery?.url?.trim() || '';
   const corpusEnv: RunnerContext['corpusEnv'] | undefined =
-    config.subgraphUrl?.trim()
+    (corpusDiscoveryUrl || identityRegistryAddress)
       ? {
-          subgraphUrl: config.subgraphUrl,
+          ...(corpusDiscoveryUrl ? { discoveryUrl: corpusDiscoveryUrl } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
+          rpcUrl: config.rpcUrl,
+          chainId: corpusChainId,
+          ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
+          ...(corpusFromBlock > 0 ? { fromBlock: corpusFromBlock } : {}),
         }
       : undefined;
 
@@ -1325,45 +1635,102 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
     ipfsRegistryUrl: config.ipfsRegistryUrl,
+    ...(process.env['JINN_POLYMARKET_GAMMA_BASE_URL']
+      ? { polymarketGammaBaseUrl: process.env['JINN_POLYMARKET_GAMMA_BASE_URL'] }
+      : {}),
+    ...(process.env['JINN_POLYMARKET_CLOB_BASE_URL']
+      ? { polymarketClobBaseUrl: process.env['JINN_POLYMARKET_CLOB_BASE_URL'] }
+      : {}),
     externalImpls,
     disabledNames: config.harnesses?.disabled,
     corpusEnv,
+    hermesPath: config.hermesPath,
+    hermesModel: config.hermesModel,
+    hermesProvider: config.hermesProvider,
   })) {
     implRegistry.register(impl);
   }
 
   console.log(`[main] HarnessRegistry: ${implRegistry.list().map(i => i.name).join(', ')}`);
 
+  // ── Harness readiness registry ─────────────────────────────────────────────
+  // Composes per-harness isReady() probes into a cached snapshot consumed by
+  // claim loops (A5) and /v1/harnesses/readiness (A3).
+  //
+  // The registry is constructed here, after buildHarnesses() has run, which
+  // is necessarily after bootstrap (bootstrap needs the keystore). The HTTP
+  // server was started before bootstrap so it could show setup progress — we
+  // mount the readiness routes on the already-running app via setupApiServer.app
+  // (same pattern used by registerSolverNetsEndpoints). Routes are registered
+  // before the first operator request that cares about harness readiness.
+  //
+  // A2 carry-over: start() only schedules the 4s tick; refreshNow() is called
+  // immediately so the snapshot is populated before the first claim-loop tick.
+  const harnessReadinessRegistry = buildHarnessReadinessRegistry({
+    harnesses: implRegistry.list(),
+    config,
+  });
+  harnessReadinessRegistry.start();
+  await harnessReadinessRegistry.refreshNow();
+  // Mount /v1/harnesses/readiness and /v1/harnesses/:name/readiness on the
+  // already-running HTTP server. Hono matches eagerly on first request; these
+  // routes are registered before the daemon's first claim-loop tick.
+  addHarnessReadinessRoutes(setupApiServer.app, { registry: harnessReadinessRegistry });
+  console.log('[main] HarnessReadinessRegistry started; /v1/harnesses/readiness routes active.');
+
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
-  // Packaging deps: artifact bytes are written to served_artifacts (operator-local
-  // SQLite) and served via the operator's HTTP server with x402 gating per
-  // spec/2026-04-30-phase-a-umbrella.md §1. IPFS only holds the manifest envelope.
-  // The `store` field is filled by Daemon (which owns the SQLite handle); here
-  // we just configure the endpoint + price defaults from `config.operator`
-  // (Phase 3, jinn-mono-vy37.1.3). Operators who don't declare an operator
-  // block fall back to the daemon's local API port so dev/test runs still work
-  // — but the resulting envelopes won't be reachable from outside the host.
+  // Packaging deps: artifacts are always written to served_artifacts
+  // (operator-local SQLite). In public-testnet donation mode, scrubbed artifact
+  // bytes are also pinned to IPFS and advertised as signed donation sources;
+  // that IPFS path is the canonical release path. The HTTP endpoint and price
+  // fields are kept as compatibility/future data-market fallback plumbing.
   const operatorPublicEndpoint =
     config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
   const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
   const operatorPerTypePrice = config.operator?.perArtifactTypePrice ?? {};
+  const donationRequested = config.operator?.donation?.enabled === true;
+  const donationEnabled = donationRequested && config.network === 'testnet';
+  if (donationRequested && !donationEnabled) {
+    console.warn('[main] operator.donation.enabled is testnet-only; donation disabled on mainnet.');
+  }
   if (!config.operator?.publicEndpoint) {
-    console.warn(
-      '[main] config.operator.publicEndpoint not set; defaulting to local API port. ' +
-        'External evaluators will not be able to fetch artifacts from this operator. ' +
-        'Set operator.publicEndpoint (or JINN_OPERATOR_PUBLIC_ENDPOINT) before going live.',
-    );
+    if (donationEnabled) {
+      console.log(
+        '[main] config.operator.publicEndpoint not set; using IPFS donation as the public artifact path. ' +
+          'Direct HTTP artifact fallback will remain local-only.',
+      );
+    } else {
+      console.warn(
+        '[main] operator donation is disabled and config.operator.publicEndpoint is not set; ' +
+          'new artifacts will remain local-only until donation mode is enabled.',
+      );
+    }
   }
   const packagingDeps = {
     operatorEndpoint: operatorPublicEndpoint,
     defaultPriceUsdc: operatorDefaultPrice,
     perArtifactTypePrice: operatorPerTypePrice,
+    donation: {
+      enabled: donationEnabled,
+      ipfsRegistryUrl: config.ipfsRegistryUrl,
+      scrub: {
+        identity: {
+          username: userInfo().username,
+          hostname: hostname(),
+        },
+        path: { home: homedir() },
+      },
+    },
   };
   const operatorConfig = {
     publicEndpoint: operatorPublicEndpoint,
     defaultPriceUsdc: operatorDefaultPrice,
     perArtifactTypePrice: operatorPerTypePrice,
+    donation: { enabled: donationEnabled },
+    // Daemon-wide LLM model — stamped as executor.model fallback in envelopes
+    // when a SolverNet does not specify its own model (jinn-mono-gbut, gh#191).
+    claudeModel: config.claudeModel,
   };
 
   // Envelope assembly deps: sign envelopes with agent EOA private key
@@ -1409,6 +1776,21 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     );
   }
 
+  const liveCapturePublisher = createLiveCapturePublisher({
+    store: sharedStore,
+    captures: capturesStore,
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    operatorEndpoint: operatorPublicEndpoint,
+    defaultPriceUsdc: operatorDefaultPrice,
+    perArtifactTypePrice: operatorPerTypePrice,
+    participant: { safeAddress, agentEoa: agentEoaAddress },
+    signer: { address: agentEoaAddress, privateKey: agentPrivateKey },
+    clientGitSha: buildInfo.clientGitSha,
+    identityPublisher,
+    harnessMode: config.harness.mode,
+  });
+  capturePublishRef.current = liveCapturePublisher.publishCapture;
+
   // ── Reputation feedback hook (jinn-mono-yg4) ──────────────────────────────
   //
   // After the evaluator's claimDelivery succeeds, the engine fires
@@ -1420,9 +1802,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
   //      identity.
   //   2. An agentId resolver — looks up the harness's agentId from the
-  //      parent manifest's evidenceHash via the subgraph. When `subgraphUrl`
-  //      is unconfigured the resolver returns null cleanly and the hook
-  //      becomes a no-op (defensive: feedback is non-fatal).
+  //      parent manifest's evidenceHash via the shared `DiscoveryAPI`. When
+  //      no DiscoveryAPI is available the resolver returns null cleanly and
+  //      the hook becomes a no-op (defensive: feedback is non-fatal).
   //
   // Skipped when the operator hasn't minted an agent NFT yet (matches the
   // IdentityPublisher gating above).
@@ -1445,14 +1827,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       const { resolveAgentIdForManifest } = await import(
         './erc8004/index.js'
       );
-      const subgraphUrl = config.subgraphUrl;
       reputationFeedback = {
         client: reputationClient,
         resolveAgentId: (manifestHash) =>
-          resolveAgentIdForManifest({ manifestHash, subgraphUrl }),
+          resolveAgentIdForManifest({ manifestHash, discoveryApi: sharedDiscoveryApi }),
       };
       console.log(
-        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${subgraphUrl ? ` subgraph=${subgraphUrl}` : ' (no subgraph configured — resolver always null)'}`,
+        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${sharedDiscoveryApi ? ' discoveryApi=active' : ' (no discoveryApi — resolver always null)'}`,
       );
     } else {
       console.log(
@@ -1473,10 +1854,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // lands in Task 12; until then we expose `pendingGenerators` so the
   // upcoming wiring has a clean handoff point.
   //
-  // Day-1 SubgraphClient is the no-op stub — Task 25 wires the real
-  // subgraph extension. The launch state machine still resumes correctly
-  // through the receipt-confirmation path; only the mempool-drop fallback
-  // depends on subgraph reads.
+  // The launch state machine resumes correctly through the receipt-confirmation
+  // path; discovery is now exclusively via DiscoveryAPI (280n.6).
   let solverNetSubsystem: import('./solvernets/daemon-init.js').SolverNetSubsystem | undefined;
   // Hoisted so the engine wiring below can pick the registry client up as
   // its `manifestResolver` (Task 27 of the SolverNet creation-and-launch
@@ -1488,8 +1867,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     const {
       initSolverNetSubsystem,
       createIpfsClientAdapter,
-      createNoopSubgraphClient,
-      createGraphqlSubgraphClient,
       createMetadataPublisherFromViem,
       createDefaultRegistryClient,
     } = await import('./solvernets/daemon-init.js');
@@ -1500,9 +1877,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       registryUrl: config.ipfsRegistryUrl,
       gatewayUrl: config.ipfsGatewayUrl,
     });
-    const solverNetSubgraph = config.subgraphUrl?.trim()
-      ? createGraphqlSubgraphClient({ url: config.subgraphUrl })
-      : createNoopSubgraphClient();
     const solverNetPublisher = createMetadataPublisherFromViem({
       identityRegistryAddress,
       walletClient: agentClients.walletClient,
@@ -1511,7 +1885,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     const solverNetRegistryClient = createDefaultRegistryClient({
       ipfs: solverNetIpfs,
       publisher: solverNetPublisher,
-      subgraph: solverNetSubgraph,
+      discoveryApi: sharedDiscoveryApi,
       network: 'base-sepolia',
     });
     solverNetRegistryClientForEngine = solverNetRegistryClient;
@@ -1527,7 +1901,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         store: solverNetStore,
         ipfs: solverNetIpfs,
         publisher: solverNetPublisher,
-        subgraph: solverNetSubgraph,
         registryClient: solverNetRegistryClient,
         network: 'base-sepolia',
         resolveSigner: async () => launcherSigner,
@@ -1555,11 +1928,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           return { blockNumber: Number(receipt.blockNumber) };
         };
         const pendingGeneratorsRef = { current: solverNetSubsystem.pendingGenerators };
+        // Noop subgraph for launch/lifecycle state-machine mempool-drop recovery.
+        // Real subgraph extension lands in Task 25 (jinn-mono-280n).
+        const noopSubgraph = {
+          async fetchSetMetadataEvents() { return []; },
+          async fetchSetMetadataEventsForCid() { return []; },
+        };
         const launchAction = new LaunchAction({
           store: solverNetStore,
           ipfs: solverNetIpfs,
           publisher: solverNetPublisher,
-          subgraph: solverNetSubgraph,
+          subgraph: noopSubgraph,
           spawnGenerator: async () => {
             /* Generators are spawned by main.ts post-launch loop;
              * the launcher endpoint just persists the record here. */
@@ -1570,7 +1949,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           store: solverNetStore,
           registry: solverNetRegistryClient,
           signer: launcherSigner,
-          subgraph: solverNetSubgraph,
+          subgraph: noopSubgraph,
           awaitTxConfirmation: awaitLauncherTxConfirmation,
         });
         if (!safeAddressForLauncher) {
@@ -1620,8 +1999,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // is determined by which launched records the daemon owns, not by the
   // operator-config role enum.
   const autoTasksDisabled = process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
-  const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
-  const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
   // ── SolverNet launched-record generators (Task 12 of
   //     spec/2026-05-05-solvernet-creation-and-launch.md §11) ────────────────
   //
@@ -1637,38 +2014,29 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     generator: import('./tasks/sources.js').TaskGenerator;
   }> = [];
   if (solverNetSubsystem && !autoTasksDisabled) {
-    const { makePredictionV1GeneratorForLaunchedRecord } = await import(
-      './solver-types/prediction-v1-auto.js'
+    const { wireLaunchedRecordGenerators } = await import(
+      './solvernets/launched-record-dispatcher.js'
     );
-    for (const pending of solverNetSubsystem.pendingGenerators) {
-      // Static deps (agent identity + Polymarket transport) are construction-
-      // time-fixed; runtime-editable settings flow through `configRef`.
-      const generator = makePredictionV1GeneratorForLaunchedRecord({
-        recordRef: pending.recordRef,
-        configRef: pending.configRef,
-        staticConfig: {
-          agentEoa: agentEoaAddress,
-          safeAddress,
-          agentPrivateKey,
-        },
-      });
-      launchedRecordGenerators.push({ solverType: 'prediction.v1', generator });
-      // First launched prediction.v1 generator becomes the legacy
-      // `predictionGeneratorRef` source for the launcher status endpoint
-      // (kept thin; multi-record launcher status lives in the launched-record
-      // surface — see spec §11/Task 14).
-      if (
-        !predictionGeneratorRef &&
-        typeof generator === 'function' &&
-        typeof (generator as { getState?: unknown }).getState === 'function'
-      ) {
-        predictionGeneratorRef =
-          generator as unknown as typeof predictionGeneratorRef;
-      }
-      console.log(
-        `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
-          `(prediction.v1, status=${pending.record.status})`,
-      );
+    const wired = await wireLaunchedRecordGenerators({
+      pendingGenerators: solverNetSubsystem.pendingGenerators,
+      launchedDir: join(config.earningDir, 'solvernets', 'launched'),
+      staticConfig: {
+        agentEoa: agentEoaAddress,
+        safeAddress,
+        agentPrivateKey,
+      },
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
+    });
+    launchedRecordGenerators.push(...wired.generators);
+    for (const [solverType, getState] of wired.generatorStatesBySolverType) {
+      launchedGeneratorStateBySolverType.set(solverType, getState);
+    }
+    if (!predictionGeneratorRef && wired.predictionGeneratorRef) {
+      predictionGeneratorRef =
+        wired.predictionGeneratorRef as unknown as typeof predictionGeneratorRef;
     }
   }
   if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
@@ -1687,21 +2055,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // Built once per daemon lifetime; the agent EOA private key stays in this
   // process's memory and never crosses into the MCP subprocess. The MCP
   // tool `acquire_artifact` proxies to `POST /v1/artifacts/acquire` instead.
-  // Disabled when subgraphUrl is unset — the API route is then absent and
-  // MCP falls back to local-only behaviour with a warning.
-  const corpusFactory = config.subgraphUrl?.trim()
+  // Always enabled when a DiscoveryAPI is available (which is always true after
+  // 280n.3 — the onchain floor is always constructed). Falls back to disabled
+  // when no discovery is available and no identity registry is set.
+  const corpusFactory = (sharedDiscoveryApi || identityRegistryAddress)
     ? (store: Store) =>
         (corpusForApi = createCorpus({
-          subgraphUrl: config.subgraphUrl!,
+          ...(sharedDiscoveryApi ? { discovery: sharedDiscoveryApi } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           store,
           signer: { privateKey: agentPrivateKey },
           selfSafeAddress: safeAddress,
+          ...(!sharedDiscoveryApi && identityRegistryAddress
+            ? {
+                onchain: {
+                  rpcUrl: config.rpcUrl,
+                  chainId: corpusChainId,
+                  identityRegistryAddress,
+                  ...(corpusFromBlock > 0 ? { fromBlock: corpusFromBlock } : {}),
+                },
+              }
+            : {}),
         }))
     : undefined;
   if (!corpusFactory) {
     console.warn(
-      '[main] Corpus disabled (config.subgraphUrl not set); ' +
+      '[main] Corpus disabled (no DiscoveryAPI or on-chain identity registry); ' +
         'MCP record lookup and artifact acquisition network branches will be unavailable.',
     );
   }
@@ -1718,10 +2097,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     apiBindHost,
     apiToken,
     peers: config.peers.length > 0 ? config.peers : undefined,
-    subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
     corpusFactory,
+    harnessReadinessRegistry,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
@@ -1818,21 +2197,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         : undefined,
   });
 
-  // Graceful shutdown — Daemon doesn't own the API server or Store in this
-  // flow (they were created in setup-mode before bootstrap), so we close
-  // them explicitly after Daemon.stop() completes.
-  const shutdown = async (signal: string) => {
-    console.log(`\n[main] Received ${signal}, shutting down...`);
-    await daemon.stop();
-    await setupApiServer.close().catch(() => undefined);
-    sharedStore.close();
-    console.log('[main] Shutdown complete.');
-    process.exit(0);
-  };
-
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-
   // Write pidfile so `jinn stop` can find us.
   const pidPath = join(config.earningDir, 'daemon.pid');
   const { writeFileSync, unlinkSync } = await import('node:fs');
@@ -1845,6 +2209,40 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
   };
   process.on('exit', removePidfile);
+
+  // Graceful shutdown — Daemon doesn't own the API server or Store in this
+  // flow (they were created in setup-mode before bootstrap), so we close
+  // them explicitly after Daemon.stop() completes.
+  let shutdownPromise: Promise<void> | null = null;
+  const shutdown = async (signal: string) => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      let exitCode = 0;
+      console.log(`\n[main] Received ${signal}, shutting down...`);
+      try {
+        harnessReadinessRegistry.stop();
+        await daemon.stop();
+        await setupApiServer.close().catch(() => undefined);
+        await closeCaptureReceiver();
+      } catch (err) {
+        exitCode = 1;
+        console.error('[main] Shutdown failed:', err instanceof Error ? err.message : String(err));
+      } finally {
+        removePidfile();
+        try {
+          sharedStore.close();
+        } catch {
+          /* ignore */
+        }
+      }
+      console.log('[main] Shutdown complete.');
+      process.exit(exitCode);
+    })();
+    return shutdownPromise;
+  };
+
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 
   emitProgress({
     type: 'progress',
@@ -1887,4 +2285,37 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     serviceIndex,
     serviceId,
   };
+}
+
+// ── Harness readiness registry factory ───────────────────────────────────────
+// Exported so tests can construct a registry without booting the full daemon.
+
+/**
+ * Builds a HarnessReadinessRegistry from the harness list returned by
+ * buildHarnesses() and the operator's joinedSolverNets config block.
+ *
+ * Per A2 carry-over: start() only schedules the background tick; callers that
+ * need the snapshot populated immediately must call refreshNow() after start().
+ */
+export function buildHarnessReadinessRegistry(args: {
+  harnesses: Harness[];
+  config: Pick<JinnConfig, 'joinedSolverNets'>;
+}): HarnessReadinessRegistry {
+  const harnessesByName: Record<string, Harness> = {};
+  for (const h of args.harnesses) {
+    harnessesByName[h.name] = h;
+  }
+  const joinedHarnessesByCid: Record<string, { harnessName: string; roles: Array<'solver' | 'evaluator'> }> = {};
+  for (const [cid, entry] of Object.entries(args.config.joinedSolverNets ?? {})) {
+    if (entry.harness) {
+      joinedHarnessesByCid[cid] = {
+        harnessName: entry.harness,
+        roles: entry.roles,
+      };
+    }
+  }
+  return new HarnessReadinessRegistry({
+    harnessesByName,
+    joinedHarnessesByCid,
+  });
 }

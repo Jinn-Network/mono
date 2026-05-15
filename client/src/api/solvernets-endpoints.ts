@@ -64,6 +64,7 @@ import {
   type SolverNetStore,
 } from '../solvernets/store.js';
 import {
+  manifestHash,
   signManifest,
   type UnsignedSolverNetManifestV1,
 } from '../solvernets/manifest.js';
@@ -73,12 +74,15 @@ import type {
   PendingGeneratorSpawn,
   SolverNetCatalogCache,
 } from '../solvernets/daemon-init.js';
+import {
+  resolveLaunchedRecordContract,
+  type LaunchedRecordContractRef,
+} from '../solvernets/launched-record-dispatcher.js';
 import type {
   SignerWithAgentEoa,
   SolverNetManifestSummary,
   SolverNetRegistryClient,
 } from '../solvernets/registry-client.js';
-import type { PredictionV1GeneratorRuntimeConfig } from '../solver-types/prediction-v1-auto.js';
 
 /**
  * Optional Task-14 deps that turn on the launch + lifecycle + generator-config
@@ -253,7 +257,7 @@ const LifecycleBodySchema = z
  * `.strict()` rejects unknown keys so a typo in the SPA surfaces as 400
  * rather than silently dropping the field.
  */
-const GeneratorConfigPatchSchema = z
+const PredictionV1GeneratorConfigPatchSchema = z
   .object({
     cadenceMs: z.number().int().nonnegative().optional(),
     maxNewRoundsPerPoll: z.number().int().nonnegative().optional(),
@@ -270,6 +274,158 @@ const GeneratorConfigPatchSchema = z
     maxOrderbookAgeSeconds: z.number().int().nonnegative().optional(),
   })
   .strict();
+
+const SweRebenchV2GeneratorConfigPatchSchema = z
+  .object({
+    N_target_successes: z.number().int().positive().optional(),
+    N_max_postings_per_task: z.number().int().positive().optional(),
+    cooldown_ms: z.number().int().nonnegative().optional(),
+    claimPolicy: z
+      .object({
+        maxClaims: z.number().int().positive().max(65_535).optional(),
+        maxClaimsPerOperator: z.number().int().positive().max(65_535).optional(),
+        claimLeaseTtlSeconds: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.N_target_successes !== undefined &&
+      value.N_max_postings_per_task !== undefined &&
+      value.N_max_postings_per_task < value.N_target_successes
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['N_max_postings_per_task'],
+        message: 'must be >= N_target_successes',
+      });
+    }
+    if (
+      value.claimPolicy?.maxClaims !== undefined &&
+      value.claimPolicy.maxClaimsPerOperator !== undefined &&
+      value.claimPolicy.maxClaimsPerOperator > value.claimPolicy.maxClaims
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['claimPolicy', 'maxClaimsPerOperator'],
+        message: 'must be <= claimPolicy.maxClaims',
+      });
+    }
+  });
+
+function isContractRefFor(
+  contract: LaunchedRecordContractRef | null,
+  id: string,
+  version: string,
+): boolean {
+  return contract?.id === id && contract.version === version;
+}
+
+function defaultSweRebenchV2ClaimPolicy(): {
+  maxClaims: number;
+  maxClaimsPerOperator: number;
+  claimLeaseTtlSeconds: number;
+} {
+  const defaults = getSolverNetContract({
+    id: 'swe-rebench-v2',
+    version: 'v1',
+  })?.claimPolicyDefaults;
+  return {
+    maxClaims: defaults?.maxClaims ?? 50,
+    maxClaimsPerOperator: defaults?.maxClaimsPerOperator ?? 5,
+    claimLeaseTtlSeconds: defaults?.claimLeaseTtlSeconds ?? 60 * 60,
+  };
+}
+
+function mergeGeneratorConfigPatchForRecord(
+  record: LaunchedSolverNetRecord,
+  contract: LaunchedRecordContractRef | null,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const nextConfig: Record<string, unknown> = {
+    ...(record.generatorConfig ?? {}),
+    ...patch,
+  };
+  if (
+    isContractRefFor(contract, 'swe-rebench-v2', 'v1') &&
+    typeof patch.claimPolicy === 'object' &&
+    patch.claimPolicy !== null
+  ) {
+    const existingPolicy =
+      typeof record.generatorConfig?.claimPolicy === 'object' &&
+      record.generatorConfig.claimPolicy !== null
+        ? record.generatorConfig.claimPolicy as Record<string, unknown>
+        : {};
+    nextConfig.claimPolicy = {
+      ...existingPolicy,
+      ...patch.claimPolicy as Record<string, unknown>,
+    };
+  }
+  return nextConfig;
+}
+
+function validateSweRebenchV2EffectiveConfig(
+  contract: LaunchedRecordContractRef | null,
+  config: Record<string, unknown>,
+): { path: string; message: string } | undefined {
+  if (!isContractRefFor(contract, 'swe-rebench-v2', 'v1')) return undefined;
+  const targetSuccesses = typeof config.N_target_successes === 'number'
+    ? config.N_target_successes
+    : undefined;
+  const maxPostingsPerTask = typeof config.N_max_postings_per_task === 'number'
+    ? config.N_max_postings_per_task
+    : undefined;
+  if (
+    targetSuccesses !== undefined &&
+    maxPostingsPerTask !== undefined &&
+    maxPostingsPerTask < targetSuccesses
+  ) {
+    return {
+      path: 'N_max_postings_per_task',
+      message: 'must be >= N_target_successes',
+    };
+  }
+  const defaults = defaultSweRebenchV2ClaimPolicy();
+  const rawPolicy =
+    typeof config.claimPolicy === 'object' && config.claimPolicy !== null
+      ? config.claimPolicy as Record<string, unknown>
+      : {};
+  const maxClaims = typeof rawPolicy.maxClaims === 'number'
+    ? rawPolicy.maxClaims
+    : defaults.maxClaims;
+  const maxClaimsPerOperator = typeof rawPolicy.maxClaimsPerOperator === 'number'
+    ? rawPolicy.maxClaimsPerOperator
+    : defaults.maxClaimsPerOperator;
+  if (maxClaimsPerOperator > maxClaims) {
+    return {
+      path: 'claimPolicy.maxClaimsPerOperator',
+      message: 'claimPolicy.maxClaimsPerOperator must be <= claimPolicy.maxClaims',
+    };
+  }
+  return undefined;
+}
+
+function parseGeneratorConfigPatchForRecord(
+  contract: LaunchedRecordContractRef | null,
+  raw: unknown,
+): z.SafeParseReturnType<unknown, Record<string, unknown>> {
+  if (isContractRefFor(contract, 'swe-rebench-v2', 'v1')) {
+    return SweRebenchV2GeneratorConfigPatchSchema.safeParse(raw);
+  }
+  return PredictionV1GeneratorConfigPatchSchema.safeParse(raw);
+}
+
+function zodIssuesForResponse(error: z.ZodError): Array<{
+  path: string;
+  message: string;
+}> {
+  return error.issues.map((issue) => ({
+    path: issue.path.join('.') || '<body>',
+    message: issue.message,
+  }));
+}
 
 // ── Launch helpers ──────────────────────────────────────────────────────────
 
@@ -447,6 +603,42 @@ async function tryGetSummary(
     // an undefined summary rather than failing the entire list response.
     return undefined;
   }
+}
+
+async function tryGetOwnedCachedManifest(
+  store: SolverNetStore,
+  manifestCid: string,
+): Promise<{
+  record: LaunchedSolverNetRecord;
+  manifest: SolverNetManifestV1;
+} | null> {
+  const records = await store.loadOwnedRecords();
+  for (const record of records) {
+    if (record.manifestCid !== manifestCid || !record.manifestPath) continue;
+    const manifest = await store.loadManifestCache(record.manifestPath);
+    if (!manifest) continue;
+    if (manifest.solverNetId !== record.solverNetId) continue;
+    if (manifestHash(manifest) !== record.manifestHash) continue;
+    return { record, manifest };
+  }
+  return null;
+}
+
+function localLifecycleForRecord(record: LaunchedSolverNetRecord): {
+  status: 'launched' | 'paused' | 'retired';
+  statusUpdatedAt: string;
+  sourceBlock: number;
+} | null {
+  const sourceBlock = record.registry.metadataBlockNumber;
+  if (sourceBlock === undefined) return null;
+  return {
+    status:
+      record.status === 'paused' || record.status === 'retired'
+        ? record.status
+        : 'launched',
+    statusUpdatedAt: record.statusUpdatedAt,
+    sourceBlock,
+  };
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -1066,19 +1258,6 @@ export function registerSolverNetsEndpoints(
       return c.json({ error: 'invalid_body', message: 'expected JSON body' }, 400);
     }
 
-    const parsed = GeneratorConfigPatchSchema.safeParse(raw);
-    if (!parsed.success) {
-      return c.json(
-        {
-          error: 'invalid_body',
-          message: parsed.error.issues
-            .map((i) => `${i.path.join('.') || '<body>'}: ${i.message}`)
-            .join('; '),
-        },
-        400,
-      );
-    }
-
     let record: LaunchedSolverNetRecord | null;
     try {
       record = await store.loadRecord(id);
@@ -1095,19 +1274,48 @@ export function registerSolverNetsEndpoints(
       return c.json({ error: 'record_not_found', message: `Unknown record: ${id}` }, 404);
     }
 
+    const contract = await resolveLaunchedRecordContract(record);
+    const parsed = parseGeneratorConfigPatchForRecord(contract, raw);
+    if (!parsed.success) {
+      const issues = zodIssuesForResponse(parsed.error);
+      return c.json(
+        {
+          error: 'invalid_body',
+          kind: 'schema_validation_failed',
+          issues,
+          message: issues.map((i) => `${i.path}: ${i.message}`).join('; '),
+        },
+        400,
+      );
+    }
+
     // Patch semantics: merge the provided fields over the existing config.
     // Operators editing one field shouldn't have to re-send the rest.
-    const nextConfig: PredictionV1GeneratorRuntimeConfig = {
-      ...((record.generatorConfig as PredictionV1GeneratorRuntimeConfig | undefined) ?? {}),
-      ...parsed.data,
-    };
+    const nextConfig = mergeGeneratorConfigPatchForRecord(record, contract, parsed.data);
+    const effectiveConfigError = validateSweRebenchV2EffectiveConfig(contract, nextConfig);
+    if (effectiveConfigError) {
+      return c.json(
+        {
+          error: 'invalid_body',
+          kind: 'schema_validation_failed',
+          issues: [
+            {
+              path: effectiveConfigError.path,
+              message: effectiveConfigError.message,
+            },
+          ],
+          message: effectiveConfigError.message,
+        },
+        400,
+      );
+    }
 
     // Persist on disk. The store schema treats generatorConfig as an opaque
     // record; we widen the strongly-typed runtime config back to that shape
     // for storage.
     const updatedRecord: LaunchedSolverNetRecord = {
       ...record,
-      generatorConfig: nextConfig as Record<string, unknown>,
+      generatorConfig: nextConfig,
     };
     const validated = LaunchedSolverNetRecordSchema.safeParse(updatedRecord);
     if (!validated.success) {
@@ -1297,23 +1505,56 @@ export function registerSolverNetsEndpoints(
   // (path-traversal, decimals, empty) so we never round-trip them to IPFS,
   // but the registry client does the canonical check.
   app.get('/v1/solvernets/registry/:cid', async (c) => {
+    const cid = c.req.param('cid');
+    if (!cid) {
+      return c.json(
+        {
+          error: 'invalid_cid',
+          message: `cid does not look like a CID: ${cid ?? '<empty>'}`,
+        },
+        400,
+      );
+    }
+
+    let ownedCached: Awaited<ReturnType<typeof tryGetOwnedCachedManifest>>;
+    try {
+      ownedCached = await tryGetOwnedCachedManifest(store, cid);
+    } catch (err) {
+      return c.json(
+        {
+          error: 'store_read_failed',
+          message: err instanceof Error ? err.message : String(err),
+        },
+        500,
+      );
+    }
+    if (ownedCached) {
+      const lifecycle = localLifecycleForRecord(ownedCached.record);
+      if (lifecycle) {
+        return c.json({
+          manifest: ownedCached.manifest,
+          lifecycle,
+        });
+      }
+    }
+
     if (!deps.registry) {
       return c.json(
         {
           error: 'registry_unavailable',
-          message: 'registry client is not configured',
+          message:
+            'registry client is not configured and no owned cached manifest matched this cid',
         },
         503,
       );
     }
     const registry = deps.registry;
 
-    const cid = c.req.param('cid');
-    if (!cid || !CID_SHAPE_REGEX.test(cid)) {
+    if (!CID_SHAPE_REGEX.test(cid)) {
       return c.json(
         {
           error: 'invalid_cid',
-          message: `cid does not look like a CID: ${cid ?? '<empty>'}`,
+          message: `cid does not look like a CID: ${cid}`,
         },
         400,
       );

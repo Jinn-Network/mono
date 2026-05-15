@@ -6,15 +6,24 @@
  */
 
 import type { Store } from '../store/store.js';
-import type { EvidenceTier, Role, SignedEnvelope } from '../types/envelope.js';
+import type { ArtifactSource, EvidenceTier, LegacyEnvelopeRole, Role, SignedEnvelope } from '../types/envelope.js';
 
 export interface CorpusOptions {
-  subgraphUrl: string;
   ipfsGatewayUrl: string;
   store: Store;
   signer: { privateKey: string };
   selfSafeAddress: string;
   routeResolver?: RouteResolver;
+  onchain?: import('./onchain-query.js').OnchainCorpusQueryOptions;
+  /**
+   * DiscoveryAPI instance for envelope queries. When provided, delegates all
+   * `queryEnvelopes` calls to the DiscoveryAPI (Ponder HTTP or onchain floor)
+   * and bypasses the `onchain` legacy path. The DiscoveryAPI owns the
+   * primary-vs-floor fallback split internally via `withFallback`.
+   *
+   * When both `discovery` and `onchain` are set, `discovery` takes precedence.
+   */
+  discovery?: import('../discovery/types.js').DiscoveryAPI;
 }
 
 export interface CorpusQuery {
@@ -26,6 +35,8 @@ export interface CorpusQuery {
   generatedAfter?: number;
   generatedBefore?: number;
   limit?: number;
+  /** Filter envelopes by the manifest hash (the keccak256 of the manifest body). */
+  manifestHash?: string;
 }
 
 export type EnvelopeProjectionMetadataValue = string | number | boolean;
@@ -58,7 +69,7 @@ export interface EnvelopeProjection {
 export interface EnvelopeProjectionQuery {
   envelopeRefs?: readonly string[];
   solverType?: string;
-  role?: Role;
+  role?: Role | LegacyEnvelopeRole;
   taskCid?: string;
   taskId?: string;
   requestId?: string;
@@ -92,7 +103,7 @@ export interface ArtifactContent {
   sha256: string;
   bytes: Buffer;
   artifactType: string;
-  source: 'cache' | 'self-store' | 'origin' | 'route-resolver';
+  source: 'cache' | 'self-store' | 'origin' | 'route-resolver' | 'ipfs';
   paidAmountUsdc: string;
   fetchedAt: string;
   sourceOperator?: string;
@@ -118,7 +129,7 @@ export interface Corpus {
   acquireBySha256(
     sha256: string,
     access: { endpoint: string; priceUsdc: string },
-    hint?: { artifactType?: string; envelopeCid?: string },
+    hint?: { artifactType?: string; envelopeCid?: string; sources?: ArtifactSource[]; ownerSafe?: string },
   ): Promise<ArtifactContent>;
 }
 

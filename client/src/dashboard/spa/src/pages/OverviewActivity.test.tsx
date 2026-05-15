@@ -48,23 +48,29 @@ describe('<OverviewActivityPage />', () => {
     expect(screen.getByTestId('overview-activity-back')).toBeTruthy();
   });
 
-  it('shows in-flight rows when recentTasks contains non-terminal states', async () => {
+  it('shows in-flight rows from generic taskRuns', async () => {
     const now = Date.now();
     vi.mocked(api.getStatus).mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
       activity: { recent: [] },
-      predictionV1: {
+      taskRuns: {
         totals: { activeTaskRuns: 1 },
-        recentTasks: [
+        inFlight: [
           {
             requestId: 'req-abc12345',
             taskId: 'task-1',
             taskCid: 'bafkre...',
+            solverType: 'swe-rebench-v2.v1',
             state: 'RUNNING',
             taskRole: 'restoration',
             stateUpdatedAt: now - 60_000,
             deliveryTxHash: null,
           },
+        ],
+      },
+      predictionV1: {
+        totals: { activeTaskRuns: 0 },
+        recentTasks: [
           {
             // terminal state — should be filtered out
             requestId: 'req-zzz',
@@ -85,6 +91,7 @@ describe('<OverviewActivityPage />', () => {
     });
     expect(screen.getByText('RUNNING')).toBeTruthy();
     expect(screen.getByText('restoration')).toBeTruthy();
+    expect(screen.getByText(/swe-rebench-v2.v1/)).toBeTruthy();
     // Empty state should not render when we have rows
     expect(screen.queryByTestId('overview-activity-in-flight-empty')).toBeNull();
   });

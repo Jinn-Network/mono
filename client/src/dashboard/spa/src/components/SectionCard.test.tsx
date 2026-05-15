@@ -27,6 +27,22 @@ describe('SectionCard', () => {
     expect(screen.getByTestId('body')).toBeTruthy();
   });
 
+  it('opens when a deep-link target becomes active after mount', () => {
+    const { rerender } = render(
+      <SectionCard title="Security" summary="" defaultExpanded={false}>
+        <div data-testid="body">body content</div>
+      </SectionCard>,
+    );
+    expect(screen.queryByTestId('body')).toBeNull();
+
+    rerender(
+      <SectionCard title="Security" summary="" defaultExpanded={true}>
+        <div data-testid="body">body content</div>
+      </SectionCard>,
+    );
+    expect(screen.getByTestId('body')).toBeTruthy();
+  });
+
   it('renders the save footer when dirty', () => {
     const onSave = vi.fn();
     const onCancel = vi.fn();

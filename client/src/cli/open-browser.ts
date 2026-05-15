@@ -10,7 +10,11 @@ export function openBrowser(url: string): void {
             : platform === 'win32'  ? 'start'
             : 'xdg-open';
   try {
-    spawn(cmd, [url], { detached: true, stdio: 'ignore' }).unref();
+    const child = spawn(cmd, [url], { detached: true, stdio: 'ignore' });
+    child.on('error', () => {
+      // best-effort; never crash the daemon over a failed browser launch
+    });
+    child.unref();
   } catch {
     // best-effort; never crash the daemon over a failed browser launch
   }

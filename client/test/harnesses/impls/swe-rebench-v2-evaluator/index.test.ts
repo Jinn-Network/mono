@@ -15,11 +15,12 @@ describe('SweRebenchV2Evaluator', () => {
     const fakeFetcher = {
       fetchTaskRow: vi.fn().mockResolvedValue({
         instance_id: 'unidata__netcdf-c-1925',
+        repo: 'Unidata/netcdf-c',
         image_name: 'docker.io/swerebenchv2/unidata-netcdf-c:1925-ad6bff3',
         FAIL_TO_PASS: ['test_a'],
         PASS_TO_PASS: ['test_b'],
         test_patch: 'diff --git ...',
-        install_config: { test_cmd: 'make test', log_parser: 'pytest' },
+        install_config: { install: 'pip install -e .', test_cmd: 'make test', log_parser: 'pytest' },
       }),
     };
     const evaluator = new SweRebenchV2Evaluator({ fetcher: fakeFetcher, runner: fakeRunner });
@@ -33,6 +34,11 @@ describe('SweRebenchV2Evaluator', () => {
     });
     expect(verdict.score).toBe(1);
     expect(verdict.passed_match).toBe(true);
+    expect(fakeRunner.runEval).toHaveBeenCalledWith(expect.objectContaining({
+      instance_id: 'unidata__netcdf-c-1925',
+      repo: 'Unidata/netcdf-c',
+      install: 'pip install -e .',
+    }));
   });
 
   it('emits a failing Verdict (score=0) when tests fail', async () => {
@@ -48,6 +54,7 @@ describe('SweRebenchV2Evaluator', () => {
     const fakeFetcher = {
       fetchTaskRow: vi.fn().mockResolvedValue({
         instance_id: 'unidata__netcdf-c-1925',
+        repo: 'Unidata/netcdf-c',
         image_name: 'docker.io/swerebenchv2/unidata-netcdf-c:1925-ad6bff3',
         FAIL_TO_PASS: ['test_a'],
         PASS_TO_PASS: [],

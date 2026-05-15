@@ -11,12 +11,15 @@ import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { addLauncherRoutes } from '../../src/api/launcher-endpoints.js';
 import { requireUiToken } from '../../src/api/handshake.js';
+import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
+import { TaskRunState } from '../../src/harnesses/engine/state.js';
 import type { JinnConfig } from '../../src/config.js';
 import type { LauncherGeneratorStateSnapshot } from '../../src/api/launcher-status.js';
 import type {
   PostedTaskRecord,
   FetchPostedTasksOptions,
 } from '../../src/api/launcher-tasks.js';
+import { withTempStore } from '@test/store.js';
 
 const UI_TOKEN = 'ui-token-test';
 const SAFE_ADDRESS = '0x0000000000000000000000000000000000000abc';
@@ -401,6 +404,116 @@ describe('GET /v1/launcher/tasks', () => {
     const body = (await res.json()) as TasksResponseBody;
     expect(body.tasks).toHaveLength(1);
     expect(body.tasks[0]?.solverNet).toBe('unknown');
+  });
+
+  it('uses local task_payload claimPolicy.maxClaims and task_run state for SWE posts', async () => {
+    await withTempStore(async (store) => {
+      const postedAt = '2026-05-05T12:00:00.000Z';
+      store.upsertTaskPostRecord({
+        creatorSafeAddress: SAFE_ADDRESS,
+        sourceKey: 'swe-rebench-v2.local',
+        policyType: 'once_per_bucket',
+        scopeKey: 'swe-instance-1',
+        taskId: 'swe-task-1',
+        protocolTaskId: '1',
+        taskCid: 'bafy-swe-task-1',
+        requestId: 'post-request-1',
+        firstPostedAt: postedAt,
+        lastPostedAt: postedAt,
+        postCount: 1,
+      });
+      store.recordActivityEvent({
+        ts: postedAt,
+        kind: 'task_posted',
+        requestId: 'post-request-1',
+        solverType: 'swe-rebench-v2.v1',
+      });
+
+      const persistence = new TaskRunPersistence(store.db);
+      persistence.insertDiscovered({
+        requestId: 'claim-request-1',
+        taskId: 'swe-task-1',
+        taskCid: 'bafy-swe-task-1',
+        onchainCreationTx: '0xabc',
+        onchainCreationBlock: 1,
+        solverType: 'swe-rebench-v2.v1',
+        taskRole: 'restoration',
+        windowStartTs: 1_000,
+        windowEndTs: 2_000,
+        task: {
+          id: 'swe-task-1',
+          description: 'SWE task',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+          claimPolicy: {
+            mode: 'parallel',
+            maxClaims: 50,
+            maxClaimsPerOperator: 5,
+            claimLeaseTtlSeconds: 3_600,
+          },
+        },
+      });
+      persistence.transition('claim-request-1', TaskRunState.CLAIMED);
+      persistence.transition('claim-request-1', TaskRunState.WAITING);
+
+      const { app, token } = buildTestApp({
+        solverNets: {
+          swe: {
+            ...launchingNet,
+            solverType: 'swe-rebench-v2.v1',
+          } as never,
+        },
+        postedTasks: ({ creatorAddress, limit, before }) =>
+          store.listPostedTasksByCreator({
+            creatorSafeAddress: creatorAddress,
+            limit,
+            ...(before ? { before } : {}),
+          }).map((r) => ({
+            taskId: r.taskId,
+            taskCid: r.taskCid,
+            solverType: r.solverType ?? undefined,
+            postedAt: r.postedAt,
+            ...(r.state ? { state: r.state } : {}),
+            ...(r.claims ? { claims: r.claims } : {}),
+          })),
+      });
+
+      const res = await app.request('/v1/launcher/tasks', {
+        headers: { 'x-jinn-ui-token': token },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as TasksResponseBody;
+      expect(body.tasks[0]?.solverNet).toBe('swe');
+      expect(body.tasks[0]?.claims).toEqual({ current: 1, max: 50 });
+      expect(body.tasks[0]?.state).toBe('claims-in-flight');
+    });
+  });
+
+  it('uses SolverNet contract claim defaults when a SWE post has no local run payload', async () => {
+    const { app, token } = buildTestApp({
+      solverNets: {
+        swe: {
+          ...launchingNet,
+          solverType: 'swe-rebench-v2.v1',
+        } as never,
+      },
+      postedTasks: [
+        {
+          taskId: 'swe-open-1',
+          taskCid: 'bafy-swe-open-1',
+          solverType: 'swe-rebench-v2.v1',
+          postedAt: '2026-05-05T12:00:00.000Z',
+        },
+      ],
+    });
+
+    const res = await app.request('/v1/launcher/tasks', {
+      headers: { 'x-jinn-ui-token': token },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TasksResponseBody;
+    expect(body.tasks[0]?.solverNet).toBe('swe');
+    expect(body.tasks[0]?.claims).toEqual({ current: 0, max: 50 });
   });
 
   it('clamps limit to [1, 100]', async () => {

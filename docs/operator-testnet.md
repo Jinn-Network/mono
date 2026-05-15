@@ -21,7 +21,8 @@ Testnet is where you prove the loop works against real (test-) money before main
 - A long-running daemon process (bare, Docker Compose, or your own container).
 - Two Ethereum-style addresses: a **master wallet** (holds ETH for gas; owns the protocol service) and a **fleet of per-service agents** (Safe multisig + EOA derived from the master mnemonic).
 - For portfolio.v0: a **Hyperliquid master account** (holds USDC for trading) and an approved **API wallet / agent** (signs trades on the master's behalf without fund-withdrawal authority).
-- Claude Code CLI authenticated on the machine (bare mode) or volume (Docker).
+- Claude Code CLI installed. If Claude auth or runtime setup is needed,
+  `jinn run` opens the operator app and guides you through it.
 
 ## Key concept — the agent / master duality
 
@@ -41,17 +42,15 @@ npm install -g @jinn-network/client@latest
 Then:
 
 ```bash
-# Step 1 — Pick runtime mode + authenticate Claude (one-time, interactive).
-jinn auth
-
-# Step 2 — Zero-to-running: auto-password + init → fund (auto via CDP) → bootstrap → run daemon.
-#           Use a testnet-dedicated earning directory so mainnet state stays separate.
+# Zero-to-running: opens the app, then auto-password + init → fund
+# (auto via CDP) → bootstrap → run daemon. Use a testnet-dedicated earning
+# directory so mainnet state stays separate.
 JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet" JINN_NETWORK=testnet jinn run
 ```
 
 Expected output:
-- `jinn auth` asks "how do you want to run the Jinn daemon?" Pick `bare` unless you've set up Docker Compose.
-- `jinn run` prints: keystore created (auto-password saved to `~/.jinn-client/keystore-password`), master address, CDP drips landing, staking complete, daemon started on port 7331.
+- `jinn run` opens the operator app and prints: keystore created (auto-password saved to `~/.jinn-client/keystore-password`), master address, CDP drips landing, staking complete, daemon started on port 7331.
+- If Claude Code authentication or runtime setup is needed, complete it in the operator app.
 
 If it ran through, you're done. Otherwise, skip to [Troubleshooting](#troubleshooting).
 
@@ -201,8 +200,8 @@ The `hl_open_position` MCP tool rejects invalid requests at the tool level befor
 - **Evicted services recover through the same operator wallet.** In standard mode, `distributor.stake()` records your master EOA as the service operator. If the service is evicted, rerun `jinn bootstrap` with the same `JINN_EARNING_DIR` and `JINN_PASSWORD`; the client calls `distributor.reStake()` from that master EOA. Per-operator whitelisting is not required.
 - **CDP faucet rate limits by address over 24h.** If you burn through your daily quota (rare — the drip loop runs ~50 × 0.0001 ETH in 50 seconds, well under CDP's cap), `jinn bootstrap` falls back to a manual-funding poll. Wait or fund via the portal: <https://portal.cdp.coinbase.com/products/faucet>.
 - **One HL master per test run.** If you reuse a master across experiments, expect position interference from leftover bots. Fresh master = clean signal.
-- **Claude Code CLI auth is machine-local.** Containers need the OAuth token mounted into a persistent volume (see the Docker Compose section of `client/README.md`).
-- **Docker Compose cwd detection is flaky.** If you run from inside the `jinn-mono/client/` git checkout, the daemon misdetects `docker-compose` context. Either run from `$HOME`, or set `JINN_RUNTIME_MODE=bare` explicitly — `jinn auth` persists this choice to your config.
+- **Claude runtime state is machine-local.** Bare-mode operators complete Claude setup in the app opened by `jinn run`; headless containers need the OAuth token mounted into a persistent volume (see the Docker Compose section of `client/README.md`).
+- **Docker Compose cwd detection is flaky.** If you run from inside the `jinn-mono/client/` git checkout, the daemon can misdetect `docker-compose` context. Either run from `$HOME`, or set `JINN_RUNTIME_MODE=bare` explicitly before `jinn run`.
 
 ## Troubleshooting
 
@@ -252,9 +251,12 @@ Less common: the MCP config path was wrong, or Claude auth expired. Check `/tmp/
 
 A competing trading bot is active on the same HL master. Generate a fresh master and use it exclusively for this test run.
 
-### `jinn auth` says "Claude is not authenticated"
+### The app says Claude is not authenticated
 
-Run the interactive login it suggests. For bare mode: `claude auth login` in a TTY. For docker-compose: `docker compose run --rm -it --entrypoint claude jinn-daemon auth login`. For container: mount your host's Claude state into the container or set `CLAUDE_CODE_OAUTH_TOKEN` explicitly.
+Follow the app prompt. For bare mode it opens the local Claude Code auth path.
+For docker-compose: `docker compose run --rm -it --entrypoint claude jinn-daemon auth login`.
+For container mode: mount your host's Claude state into the container or set
+`CLAUDE_CODE_OAUTH_TOKEN` explicitly.
 
 ### I need to start over from scratch
 

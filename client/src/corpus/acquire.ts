@@ -11,6 +11,8 @@ import type { Store } from '../store/store.js';
 import { acquireArtifactWithPayment, type AcquireWithPaymentResult } from '../x402/acquire.js';
 import type { ArtifactContent, RouteResolver } from './types.js';
 import { AcquireError, HashMismatchError } from './types.js';
+import { fetchFromIpfs as defaultFetchFromIpfs } from '../adapters/mech/ipfs.js';
+import type { ArtifactSource } from '../types/envelope.js';
 
 /**
  * Origin acquire function. Historically returned `Buffer | null`; the new
@@ -18,9 +20,14 @@ import { AcquireError, HashMismatchError } from './types.js';
  * vs network_error. We accept either shape so test fakes that still return
  * `Buffer | null` keep working.
  */
-type AcquireFnLegacy = (endpoint: string, sha256: string, privateKey: string) => Promise<Buffer | null>;
-type AcquireFnNew = (endpoint: string, sha256: string, privateKey: string) => Promise<AcquireWithPaymentResult>;
-type AcquireFn = AcquireFnLegacy | AcquireFnNew;
+type AcquireFn = (
+  endpoint: string,
+  sha256: string,
+  privateKey: string,
+) => Promise<Buffer | null | AcquireWithPaymentResult>;
+type FetchFromIpfsFn = (gatewayUrl: string, cid: string) => Promise<unknown>;
+
+const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1';
 
 export interface AcquireArtifactArgs {
   sha256: string;
@@ -31,13 +38,33 @@ export interface AcquireArtifactArgs {
   privateKey: string;
   routeResolver?: RouteResolver;
   envelopeCid?: string;
+  sources?: ArtifactSource[];
+  ipfsGatewayUrl?: string;
   /** Safe address that produced this artifact, when known (from envelope.participant). */
   ownerSafe?: string;
   acquireFn?: AcquireFn;
+  fetchFromIpfs?: FetchFromIpfsFn;
 }
 
 function sha256Hex(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
+}
+
+function decodeDonationArtifact(raw: unknown, expectedSha256: string): Buffer {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('donation artifact payload is not an object');
+  }
+  const record = raw as Record<string, unknown>;
+  if (record['schemaVersion'] !== DONATION_ARTIFACT_ENCODING || record['encoding'] !== DONATION_ARTIFACT_ENCODING) {
+    throw new Error('donation artifact payload has unexpected encoding');
+  }
+  if (record['sha256'] !== expectedSha256) {
+    throw new Error('donation artifact sha256 does not match requested artifact');
+  }
+  if (typeof record['data'] !== 'string') {
+    throw new Error('donation artifact payload is missing base64 data');
+  }
+  return Buffer.from(record['data'], 'base64');
 }
 
 export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise<ArtifactContent> {
@@ -50,8 +77,11 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     privateKey,
     routeResolver,
     envelopeCid,
+    sources = [],
+    ipfsGatewayUrl,
     ownerSafe,
     acquireFn = acquireArtifactWithPayment,
+    fetchFromIpfs = defaultFetchFromIpfs,
   } = args;
 
   const now = () => new Date().toISOString();
@@ -71,7 +101,46 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     };
   }
 
-  // 2. Self-store fast path
+  // 2. Public IPFS donation source.
+  const ipfsSource = sources.find((source) => source.kind === 'ipfs');
+  if (ipfsSource && ipfsGatewayUrl) {
+    try {
+      const raw = await fetchFromIpfs(ipfsGatewayUrl, ipfsSource.cid);
+      const bytes = decodeDonationArtifact(raw, sha256);
+      const actualSha = sha256Hex(bytes);
+      if (actualSha !== sha256) {
+        throw new HashMismatchError(sha256, actualSha, 'ipfs', ownerSafe);
+      }
+      const ts = now();
+      store.saveNetworkArtifact({
+        sha256,
+        artifactType,
+        envelopeCid: envelopeCid ?? null,
+        content: bytes,
+        source: 'origin',
+        sourceOperator: ownerSafe ?? null,
+        sourceEndpoint: `ipfs://${ipfsSource.cid}`,
+        paidAmountUsdc: '0',
+        fetchedAt: ts,
+      });
+      return {
+        sha256,
+        bytes,
+        artifactType,
+        source: 'ipfs',
+        paidAmountUsdc: '0',
+        fetchedAt: ts,
+        sourceOperator: ownerSafe,
+      };
+    } catch (err) {
+      if (err instanceof HashMismatchError) throw err;
+      // Donated IPFS is an opportunistic fast path. Gateway failures and
+      // malformed donation payloads should not block the paid acquisition
+      // chain; only verified byte hash mismatches remain fatal.
+    }
+  }
+
+  // 3. Self-store fast path
   if (ownerSafe && ownerSafe.toLowerCase() === selfSafeAddress.toLowerCase()) {
     const own = store.getServedArtifact(sha256);
     if (own) {
@@ -106,7 +175,7 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     }
   }
 
-  // 3. Route resolver
+  // 4. Route resolver
   if (routeResolver) {
     try {
       const out = await routeResolver.resolve({ sha256, access, requesterSafe: selfSafeAddress });
@@ -142,7 +211,7 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
     }
   }
 
-  // 4. Origin fetch
+  // 5. Origin fetch
   let bytes: Buffer | null;
   try {
     const raw = await acquireFn(access.endpoint, sha256, privateKey);

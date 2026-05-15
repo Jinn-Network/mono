@@ -1,0 +1,25 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+describe('{{packageName}} manifest', () => {
+  it('has a valid jinn.plugin.json', () => {
+    const manifestPath = join(ROOT, 'jinn.plugin.json');
+    expect(existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    expect(manifest.name).toBe('{{packageName}}');
+    expect(manifest.jinn.supports).toContain('{{solverTypeString}}');
+    expect(Array.isArray(manifest.jinn.skills)).toBe(true);
+  });
+
+  it('every declared skill file exists', () => {
+    const manifestPath = join(ROOT, 'jinn.plugin.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    for (const skill of manifest.jinn.skills ?? []) {
+      expect(existsSync(join(ROOT, skill)), `missing skill file: ${skill}`).toBe(true);
+    }
+  });
+});

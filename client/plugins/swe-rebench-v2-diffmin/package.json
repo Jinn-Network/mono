@@ -1,0 +1,19 @@
+{
+  "name": "swe-rebench-v2-diffmin",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Reference competing plug-in for swe-rebench-v2.v1 — minimal-diff + test-mapping angle.",
+  "files": [
+    "jinn.plugin.json",
+    ".claude-plugin/",
+    ".mcp.json",
+    "skills/",
+    "mcp/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "license": "MIT"
+}

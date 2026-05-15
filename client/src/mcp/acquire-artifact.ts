@@ -16,12 +16,15 @@
 
 import type { ArtifactContent } from '../corpus/index.js';
 import type { Store } from '../store/store.js';
+import type { ArtifactSource } from '../types/envelope.js';
 
 export interface AcquireArtifactArgs {
   sha256: string;
   access: { endpoint: string; priceUsdc: string };
   envelopeCid?: string;
   artifactType?: string;
+  sources?: ArtifactSource[];
+  ownerSafe?: string;
 }
 
 export type AcquireArtifactResult =
@@ -100,6 +103,8 @@ export async function handleAcquireArtifact(
         access: args.access,
         envelopeCid: args.envelopeCid,
         artifactType: args.artifactType,
+        sources: args.sources,
+        ownerSafe: args.ownerSafe,
       }),
     });
   } catch (err) {
@@ -157,6 +162,10 @@ export async function handleAcquireArtifact(
   const sourceOperator = typeof body['sourceOperator'] === 'string'
     ? (body['sourceOperator'] as string)
     : undefined;
+  const ipfsSource = args.sources?.find((artifactSource) => artifactSource.kind === 'ipfs');
+  const sourceEndpoint = source === 'ipfs' && ipfsSource
+    ? `ipfs://${ipfsSource.cid}`
+    : args.access.endpoint;
 
   // Best-effort cache mirror; errors here are non-fatal.
   try {
@@ -168,7 +177,7 @@ export async function handleAcquireArtifact(
         content: bytes,
         source: 'origin',
         sourceOperator: sourceOperator ?? null,
-        sourceEndpoint: args.access.endpoint,
+        sourceEndpoint,
         paidAmountUsdc,
         fetchedAt,
       });

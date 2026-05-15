@@ -51,8 +51,8 @@ describe('PredictionV0RestorationPayloadSchema', () => {
 
 describe('PredictionV0VerdictPayloadSchema', () => {
   const valid = {
-    restorationEnvelope: {
-      cid: 'bafy-rest',
+    solutionEnvelope: {
+      cid: 'bafy-solution',
       sha256: '0'.repeat(64),
     },
     verificationOfRestoration: {
@@ -100,11 +100,20 @@ describe('PredictionV0VerdictPayloadSchema', () => {
     expect(() => PredictionV0VerdictPayloadSchema.parse(withOptionals)).not.toThrow();
   });
 
-  it('rejects invalid verdict payload — bad sha256 in restorationEnvelope', () => {
+  it('accepts legacy restorationEnvelope as a read-compat alias', () => {
+    const { solutionEnvelope, ...rest } = valid;
+    const parsed = PredictionV0VerdictPayloadSchema.parse({
+      ...rest,
+      restorationEnvelope: solutionEnvelope,
+    });
+    expect(parsed.solutionEnvelope).toEqual(solutionEnvelope);
+  });
+
+  it('rejects invalid verdict payload — bad sha256 in solutionEnvelope', () => {
     expect(() =>
       PredictionV0VerdictPayloadSchema.parse({
         ...valid,
-        restorationEnvelope: { cid: 'bafy-rest', sha256: 'not-a-hash' },
+        solutionEnvelope: { cid: 'bafy-solution', sha256: 'not-a-hash' },
       }),
     ).toThrow();
   });

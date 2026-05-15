@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { TrajectoryCollector } from '../../src/trajectory/collector.js';
 import { computeGenesisHash, computePrevSpanHash } from '../../src/trajectory/hash-chain.js';
 
@@ -207,5 +208,40 @@ describe('TrajectoryCollector', () => {
       parentSpanId: parent.spanId,
     });
     expect(child.parentSpanId).toBe(parent.spanId);
+  });
+
+  it('runs finalized spans through OpenTelemetry SpanProcessors before snapshotting', () => {
+    class MutatingProcessor implements SpanProcessor {
+      seen: ReadableSpan[] = [];
+      forceFlush() { return Promise.resolve(); }
+      shutdown() { return Promise.resolve(); }
+      onStart() {}
+      onEnd(span: ReadableSpan) {
+        this.seen.push(span);
+        span.attributes['processor.touched'] = true;
+      }
+    }
+
+    const processor = new MutatingProcessor();
+    const collector = new TrajectoryCollector({
+      taskCid: 'bafy-task',
+      runId: 'run-processors',
+      processors: [processor],
+    });
+
+    const span = collector.addSpan({
+      name: 'phase',
+      kind: 'INTERNAL',
+      startTimeUnixNano: '1',
+      endTimeUnixNano: '2',
+      attributes: { 'jinn.span.kind': 'jinn.phase', 'jinn.phase.name': 'design' },
+      events: [],
+      status: { code: 'OK' },
+    });
+
+    expect(processor.seen).toHaveLength(1);
+    expect(processor.seen[0].spanContext().spanId).toBe(span.spanId);
+    expect(span.attributes['processor.touched']).toBe(true);
+    expect(collector.snapshot().spans[0].attributes['processor.touched']).toBe(true);
   });
 });

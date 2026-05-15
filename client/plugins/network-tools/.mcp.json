@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "jinn-client": {
+      "command": "node",
+      "args": [
+        "mcp/jinn-client-server.mjs"
+      ],
+      "cwd": "."
+    }
+  }
+}

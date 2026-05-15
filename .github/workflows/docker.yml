@@ -15,7 +15,7 @@ defaults:
 jobs:
   build-and-push:
     name: Build & Push OCI Image
-    if: startsWith(github.event.release.tag_name, 'client-v')
+    if: startsWith(github.event.release.tag_name, 'client-v') || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -29,8 +29,15 @@ jobs:
             client-v*)
               VERSION="${RELEASE_TAG#client-v}"
               ;;
+            v*)
+              VERSION="${RELEASE_TAG#v}"
+              if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "::error::Release tag ${RELEASE_TAG} does not look like v<semver>; got version: ${VERSION}"
+                exit 1
+              fi
+              ;;
             *)
-              echo "::error::Stable client releases must use tags shaped like client-vX.Y.Z"
+              echo "::error::Stable client releases must use tags shaped like vX.Y.Z or client-vX.Y.Z"
               exit 1
               ;;
           esac
@@ -62,7 +69,7 @@ jobs:
       - name: Build smoke-test image
         uses: docker/build-push-action@v6
         with:
-          context: client
+          context: .
           file: client/Dockerfile
           load: true
           platforms: linux/amd64
@@ -94,7 +101,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: client
+          context: .
           file: client/Dockerfile
           push: true
           tags: |

@@ -1,0 +1,8 @@
+{"role":"user","ts":"2026-05-07T00:00:00.000Z","content":"please read the file"}
+{"role":"assistant","ts":"2026-05-07T00:00:01.000Z","content":"I will read it."}
+{"role":"function","ts":"2026-05-07T00:00:02.000Z","function_call":{"name":"read","arguments":"{\"path\":\"src/x.ts\"}"}}
+{"role":"tool","ts":"2026-05-07T00:00:03.000Z","name":"read","content":"file contents here"}
+{"role":"assistant","ts":"2026-05-07T00:00:04.000Z","content":"now editing"}
+{"role":"function","ts":"2026-05-07T00:00:05.000Z","function_call":{"name":"edit","arguments":"{\"path\":\"src/x.ts\",\"old\":\"a\",\"new\":\"b\"}"}}
+{"role":"tool","ts":"2026-05-07T00:00:06.000Z","tool_call_id":"call_2","name":"edit","content":"edit applied"}
+{"role":"assistant","ts":"2026-05-07T00:00:07.000Z","content":"done"}

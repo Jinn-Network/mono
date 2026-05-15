@@ -12,6 +12,7 @@ import {
 } from '../harnesses/external-impls/index.js';
 import { buildHarnesses as defaultBuildHarnesses } from '../harnesses/impls/index.js';
 import { PredictionV1BaselineImpl } from '../harnesses/impls/prediction-v1-baseline/index.js';
+import { canonicalHarnessName, harnessNameMatches } from '../harnesses/names.js';
 import type { Harness, ReadyStatus, RuntimePlugin } from '../harnesses/types.js';
 import { TrajectoryCollector } from '../trajectory/collector.js';
 import { PredictionV1TaskSchema, type PredictionV1Task } from '../types/prediction-v1.js';
@@ -188,13 +189,11 @@ function missingSolverNetStatus(
     {
       code: 'prediction_solvernet_missing',
       severity: 'error',
-      message: `No SolverNet named '${name}' is configured.`,
-      configField: `solverNets.${name}`,
+      message: 'No active SolverNet configured.',
+      configField: 'solverNets',
       nextAction: {
-        description: name === 'prediction'
-          ? 'Enable the default Prediction SolverNet.'
-          : 'Choose a configured SolverNet or add it to config.',
-        cli: name === 'prediction' ? 'jinn solver-nets enable prediction' : 'jinn solver-nets list',
+        description: 'Open Operator > SolverNets to join or configure a SolverNet.',
+        url: '/operator#solvernets',
       },
     },
   ];
@@ -244,7 +243,7 @@ export async function buildPredictionOperatorStatus({
     });
   }
 
-  if (net.solverType !== 'prediction.v1') {
+  if (net.enabled && net.solverType !== 'prediction.v1') {
     diagnostics.push({
       code: 'prediction_solver_type_mismatch',
       severity: 'error',
@@ -279,119 +278,127 @@ export async function buildPredictionOperatorStatus({
     }
   }
 
-  const externalHarnesses: Harness[] = [];
-  const selectedExternalEntry = config.harnesses?.externalImpls?.find((entry) => entry.name === net.harness);
-  let selectedExternalUnavailable = false;
-  for (const entry of config.harnesses?.externalImpls ?? []) {
-    const result = await loadExternalImpl({
-      entry,
-      trustedSigners: config.trustedImplSigners ?? [],
-      env: {
-        implName: entry.name,
-        implVersion: '0.0.0',
-        network: config.network,
-        implStateDir: join(config.engine.implStateDirRoot, entry.name),
-        secrets: Object.freeze({}),
-        log: () => {},
-        stub: true,
-      },
-    } satisfies LoadExternalImplArgs);
-    if (result.kind === 'ok') {
-      externalHarnesses.push(result.impl);
-    } else if (entry.name === net.harness) {
-      selectedExternalUnavailable = true;
+  let harnessStatus: NonNullable<PredictionOperatorStatus['harness']> | undefined;
+  if (net.enabled) {
+    const externalHarnesses: Harness[] = [];
+    const selectedExternalEntry = config.harnesses?.externalImpls?.find((entry) => entry.name === net.harness);
+    let selectedExternalUnavailable = false;
+    for (const entry of config.harnesses?.externalImpls ?? []) {
+      const result = await loadExternalImpl({
+        entry,
+        trustedSigners: config.trustedImplSigners ?? [],
+        env: {
+          implName: entry.name,
+          implVersion: '0.0.0',
+          network: config.network,
+          implStateDir: join(config.engine.implStateDirRoot, entry.name),
+          secrets: Object.freeze({}),
+          log: () => {},
+          stub: true,
+        },
+      } satisfies LoadExternalImplArgs);
+      if (result.kind === 'ok') {
+        externalHarnesses.push(result.impl);
+      } else if (entry.name === net.harness) {
+        selectedExternalUnavailable = true;
+        diagnostics.push({
+          code: 'prediction_harness_external_unavailable',
+          severity: 'error',
+          message: `Selected external Harness '${entry.name}' could not be loaded: ${result.reason}${result.detail ? ` (${result.detail})` : ''}.`,
+          configField: `harnesses.externalImpls.${entry.name}`,
+          nextAction: {
+            description: 'Fix the configured external Harness package or select an installed Harness.',
+            cli: `jinn harnesses list`,
+          },
+        });
+      }
+    }
+
+    const disabledHarnesses = config.harnesses?.disabled ?? [...DEFAULT_DISABLED_HARNESSES];
+    const selectedHarnessDisabled = Boolean(
+      net.harness &&
+        disabledHarnesses
+          .map((name) => canonicalHarnessName(name))
+          .includes(canonicalHarnessName(net.harness)),
+    );
+    const harnesses = buildHarnesses({
+      stub: true,
+      rpcUrl: config.rpcUrl,
+      archiveRpcUrl: config.archiveRpcUrl,
+      claudePath: config.claudePath,
+      claudeModel: config.claudeModel,
+      implStateDirRoot: config.engine.implStateDirRoot,
+      externalImpls: externalHarnesses,
+      disabledNames: disabledHarnesses,
+    });
+    const selectedHarness = net.harness
+      ? harnesses.find((candidate) => harnessNameMatches(candidate.name, net.harness))
+      : undefined;
+    harnessStatus = selectedHarness
+      ? await buildHarnessStatus(selectedHarness)
+      : undefined;
+
+    if (!net.harness) {
       diagnostics.push({
-        code: 'prediction_harness_external_unavailable',
+        code: 'prediction_harness_missing',
         severity: 'error',
-        message: `Selected external Harness '${entry.name}' could not be loaded: ${result.reason}${result.detail ? ` (${result.detail})` : ''}.`,
-        configField: `harnesses.externalImpls.${entry.name}`,
+        message: 'No Harness is selected for the Prediction SolverNet.',
+        configField: `solverNets.${name}.harness`,
         nextAction: {
-          description: 'Fix the configured external Harness package or select an installed Harness.',
+          description: 'Select a Harness for prediction.v1 Tasks.',
+          cli: `jinn solver-nets set-harness ${name} prediction-v1-baseline`,
+        },
+      });
+    } else if (selectedHarnessDisabled) {
+      diagnostics.push({
+        code: 'prediction_harness_disabled',
+        severity: 'error',
+        message: `Selected Harness '${net.harness}' is disabled in operator config.`,
+        configField: `harnesses.disabled`,
+        nextAction: {
+          description: 'Remove the selected Harness from the disabled list or select a different Harness.',
           cli: `jinn harnesses list`,
+        },
+      });
+    } else if (!selectedHarness && !selectedExternalUnavailable) {
+      diagnostics.push({
+        code: 'prediction_harness_unknown',
+        severity: 'error',
+        message: selectedExternalEntry
+          ? `Selected external Harness '${net.harness}' is configured but not available.`
+          : `Selected Harness '${net.harness}' is not installed.`,
+        configField: `solverNets.${name}.harness`,
+        nextAction: {
+          description: 'Select an installed Harness.',
+          cli: `jinn harnesses list`,
+        },
+      });
+    } else if (selectedHarness && !harnessStatus?.supportsPredictionV1Restoration) {
+      diagnostics.push({
+        code: 'prediction_harness_unsupported',
+        severity: 'error',
+        message: `Selected Harness '${selectedHarness.name}' does not support prediction.v1 restoration Tasks.`,
+        configField: `solverNets.${name}.harness`,
+        nextAction: {
+          description: 'Select a Harness that supports prediction.v1.',
+          cli: `jinn solver-nets set-harness ${name} prediction-v1-baseline`,
+        },
+      });
+    } else if (selectedHarness && harnessStatus && !harnessStatus.readiness.ready) {
+      diagnostics.push({
+        code: 'prediction_harness_not_ready',
+        severity: 'warning',
+        message: harnessStatus.readiness.reason ?? `Selected Harness '${selectedHarness.name}' is not ready.`,
+        configField: `solverNets.${name}.harness`,
+        nextAction: harnessStatus.readiness.nextStep ?? {
+          description: 'Start the daemon with a configured operator fleet.',
+          cli: 'jinn run',
         },
       });
     }
   }
 
-  const disabledHarnesses = config.harnesses?.disabled ?? [...DEFAULT_DISABLED_HARNESSES];
-  const selectedHarnessDisabled = Boolean(net.harness && disabledHarnesses.includes(net.harness));
-  const harnesses = buildHarnesses({
-    stub: true,
-    rpcUrl: config.rpcUrl,
-    archiveRpcUrl: config.archiveRpcUrl,
-    claudePath: config.claudePath,
-    claudeModel: config.claudeModel,
-    implStateDirRoot: config.engine.implStateDirRoot,
-    externalImpls: externalHarnesses,
-    disabledNames: disabledHarnesses,
-  });
-  const selectedHarness = net.harness
-    ? harnesses.find((candidate) => candidate.name === net.harness)
-    : undefined;
-  const harnessStatus = selectedHarness
-    ? await buildHarnessStatus(selectedHarness)
-    : undefined;
-
-  if (!net.harness) {
-    diagnostics.push({
-      code: 'prediction_harness_missing',
-      severity: 'error',
-      message: 'No Harness is selected for the Prediction SolverNet.',
-      configField: `solverNets.${name}.harness`,
-      nextAction: {
-        description: 'Select a Harness for prediction.v1 Tasks.',
-        cli: `jinn solver-nets set-harness ${name} prediction-v1-baseline`,
-      },
-    });
-  } else if (selectedHarnessDisabled) {
-    diagnostics.push({
-      code: 'prediction_harness_disabled',
-      severity: 'error',
-      message: `Selected Harness '${net.harness}' is disabled in operator config.`,
-      configField: `harnesses.disabled`,
-      nextAction: {
-        description: 'Remove the selected Harness from the disabled list or select a different Harness.',
-        cli: `jinn harnesses list`,
-      },
-    });
-  } else if (!selectedHarness && !selectedExternalUnavailable) {
-    diagnostics.push({
-      code: 'prediction_harness_unknown',
-      severity: 'error',
-      message: selectedExternalEntry
-        ? `Selected external Harness '${net.harness}' is configured but not available.`
-        : `Selected Harness '${net.harness}' is not installed.`,
-      configField: `solverNets.${name}.harness`,
-      nextAction: {
-        description: 'Select an installed Harness.',
-        cli: `jinn harnesses list`,
-      },
-    });
-  } else if (selectedHarness && !harnessStatus?.supportsPredictionV1Restoration) {
-    diagnostics.push({
-      code: 'prediction_harness_unsupported',
-      severity: 'error',
-      message: `Selected Harness '${selectedHarness.name}' does not support prediction.v1 restoration Tasks.`,
-      configField: `solverNets.${name}.harness`,
-      nextAction: {
-        description: 'Select a Harness that supports prediction.v1.',
-        cli: `jinn solver-nets set-harness ${name} prediction-v1-baseline`,
-      },
-    });
-  } else if (selectedHarness && harnessStatus && !harnessStatus.readiness.ready) {
-    diagnostics.push({
-      code: 'prediction_harness_not_ready',
-      severity: 'warning',
-      message: harnessStatus.readiness.reason ?? `Selected Harness '${selectedHarness.name}' is not ready.`,
-      configField: `solverNets.${name}.harness`,
-      nextAction: harnessStatus.readiness.nextStep ?? {
-        description: 'Start the daemon with a configured operator fleet.',
-        cli: 'jinn run',
-      },
-    });
-  }
-
-  if (!net.taskGenerator.enabled) {
+  if (net.enabled && !net.taskGenerator.enabled) {
     diagnostics.push({
       code: 'prediction_task_generator_disabled',
       severity: 'warning',

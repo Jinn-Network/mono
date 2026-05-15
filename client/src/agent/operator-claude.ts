@@ -21,9 +21,11 @@
  * operator who has used claude before) we leave it alone — the operator's
  * actual settings are theirs.
  */
+import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface OperatorClaudeConfig {
   claudePath: string;
@@ -93,6 +95,28 @@ function ensureClaudeOnboarded(): void {
   }
 }
 
+function findNodePtyFixScript(): string | null {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(here, '..', 'scripts', 'fix-node-pty.mjs'),
+    join(here, '..', '..', 'scripts', 'fix-node-pty.mjs'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function runNodePtyRepair(): string | null {
+  const script = findNodePtyFixScript();
+  if (!script) return 'node-pty repair script was not found in this install.';
+  const result = spawnSync(process.execPath, [script, '--verify'], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+    timeout: 15000,
+  });
+  if (result.status === 0) return null;
+  const detail = (result.stderr || result.stdout || `exit status ${result.status ?? 'unknown'}`).trim();
+  return detail || 'node-pty repair did not complete successfully.';
+}
+
 export async function spawnOperatorClaude(cfg: OperatorClaudeConfig): Promise<OperatorClaude> {
   ensureClaudeOnboarded();
 
@@ -111,7 +135,7 @@ export async function spawnOperatorClaude(cfg: OperatorClaudeConfig): Promise<Op
     );
   }
 
-  try {
+  const spawnPty = (): OperatorClaude => {
     // Pass through the env vars that get claude's TUI rendering right. Without
     // COLORTERM + FORCE_COLOR, claude falls back to a degraded glyph set that
     // renders as solid blocks instead of box-drawing chars in xterm.js.
@@ -140,6 +164,10 @@ export async function spawnOperatorClaude(cfg: OperatorClaudeConfig): Promise<Op
       onExit: (cb) => { exitHandlers.push(cb); },
       kill: () => pty.kill(),
     };
+  };
+
+  try {
+    return spawnPty();
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | undefined)?.code;
     if (code === 'ENOENT') {
@@ -149,15 +177,33 @@ export async function spawnOperatorClaude(cfg: OperatorClaudeConfig): Promise<Op
         err,
       );
     }
+    let finalError: unknown = err;
+    const repairError = runNodePtyRepair();
+    if (!repairError) {
+      try {
+        return spawnPty();
+      } catch (retryErr) {
+        const retryCode = (retryErr as NodeJS.ErrnoException | undefined)?.code;
+        if (retryCode === 'ENOENT') {
+          throw new OperatorClaudeSpawnError(
+            `Claude Code CLI not found: ${cfg.claudePath}`,
+            'Install Claude Code from the operator panel, then sign in with Claude.',
+            retryErr,
+          );
+        }
+        finalError = retryErr;
+      }
+    }
     // node-pty's prebuilt binary loaded but posix_spawnp / fork failed at runtime.
     // This is the ABI-mismatch case — the JS wrapper resolves but the native
     // module's internals can't actually spawn. Falling back to plain spawn
     // would silently produce a broken claude session.
     throw new OperatorClaudeSpawnError(
-      `node-pty failed to spawn: ${err instanceof Error ? err.message : String(err)}`,
+      `node-pty failed to spawn: ${finalError instanceof Error ? finalError.message : String(finalError)}`,
       'Run `npm rebuild node-pty` in the jinn-client install directory and restart the daemon. ' +
-        'If the rebuild fails, ensure your system has a C++ toolchain (Xcode CLT on macOS, build-essential on Linux).',
-      err,
+        'If the rebuild fails, ensure your system has a C++ toolchain (Xcode CLT on macOS, build-essential on Linux).' +
+        (repairError ? ` Automatic repair failed: ${repairError}` : ''),
+      finalError,
     );
   }
 }

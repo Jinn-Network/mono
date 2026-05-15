@@ -3,7 +3,7 @@
  * external Harness packages.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   mkdtempSync,
   rmSync,
@@ -21,6 +21,14 @@ import { canonicaliseManifest } from '../../../src/harnesses/manifest/index.js';
 import { computePackageHash } from '../../../src/harnesses/external-impls/package-hash.js';
 import { makeCommandCtx } from '@test/cli.js';
 
+const MOCKS = vi.hoisted(() => ({
+  buildHarnesses: vi.fn(),
+}));
+
+vi.mock('../../../src/harnesses/impls/index.js', () => ({
+  buildHarnesses: MOCKS.buildHarnesses,
+}));
+
 ed.hashes.sha512 = (m: Uint8Array) => sha512(m);
 
 let TMP: string;
@@ -30,6 +38,7 @@ let PUBKEY_B64: string;
 let SECRET_KEY: Uint8Array;
 
 beforeEach(async () => {
+  MOCKS.buildHarnesses.mockReset();
   TMP = mkdtempSync(join(tmpdir(), 'jinn-harnesses-cli-'));
   CONFIG_PATH = join(TMP, 'config.json');
 
@@ -205,5 +214,76 @@ describe('jinn harnesses', () => {
     });
     await harnesses.run(made.ctx);
     expect(made.exits).toContain(1);
+  });
+
+  it('enable: runs a first-party harness onEnable flow without mutating harness selection', async () => {
+    const onEnable = vi.fn(async () => ({
+      status: 'ready' as const,
+      details: { upstreamRepoDir: '/tmp/swe-rebench-v2-evaluator/upstream' },
+    }));
+    MOCKS.buildHarnesses.mockReturnValue([
+      {
+        name: 'swe-rebench-v2-evaluator',
+        version: '1.0.0',
+        supports: () => false,
+        run: async () => { throw new Error('not used'); },
+        onEnable,
+      },
+    ]);
+    writeFileSync(
+      CONFIG_PATH,
+      JSON.stringify({
+        joinedSolverNets: {
+          bafyfixture: {
+            manifestCid: 'bafyfixture',
+            name: 'SWE-rebench v2',
+            roles: ['solver', 'evaluator'],
+            harness: 'codex-code-learner',
+            model: 'gpt-5.4-mini',
+            plugins: ['bundled:swe-rebench-v2-runtime'],
+          },
+        },
+        engine: { implStateDirRoot: join(TMP, 'impl-state') },
+      }),
+    );
+
+    const made = makeCommandCtx({
+      argv: ['enable', 'swe-rebench-v2-evaluator', '--config', CONFIG_PATH, '--json'],
+    });
+    await harnesses.run(made.ctx);
+
+    expect(MOCKS.buildHarnesses).toHaveBeenCalledWith(expect.objectContaining({
+      stub: true,
+      implStateDirRoot: join(TMP, 'impl-state'),
+    }));
+    expect(onEnable).toHaveBeenCalledWith({
+      runtimePlugins: [],
+      args: {},
+    });
+    const parsed = JSON.parse(made.writes.join(''));
+    expect(parsed).toMatchObject({
+      verb: 'harnesses enable',
+      name: 'swe-rebench-v2-evaluator',
+      enableResult: {
+        status: 'ready',
+        details: { upstreamRepoDir: '/tmp/swe-rebench-v2-evaluator/upstream' },
+      },
+    });
+    const cfg = readConfig();
+    expect((cfg.joinedSolverNets as any).bafyfixture.harness).toBe('codex-code-learner');
+  });
+
+  it('enable: errors for unknown harness names', async () => {
+    MOCKS.buildHarnesses.mockReturnValue([]);
+    writeFileSync(CONFIG_PATH, JSON.stringify({}));
+    const made = makeCommandCtx({
+      argv: ['enable', 'missing-harness', '--config', CONFIG_PATH, '--json'],
+    });
+
+    await harnesses.run(made.ctx);
+
+    expect(made.exits).toContain(1);
+    const parsed = JSON.parse(made.writes.join(''));
+    expect(parsed.error.code).toBe('unknown_harness');
   });
 });

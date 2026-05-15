@@ -143,14 +143,15 @@ async function main(): Promise<void> {
   }));
 
   // Verify swe-rebench-v2.v1 round-trips cleanly through the on-chain Task
-  // lifecycle: solverTypeDigest is preserved (no implicit downcast to
-  // prediction.v1), Solution/Verdict envelope schemaVersions survive the
-  // SignedEnvelope round-trip, and settlement consumes operator escrow.
+  // lifecycle: manifestDigest is preserved (no implicit downcast to
+  // prediction.v1 or legacy solverType digest), Solution/Verdict envelope
+  // schemaVersions survive the SignedEnvelope round-trip, and settlement
+  // consumes operator escrow.
   // Plain Anvil — no external RPC needed.
   results.push(await runPhase('swe-rebench-v2 Anvil settlement (Task → claim → Solution → Verdict → settle)', async () => {
     const r = await runSweRebenchV2AnvilSettlementE2E();
     process.stdout.write(
-      `taskId=${r.taskId} solverTypePreserved=${r.solverTypePreserved} ` +
+      `taskId=${r.taskId} manifestDigestPreserved=${r.manifestDigestPreserved} ` +
       `solutionSchema=${r.solutionSchemaVersion} verdictSchema=${r.verdictSchemaVersion} ` +
       `verdictScore=${r.verdictScore} attemptFinalization=${r.attemptFinalization} ` +
       `submitted=${r.submittedCount} solutionBudgetConsumed=${r.solutionBudgetConsumed} ` +

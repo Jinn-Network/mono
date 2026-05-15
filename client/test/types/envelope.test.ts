@@ -25,7 +25,7 @@ describe('UnsignedEnvelopeSchema', () => {
   const baseEnv: UnsignedEnvelope = {
     schemaVersion: 'jinn.execution.v1',
     solverType: 'portfolio.v0',
-    role: 'restoration',
+    role: 'solution',
     generatedAt: 1700000000000,
     task: {
       cid: 'bafy...',
@@ -57,8 +57,13 @@ describe('UnsignedEnvelopeSchema', () => {
     payload: { preSnapshot: {} as any, postSnapshot: {} as any, fills: [], gating: {} },
   };
 
-  it('accepts a well-formed restoration envelope', () => {
+  it('accepts a well-formed solution envelope', () => {
     expect(() => UnsignedEnvelopeSchema.parse(baseEnv)).not.toThrow();
+  });
+
+  it('normalizes legacy restoration envelopes to solution on read', () => {
+    const parsed = UnsignedEnvelopeSchema.parse({ ...baseEnv, role: 'restoration' });
+    expect(parsed.role).toBe('solution');
   });
 
   it('rejects wrong schemaVersion', () => {
@@ -118,7 +123,7 @@ describe('SignedEnvelopeSchema', () => {
   const baseSigned = {
     schemaVersion: 'jinn.execution.v1' as const,
     solverType: 'portfolio.v0',
-    role: 'restoration' as const,
+    role: 'solution' as const,
     generatedAt: 1700000000000,
     task: {
       cid: 'bafy',
@@ -155,5 +160,32 @@ describe('SignedEnvelopeSchema', () => {
 
   it('accepts a signed envelope', () => {
     expect(() => SignedEnvelopeSchema.parse(baseSigned)).not.toThrow();
+  });
+
+  it('preserves signed legacy restoration envelopes for hash verification', () => {
+    const parsed = SignedEnvelopeSchema.parse({ ...baseSigned, role: 'restoration' });
+    expect(parsed.role).toBe('restoration');
+  });
+
+  describe('executor.model (jinn-mono-gbut, gh#191)', () => {
+    it('accepts envelope with executor.model set', () => {
+      const env = {
+        ...baseSigned,
+        executor: { ...baseSigned.executor, model: 'claude-haiku-4-5-20251001' },
+      };
+      const parsed = SignedEnvelopeSchema.parse(env);
+      expect(parsed.executor.model).toBe('claude-haiku-4-5-20251001');
+    });
+
+    it('accepts envelope without executor.model (back-compat)', () => {
+      // baseSigned has no model field — must parse cleanly
+      const parsed = SignedEnvelopeSchema.parse(baseSigned);
+      expect(parsed.executor.model).toBeUndefined();
+    });
+
+    it('does not coerce missing executor.model to empty string', () => {
+      const parsed = SignedEnvelopeSchema.parse(baseSigned);
+      expect(parsed.executor.model).not.toBe('');
+    });
   });
 });

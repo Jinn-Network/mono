@@ -1,0 +1,131 @@
+# Friday triage cron — implements jinn-mono-2cl.11.
+#
+# Auto-mirrors the top-N priority bd issues for the upcoming Monday's sprint into public GitHub
+# Issues + the "Jinn engineering" Project (v2) board. Captain reviews on Friday afternoon and
+# **rejects** anything that doesn't belong by closing the GitHub Issue. Captain only adds Issues
+# by exception. The default flow is reject, not select.
+#
+# Uses cargo/scripts/bd-mirror (jinn-mono-2cl.12) for the actual mirror operation.
+#
+# v0 status: shipped with `workflow_dispatch` only — cron schedule below is commented out.
+# Enable after:
+#   - jinn-mono-2cl.9 (GitHub Project board) exists; until then, bd-mirror falls back to
+#     "Issue created, Project add skipped" mode and the sprint surface won't update.
+#   - A manual run validates the workflow output and shape.
+#
+# Reference:
+# - cargo/docs/engineering/handbook.md §The shipping machine §Weekly retrace
+# - cargo/docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md §Weekly retrace
+# - DR-2026-05-11-b (Engineering substrate)
+
+name: Friday triage
+
+on:
+  workflow_dispatch:
+    inputs:
+      sprint_date:
+        description: "Upcoming Monday date (yyyy-mm-dd). Defaults to next Monday from today."
+        required: false
+        type: string
+      sprint_cap:
+        description: "Max number of P1 issues to mirror (P0 always mirror, no cap)."
+        required: false
+        default: "8"
+        type: string
+  # schedule:
+  #   - cron: '0 15 * * 5'  # Friday 15:00 UTC — enable once 2cl.9 board exists and manual run validates.
+
+permissions:
+  contents: read
+  issues: write
+  repository-projects: write
+
+jobs:
+  triage:
+    name: Mirror top-N bd → GitHub Issue + Project
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      # bd CLI install — adjust to your installation method. This is best-effort; if bd is not
+      # available in CI yet, the workflow exits gracefully with a clear note.
+      - name: Probe bd CLI
+        id: bd_probe
+        shell: bash
+        run: |
+          if command -v bd >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::bd CLI not available in CI runner. Skipping triage. Install bd or move triage to a self-hosted runner with bd."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve sprint date
+        if: steps.bd_probe.outputs.available == 'true'
+        id: sprint
+        shell: bash
+        run: |
+          INPUT="${{ inputs.sprint_date }}"
+          if [ -n "$INPUT" ]; then
+            DATE="$INPUT"
+          else
+            # Default: next Monday from today. The runner is ubuntu-latest (GNU date),
+            # which handles relative-date strings natively — no fallback needed.
+            DATE="$(date -u -d 'next Monday' +%Y-%m-%d)"
+          fi
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+
+      - name: Pick top-N priority bd issues
+        if: steps.bd_probe.outputs.available == 'true'
+        id: pick
+        env:
+          SPRINT_DATE: ${{ steps.sprint.outputs.date }}
+          SPRINT_CAP: ${{ inputs.sprint_cap }}
+        shell: bash
+        run: |
+          # Top-N policy: all P0 in ready state + capped P1 by configured cap.
+          CAP="${SPRINT_CAP:-8}"
+
+          P0_IDS="$(bd list --status=open --priority=P0 --json 2>/dev/null | jq -r '.[].id' || true)"
+          P1_IDS="$(bd list --status=open --priority=P1 --json 2>/dev/null | jq -r '.[].id' | head -n "$CAP" || true)"
+
+          : > /tmp/to-mirror.txt
+          for id in $P0_IDS $P1_IDS; do
+            # Skip if already mirrored (external-ref points at this org).
+            EXT="$(bd show "$id" --json 2>/dev/null | jq -r '.external_ref // ""')"
+            if [ -n "$EXT" ] && echo "$EXT" | grep -q 'Jinn-Network/mono'; then
+              continue
+            fi
+            echo "$id" >> /tmp/to-mirror.txt
+          done
+
+          COUNT="$(wc -l < /tmp/to-mirror.txt | tr -d ' ')"
+          echo "::notice::Triage candidates for sprint $SPRINT_DATE: $COUNT bd issues"
+
+      - name: Mirror each candidate via bd-mirror helper
+        if: steps.bd_probe.outputs.available == 'true'
+        env:
+          SPRINT_DATE: ${{ steps.sprint.outputs.date }}
+        shell: bash
+        run: |
+          if [ ! -s /tmp/to-mirror.txt ]; then
+            echo "::notice::No new candidates to mirror this triage run."
+            exit 0
+          fi
+          FAILED=0
+          while IFS= read -r id; do
+            if [ -z "$id" ]; then continue; fi
+            echo "→ Mirroring $id"
+            if ! scripts/bd-mirror "$id" "$SPRINT_DATE"; then
+              echo "::warning::Mirror failed for $id"
+              FAILED=$((FAILED + 1))
+            fi
+          done < /tmp/to-mirror.txt
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::warning::$FAILED candidate(s) failed to mirror — Captain may need to mirror manually."
+          fi
+          echo "::notice::Friday triage complete for sprint $SPRINT_DATE. Captain: review the Project board and reject anything that doesn't belong."

@@ -1,10 +1,18 @@
-# Jinn Network
+# Jinn
 
-Monorepo for the Jinn protocol — a training protocol for agentic tasks.
-Operators run a headless daemon that observes marketplace requests, executes
-them via Claude Code, and earns on-chain rewards for measured work.
+Jinn is a collective agentic intelligence network. As your agent learns, the network learns.
 
-## I want to run a daemon on testnet
+- LEARN – this repo has canonical docs – these are currently the best entrypoint:
+  - [THESIS](https://github.com/Jinn-Network/mono/blob/main/THESIS.md)
+  - [SPEC](https://github.com/Jinn-Network/mono/blob/main/SPEC.md)
+  - [GLOSSARY](https://github.com/Jinn-Network/mono/blob/main/GLOSSARY.md)
+- [OPERATE](https://github.com/jinn-network/mono#i-want-to-run-a-daemon-on-testnet) – run Jinn client (testnet) to contribute learnings
+- [CONTRIBUTE](https://github.com/Jinn-Network/mono/issues) – pick up an issue and solve it, or just make a PR
+- [GOVERN](https://github.com/Jinn-Network/mono/discussions) – guide the network decision making
+- [GROW](https://github.com/Jinn-Network/mono/edit/main/GROWTH.md) – in a nutshell, our approach is to build a product on Jinn testnet that's useful to open agent – Hermes, OpenClaw – users. Then parlay those users into fuller contributors. When we feel we have a legit early community earning testnet tokens and engaging meaningfully, deploy to mainnet, fair launch.
+- [CHAT](https://t.me/c/jinnNetwork/1) – stay in the loop and meet the community – Jinn Working Group on Telegram
+
+## I want to run a client on testnet
 
 Start here: [`docs/operator-testnet.md`](docs/operator-testnet.md) — honest
 15-minute guide from `npm install` to "my daemon is running."
@@ -13,8 +21,7 @@ TL;DR for human operators:
 
 ```bash
 npm install -g @jinn-network/client@latest
-jinn auth           # one-time: pick runtime mode + authenticate Claude
-jinn run            # creates wallet, funds via CDP faucet, starts the daemon
+jinn run            # opens the app, creates wallet, funds via CDP faucet, starts the daemon
 ```
 
 TL;DR for agent-assisted operators (Claude Code / Codex / Cursor / Gemini):

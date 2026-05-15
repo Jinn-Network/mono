@@ -22,21 +22,19 @@ import { COMMON_FLAGS } from '../command.js';
  * to `client/dist/templates` — we copy templates into dist on build.
  * For robustness we probe both locations.
  */
-function resolveTemplatesRoot(): string {
+function resolveTemplatesRoot(target: 'harness' | 'plugin'): string {
+  const subdir = target === 'harness' ? 'harnesses' : 'plugins';
   const here = fileURLToPath(new URL('.', import.meta.url));
   const candidates = [
-    join(here, '../../../templates/harnesses/'), // src/cli/commands -> client/templates
-    join(here, '../../templates/harnesses/'),    // dist/cli/commands -> client/templates
-    join(here, '../../../../templates/harnesses/'),
+    join(here, `../../../templates/${subdir}/`),
+    join(here, `../../templates/${subdir}/`),
+    join(here, `../../../../templates/${subdir}/`),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }
-  // Fallback: first candidate (will surface a clear ENOENT below).
   return candidates[0];
 }
-
-const TEMPLATES_ROOT = resolveTemplatesRoot();
 
 const NETWORK_CHAIN_IDS: Record<string, number> = {
   'base-mainnet': 8453,
@@ -53,12 +51,19 @@ export const SUPPORTED_PATTERNS: readonly HarnessPattern[] = [
   'alternative-harness',
 ];
 
+export type PluginPattern = 'solver-type-plugin' | 'runtime-plugin';
+
+export const SUPPORTED_PLUGIN_PATTERNS: readonly PluginPattern[] = [
+  'solver-type-plugin',
+  'runtime-plugin',
+];
+
 export interface RunCreateArgs {
-  target: 'harness';
-  pattern: HarnessPattern;
+  target: 'harness' | 'plugin';
+  pattern: HarnessPattern | PluginPattern;
   packageName: string;
   solverTypeString: string;
-  network: string;
+  network?: string;
   outDir: string;
 }
 
@@ -108,6 +113,38 @@ const ALTERNATIVE_HARNESS_FILES: TemplateFile[] = [
   { src: 'gitignore.tmpl', dst: '.gitignore' },
 ];
 
+const SOLVER_TYPE_PLUGIN_FILES: TemplateFile[] = [
+  { src: 'package.json.tmpl', dst: 'package.json' },
+  { src: 'jinn.plugin.json.tmpl', dst: 'jinn.plugin.json' },
+  { src: 'skills/example/SKILL.md.tmpl', dst: 'skills/example/SKILL.md' },
+  { src: 'test/plugin.test.ts.tmpl', dst: 'test/plugin.test.ts' },
+  { src: 'README.md.tmpl', dst: 'README.md' },
+  { src: 'tsconfig.json.tmpl', dst: 'tsconfig.json' },
+  { src: 'gitignore.tmpl', dst: '.gitignore' },
+];
+
+const RUNTIME_PLUGIN_FILES: TemplateFile[] = [
+  { src: 'package.json.tmpl', dst: 'package.json' },
+  { src: 'jinn.plugin.json.tmpl', dst: 'jinn.plugin.json' },
+  { src: '.mcp.json.tmpl', dst: '.mcp.json' },
+  { src: 'mcp/server.mjs.tmpl', dst: 'mcp/server.mjs' },
+  { src: 'test/plugin.test.ts.tmpl', dst: 'test/plugin.test.ts' },
+  { src: 'README.md.tmpl', dst: 'README.md' },
+  { src: 'tsconfig.json.tmpl', dst: 'tsconfig.json' },
+  { src: 'gitignore.tmpl', dst: '.gitignore' },
+];
+
+function pluginTemplateFiles(pattern: PluginPattern): TemplateFile[] {
+  switch (pattern) {
+    case 'solver-type-plugin':
+      return SOLVER_TYPE_PLUGIN_FILES;
+    case 'runtime-plugin':
+      return RUNTIME_PLUGIN_FILES;
+    default:
+      throw new Error(`unsupported plugin pattern: ${pattern as string}`);
+  }
+}
+
 function templateFiles(pattern: HarnessPattern): TemplateFile[] {
   switch (pattern) {
     case 'forecaster':
@@ -132,26 +169,37 @@ function packageNameSlug(packageName: string): string {
 }
 
 export async function runCreate(args: RunCreateArgs): Promise<string> {
-  if (args.target !== 'harness') {
-    throw new Error(`unsupported target: ${args.target as string}`);
-  }
-  const networkChainId = NETWORK_CHAIN_IDS[args.network];
-  if (networkChainId === undefined) {
-    throw new Error(
-      `unknown network ${args.network}; known: ${Object.keys(NETWORK_CHAIN_IDS).join(', ')}`,
-    );
-  }
   const targetRoot = join(args.outDir, args.packageName);
   const vars: Record<string, string | number> = {
     packageName: args.packageName,
     packageNameSlug: packageNameSlug(args.packageName),
     solverTypeString: args.solverTypeString,
-    network: args.network,
-    networkChainId,
   };
 
-  for (const file of templateFiles(args.pattern)) {
-    const srcPath = join(TEMPLATES_ROOT, args.pattern, file.src);
+  let files: TemplateFile[];
+  let templatesRoot: string;
+
+  if (args.target === 'harness') {
+    const network = args.network ?? 'base-sepolia';
+    const networkChainId = NETWORK_CHAIN_IDS[network];
+    if (networkChainId === undefined) {
+      throw new Error(
+        `unknown network ${network}; known: ${Object.keys(NETWORK_CHAIN_IDS).join(', ')}`,
+      );
+    }
+    vars.network = network;
+    vars.networkChainId = networkChainId;
+    files = templateFiles(args.pattern as HarnessPattern);
+    templatesRoot = join(resolveTemplatesRoot('harness'), args.pattern);
+  } else if (args.target === 'plugin') {
+    files = pluginTemplateFiles(args.pattern as PluginPattern);
+    templatesRoot = join(resolveTemplatesRoot('plugin'), args.pattern);
+  } else {
+    throw new Error(`unsupported target: ${(args as { target: string }).target}`);
+  }
+
+  for (const file of files) {
+    const srcPath = join(templatesRoot, file.src);
     const dstPath = join(targetRoot, file.dst);
     const text = readFileSync(srcPath, 'utf8');
     mkdirSync(dirname(dstPath), { recursive: true });
@@ -162,11 +210,13 @@ export async function runCreate(args: RunCreateArgs): Promise<string> {
 
 const HELP_TEXT = `\
 jinn create harness <packageName>
+jinn create plugin <packageName>
 
 Scaffold a new Jinn package on disk.
 
 Subcommands:
   harness    external Harness package (forecaster / evaluator / alternative-harness)
+  plugin     SolverPlugin package (solver-type-plugin / runtime-plugin)
 
 Harness options:
   --pattern=<pattern>     Template pattern (default: forecaster)
@@ -175,24 +225,34 @@ Harness options:
   --network=<network>     Default network (default: base-sepolia)
                           One of: base-mainnet, base-sepolia, sepolia, ethereum-mainnet
 
+Plugin options:
+  --pattern=<pattern>     Template pattern (default: solver-type-plugin)
+                          Supported: solver-type-plugin, runtime-plugin
+  --solver-type=<value>   SolverType this plug-in targets (default: swe-rebench-v2.v1;
+                          ignored for runtime-plugin)
+
 Common:
   --out-dir=<path>        Where to write the package (default: cwd)
   --help                  Show this help
 
 Examples:
   jinn create harness @example/forecaster
+  jinn create plugin  @example/my-skill
+  jinn create plugin  @example/my-runtime --pattern runtime-plugin
+
+Quickstart:
+  https://github.com/Jinn-Network/mono/blob/main/cargo/client/docs/build/quickstart.md
 `;
 
 async function run(ctx: CommandContext): Promise<void> {
-  // Manual parsing — we want positional: subcommand + packageName.
   const sub = ctx.argv[0];
   if (!sub || sub === '--help' || ctx.argv.includes('--help')) {
     ctx.writer.write(HELP_TEXT);
     return;
   }
-  if (sub !== 'harness') {
+  if (sub !== 'harness' && sub !== 'plugin') {
     ctx.writer.write(
-      `error: unknown subcommand '${sub}' (expected 'harness')\n`,
+      `error: unknown subcommand '${sub}' (expected 'harness' or 'plugin')\n`,
     );
     ctx.writer.write(HELP_TEXT);
     ctx.exit(1);
@@ -206,17 +266,17 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
 
+  const defaultPattern = sub === 'harness' ? 'forecaster' : 'solver-type-plugin';
+  const defaultSolverType = sub === 'harness' ? 'prediction.v1' : 'swe-rebench-v2.v1';
+
   let parsed;
   try {
     parsed = parseArgs({
       args: ctx.argv.slice(2),
       options: {
         ...COMMON_FLAGS,
-        pattern: {
-          type: 'string' as const,
-          default: 'forecaster',
-        },
-        'solver-type': { type: 'string' as const, default: 'prediction.v1' },
+        pattern: { type: 'string' as const, default: defaultPattern },
+        'solver-type': { type: 'string' as const, default: defaultSolverType },
         network: { type: 'string' as const, default: 'base-sepolia' },
         'out-dir': { type: 'string' as const },
       },
@@ -229,24 +289,34 @@ async function run(ctx: CommandContext): Promise<void> {
   }
   const flags = parsed.values;
   const outDir = String(flags['out-dir'] ?? process.cwd());
+  const pattern = String(flags.pattern ?? defaultPattern);
 
-  const pattern = String(flags.pattern ?? 'forecaster') as HarnessPattern;
-  if (!SUPPORTED_PATTERNS.includes(pattern)) {
-    ctx.writer.write(
-      `error: unsupported --pattern '${pattern}' (supported: ${SUPPORTED_PATTERNS.join(', ')})\n`,
-    );
-    ctx.exit(1);
-    return;
+  if (sub === 'harness') {
+    if (!SUPPORTED_PATTERNS.includes(pattern as HarnessPattern)) {
+      ctx.writer.write(
+        `error: unsupported --pattern '${pattern}' (supported: ${SUPPORTED_PATTERNS.join(', ')})\n`,
+      );
+      ctx.exit(1);
+      return;
+    }
+  } else {
+    if (!SUPPORTED_PLUGIN_PATTERNS.includes(pattern as PluginPattern)) {
+      ctx.writer.write(
+        `error: unsupported --pattern '${pattern}' (supported: ${SUPPORTED_PLUGIN_PATTERNS.join(', ')})\n`,
+      );
+      ctx.exit(1);
+      return;
+    }
   }
 
   let target: string;
   try {
     target = await runCreate({
-      target: 'harness',
-      pattern,
+      target: sub,
+      pattern: pattern as HarnessPattern | PluginPattern,
       packageName,
-      solverTypeString: String(flags['solver-type'] ?? 'prediction.v1'),
-      network: String(flags.network ?? 'base-sepolia'),
+      solverTypeString: String(flags['solver-type'] ?? defaultSolverType),
+      network: sub === 'harness' ? String(flags.network ?? 'base-sepolia') : undefined,
       outDir,
     });
   } catch (err) {
@@ -255,13 +325,15 @@ async function run(ctx: CommandContext): Promise<void> {
     return;
   }
   ctx.writer.write(
-    `Created ${packageName} at ${target}\nNext: cd ${target} && yarn install && yarn test\n`,
+    `Created ${packageName} at ${target}\n` +
+    `Next: cd ${target} && yarn install && yarn test\n` +
+    `Quickstart: https://github.com/Jinn-Network/mono/blob/main/cargo/client/docs/build/quickstart.md\n`,
   );
 }
 
 export const createCommand: CommandModule = {
   name: 'create',
-  summary: 'Scaffold a new Jinn external harness impl package',
+  summary: 'Scaffold a new Jinn external harness or SolverPlugin package',
   helpText: HELP_TEXT,
   run,
 };

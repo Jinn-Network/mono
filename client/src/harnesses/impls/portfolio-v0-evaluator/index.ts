@@ -35,13 +35,13 @@ import { bracketGridPoints } from '../../../venues/hyperliquid/grid.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { signCanonical } from '../../engine/signing.js';
 import { buildVerificationStub } from '../../engine/verification-stub.js';
-import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
+import { resolveSolutionEnvelopeCid } from '../evaluation-context.js';
 
 import {
   PortfolioV0TaskSchema,
   PortfolioV0EligibilitySchema,
 } from '../../../types/portfolio.js';
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import type { SignedEnvelope } from '../../../types/envelope.js';
 import { PortfolioV0RestorationPayloadSchema } from '../../../types/payloads/portfolio-v0.js';
 import type { PortfolioV0RestorationPayload } from '../../../types/payloads/portfolio-v0.js';
@@ -319,9 +319,12 @@ export class PortfolioV0Evaluator implements Harness {
 
     try {
       targetEnvelope = SignedEnvelopeSchema.parse(JSON.parse(inlined));
-      if (targetEnvelope.solverType !== 'portfolio.v0' || targetEnvelope.role !== 'restoration') {
+      if (
+        targetEnvelope.solverType !== 'portfolio.v0' ||
+        normalizeEnvelopeRole(targetEnvelope.role) !== 'solution'
+      ) {
         throw new Error(
-          `Unexpected envelope kind/role: ${targetEnvelope.solverType}/${targetEnvelope.role}; expected portfolio.v0/restoration`,
+          `Unexpected envelope kind/role: ${targetEnvelope.solverType}/${targetEnvelope.role}; expected portfolio.v0/solution`,
         );
       }
       targetPayload = PortfolioV0RestorationPayloadSchema.parse(targetEnvelope.payload);
@@ -352,9 +355,9 @@ export class PortfolioV0Evaluator implements Harness {
     }
 
     // Extract provenance fields from the parsed envelope + task
-    const taskCid = targetEnvelope.task.cid;
-    const onchainCreationTx = targetEnvelope.task.onchainCreationTx;
-    const onchainCreationBlock = targetEnvelope.task.onchainCreationBlock;
+    const taskCid = targetEnvelope.task!.cid;
+    const onchainCreationTx = targetEnvelope.task!.onchainCreationTx;
+    const onchainCreationBlock = targetEnvelope.task!.onchainCreationBlock;
     const restorationRequestId = task.restorationRequestId!;
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: starting evaluation', data: { taskCid, restorationRequestId } });
@@ -673,8 +676,8 @@ export class PortfolioV0Evaluator implements Harness {
     // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
     // Assembles the PortfolioV0VerdictPayload from the already-computed fields.
     //
-    // restorationEnvelope: CID threaded from the daemon via context, sha256
-    // computed as sha256(JCS(restorationEnvelope)) — matching the upload pipeline
+    // solutionEnvelope: CID threaded from the daemon via context, sha256
+    // computed as sha256(JCS(solutionEnvelope)) — matching the upload pipeline
     // and the conformance harness (8l6 fix A).
     //
     // verificationOfRestoration: stub — Plan D will connect the real SDK that
@@ -682,23 +685,23 @@ export class PortfolioV0Evaluator implements Harness {
     // For V1 the stub always reports 'valid' (self-signed tier), which means
     // the REJECTED-if-invalid path in engine.pack() never fires in practice
     // until Plan D replaces this stub.
-    const restorationEnvelopeCid = (task.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+    const solutionEnvelopeCid = resolveSolutionEnvelopeCid(task)
       ?? restorationRequestId
       ?? 'bafy-unknown';
     const restorationResultJson = task.context?.['restorationResult'];
     // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
-    const restorationEnvelopeSha256 = typeof restorationResultJson === 'string'
+    const solutionEnvelopeSha256 = typeof restorationResultJson === 'string'
       ? createHash('sha256').update(canonicalJson(JSON.parse(restorationResultJson) as unknown)).digest('hex')
       : '0'.repeat(64);
-    const restorationEnvelope = {
-      cid: restorationEnvelopeCid,
-      sha256: restorationEnvelopeSha256,
+    const solutionEnvelope = {
+      cid: solutionEnvelopeCid,
+      sha256: solutionEnvelopeSha256,
     };
 
     const verificationOfRestoration = buildVerificationStub();
 
     const verdictPayload: Record<string, unknown> = {
-      restorationEnvelope,
+      solutionEnvelope,
       verificationOfRestoration,
       verdict,
       score,

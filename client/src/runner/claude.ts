@@ -73,11 +73,16 @@ export class ClaudeRunner implements Runner {
             // on fetches to `POST /v1/artifacts/acquire` and
             // `POST /artifacts`. Empty string when unset → daemon returns 401.
             DAEMON_API_TOKEN: context.daemonApiToken ?? '',
-            // Subgraph + IPFS gateway only — both keyless. The agent EOA
+            // Discovery indexer + IPFS gateway — both keyless. The agent EOA
             // private key NEVER leaves the daemon process; acquire_artifact
             // proxies through DAEMON_API_URL instead.
-            JINN_CORPUS_SUBGRAPH_URL: context.corpusEnv?.subgraphUrl ?? '',
+            JINN_DISCOVERY_URL: context.corpusEnv?.discoveryUrl ?? '',
+            JINN_DISCOVERY_MODE: context.corpusEnv?.discoveryUrl ? 'http' : 'onchain',
             JINN_CORPUS_IPFS_GATEWAY_URL: context.corpusEnv?.ipfsGatewayUrl ?? '',
+            JINN_CORPUS_RPC_URL: context.corpusEnv?.rpcUrl ?? '',
+            JINN_CORPUS_CHAIN_ID: context.corpusEnv?.chainId != null ? String(context.corpusEnv.chainId) : '',
+            JINN_CORPUS_IDENTITY_REGISTRY_ADDRESS: context.corpusEnv?.identityRegistryAddress ?? '',
+            JINN_CORPUS_FROM_BLOCK: context.corpusEnv?.fromBlock != null ? String(context.corpusEnv.fromBlock) : '',
           },
         },
       },

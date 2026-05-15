@@ -7,6 +7,7 @@ import { predictionV1 } from './prediction-v1.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
 import { learnerLoopTest } from './learner-loop-test.js';
 import { sweRebenchV2 } from './swe-rebench-v2.js';
+import { sessionDerived } from './session-derived.js';
 import type { SolverTypeDefinition } from './solver-type.js';
 
 export type { ParsedSpecOverlay, ParseDeps, SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
@@ -19,6 +20,7 @@ export const SOLVER_TYPES: Record<string, SolverTypeDefinition<any>> = {
   'prediction.apy.v0': predictionApyV0,
   'learner-loop-test': learnerLoopTest,
   'swe-rebench-v2.v1': sweRebenchV2,
+  'session-derived.v1': sessionDerived,
 };
 
 export function knownSolverTypes(): string[] {

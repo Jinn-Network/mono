@@ -6,7 +6,7 @@
  * Three things to assert:
  *
  *   1. Mocked store with a launched + paused record → `pendingGenerators`
- *      contains only the launched record (Task 12 will spawn from this set).
+ *      contains both; paused records are wired and gated per tick.
  *   2. Mocked store with a record in `status: 'launching'` →
  *      `recoverInFlightLaunches` is exercised; the record advances to
  *      `launched` and shows up in `pendingGenerators`.
@@ -23,7 +23,6 @@ import os from 'os';
 import path from 'path';
 
 import {
-  createNoopSubgraphClient,
   initSolverNetSubsystem,
   type InitSolverNetSubsystemDeps,
   DEFAULT_CATALOG_REFRESH_INTERVAL_MS,
@@ -42,7 +41,6 @@ import type {
   IpfsClient,
   MetadataPublisher,
   SetMetadataPublishResult,
-  SubgraphClient,
 } from '../../src/solvernets/registry-client-erc8004.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -204,7 +202,6 @@ let baseDir: string;
 let store: SolverNetStore;
 let ipfs: IpfsClient;
 let publisher: MockPublisher;
-let subgraph: SubgraphClient;
 
 function buildDeps(overrides: Partial<InitSolverNetSubsystemDeps> = {}): InitSolverNetSubsystemDeps {
   const signer: SignerWithAgentEoa = {
@@ -216,7 +213,6 @@ function buildDeps(overrides: Partial<InitSolverNetSubsystemDeps> = {}): InitSol
     store,
     ipfs,
     publisher,
-    subgraph,
     registryClient: makeMockRegistryClient({ summaries: [] }),
     network: 'base-sepolia',
     resolveSigner: async () => signer,
@@ -233,7 +229,6 @@ beforeEach(async () => {
   store = createSolverNetStore({ baseDir });
   ipfs = makeMockIpfs();
   publisher = makeMockPublisher();
-  subgraph = createNoopSubgraphClient();
 });
 
 afterEach(async () => {
@@ -243,8 +238,8 @@ afterEach(async () => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('initSolverNetSubsystem — record loading + filtering', () => {
-  it('returns only launched + generatorEnabled records in pendingGenerators', async () => {
-    // 1 launched (eligible), 1 paused (ineligible), 1 launched-but-disabled (ineligible),
+  it('returns launched/paused + generatorEnabled records in pendingGenerators', async () => {
+    // 1 launched (eligible), 1 paused (wired but per-tick gated), 1 launched-but-disabled (ineligible),
     // 1 retired (ineligible).
     await store.writeRecord(buildLaunchedRecord({
       solverNetId: 'net-launched-enabled',
@@ -267,11 +262,12 @@ describe('initSolverNetSubsystem — record loading + filtering', () => {
       generatorEnabled: true,
     }));
 
-    const subsystem = await initSolverNetSubsystem(buildDeps());
+      const subsystem = await initSolverNetSubsystem(buildDeps());
     try {
       expect(subsystem.records).toHaveLength(4);
-      expect(subsystem.pendingGenerators).toHaveLength(1);
+      expect(subsystem.pendingGenerators).toHaveLength(2);
       expect(subsystem.pendingGenerators[0]?.record.solverNetId).toBe('net-launched-enabled');
+      expect(subsystem.pendingGenerators[1]?.record.solverNetId).toBe('net-paused');
       // Refs are populated and seeded with sensible defaults so the
       // generator factory and Task 14's API endpoint share a single source
       // of truth.
@@ -294,7 +290,6 @@ describe('initSolverNetSubsystem — record loading + filtering', () => {
     }
   });
 });
-
 describe('initSolverNetSubsystem — in-flight recovery', () => {
   it('resumes a record stuck in status: launching via recoverInFlightLaunches', async () => {
     // Record at the spawning checkpoint — recovery only needs to fire the
@@ -507,13 +502,5 @@ describe('initSolverNetSubsystem — stop()', () => {
     subsystem.stop();
     subsystem.stop(); // idempotent — only one clear
     expect(cleared).toEqual(['handle-1']);
-  });
-});
-
-describe('createNoopSubgraphClient', () => {
-  it('returns empty arrays for both queries', async () => {
-    const client = createNoopSubgraphClient();
-    expect(await client.fetchSetMetadataEvents({ keyPrefix: 'solvernet-manifest:' })).toEqual([]);
-    expect(await client.fetchSetMetadataEventsForCid({ manifestCid: 'bafy-anything' })).toEqual([]);
   });
 });

@@ -6,7 +6,6 @@
  *   - `/tmp/erc8004-ref/IdentityRegistryUpgradeable.sol`
  *   - `/tmp/erc8004-ref/ReputationRegistryUpgradeable.sol`
  *   - `/tmp/erc8004-ref/ValidationRegistryUpgradeable.sol`
- *   - `subgraph/abis/{Identity,Reputation,Validation}Registry.json`
  *
  * Keep the slices tight: typed-ABI inference from viem/abitype is what makes
  * the client surface stay sharp, and full ABIs widen the inferred types
@@ -50,6 +49,56 @@ export const PAYLOAD_TUPLE_V2 = [
   { name: 'codeDigest', type: 'bytes32' },
   { name: 'implName', type: 'string' },
   { name: 'modeFlag', type: 'uint8' },
+] as const;
+
+/**
+ * Plug-in registry payload tuple (1pbc).
+ *
+ * Per `docs/superpowers/specs/2026-05-13-plug-in-builder-entry-point-design.md` §5.2,
+ * a published plug-in record is anchored on the existing
+ * `IdentityRegistry.setMetadata` surface under the key
+ * `plugin:<pluginCid>`, with the payload ABI-encoded against this tuple:
+ *
+ *   abi.encode(
+ *       uint8    version,        // = 1
+ *       string   pluginName,     // npm package name
+ *       string   pluginVersion,  // semver
+ *       bytes32  pluginSha256,   // digestDirectory output for the packed tarball
+ *       string[] supports,       // SolverType ids (e.g. ["swe-rebench-v2.v1"])
+ *       uint64   publishedAt     // unix seconds
+ *   )
+ *
+ * The textual `pluginCid` in the metadataKey is the IPFS CID of the packed
+ * tarball; it is the canonical primary key for the record. Builders publish
+ * a new CID per version (`plugin:<newCid>`).
+ */
+export const PLUGIN_PAYLOAD_TUPLE = [
+  { name: 'version', type: 'uint8' },
+  { name: 'pluginName', type: 'string' },
+  { name: 'pluginVersion', type: 'string' },
+  { name: 'pluginSha256', type: 'bytes32' },
+  { name: 'supports', type: 'string[]' },
+  { name: 'publishedAt', type: 'uint64' },
+] as const;
+
+/**
+ * Plug-in revocation payload tuple (1pbc).
+ *
+ * Builders overwrite `plugin:<pluginCid>` with a `version=2` revoked-marker
+ * payload. The indexer treats the most-recent metadata value as authoritative
+ * (per spec §5.2 "Revocation"). The key stays the same so the primary-key
+ * stability across overwrites is preserved.
+ *
+ *   abi.encode(
+ *       uint8  version,  // = 2
+ *       bool   revoked,  // = true
+ *       string reason
+ *   )
+ */
+export const REVOCATION_PAYLOAD_TUPLE = [
+  { name: 'version', type: 'uint8' },
+  { name: 'revoked', type: 'bool' },
+  { name: 'reason', type: 'string' },
 ] as const;
 
 /** ERC-8004 IdentityRegistry — only the function the publisher calls. */

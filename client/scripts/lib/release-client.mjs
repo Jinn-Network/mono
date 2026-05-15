@@ -477,8 +477,8 @@ export function releaseGateSteps(skipAcceptance = false) {
     ['gate-test', 'yarn test', 'yarn', ['test'], 'clientRoot'],
     ['gate-build', 'yarn build', 'yarn', ['build'], 'clientRoot'],
     ['gate-pack-smoke', 'yarn pack:smoke', 'yarn', ['pack:smoke'], 'clientRoot'],
-    ['gate-operator', 'yarn release:operator-gate', 'yarn', ['release:operator-gate'], 'clientRoot'],
     ['gate-contracts-install', 'contracts: yarn install --immutable', 'yarn', ['install', '--immutable'], 'contractsRoot'],
+    ['gate-operator', 'yarn release:operator-gate', 'yarn', ['release:operator-gate'], 'clientRoot'],
     ['gate-contracts-test', 'contracts: yarn test', 'yarn', ['test'], 'contractsRoot'],
     ['gate-contracts-foundry-install', 'contracts: ensure forge-std', 'node', ['../client/scripts/ensure-forge-std.mjs'], 'contractsRoot'],
     ['gate-contracts-foundry-invariants', 'contracts: forge test --match-contract Invariant', 'forge', ['test', '--match-contract', 'Invariant'], 'contractsRoot'],
@@ -487,6 +487,7 @@ export function releaseGateSteps(skipAcceptance = false) {
     steps.push(
       ['gate-acceptance-setup', 'yarn setup:testnet-acceptance-operator --bootstrap', 'yarn', ['setup:testnet-acceptance-operator', '--bootstrap'], 'clientRoot'],
       ['gate-acceptance', 'yarn release:testnet-acceptance', 'yarn', ['release:testnet-acceptance'], 'clientRoot'],
+      ['gate-donation-consumption', 'yarn release:donation-consumption', 'yarn', ['release:donation-consumption'], 'clientRoot'],
     );
   }
   return steps.map(([id, label, command, args, cwdKey]) => ({ id, label, command, args, cwdKey }));

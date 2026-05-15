@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 /**
  * Shared collapsed/expanded section pattern used across the Operator
@@ -42,6 +42,12 @@ export function SectionCard({
   children,
 }: SectionCardProps): JSX.Element {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  useEffect(() => {
+    if (defaultExpanded) {
+      setExpanded(true);
+    }
+  }, [defaultExpanded]);
+
   const tone = TONE_COLORS[metaChip?.tone ?? 'default'];
   const borderColor = variant === 'danger' ? 'var(--break-red)' : 'var(--border)';
   return (

@@ -35,15 +35,40 @@ export interface BootstrapState {
     step: string;
     safe_address?: string;
     service_id?: number;
+    /** Raw error string set when a bootstrap step fails non-fatally (e.g. safe_binding_failed). */
+    error?: string | null;
+    /**
+     * Decoded contract revert reason when `error` starts with `safe_binding_failed`.
+     * Null when the revert had no reason string; absent on older state files.
+     */
+    error_revert_reason?: string | null;
   }>;
   master_address?: string;
   chain?: string;
+  fleet_agent_id?: string;
+  fleet_safe_address?: string;
   funding?: {
     master_address?: string;
     eth_required?: string;
     eth_balance?: string;
     targetWei?: string;
   };
+  solverNets?: Record<string, {
+    name?: string;
+    manifestCid?: string;
+    enabled?: boolean;
+    roles?: string[];
+  }>;
+  joinedSolverNets?: Record<string, {
+    name?: string;
+    manifestCid?: string;
+    contract?: { id: string; version: string };
+    roles?: string[];
+    harness?: string;
+    model?: string;
+    plugins?: string[];
+    disabledDefaultPlugins?: string[];
+  }>;
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
 }
@@ -117,6 +142,7 @@ export interface LauncherStatusBudgetView {
 
 export interface LauncherStatusNetEntry {
   name: string;
+  solverType?: string;
   generator: LauncherStatusGeneratorView;
   openTasks: number;
   budget: LauncherStatusBudgetView;
@@ -145,6 +171,7 @@ export interface LauncherTaskEntry {
   taskId: string;
   taskCid: string;
   solverNet: string;
+  solverType?: string;
   postedAt: string;
   state: LauncherTaskState;
   claims: { current: number; max: number };
@@ -194,6 +221,7 @@ export interface OperatorPricingConfig {
   publicEndpoint: string;
   defaultPriceUsdc: string;
   perArtifactTypePrice: Record<string, string>;
+  donation: { enabled: boolean };
 }
 
 export interface OperatorArtifactTypeSummary {
@@ -476,6 +504,14 @@ export interface GeneratorConfig {
   minVolume24hUsd?: string;
   maxYesSpread?: string;
   maxOrderbookAgeSeconds?: number;
+  N_target_successes?: number;
+  N_max_postings_per_task?: number;
+  cooldown_ms?: number;
+  claimPolicy?: {
+    maxClaims?: number;
+    maxClaimsPerOperator?: number;
+    claimLeaseTtlSeconds?: number;
+  };
 }
 
 /**
@@ -622,4 +658,90 @@ export interface OwnedLaunchedListResponse {
 
 export interface DraftListResponse {
   drafts: DraftSolverNetRecord[];
+}
+
+export interface CaptureSummary {
+  sessionId: string;
+  capturedAt: Iso8601;
+  originatingTool: { name: string; version?: string };
+  capturePath: 'A' | 'B' | 'C' | 'D';
+  status: 'pending' | 'approved' | 'skipped';
+  spanCount: number;
+  durationMs: number;
+  redactedSpanCount: number;
+  repoRemoteUrl?: string;
+  repoCommitHash?: string;
+  envelopeCid?: string;
+  publishedAt?: Iso8601;
+  skippedAt?: Iso8601;
+}
+
+export interface CaptureSpan {
+  sessionId: string;
+  spanId: string;
+  traceId: string;
+  parentSpanId: string | null;
+  name: string;
+  startTimeUnixNano: string;
+  endTimeUnixNano: string;
+  attributes: Record<string, unknown>;
+  redactedKeys: string[];
+}
+
+export interface CapturesListResponse {
+  captures: CaptureSummary[];
+}
+
+export interface CaptureDetailResponse {
+  capture: CaptureSummary;
+  spans: CaptureSpan[];
+}
+
+// ── Discovery types (hfmf) ────────────────────────────────────────────────────
+
+export interface PluginPublicationDto {
+  builderAgentId: string;
+  cid: string;
+  name: string;
+  version: string;
+  supports: string[];
+  publishedAt: number;
+  artifactType: 'plugin';
+  revoked: boolean;
+  revokedReason?: string;
+  pluginSha256: string;
+}
+
+export interface PublishedArtifactDto {
+  builderAgentId: string;
+  cid: string;
+  name: string;
+  version: string;
+  supports: string[];
+  publishedAt: number;
+  artifactType: 'plugin' | 'harness';
+  revoked: boolean;
+  revokedReason?: string;
+}
+
+export interface PluginScoreHistoryRowDto {
+  pluginCid: string;
+  taskId: string;
+  operatorAgentId: string;
+  verdict: string;
+  score?: number;
+  ts: number;
+  forkSuspected: boolean;
+}
+
+export interface DiscoveryPluginPublicationsResponse {
+  publications: PluginPublicationDto[];
+}
+
+export interface DiscoveryBuilderArtifactsResponse {
+  artifacts: PublishedArtifactDto[];
+}
+
+export interface DiscoveryPluginScoresResponse {
+  scores: PluginScoreHistoryRowDto[];
 }

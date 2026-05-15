@@ -1,13 +1,13 @@
 ---
 name: swe-rebench-v2-plan
-description: Plan the patch for a SWE-rebench v2 task — given the Orient summary, sketch the minimal diff that resolves the issue without breaking existing PASS_TO_PASS tests, then submit the final patch via the `submit_typed_payload` MCP tool.
+description: Plan the patch for a SWE-rebench v2 task — given the Orient summary, sketch the minimal diff that resolves the issue without breaking existing PASS_TO_PASS tests, then submit the final patch as a typed structured payload to the daemon.
 ---
 
 # Plan the patch
 
 Inputs:
 - The Orient summary from the previous phase.
-- The repo at `task.base_commit`.
+- The repo at `goal.spec.base_commit`.
 - The `FAIL_TO_PASS` test names (must pass after your patch).
 - The `PASS_TO_PASS` test names (must continue passing — don't break them).
 
@@ -25,9 +25,9 @@ Pass this plan forward to the Execute phase, which produces the actual patch.
 
 ## Submitting the final patch
 
-Once Execute has produced the unified diff, call the **`submit_typed_payload`** MCP tool exposed by the daemon to register the Solution. The daemon validates the payload against the SolverNet contract's solution schema before persisting it; if validation fails, the tool returns the Zod error tree under `error.issues` and you can retry.
+Once Execute has produced the unified diff, hand the Solution back to the daemon by submitting a **typed structured payload** through the Jinn client tools available to you. Your tool catalogue includes a dedicated "submit typed payload" action that validates the payload against the active SolverNet contract schema before persisting it. The validator runs server-side — on schema mismatch you will receive a Zod-style `issues[]` tree and can correct the payload and re-submit.
 
-Required payload shape for `swe-rebench-v2.v1`:
+The required payload shape for `swe-rebench-v2.v1` restoration is:
 
 ```json
 {
@@ -42,21 +42,12 @@ Optional fields:
 
 Do **not** include daemon-derived fields (e.g. trajectory CIDs) — the daemon attaches trajectory provenance to the envelope automatically. The Solution payload is purely solver-known fields.
 
-Example call:
-
-```
-submit_typed_payload({
-  payload: {
-    schemaVersion: "swe-rebench-v2-solution.v1",
-    patch: "--- a/src/foo.c\n+++ b/src/foo.c\n@@ -1 +1 @@\n-old\n+new\n"
-  }
-})
-```
-
-A successful response looks like:
+A successful submission response looks like:
 
 ```json
 { "accepted": true, "solverType": "swe-rebench-v2.v1", "role": "restoration", "persistedTo": "<workingDir>/.execute/solution-payload.json" }
 ```
+
+If — and only if — your harness exposes no typed-payload submission tool at all, fall back by writing the same payload object directly to `<workingDir>/.execute/solution-payload.json` (create the `.execute` directory if needed). The daemon's harvester reads that file post-execution and applies the same SolverNet payload schema during envelope assembly. Prefer the tool path whenever it exists, because the tool gives you immediate schema validation feedback while the file path does not.
 
 After a successful submission, this Plan/Execute cycle is complete — the daemon's harness picks up the persisted payload post-execution and assembles the on-chain envelope.

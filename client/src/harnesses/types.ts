@@ -165,7 +165,7 @@ export interface HarnessEnableMetadata {
 }
 
 /**
- * Outcome of a single `jinn solver-nets enable <name>` invocation.
+ * Outcome of a single Harness/SolverNet enable invocation.
  *
  * The flow is idempotent: the agent reruns the same command until
  * `status === 'ready'`. Each intermediate state carries enough info for
@@ -226,6 +226,13 @@ export interface Harness {
   /** semver */
   version: string;
   /**
+   * Optional implStateDir paths that are runtime-only and should not contribute
+   * to the frozen-mode state digest. Use this for generated credentials,
+   * binaries, or per-task config that a harness needs in ctx.implStateDir but
+   * that is not part of its learning/code surface.
+   */
+  freezeStateHashIgnore?: readonly string[];
+  /**
    * Return true if this Harness should handle the given (solverType, role) pair.
    *
    * `role` reflects Task.role:
@@ -252,7 +259,9 @@ export interface Harness {
   enableMetadata?(): HarnessEnableMetadata;
 
   /**
-   * Idempotent enable-state machine. Called by `jinn solver-nets enable <name>`.
+   * Idempotent enable-state machine. Called by `jinn harnesses enable <name>`
+   * for direct Harness setup, or by SolverNet-specific enable flows when a
+   * SolverNet's selected Harness also needs setup.
    *
    * Contract:
    *   - Zero-dep impls return `{ status: 'ready' }` on every call.

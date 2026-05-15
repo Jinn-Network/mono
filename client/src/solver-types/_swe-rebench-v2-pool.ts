@@ -13,7 +13,13 @@ export interface PoolTask {
   instance_id: string;
   hf_dataset: string;
   hf_split: string;
+  repo?: string;
+  base_commit?: string;
   language?: string;
+  problem_statement?: string;
+  interface?: string;
+  patch?: string;
+  test_patch?: string;
   meta?: { num_modified_files?: number; num_modified_lines?: number };
 }
 
@@ -26,7 +32,17 @@ export function listMonthlyPartitions(splits: string[]): string[] {
 
 export interface BuildPoolArgs {
   months: string[];
-  fetchSplit: (split: string) => Promise<Array<{ instance_id: string; language?: string; meta?: any }>>;
+  fetchSplit: (split: string) => Promise<Array<{
+    instance_id: string;
+    repo?: string;
+    base_commit?: string;
+    language?: string;
+    problem_statement?: string;
+    interface?: string;
+    patch?: string;
+    test_patch?: string;
+    meta?: any;
+  }>>;
 }
 
 /**
@@ -45,7 +61,13 @@ export async function buildHistoricalPool(args: BuildPoolArgs): Promise<PoolTask
         instance_id: row.instance_id,
         hf_dataset: 'nebius/SWE-rebench-leaderboard',
         hf_split: split,
+        repo: row.repo,
+        base_commit: row.base_commit,
         language: row.language,
+        problem_statement: row.problem_statement,
+        interface: row.interface,
+        patch: row.patch,
+        test_patch: row.test_patch,
         meta: row.meta,
       });
     }

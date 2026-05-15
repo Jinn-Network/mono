@@ -69,4 +69,53 @@ describe('emitTrajectory', () => {
     const { signature: _s, ...unsigned } = result.signed;
     expect(result.signed.signature.hash).toBe(keccak256(toBytes(canonicalJson(unsigned))));
   });
+
+  it('scrubs identity, local paths, and credential-looking values before signing and pinning', async () => {
+    const c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-scrub' });
+    c.addSpan({
+      name: 'artifact.emit',
+      kind: 'INTERNAL',
+      startTimeUnixNano: '1',
+      endTimeUnixNano: '2',
+      attributes: {
+        'jinn.span.kind': 'jinn.artifact.emit',
+        message: 'adriano wrote /Users/adriano/repo/src/index.ts with Bearer sk-ant-oat01-abcdefghijklmnop',
+        token: 'secret-value',
+      },
+      events: [{
+        timeUnixNano: '2',
+        name: 'stdout',
+        attributes: {
+          line: 'cwd=/Users/adriano/.jinn-client on devbox',
+        },
+      }],
+      status: { code: 'OK' },
+    });
+
+    const pk = generatePrivateKey();
+    const account = privateKeyToAccount(pk);
+    const result = await emitTrajectory({
+      collector: c,
+      runId: 'run-scrub',
+      signerPrivateKey: pk,
+      signerAddress: account.address,
+      ipfsRegistryUrl: 'http://stub',
+      scrub: {
+        identity: { username: 'adriano', hostname: 'devbox' },
+        path: { home: '/Users/adriano', repoRoot: '/Users/adriano/repo' },
+      },
+    });
+
+    const serialized = JSON.stringify(result.signed);
+    expect(serialized).not.toContain('adriano');
+    expect(serialized).not.toContain('devbox');
+    expect(serialized).not.toContain('/Users/adriano');
+    expect(serialized).not.toContain('sk-ant-oat01');
+    expect(serialized).not.toContain('secret-value');
+    expect(result.signed.spans[0]!.attributes.message).toContain('<USER>');
+    expect(result.signed.spans[0]!.attributes.message).toContain('src/index.ts');
+    expect(result.signed.spans[0]!.attributes.message).toContain('<REDACTED>');
+    expect(result.signed.redactionManifest.totalRedactions).toBeGreaterThan(0);
+    expect(() => JinnTrajectoryV1Schema.parse(result.signed)).not.toThrow();
+  });
 });

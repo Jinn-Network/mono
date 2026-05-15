@@ -5,6 +5,7 @@ import type {
   RegistryListResponse,
   SolverNetManifestSummary,
 } from '../../api/types.js';
+import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
  * Operator-side catalog of all launched SolverNets discoverable via the
@@ -29,20 +30,6 @@ const STATUS_TONE: Record<
   retired: { fg: 'var(--fg-dim)', border: 'var(--border)', label: 'Retired' },
 };
 
-/** Wei → ETH string; mirrors `pages/launcher-launched/helpers.ts`. */
-function formatEthFromWei(wei: string | undefined): string {
-  if (!wei || !/^\d+$/.test(wei)) return '—';
-  try {
-    const n = BigInt(wei);
-    const eth = Number(n) / 1e18;
-    if (eth === 0) return '0 ETH';
-    if (eth < 0.0001) return `${eth.toExponential(3)} ETH`;
-    return `${eth.toFixed(eth < 1 ? 6 : 4)} ETH`;
-  } catch {
-    return '—';
-  }
-}
-
 function truncateAddress(address: string): string {
   if (!address) return '';
   if (address.length <= 13) return address;
@@ -57,6 +44,36 @@ function formatTimestamp(iso: string | null): string | null {
     return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   } catch {
     return iso;
+  }
+}
+
+function errorCode(error: unknown): string | null {
+  if (error instanceof Error) {
+    const code = (error as Error & { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    if (error.message.includes('subsystem_not_ready')) return 'subsystem_not_ready';
+    if (error.message.includes('registry_unavailable')) return 'registry_unavailable';
+  }
+  return null;
+}
+
+function registryErrorCopy(error: unknown): { title: string; detail: string } {
+  switch (errorCode(error)) {
+    case 'subsystem_not_ready':
+      return {
+        title: 'SolverNet subsystem is still starting.',
+        detail: 'Wait a few seconds, then retry. If this persists, restart the daemon and check its startup logs.',
+      };
+    case 'registry_unavailable':
+      return {
+        title: 'Registry cache is unavailable.',
+        detail: 'The daemon could not read the SolverNet registry cache. Retry after startup finishes; check daemon logs if it keeps failing.',
+      };
+    default:
+      return {
+        title: 'Failed to load registry catalog.',
+        detail: error instanceof Error ? error.message : 'Unknown error',
+      };
   }
 }
 
@@ -197,11 +214,11 @@ function RegistryCard({ summary, joinedRoles }: RegistryCardProps): JSX.Element 
         <RoleChips openRoles={summary.openRoles} />
         <span>Solution price</span>
         <span style={{ color: 'var(--fg)' }}>
-          {formatEthFromWei(summary.solutionPriceWei)}
+          {formatWeiAmount(summary.solutionPriceWei)}
         </span>
         <span>Verdict price</span>
         <span style={{ color: 'var(--fg)' }}>
-          {formatEthFromWei(summary.verdictPriceWei)}
+          {formatWeiAmount(summary.verdictPriceWei)}
         </span>
       </div>
 
@@ -292,7 +309,7 @@ export function RegistryCatalog({
   });
   const joinedByCid = joinedQuery.data?.joinedSolverNets ?? {};
 
-  if (isLoading) {
+  if (isLoading || joinedQuery.isLoading) {
     return (
       <p
         data-testid="registry-catalog-loading"
@@ -308,7 +325,9 @@ export function RegistryCatalog({
     );
   }
 
-  if (isError) {
+  if (isError || joinedQuery.isError) {
+    const visibleError = isError ? error : joinedQuery.error;
+    const copy = registryErrorCopy(visibleError);
     return (
       <div
         data-testid="registry-catalog-error"
@@ -332,10 +351,10 @@ export function RegistryCatalog({
               fontWeight: 500,
             }}
           >
-            Failed to load registry catalog.
+            {copy.title}
           </span>
           <span style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
-            {error instanceof Error ? error.message : 'Unknown error'}
+            {copy.detail}
           </span>
         </div>
         <button
@@ -361,7 +380,8 @@ export function RegistryCatalog({
     );
   }
 
-  const summaries = data?.summaries ?? [];
+  const allSummaries = data?.summaries ?? [];
+  const summaries = allSummaries.filter((summary) => joinedByCid[summary.manifestCid] === undefined);
   const lastRefreshed = formatTimestamp(data?.lastRefreshedAt ?? null);
   const lastError = data?.lastError ?? null;
 
@@ -383,7 +403,7 @@ export function RegistryCatalog({
         }}
       >
         <span data-testid="registry-catalog-meta">
-          {summaries.length} launched · last refreshed{' '}
+          {summaries.length} discoverable · last refreshed{' '}
           {lastRefreshed ?? 'never'}
         </span>
         {lastError && (
@@ -409,7 +429,9 @@ export function RegistryCatalog({
             fontSize: '13px',
           }}
         >
-          No launched SolverNets available.
+          {allSummaries.length === 0
+            ? 'No launched SolverNets available.'
+            : 'No unjoined SolverNets available.'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

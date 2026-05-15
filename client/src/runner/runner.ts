@@ -17,15 +17,20 @@ export interface RunnerContext {
   daemonApiToken?: string;
   /**
    * Optional corpus configuration forwarded to the MCP subprocess so
-   * `search_records` / `inspect_record` can hit the keyless subgraph + IPFS
+   * `search_records` / `inspect_record` can hit the Ponder indexer + IPFS
    * gateway. `acquire_artifact` no longer needs anything from this block — it
    * proxies to the daemon at `daemonApiUrl` and the daemon owns the agent EOA
    * private key. When omitted, record lookup and artifact acquisition fall
    * back to local-only behavior. Spec: spec/2026-04-30-phase-a-umbrella.md §4.
    */
   corpusEnv?: {
-    subgraphUrl?: string;
+    /** Discovery indexer URL (Ponder). Sets JINN_DISCOVERY_URL on the MCP subprocess. */
+    discoveryUrl?: string;
     ipfsGatewayUrl?: string;
+    rpcUrl?: string;
+    chainId?: number;
+    identityRegistryAddress?: string;
+    fromBlock?: number;
   };
   /**
    * In-run trajectory collector. When provided, the runner emits a

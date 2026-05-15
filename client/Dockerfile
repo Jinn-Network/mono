@@ -1,7 +1,7 @@
 # @jinn-network/client — OCI image
 #
-# Build from the client/ directory:
-#   docker build -t jinn-client .
+# Build from the repository root:
+#   docker build -f client/Dockerfile -t jinn-client .
 #
 # Run:
 #   docker run -e JINN_PASSWORD=secret jinn-client run
@@ -21,18 +21,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency manifests first for layer caching
-COPY package.json yarn.lock .yarnrc.yml ./
-RUN corepack enable && yarn install --immutable
+# Copy dependency manifests first for layer caching. The client depends on the
+# mono checkout's SDK package through a Yarn portal, so Docker builds use the
+# repository root as their build context.
+COPY client/package.json client/yarn.lock client/.yarnrc.yml ./client/
+COPY client/src/dashboard/spa/package.json ./client/src/dashboard/spa/package.json
+COPY packages/sdk/package.json packages/sdk/yarn.lock packages/sdk/README.md ./packages/sdk/
+RUN corepack enable && cd client && yarn install --immutable
+
+# Copy SDK sources before the client build; `yarn build` builds the SDK first.
+COPY packages/sdk/tsconfig.json ./packages/sdk/
+COPY packages/sdk/src/ ./packages/sdk/src/
 
 # Copy source and bundled deployment artifacts
-COPY src/ src/
-COPY deployments/ deployments/
-COPY plugins/ plugins/
-COPY scripts/ scripts/
-COPY tsconfig.json ./
+COPY client/src/ ./client/src/
+COPY client/deployments/ ./client/deployments/
+COPY client/plugins/ ./client/plugins/
+COPY client/scripts/ ./client/scripts/
+COPY client/templates/ ./client/templates/
+COPY client/tsconfig.json ./client/
 
 # Build TypeScript
+WORKDIR /app/client
 RUN yarn build
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
@@ -61,11 +71,11 @@ RUN npm install -g @anthropic-ai/claude-code
 RUN mkdir -p /root/.claude && ln -sf /root/.claude/claude.json /root/.claude.json
 
 # Copy only what's needed to run
-COPY --from=build /app/dist dist/
-COPY --from=build /app/deployments deployments/
-COPY --from=build /app/plugins plugins/
-COPY --from=build /app/node_modules node_modules/
-COPY --from=build /app/package.json ./
+COPY --from=build /app/client/dist dist/
+COPY --from=build /app/client/deployments deployments/
+COPY --from=build /app/client/plugins plugins/
+COPY --from=build /app/client/node_modules node_modules/
+COPY --from=build /app/client/package.json ./
 
 # Default data directory inside the container
 ENV NODE_ENV=production

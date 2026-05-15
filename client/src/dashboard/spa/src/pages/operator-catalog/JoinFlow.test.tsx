@@ -25,6 +25,7 @@ const apiMock = vi.hoisted(() => ({
   getSolverNets: vi.fn(),
   operatorJoin: vi.fn(),
   operatorLeave: vi.fn(),
+  hermesDoctor: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({
@@ -37,6 +38,7 @@ vi.mock('../../api/client.js', () => ({
       join: (cid: string, body: unknown) => apiMock.operatorJoin(cid, body),
       leave: (cid: string) => apiMock.operatorLeave(cid),
     },
+    hermesDoctor: () => apiMock.hermesDoctor(),
   },
 }));
 
@@ -140,6 +142,7 @@ beforeEach(() => {
   apiMock.getSolverNets.mockReset();
   apiMock.operatorJoin.mockReset();
   apiMock.operatorLeave.mockReset();
+  apiMock.hermesDoctor.mockReset();
 
   apiMock.getManifest.mockResolvedValue({
     manifest: baseManifest,
@@ -177,6 +180,30 @@ describe('JoinFlow — manifest fetch', () => {
     );
   });
 
+  it('formats tiny manifest prices as gwei', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        solutionPriceWei: '10000000000',
+        verdictPriceWei: '5000000000',
+      },
+      lifecycle: {
+        status: 'launched' as const,
+        statusUpdatedAt: '2026-05-05T00:00:00Z',
+        sourceBlock: 1,
+      },
+    });
+
+    wrap(<JoinFlow />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+    expect(screen.getByText('10 gwei')).toBeTruthy();
+    expect(screen.getByText('5 gwei')).toBeTruthy();
+    expect(screen.queryByText(/e-/i)).toBeNull();
+  });
+
   it('shows a loading state while the manifest is in flight', () => {
     apiMock.getManifest.mockReturnValue(new Promise(() => undefined));
     wrap(<JoinFlow />);
@@ -191,6 +218,75 @@ describe('JoinFlow — manifest fetch', () => {
     );
     expect(screen.getByText(/failed to load manifest/i)).toBeTruthy();
     expect(screen.getByTestId('join-flow-retry')).toBeTruthy();
+  });
+});
+
+describe('JoinFlow — harness options', () => {
+  it('renders Hermes Agent as a selectable harness option when catalog includes it', async () => {
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          compatibleHarnesses: [
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Hermes Agent 0.1.0'),
+    );
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Claude Code 0.1.0');
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Codex 0.1.0');
+  });
+
+  it('shows the Hermes install description when Hermes Agent is selected', async () => {
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          compatibleHarnesses: [
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).some((o) => o.value === 'hermes-agent')).toBe(true),
+    );
+
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-harness-hermes-description')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('join-harness-hermes-description').textContent).toMatch(
+      /requires separate install/i,
+    );
+    expect(screen.getByTestId('join-harness-hermes-description').textContent).toMatch(
+      /Nous Research/,
+    );
   });
 });
 
@@ -222,6 +318,114 @@ describe('JoinFlow — role selection', () => {
 
     expect(screen.getByTestId('join-flow-solver-fields')).toBeTruthy();
     expect(screen.queryByTestId('join-flow-evaluator-info')).toBeNull();
+  });
+
+  it('defaults SWE solver joins to Claude Code and default-includes the SWE runtime', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        name: 'SWE-rebench v2',
+        contract: {
+          ...baseManifest.contract,
+          id: 'swe-rebench-v2',
+          version: 'v1',
+        },
+      },
+      lifecycle: {
+        status: 'launched' as const,
+        statusUpdatedAt: '2026-05-05T00:00:00Z',
+        sourceBlock: 1,
+      },
+    });
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          name: 'swe-rebench-v2',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          compatibleHarnesses: [
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+          compatiblePlugins: [
+            { name: 'swe-rebench-v2-runtime', version: '0.1.0', source: 'bundled' },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() => expect(harnessSelect.value).toBe('claude-code'));
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toEqual([
+      'Claude Code 0.1.0',
+      'Codex 0.1.0',
+    ]);
+
+    const modelSelect = screen.getByTestId('join-model-select') as HTMLSelectElement;
+    const optionValues = Array.from(modelSelect.options).map((o) => o.value);
+    expect(modelSelect.value).toBe('claude-haiku-4-5-20251001');
+    expect(optionValues).toContain('claude-sonnet-4-6');
+    expect(optionValues).not.toContain('gpt-5.4-mini');
+
+    const chips = screen.getAllByTestId('join-plugin-option-chip');
+    expect(chips.some((chip) => chip.textContent?.match(/network tools/i))).toBe(true);
+    expect(chips.some((chip) => chip.textContent?.match(/learner/i))).toBe(true);
+    expect(
+      chips.some(
+        (chip) =>
+          chip.getAttribute('data-plugin') === 'swe-rebench-v2-runtime' &&
+          chip.textContent?.match(/default/i),
+      ),
+    ).toBe(true);
+    expect(screen.queryByTestId('join-plugin-option')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('join-plugin-option-trigger'));
+    let pluginRows = screen.queryAllByTestId('join-plugin-option');
+    expect(pluginRows.some((row) => row.getAttribute('data-plugin') === 'network-tools')).toBe(false);
+    expect(pluginRows.some((row) => row.getAttribute('data-plugin') === 'claude-code-learner')).toBe(false);
+    expect(pluginRows.some((row) => row.getAttribute('data-plugin') === 'swe-rebench-v2-runtime')).toBe(false);
+
+    fireEvent.change(screen.getByTestId('join-plugin-search'), {
+      target: { value: 'swe' },
+    });
+    pluginRows = screen.queryAllByTestId('join-plugin-option');
+    expect(pluginRows).toHaveLength(0);
+  });
+
+  it('allows removing a default plugin after warning and keeps it available to re-add', async () => {
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const removeNetwork = screen
+      .getAllByTestId('join-plugin-option-remove')
+      .find((button) => button.getAttribute('data-plugin') === 'network-tools')!;
+    fireEvent.click(removeNetwork);
+    expect(screen.getByTestId('join-plugin-option-default-warning').textContent).toMatch(
+      /default operator baseline/i,
+    );
+    fireEvent.click(screen.getByTestId('join-plugin-option-default-warning-confirm'));
+
+    expect(
+      screen
+        .getAllByTestId('join-plugin-option-chip')
+        .some((chip) => chip.getAttribute('data-plugin') === 'network-tools'),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByTestId('join-plugin-option-trigger'));
+    const pluginRows = screen.getAllByTestId('join-plugin-option');
+    expect(pluginRows.find((row) => row.getAttribute('data-plugin') === 'network-tools')).toBeTruthy();
   });
 
   it('shows both the harness picker and an evaluator binding note when both roles are selected', async () => {
@@ -258,8 +462,13 @@ describe('JoinFlow — submission', () => {
     // Wait for the catalog query to populate the harness select default.
     await waitFor(() => expect(apiMock.getSolverNets).toHaveBeenCalled());
 
-    // Toggle the bundled plugin on.
-    fireEvent.click(screen.getByLabelText(/plugin: jinn-prediction-plugin/i));
+    // Add the recommended SolverNet plugin from the searchable picker.
+    fireEvent.click(screen.getByTestId('join-plugin-option-trigger'));
+    fireEvent.click(
+      screen
+        .getAllByTestId('join-plugin-option')
+        .find((row) => row.getAttribute('data-plugin') === 'jinn-prediction-plugin')!,
+    );
 
     fireEvent.click(screen.getByTestId('join-flow-submit'));
 
@@ -268,9 +477,11 @@ describe('JoinFlow — submission', () => {
       'bafybeiaaa',
       expect.objectContaining({
         name: 'Prediction Markets',
+        contract: { id: 'prediction', version: 'v1' },
         roles: ['solver'],
-        harness: 'claude-code-learner',
-        plugins: ['jinn-prediction-plugin'],
+        harness: 'claude-code',
+        plugins: ['bundled:jinn-prediction-plugin'],
+        disabledDefaultPlugins: [],
       }),
     );
     await waitFor(() =>
@@ -289,6 +500,7 @@ describe('JoinFlow — submission', () => {
 
     await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
     const callArgs = apiMock.operatorJoin.mock.calls[0]![1] as Record<string, unknown>;
+    expect(callArgs.contract).toEqual({ id: 'prediction', version: 'v1' });
     expect(callArgs.roles).toEqual(['evaluator']);
     expect(callArgs.harness).toBeUndefined();
     expect(callArgs.model).toBeUndefined();
@@ -324,5 +536,167 @@ describe('JoinFlow — submission', () => {
     fireEvent.click(screen.getByTestId('join-flow-cancel'));
 
     expect(nav.history.at(-1)).toBe('/operator#solvernets');
+  });
+});
+
+describe('JoinFlow — Hermes Agent precheck panel', () => {
+  /** Catalog with hermes-agent listed as compatible so it appears in the select. */
+  const hermesCompatibleCatalog = {
+    ...baseCatalog,
+    nets: [
+      {
+        ...baseCatalog.nets[0]!,
+        compatibleHarnesses: [
+          { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+        ],
+      },
+    ],
+  };
+
+  async function setupHermesSelected(): Promise<void> {
+    apiMock.getSolverNets.mockResolvedValue(hermesCompatibleCatalog);
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    // Select solver role so the harness picker shows.
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    // Wait for the harness select to be populated with hermes-agent.
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).some((o) => o.value === 'hermes-agent')).toBe(true),
+    );
+
+    // Select hermes-agent.
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+    await waitFor(() => expect(harnessSelect.value).toBe('hermes-agent'));
+  }
+
+  it('shows the not-installed panel when hermesDoctor returns installed:false', async () => {
+    apiMock.hermesDoctor.mockResolvedValue({ installed: false, exitCode: null, stdout: '', stderr: '' });
+
+    await setupHermesSelected();
+
+    // Click submit — should fire precheck instead of join.
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-not-installed')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('hermes-precheck-not-installed').textContent).toMatch(/not installed/i);
+    // The curl install command should be visible.
+    expect(screen.getByTestId('hermes-precheck-not-installed').textContent).toMatch(/curl/);
+    // The join mutation should NOT have fired.
+    expect(apiMock.operatorJoin).not.toHaveBeenCalled();
+  });
+
+  it('shows the config-issue panel when hermesDoctor returns exitCode:1', async () => {
+    const stderrMsg = 'error: no provider configured';
+    apiMock.hermesDoctor.mockResolvedValue({
+      installed: true,
+      exitCode: 1,
+      stdout: '',
+      stderr: stderrMsg,
+    });
+
+    await setupHermesSelected();
+
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-config-issue')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('hermes-precheck-config-issue').textContent).toMatch(stderrMsg);
+    expect(apiMock.operatorJoin).not.toHaveBeenCalled();
+  });
+
+  it('proceeds to join when hermesDoctor returns exitCode:0', async () => {
+    apiMock.hermesDoctor.mockResolvedValue({
+      installed: true,
+      exitCode: 0,
+      stdout: 'all checks passed',
+      stderr: '',
+    });
+    apiMock.operatorJoin.mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
+    });
+
+    await setupHermesSelected();
+
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
+    expect(apiMock.operatorJoin).toHaveBeenCalledWith(
+      'bafybeiaaa',
+      expect.objectContaining({ harness: 'hermes-agent', roles: ['solver'] }),
+    );
+  });
+
+  it('retry precheck button re-runs the doctor check', async () => {
+    // First call: not installed; second call: ok.
+    apiMock.hermesDoctor
+      .mockResolvedValueOnce({ installed: false, exitCode: null, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ installed: true, exitCode: 0, stdout: '', stderr: '' });
+    apiMock.operatorJoin.mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
+    });
+
+    await setupHermesSelected();
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-not-installed')).toBeTruthy(),
+    );
+
+    // Click retry.
+    fireEvent.click(screen.getByTestId('hermes-precheck-retry'));
+
+    // After retry with exitCode:0 the join should proceed.
+    await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
+  });
+
+  it('cancel button on the precheck panel hides the panel and does not join', async () => {
+    apiMock.hermesDoctor.mockResolvedValue({ installed: false, exitCode: null, stdout: '', stderr: '' });
+
+    await setupHermesSelected();
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-not-installed')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByTestId('hermes-precheck-cancel'));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('hermes-precheck-not-installed')).toBeNull(),
+    );
+    expect(apiMock.operatorJoin).not.toHaveBeenCalled();
+    // The harness select should still be visible.
+    expect(screen.getByTestId('join-flow-solver-fields')).toBeTruthy();
+  });
+
+  it('shows the network-error panel when hermesDoctor rejects (does NOT fall through to install)', async () => {
+    apiMock.hermesDoctor.mockRejectedValue(new Error('Network error: failed to fetch /api/hermes/doctor'));
+
+    await setupHermesSelected();
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hermes-precheck-network-error')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('hermes-precheck-network-error').textContent).toMatch(/Could not reach the daemon/i);
+    // Critically, we must NOT show the install command (operator would otherwise
+    // reinstall a Hermes that is already there when the daemon is just down).
+    expect(screen.queryByTestId('hermes-precheck-not-installed')).toBeNull();
+    expect(apiMock.operatorJoin).not.toHaveBeenCalled();
   });
 });

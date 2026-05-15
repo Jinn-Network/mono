@@ -168,6 +168,7 @@ Paused means:
 
 - no new tasks are posted by the launcher generator
 - existing tasks continue through normal lifecycle (claim → submit → verdict → settle)
+- verdict delivery follows the post-`jinn-mono-04wq` rule: Unresolved is terminal alongside Pass / Fail / Invalid; retry happens only before a verdict through the off-chain Stage 5 `PreconditionResolverRegistry`
 - operators see that the SolverNet is not currently producing new work
 - launchers can resume to return to launched
 
@@ -561,13 +562,15 @@ Operator participation flow:
 Operator local config after participation:
 
 ```ts
-solverNets: {
-  '<manifestCid or solverNetId>': {
+joinedSolverNets: {
+  '<manifestCid>': {
     name: 'Prediction',                      // cached for display
     manifestCid: '<cid>',
+    contract: { id: 'prediction', version: 'v1' },
     roles: ['solver'],                       // operator's chosen roles within openRoles
     harness: 'claude-code-learner',          // operator-side, only for solver role
-    plugins: [...],                          // operator-side
+    plugins: [...],                          // operator-side additions; defaults are implicit
+    disabledDefaultPlugins: [...],           // explicit opt-outs from default runtime plugins
     model: 'claude-haiku-4-5-20251001',      // operator-side
     // evaluator-role harness comes from manifest.contract.evaluationFunction.implementation
   };
@@ -713,6 +716,7 @@ The full plan with ordering, dependencies, and per-step verification lives at `d
 | 9 | Operator-side discovery bootstrap | None — registry is global; subgraph query is unfiltered |
 | 10 | Launch atomicity / failure recovery | Forward-only checkpointed state machine; per-phase progress in launched record; crash-resume on daemon restart |
 | 11 | Lifecycle action surface | Pause + Resume + Retire; in-flight tasks drain naturally; no Cancel; Retire requires typed-name confirmation |
+| 12 | Verdict terminality cutover | As of `jinn-mono-04wq`, Unresolved is terminal alongside Pass / Fail / Invalid; no slot-reopen or router budget-refund path remains for Unresolved, and the off-chain Stage 5 `PreconditionResolverRegistry` is the only retry mechanism |
 
 ## 18. Remaining open questions
 
