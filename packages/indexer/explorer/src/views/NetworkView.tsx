@@ -579,34 +579,8 @@ export function NetworkView() {
         gap: 28,
       }}
     >
-      {/* Page header */}
-      <div>
-        <h1
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontStyle: 'italic',
-            fontSize: 'var(--text-4xl)',
-            lineHeight: 1.05,
-            color: 'var(--fg)',
-            margin: 0,
-            marginBottom: 4,
-            fontWeight: 400,
-          }}
-        >
-          The ether
-        </h1>
-        <div
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--text-xs)',
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--fg-dim)',
-          }}
-        >
-          Network
-        </div>
-      </div>
+      {/* No page header — the chrome's Network tab is the wayfinder, and the
+          gold Solve-rate hero leads. Matches the May 15 redesign reference. */}
 
       {/* Loading state */}
       {isLoading && <SkeletonHero />}

@@ -197,13 +197,17 @@ describe('NetworkView', () => {
     });
   });
 
-  it('renders the page headline in Instrument Serif', async () => {
+  it('has no page-level headline — the Solve rate hero leads', async () => {
+    // The May 15 redesign drops the italic "The ether" headline; the chrome's
+    // Network tab is the wayfinder and the gold hero card is the lead.
     mockFetchNetwork(NETWORK_FIXTURE);
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('The ether')).toBeInTheDocument();
+      expect(screen.getByText('Solve rate')).toBeInTheDocument();
     });
+    expect(screen.queryByText('The ether')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument();
   });
 
   it('renders the status bar with the last indexed block', async () => {
@@ -242,7 +246,7 @@ describe('NetworkView', () => {
     const { Wrapper } = makeWrapper();
     render(<NetworkView />, { wrapper: Wrapper });
     await waitFor(() => {
-      expect(screen.getByText('The ether')).toBeInTheDocument();
+      expect(screen.getByText('Solve rate')).toBeInTheDocument();
     });
     expect(screen.queryByText('On-chain vs envelope')).not.toBeInTheDocument();
     expect(screen.queryByText('Envelope-truth resolved')).not.toBeInTheDocument();
