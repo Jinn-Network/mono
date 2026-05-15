@@ -21,7 +21,7 @@
  *      `checkSignatures` does for the EIP-712 path.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   encodeAbiParameters,
   hashTypedData,
@@ -29,6 +29,8 @@ import {
   keccak256,
   recoverAddress,
   toHex,
+  BaseError,
+  ContractFunctionRevertedError,
   type Address,
   type Hex,
 } from 'viem';
@@ -37,7 +39,9 @@ import {
   buildIdentityDigest,
   buildSafeMessageHash,
   packSafeOwnerSignature,
+  bindAgentWalletToSafe,
 } from '../../src/earning/agent-wallet-binding.js';
+import { IDENTITY_REGISTRY_ABI } from '../../src/earning/contracts.js';
 
 // Deterministic fixtures — matches the contract test pattern.
 const AGENT_PK: Hex = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
@@ -267,5 +271,52 @@ describe('packSafeOwnerSignature', () => {
     expect(() => packSafeOwnerSignature(('0x' + '00'.repeat(64)) as Hex)).toThrow(
       /Expected 65-byte/,
     );
+  });
+});
+
+describe('bindAgentWalletToSafe — error result (jinn-mono-hjex.4)', () => {
+  it('captures the contract revert reason when setAgentWallet reverts (jinn-mono-hjex.4)', async () => {
+    // Build a viem BaseError wrapping a ContractFunctionRevertedError whose
+    // Error(string) payload is "Not authorized". This mirrors what viem
+    // produces when the node returns an `execution reverted` with the
+    // Error(string) selector + ABI-encoded reason.
+    const revertedError = new ContractFunctionRevertedError({
+      abi: IDENTITY_REGISTRY_ABI,
+      functionName: 'setAgentWallet',
+      // Pass the reason directly; viem will set `.reason = 'Not authorized'`
+      message: 'Not authorized',
+    });
+    const wrappedRevert = new BaseError('Execution reverted', {
+      cause: revertedError,
+    });
+
+    const agentAccount = privateKeyToAccount(AGENT_PK);
+
+    // Mock walletClient: sendTransaction rejects with the wrapped revert.
+    const mockWalletClient = {
+      sendTransaction: vi.fn().mockRejectedValue(wrappedRevert),
+    };
+
+    // Mock publicClient: getBlock returns a recent timestamp; no receipt wait needed
+    // because sendTransaction throws before we get a hash.
+    const mockPublicClient = {
+      getBlock: vi.fn().mockResolvedValue({ timestamp: BigInt(Math.floor(Date.now() / 1000)) }),
+    };
+
+    const result = await bindAgentWalletToSafe({
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      agentId: AGENT_ID,
+      safeAddress: SAFE_ADDRESS,
+      agentEoaAccount: agentAccount,
+      agentEoaWalletClient: mockWalletClient as any,
+      publicClient: mockPublicClient as any,
+      chainId: CHAIN_ID,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected ok=false');
+    expect(result.error.kind).toBe('safe_binding_failed');
+    expect(result.error.revertReason).toBe('Not authorized');
+    expect(result.error.shortMessage).toContain('Not authorized');
   });
 });

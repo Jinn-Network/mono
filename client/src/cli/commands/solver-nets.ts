@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
@@ -14,8 +15,112 @@ import {
   runPredictionSample,
   type PredictionOperatorStatus,
 } from '../../solver-nets/prediction-operator-ux.js';
+import { EVAL_SEMANTICS_VERSION } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
+import { defaultStateDir as sweRebenchV2DefaultStateDir } from '../../solver-types/swe-rebench-v2.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
+
+// ---------------------------------------------------------------------------
+// resolveValidatePoolInstanceIds — exported for unit testing
+// ---------------------------------------------------------------------------
+
+function readInstanceIdFile(name: 'swe-rebench-v2-seed-pool.json' | 'swe-rebench-v2-known-bad.json'): string[] {
+  // Resolve relative to this compiled file's location. At runtime the file is
+  // at dist/cli/commands/<this>.js and the data files are at dist/scripts/<name>
+  // (copied there during `yarn build`). In dev/test the source file is at
+  // src/cli/commands/<this>.ts and the data files live at scripts/<name>
+  // (sibling to src/). In both cases ../../../scripts/<name> resolves correctly:
+  //   dist/cli/commands → dist/ → dist/../scripts  (published package)
+  //   src/cli/commands  → src/  → src/../scripts   (dev / vitest)
+  const here = dirname(fileURLToPath(import.meta.url));
+  const path = resolvePath(here, '..', '..', '..', 'scripts', name);
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as { instance_ids?: string[] };
+  if (!Array.isArray(parsed.instance_ids)) {
+    throw new Error(`${path} does not contain an instance_ids array`);
+  }
+  return parsed.instance_ids;
+}
+
+export function resolveValidatePoolInstanceIds(flags: {
+  instanceId?: string[];
+  instancesFile?: string;
+  seedPositive?: boolean;
+  knownBad?: boolean;
+}): string[] {
+  const collected: string[] = [];
+  if (flags.instanceId) collected.push(...flags.instanceId);
+  if (flags.instancesFile) {
+    let body: string;
+    try {
+      body = readFileSync(flags.instancesFile, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`--instances-file: file not found: ${flags.instancesFile}`);
+      }
+      throw err;
+    }
+    for (const raw of body.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      collected.push(line);
+    }
+  }
+  if (flags.seedPositive) {
+    collected.push(...readInstanceIdFile('swe-rebench-v2-seed-pool.json'));
+  }
+  if (flags.knownBad) {
+    collected.push(...readInstanceIdFile('swe-rebench-v2-known-bad.json'));
+  }
+  return Array.from(new Set(collected));
+}
+
+// ---------------------------------------------------------------------------
+// describeSweRebenchV2PoolFreshness — exported for unit testing
+// ---------------------------------------------------------------------------
+
+export async function describeSweRebenchV2PoolFreshness(opts: {
+  stateDir: string;
+}): Promise<
+  | { status: 'ready'; semanticsVersion: string; scorable: number; unscorable: number; total: number }
+  | { status: 'stale'; reason: string; cli: string }
+> {
+  const path = join(opts.stateDir, 'validated-pool.json');
+  let raw: unknown = null;
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return {
+      status: 'stale',
+      reason: 'validated-pool.json is absent or unreadable',
+      cli: 'jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad',
+    };
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return {
+      status: 'stale',
+      reason: 'validated-pool.json is malformed',
+      cli: 'jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad',
+    };
+  }
+  const file = raw as { evalSemanticsVersion?: string; entries?: Record<string, { scorable?: boolean }> };
+  if (file.evalSemanticsVersion !== EVAL_SEMANTICS_VERSION) {
+    return {
+      status: 'stale',
+      reason: `validated-pool.json was built for semanticsVersion=${file.evalSemanticsVersion ?? 'unknown'}, current=${EVAL_SEMANTICS_VERSION}`,
+      cli: 'jinn solver-nets validate-pool swe-rebench-v2 --seed-positive --known-bad',
+    };
+  }
+  const entries = file.entries ?? {};
+  const scorable = Object.values(entries).filter((e) => e.scorable === true).length;
+  const unscorable = Object.values(entries).length - scorable;
+  return {
+    status: 'ready',
+    semanticsVersion: EVAL_SEMANTICS_VERSION,
+    scorable,
+    unscorable,
+    total: scorable + unscorable,
+  };
+}
 
 type SolverPluginEntry = string | { name?: string; source: string; version?: string };
 
@@ -220,10 +325,20 @@ const command: CommandModule = {
   jinn solver-nets doctor <name> [--human|--json] [--config <path>]
   jinn solver-nets sample <name> [--closed-window]
   jinn solver-nets validate-pool swe-rebench-v2 [--limit <n>] [--force]
+                                [--instance-id <id>]... [--instances-file <path>]
+                                [--seed-positive] [--known-bad]
             Run the gold patch of each pool instance through the eval harness
             and cache which instances are scorable; the generator then posts
             only those. Requires Docker + \`jinn harnesses enable
             swe-rebench-v2-evaluator\`.
+            --seed-positive scopes the run to instances in
+            client/scripts/swe-rebench-v2-seed-pool.json (gold eval runs;
+            most expected to record scorable:true).
+            --known-bad scopes the run to instances in
+            client/scripts/swe-rebench-v2-known-bad.json (gold eval runs;
+            expected to record scorable:false).
+            Repeatable --instance-id and --instances-file scope the run to
+            a specific subset.
 
 Output flags:
   --human   Render readable terminal output instead of JSON (supported by
@@ -246,6 +361,11 @@ Output flags:
         force: { type: 'boolean' },
         human: { type: 'boolean' },
         json: { type: 'boolean' },
+        // Repeatable instance-id input flags (jinn-mono-fufn Task 7):
+        'instance-id': { type: 'string', multiple: true },
+        'instances-file': { type: 'string' },
+        'seed-positive': { type: 'boolean' },
+        'known-bad': { type: 'boolean' },
       },
     });
     const human = Boolean(parsed.values['human']);
@@ -308,8 +428,20 @@ Output flags:
       const limit = Number.isFinite(limitParsed as number) && (limitParsed as number) > 0 ? (limitParsed as number) : undefined;
       const force = Boolean(parsed.values['force']);
 
+      const instanceIds = resolveValidatePoolInstanceIds({
+        instanceId: parsed.values['instance-id'] as string[] | undefined,
+        instancesFile: parsed.values['instances-file'] as string | undefined,
+        seedPositive: Boolean(parsed.values['seed-positive']),
+        knownBad: Boolean(parsed.values['known-bad']),
+      });
+
       process.stderr.write('[validate-pool] loading the SWE-rebench v2 pool…\n');
-      const poolTasks = await loadSweRebenchV2Pool();
+      let poolTasks = await loadSweRebenchV2Pool();
+      if (instanceIds.length > 0) {
+        const wanted = new Set(instanceIds);
+        poolTasks = poolTasks.filter((t) => wanted.has(t.instance_id));
+        process.stderr.write(`[validate-pool] restricted to ${poolTasks.length} of ${wanted.size} requested instance ids\n`);
+      }
       const store = getSweRebenchV2ValidatedPoolStore();
       const summary = await validatePoolInstances(
         poolTasks,
@@ -318,6 +450,7 @@ Output flags:
           runner: new PythonEvalRunner({ upstreamRepoDir }),
           store,
           semanticsVersion: EVAL_SEMANTICS_VERSION,
+          upstreamRepoDir,
           log: (m) => process.stderr.write(`${m}\n`),
         },
         { limit, force },
@@ -372,6 +505,28 @@ Output flags:
           human,
           json,
           renderPredictionStatusHuman,
+        );
+        return;
+      }
+      if (net.solverType === 'swe-rebench-v2.v1') {
+        const stateDir = process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? sweRebenchV2DefaultStateDir();
+        const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
+        const sanitized = sanitizeLegacySolverNet(net);
+        emit(
+          ctx,
+          { verb: 'solver-nets doctor', configPath, name, solverNet: sanitized, validatedPoolFreshness: freshness },
+          human,
+          json,
+          (v) => {
+            const lines = [renderSolverNetHuman(v)];
+            if (freshness.status === 'ready') {
+              lines.push(`  validated-pool: ready (semanticsVersion=${freshness.semanticsVersion}, ${freshness.scorable} scorable, ${freshness.unscorable} unscorable, ${freshness.total} total)`);
+            } else {
+              lines.push(`  validated-pool: stale — ${freshness.reason}`);
+              lines.push(`    run: ${freshness.cli}`);
+            }
+            return lines.join('\n');
+          },
         );
         return;
       }
