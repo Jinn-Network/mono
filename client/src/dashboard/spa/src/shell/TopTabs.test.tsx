@@ -1,95 +1,96 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TopTabs } from './TopTabs.js';
 
-describe('TopTabs', () => {
-  it('marks Overview active when location is /overview', () => {
-    const { hook } = memoryLocation({ path: '/overview' });
-    render(
+const listLaunchedMock = vi.fn();
+
+vi.mock('../api/client.js', () => ({
+  api: {
+    solvernets: {
+      listLaunched: () => listLaunchedMock(),
+    },
+  },
+}));
+
+beforeEach(() => {
+  listLaunchedMock.mockReset();
+  listLaunchedMock.mockResolvedValue({ records: [] });
+});
+
+function renderTabs(path: string): void {
+  const { hook } = memoryLocation({ path });
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
       <Router hook={hook}>
         <TopTabs />
-      </Router>,
-    );
-    const overview = screen.getByText('Overview');
-    const operator = screen.getByText('Operator');
-    const launcher = screen.getByText('Launcher');
-    expect(overview.getAttribute('data-active')).toBe('true');
-    expect(operator.getAttribute('data-active')).toBe('false');
-    expect(launcher.getAttribute('data-active')).toBe('false');
+      </Router>
+    </QueryClientProvider>,
+  );
+}
+
+describe('TopTabs', () => {
+  it('marks Dashboard active when location is /overview', () => {
+    renderTabs('/overview');
+    const dashboard = screen.getByText('Dashboard');
+    const settings = screen.getByText('Settings');
+    expect(dashboard.getAttribute('data-active')).toBe('true');
+    expect(settings.getAttribute('data-active')).toBe('false');
   });
 
   it('does not render the Leaderboard tab while the leaderboard surface is disabled', () => {
-    const { hook } = memoryLocation({ path: '/overview' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
+    renderTabs('/overview');
     expect(screen.queryByText('Leaderboard')).toBeNull();
   });
 
-  it('marks Operator active for operator routes', () => {
-    const { hook } = memoryLocation({ path: '/operator/join/bafybeiaaa' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
-    const operator = screen.getByText('Operator');
-    expect(operator.getAttribute('data-active')).toBe('true');
+  it('marks Settings active for operator routes', () => {
+    renderTabs('/operator/join/bafybeiaaa');
+    const settings = screen.getByText('Settings');
+    expect(settings.getAttribute('data-active')).toBe('true');
   });
 
   it('marks Launcher active for launcher routes', () => {
-    const { hook } = memoryLocation({ path: '/launcher/create' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
+    renderTabs('/launcher/create');
     const launcher = screen.getByText('Launcher');
     expect(launcher.getAttribute('data-active')).toBe('true');
+    expect(listLaunchedMock).not.toHaveBeenCalled();
+  });
+
+  it('hides Launcher until there are owned launched records', async () => {
+    renderTabs('/overview');
+    expect(screen.queryByText('Launcher')).toBeNull();
+    await waitFor(() => expect(listLaunchedMock).toHaveBeenCalledOnce());
+    expect(screen.queryByText('Launcher')).toBeNull();
+  });
+
+  it('shows Launcher when owned launched records exist', async () => {
+    listLaunchedMock.mockResolvedValue({ records: [{ solverNetId: 'sn-1' }] });
+    renderTabs('/overview');
+    await waitFor(() => expect(screen.getByText('Launcher')).toBeTruthy());
+    expect(screen.getByText('Launcher').getAttribute('data-active')).toBe('false');
   });
 
   it('does not expose captures as a top-level tab', () => {
-    const { hook } = memoryLocation({ path: '/overview' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
+    renderTabs('/overview');
     expect(screen.queryByText('Captures')).toBeNull();
   });
 
-  it('marks Operator active for execution data routes', () => {
-    const { hook } = memoryLocation({ path: '/operator/execution-data' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
-    const operator = screen.getByText('Operator');
-    expect(operator.getAttribute('data-active')).toBe('true');
+  it('marks Settings active for execution data routes', () => {
+    renderTabs('/operator/execution-data');
+    const settings = screen.getByText('Settings');
+    expect(settings.getAttribute('data-active')).toBe('true');
   });
 
   it('renders the Build tab', () => {
-    const { hook } = memoryLocation({ path: '/overview' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
+    renderTabs('/overview');
     expect(screen.getByText('Build')).toBeTruthy();
   });
 
   it('marks Build tab active on /build', () => {
-    const { hook } = memoryLocation({ path: '/build' });
-    render(
-      <Router hook={hook}>
-        <TopTabs />
-      </Router>,
-    );
+    renderTabs('/build');
     expect(screen.getByText('Build').getAttribute('data-active')).toBe('true');
   });
 });

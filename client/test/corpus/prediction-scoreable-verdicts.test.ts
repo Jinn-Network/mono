@@ -115,7 +115,7 @@ function makeEvaluationTask(): Task {
     solverType: 'prediction.v1',
     role: 'evaluation',
     window: { startTs: 1000, endTs: 2000 },
-    context: { restorationTaskCid: TASK_CID },
+    context: { solutionTaskCid: TASK_CID },
     spec: {
       question: { kind: 'binary', text: 'Will test pass?', yesLabel: 'YES', noLabel: 'NO' },
       source: {

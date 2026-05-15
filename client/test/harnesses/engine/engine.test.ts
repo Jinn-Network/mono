@@ -9,6 +9,7 @@ import {
 import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { Harness, ReadyStatus, Solution } from '../../../src/harnesses/types.js';
+import { VerdictCode } from '../../../src/adapters/mech/verdict-code.js';
 
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
@@ -631,5 +632,117 @@ describe('TaskEngine', () => {
       const released = await eng.releaseClaimedNotStarted();
       expect(released).toEqual([]);
     });
+  });
+});
+
+// ── verdictCodeForTask ────────────────────────────────────────────────────────
+// verdictCodeForTask is private; access via (eng as any) is intentional for
+// unit-testing the decision logic in isolation.
+
+describe('verdictCodeForTask (fix: uy6v7 — no Pass-by-default)', () => {
+  let store: Store;
+  let eng: TestEngine;
+
+  beforeEach(() => {
+    store = new Store(':memory:');
+    eng = new TestEngine(makeOpts(store));
+  });
+
+  function makeTask(gatingClaim: unknown): PersistedTaskRun {
+    return {
+      requestId: 'req-verdict-test',
+      taskCid: 'bafytest',
+      solverType: 'prediction.v0',
+      windowStartTs: Date.now(),
+      windowEndTs: Date.now() + 1000,
+      onchainCreationTx: '0xabc',
+      onchainCreationBlock: 1,
+      state: TaskRunState.DELIVERING,
+      taskRole: 'evaluation',
+      task: { id: 'req-verdict-test', description: 'test', solverType: 'prediction.v0', role: 'evaluation' },
+      gatingClaim,
+    } as unknown as PersistedTaskRun;
+  }
+
+  it('PASS → VerdictCode.Pass (1)', () => {
+    const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'PASS' }));
+    expect(code).toBe(VerdictCode.Pass);
+  });
+
+  it('SCORED → VerdictCode.Pass (1)', () => {
+    const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'SCORED' }));
+    expect(code).toBe(VerdictCode.Pass);
+  });
+
+  it('FAIL → VerdictCode.Fail (2)', () => {
+    const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'FAIL' }));
+    expect(code).toBe(VerdictCode.Fail);
+  });
+
+  it('REJECTED → VerdictCode.Fail (2)', () => {
+    const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'REJECTED' }));
+    expect(code).toBe(VerdictCode.Fail);
+  });
+
+  it('INVALID → VerdictCode.Invalid (3)', () => {
+    const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'INVALID' }));
+    expect(code).toBe(VerdictCode.Invalid);
+  });
+
+  it('INDETERMINATE → VerdictCode.Unresolved (4)', () => {
+    const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'INDETERMINATE' }));
+    expect(code).toBe(VerdictCode.Unresolved);
+  });
+
+  it('UNRESOLVED → VerdictCode.Unresolved (4)', () => {
+    const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'UNRESOLVED' }));
+    expect(code).toBe(VerdictCode.Unresolved);
+  });
+
+  it('undefined verdict → VerdictCode.Invalid (3) AND emits console.warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const code = (eng as any).verdictCodeForTask(makeTask({ /* no verdict field */ }));
+      expect(code).toBe(VerdictCode.Invalid);
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy.mock.calls[0]![0]).toMatch(/unrecognized gatingClaim\.verdict/);
+      expect(warnSpy.mock.calls[0]![0]).toMatch(/Invalid\(3\)/);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('null gatingClaim → VerdictCode.Invalid (3) AND emits console.warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const code = (eng as any).verdictCodeForTask(makeTask(null));
+      expect(code).toBe(VerdictCode.Invalid);
+      expect(warnSpy).toHaveBeenCalledOnce();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('empty string verdict → VerdictCode.Invalid (3) AND emits console.warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const code = (eng as any).verdictCodeForTask(makeTask({ verdict: '' }));
+      expect(code).toBe(VerdictCode.Invalid);
+      expect(warnSpy).toHaveBeenCalledOnce();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('garbage verdict string → VerdictCode.Invalid (3) AND emits console.warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const code = (eng as any).verdictCodeForTask(makeTask({ verdict: 'TOTALLY_MADE_UP' }));
+      expect(code).toBe(VerdictCode.Invalid);
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy.mock.calls[0]![0]).toMatch(/TOTALLY_MADE_UP/);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

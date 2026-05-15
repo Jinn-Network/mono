@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { canonicalJson } from '../../../../src/harnesses/engine/canonical-json.js';
 import { tmpdir } from 'node:os';
 import { PortfolioV0Evaluator } from '../../../../src/harnesses/impls/portfolio-v0-evaluator/index.js';
-import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
+import { SOLUTION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { HlFill, HlGridPoint } from '../../../../src/venues/hyperliquid/types.js';
@@ -73,7 +73,7 @@ const POST_SNAPSHOT = {
 const MOCK_MANIFEST = {
   schemaVersion: 'jinn.execution.v1',
   solverType: 'portfolio.v0',
-  role: 'restoration',
+  role: 'solution',
   generatedAt: NOW,
   task: {
     cid: 'QmINTENT',
@@ -199,7 +199,7 @@ interface CtxOverrides {
   grid?: HlGridPoint[];
   startTimeClamped?: boolean;
   /** Thread a restoration envelope CID through context (tests CID back-ref). */
-  restorationEnvelopeCid?: string;
+  solutionEnvelopeCid?: string;
   /** Simulate HL API failure. */
   hlError?: boolean;
 }
@@ -221,7 +221,7 @@ function makeCtx(
     intentSpecOverrides = {},
     eligibilityOverrides,
     manifest = MOCK_MANIFEST,
-    restorationEnvelopeCid,
+    solutionEnvelopeCid,
   } = overrides;
 
   const ds: Task = {
@@ -252,7 +252,7 @@ function makeCtx(
     },
     context: {
       restorationResult: JSON.stringify(manifest),
-      ...(restorationEnvelopeCid ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: restorationEnvelopeCid } : {}),
+      ...(solutionEnvelopeCid ? { [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: solutionEnvelopeCid } : {}),
     },
   };
 
@@ -907,21 +907,21 @@ describe('PortfolioV0Evaluator', () => {
     });
   });
 
-  // ── restorationEnvelope back-ref ──────────────────────────────────────────
+  // ── solutionEnvelope back-ref ─────────────────────────────────────────────
 
-  describe('restorationEnvelope back-ref', () => {
-    it('uses restorationEnvelopeCid from context when threaded by daemon', async () => {
+  describe('solutionEnvelope back-ref', () => {
+    it('uses solutionEnvelopeCid from context when threaded by daemon', async () => {
       const workingDir = makeTmpDir();
       dirs.push(workingDir);
       const evaluator = makeEvaluator();
       const envelopeCid = 'f01551220deadbeefcafe';
-      const ctx = makeCtx(workingDir, evaluator, { restorationEnvelopeCid: envelopeCid });
+      const ctx = makeCtx(workingDir, evaluator, { solutionEnvelopeCid: envelopeCid });
       const out = await evaluator.run(ctx);
-      const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
-      expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
+      const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
+      expect(vp.solutionEnvelope.cid).toBe(envelopeCid);
       // sha256 must be the sha256 of the JCS canonical bytes (aligns with JCS upload pipeline)
       const expectedSha256 = createHash('sha256').update(canonicalJson(MOCK_MANIFEST)).digest('hex');
-      expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+      expect(vp.solutionEnvelope.sha256).toBe(expectedSha256);
     });
 
     it('falls back to restorationRequestId when no context key present', async () => {
@@ -930,11 +930,11 @@ describe('PortfolioV0Evaluator', () => {
       const evaluator = makeEvaluator();
       const ctx = makeCtx(workingDir, evaluator);
       const out = await evaluator.run(ctx);
-      const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+      const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
       // restorationRequestId is '0xrequest' in makeCtx
-      expect(vp.restorationEnvelope.cid).toBe('0xrequest');
+      expect(vp.solutionEnvelope.cid).toBe('0xrequest');
       // sha256 must be a valid hex string (not placeholder zeros)
-      expect(vp.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(vp.solutionEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
     });
   });
 });

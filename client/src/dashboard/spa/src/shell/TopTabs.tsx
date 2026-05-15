@@ -1,14 +1,25 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
+import { api } from '../api/client.js';
 
 const TABS = [
-  { path: '/overview', label: 'Overview' },
-  { path: '/operator', label: 'Operator' },
-  { path: '/launcher', label: 'Launcher' },
+  { path: '/overview', label: 'Dashboard' },
+  { path: '/operator', label: 'Settings' },
   { path: '/build', label: 'Build' },
 ] as const;
 
 export function TopTabs(): JSX.Element {
   const [location] = useLocation();
+  const onLauncherRoute = location === '/launcher' || location.startsWith('/launcher/');
+  const { data: launched } = useQuery({
+    queryKey: ['solvernets', 'launched', 'top-tabs'],
+    queryFn: () => api.solvernets.listLaunched(),
+    refetchInterval: 30_000,
+    enabled: !onLauncherRoute,
+  });
+  const showLauncher = onLauncherRoute || (launched?.records.length ?? 0) > 0;
+  const tabs = showLauncher ? [...TABS, { path: '/launcher', label: 'Launcher' } as const] : TABS;
+
   return (
     <nav
       style={{
@@ -16,7 +27,7 @@ export function TopTabs(): JSX.Element {
         padding: '0 24px',
       }}
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = location === tab.path || location.startsWith(`${tab.path}/`);
         return (
           <Link

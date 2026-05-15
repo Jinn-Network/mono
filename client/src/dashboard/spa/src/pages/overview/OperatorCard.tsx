@@ -25,10 +25,9 @@ function roleLabel(role: OperatorCardRole): string {
   return role === 'solving' ? 'Solver' : 'Evaluator';
 }
 
-export function OperatorCard({ name, configId, roles, state, waitingMessage }: OperatorCardProps): JSX.Element {
+export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCardProps): JSX.Element {
   const stateColor =
     state === 'live' ? 'var(--vow-green)' : state === 'available' ? 'var(--fg-muted)' : 'var(--fg-dim)';
-  const configTarget = encodeURIComponent(configId ?? name);
   return (
     <section
       style={{
@@ -52,7 +51,7 @@ export function OperatorCard({ name, configId, roles, state, waitingMessage }: O
             color: 'var(--fg-muted)',
           }}
         >
-          Your {name}
+          Solving on
         </span>
         <span
           style={{
@@ -66,7 +65,9 @@ export function OperatorCard({ name, configId, roles, state, waitingMessage }: O
         </span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--fg)', fontSize: '14px' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--fg)', fontSize: '14px', flexWrap: 'wrap' }}>
+          <span>{name}</span>
+          <span style={{ color: 'var(--fg-muted)' }}>·</span>
           <span style={{ color: 'var(--fg-muted)' }}>{roles.length > 1 ? 'Roles' : 'Role'}</span>
           <span style={{ color: 'var(--fg-muted)' }}>·</span>
           {roles.length === 0 ? (
@@ -93,7 +94,7 @@ export function OperatorCard({ name, configId, roles, state, waitingMessage }: O
           )}
         </span>
         <Link
-          href={`/operator#solvernets/${configTarget}`}
+          href="/operator#solvernets"
           style={{
             color: 'var(--accent-sky)',
             fontSize: '11px',
@@ -102,7 +103,7 @@ export function OperatorCard({ name, configId, roles, state, waitingMessage }: O
             textTransform: 'uppercase',
           }}
         >
-          Configure →
+          Change →
         </Link>
       </div>
       {waitingMessage && (

@@ -1,0 +1,63 @@
+import { describe, it, expect, vi } from 'vitest';
+import { LearnerHarness } from '../../../../src/harnesses/impls/learner/harness.js';
+import type { HarnessAdapter, TaskSessionInputs } from '../../../../src/harnesses/impls/learner/types.js';
+import * as harvestModule from '../../../../src/harnesses/impls/learner/harvest.js';
+import type { HarnessContext } from '../../../../src/harnesses/types.js';
+
+class CapturingAdapter implements HarnessAdapter {
+  readonly name = 'capturing';
+  readonly allowsHarnessSelfModification = false;
+  public lastInputs?: TaskSessionInputs;
+  async runTask(inputs: TaskSessionInputs): Promise<void> {
+    this.lastInputs = inputs;
+  }
+}
+
+function makeMinimalCtx(mode: 'train' | 'frozen'): HarnessContext {
+  return {
+    task: {
+      id: 't1',
+      solverType: 'prediction.v1',
+      window: { startTs: 0, endTs: 0 },
+    } as HarnessContext['task'],
+    implStateDir: '/tmp/state',
+    workingDir: '/tmp/work',
+    log: () => {},
+    abort: new AbortController().signal,
+    msUntilEndTs: () => 0,
+    trajectory: { addSpan: () => {} } as unknown as HarnessContext['trajectory'],
+    mode,
+  };
+}
+
+describe('claude-code-learner mode gate', () => {
+  it('forwards mode = "train" through TaskSessionInputs', async () => {
+    const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockReturnValue({
+      venueRef: { name: 'claude-code-learner' },
+      gating: {},
+    } as ReturnType<typeof harvestModule.harvestOutput>);
+    try {
+      const adapter = new CapturingAdapter();
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
+      await harness.run(makeMinimalCtx('train'));
+      expect(adapter.lastInputs?.mode).toBe('train');
+    } finally {
+      harvestSpy.mockRestore();
+    }
+  });
+
+  it('forwards mode = "frozen" through TaskSessionInputs', async () => {
+    const harvestSpy = vi.spyOn(harvestModule, 'harvestOutput').mockReturnValue({
+      venueRef: { name: 'claude-code-learner' },
+      gating: {},
+    } as ReturnType<typeof harvestModule.harvestOutput>);
+    try {
+      const adapter = new CapturingAdapter();
+      const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/x' });
+      await harness.run(makeMinimalCtx('frozen'));
+      expect(adapter.lastInputs?.mode).toBe('frozen');
+    } finally {
+      harvestSpy.mockRestore();
+    }
+  });
+});

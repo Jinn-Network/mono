@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { api } from '../../api/client.js';
 import { SectionCard } from '../../components/SectionCard.js';
 import { RegistryCatalog } from '../operator-catalog/RegistryCatalog.js';
@@ -53,6 +53,7 @@ export function SolverNetsSection({
   onRestartPending,
   joinedHashFragment,
 }: SolverNetsSectionProps = {}): JSX.Element {
+  const sectionRef = useRef<HTMLDivElement | null>(null);
   const joinedQuery = useQuery<JoinedListResponse>({
     queryKey: ['operator', 'joined'],
     queryFn: () => api.operator.listJoined(),
@@ -71,23 +72,109 @@ export function SolverNetsSection({
     return [parts[0] ?? null, parts[1] === 'harness' ? ('harness' as const) : null] as const;
   }, [joinedHashFragment]);
 
+  useEffect(() => {
+    const focusSection = (): void => {
+      if (!defaultExpanded || joinedHashFragment !== undefined) return;
+      if (window.location.hash !== '#solvernets') return;
+      sectionRef.current?.scrollIntoView({ block: 'start' });
+      sectionRef.current?.focus({ preventScroll: true });
+    };
+    focusSection();
+    window.addEventListener('hashchange', focusSection);
+    return () => window.removeEventListener('hashchange', focusSection);
+  }, [defaultExpanded, joinedHashFragment]);
+
   return (
-    <SectionCard
-      title="SolverNets"
-      summary="Configure your joined SolverNets and discover new ones."
-      defaultExpanded={defaultExpanded}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <section
-          data-testid="solvernets-joined-block"
-          style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'baseline',
-            }}
+    <div id="solvernets" ref={sectionRef} tabIndex={-1}>
+      <SectionCard
+        title="SolverNets"
+        summary="Configure your joined SolverNets and discover new ones."
+        defaultExpanded={defaultExpanded}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <section
+            data-testid="solvernets-joined-block"
+            style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: 'var(--fg-muted)',
+                }}
+              >
+                Joined · {joinedEntries.length}
+              </span>
+              {joinedQuery.isError && (
+                <span
+                  role="alert"
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '11px',
+                    color: 'var(--break-red)',
+                  }}
+                >
+                  Failed to load joined SolverNets.
+                </span>
+              )}
+            </div>
+
+            {joinedQuery.isLoading && (
+              <p
+                data-testid="solvernets-joined-loading"
+                style={{
+                  margin: 0,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '12px',
+                  color: 'var(--fg-muted)',
+                }}
+              >
+                Loading…
+              </p>
+            )}
+
+            {!joinedQuery.isLoading && joinedEntries.length === 0 && (
+              <p
+                data-testid="solvernets-joined-empty"
+                style={{
+                  margin: 0,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '12px',
+                  color: 'var(--fg-muted)',
+                  lineHeight: 1.5,
+                }}
+              >
+                You haven't joined any SolverNets yet. Pick one below to participate.
+              </p>
+            )}
+
+            {joinedEntries.map((entry) => {
+              const isHashTarget = hashCid !== null && hashCid === entry.manifestCid;
+              return (
+                <JoinedNetCard
+                  key={entry.manifestCid}
+                  joined={entry}
+                  defaultExpanded={isHashTarget}
+                  focusOn={isHashTarget ? hashFocus ?? undefined : undefined}
+                  onRestartPending={onRestartPending}
+                />
+              );
+            })}
+          </section>
+
+          <section
+            data-testid="solvernets-discover-block"
+            style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
           >
             <span
               style={{
@@ -99,84 +186,12 @@ export function SolverNetsSection({
                 color: 'var(--fg-muted)',
               }}
             >
-              Joined · {joinedEntries.length}
+              Discover
             </span>
-            {joinedQuery.isError && (
-              <span
-                role="alert"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '11px',
-                  color: 'var(--break-red)',
-                }}
-              >
-                Failed to load joined SolverNets.
-              </span>
-            )}
-          </div>
-
-          {joinedQuery.isLoading && (
-            <p
-              data-testid="solvernets-joined-loading"
-              style={{
-                margin: 0,
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                color: 'var(--fg-muted)',
-              }}
-            >
-              Loading…
-            </p>
-          )}
-
-          {!joinedQuery.isLoading && joinedEntries.length === 0 && (
-            <p
-              data-testid="solvernets-joined-empty"
-              style={{
-                margin: 0,
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '12px',
-                color: 'var(--fg-muted)',
-                lineHeight: 1.5,
-              }}
-            >
-              You haven't joined any SolverNets yet. Pick one below to participate.
-            </p>
-          )}
-
-          {joinedEntries.map((entry) => {
-            const isHashTarget = hashCid !== null && hashCid === entry.manifestCid;
-            return (
-              <JoinedNetCard
-                key={entry.manifestCid}
-                joined={entry}
-                defaultExpanded={isHashTarget}
-                focusOn={isHashTarget ? hashFocus ?? undefined : undefined}
-                onRestartPending={onRestartPending}
-              />
-            );
-          })}
-        </section>
-
-        <section
-          data-testid="solvernets-discover-block"
-          style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
-        >
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              fontWeight: 500,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--fg-muted)',
-            }}
-          >
-            Discover
-          </span>
-          <RegistryCatalog />
-        </section>
-      </div>
-    </SectionCard>
+            <RegistryCatalog />
+          </section>
+        </div>
+      </SectionCard>
+    </div>
   );
 }

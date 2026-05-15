@@ -111,7 +111,7 @@ describe('App routes', () => {
     );
     // Overview renders HeroStats with these canonical eyebrows.
     expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
-    expect(screen.getByText(/jinn earned/i)).toBeTruthy();
+    expect(screen.getByText(/jinn claimable/i)).toBeTruthy();
   });
 
   it('renders OverviewActivityPage on /overview/activity', async () => {
@@ -142,6 +142,8 @@ describe('App routes', () => {
     );
     expect(screen.getByTestId('operator-page')).toBeTruthy();
     expect(screen.getByTestId('live-now-band')).toBeTruthy();
+    expect(screen.getByText(/launcher tools/i).closest('section')).toBeTruthy();
+    expect(screen.getByText(/open launcher/i).closest('a')?.getAttribute('href')).toBe('/launcher');
     // Operator is the configuration surface (SolverNets / Harness / Network /
     // Security). The SolverNets head is the most stable assertion since it
     // never collapses to nothing.

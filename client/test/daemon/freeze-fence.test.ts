@@ -130,4 +130,25 @@ describe('runHarnessWithFreezeFence', () => {
     const result = await runHarnessWithFreezeFence(ephemeralHarness, makeCtx(stateDir, 'frozen'));
     expect(result.ok).toBe(true);
   });
+
+  it('frozen mode excludes harness-declared runtime-only state from the digest', async () => {
+    const runtimeHarness: Harness = {
+      name: 'runtime-writer',
+      version: '0.1.0',
+      freezeStateHashIgnore: ['runtime', 'runtime.json'],
+      supports: () => true,
+      async run(ctx): Promise<Solution> {
+        await mkdir(join(ctx.implStateDir, 'runtime'));
+        await writeFile(join(ctx.implStateDir, 'runtime', 'token.json'), '{"access":"refreshed"}');
+        await writeFile(join(ctx.implStateDir, 'runtime.json'), '{"pid":1}');
+        return { artifact: {} as any, rationale: [] } as any;
+      },
+    };
+
+    const result = await runHarnessWithFreezeFence(runtimeHarness, makeCtx(stateDir, 'frozen'));
+
+    expect(result.ok).toBe(true);
+    expect(await readFile(join(stateDir, 'runtime', 'token.json'), 'utf8')).toBe('{"access":"refreshed"}');
+    expect(await readFile(join(stateDir, 'runtime.json'), 'utf8')).toBe('{"pid":1}');
+  });
 });

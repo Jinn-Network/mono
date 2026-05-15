@@ -17,7 +17,7 @@ const TEST_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
 const baseInputs: EnvelopeInputs = {
   solverType: 'portfolio.v0',
-  role: 'restoration',
+  role: 'solution',
   task: {
     cid: 'bafy-task',
     onchainCreationTx: '0x' + 'ab'.repeat(32),
@@ -77,6 +77,15 @@ describe('checkPayload', () => {
     expect(result.passed).toBe(true);
     expect(result.id).toBe('envelope.payload');
     expect(result.layer).toBe(1);
+  });
+
+  it('normalizes legacy restoration role only for payload schema lookup', async () => {
+    const ctx = await buildGoodCtx();
+    const result = checkPayload({
+      ...ctx,
+      envelope: { ...ctx.envelope!, role: 'restoration' },
+    });
+    expect(result.passed).toBe(true);
   });
 
   it('fails when payload is malformed for the declared kind+role', async () => {
