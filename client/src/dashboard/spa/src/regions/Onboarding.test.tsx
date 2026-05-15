@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Onboarding } from './Onboarding.js';
+import { Onboarding, statusFor } from './Onboarding.js';
 import type { BootstrapState } from '../api/types.js';
 
 // Mock the API client so we control what bootstrap + status data returns.
@@ -40,5 +40,54 @@ describe('Onboarding (3-phase post-vh74.2)', () => {
     render(withQueryClient(<Onboarding />));
     await screen.findByText(/Provisioning your wallet/i);
     expect(screen.queryByText(/Sign in to Claude/i)).toBeNull();
+  });
+});
+
+// statusFor — determines whether a phase row is 'done', 'active', or
+// 'queued'. The funding gate (jinn-mono-hjex.7): Phase 2 ("Fund your wallet")
+// must stay 'active' until the funding gate explicitly clears, even when
+// currentPhase has already advanced to 3. A single drip that briefly crossed
+// the threshold must not flip phase 2 to DONE before the bootstrapper has
+// actually advanced past awaiting_funding on-chain.
+describe('statusFor phase machine', () => {
+  it('marks earlier phases as done when currentPhase advances', () => {
+    expect(statusFor(1, 3)).toBe('done');
+    expect(statusFor(2, 3)).toBe('done');
+    expect(statusFor(1, 2)).toBe('done');
+  });
+
+  it('marks the current phase as active', () => {
+    expect(statusFor(1, 1)).toBe('active');
+    expect(statusFor(2, 2)).toBe('active');
+    expect(statusFor(3, 3)).toBe('active');
+  });
+
+  it('marks later phases as queued', () => {
+    expect(statusFor(3, 2)).toBe('queued');
+    expect(statusFor(3, 1)).toBe('queued');
+    expect(statusFor(2, 1)).toBe('queued');
+  });
+
+  it('keeps Phase 2 active when funding.targetMet is false (hjex.7)', () => {
+    // Explicit false: gate is still open even though step advanced to phase 3.
+    expect(statusFor(2, 3, false)).toBe('active');
+  });
+
+  it('marks Phase 2 done when funding.targetMet is absent (gate cleared)', () => {
+    expect(statusFor(2, 3, undefined)).toBe('done');
+  });
+
+  it('marks Phase 2 done when funding.targetMet is explicitly true', () => {
+    expect(statusFor(2, 3, true)).toBe('done');
+  });
+
+  it('does not apply the funding gate hold to phases other than 2', () => {
+    expect(statusFor(1, 3, false)).toBe('done');
+  });
+
+  it('Phase 2 stays active when it is the current phase, regardless of funding flag', () => {
+    expect(statusFor(2, 2, false)).toBe('active');
+    expect(statusFor(2, 2, undefined)).toBe('active');
+    expect(statusFor(2, 2, true)).toBe('active');
   });
 });

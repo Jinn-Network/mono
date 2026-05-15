@@ -52,6 +52,15 @@ export interface BootstrapState {
     eth_required?: string;
     eth_balance?: string;
     targetWei?: string;
+    /**
+     * True only when master balance has met or exceeded the bootstrap target
+     * AND `currentStep` has advanced past `awaiting_funding`. Present only
+     * when the funding block is included (i.e. when the gate was recently
+     * active). When the gate clears the funding block is omitted entirely,
+     * so consumers should treat absent funding as "not blocking" and present
+     * funding with targetMet===false as "still blocking".
+     */
+    targetMet?: boolean;
   };
   solverNets?: Record<string, {
     name?: string;

@@ -100,7 +100,63 @@ import type { Account } from 'viem/accounts';
 const addr = (value: string): Address => getAddress(value) as Address;
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
-const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+
+/**
+ * 2× cold-start headroom for master ETH target on a fresh bootstrap.
+ *
+ * Gas accounting for a single standard-mode service on first run:
+ *   ~1.3M gas for the Safe deploy + stake + mech (at 2 gwei ≈ 0.0026 ETH)
+ *   + 0.002 ETH Safe seed (sent to the Safe so it can pay mech fees)
+ *   ≈ 0.0046 ETH minimum; 2× gives ≈ 0.009–0.010 ETH — the bootstrap
+ *   `minEoaGasEth` default.
+ *
+ * The multiplier only applies when no service has a persisted `service_id`
+ * on-chain (i.e. the fleet is truly cold — OR migration-wiped, where
+ * services exist in shape but lost their on-chain anchor). Once any service
+ * has committed a `service_id`, the fleet is past the cold-start cliff and
+ * 1× suffices.
+ *
+ * Single source of truth: imported by funding-plan.ts.
+ */
+export const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+
+/**
+ * Compute the required master ETH gate for the standard staking mode.
+ *
+ * @param services         Persisted service states
+ * @param minEoaGasEth     Configured minimum EOA gas target (wei)
+ * @param standardMultiplier  Cold-start multiplier (defaults to {@link STANDARD_MASTER_BOOTSTRAP_MULTIPLIER})
+ * @param pendingSetupMigration  True when deprecated testnet setup detected
+ * @param targetServices   How many services the fleet is aiming for
+ */
+export function computeRequiredMasterEth({
+  services,
+  minEoaGasEth,
+  standardMultiplier = STANDARD_MASTER_BOOTSTRAP_MULTIPLIER,
+  pendingSetupMigration = false,
+  targetServices = 1,
+}: {
+  services: Array<{ service_id: number | null | undefined; step?: string }>;
+  minEoaGasEth: bigint;
+  standardMultiplier?: bigint;
+  pendingSetupMigration?: boolean;
+  targetServices?: number;
+}): bigint {
+  const completedCount = services.filter(s =>
+    s.step !== undefined && isOperationalServiceStep(s.step),
+  ).length;
+  const standardFleetAlreadyComplete =
+    !pendingSetupMigration && completedCount >= targetServices;
+  if (standardFleetAlreadyComplete) return 0n;
+
+  // "Cold in liability" = no service has an on-chain anchor yet.
+  // This includes:
+  //   1. Fresh fleet (services array is empty)
+  //   2. Migration-wiped fleet (services exist in shape but service_id === null)
+  // Apply the 2× headroom multiplier in both cases.
+  const hasPersistedOnChain = services.some(s => s.service_id != null);
+  return minEoaGasEth * (hasPersistedOnChain ? 1n : standardMultiplier);
+}
 
 /** Master ETH required to FINISH the whole bootstrap from a fresh start (not
  *  just to enter Stage 1). Centralized so the daemon's ensureStage1 gate,
@@ -576,15 +632,13 @@ export class FleetBootstrapper {
         stakingMode: this.stakingMode,
         currentStakingContract: this.config.stakingContract,
       }).services.length > 0;
-      const completedCountBeforeFunding = state.services.filter(s =>
-        isOperationalServiceStep(s.step),
-      ).length;
       const standardFleetAlreadyComplete =
         this.stakingMode === 'standard' &&
-        !pendingSetupMigration &&
-        completedCountBeforeFunding >= this.targetServices;
-      const standardFleetHasInProgressServices =
-        this.stakingMode === 'standard' && state.services.length > 0;
+        state.services.length >= this.targetServices &&
+        state.services.every(svc =>
+          svc.step !== undefined && isOperationalServiceStep(svc.step),
+        ) &&
+        !pendingSetupMigration;
       const requiredMasterEth = this.stakingMode === 'standard'
         ? (
             standardFleetAlreadyComplete

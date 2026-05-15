@@ -65,8 +65,22 @@ function bootstrapPhaseFor(step: string): BootstrapPhaseDescriptor {
   return PHASE_FOR_STEP[step] ?? { phase: 1, subState: null };
 }
 
-function statusFor(rowPhase: Phase, currentPhase: Phase): PhaseStatus {
-  if (rowPhase < currentPhase) return 'done';
+/** @internal exported for unit tests */
+export function statusFor(rowPhase: Phase, currentPhase: Phase, fundingTargetMet?: boolean): PhaseStatus {
+  if (rowPhase < currentPhase) {
+    // Phase 2 (Fund your wallet) stays 'active' until the endpoint explicitly
+    // signals that the balance target is met. This prevents a momentary drip
+    // that briefly crossed the threshold from flipping phase 2 to DONE before
+    // the bootstrapper has actually advanced past awaiting_funding on-chain.
+    //
+    // `fundingTargetMet === false` (explicit false from the funding gate) means
+    // the gate is still open; absent funding block means the gate has cleared.
+    // (Numbering note: hjex.7 was authored against the 4-phase shape where
+    // Fund was Phase 3; after vh74.2 collapsed Onboarding to 3 phases, Fund
+    // is now Phase 2.)
+    if (rowPhase === 2 && fundingTargetMet === false) return 'active';
+    return 'done';
+  }
   if (rowPhase === currentPhase) return 'active';
   return 'queued';
 }
@@ -96,7 +110,12 @@ export function Onboarding(): JSX.Element {
   const bootstrapError = bootstrap.error;
   const activeService = bootstrap.services.find((svc) => svc.step === bootstrap.currentStep)
     ?? bootstrap.services[0];
-
+  // hjex.7: explicit `false` means the funding gate is still open; absent
+  // (undefined) means the bootstrapper has cleared funding. The statusFor()
+  // helper keeps Phase 3 (Fund your wallet) 'active' until this clears, so a
+  // momentary drip that briefly crossed the threshold doesn't flip the row
+  // to DONE before the bootstrapper advances past awaiting_funding on-chain.
+  const fundingTargetMet = bootstrap.funding?.targetMet;
   return (
     <div
       className="min-h-screen w-full"
@@ -122,7 +141,7 @@ export function Onboarding(): JSX.Element {
 
           <ol className="flex flex-col">
             {([1, 2, 3] as Phase[]).map((p) => {
-              const status = statusFor(p, currentPhase);
+              const status = statusFor(p, currentPhase, fundingTargetMet);
               const showError = bootstrapError && p === currentPhase;
               return (
                 <PhaseRow key={p} phase={p} status={showError ? 'error' : status}>

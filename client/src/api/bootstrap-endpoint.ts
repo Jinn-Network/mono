@@ -206,6 +206,11 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
           eth_required: fundingGate.eth_required,
           eth_balance: fundingGate.eth_balance,
           targetWei: fundingTargetWei(fundingGate),
+          // targetMet is false whenever the funding gate is active: the gate
+          // fires only when master balance < target. Once the gate clears the
+          // daemon advances past awaiting_funding and the funding block is
+          // omitted entirely (allRunning path or currentStep > awaiting_funding).
+          targetMet: false,
         },
       } : {}),
       ...(error ? { error } : {}),

@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { getAddress } from 'viem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { FleetBootstrapper, computeRequiredMasterEth } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';
 import {
   generateMnemonic,
@@ -1595,5 +1595,61 @@ describe('Fleet bootstrap', () => {
 
     // Guard did not fire — error must NOT contain agent_already_bound
     expect(result.message).not.toContain('agent_already_bound');
+  });
+});
+
+describe('computeRequiredMasterEth (jinn-mono-hjex.7)', () => {
+  const MIN_ETH = 5_000_000_000_000_000n; // 0.005 ETH
+
+  it('applies 2× cold-start multiplier when services array is empty (fresh fleet)', () => {
+    const required = computeRequiredMasterEth({
+      services: [],
+      minEoaGasEth: MIN_ETH,
+    });
+    expect(required).toBe(MIN_ETH * 2n);
+  });
+
+  it('applies 2× cold-start multiplier when services are migration-wiped (service_id === null) (jinn-mono-hjex.7)', () => {
+    const required = computeRequiredMasterEth({
+      services: [{ service_id: null, step: 'awaiting_stake' }],
+      minEoaGasEth: MIN_ETH,
+    });
+    expect(required).toBe(MIN_ETH * 2n);
+  });
+
+  it('uses 1× multiplier when at least one service has a persisted service_id', () => {
+    const required = computeRequiredMasterEth({
+      services: [{ service_id: 42, step: 'staked' }],
+      minEoaGasEth: MIN_ETH,
+    });
+    expect(required).toBe(MIN_ETH);
+  });
+
+  it('returns 0n when fleet is already complete (no pending setup migration)', () => {
+    const required = computeRequiredMasterEth({
+      services: [{ service_id: 42, step: 'complete' }],
+      minEoaGasEth: MIN_ETH,
+      targetServices: 1,
+      pendingSetupMigration: false,
+    });
+    expect(required).toBe(0n);
+  });
+
+  it('applies 2× multiplier to migration-wiped services regardless of step', () => {
+    // Migration-wiped: service_id is null but step advanced (race condition)
+    const required = computeRequiredMasterEth({
+      services: [{ service_id: null, step: 'staked' }],
+      minEoaGasEth: MIN_ETH,
+    });
+    expect(required).toBe(MIN_ETH * 2n);
+  });
+
+  it('respects custom standardMultiplier override', () => {
+    const required = computeRequiredMasterEth({
+      services: [],
+      minEoaGasEth: MIN_ETH,
+      standardMultiplier: 3n,
+    });
+    expect(required).toBe(MIN_ETH * 3n);
   });
 });
