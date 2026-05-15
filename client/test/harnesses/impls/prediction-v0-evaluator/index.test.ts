@@ -86,10 +86,10 @@ describe('PredictionV1Evaluator — verdict pipeline', () => {
     expect(out.gating.score).toBe('0');
   });
 
-  it('INDETERMINATE when context.restorationTaskCid is missing (legacy eval payload)', async () => {
+  it('INDETERMINATE when context.solutionTaskCid is missing', async () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ taskCid: 'task-cid' });
-    const evalTask = makeEvalTask(manifest, task, { omitRestorationTaskCid: true });
+    const evalTask = makeEvalTask(manifest, task, { omitSolutionTaskCid: true });
     const evaluator = new PredictionV1Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
     const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('INDETERMINATE');
@@ -126,25 +126,25 @@ describe('PredictionV1Evaluator — verdict pipeline', () => {
     expect(typeof artifactSpan!.attributes['jinn.artifact.sha256']).toBe('string');
   });
 
-  it('restorationEnvelope.cid uses context restorationEnvelopeCid when present', async () => {
+  it('solutionEnvelope.cid uses context solutionEnvelopeCid when present', async () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task, {
-      restorationEnvelopeCid: 'f01551220abcdef1234',
+      solutionEnvelopeCid: 'f01551220abcdef1234',
     });
     const evaluator = new PredictionV1Evaluator({
       evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
-    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
-    expect(vp.restorationEnvelope.cid).toBe('f01551220abcdef1234');
+    const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
+    expect(vp.solutionEnvelope.cid).toBe('f01551220abcdef1234');
     // Evaluator uses JCS canonical bytes (canonicalJson) to match the upload pipeline.
     const expectedSha256 = createHash('sha256').update(canonicalJson(manifest)).digest('hex');
-    expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+    expect(vp.solutionEnvelope.sha256).toBe(expectedSha256);
   });
 
-  it('restorationEnvelope.cid falls back to bafy-unknown when no context key or requestId', async () => {
+  it('solutionEnvelope.cid falls back to bafy-unknown when no context key or requestId', async () => {
     const task = makeValidTask();
     const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
     const evalTask = makeEvalTask(manifest, task);
@@ -154,10 +154,10 @@ describe('PredictionV1Evaluator — verdict pipeline', () => {
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
-    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
-    // falls back to restorationRequestId (0x00...00) since no RESTORATION_ENVELOPE_CID_CONTEXT_KEY
-    expect(vp.restorationEnvelope.cid).not.toBe('bafy-unknown');
-    expect(vp.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
+    const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
+    // falls back to restorationRequestId (0x00...00) since no solutionEnvelopeCid context key
+    expect(vp.solutionEnvelope.cid).not.toBe('bafy-unknown');
+    expect(vp.solutionEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('INDETERMINATE when oracle has no spanning round', async () => {

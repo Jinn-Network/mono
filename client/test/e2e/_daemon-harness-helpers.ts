@@ -1,0 +1,1463 @@
+// client/test/e2e/_daemon-harness-helpers.ts
+import { createHash } from 'node:crypto';
+import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  createPublicClient,
+  createWalletClient,
+  decodeEventLog,
+  getAddress,
+  http,
+  keccak256,
+  parseAbi,
+  parseEther,
+  toBytes,
+  zeroAddress,
+  type Abi,
+  type Address,
+  type Hex,
+  type Log,
+  type PublicClient,
+  type WalletClient,
+} from 'viem';
+import { base } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
+import { SignedEnvelopeSchema, type SignedEnvelope } from '../../src/types/envelope.js';
+
+const E2E_DIR = dirname(fileURLToPath(import.meta.url));
+const CONTRACTS_DIR = resolve(E2E_DIR, '..', '..', '..', 'contracts');
+import {
+  spawnAnvilFork,
+  jsonRpc as anvilJsonRpc,
+  type AnvilHarness,
+} from '../_support/chain/anvil.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import {
+  SERVICE_REGISTRY_L2_ABI,
+  getChainConfig,
+} from '../../src/earning/contracts.js';
+import { FleetStateStore } from '../../src/earning/store.js';
+import { decryptMnemonic, walletPrivateKeyAtIndex } from '../../src/earning/wallet.js';
+import {
+  ANVIL_PRIVATE_KEYS,
+  compileContracts,
+  writeContractTx,
+  decodeFirstEvent,
+} from './task-first-helpers.js';
+import { Daemon } from '../../src/daemon/daemon.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { getMechDeliveryRate, getTimeoutBounds } from '../../src/adapters/mech/contracts.js';
+import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
+import { buildHarnesses } from '../../src/harnesses/impls/index.js';
+import { Store } from '../../src/store/store.js';
+import {
+  HarnessRegistry,
+  DEFAULT_HARNESS,
+  DEFAULT_DISABLED_HARNESSES,
+} from '../../src/harnesses/engine/registry.js';
+import { signCanonical } from '../../src/harnesses/engine/signing.js';
+import { startApiServer } from '../../src/api/server.js';
+export { compileContracts, ANVIL_PRIVATE_KEYS };
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
+
+const CHAIN_CONFIG = getChainConfig('base');
+
+const PASSWORD = 'test-password';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export type HarnessSelector = 'hermes-agent' | 'claude-code' | 'codex' | 'prediction-v1-baseline';
+
+export interface PostedPredictionTask {
+  taskId: bigint;
+  taskCidDigest: `0x${string}`;
+  manifestDigest: `0x${string}`;
+  /**
+   * Block number containing the TaskCreated event. waitForDaemonClaim uses
+   * this as the initial scan floor so the claim event cannot be missed by a
+   * scan that starts at the tip and races forward — if the daemon claims
+   * within the same block as the post (possible on Anvil's instant-mine),
+   * scanning from the current tip would skip the event permanently.
+   */
+  createdAtBlock: bigint;
+}
+
+export interface DaemonClaim {
+  requestId: `0x${string}`;
+  txHash: `0x${string}`;
+}
+
+export interface DeliveredTask {
+  /** RequestId from the daemon claim. */
+  requestId: `0x${string}`;
+  /** Tx hash of the Deliver event on the mock mech. */
+  deliveryTxHash: `0x${string}`;
+  /** Signed envelope assembled by the daemon and uploaded to mock IPFS. */
+  envelope: SignedEnvelope;
+  /** Solver harness name from envelope.executor.implName. */
+  solverHarnessName: string;
+}
+
+/**
+ * Locally-deployed V3 task stack.
+ *
+ * The production JinnRouter on Base mainnet is V1 and does not support the
+ * new `createTask(taskCidDigest, manifestDigest, policy, ...)` interface.
+ * We deploy a V3 stack locally on the Anvil fork so we can post tasks and
+ * have the daemon claim them.
+ *
+ * The mock mech's `isOperator(safeAddress)` returns true for the bootstrapped
+ * operator's Safe so the V3 router's `claimTask` validation passes.
+ */
+export interface TaskV3Env {
+  /** Locally-deployed JinnRouterV3 address. */
+  routerAddress: `0x${string}`;
+  /** MockTaskMechWithDelivery deployed with `operator = safeAddress`. */
+  mockMechAddress: `0x${string}`;
+  /** MockTaskMarketplace address used by the V3 router. */
+  mockMarketplaceAddress: `0x${string}`;
+  /**
+   * Locally-deployed TaskActivityCheckerV3 address.
+   * Used by `readActivityCount` to read `eligibleActivityWeight[safeAddress]`
+   * and assert that the daemon's settle tx incremented the counter.
+   */
+  activityCheckerAddress: `0x${string}`;
+}
+
+export interface DaemonHarnessFixture {
+  anvil: AnvilHarness;
+  publicClient: PublicClient;
+  operatorEoa: ReturnType<typeof privateKeyToAccount>;
+  workingDirRoot: string;
+  implStateRoot: string;
+  /** Disposes anvil, deletes scratch dirs, etc. */
+  teardown: () => Promise<void>;
+}
+
+export interface BootstrappedOperator {
+  /** Agent EOA private key — held in the test process, not on disk. */
+  agentPrivateKey: `0x${string}`;
+  agentAddress: `0x${string}`;
+  safeAddress: `0x${string}`;
+  mechAddress: `0x${string}`;
+  serviceId: bigint;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Pick the harness from JINN_E2E_HARNESS, default `prediction-v1-baseline`. */
+export function harnessSelectorFromEnv(): HarnessSelector {
+  const raw = (process.env['JINN_E2E_HARNESS'] ?? 'prediction-v1-baseline').trim();
+  if (raw === 'hermes-agent' || raw === 'claude-code' || raw === 'codex' || raw === 'prediction-v1-baseline') {
+    return raw;
+  }
+  throw new Error(`JINN_E2E_HARNESS=${raw} not recognised. Use one of: hermes-agent, claude-code, codex, prediction-v1-baseline.`);
+}
+
+export type HarnessKeyCheck = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Check whether the API key required by the selected harness is present in
+ * the environment. Returns `{ ok: true }` for `prediction-v1-baseline` (no
+ * key needed) and for every other selector when the required env var is set.
+ *
+ * Used at the top of daemon-harness-cycle.ts to skip cleanly (exit 0) when
+ * the operator has not configured credentials for the selected harness.
+ */
+export function checkHarnessApiKey(sel: HarnessSelector): HarnessKeyCheck {
+  switch (sel) {
+    case 'prediction-v1-baseline':
+      return { ok: true };
+    case 'hermes-agent':
+      if (!process.env['OPENROUTER_API_KEY'] && !process.env['ANTHROPIC_API_KEY']) {
+        return { ok: false, reason: 'OPENROUTER_API_KEY or ANTHROPIC_API_KEY required for hermes-agent' };
+      }
+      return { ok: true };
+    case 'claude-code':
+      if (!process.env['ANTHROPIC_API_KEY']) {
+        return { ok: false, reason: 'ANTHROPIC_API_KEY required for claude-code' };
+      }
+      return { ok: true };
+    case 'codex':
+      if (!process.env['OPENAI_API_KEY']) {
+        return { ok: false, reason: 'OPENAI_API_KEY required for codex' };
+      }
+      return { ok: true };
+  }
+}
+
+/**
+ * Map a HarnessSelector to the canonical registered harness name used inside
+ * the daemon's HarnessRegistry / envelope.executor.implName.
+ *
+ * Canonical names come from `client/src/harnesses/names.ts`:
+ *   CLAUDE_CODE_HARNESS = 'claude-code'
+ *   CODEX_HARNESS       = 'codex'
+ *   HERMES_AGENT_HARNESS = 'hermes-agent'
+ * PredictionV1BaselineImpl.name = 'prediction-v1-baseline' (from its index.ts).
+ */
+export function selectorToHarnessName(sel: HarnessSelector): string {
+  switch (sel) {
+    case 'hermes-agent':           return 'hermes-agent';
+    case 'claude-code':            return 'claude-code';
+    case 'codex':                  return 'codex';
+    case 'prediction-v1-baseline': return 'prediction-v1-baseline';
+  }
+}
+
+// ── Contract deployment helpers ───────────────────────────────────────────────
+
+async function loadContractArtifact(pathFromContracts: string): Promise<{ abi: Abi; bytecode: Hex }> {
+  const raw = JSON.parse(
+    await readFile(join(CONTRACTS_DIR, pathFromContracts), 'utf8'),
+  ) as { abi: Abi; bytecode: Hex };
+  return { abi: raw.abi, bytecode: raw.bytecode };
+}
+
+async function deployContractFromArtifact(
+  publicClient: PublicClient,
+  rpcUrl: string,
+  account: ReturnType<typeof privateKeyToAccount>,
+  artifact: { abi: Abi; bytecode: Hex },
+  args: readonly unknown[] = [],
+): Promise<Address> {
+  const client = createWalletClient({ account, chain: base, transport: http(rpcUrl) });
+  const hash = await client.deployContract({
+    abi: artifact.abi,
+    bytecode: artifact.bytecode,
+    args,
+    account,
+    chain: base,
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  if (receipt.status !== 'success') throw new Error(`deploy failed: ${hash}`);
+  if (!receipt.contractAddress) throw new Error(`deploy returned no address: ${hash}`);
+  return getAddress(receipt.contractAddress) as Address;
+}
+
+/**
+ * Deploy a minimal V3 task stack on the Anvil fork.
+ *
+ * The production JinnRouter V1 at `0xfFa7118A3D820cd4E820010837D65FAfF463181B`
+ * does NOT have the `createTask(taskCidDigest, manifestDigest, policy, ...)` interface
+ * (it uses the older OLAS request-first flow). We deploy a fresh V3 stack:
+ *   JinnRouterV3 + TaskCoordinator + TaskActivityCheckerV3 + MockTaskMarketplace
+ * and one MockTaskMechWithDelivery with `operator = safeAddress` so the daemon's
+ * Safe-mediated `claimTask` call passes the `isOperator` check.
+ *
+ * The daemon's MechAdapter is then pointed at the V3 router + mock mech.
+ */
+export async function deployMinimalV3Stack(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  deployerPrivKey: `0x${string}`,
+): Promise<TaskV3Env> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const deployer = privateKeyToAccount(deployerPrivKey);
+
+  const NATIVE_PAYMENT_TYPE = '0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1' as Hex;
+
+  // 1. Load compiled artifacts.
+  const [coordinatorArtifact, routerV3Artifact, marketplaceArtifact, activityArtifact, mechArtifact] =
+    await Promise.all([
+      loadContractArtifact('artifacts/src/tasks/TaskCoordinator.sol/TaskCoordinator.json'),
+      loadContractArtifact('artifacts/src/staking/JinnRouterV3.sol/JinnRouterV3.json'),
+      loadContractArtifact('artifacts/src/stubs/TaskCoordinatorTestMocks.sol/MockTaskMarketplace.json'),
+      loadContractArtifact('artifacts/src/staking/TaskActivityCheckerV3.sol/TaskActivityCheckerV3.json'),
+      loadContractArtifact('artifacts/src/stubs/TaskCoordinatorTestMocks.sol/MockTaskMechWithDelivery.json'),
+    ]);
+
+  // 2. Deploy coordinator, marketplace, activity checker, router (uninitialized).
+  const coordinator = await deployContractFromArtifact(
+    fixture.publicClient, rpcUrl, deployer, coordinatorArtifact,
+  );
+  const marketplace = await deployContractFromArtifact(
+    fixture.publicClient, rpcUrl, deployer, marketplaceArtifact,
+  );
+  const activityChecker = await deployContractFromArtifact(
+    fixture.publicClient, rpcUrl, deployer, activityArtifact,
+  );
+  const router = await deployContractFromArtifact(
+    fixture.publicClient, rpcUrl, deployer, routerV3Artifact,
+  );
+
+  // 3. Initialize in dependency order.
+  const deployerClient = createWalletClient({ account: deployer, chain: base, transport: http(rpcUrl) });
+
+  const initActivity = await deployerClient.writeContract({
+    address: activityChecker,
+    abi: activityArtifact.abi,
+    functionName: 'initialize',
+    args: [parseEther('0.001'), deployer.address, 64n, 0n, 20n],
+    account: deployer,
+    chain: base,
+  });
+  await fixture.publicClient.waitForTransactionReceipt({ hash: initActivity });
+
+  const initCoordinator = await deployerClient.writeContract({
+    address: coordinator,
+    abi: coordinatorArtifact.abi,
+    functionName: 'initialize',
+    args: [deployer.address, router],
+    account: deployer,
+    chain: base,
+  });
+  await fixture.publicClient.waitForTransactionReceipt({ hash: initCoordinator });
+
+  const initRouter = await deployerClient.writeContract({
+    address: router,
+    abi: routerV3Artifact.abi,
+    functionName: 'initialize',
+    args: [deployer.address, marketplace, coordinator, activityChecker],
+    account: deployer,
+    chain: base,
+  });
+  await fixture.publicClient.waitForTransactionReceipt({ hash: initRouter });
+
+  const setRouter = await deployerClient.writeContract({
+    address: activityChecker,
+    abi: activityArtifact.abi,
+    functionName: 'setAuthorizedRouter',
+    args: [router],
+    account: deployer,
+    chain: base,
+  });
+  await fixture.publicClient.waitForTransactionReceipt({ hash: setRouter });
+
+  // 4. Deploy mock mech with operator = safeAddress.
+  //    The V3 router calls `IMechV3(priorityMech).isOperator(msg.sender)` where
+  //    msg.sender is the Safe (since claimTask is called via executeSafeTransaction).
+  const MOCK_MECH_RATE = parseEther('0.0001');
+  const mockMech = await deployContractFromArtifact(
+    fixture.publicClient, rpcUrl, deployer, mechArtifact,
+    [MOCK_MECH_RATE, NATIVE_PAYMENT_TYPE, operator.safeAddress, marketplace],
+  );
+
+  return {
+    routerAddress: router,
+    mockMechAddress: mockMech,
+    mockMarketplaceAddress: marketplace,
+    activityCheckerAddress: activityChecker,
+  };
+}
+
+/**
+ * Spawns an Anvil fork of Base mainnet, funds Anvil-deterministic accounts,
+ * and assembles scratch dirs. Does NOT run earning bootstrap — that's a
+ * separate helper because the production Daemon path uses FleetBootstrapper
+ * instead.
+ */
+export async function setupAnvilFixture(): Promise<DaemonHarnessFixture> {
+  await compileContracts();
+  const anvil = await spawnAnvilFork({ forkUrl: BASE_RPC_URL, silent: true });
+  const operatorEoa = privateKeyToAccount(ANVIL_PRIVATE_KEYS[1]!); // skip deployer
+  const publicClient = createPublicClient({
+    chain: base,
+    transport: http(anvil.rpcUrl),
+  }) as unknown as PublicClient;
+
+  await anvilJsonRpc(anvil.rpcUrl, 'anvil_setBalance', [
+    operatorEoa.address,
+    '0x56bc75e2d63100000', // 100 ETH
+  ]);
+
+  const workingDirRoot = mkdtempSync(join(tmpdir(), 'jinn-daemon-harness-work-'));
+  const implStateRoot = mkdtempSync(join(tmpdir(), 'jinn-daemon-harness-state-'));
+
+  return {
+    anvil,
+    publicClient,
+    operatorEoa,
+    workingDirRoot,
+    implStateRoot,
+    async teardown() {
+      try { await anvil.teardown(); } catch {}
+      try { rmSync(workingDirRoot, { recursive: true, force: true }); } catch {}
+      try { rmSync(implStateRoot, { recursive: true, force: true }); } catch {}
+    },
+  };
+}
+
+/**
+ * Run the FleetBootstrapper 11-step lifecycle to `complete` on the Anvil fork.
+ * Funds the EOA via Anvil's anvil_setBalance (stOLAS mode — the distributor
+ * funds the OLAS bond on-chain, so only ETH is required on the master EOA).
+ *
+ * Pattern lifted from `client/test/e2e/staking.ts` — see that file for the
+ * canonical funding sequence.
+ *
+ * Returns the on-chain identifiers downstream Daemon construction needs.
+ */
+export async function bootstrapStakedOperator(
+  fixture: DaemonHarnessFixture,
+): Promise<BootstrappedOperator> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+
+  // Step 1: Create a temp earning dir under implStateRoot.
+  const earningDir = await mkdtemp(join(fixture.implStateRoot, 'earning-'));
+
+  // Step 2: Construct bootstrapper — run to awaiting_funding to learn the EOA address.
+  const bootstrapper = new FleetBootstrapper({
+    earningDir,
+    chain: 'base',
+    rpcUrl,
+  });
+
+  const firstResult = await bootstrapper.bootstrap(PASSWORD);
+
+  if (!firstResult.funding) {
+    // Unexpectedly completed on first pass (shouldn't happen with a fresh earningDir).
+    if (!firstResult.ok) {
+      throw new Error(`FleetBootstrapper failed before funding gate: ${firstResult.message}`);
+    }
+    // Already complete — unlikely but handle it below.
+  }
+
+  // Step 3: Fund master EOA with 100 ETH so it can pay gas for all 11 steps.
+  // stOLAS mode: the distributor handles OLAS bond — only ETH is needed on the EOA.
+  const masterAddress = firstResult.funding?.master_address ?? firstResult.fleet_state.master_address;
+  if (!masterAddress) {
+    throw new Error('FleetBootstrapper did not expose a master EOA address');
+  }
+
+  await anvilJsonRpc(rpcUrl, 'anvil_setBalance', [
+    getAddress(masterAddress) as Address,
+    '0x56BC75E2D63100000', // 100 ETH in hex — exact value from staking.ts
+  ]);
+
+  // Mine a block so the provider sees the new balance.
+  await anvilJsonRpc(rpcUrl, 'evm_mine', []);
+
+  // Step 4: Re-create bootstrapper with a fresh provider (avoids stale balance cache)
+  // and run to completion.
+  const bootstrapper2 = new FleetBootstrapper({
+    earningDir,
+    chain: 'base',
+    rpcUrl,
+  });
+
+  const result = await bootstrapper2.bootstrap(PASSWORD);
+
+  if (!result.ok) {
+    throw new Error(`FleetBootstrapper did not reach complete: ${result.message}`);
+  }
+
+  // Step 5: Extract per-service state.
+  const service = result.fleet_state.services.find(
+    (svc) => svc.safe_address && svc.mech_address,
+  );
+  if (!service?.safe_address || !service.mech_address || service.service_id == null) {
+    throw new Error(
+      `Bootstrap completed but missing required service fields: ` +
+      `safe=${service?.safe_address ?? 'null'} ` +
+      `mech=${service?.mech_address ?? 'null'} ` +
+      `serviceId=${service?.service_id ?? 'null'}`,
+    );
+  }
+
+  // Step 6: Decrypt mnemonic to derive agent private key.
+  const store = new FleetStateStore(earningDir);
+  const mnemonic = await decryptMnemonic(
+    await store.loadMnemonicKeystore(),
+    PASSWORD,
+  );
+  const agentPrivateKey = walletPrivateKeyAtIndex(mnemonic, service.index);
+  const agentAddress = getAddress(service.agent_address) as `0x${string}`;
+
+  const serviceId = BigInt(service.service_id);
+
+  // Step 7 (sanity check): verify service is staked on-chain — mirrors staking.ts Phase 5.
+  const publicClient = createPublicClient({ chain: base, transport: http(rpcUrl) });
+
+  const serviceState = await publicClient.readContract({
+    address: CHAIN_CONFIG.serviceRegistry as Address,
+    abi: SERVICE_REGISTRY_L2_ABI,
+    functionName: 'getService',
+    args: [serviceId],
+  });
+  if (Number(serviceState.state) !== 4) {
+    throw new Error(
+      `Expected service state 4 (Deployed), got ${serviceState.state} for serviceId=${serviceId}`,
+    );
+  }
+
+  const stakingAbi = parseAbi([
+    'function getServiceIds() view returns (uint256[])',
+  ]);
+  const stakedIds = await publicClient.readContract({
+    address: CHAIN_CONFIG.stakingContract as Address,
+    abi: stakingAbi,
+    functionName: 'getServiceIds',
+  });
+  if (!stakedIds.includes(serviceId)) {
+    throw new Error(
+      `Service ${serviceId} not found in staking contract's getServiceIds()`,
+    );
+  }
+
+  return {
+    agentPrivateKey: agentPrivateKey as `0x${string}`,
+    agentAddress,
+    safeAddress: getAddress(service.safe_address) as `0x${string}`,
+    mechAddress: getAddress(service.mech_address) as `0x${string}`,
+    serviceId,
+  };
+}
+
+// ── Mock IPFS server ───────────────────────────────────────────────────────────
+
+/**
+ * A minimal in-process HTTP server that acts as both an IPFS gateway and
+ * registry for the daemon.
+ *
+ * Serves task JSON at `GET /ipfs/{cid}` paths. The daemon's
+ * `fetchSignedTaskFromIpfs` constructs a CID from the on-chain `taskCidDigest`
+ * and fetches from `${ipfsGatewayUrl}/ipfs/{cid}`. Point `ipfsGatewayUrl` at
+ * this server's `baseUrl` to intercept those fetches without network I/O.
+ *
+ * Also handles `POST /api/v0/add` uploads (Kubo API format) so the daemon's
+ * `uploadToIpfs` call succeeds. Uploaded content is stored in the same map as
+ * registered content — the CID returned is a deterministic sha256-based CIDv1
+ * hex string (`f01551220{sha256hex}`).
+ *
+ * Also exposes `register(digest, json)` so you can pre-populate the store
+ * before posting a task on-chain.
+ */
+export interface MockIpfsServer {
+  /** Base URL of the server (e.g. `http://127.0.0.1:PORT`). */
+  baseUrl: string;
+  /**
+   * Pre-populate: store `json` at the digest path so the daemon can fetch it.
+   * `digest` is the 32-byte hex string (with `0x` prefix) used as the on-chain
+   * `taskCidDigest`; the server serves it at `/ipfs/f01551220{digest.slice(2)}`.
+   */
+  register(digest: `0x${string}`, json: unknown): void;
+  /**
+   * Look up uploaded content by CID string (e.g. `f01551220{hex}`).
+   * Returns the parsed JSON or undefined if not found.
+   */
+  getUploaded(cid: string): unknown | undefined;
+  /** Tear down the HTTP server. */
+  close(): Promise<void>;
+}
+
+function listenServer(server: Server): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      if (!addr || typeof addr === 'string') {
+        reject(new Error('mock IPFS server did not bind to a TCP port'));
+        return;
+      }
+      resolve(addr.port);
+    });
+  });
+}
+
+function closeServer(server: Server): Promise<void> {
+  // Drop keep-alive connections immediately so server.close() doesn't hang
+  // waiting for the daemon's undici HTTP/1.1 pool to time out. Node ≥18.2
+  // exposes closeAllConnections; we require Node ≥20 per package.json.
+  server.closeAllConnections();
+  return new Promise((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+/**
+ * Read the full body of an IncomingMessage as a Buffer.
+ */
+function readBody(req: IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Parse a multipart/form-data body (minimal — only extracts the first `file` part).
+ * Returns the raw bytes of the file part.
+ */
+function parseMultipartBody(body: Buffer, contentType: string): Buffer | null {
+  const boundaryMatch = contentType.match(/boundary=([^\s;]+)/);
+  if (!boundaryMatch) return null;
+  const boundary = `--${boundaryMatch[1]}`;
+  const bodyStr = body.toString('binary');
+  const parts = bodyStr.split(boundary);
+  for (const part of parts) {
+    if (!part.includes('Content-Disposition')) continue;
+    const headerEnd = part.indexOf('\r\n\r\n');
+    if (headerEnd === -1) continue;
+    // Strip leading \r\n and trailing --\r\n
+    const content = part.slice(headerEnd + 4);
+    const trimmed = content.replace(/\r\n--$/, '').replace(/\r\n$/, '');
+    return Buffer.from(trimmed, 'binary');
+  }
+  return null;
+}
+
+export async function startMockIpfsServer(): Promise<MockIpfsServer> {
+  // Map from CID path (e.g. `f01551220{hex}`) → serialised JSON string.
+  const store = new Map<string, string>();
+
+  const server = createServer((req, res) => {
+    void (async () => {
+      try {
+        if (req.method === 'GET' && req.url?.startsWith('/ipfs/')) {
+          const cidPath = decodeURIComponent(req.url.slice('/ipfs/'.length).split('?')[0] ?? '');
+          if (store.has(cidPath)) {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(store.get(cidPath));
+            return;
+          }
+          res.writeHead(404, { 'content-type': 'text/plain' });
+          res.end(`not found: ${cidPath}`);
+          return;
+        }
+
+        // Handle IPFS registry upload: POST /api/v0/add (Kubo API format).
+        // The daemon's `uploadToIpfs` sends a multipart/form-data POST with a
+        // single `file` field containing JCS-encoded JSON bytes. We:
+        //   1. Parse the multipart body to extract the file bytes.
+        //   2. Compute a sha256 digest of the bytes.
+        //   3. Derive a CIDv1 hex key: `f01551220{sha256hex}`.
+        //   4. Store the raw content under that CID path.
+        //   5. Return `{"Hash": "<cidPath>"}` so the daemon can reference it.
+        if (req.method === 'POST' && req.url?.startsWith('/api/v0/add')) {
+          const contentType = req.headers['content-type'] ?? '';
+          const body = await readBody(req);
+          let fileBytes: Buffer;
+          if (contentType.includes('multipart/form-data')) {
+            const parsed = parseMultipartBody(body, contentType);
+            fileBytes = parsed ?? body;
+          } else {
+            fileBytes = body;
+          }
+          const sha256hex = createHash('sha256').update(fileBytes).digest('hex');
+          const cidPath = `f01551220${sha256hex}`;
+          const serialised = fileBytes.toString('utf8');
+          store.set(cidPath, serialised);
+          // Also store under dag-pb variant so gateway fetches succeed either way.
+          store.set(`f01701220${sha256hex}`, serialised);
+          console.log(`[mock-ipfs] uploaded cid=${cidPath} bytes=${fileBytes.length}`);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ Hash: cidPath, Size: fileBytes.length, Name: 'content.json' }));
+          return;
+        }
+
+        res.writeHead(404, { 'content-type': 'text/plain' });
+        res.end('not found');
+      } catch (err) {
+        res.writeHead(500, { 'content-type': 'text/plain' });
+        res.end(err instanceof Error ? err.message : String(err));
+      }
+    })();
+  });
+
+  const port = await listenServer(server);
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  return {
+    baseUrl,
+    register(digest: `0x${string}`, json: unknown) {
+      const hex = digest.startsWith('0x') ? digest.slice(2) : digest;
+      // Register under both codec variants the daemon tries (raw f015 and dag-pb f017).
+      const raw = `f01551220${hex}`;
+      const dagPb = `f01701220${hex}`;
+      const serialised = JSON.stringify(json);
+      store.set(raw, serialised);
+      store.set(dagPb, serialised);
+    },
+    getUploaded(cid: string): unknown | undefined {
+      const serialised = store.get(cid);
+      if (!serialised) return undefined;
+      try { return JSON.parse(serialised) as unknown; } catch { return undefined; }
+    },
+    close() {
+      return closeServer(server);
+    },
+  };
+}
+
+// ── Daemon startup ─────────────────────────────────────────────────────────────
+
+export interface RunningDaemon {
+  daemon: Daemon;
+  store: Store;
+  /** Stop all loops + close store. Idempotent. */
+  stop: () => Promise<void>;
+}
+
+/**
+ * Instantiate the production Daemon class with MechAdapter pointed at the
+ * Anvil fork + the bootstrapped operator's credentials. Start all long-running
+ * loops.
+ *
+ * Polling intervals are shortened (300ms vs production 5000ms) so the test
+ * does not sit idle. Increase if the fork RPC starts struggling.
+ *
+ * SolverNet selection (which harness handles which task) is configured in
+ * Task 6 via JINN_E2E_HARNESS. Task 3 just proves the daemon starts cleanly.
+ *
+ * Translation notes vs main.ts:
+ *   - No shared setupApiServer: Daemon owns and starts its own API server.
+ *   - apiPort: 0 → OS assigns a free port at daemon-startup time (no TOCTOU race).
+ *   - peers: empty (no peer discovery in the test).
+ *   - subgraphUrl: omitted (no-subgraph mode is supported).
+ *   - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → loops not started).
+ *   - packagingDeps / envelopeDeps / deliveryDeps: omitted → pack() falls back
+ *     to NotImplementedError (Task 4+ will wire delivery deps as needed).
+ *   - identityPublisher / reputationFeedback: omitted (no ERC-8004 in test).
+ *   - operatorConfig: minimal synthetic value (no donation, no price).
+ *   - harnessMode: 'train' (default learning mode, same as production default).
+ *   - taskSources: empty (no creator-side tasks; daemon waits for on-chain claims).
+ *   - creatorSafeAddress: set from operator.safeAddress so CreatorLoop scopes correctly.
+ *
+ * @param ipfsGatewayUrl - Override the IPFS gateway URL (default: env var or Autonolas
+ *   gateway). Pass the `baseUrl` of a `MockIpfsServer` so the daemon's task-fetch
+ *   calls hit the in-process server instead of the real Autonolas gateway.
+ * @param v3Env - When provided, the daemon uses the locally-deployed V3 router and
+ *   mock mech instead of the production V1 JinnRouter. Required for Task 4+ so that
+ *   tasks posted via `postPredictionV1Task` are actually claimable.
+ */
+export async function startDaemon(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  harnessSelector: HarnessSelector,
+  ipfsGatewayUrl?: string,
+  v3Env?: TaskV3Env,
+  /**
+   * When provided, used as the IPFS registry URL for uploads (POST /api/v0/add).
+   * The mock IPFS server accepts uploads at its baseUrl + /api/v0/add — pass
+   * mockIpfs.baseUrl here so the daemon's uploadToIpfs calls hit the mock.
+   * Falls back to the real Autonolas registry when absent.
+   */
+  ipfsRegistryUrl?: string,
+): Promise<RunningDaemon> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const chainCfg = getChainConfig('base');
+
+  // 1. SQLite store (Daemon owns this instance; stop() will close it).
+  const storePath = join(fixture.implStateRoot, 'daemon-jinn.db');
+  const store = new Store(storePath);
+
+  // 2. Fix for the Task 3 latent daemonApiUrl: 0 bug.
+  //
+  //    The root cause: subprocess-based harnesses (hermes-agent, claude-code,
+  //    codex) bake `daemonApiUrl` at construction time inside `buildHarnesses`.
+  //    If we call `buildHarnesses` before `daemon.start()`, the URL contains
+  //    port 0 and every harness subprocess gets `DAEMON_API_URL=http://127.0.0.1:0`.
+  //
+  //    Fix chosen: **option (b) — pre-start the API server** via `startApiServer`
+  //    before constructing the daemon. `startApiServer({ port: 0 })` lets the OS
+  //    assign a free port and returns the real bound port. We then pass this
+  //    already-started server to `Daemon` via `config.apiServer` so the daemon
+  //    adopts it instead of starting its own. The pre-started server is closed in
+  //    `stop()` since `ownsApiServer=false` means Daemon won't close it.
+  //
+  //    This approach:
+  //      ✓ No TOCTOU race (OS-assigned port stays bound until daemon adopts it)
+  //      ✓ No production code changes needed (DaemonConfig.apiServer is the
+  //        established injection mechanism used by main.ts setup-mode)
+  //      ✓ Harnesses receive the real URL at construction time
+  const preStartedApiServer = await startApiServer({
+    port: 0,      // OS assigns a free port — actual port read from .port below
+    store,
+    apiToken: 'test-token-daemon-harness', // test-only; cost-mutating routes not exercised
+  });
+  const daemonApiUrl = `http://127.0.0.1:${preStartedApiServer.port}`;
+  console.log(`[startDaemon] pre-started API server on port ${preStartedApiServer.port}`);
+
+  // 3. Build harnesses with the real daemonApiUrl. Mirror the HarnessEnv shape
+  //    from main.ts §1614. All subprocess-harness URL fields are populated so
+  //    hermes-agent / claude-code / codex subprocesses get a working API URL.
+  //    - runner: omitted → LegacyClaudeImpl is not constructed
+  //    - storePath: wired so harnesses can hand off artifacts through SQLite
+  //    - implStateDirRoot: use fixture.implStateRoot so harness state is isolated
+  const claudePath = process.env['JINN_CLAUDE_PATH'] ?? 'claude';
+  const claudeModel = process.env['JINN_CLAUDE_MODEL'] ?? 'claude-haiku-4-5-20251001';
+
+  const resolvedIpfsRegistryUrl = ipfsRegistryUrl
+    ?? process.env['JINN_IPFS_REGISTRY_URL']
+    ?? 'https://registry.autonolas.tech';
+
+  const harnessList = buildHarnesses({
+    rpcUrl,
+    claudePath,
+    claudeModel,
+    pk: operator.agentPrivateKey,
+    safe: operator.safeAddress,
+    // runner omitted → no LegacyClaudeImpl
+    storePath,
+    daemonApiUrl,
+    // daemonApiToken omitted → harnesses will handle missing token gracefully
+    implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
+    // ipfsRegistryUrl wired so harnesses that upload artifacts use the mock
+    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+    // Codex subprocess env defaults
+    codexPath: process.env['JINN_CODEX_PATH'] ?? 'codex',
+    codexModel: process.env['JINN_CODEX_MODEL'] ?? 'gpt-4.1-mini',
+    // Hermes subprocess env defaults
+    hermesPath: process.env['JINN_HERMES_PATH'] ?? 'hermes',
+    hermesModel: process.env['JINN_HERMES_MODEL'] ?? 'google/gemini-2.5-flash',
+    hermesProvider: process.env['JINN_HERMES_PROVIDER'] ?? 'openrouter',
+    // externalImpls omitted — no operator-supplied harnesses
+    // disabledNames omitted — use production defaults
+  });
+
+  // 4. Wire the selected harness into HarnessRegistry dispatch.
+  //
+  //    HermesHarness.supports() now returns true for any restoration role,
+  //    but PredictionV1BaselineImpl is registered BEFORE hermes-agent in
+  //    buildHarnesses(), so prediction.v1 falls to the baseline by first-match.
+  //    LearnerHarness.supports() explicitly returns false for 'prediction.v1'
+  //    (because prediction.v1 has a first-party typed harness). So for
+  //    hermes-agent / claude-code / codex to handle prediction.v1 tasks we
+  //    must override dispatch via solverTypeHarnesses rather than first-match.
+  //
+  //    PredictionV1BaselineImpl.supports() returns true for prediction.v1, so
+  //    that stays as first-match (no solverTypeHarnesses entry needed for it).
+  //
+  //    The selected harness name is the canonical name from names.ts —
+  //    see `selectorToHarnessName` above.
+  const selectedHarnessName = selectorToHarnessName(harnessSelector);
+  const solverTypeHarnesses: Record<string, string> =
+    harnessSelector === 'prediction-v1-baseline'
+      ? {}
+      : { 'prediction.v1': selectedHarnessName };
+
+  const implRegistry = new HarnessRegistry({
+    default: DEFAULT_HARNESS,
+    disabled: [...DEFAULT_DISABLED_HARNESSES],
+    solverTypeHarnesses,
+  });
+  for (const impl of harnessList) {
+    implRegistry.register(impl);
+  }
+
+  // 5. Build MechAdapter. Translation of main.ts §1469.
+  //    - routerClaimDeliveryVariant: 'v3' when v3Env is provided (local stack);
+  //      'v1' otherwise (production router).
+  //    - routerAddress / mechContractAddress: use v3Env addresses when provided;
+  //      fall back to production addresses for Task 3 (no-v3Env path).
+  //    - taskDiscovery.onchainFromBlock: set to 0 when using the local V3 stack so
+  //      the daemon scans from genesis of the fork (block 0) — otherwise it would
+  //      default to block ~25M and miss our freshly-deployed router's events.
+  //    - evictionRecovery: omitted — no master wallet in test
+  //    - pollIntervalMs: 300ms (shortened for test cadence)
+  const routerAddress = v3Env
+    ? v3Env.routerAddress
+    : (chainCfg.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
+  const mechContractAddress = v3Env
+    ? v3Env.mockMechAddress
+    : operator.mechAddress;
+  const mechMarketplaceAddress = v3Env
+    ? v3Env.mockMarketplaceAddress
+    : chainCfg.mechMarketplace as `0x${string}`;
+  const routerClaimDeliveryVariant = v3Env ? 'v3' : chainCfg.routerClaimDeliveryVersion;
+
+  const resolvedIpfsGatewayUrl = ipfsGatewayUrl
+    ?? process.env['JINN_IPFS_GATEWAY_URL']
+    ?? 'https://gateway.autonolas.tech';
+
+  const mechAdapter = new MechAdapter({
+    rpcUrl,
+    mechMarketplaceAddress,
+    routerAddress,
+    mechContractAddress,
+    safeAddress: operator.safeAddress,
+    agentEoaPrivateKey: operator.agentPrivateKey,
+    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+    ipfsGatewayUrl: resolvedIpfsGatewayUrl,
+    pollIntervalMs: 300,
+    chainId: 8453,
+    routerClaimDeliveryVariant,
+    // taskDiscovery: omitted → daemon scans from current block onwards; no manifest
+    // filter (joinedManifestDigests.size === 0 → all tasks are discovered).
+    // evictionRecovery: omitted — no master wallet in test
+  }, store);
+
+  // 6. Build agent viem clients for deliveryDeps (mirrors main.ts §1513 + §1699).
+  //    These are required for the full delivery path (Task 5+).
+  const { createClients } = await import('../../src/adapters/mech/safe.js');
+  const agentClients = createClients(rpcUrl, operator.agentPrivateKey, base);
+
+  // 7. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
+  //    - packagingDeps: operatorEndpoint + pricing config for artifact serving.
+  //      No artifact donation in tests; donation.enabled = false.
+  //    - envelopeDeps: agent EOA private key + IPFS registry URL for envelope upload.
+  //    - deliveryDeps: viem clients + contract addresses for on-chain delivery.
+  //    The safeAddress in envelopeDeps matches the operator Safe so the
+  //    envelope's participant.safeAddress is correct.
+  const packagingDeps = {
+    operatorEndpoint: daemonApiUrl,
+    defaultPriceUsdc: '0',
+    perArtifactTypePrice: {} as Record<string, string>,
+    donation: {
+      enabled: false,
+      ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+    },
+  };
+
+  const envelopeDeps = {
+    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+    agentEoaPrivateKey: operator.agentPrivateKey,
+    safeAddress: operator.safeAddress,
+  };
+
+  const deliveryDeps = {
+    publicClient: agentClients.publicClient,
+    walletClient: agentClients.walletClient as unknown as WalletClient,
+    safeAddress: operator.safeAddress as Address,
+    mechContractAddress: (v3Env ? v3Env.mockMechAddress : operator.mechAddress) as Address,
+    routerAddress: (v3Env ? v3Env.routerAddress : routerAddress) as Address,
+    claimDeliveryVariant: routerClaimDeliveryVariant as 'v1' | 'v2' | 'v3',
+    // evictionRecovery: omitted — no master wallet in test
+  };
+
+  // 8. Construct Daemon. Translation of main.ts §2046.
+  //    - store: injected so Daemon does NOT own it (our stop() closes it explicitly)
+  //    - taskSources: omitted (no creator-side tasks in Task 5+)
+  //    - peers / subgraphUrl / nodeEndpoint: omitted (test environment)
+  //    - rewardClaim / balanceTopup / jinnClaim: omitted (interval 0 → no loops)
+  //    - status: omitted (GET /v1/status not exercised here)
+  //    - corpusFactory: omitted (no subgraph configured)
+  //    - apiServer: the pre-started server from step 2 — Daemon adopts it
+  //      (ownsApiServer=false) so our stop() must close it explicitly.
+  const daemon = new Daemon({
+    adapter: mechAdapter,
+    // runner omitted — DaemonConfig.runner is optional and only consumed by
+    // LegacyClaudeImpl, which we didn't include in buildHarnesses.
+    store,        // Daemon adopts (ownsStore=false); our stop() handles close
+    dbPath: storePath, // used only when store is absent; kept for completeness
+    pollIntervalMs: 300,  // shortened from production 5000ms for test cadence
+    apiServer: preStartedApiServer, // inject pre-started server (ownsApiServer=false)
+    // apiToken: not passed because we injected apiServer with its own token above
+    peers: [],
+    creatorSafeAddress: operator.safeAddress,
+    // subgraphUrl / nodeEndpoint / x402 / signer: omitted
+    // rewardClaim / balanceTopup / jinnClaim: omitted → those loops don't start
+    restorationEngine: {
+      paths: {
+        workingDirRoot: fixture.workingDirRoot,
+        implStateDirRoot: join(fixture.implStateRoot, 'impl-state'),
+      },
+      implRegistry,
+      packagingDeps,
+      envelopeDeps,
+      deliveryDeps,
+      // joinedSolverNets: omitted — engine falls back to legacy solverType gate.
+      // Harness dispatch for non-baseline selectors is driven by
+      // implRegistry.config.solverTypeHarnesses (wired in step 4 above).
+      // manifestResolver / identityPublisher / reputationFeedback: omitted
+      operatorConfig: {
+        publicEndpoint: daemonApiUrl,
+        defaultPriceUsdc: '0',
+        perArtifactTypePrice: {},
+        donation: { enabled: false },
+      },
+      harnessMode: 'train',
+    },
+  });
+
+  // 9. Start the daemon (kicks off all configured loops).
+  await daemon.start();
+
+  let stopped = false;
+  const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    await daemon.stop();
+    store.close();
+    // Close the pre-started API server: the Daemon does NOT own it
+    // (ownsApiServer=false when config.apiServer is injected), so we
+    // are responsible for closing it here.
+    await preStartedApiServer.close().catch(() => {});
+  };
+
+  return { daemon, store, stop };
+}
+
+// ── Task posting + claim detection ────────────────────────────────────────────
+
+/**
+ * Build, sign, and register a prediction.v1 task with the mock IPFS server,
+ * then post it on the locally-deployed V3 JinnRouter.
+ *
+ * The task uses `solverNetManifestCid = 'prediction.v1'` (the legacy string
+ * form); `manifestDigest = keccak256(toBytes('prediction.v1'))`. The daemon's
+ * MechAdapter discovers the task via on-chain log scan (no joinedSolverNets
+ * filter needed — the filter is skipped when the set is empty), fetches the
+ * signed task from the mock IPFS server, and claims it via the Safe.
+ *
+ * @param fixture        - Anvil harness + scratch dirs.
+ * @param operator       - Bootstrapped operator (Safe address used as creator).
+ * @param creatorPrivKey - EOA private key that funds + posts the task. Must
+ *   have ETH on the fork (fund via `anvil_setBalance` before calling).
+ * @param mockIpfs       - Mock IPFS server to register the signed task with.
+ * @param v3Env          - Locally-deployed V3 stack addresses (from `deployMinimalV3Stack`).
+ */
+export async function postPredictionV1Task(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  creatorPrivKey: `0x${string}`,
+  mockIpfs: MockIpfsServer,
+  v3Env: TaskV3Env,
+): Promise<PostedPredictionTask> {
+  const rpcUrl = fixture.anvil.rpcUrl;
+  const routerAddress = v3Env.routerAddress;
+  const marketplaceAddress = v3Env.mockMarketplaceAddress;
+
+  const creator = privateKeyToAccount(creatorPrivKey);
+  const now = Date.now();
+  const nowSec = Math.floor(now / 1000);
+
+  // ── Step 1: Build the signed task document ────────────────────────────────
+  // The SignedTaskV1 schema requires: schemaVersion, id, solverType,
+  // solverNetManifestCid, contractId, contractVersion, role, description,
+  // window, spec, eligibility, claimPolicy, creator, createdAt, signature.
+  const MANIFEST_CID = 'prediction.v1'; // legacy string form
+  const unsignedTaskDoc = {
+    schemaVersion: 'task.v1' as const,
+    id: 'daemon-harness-e2e-task-4',
+    solverType: 'prediction.v1',
+    solverNetManifestCid: MANIFEST_CID,
+    contractId: 'prediction',
+    contractVersion: 'v1',
+    role: 'restoration' as const,
+    description: 'Will the daemon-harness e2e Task 4 claim succeed? YES.',
+    window: {
+      startTs: now - 5_000,
+      endTs: now + 600_000,
+    },
+    spec: {
+      question: {
+        kind: 'binary' as const,
+        text: 'Will the daemon-harness e2e Task 4 claim succeed?',
+        yesLabel: 'YES' as const,
+        noLabel: 'NO' as const,
+      },
+      source: {
+        type: 'prediction-market' as const,
+        venue: 'polymarket' as const,
+        url: 'https://polymarket.com/event/jinn-daemon-harness-e2e-task4',
+        identifiers: {
+          marketId: 'jinn-daemon-harness-e2e-task4',
+          conditionId: '0xcondition-daemon-harness-e2e-task4',
+          yesTokenId: 'yes-token-daemon-harness-e2e-task4',
+          noTokenId: 'no-token-daemon-harness-e2e-task4',
+        },
+      },
+      resolution: {
+        expectedResolutionTime: new Date(now + 3_600_000).toISOString(),
+        rulesText: 'Daemon harness e2e Task 4 fixture resolves YES.',
+        rulesUrl: 'https://example.com/jinn-daemon-harness-e2e-task4-rules',
+      },
+      consensusSnapshot: {
+        sampledAt: new Date(now - 10_000).toISOString(),
+        probabilityYes: '0.75',
+        method: 'best-bid-ask-midpoint' as const,
+        bestBidYes: '0.74',
+        bestAskYes: '0.76',
+        spread: '0.02',
+        source: 'polymarket-clob' as const,
+      },
+      eligibilitySnapshot: {
+        sampledAt: new Date(now - 10_000).toISOString(),
+        timeToResolutionHours: 1,
+        liquidityUsd: '50000',
+        volume24hUsd: '20000',
+        orderbookAgeSeconds: 5,
+        selectionReason: 'deterministic daemon-harness e2e Task 4 fixture',
+      },
+    },
+    eligibility: {},
+    claimPolicy: {
+      mode: 'parallel' as const,
+      maxClaims: 10,
+      maxClaimsPerOperator: 1,
+      claimLeaseTtlSeconds: 600,
+      claimWindowStartTs: nowSec - 5,
+      claimWindowEndTs: nowSec + 300,
+      submissionDeadlineTs: nowSec + 900,
+    },
+    creator: {
+      safeAddress: operator.safeAddress as `0x${string}`,
+      agentEoa: operator.agentAddress as `0x${string}`,
+    },
+    createdAt: now,
+  };
+
+  // Sign the task document with the creator's key (any secp256k1 key works;
+  // the daemon does not validate the creator signature at claim time).
+  const signed = await signCanonical(unsignedTaskDoc, creatorPrivKey, creator.address);
+  const signedTaskDoc = {
+    ...unsignedTaskDoc,
+    signature: {
+      algo: 'secp256k1' as const,
+      signer: creator.address,
+      hash: signed.hash,
+      sig: signed.sig,
+    },
+  };
+
+  // ── Step 2: Compute on-chain digest and register with mock IPFS ────────────
+  // `taskCidDigest` = keccak256(JSON.stringify(signedTaskDoc)).
+  // The daemon derives the IPFS CID as `f01551220${digest.slice(2)}` from the
+  // on-chain event and fetches from the mock gateway at that path.
+  const taskJson = JSON.stringify(signedTaskDoc);
+  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  mockIpfs.register(taskCidDigest, signedTaskDoc);
+
+  // ── Step 3: Compute manifestDigest ────────────────────────────────────────
+  const manifestDigest = keccak256(toBytes(MANIFEST_CID)) as `0x${string}`;
+
+  // ── Step 4: Get delivery rate + timeout from the mock mech/marketplace ──────
+  // Use the mock mech's maxDeliveryRate so the V3 router's budget check passes.
+  const deliveryRate = await getMechDeliveryRate(
+    fixture.publicClient,
+    v3Env.mockMechAddress as Address,
+  );
+  const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
+  const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
+
+  // ── Step 5: Build claim policy matching the task doc ──────────────────────
+  const latestBlock = await fixture.publicClient.getBlock();
+  const chainNowSec = Number(latestBlock.timestamp);
+  const onchainPolicy = {
+    claimWindowStart: BigInt(chainNowSec - 5),
+    claimWindowEnd: BigInt(chainNowSec + 300),
+    submissionDeadline: BigInt(chainNowSec + 900),
+    claimLeaseTtlSeconds: 600,
+    maxClaims: 10,
+    maxClaimsPerOperator: 1,
+    policyHook: zeroAddress,
+    evaluationPolicy: {
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      evaluationDeadline: BigInt(chainNowSec + 1_200),
+      maxVerdictsPerEvaluator: 1,
+      disallowSolverSelfEvaluation: false,
+    },
+  };
+
+  // ── Step 6: Post task on-chain via the locally-deployed V3 JinnRouter ───────
+  // The V3 router's createTask requires: msg.value == solutionBudget + verdictBudget
+  // where solutionBudget = rate * maxClaims and verdictBudget = rate * maxClaims * requiredVerdicts.
+  // With maxClaims=10 and requiredVerdicts=1: value = rate * 10 + rate * 10 * 1 = rate * 20.
+  const MAX_CLAIMS = 10n;
+  const REQUIRED_VERDICTS = 1n;
+  const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
+  const solutionBudget = rateArg * MAX_CLAIMS;
+  const verdictBudget = rateArg * MAX_CLAIMS * REQUIRED_VERDICTS;
+  const value = solutionBudget + verdictBudget;
+
+  const created = await writeContractTx({
+    publicClient: fixture.publicClient,
+    rpcUrl,
+    account: creator,
+    address: routerAddress,
+    abi: JINN_ROUTER_ABI,
+    functionName: 'createTask',
+    args: [taskCidDigest, manifestDigest, onchainPolicy, rateArg, rateArg, responseTimeout],
+    value,
+  });
+
+  const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_ABI, 'TaskCreated');
+  const taskId = BigInt(String(taskCreated['taskId']));
+  const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
+
+  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
+}
+
+// ── Deliver event ABI for MockTaskMechWithDelivery ───────────────────────────
+
+/**
+ * Minimal ABI covering the Deliver event emitted by MockTaskMechWithDelivery.
+ *
+ * event Deliver(
+ *   address indexed mech,
+ *   address indexed mechServiceMultisig,
+ *   bytes32 requestId,       ← non-indexed
+ *   uint256 deliveryRate,    ← non-indexed
+ *   bytes data               ← non-indexed (contains the delivery digest)
+ * )
+ */
+const MOCK_MECH_DELIVER_ABI = [
+  {
+    name: 'Deliver',
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'mech', type: 'address', indexed: true },
+      { name: 'mechServiceMultisig', type: 'address', indexed: true },
+      { name: 'requestId', type: 'bytes32', indexed: false },
+      { name: 'deliveryRate', type: 'uint256', indexed: false },
+      { name: 'data', type: 'bytes', indexed: false },
+    ],
+  },
+] as const;
+
+/**
+ * Poll the MockTaskMechWithDelivery for a `Deliver` event matching
+ * `claim.requestId`. When found, fetches the signed envelope from the
+ * mock IPFS server (the daemon uploads on settle) and parses it via
+ * `SignedEnvelopeSchema`.
+ *
+ * The delivery tx hash comes from the on-chain Deliver event. The
+ * envelope CID is derived from the event's `data` field: the daemon
+ * uploads via `POST /api/v0/add` and the returned CID is
+ * `f01551220{sha256hex}`; `deliverToMarketplace` passes
+ * `cidToDigestHex(manifestCid)` = `0x{sha256hex}` as the delivery digest,
+ * so the CID path is `f01551220${deliveryDigest.slice(2)}`.
+ *
+ * Resolves when delivery is on-chain and the envelope is parsed.
+ * Rejects after `timeoutMs` (default 180s).
+ */
+export async function waitForDelivery(
+  fixture: DaemonHarnessFixture,
+  claim: DaemonClaim,
+  v3Env: TaskV3Env,
+  mockIpfs: MockIpfsServer,
+  timeoutMs = 180_000,
+): Promise<DeliveredTask> {
+  const mechAddress = v3Env.mockMechAddress;
+  const deadline = Date.now() + timeoutMs;
+
+  // Start scanning from the current block at call time — Deliver can only happen
+  // after the claim (which is already on-chain). Using the current tip as the
+  // floor avoids the 10,000-block getLogs range limit when scanning an Anvil
+  // fork of Base mainnet (which starts at block ~46M).
+  const startBlock = await fixture.publicClient.getBlockNumber();
+  let scannedUpTo = startBlock > 1n ? startBlock - 1n : 0n;
+
+  while (Date.now() < deadline) {
+    const currentBlock = await fixture.publicClient.getBlockNumber();
+    const fromBlock = scannedUpTo + 1n;
+
+    if (fromBlock <= currentBlock) {
+      const logs = await fixture.publicClient.getLogs({
+        address: mechAddress,
+        fromBlock,
+        toBlock: currentBlock,
+      });
+
+      let foundDeliverButNoEnvelope = false;
+
+      for (const log of logs as Log[]) {
+        try {
+          const decoded = decodeEventLog({
+            abi: MOCK_MECH_DELIVER_ABI,
+            data: log.data,
+            topics: log.topics,
+          });
+          if (decoded.eventName !== 'Deliver') continue;
+          const args = decoded.args as {
+            requestId: `0x${string}`;
+            deliveryRate: bigint;
+            data: `0x${string}`;
+          };
+          // Filter: the non-indexed requestId must match our claim.
+          if (args.requestId.toLowerCase() !== claim.requestId.toLowerCase()) continue;
+
+          // Found the Deliver event for our requestId.
+          const deliveryTxHash = (log.transactionHash ?? '0x') as `0x${string}`;
+
+          // Derive the envelope CID from the delivery data field.
+          // The daemon calls cidToDigestHex(manifestCid) = 0x{sha256hex} as the
+          // delivery data. But `deliverToMarketplace` passes it as a `bytes` arg,
+          // so `args.data` is the ABI-encoded bytes value which is exactly the
+          // 32-byte sha256 digest when the daemon passes bytes32 cast to bytes.
+          // The CID in mock IPFS is `f01551220{sha256hex}` where sha256hex =
+          // args.data.slice(2) (the raw 32-byte hex, no leading 0x).
+          const deliveryDataHex = (args.data ?? '').startsWith('0x')
+            ? (args.data as string).slice(2)
+            : (args.data as string);
+
+          // args.data is the decoded hex of the 32-byte delivery digest
+          // (viem's decodeEventLog already ABI-decoded the bytes parameter).
+          // Slice the last 64 hex chars to defensively recover the digest even
+          // if a future contract change wraps it in additional padding.
+          const digestHex = deliveryDataHex.length >= 64
+            ? deliveryDataHex.slice(-64)
+            : deliveryDataHex;
+
+          const candidateCids = [
+            `f01551220${digestHex}`,
+            `f01701220${digestHex}`,
+          ];
+
+          let envelopeJson: unknown | undefined;
+          for (const cid of candidateCids) {
+            const found = mockIpfs.getUploaded(cid);
+            if (found !== undefined) {
+              envelopeJson = found;
+              break;
+            }
+          }
+
+          if (envelopeJson === undefined) {
+            // Envelope not yet in mock IPFS store — daemon may still be uploading.
+            // Mark so we don't advance scannedUpTo past this block (we need to re-check).
+            foundDeliverButNoEnvelope = true;
+            break;
+          }
+
+          // Parse and validate as SignedEnvelope.
+          const envelope = SignedEnvelopeSchema.parse(envelopeJson);
+          const solverHarnessName = envelope.executor.implName;
+
+          return {
+            requestId: claim.requestId,
+            deliveryTxHash,
+            envelope,
+            solverHarnessName,
+          };
+        } catch (err) {
+          // If the event matched our ABI (i.e. we got past decodeEventLog and
+          // the requestId comparison) but envelope parsing failed, that's a
+          // hard error — re-throw rather than silently advancing the scan
+          // floor past the only block where the event will ever exist.
+          // ZodError detection: check name, not message (message holds the
+          // JSON-formatted issues array, never literally "ZodError").
+          if (err instanceof Error && err.name === 'ZodError') {
+            throw new Error(
+              `waitForDelivery: envelope failed SignedEnvelopeSchema for requestId=${claim.requestId}: ${err.message.slice(0, 400)}`,
+            );
+          }
+          // Otherwise: not our event (different ABI) — keep scanning.
+        }
+      }
+
+      // Only advance the scan floor when we fully processed all logs in range.
+      // If we found the event but IPFS isn't ready yet, keep the same floor so
+      // the next iteration re-scans the same range (harmless: Deliver is idempotent).
+      if (!foundDeliverButNoEnvelope) {
+        scannedUpTo = currentBlock;
+      }
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(
+    `waitForDelivery: timed out after ${timeoutMs}ms waiting for Deliver event ` +
+    `(requestId=${claim.requestId}, mechAddress=${mechAddress})`,
+  );
+}
+
+/**
+ * Poll the locally-deployed V3 JinnRouter for a `TaskAttemptCreated` event
+ * matching `task.taskId` and `operator.safeAddress` (the operator that the daemon
+ * claims with). The daemon claims via its Safe, so the `operator` field in the
+ * event is the Safe address.
+ *
+ * Resolves when the daemon has claimed, or rejects after `timeoutMs`.
+ */
+export async function waitForDaemonClaim(
+  fixture: DaemonHarnessFixture,
+  task: PostedPredictionTask,
+  operator: BootstrappedOperator,
+  v3Env: TaskV3Env,
+  timeoutMs = 120_000,
+): Promise<DaemonClaim> {
+  const routerAddress = v3Env.routerAddress;
+
+  const deadline = Date.now() + timeoutMs;
+  // First scan must cover the block containing TaskCreated — Anvil's
+  // instant-mine could already have the claim in the same block as the post,
+  // and starting from the tip would skip it permanently.
+  let scannedUpTo: bigint = task.createdAtBlock > 0n ? task.createdAtBlock - 1n : 0n;
+
+  while (Date.now() < deadline) {
+    const currentBlock = await fixture.publicClient.getBlockNumber();
+    const fromBlock = scannedUpTo + 1n;
+    scannedUpTo = currentBlock;
+
+    if (fromBlock <= currentBlock) {
+      const logs = await fixture.publicClient.getLogs({
+        address: routerAddress,
+        fromBlock,
+        toBlock: currentBlock,
+      });
+
+      for (const log of logs as Log[]) {
+        try {
+          const decoded = decodeEventLog({
+            abi: JINN_ROUTER_ABI,
+            data: log.data,
+            topics: log.topics,
+          });
+          if (decoded.eventName !== 'TaskAttemptCreated') continue;
+          const args = decoded.args as {
+            taskId: bigint;
+            attemptIndex: number;
+            requestId: Hex;
+            operator: `0x${string}`;
+            priorityMech: `0x${string}`;
+          };
+          // Filter by taskId and operator (Safe address).
+          if (args.taskId !== task.taskId) continue;
+          if (getAddress(args.operator) !== getAddress(operator.safeAddress)) continue;
+          return {
+            requestId: args.requestId,
+            txHash: (log.transactionHash ?? '0x') as `0x${string}`,
+          };
+        } catch {
+          // Not a TaskAttemptCreated event for our ABI — skip.
+        }
+      }
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(
+    `waitForDaemonClaim: timed out after ${timeoutMs}ms waiting for TaskAttemptCreated ` +
+    `(taskId=${task.taskId}, operator=${operator.safeAddress})`,
+  );
+}
+
+/**
+ * Read the operator's on-chain activity counter from the locally-deployed
+ * TaskActivityCheckerV3. The counter (`eligibleActivityWeight`) increments
+ * when the V3 router calls `recordSolutionDelivery(safeAddress, solutionDigest)`
+ * during `claimSolutionDelivery`. We compare before/after values around
+ * `waitForDelivery` to assert the daemon's settle tx actually registered
+ * with the activity checker.
+ *
+ * Note: this reads from our locally-deployed TaskActivityCheckerV3 (in the V3
+ * stack deployed by `deployMinimalV3Stack`), NOT from the production OLAS
+ * staking contract. The production staking contract tracks the production
+ * JinnRouter and is unaware of our locally-deployed V3 stack — but the local
+ * activity checker IS wired to the local V3 router via `setAuthorizedRouter`,
+ * so deliveries through our test stack increment the local counter correctly.
+ *
+ * Returns the raw `eligibleActivityWeight` as a bigint.
+ */
+export async function readActivityCount(
+  fixture: DaemonHarnessFixture,
+  operator: BootstrappedOperator,
+  v3Env: TaskV3Env,
+): Promise<bigint> {
+  const activityArtifact = await loadContractArtifact(
+    'artifacts/src/staking/TaskActivityCheckerV3.sol/TaskActivityCheckerV3.json',
+  );
+  const result = await fixture.publicClient.readContract({
+    address: v3Env.activityCheckerAddress as Address,
+    abi: activityArtifact.abi,
+    functionName: 'eligibleActivityWeight',
+    args: [operator.safeAddress as Address],
+  });
+  return result as bigint;
+}

@@ -9,6 +9,7 @@
  */
 
 import { SOLVER_TYPE_PAYLOADS } from '../../types/payloads/index.js';
+import { normalizeEnvelopeRole } from '../../types/envelope.js';
 import type { CheckResult, ConformanceContext } from '../types.js';
 
 /**
@@ -33,13 +34,14 @@ export function checkPayload(ctx: ConformanceContext): CheckResult {
     return { id, layer, passed: false, detail: `unknown solverType: ${env.solverType}` };
   }
 
-  const schema = bucket[env.role];
+  const role = normalizeEnvelopeRole(env.role);
+  const schema = bucket[role];
   if (!schema) {
     return {
       id,
       layer,
       passed: false,
-      detail: `no payload schema for (${env.solverType}, ${env.role})`,
+      detail: `no payload schema for (${env.solverType}, ${role})`,
     };
   }
 

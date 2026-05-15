@@ -44,13 +44,15 @@ import {
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
+import { VerdictCode } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
 import {
-  RESTORATION_ENVELOPE_CID_CONTEXT_KEY,
+  SOLUTION_ENVELOPE_CID_CONTEXT_KEY,
+  SOLUTION_TASK_CID_CONTEXT_KEY,
   RESTORATION_TASK_CID_CONTEXT_KEY,
 } from '../../harnesses/impls/evaluation-context.js';
 import { signTaskV1 } from '../../tasks/signing.js';
@@ -360,7 +362,7 @@ export class MechAdapter implements ExecutionAdapter {
       task: {
         ...restorationState,
         signedTask,
-        context: { ...(restorationState.context ?? {}), [RESTORATION_TASK_CID_CONTEXT_KEY]: restorationTaskCid },
+        context: { ...(restorationState.context ?? {}), [SOLUTION_TASK_CID_CONTEXT_KEY]: restorationTaskCid },
       },
       taskCid: restorationTaskCid,
       onchainCreationTx: taskSubmission.txHash,
@@ -474,7 +476,7 @@ export class MechAdapter implements ExecutionAdapter {
     solutionRequestId: string;
     attemptIndex: number;
     resultData: string;
-    restorationEnvelopeCid: string;
+    solutionEnvelopeCid: string;
     taskCid?: string;
   }): Task {
     return {
@@ -487,9 +489,9 @@ export class MechAdapter implements ExecutionAdapter {
       context: {
         ...(params.task.context ?? {}),
         restorationResult: params.resultData,
-        [RESTORATION_TASK_CID_CONTEXT_KEY]:
-          params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
-        [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: params.restorationEnvelopeCid,
+        [SOLUTION_TASK_CID_CONTEXT_KEY]:
+          params.task.context?.[SOLUTION_TASK_CID_CONTEXT_KEY] ?? params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
+        [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: params.solutionEnvelopeCid,
       },
     };
   }
@@ -663,10 +665,10 @@ export class MechAdapter implements ExecutionAdapter {
       return undefined;
     }
 
-    const restorationEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
+    const solutionEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,
-      restorationEnvelopeCid,
+      solutionEnvelopeCid,
     ) as Record<string, unknown>;
     const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
     const evaluationTask = this.buildEvaluationTask({
@@ -674,7 +676,7 @@ export class MechAdapter implements ExecutionAdapter {
       solutionRequestId: solution.requestId,
       attemptIndex: solution.attemptIndex,
       resultData,
-      restorationEnvelopeCid,
+      solutionEnvelopeCid,
       taskCid: restoration.taskCid,
     });
     const opportunityId = `evaluation:${solution.taskId}:${solution.attemptIndex}:${solution.requestId}`;
@@ -896,7 +898,7 @@ export class MechAdapter implements ExecutionAdapter {
     );
   }
 
-  async submitVerdictDelivery(requestId: RequestId, verdictDigest: Hex, verdictCode = 1): Promise<void> {
+  async submitVerdictDelivery(requestId: RequestId, verdictDigest: Hex, verdictCode: VerdictCode): Promise<void> {
     await claimDelivery(
       this.publicClient,
       this.walletClient,

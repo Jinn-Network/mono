@@ -13,8 +13,10 @@ import {
   PayloadValidationError,
   buildMetadataKey,
   encodeExecutionPayload,
+  encodeExecutionPayloadV2,
   validatePayload,
   type ExecutionPayload,
+  type ExecutionPayloadV2,
 } from '../../src/erc8004/identity.js';
 
 // ── Spec test vectors (payload-schema §8) ─────────────────────────────────────
@@ -355,5 +357,74 @@ describe('IdentityPublisher.publishContent', () => {
         payload: VECTOR_A_INPUT,
       }),
     ).rejects.toThrow('rpc unreachable');
+  });
+});
+
+// ── publishContentV2 — kind-prefix calldata ───────────────────────────────────
+
+const V2_VECTOR_INPUT: ExecutionPayloadV2 = {
+  version: 2,
+  tier: 1,
+  manifestHash: '0x1111111111111111111111111111111111111111111111111111111111111111',
+  attestationQuoteCid: '0x',
+  sourceMeasurement: '0x0000000000000000000000000000000000000000000000000000000000000000',
+  codeDigest: ('0x' + 'cd'.repeat(32)) as Hex,
+  implName: 'claude-code-learner',
+  modeFlag: 0,
+};
+
+describe('IdentityPublisher.publishContentV2', () => {
+  const REGISTRY = '0x8004800480048004800480048004800480048004' as `0x${string}`;
+  const AGENT_ID = 42n;
+
+  it('uses "evaluation:" prefix when kind=evaluation (jinn-mono-n93o)', async () => {
+    const { walletClient, publicClient, writeContract, waitForTransactionReceipt } = makeMocks();
+    const publisher = new IdentityPublisher({
+      identityRegistryAddress: REGISTRY,
+      agentId: AGENT_ID,
+      walletClient,
+      publicClient,
+    });
+
+    const cid = 'bafyverdict003';
+    const txHash = await publisher.publishContentV2({
+      kind: 'evaluation',
+      cid,
+      payload: V2_VECTOR_INPUT,
+    });
+
+    expect(txHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(writeContract).toHaveBeenCalledTimes(1);
+    expect(waitForTransactionReceipt).toHaveBeenCalledTimes(1);
+
+    const call = writeContract.mock.calls[0]![0] as {
+      address: string;
+      functionName: string;
+      args: [bigint, string, Hex];
+    };
+    expect(call.address).toBe(REGISTRY);
+    expect(call.functionName).toBe('setMetadata');
+    expect(call.args[0]).toBe(AGENT_ID);
+    expect(call.args[1]).toBe(`evaluation:${cid}`);
+    expect(call.args[2]).toBe(encodeExecutionPayloadV2(V2_VECTOR_INPUT));
+  });
+
+  it('uses "envelope:" prefix when kind=envelope (back-compat regression)', async () => {
+    const { walletClient, publicClient, writeContract } = makeMocks();
+    const publisher = new IdentityPublisher({
+      identityRegistryAddress: REGISTRY,
+      agentId: AGENT_ID,
+      walletClient,
+      publicClient,
+    });
+
+    await publisher.publishContentV2({
+      kind: 'envelope',
+      cid: 'bafyenvelope004',
+      payload: V2_VECTOR_INPUT,
+    });
+
+    const call = writeContract.mock.calls[0]![0] as { args: [bigint, string, Hex] };
+    expect(call.args[1]).toBe('envelope:bafyenvelope004');
   });
 });

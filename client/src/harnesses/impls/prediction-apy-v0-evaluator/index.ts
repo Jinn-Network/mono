@@ -18,7 +18,7 @@ import {
   checkManifestSignature,
   recomputeTopLevelSignatureHash,
 } from '../prediction-v0-evaluator/checks/integrity.js';
-import { resolveExpectedRestorationTaskCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
+import { resolveExpectedSolutionTaskCid, resolveSolutionEnvelopeCid } from '../evaluation-context.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { deriveGroundTruthBps } from './canonical-metrics.js';
 import { parsePredictionApySubmissionEnvelope } from './parse-submission.js';
@@ -86,7 +86,7 @@ export class PredictionApyV0Evaluator implements Harness {
     }
     const testDeps = (ctx as HarnessContext & { _testDeps?: PredictionApyV0EvaluatorConfig['_testDeps'] })._testDeps
       ?? this.config._testDeps;
-    const expectedRef = resolveExpectedRestorationTaskCid(ctx.task, testDeps);
+    const expectedRef = resolveExpectedSolutionTaskCid(ctx.task, testDeps);
 
     const task = PredictionApyV0TaskSchema.parse(ctx.task);
     const manifestJson = ctx.task.context!['restorationResult'] as string;
@@ -298,8 +298,8 @@ export class PredictionApyV0Evaluator implements Harness {
     // ── Verdict payload for engine.pack() (role='verdict' envelope) ───────────
     // Assembles the PredictionApyV0VerdictPayload from the already-computed fields.
     //
-    // restorationEnvelope: CID threaded from the daemon via context, sha256
-    // computed as sha256(JCS(restorationEnvelope)) — matching the upload pipeline
+    // solutionEnvelope: CID threaded from the daemon via context, sha256
+    // computed as sha256(JCS(solutionEnvelope)) — matching the upload pipeline
     // and the conformance harness (8l6 fix A).
     //
     // verificationOfRestoration: stub — Plan D will connect the real SDK that
@@ -307,12 +307,12 @@ export class PredictionApyV0Evaluator implements Harness {
     // For V1 the stub always reports 'valid' (self-signed tier), which means
     // the REJECTED-if-invalid path in engine.pack() never fires in practice
     // until Plan D replaces this stub.
-    const envelopeCid = (ctx.task.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+    const envelopeCid = resolveSolutionEnvelopeCid(ctx.task)
       ?? ctx.task.restorationRequestId
       ?? 'bafy-unknown';
     // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
     const envelopeSha256 = createHash('sha256').update(canonicalJson(rawPayload)).digest('hex');
-    const restorationEnvelope = {
+    const solutionEnvelope = {
       cid: envelopeCid,
       sha256: envelopeSha256,
     };
@@ -320,7 +320,7 @@ export class PredictionApyV0Evaluator implements Harness {
     const verificationOfRestoration = buildVerificationStub();
 
     const verdictPayload: Record<string, unknown> = {
-      restorationEnvelope,
+      solutionEnvelope,
       verificationOfRestoration,
       verdict,
       score: scored.score,

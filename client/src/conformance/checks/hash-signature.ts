@@ -35,9 +35,13 @@ export async function checkHashAndSignature(ctx: ConformanceContext): Promise<Ch
     return { id, layer, passed: false, detail: 'envelope not loaded' };
   }
 
-  const { signature, ...unsigned } = ctx.envelope;
+  const rawEnvelope = ctx.rawEnvelope ?? ctx.envelope;
+  const { signature: _rawSignature, ...unsigned } = rawEnvelope;
+  const { signature } = ctx.envelope;
 
-  // Step 1: Recompute hash over the unsigned fields (JCS → keccak256).
+  // Step 1: Recompute hash over the unsigned wire fields (JCS → keccak256).
+  // The schema normalizes legacy role='restoration' to role='solution' on
+  // parse, but old artifacts were signed over the original wire value.
   const recomputed = keccak256(toBytes(canonicalJson(unsigned)));
 
   // Step 2: Verify the stored hash matches the recomputed hash.

@@ -120,7 +120,7 @@ export function checkTaskRefMissingExpected(): Check {
     status: 'INDETERMINATE',
     detail: {
       reason:
-        'context.restorationTaskCid missing; cannot verify submission.task.cid trustlessly',
+        'context.solutionTaskCid missing; cannot verify submission.task.cid trustlessly',
     },
   };
 }
