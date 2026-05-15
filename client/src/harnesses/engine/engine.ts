@@ -1191,6 +1191,26 @@ export class TaskEngine {
       }
     }
 
+    // jinn-mono-4tfq: SkippableError caught in RUNNING leaves a skip-marker
+    // Solution with no payload; short-circuit before envelope assembly.
+    // Runs BEFORE the deps guard — skipping needs nothing wired.
+    const earlyImplOutput = this.solutionOutputs.get(task.requestId);
+    const gatingClaim = earlyImplOutput?.gating as Record<string, unknown> | undefined;
+    if (gatingClaim?.['skipped'] === true) {
+      const reason = String(gatingClaim['reason'] ?? 'unknown');
+      const detail = String(
+        (earlyImplOutput?.informational as Record<string, unknown> | undefined)?.['detail'] ?? '',
+      );
+      console.log(
+        `[harness-engine] ${task.requestId}: PACKAGING short-circuited — impl was skipped (${reason})${detail ? `: ${detail}` : ''}`,
+      );
+      this.persistence.markFailed(
+        task.requestId,
+        `impl skipped: ${reason}${detail ? ` — ${detail}` : ''}`,
+      );
+      return;
+    }
+
     if (!this.packagingDeps || !this.envelopeDeps) {
       throw new NotImplementedError('pack');
     }
