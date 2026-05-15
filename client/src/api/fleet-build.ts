@@ -29,7 +29,18 @@ export interface FleetV1Service {
   staking: { staked: boolean; evicted: boolean; sinceBlock: number | null };
   activity: { lastEventAt: string | null; counts: Record<string, number> };
   rewards: { pending: string; asset: 'reward' };
-  attention: null | { kind: AttentionKind; hint: string; exampleCli: string };
+  attention: null | {
+    kind: AttentionKind;
+    hint: string;
+    exampleCli: string;
+    /** Machine-readable category for programmatic consumers (e.g. CLI tools). */
+    category?: string;
+    /**
+     * Decoded contract revert reason when `category === 'safe_binding_failed'`.
+     * Null when the revert had no reason data; absent for other attention kinds.
+     */
+    revertReason?: string | null;
+  };
 }
 
 export interface FleetV1Response {
@@ -61,10 +72,15 @@ function computeAttention(
     };
   }
   if (svc.error) {
+    const hint = svc.error_short_message ?? svc.error;
     return {
       kind: 'reconcile_needed',
-      hint: svc.error,
+      hint,
       exampleCli: 'jinn status --detail',
+      ...(svc.error?.startsWith('safe_binding_failed') ? { category: 'safe_binding_failed' as const } : {}),
+      ...(svc.error_revert_reason !== undefined
+        ? { revertReason: svc.error_revert_reason }
+        : {}),
     };
   }
   if (svc.step === 'safe_binding_pending') {

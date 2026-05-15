@@ -951,6 +951,7 @@ describe('Fleet bootstrap', () => {
     const bindSpy = vi
       .spyOn(bindingMod, 'bindAgentWalletToSafe')
       .mockResolvedValue({
+        ok: true as const,
         txHash: ('0x' + 'ee'.repeat(32)) as `0x${string}`,
         identityDigest: ('0x' + '11'.repeat(32)) as `0x${string}`,
         safeMessageHash: ('0x' + '22'.repeat(32)) as `0x${string}`,
@@ -1014,7 +1015,15 @@ describe('Fleet bootstrap', () => {
     });
 
     const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
-    vi.spyOn(bindingMod, 'bindAgentWalletToSafe').mockRejectedValue(new Error('bind reverted'));
+    vi.spyOn(bindingMod, 'bindAgentWalletToSafe').mockResolvedValue({
+      ok: false as const,
+      error: {
+        kind: 'safe_binding_failed' as const,
+        message: 'bind reverted',
+        shortMessage: 'bind reverted',
+        revertReason: null,
+      },
+    });
 
     const fleet = await store.load('base');
     const next = await (bootstrapper as any).resumeServiceStandard(fleet, mnemonic, 1);
@@ -1080,7 +1089,10 @@ describe('Fleet bootstrap', () => {
       // First attempt: simulated freshly-deployed-Safe revert.
       .mockRejectedValueOnce(new Error('Execution reverted for an unknown reason.'))
       // Second attempt (after short retry delay): succeeds.
+      // hjex.4 introduced the BindAgentWalletOutcome Result type — success
+      // requires `ok: true` on the resolved value.
       .mockResolvedValueOnce({
+        ok: true as const,
         txHash: ('0x' + 'ee'.repeat(32)) as `0x${string}`,
         identityDigest: ('0x' + '11'.repeat(32)) as `0x${string}`,
         safeMessageHash: ('0x' + '22'.repeat(32)) as `0x${string}`,
