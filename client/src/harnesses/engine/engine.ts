@@ -52,6 +52,7 @@ import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
+import { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import { buildInfo } from '../../build-info.js';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
@@ -287,6 +288,12 @@ export interface TaskEngineOptions {
     defaultPriceUsdc: string;
     perArtifactTypePrice: Record<string, string>;
     donation?: { enabled: boolean };
+    /**
+     * Daemon-wide default LLM model identifier (from JinnConfig.claudeModel).
+     * Used as the fallback when a SolverNet does not specify its own model.
+     * Stamped into executor.model in the assembled envelope (jinn-mono-gbut).
+     */
+    claudeModel?: string;
   };
   /**
    * Harness execution mode from operator config (JinnConfig.harness.mode).
@@ -1295,9 +1302,9 @@ export class TaskEngine {
     const solverType = task.solverType ?? 'legacy.v0';
 
     // Derive role from Task.role. Evaluator tasks produce 'verdict' envelopes;
-    // all other tasks produce 'restoration' envelopes.
+    // all other tasks produce 'solution' envelopes.
     const isEvaluation = task.taskRole === 'evaluation';
-    const role: Role = isEvaluation ? 'verdict' : 'restoration';
+    const role: Role = isEvaluation ? 'verdict' : 'solution';
 
     let envelopePayload: Record<string, unknown>;
 
@@ -1312,7 +1319,7 @@ export class TaskEngine {
       // with a wrong shape — validatePayload will catch schema mismatches.
       //
       // verificationOfRestoration: stubbed — Plan D will connect the real SDK.
-      // restorationEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
+      // solutionEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
       const verdictPayload = implOutput?.verdictPayload;
       if (!verdictPayload) {
         throw new Error(
@@ -1465,6 +1472,10 @@ export class TaskEngine {
         // Propagate the harness execution mode (train | frozen) so the
         // envelope records whether implStateDir was locked during this run.
         mode: executorMode,
+        // LLM model: prefer SolverNet-specific override, fall back to daemon-wide
+        // default from operatorConfig.claudeModel (jinn-mono-gbut, gh#191).
+        // Left undefined when neither is set — the field is optional in the schema.
+        model: solverNet?.model ?? this.operatorConfig?.claudeModel,
       },
       evidenceTier,
       trajectory: envelopeTrajectory,
@@ -1596,73 +1607,76 @@ export class TaskEngine {
     // DELIVERING state by pack()); idempotent on retry (setMetadata is a pure
     // key-value write; re-running with the same payload is safe).
     //
-    // Restoration-only for now. Evaluator setMetadata lands with jinn-mono-2ff.
+    // Both roles publish (jinn-mono-n93o): restoration runs emit
+    // `envelope:<cid>`; evaluation runs emit `evaluation:<cid>`. The indexer's
+    // verdictEnvelopeMeta enrichment branch (ebu7.13) listens for the
+    // `evaluation:` prefix to surface verdicts in the explorer.
     if (this.identityPublisher) {
       const taskRoleRaw = task.taskRole ?? 'restoration';
-      if (taskRoleRaw === 'restoration') {
-        const signatureHash = evidenceHash as `0x${string}` | null | undefined;
-        // v0 tier rule: with an evidenceHash on chain we declare `committed` (tier=1);
-        // higher tiers (`attested`, `proved`) come later when TEE work lands.
-        const tier: ExecutionTier = signatureHash ? 1 : 0;
-        const manifestHashHex = signatureHash ?? ('0x' as `0x${string}`);
+      const metadataKind: 'envelope' | 'evaluation' =
+        taskRoleRaw === 'evaluation' ? 'evaluation' : 'envelope';
+      const signatureHash = evidenceHash as `0x${string}` | null | undefined;
+      // v0 tier rule: with an evidenceHash on chain we declare `committed` (tier=1);
+      // higher tiers (`attested`, `proved`) come later when TEE work lands.
+      const tier: ExecutionTier = signatureHash ? 1 : 0;
+      const manifestHashHex = signatureHash ?? ('0x' as `0x${string}`);
 
-        // Prefer v2 when the harness identity is available — the engine
-        // captures executorMode + executorCodeDigest in pack(). For legacy
-        // rows that completed before payload v2 wiring (or for solver paths
-        // that don't produce a fence digest), executorCodeDigest is null and
-        // we fall back to the v1 encoder so the indexer still sees envelope
-        // metadata, just without harness identity. v1 envelopes are decoded
-        // by the subgraph as mode='train' with empty codeDigest/implName.
-        const harnessImplName = task.implName;
-        const canEmitV2 =
-          !!task.executorMode &&
-          !!task.executorCodeDigest &&
-          !!harnessImplName;
-        try {
-          let pubTxHash: `0x${string}`;
-          if (canEmitV2) {
-            const v2Payload: ExecutionPayloadV2 = {
-              version: 2,
-              tier,
-              manifestHash: manifestHashHex,
-              attestationQuoteCid: '0x',
-              sourceMeasurement:
-                '0x0000000000000000000000000000000000000000000000000000000000000000',
-              codeDigest: codeDigestSha256ToBytes32(task.executorCodeDigest),
-              implName: harnessImplName as string,
-              modeFlag: modeStringToFlag(task.executorMode as 'train' | 'frozen'),
-            };
-            pubTxHash = await this.identityPublisher.publishContentV2({
-              kind: 'envelope',
-              cid: manifestCid,
-              payload: v2Payload,
-            });
-            console.log(
-              `[harness-engine] ${requestId}: setMetadata envelope:${manifestCid} tx=${pubTxHash} (payload v2 mode=${task.executorMode} impl=${harnessImplName})`,
-            );
-          } else {
-            const v1Payload: ExecutionPayload = {
-              version: 1,
-              tier,
-              manifestHash: manifestHashHex,
-              attestationQuoteCid: '0x',
-              sourceMeasurement:
-                '0x0000000000000000000000000000000000000000000000000000000000000000',
-            };
-            pubTxHash = await this.identityPublisher.publishContent({
-              kind: 'envelope',
-              cid: manifestCid,
-              payload: v1Payload,
-            });
-            console.log(
-              `[harness-engine] ${requestId}: setMetadata envelope:${manifestCid} tx=${pubTxHash} (payload v1)`,
-            );
-          }
-        } catch (err) {
-          console.warn(
-            `[harness-engine] ${requestId}: setMetadata envelope publish failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+      // Prefer v2 when the harness identity is available — the engine
+      // captures executorMode + executorCodeDigest in pack(). For legacy
+      // rows that completed before payload v2 wiring (or for solver paths
+      // that don't produce a fence digest), executorCodeDigest is null and
+      // we fall back to the v1 encoder so the indexer still sees envelope
+      // metadata, just without harness identity. v1 envelopes are decoded
+      // by the subgraph as mode='train' with empty codeDigest/implName.
+      const harnessImplName = task.implName;
+      const canEmitV2 =
+        !!task.executorMode &&
+        !!task.executorCodeDigest &&
+        !!harnessImplName;
+      try {
+        let pubTxHash: `0x${string}`;
+        if (canEmitV2) {
+          const v2Payload: ExecutionPayloadV2 = {
+            version: 2,
+            tier,
+            manifestHash: manifestHashHex,
+            attestationQuoteCid: '0x',
+            sourceMeasurement:
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+            codeDigest: codeDigestSha256ToBytes32(task.executorCodeDigest),
+            implName: harnessImplName as string,
+            modeFlag: modeStringToFlag(task.executorMode as 'train' | 'frozen'),
+          };
+          pubTxHash = await this.identityPublisher.publishContentV2({
+            kind: metadataKind,
+            cid: manifestCid,
+            payload: v2Payload,
+          });
+          console.log(
+            `[harness-engine] ${requestId}: setMetadata ${metadataKind}:${manifestCid} tx=${pubTxHash} (payload v2 mode=${task.executorMode} impl=${harnessImplName})`,
+          );
+        } else {
+          const v1Payload: ExecutionPayload = {
+            version: 1,
+            tier,
+            manifestHash: manifestHashHex,
+            attestationQuoteCid: '0x',
+            sourceMeasurement:
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+          };
+          pubTxHash = await this.identityPublisher.publishContent({
+            kind: metadataKind,
+            cid: manifestCid,
+            payload: v1Payload,
+          });
+          console.log(
+            `[harness-engine] ${requestId}: setMetadata ${metadataKind}:${manifestCid} tx=${pubTxHash} (payload v1)`,
           );
         }
+      } catch (err) {
+        console.warn(
+          `[harness-engine] ${requestId}: setMetadata ${metadataKind} publish failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
       }
     }
 
@@ -1748,23 +1762,28 @@ export class TaskEngine {
     });
   }
 
-  private verdictCodeForTask(task: PersistedTaskRun): number {
+  private verdictCodeForTask(task: PersistedTaskRun): VerdictCode {
     const gating = task.gatingClaim as { verdict?: unknown } | null;
     const raw = gating?.verdict;
     switch (raw) {
       case 'PASS':
       case 'SCORED':
-        return 1;
+        return VerdictCode.Pass;
       case 'FAIL':
       case 'REJECTED':
-        return 2;
+        return VerdictCode.Fail;
       case 'INVALID':
-        return 3;
+        return VerdictCode.Invalid;
       case 'INDETERMINATE':
       case 'UNRESOLVED':
-        return 4;
+        return VerdictCode.Unresolved;
       default:
-        return 1;
+        // gatingClaim is null, verdict is absent, or the string is unrecognized.
+        // Return Invalid(3) — not Pass(1). Pass must come from an explicit PASS/SCORED verdict.
+        console.warn(
+          `[harness-engine] verdictCodeForTask: unrecognized gatingClaim.verdict (got=${String(raw)}); defaulting to Invalid(3) — should never happen, indicates the evaluator harness didn't set gatingClaim.verdict before submission`,
+        );
+        return VerdictCode.Invalid;
     }
   }
 

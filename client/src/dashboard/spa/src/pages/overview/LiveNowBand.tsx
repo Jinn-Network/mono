@@ -286,10 +286,17 @@ export function LiveNowBand(): JSX.Element {
             href={derived.cta.href}
             data-testid="live-now-cta"
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              minHeight: '30px',
               fontSize: '11px',
               letterSpacing: '0.14em',
               textTransform: 'uppercase',
-              color: 'var(--accent-sky)',
+              color: derived.state === 'attention' ? 'var(--bg-sunken)' : 'var(--accent-sky)',
+              background: derived.state === 'attention' ? 'var(--accent-sky)' : 'transparent',
+              border: '1px solid var(--accent-sky)',
+              borderRadius: 'var(--radius-2)',
+              padding: '0 12px',
               textDecoration: 'none',
             }}
           >

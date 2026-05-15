@@ -7,6 +7,7 @@ import type {
   EnvelopeProjectionQuery,
 } from '../corpus/types.js';
 import { TASK_RUNS_SCHEMA } from '../harnesses/engine/persistence.js';
+import { normalizeEnvelopeRole, type Role } from '../types/envelope.js';
 
 export interface ActivityEventInput {
   ts: string | null;
@@ -1898,7 +1899,7 @@ export class Store {
         envelopeSha256: p.envelopeSha256,
         signatureHash: p.signatureHash,
         solverType: p.solverType,
-        role: p.role,
+        role: normalizeEnvelopeRole(p.role),
         taskCid: p.taskCid,
         taskId: p.taskId,
         requestId: p.requestId,
@@ -1955,8 +1956,14 @@ export class Store {
       params['solverType'] = query.solverType;
     }
     if (query.role) {
-      conditions.push('role = @role');
-      params['role'] = query.role;
+      const role = normalizeEnvelopeRole(query.role) as Role;
+      if (role === 'solution') {
+        conditions.push('(role = @role OR role = @legacyRole)');
+        params['legacyRole'] = 'restoration';
+      } else {
+        conditions.push('role = @role');
+      }
+      params['role'] = role;
     }
     if (query.taskCid) {
       conditions.push('task_cid = @taskCid');
@@ -2038,7 +2045,7 @@ interface EnvelopeProjectionRow {
   envelope_sha256: string | null;
   signature_hash: string;
   solver_type: string;
-  role: 'restoration' | 'verdict';
+  role: string;
   task_cid: string | null;
   task_id: string | null;
   request_id: string | null;
@@ -2063,7 +2070,7 @@ function rowToEnvelopeProjection(row: EnvelopeProjectionRow): EnvelopeProjection
     envelopeSha256: row.envelope_sha256,
     signatureHash: row.signature_hash,
     solverType: row.solver_type,
-    role: row.role,
+    role: normalizeEnvelopeRole(row.role) as Role,
     taskCid: row.task_cid,
     taskId: row.task_id,
     requestId: row.request_id,

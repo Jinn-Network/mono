@@ -421,6 +421,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@hono/node-server@npm:^1.13.0":
+  version: 1.19.14
+  resolution: "@hono/node-server@npm:1.19.14"
+  peerDependencies:
+    hono: ^4
+  checksum: 10c0/41a099bb3705d96aac44b7a8db8805f2a22ce8a0f767a27b6d10b74a9964925df01c5f35d3631e882f8bcdeee3518884c30f40588ac8c960d88bf71048ba0df3
+  languageName: node
+  linkType: hard
+
 "@isaacs/cliui@npm:^8.0.2":
   version: 8.0.2
   resolution: "@isaacs/cliui@npm:8.0.2"
@@ -448,6 +457,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/indexer@workspace:."
   dependencies:
+    "@hono/node-server": "npm:^1.13.0"
+    "@types/node": "npm:^22.0.0"
     hono: "npm:^4.0.0"
     ponder: "npm:^0.16.6"
     typescript: "npm:^5.4.0"
@@ -743,6 +754,15 @@ __metadata:
   version: 1.0.9
   resolution: "@types/estree@npm:1.0.9"
   checksum: 10c0/3ad3286ca2988cd550dafb8f2ad599c8474868e954fa601a36655bdfefd8039f7c714b8c1c7f2ae219ffbd58bd4660e66fa7479a0120fc02d4777057d4865387
+  languageName: node
+  linkType: hard
+
+"@types/node@npm:^22.0.0":
+  version: 22.19.19
+  resolution: "@types/node@npm:22.19.19"
+  dependencies:
+    undici-types: "npm:~6.21.0"
+  checksum: 10c0/402e0f088c94cabda3cd721546bd8e4e75e098e0b342f6e03b90ca1e19c28986f9650112c64fcfd09fc8cebc0f8b20291a513153e90489331cf666e1e5503e16
   languageName: node
   linkType: hard
 
@@ -2776,6 +2796,13 @@ __metadata:
   version: 0.3.0
   resolution: "uint8array-extras@npm:0.3.0"
   checksum: 10c0/5151d34fa4b45807aa5a65187ec99da24e6ddff36edc24b9d94426f0fe46026660e0bdbb7e20c741770745785eb43d3db46d316082aee4b252cf89160880c292
+  languageName: node
+  linkType: hard
+
+"undici-types@npm:~6.21.0":
+  version: 6.21.0
+  resolution: "undici-types@npm:6.21.0"
+  checksum: 10c0/c01ed51829b10aa72fc3ce64b747f8e74ae9b60eafa19a7b46ef624403508a54c526ffab06a14a26b3120d055e1104d7abe7c9017e83ced038ea5cf52f8d5e04
   languageName: node
   linkType: hard
 

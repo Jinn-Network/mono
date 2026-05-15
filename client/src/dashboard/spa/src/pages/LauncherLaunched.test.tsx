@@ -329,6 +329,48 @@ describe('LauncherLaunchedPage', () => {
     );
   });
 
+  it('hot-apply: renders the swe-rebench-v2 config form from the launched manifest template', async () => {
+    vi.mocked(api.solvernets.get).mockResolvedValue(
+      buildRecord({ generatorConfig: {}, summary: undefined }),
+    );
+    const predictionManifest = buildManifest();
+    vi.mocked(api.solvernets.getManifest).mockResolvedValue({
+      ...buildManifestResponse(),
+      manifest: buildManifest({
+        name: 'SWE-rebench v2',
+        contract: {
+          ...predictionManifest.contract,
+          id: 'swe-rebench-v2',
+          version: 'v1',
+          claimPolicyDefaults: {
+            mode: 'parallel',
+            maxClaims: 50,
+            maxClaimsPerOperator: 5,
+            claimLeaseTtlSeconds: 3600,
+          },
+        },
+      }),
+    });
+
+    wrap(<LauncherLaunchedPage solverNetId="sn-1" pollIntervalMs={10_000} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('launcher-launched-generator-toggle')).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('launcher-launched-name').textContent).toBe(
+        'SWE-rebench v2',
+      ),
+    );
+    fireEvent.click(screen.getByTestId('launcher-launched-generator-toggle'));
+
+    expect(screen.getByTestId('launcher-launched-generator-N_target_successes')).toBeTruthy();
+    expect(
+      screen.getByTestId('launcher-launched-generator-N_max_postings_per_task'),
+    ).toBeTruthy();
+    expect(screen.getByTestId('launcher-launched-generator-cooldown_ms')).toBeTruthy();
+    expect(screen.queryByTestId('launcher-launched-generator-cadenceMs')).toBeNull();
+  });
+
   it('terminal record (retired) shows no actions', async () => {
     vi.mocked(api.solvernets.get).mockResolvedValue(buildRecord({ status: 'retired' }));
     vi.mocked(api.solvernets.getManifest).mockResolvedValue(buildManifestResponse());

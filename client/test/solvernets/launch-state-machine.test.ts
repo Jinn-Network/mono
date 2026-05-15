@@ -334,6 +334,7 @@ describe('LaunchAction.launch — happy path', () => {
     expect(record.launchProgress).toBeUndefined();
     expect(record.solverNetId).toBe(manifest.solverNetId);
     expect(record.manifestCid).toBeTruthy();
+    expect(record.manifestPath).toContain(record.manifestCid);
     expect(record.manifestHash).toBe(manifestHash(manifest));
     expect(record.launcherAgentId).toBe(signer.agentId);
     expect(record.launcherSafeAddress.toLowerCase()).toBe(
@@ -352,6 +353,8 @@ describe('LaunchAction.launch — happy path', () => {
     // Persisted record on disk equals returned record.
     const onDisk = await store.loadRecord(record.solverNetId);
     expect(onDisk).toEqual(record);
+    const cachedManifest = await store.loadManifestCache(record.manifestPath!);
+    expect(cachedManifest?.solverNetId).toBe(manifest.solverNetId);
   });
 
   it('persists progress before each side effect (checkpoint visible after each phase)', async () => {

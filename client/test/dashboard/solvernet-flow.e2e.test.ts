@@ -15,7 +15,7 @@
  * dispatch. Intercepting at the page boundary lets us drive the SPA
  * end-to-end without touching the daemon's chain integration.
  *
- * Coverage (this file): scenario 1 — happy-path Launch.
+ * Coverage (this file): scenarios 1-4.
  *
  *   1. Operator → Launcher mode → Create SolverNet → walk Steps 1-5 →
  *      click Launch on Step 5.
@@ -30,9 +30,6 @@
  *      post-launch dashboard shows status `launched`.
  *
  * Out of scope for this dispatch (filed for follow-up):
- *   - Lifecycle (pause/resume/retire)
- *   - Operator catalog walk + join flow
- *   - Empty-state coverage
  *   - Crash-recovery
  */
 import { test, expect, type Page, type Route } from '@playwright/test';
@@ -52,6 +49,24 @@ let handshakeUrl: string | null = null;
 const DRAFT_ID = 'draft-test-1';
 const SOLVER_NET_ID = 'sn-test-1';
 const MANIFEST_CID = 'QmTestSolverNetManifestCid000000000000000001';
+const MANIFEST_HASH =
+  '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
+const PREDICTION_CONTRACT = { id: 'prediction', version: 'v1' };
+
+type LifecycleTarget = 'paused' | 'launched' | 'retired';
+type RegistrySummary = Record<string, unknown> & {
+  manifestCid: string;
+  status: LifecycleTarget;
+};
+type JoinedSolverNetEntry = Record<string, unknown> & {
+  manifestCid: string;
+  roles: Array<'solver' | 'evaluator'>;
+};
+interface ObservedLifecycleRequest {
+  method: string;
+  solverNetId: string;
+  payload: { target: LifecycleTarget };
+}
 
 const RUNNING_BOOTSTRAP = {
   schemaVersion: 1,
@@ -94,7 +109,7 @@ const SOLVERNETS_CATALOG = {
       name: 'prediction',
       description:
         'Forecast resolved outcomes; rewarded by Brier score on verified resolutions.',
-      contract: { id: 'prediction', version: 'v1' },
+      contract: PREDICTION_CONTRACT,
       state: 'live',
       supportedRoles: ['solving', 'evaluating'],
       compatibleHarnesses: [
@@ -168,15 +183,59 @@ test.afterAll(async () => {
 interface MockState {
   draft: Record<string, unknown> | null;
   observedLaunches: Array<{ draftId: string }>;
+  observedLifecycleRequests: ObservedLifecycleRequest[];
   /** How many times GET /v1/solvernets/launched/sn-test-1 has been called. */
   launchedReadCount: number;
+  launchedRecord: Record<string, unknown> | null;
+  registrySummaries: RegistrySummary[];
+  joinedSolverNets: Record<string, JoinedSolverNetEntry>;
 }
 
-function makeMockState(): MockState {
+function makeMockState(overrides: Partial<MockState> = {}): MockState {
   return {
     draft: null,
     observedLaunches: [],
+    observedLifecycleRequests: [],
     launchedReadCount: 0,
+    launchedRecord: null,
+    registrySummaries: [],
+    joinedSolverNets: {},
+    ...overrides,
+  };
+}
+
+function buildLaunchedRecord(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const status = (overrides.status ?? 'launched') as
+    | 'launching'
+    | 'launched'
+    | 'paused'
+    | 'retired'
+    | 'failed';
+  return {
+    schemaVersion: 'solvernet.launched.v1',
+    solverNetId: SOLVER_NET_ID,
+    manifestCid: MANIFEST_CID,
+    manifestHash: MANIFEST_HASH,
+    launcherAgentId: '9001',
+    launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+    launchedAt: '2026-05-05T00:00:00.000Z',
+    statusUpdatedAt: '2026-05-05T00:00:00.000Z',
+    status,
+    generatorEnabled: status === 'launched',
+    generatorState: { lastPollAt: undefined },
+    generatorConfig: {
+      cadenceMs: 60_000,
+      windowMs: 3_600_000,
+      maxOpenRounds: 5,
+    },
+    registry: {
+      metadataTxHash:
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      metadataBlockNumber: 12345,
+    },
+    ...overrides,
   };
 }
 
@@ -192,51 +251,20 @@ function makeMockState(): MockState {
  * returning the launched record.
  */
 function buildLaunchedSnapshot(callIndex: number): Record<string, unknown> {
-  const base: Record<string, unknown> = {
-    schemaVersion: 'solvernet.launched.v1',
-    solverNetId: SOLVER_NET_ID,
-    manifestCid: MANIFEST_CID,
-    manifestHash:
-      '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
-    launcherAgentId: '9001',
-    launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
-    launchedAt: '2026-05-05T00:00:00.000Z',
-    statusUpdatedAt: '2026-05-05T00:00:00.000Z',
-    generatorEnabled: false,
-    generatorState: { lastPollAt: undefined },
-    generatorConfig: {
-      cadenceMs: 60_000,
-      windowMs: 3_600_000,
-      maxOpenRounds: 5,
-    },
-    registry: {
-      metadataTxHash:
-        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-      metadataBlockNumber: 12345,
-    },
-  };
-
   if (callIndex === 0) {
-    return {
-      ...base,
+    return buildLaunchedRecord({
       status: 'launching',
       launchProgress: { phase: 'broadcasting', attemptCount: 1 },
-    };
+    });
   }
   if (callIndex === 1) {
-    return {
-      ...base,
+    return buildLaunchedRecord({
       status: 'launching',
       launchProgress: { phase: 'confirming', attemptCount: 1 },
-    };
+    });
   }
   // 3rd call onwards — launched and steady-state.
-  return {
-    ...base,
-    status: 'launched',
-    generatorEnabled: true,
-    // launchProgress intentionally absent
-  };
+  return buildLaunchedRecord();
 }
 
 const MOCK_MANIFEST = {
@@ -252,8 +280,7 @@ const MOCK_MANIFEST = {
     agentId: '9001',
   },
   contract: {
-    id: 'prediction.v1',
-    version: '1',
+    ...PREDICTION_CONTRACT,
     schemas: { task: {}, solution: {}, verdict: {} },
     claimPolicyDefaults: {
       mode: 'parallel',
@@ -267,7 +294,7 @@ const MOCK_MANIFEST = {
       deterministic: true,
       inputs: ['solution', 'resolution'],
       output: 'score',
-      implementation: 'claude-code-learner',
+      implementation: 'prediction-v0-evaluator',
     },
     aggregationFunction: {
       id: 'mean',
@@ -289,6 +316,79 @@ const MOCK_MANIFEST = {
   },
 };
 
+function buildRegistrySummary(
+  overrides: Partial<RegistrySummary> = {},
+): RegistrySummary {
+  return {
+    manifestCid: MANIFEST_CID,
+    solverNetId: SOLVER_NET_ID,
+    name: MOCK_MANIFEST.name,
+    network: 'base-sepolia',
+    launcherAgentId: '9001',
+    launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
+    status: 'launched',
+    statusUpdatedAt: '2026-05-05T00:00:00.000Z',
+    contractId: PREDICTION_CONTRACT.id,
+    contractVersion: PREDICTION_CONTRACT.version,
+    solutionPriceWei: '100000000000000',
+    verdictPriceWei: '50000000000000',
+    openRoles: ['solver', 'evaluator'],
+    anchorBlock: 12345,
+    ...overrides,
+  };
+}
+
+function lifecycleResponseTimestamp(target: LifecycleTarget): string {
+  return `2026-05-05T00:00:0${target === 'paused' ? 1 : target === 'launched' ? 2 : 3}.000Z`;
+}
+
+async function fulfillLifecycleTransition(
+  route: Route,
+  state: MockState,
+): Promise<void> {
+  const req = route.request();
+  const url = new URL(req.url());
+  const segments = url.pathname.split('/').filter(Boolean);
+  const id = decodeURIComponent(segments[3] ?? '');
+  if (id !== SOLVER_NET_ID || !state.launchedRecord) {
+    return route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'record_not_found' }),
+    });
+  }
+  const body = (req.postDataJSON?.() ?? {}) as { target?: LifecycleTarget };
+  const target = body.target;
+  if (target !== 'paused' && target !== 'launched' && target !== 'retired') {
+    return route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'invalid_target' }),
+    });
+  }
+
+  state.observedLifecycleRequests.push({
+    method: req.method(),
+    solverNetId: id,
+    payload: { target },
+  });
+  state.launchedRecord = {
+    ...state.launchedRecord,
+    status: target,
+    statusUpdatedAt: lifecycleResponseTimestamp(target),
+    generatorEnabled: target === 'launched',
+    registry: {
+      metadataTxHash:
+        `0x${String(state.observedLifecycleRequests.length).padStart(64, '0')}`,
+      metadataBlockNumber: 12345 + state.observedLifecycleRequests.length,
+    },
+  };
+  return route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(state.launchedRecord),
+  });
+}
+
 async function mockDaemonApi(page: Page, state: MockState): Promise<void> {
   // Operator-side reads.
   await page.route('**/v1/bootstrap', (route) =>
@@ -309,6 +409,52 @@ async function mockDaemonApi(page: Page, state: MockState): Promise<void> {
       body: JSON.stringify(SOLVERNETS_CATALOG),
     }),
   );
+  await page.route('**/v1/operator/joined', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ joinedSolverNets: state.joinedSolverNets }),
+    }),
+  );
+  await page.route('**/v1/operator/join/*', async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const segments = url.pathname.split('/').filter(Boolean);
+    const manifestCid = decodeURIComponent(segments[3] ?? '');
+    if (req.method() !== 'POST') {
+      return route.fulfill({ status: 405, body: 'method not allowed' });
+    }
+    const body = (req.postDataJSON?.() ?? {}) as {
+      name?: string;
+      contract?: { id: string; version: string };
+      roles?: Array<'solver' | 'evaluator'>;
+      harness?: string;
+      model?: string;
+      plugins?: string[];
+      disabledDefaultPlugins?: string[];
+    };
+    const config: JoinedSolverNetEntry = {
+      manifestCid,
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.contract !== undefined ? { contract: body.contract } : {}),
+      roles: body.roles ?? [],
+      ...(body.harness !== undefined ? { harness: body.harness } : {}),
+      ...(body.model !== undefined ? { model: body.model } : {}),
+      ...(body.plugins !== undefined ? { plugins: body.plugins } : {}),
+      ...(body.disabledDefaultPlugins !== undefined
+        ? { disabledDefaultPlugins: body.disabledDefaultPlugins }
+        : {}),
+    };
+    state.joinedSolverNets[manifestCid] = config;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        restartRequired: true,
+        manifestCid,
+        config,
+      }),
+    });
+  });
   // Suppress recent-events polling (204 / empty list — SPA tolerates both).
   await page.route('**/v1/events/recent**', (route) =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ events: [] }) }),
@@ -457,6 +603,13 @@ async function mockDaemonApi(page: Page, state: MockState): Promise<void> {
     });
   });
 
+  await page.route('**/v1/solvernets/launched/*/lifecycle', async (route) => {
+    if (route.request().method() !== 'PATCH') {
+      return route.fulfill({ status: 405, body: 'method not allowed' });
+    }
+    return fulfillLifecycleTransition(route, state);
+  });
+
   // ── Launched-record polling ────────────────────────────────────────────
   await page.route('**/v1/solvernets/launched/*', async (route) => {
     const url = new URL(route.request().url());
@@ -465,7 +618,11 @@ async function mockDaemonApi(page: Page, state: MockState): Promise<void> {
     const sub = segments[4];
     const req = route.request();
 
-    // Only the bare GET /launched/:id is in scope for the happy path.
+    if (sub === 'lifecycle' && req.method() === 'PATCH') {
+      return fulfillLifecycleTransition(route, state);
+    }
+
+    // Only the bare GET /launched/:id and PATCH /lifecycle are in scope.
     // Anything else gets a 405 to make missing coverage loud.
     if (sub === undefined && req.method() === 'GET') {
       if (id !== SOLVER_NET_ID) {
@@ -473,6 +630,13 @@ async function mockDaemonApi(page: Page, state: MockState): Promise<void> {
           status: 404,
           contentType: 'application/json',
           body: JSON.stringify({ error: 'record_not_found' }),
+        });
+      }
+      if (state.launchedRecord) {
+        state.launchedReadCount += 1;
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(state.launchedRecord),
         });
       }
       const idx = state.launchedReadCount;
@@ -490,7 +654,9 @@ async function mockDaemonApi(page: Page, state: MockState): Promise<void> {
   await page.route('**/v1/solvernets/launched', async (route) => {
     return route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ records: [] }),
+      body: JSON.stringify({
+        records: state.launchedRecord ? [state.launchedRecord] : [],
+      }),
     });
   });
 
@@ -504,25 +670,7 @@ async function mockDaemonApi(page: Page, state: MockState): Promise<void> {
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          summaries: [
-            {
-              manifestCid: MANIFEST_CID,
-              solverNetId: SOLVER_NET_ID,
-              name: MOCK_MANIFEST.name,
-              network: 'base-sepolia',
-              launcherAgentId: '9001',
-              launcherSafeAddress:
-                '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
-              status: 'launched',
-              statusUpdatedAt: '2026-05-05T00:00:00.000Z',
-              contractId: 'prediction.v1',
-              contractVersion: '1',
-              solutionPriceWei: '100000000000000',
-              verdictPriceWei: '50000000000000',
-              openRoles: ['solver', 'evaluator'],
-              anchorBlock: 12345,
-            },
-          ],
+          summaries: state.registrySummaries,
           lastRefreshedAt: new Date().toISOString(),
           lastError: null,
         }),
@@ -557,6 +705,12 @@ async function clearLocalStorage(page: Page): Promise<void> {
       // best-effort
     }
   });
+}
+
+function dashboardUrl(path = '/'): string {
+  const url = new URL(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
+  url.pathname = path;
+  return url.toString();
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -626,9 +780,153 @@ test('Launcher happy-path: walks Create wizard and lands on the post-launch dash
     /launched/i,
     { timeout: 10_000 },
   );
+  await expect(page.getByTestId('launcher-launched-name')).toContainText(
+    'Polymarket forecasts',
+  );
+  await expect(page.getByTestId('launcher-launched-spend-solution-price')).not.toHaveText('—');
+  await expect(page.getByTestId('launcher-launched-spend-verdict-price')).not.toHaveText('—');
 
   // Daemon-side assertions: the launch fired exactly once against our
   // draft and the launched record is being polled.
   expect(state.observedLaunches).toEqual([{ draftId: DRAFT_ID }]);
   expect(state.launchedReadCount).toBeGreaterThanOrEqual(3);
+});
+
+test('Launcher lifecycle transitions: Pause, Resume, Retire send lifecycle requests and update status', async ({
+  page,
+}) => {
+  await clearLocalStorage(page);
+  const state = makeMockState({
+    launchedRecord: buildLaunchedRecord(),
+  });
+  await mockDaemonApi(page, state);
+
+  await page.goto(dashboardUrl(`/launcher/launched/${SOLVER_NET_ID}`));
+  await expect(page.getByTestId('launcher-launched')).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(page.getByTestId('launcher-launched-status-badge')).toContainText(
+    /launched/i,
+  );
+
+  await page.getByTestId('launcher-launched-action-paused').click();
+  await expect(page.getByTestId('launcher-launched-dialog')).toHaveAttribute(
+    'data-target',
+    'paused',
+  );
+  await page.getByTestId('launcher-launched-dialog-confirm').click();
+  await expect(page.getByTestId('launcher-launched-status-badge')).toContainText(
+    /paused/i,
+  );
+
+  await page.getByTestId('launcher-launched-action-launched').click();
+  await expect(page.getByTestId('launcher-launched-dialog')).toHaveAttribute(
+    'data-target',
+    'launched',
+  );
+  await page.getByTestId('launcher-launched-dialog-confirm').click();
+  await expect(page.getByTestId('launcher-launched-status-badge')).toContainText(
+    /launched/i,
+  );
+
+  await page.getByTestId('launcher-launched-action-retired').click();
+  await expect(page.getByTestId('launcher-launched-dialog')).toHaveAttribute(
+    'data-target',
+    'retired',
+  );
+  await expect(page.getByTestId('launcher-launched-dialog-confirm')).toBeDisabled();
+  await page
+    .getByTestId('launcher-launched-dialog-typed')
+    .fill(MOCK_MANIFEST.name);
+  await expect(page.getByTestId('launcher-launched-dialog-confirm')).toBeEnabled();
+  await page.getByTestId('launcher-launched-dialog-confirm').click();
+  await expect(page.getByTestId('launcher-launched-status-badge')).toContainText(
+    /retired/i,
+  );
+  await expect(page.getByTestId('launcher-launched-terminal-pill')).toBeVisible();
+
+  expect(state.observedLifecycleRequests).toEqual([
+    {
+      method: 'PATCH',
+      solverNetId: SOLVER_NET_ID,
+      payload: { target: 'paused' },
+    },
+    {
+      method: 'PATCH',
+      solverNetId: SOLVER_NET_ID,
+      payload: { target: 'launched' },
+    },
+    {
+      method: 'PATCH',
+      solverNetId: SOLVER_NET_ID,
+      payload: { target: 'retired' },
+    },
+  ]);
+});
+
+test('Operator catalog join flow writes manifest-cid keyed evaluator config from the launched registry', async ({
+  page,
+}) => {
+  await clearLocalStorage(page);
+  const state = makeMockState({
+    registrySummaries: [buildRegistrySummary()],
+  });
+  await mockDaemonApi(page, state);
+
+  await page.goto(dashboardUrl('/'));
+  await expect(page.getByText('jinn operator')).toBeVisible();
+  await page.getByRole('link', { name: /^operator$/i }).click();
+  await expect(page).toHaveURL(/\/operator/);
+
+  const card = page.getByTestId('registry-card');
+  await expect(card).toContainText(MOCK_MANIFEST.name);
+  await expect(card.getByTestId('registry-status-badge')).toContainText(/launched/i);
+  await page.getByTestId('registry-join-cta').click();
+
+  await expect(page).toHaveURL(new RegExp(`/operator/join/${MANIFEST_CID}`));
+  await expect(page.getByTestId('join-flow-title')).toContainText(
+    `Join ${MOCK_MANIFEST.name}`,
+  );
+  await expect(page.getByTestId('join-flow-open-roles')).toContainText(
+    /solver, evaluator/i,
+  );
+
+  await page.getByLabel('Evaluator').check();
+  await expect(page.getByTestId('join-flow-evaluator-info')).toContainText(
+    MOCK_MANIFEST.contract.evaluationFunction.implementation,
+  );
+  await expect(page.getByTestId('join-flow-solver-fields')).toHaveCount(0);
+  await page.getByTestId('join-flow-submit').click();
+
+  await expect(page).toHaveURL(/\/operator#solvernets$/);
+  await expect(page.getByText(/Joined · 1/i)).toBeVisible();
+
+  expect(state.joinedSolverNets[MANIFEST_CID]).toMatchObject({
+    manifestCid: MANIFEST_CID,
+    name: MOCK_MANIFEST.name,
+    contract: PREDICTION_CONTRACT,
+    roles: ['evaluator'],
+  });
+  expect(state.joinedSolverNets[MANIFEST_CID].harness).toBeUndefined();
+});
+
+test('Fresh daemon empty states show no launched operator catalog and no owned launcher SolverNets', async ({
+  page,
+}) => {
+  await clearLocalStorage(page);
+  const state = makeMockState();
+  await mockDaemonApi(page, state);
+
+  await page.goto(dashboardUrl('/'));
+  await expect(page.getByText('jinn operator')).toBeVisible();
+  await page.getByRole('link', { name: /^operator$/i }).click();
+
+  await expect(page.getByTestId('registry-catalog-empty')).toContainText(
+    'No launched SolverNets available.',
+  );
+
+  await page.getByRole('link', { name: /^launcher$/i }).click();
+  await expect(page.getByTestId('launcher-empty-state')).toContainText(
+    'No SolverNets created yet.',
+  );
 });

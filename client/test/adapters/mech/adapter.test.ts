@@ -618,7 +618,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(value!.task.id).toBe('watched-task:evaluation:0');
     expect(value!.task.context).toMatchObject({
       restorationResult: 'solution payload',
-      restorationEnvelopeCid: TASK_CID,
+      solutionEnvelopeCid: TASK_CID,
     });
     expect(getTaskCidDigest).toHaveBeenCalledWith(
       expect.anything(),
@@ -1034,7 +1034,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     }]);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({
       schemaVersion: 'jinn.execution.v1',
-      role: 'restoration',
+      role: 'solution',
       signature: { hash: '0x' + 'ef'.repeat(32) },
     });
 
@@ -1083,7 +1083,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const fakeEnvelope = {
       schemaVersion: 'jinn.execution.v1',
       kind: 'prediction.v1',
-      role: 'restoration',
+      role: 'solution',
       signature: {
         algo: 'secp256k1',
         signer: '0xabc',

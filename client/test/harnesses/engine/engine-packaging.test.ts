@@ -456,7 +456,7 @@ describe('Engine packaging integration', () => {
 
     // Build a minimal valid PortfolioV0VerdictPayload
     const verdictPayload = {
-      restorationEnvelope: { cid: 'bafy-rest', sha256: '0'.repeat(64) },
+      solutionEnvelope: { cid: 'bafy-solution', sha256: '0'.repeat(64) },
       verificationOfRestoration: {
         claimedTier: 'self-signed',
         sdkVersion: '0.0.0-stub',
@@ -549,7 +549,7 @@ describe('Engine packaging integration', () => {
     // payload must contain the verdict fields (not restoration snapshot fields)
     const payload = envelope['payload'] as Record<string, unknown>;
     expect(payload['verdict']).toBe('PASS');
-    expect(payload['restorationEnvelope']).toBeDefined();
+    expect(payload['solutionEnvelope']).toBeDefined();
     expect(payload['verificationOfRestoration']).toBeDefined();
     expect(payload['rederived']).toBeDefined();
     expect(payload['claimed']).toBeDefined();
