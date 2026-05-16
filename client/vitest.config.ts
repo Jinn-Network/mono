@@ -4,6 +4,12 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
   test: {
     globals: true,
+    // CI runners are slower than dev machines; bootstrap tests that take ~1.8s
+    // locally have crossed the 5s default under runner load. Give every test
+    // 30s and every hook 30s so transient CI slowness doesn't masquerade as a
+    // test regression and block canary publishes.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: [
       'test/**/*.test.ts',
       // Plugin tests live next to the plugin source under plugins/*/test/.

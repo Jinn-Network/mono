@@ -173,7 +173,7 @@ task run → envelope attribution → SPA panels render. A dual-role test verifi
 that a pre-bootstrapped identity is reused without re-minting.
 
 **Fixture files** live under `client/test/acceptance/_fixtures/`. See
-`client/test/acceptance/README.md` for the full fixture inventory.
+`client/test/acceptance/ACCEPTANCE.md` for the full fixture inventory.
 
 **CI gating:** The acceptance tier is NOT in the per-PR CI gate (which runs
 only `yarn typecheck` + `yarn test`). It is run nightly and as part of the

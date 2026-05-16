@@ -910,6 +910,13 @@ export class FleetBootstrapper {
       publicClient: this.publicClient,
       chainId: this.config.chainId,
     });
+    if (!bindResult.ok) {
+      const bindErr = bindResult.error;
+      throw new Error(
+        `Fleet setAgentWallet failed: ${bindErr.shortMessage}` +
+          (bindErr.revertReason ? ` (revert: ${bindErr.revertReason})` : ''),
+      );
+    }
     console.error(
       `[fleet-bootstrap] Stage 1: setAgentWallet succeeded (tx=${bindResult.txHash})`,
     );
