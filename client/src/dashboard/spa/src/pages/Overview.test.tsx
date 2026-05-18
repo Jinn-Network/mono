@@ -213,6 +213,69 @@ describe('OverviewPage empty-state gating', () => {
     expect(change?.getAttribute('href')).toBe('/operator#solvernets');
   });
 
+  it('prefers SolverNet-scoped prediction totals when the joined net is prediction (jinn-mono-0t6p)', async () => {
+    // The operator's local SQLite carries historical FAILED rows from
+    // legacy solvernets in addition to prediction.v1. The NetworkCard
+    // must show the scoped numbers so the operator sees the same fail
+    // count as the public explorer.
+    getStatusMock.mockResolvedValue({
+      taskRuns: {
+        totals: {
+          observedTasks: 201,
+          activeTaskRuns: 50,
+          completed: 100,
+          solutions: 41,
+          verdicts: 62,
+          failed: 81,
+          settledFailed: 61,
+          localErrors: 23,
+        },
+        inFlight: [],
+        recentTasks: [],
+      },
+      predictionV1: {
+        operator: {
+          ok: true,
+          solverNet: { name: 'prediction', enabled: true },
+          diagnostics: [],
+        },
+        totals: {
+          observedTasks: 22,
+          activeTaskRuns: 5,
+          solutions: 8,
+          verdicts: 7,
+          failed: 18,
+          settledFailed: 12,
+          localErrors: 6,
+        },
+      },
+      fleet: { services: [] },
+    });
+    getBootstrapMock.mockResolvedValue({
+      solverNets: { prediction: { enabled: true, roles: ['solving'] } },
+    });
+    render(withProviders(<OverviewPage />));
+
+    const networkTitle = await screen.findByText(/network · prediction/i);
+    const network = networkTitle.closest('section');
+    expect(network).not.toBeNull();
+    const card = network as HTMLElement;
+    // Scoped values surface in the card.
+    expect(within(card).getByText('22')).toBeTruthy();
+    expect(within(card).getByText('5')).toBeTruthy();
+    expect(within(card).getByText('8')).toBeTruthy();
+    expect(within(card).getByText('7')).toBeTruthy();
+    expect(within(card).getByText('12')).toBeTruthy();
+    expect(within(card).getByText('6')).toBeTruthy();
+    // Global counts that don't belong to prediction must not appear here.
+    expect(within(card).queryByText('201')).toBeNull();
+    expect(within(card).queryByText('50')).toBeNull();
+    expect(within(card).queryByText('41')).toBeNull();
+    expect(within(card).queryByText('62')).toBeNull();
+    expect(within(card).queryByText('61')).toBeNull();
+    expect(within(card).queryByText('23')).toBeNull();
+  });
+
   it('uses generic task-run totals before stale prediction counters', async () => {
     getStatusMock.mockResolvedValue({
       taskRuns: {

@@ -153,12 +153,18 @@ export function gatherPortfolioV0Status(
 ): PortfolioV0Status {
   const persistence = new TaskRunPersistence(store.db);
 
-  // In-flight: all non-terminal task runs
-  const inFlight = persistence.getInFlight().map(toInFlightTask);
+  // portfolio.v0 is a solver-specific status payload — filter task_runs by
+  // `solverType === 'portfolio.v0'` so other SolverNets' runs don't leak
+  // into these counters (jinn-mono-0t6p). Pre-migration rows without a
+  // `solverType` value are excluded; today the persistence layer always
+  // threads the solver type at observe() time.
+  const inFlight = persistence.getInFlight().filter(isPortfolioV0Run);
+  const complete = persistence.getByState('COMPLETE').filter(isPortfolioV0Run);
+  const failed = persistence.getByState('FAILED').filter(isPortfolioV0Run);
+
+  const inFlightSummaries = inFlight.map(toInFlightTask);
 
   // Recent verdicts: last N COMPLETE + FAILED task runs combined, newest first
-  const complete = persistence.getByState('COMPLETE');
-  const failed = persistence.getByState('FAILED');
   const allTerminal = [...complete, ...failed].sort(
     (a, b) => b.stateUpdatedAt - a.stateUpdatedAt,
   );
@@ -194,7 +200,17 @@ export function gatherPortfolioV0Status(
 
   const recentClaudeOutcomes = gatherRecentClaudeOutcomes(workingDirRoot);
 
-  return { totals, inFlight, recentVerdicts, recentSnapshots, recentClaudeOutcomes };
+  return {
+    totals,
+    inFlight: inFlightSummaries,
+    recentVerdicts,
+    recentSnapshots,
+    recentClaudeOutcomes,
+  };
+}
+
+function isPortfolioV0Run(run: PersistedTaskRun): boolean {
+  return run.solverType === 'portfolio.v0';
 }
 
 /**
