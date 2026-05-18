@@ -1037,8 +1037,9 @@ export class MechAdapter implements ExecutionAdapter {
           this.deliveryBlockCursor = currentBlock;
 
           const decoded = decodeDeliverLogs(logs);
+          const blockTimestampSecondsByNumber = new Map<bigint, number>();
           let currentBlockTimestampSeconds: number | undefined;
-          for (const { requestId, deliveryDataHex, mechAddress } of decoded) {
+          for (const { requestId, deliveryDataHex, mechAddress, blockNumber } of decoded) {
             // Two concerns, independent:
             //   (a) Did this Safe DELIVER this? → claim it (counter credit goes to msg.sender)
             //       The Deliver event's mechAddress is mechServiceMultisig (the Safe that owns
@@ -1050,14 +1051,25 @@ export class MechAdapter implements ExecutionAdapter {
             if (iCreatedRestoration) {
               const recoveryExpirySeconds = this.recoveryDeliveryExpirySeconds(requestId);
               if (recoveryExpirySeconds != null) {
-                if (currentBlockTimestampSeconds == null) {
-                  const currentBlockData = await this.publicClient.getBlock({ blockNumber: currentBlock });
-                  currentBlockTimestampSeconds = Number(currentBlockData.timestamp);
+                let deliveryTimestampSeconds: number | undefined;
+                if (blockNumber != null) {
+                  deliveryTimestampSeconds = blockTimestampSecondsByNumber.get(blockNumber);
+                  if (deliveryTimestampSeconds == null) {
+                    const deliveryBlockData = await this.publicClient.getBlock({ blockNumber });
+                    deliveryTimestampSeconds = Number(deliveryBlockData.timestamp);
+                    blockTimestampSecondsByNumber.set(blockNumber, deliveryTimestampSeconds);
+                  }
+                } else {
+                  if (currentBlockTimestampSeconds == null) {
+                    const currentBlockData = await this.publicClient.getBlock({ blockNumber: currentBlock });
+                    currentBlockTimestampSeconds = Number(currentBlockData.timestamp);
+                  }
+                  deliveryTimestampSeconds = currentBlockTimestampSeconds;
                 }
                 if (
                   this.shouldSkipExpiredRecoveryDelivery(
                     requestId,
-                    currentBlockTimestampSeconds,
+                    deliveryTimestampSeconds,
                     recoveryExpirySeconds,
                   )
                 ) {
