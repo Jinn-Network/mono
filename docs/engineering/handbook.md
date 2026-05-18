@@ -67,7 +67,7 @@ The Project board's Sprint view resets to the new Monday; shipped items move to 
 
 ## The shapes of work
 
-The handbook recognises seven shapes plus one emergency sub-flow. Each shape declares a **disposition** — when it applies, what discipline its container demands, what ceremony fits. The shape is declared in the GitHub Issue body's `## Run-mode` section and replicated in the PR title prefix (Conventional Commits). If an Issue does not fit one of these shapes, it is mis-scoped — split it or reshape it.
+The handbook recognises seven shapes plus one emergency sub-flow, plus one meta-shape (`INTERACTIVE DESIGN`) used when the Issue's job is to *produce a design doc* (spec or DR) rather than ship implementation. Each shape declares a **disposition** — when it applies, what discipline its container demands, what ceremony fits. The shape is declared in the GitHub Issue body's `## Run-mode` section and replicated in the PR title prefix (Conventional Commits). If an Issue does not fit one of these shapes, it is mis-scoped — split it or reshape it.
 
 The taxonomy is keyed to Conventional Commits prefixes so it composes with existing tooling: PR title → Release section grouping → CHANGELOG entry.
 

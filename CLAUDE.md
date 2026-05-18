@@ -28,7 +28,7 @@ How this team ships — cadence, dist-tags, work-shape taxonomy, AI workflow rul
 
 ### Work shape (declare it before executing)
 
-Seven shapes plus one emergency sub-flow, keyed to Conventional Commits prefixes. Declare the shape in the GitHub Issue body's `## Run-mode` section; replicate it as the PR title prefix.
+Seven shapes plus one emergency sub-flow plus one meta-shape (`INTERACTIVE DESIGN`, for design-only sessions whose output is a spec or DR, not implementation), keyed to Conventional Commits prefixes. Declare the shape in the GitHub Issue body's `## Run-mode` section; replicate it as the PR title prefix.
 
 - **`fix`** — bug fix. Regression test first. Skill chain: `systematic-debugging` → `executing-plans` → `verification-before-completion` → `receiving-code-review`.
 - **`feat`** — feature. TDD. Skill chain: (`brainstorming` if ambiguous) → `writing-plans` → `test-driven-development` → `executing-plans` / `dispatching-parallel-agents` → `verification-before-completion` → `receiving-code-review`.
