@@ -3,7 +3,7 @@ id: DR-2026-05-11-b
 title: Engineering substrate — bd as internal SoR; GitHub Projects (v2) as the public sprint surface; sprint-scoped bd→GH-Issue mirror
 date: 2026-05-11
 verb: Choose
-status: proposed
+status: superseded (by DR-2026-05-18 for the internal-SoR claim; the sprint-surface claim — GitHub Project (v2) as the canonical sprint board — survives)
 authors: opus (proposed), oak (Captain attached)
 spec: docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md (this design)
 supersedes-context-from: (none — establishes substrate)

@@ -37,7 +37,7 @@ Seven shapes plus one emergency sub-flow plus one meta-shape (`INTERACTIVE DESIG
 - **`chore`** — deps, CI, dev tooling. Integration tests if touches a dep.
 - **`docs`** — documentation. Canonical-doc changes need Discussion + CODEOWNERS approval.
 - **`test`** — test-only. Meta test discipline.
-- **`fix(incident)`** — hotfix sub-flow. Relaxed review; post-hoc regression test required as a follow-up bead before closing the incident.
+- **`fix(incident)`** — hotfix sub-flow. Relaxed review; post-hoc regression test required as a follow-up Issue before closing the incident.
 
 If an Issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a GitHub Issue under the engineering handbook umbrella when friction surfaces).
 

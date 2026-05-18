@@ -57,6 +57,7 @@ A four-section brief:
 
 - **No active sprint.** Print the fail-loud message:
   > No active sprint declared. Per docs/engineering/handbook.md §Sprint surface, the canonical sprint board is the "Jinn engineering" GitHub Project (v2) on Jinn-Network/mono. Add at least one GitHub Issue to the Project board with `Sprint = <upcoming-monday-date>` to declare a sprint, or take an explicit rest day.
+- **Project number mismatch.** This skill assumes project-number `1` for "Jinn engineering" on `Jinn-Network`. If `gh project item-list 1 --owner Jinn-Network` returns "project not found" or an unrelated board, run `gh project list --owner Jinn-Network --format json | jq '.projects[] | {number,title}'` to discover the actual number and surface it in the brief alongside the "no active sprint" failure — do not silently emit a misleading "no sprint" message when the project number is wrong.
 - **`gh` CLI unauthenticated.** Print the auth instruction (`gh auth login`, with the `project` scope: `gh auth refresh -s project`); do not block on the brief.
 - **Project board not reachable** (network / token issue). Print a one-line note and fall back to the open-Issue queue alone. Continue.
 

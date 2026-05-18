@@ -1,12 +1,17 @@
 ---
-title: Agent Instructions
-purpose: entry-point
+title: Agent Instructions (legacy reference)
+purpose: historical-reference
 last_verified: 2026-02-01
+status: archived (2026-05-18) — see note below
 ---
 
-# Agent Instructions
+# Agent Instructions (legacy reference)
 
-> Single entry point for AI agents working on Jinn.
+> **Status — archived reference (2026-05-18+).** This file is the historical entry point from the `jinn-gemini` subtree, retained under `legacy/jinn-cli-agents-reference/` for OLAS / staking / tokenomics / Phase 1 contract context. The canonical canon for live Jinn engineering work is at the repo root: [`CLAUDE.md`](../../CLAUDE.md), [`docs/engineering/handbook.md`](../../docs/engineering/handbook.md), [`SPEC.md`](../../SPEC.md), and the other root-level canonical docs.
+>
+> **Issue tracking:** per [DR-2026-05-18](../../log/decisions/2026-05-18-bd-vs-gh-substrate.md), engineering work is tracked on GitHub Issues + the "Jinn engineering" Project (v2), **not** `bd`. The `bd` / "beads" references below are historical and should not be followed for new work. Treat the workflow advice in this file as a 2026-Q1 snapshot, not active canon.
+
+> Original framing follows.
 
 ---
 
