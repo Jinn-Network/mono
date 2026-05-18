@@ -18,3 +18,22 @@ export const VerdictCode = {
 } as const;
 
 export type VerdictCode = typeof VerdictCode[keyof typeof VerdictCode];
+
+export function verdictCodeFromValue(raw: unknown): VerdictCode {
+  const normalized = typeof raw === 'string' ? raw.toUpperCase() : raw;
+  switch (normalized) {
+    case 'PASS':
+    case 'SCORED':
+      return VerdictCode.Pass;
+    case 'FAIL':
+    case 'REJECTED':
+      return VerdictCode.Fail;
+    case 'INVALID':
+      return VerdictCode.Invalid;
+    case 'INDETERMINATE':
+    case 'UNRESOLVED':
+      return VerdictCode.Unresolved;
+    default:
+      return VerdictCode.Invalid;
+  }
+}
