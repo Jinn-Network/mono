@@ -213,6 +213,84 @@ describe('OverviewPage empty-state gating', () => {
     expect(change?.getAttribute('href')).toBe('/operator#solvernets');
   });
 
+  it('prefers SolverNet-scoped prediction totals for the manifest-keyed joined prediction path (jinn-mono-0t6p)', async () => {
+    // Spec §12 / canonical shape: the operator joined prediction via
+    // `joinedSolverNets[<manifestCid>]` and bound the prediction harness.
+    // The joined entry's `name` is operator-chosen ("Prediction Markets"),
+    // its `configId` is the manifestCid (NOT 'prediction'), and the
+    // legacy `predictionV1.operator.solverNet.enabled` is false because the
+    // user no longer maintains a `solverNets.prediction` short-name entry.
+    // The fix must still route this case to the scoped predictionV1.totals.
+    getStatusMock.mockResolvedValue({
+      taskRuns: {
+        totals: {
+          observedTasks: 201,
+          activeTaskRuns: 50,
+          completed: 100,
+          solutions: 41,
+          verdicts: 62,
+          failed: 81,
+          settledFailed: 61,
+          localErrors: 23,
+        },
+        inFlight: [],
+        recentTasks: [],
+      },
+      predictionV1: {
+        operator: {
+          ok: true,
+          // The daemon's prediction operator block is cold for this user —
+          // their config has no legacy `solverNets.prediction`. The scoped
+          // payload must still be preferred via the harness signal.
+          solverNet: { name: 'prediction', enabled: false },
+          diagnostics: [],
+        },
+        totals: {
+          observedTasks: 22,
+          activeTaskRuns: 5,
+          solutions: 8,
+          verdicts: 7,
+          failed: 18,
+          settledFailed: 12,
+          localErrors: 6,
+        },
+      },
+      fleet: { services: [] },
+    });
+    getBootstrapMock.mockResolvedValue({
+      joinedSolverNets: {
+        bafybeipredmanifest: {
+          name: 'Prediction Markets',
+          manifestCid: 'bafybeipredmanifest',
+          roles: ['solver'],
+          harness: 'prediction-v1-baseline',
+        },
+      },
+    });
+    render(withProviders(<OverviewPage />));
+
+    const networkTitle = await screen.findByText(
+      /network · prediction markets/i,
+    );
+    const network = networkTitle.closest('section');
+    expect(network).not.toBeNull();
+    const card = network as HTMLElement;
+    // Scoped predictionV1 totals surface — not the global rollup.
+    expect(within(card).getByText('22')).toBeTruthy();
+    expect(within(card).getByText('5')).toBeTruthy();
+    expect(within(card).getByText('8')).toBeTruthy();
+    expect(within(card).getByText('7')).toBeTruthy();
+    expect(within(card).getByText('12')).toBeTruthy();
+    expect(within(card).getByText('6')).toBeTruthy();
+    // Global counts that don't belong to prediction must not appear here.
+    expect(within(card).queryByText('201')).toBeNull();
+    expect(within(card).queryByText('50')).toBeNull();
+    expect(within(card).queryByText('41')).toBeNull();
+    expect(within(card).queryByText('62')).toBeNull();
+    expect(within(card).queryByText('61')).toBeNull();
+    expect(within(card).queryByText('23')).toBeNull();
+  });
+
   it('prefers SolverNet-scoped prediction totals when the joined net is prediction (jinn-mono-0t6p)', async () => {
     // The operator's local SQLite carries historical FAILED rows from
     // legacy solvernets in addition to prediction.v1. The NetworkCard
