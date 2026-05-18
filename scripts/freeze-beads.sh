@@ -7,24 +7,13 @@
 # (close-or-port sweep) has executed so the freeze snapshot captures the
 # post-sweep state.
 #
-# What this does:
-#   1. Sanity-check: bd CLI is on PATH and the Dolt database is reachable.
-#   2. `bd dolt commit` — flush any pending writes.
-#   3. `bd export` — write a JSONL snapshot to `.beads-archive-2026-05-18.jsonl`
-#      at the repo root for redundancy. The Dolt database is the
-#      authoritative archive; the JSONL is a portable secondary copy.
-#   4. `bd dolt push` — sync to the configured Dolt remote.
-#   5. Print the Dolt-remote tag command Captain must run manually (this
-#      script does not run the tag command itself because Dolt-remote
-#      tagging mechanics are deployment-specific and we don't want a
-#      half-completed automation).
-#   6. Print the post-freeze checklist (operator-local cleanup, repo notes).
-#
 # What this does NOT do (Captain runs these manually after this script):
-#   - Tag the Dolt remote head as `bd-archive-2026-05-18`.
+#   - Tag the Dolt remote head as `bd-archive-2026-05-18`. Tagging mechanics
+#     depend on the Dolt-remote deployment; we don't want a half-completed
+#     automation.
 #   - Remove the `bd prime` SessionStart / PreCompact hooks from each
 #     operator's `.claude/settings.json` (those are gitignored / operator-local).
-#   - Open a follow-up PR if a label-only "sprint candidate" workflow is wanted.
+#   - Open a follow-up Issue if a label-only "sprint candidate" workflow is wanted.
 #
 # Idempotent: re-running is safe. The export overwrites; the Dolt push is a
 # no-op if nothing changed; bd dolt commit is a no-op if nothing is pending.
@@ -42,11 +31,6 @@ if ! command -v bd >/dev/null 2>&1; then
   echo "error: bd CLI not on PATH. Install bd or run this from a shell with bd installed." >&2
   exit 1
 fi
-bd status >/dev/null 2>&1 || {
-  echo "error: bd CLI reachable but database is not — check .beads/ exists at ${REPO_ROOT}/.beads." >&2
-  exit 1
-}
-echo "bd CLI ok; .beads/ database reachable."
 
 say "Commit pending bd writes (no-op if clean)"
 bd dolt commit --message "Freeze for bd-archive-${ARCHIVE_DATE} per DR-2026-05-18" 2>&1 || {
