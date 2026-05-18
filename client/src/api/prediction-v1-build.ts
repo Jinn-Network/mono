@@ -9,6 +9,7 @@
 import type { Store } from '../store/store.js';
 import { TaskRunPersistence, type PersistedTaskRun } from '../harnesses/engine/persistence.js';
 import type { PredictionOperatorStatus } from '../solver-nets/prediction-operator-ux.js';
+import { taskRunRoutingKey } from './task-run-routing.js';
 
 /**
  * Operator-mode visible roles. The launcher is configured per-net but is
@@ -124,7 +125,7 @@ export function gatherPredictionV1Status(
 }
 
 function isPredictionV1Run(run: PersistedTaskRun): boolean {
-  return run.solverType === 'prediction.v1';
+  return taskRunRoutingKey(run) === 'prediction.v1';
 }
 
 function taskIdentity(run: PersistedTaskRun): string {

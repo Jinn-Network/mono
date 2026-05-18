@@ -138,6 +138,50 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
+  it('keeps portfolio rows when solver_type is missing but task_payload still identifies the net', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      seedIntent(persistence, 'canonical-pv0');
+      store.db.prepare(
+        `UPDATE task_runs
+         SET solver_type = NULL,
+             task_payload = ?
+         WHERE request_id = ?`,
+      ).run(
+        JSON.stringify({
+          id: 'canonical-pv0',
+          description: 'test',
+          contractId: 'portfolio',
+          contractVersion: 'v0',
+        }),
+        'canonical-pv0',
+      );
+
+      seedIntent(persistence, 'legacy-pv0');
+      persistence.markFailed('legacy-pv0', 'legacy failure');
+      store.db.prepare(
+        `UPDATE task_runs
+         SET solver_type = NULL,
+             task_payload = ?
+         WHERE request_id = ?`,
+      ).run(
+        JSON.stringify({
+          id: 'legacy-pv0',
+          description: 'test',
+          solverType: 'portfolio.v0',
+        }),
+        'legacy-pv0',
+      );
+
+      const result = gatherPortfolioV0Status(store);
+
+      expect(result.totals.active).toBe(1);
+      expect(result.totals.failed).toBe(1);
+      expect(result.inFlight.map((row) => row.requestId)).toContain('canonical-pv0');
+      expect(result.recentVerdicts.map((row) => row.requestId)).toContain('legacy-pv0');
+    });
+  });
+
   it('includes solverType and implName in in-flight summaries', async () => {
     await withTempStore(async (store) => {
       const persistence = new TaskRunPersistence(store.db);

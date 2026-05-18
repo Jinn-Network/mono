@@ -194,4 +194,59 @@ describe('gatherPredictionV1Status', () => {
       expect(result.totals.localErrors).toBe(1);
     });
   });
+
+  it('keeps prediction rows when solver_type is missing but task_payload still identifies the net', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      seedPredictionRun(store, persistence, {
+        requestId: 'canonical-prediction',
+        taskId: 'prediction-canonical-task',
+      });
+      store.db.prepare(
+        `UPDATE task_runs
+         SET solver_type = NULL,
+             task_payload = ?
+         WHERE request_id = ?`,
+      ).run(
+        JSON.stringify({
+          id: 'prediction-canonical-task',
+          description: 'prediction test task',
+          contractId: 'prediction',
+          contractVersion: 'v1',
+          role: 'restoration',
+        }),
+        'canonical-prediction',
+      );
+
+      seedPredictionRun(store, persistence, {
+        requestId: 'legacy-prediction',
+        taskId: 'prediction-legacy-task',
+        state: 'FAILED',
+        stateUpdatedAt: 25,
+      });
+      store.db.prepare(
+        `UPDATE task_runs
+         SET solver_type = NULL,
+             task_payload = ?
+         WHERE request_id = ?`,
+      ).run(
+        JSON.stringify({
+          id: 'prediction-legacy-task',
+          description: 'prediction test task',
+          solverType: 'prediction.v1',
+          role: 'restoration',
+        }),
+        'legacy-prediction',
+      );
+
+      const result = gatherPredictionV1Status(store);
+
+      expect(result.totals.observedTasks).toBe(2);
+      expect(result.totals.activeTaskRuns).toBe(1);
+      expect(result.totals.failed).toBe(1);
+      expect(result.recentTasks.map((task) => task.requestId)).toEqual(
+        expect.arrayContaining(['canonical-prediction', 'legacy-prediction']),
+      );
+    });
+  });
 });

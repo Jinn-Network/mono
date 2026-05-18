@@ -34,6 +34,7 @@ vi.mock('../api/client.js', () => ({
 
 // Import after the mock so the page picks up the mocked client.
 const { OverviewPage } = await import('./Overview.js');
+const { detectJoinedSolverNet, operatorWaitingMessage } = await import('./overview/joined-solver-net.js');
 
 beforeEach(() => {
   getStatusMock.mockReset();
@@ -119,6 +120,40 @@ describe('OverviewPage empty-state gating', () => {
     );
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
     expect(screen.getByText(/waiting for tasks/i)).toBeTruthy();
+  });
+
+  it('routes manifest-keyed joined prediction nets to the prediction waiting copy', () => {
+    const joined = detectJoinedSolverNet(
+      {
+        bafybeipredmanifest: {
+          name: 'Prediction Markets',
+          manifestCid: 'bafybeipredmanifest',
+          roles: ['solver'],
+          harness: 'prediction-v1-baseline',
+        },
+      },
+      undefined,
+      false,
+      undefined,
+    );
+
+    expect(joined).toMatchObject({
+      name: 'Prediction Markets',
+      configId: 'bafybeipredmanifest',
+      scopedStatusKey: 'predictionV1',
+    });
+    expect(
+      operatorWaitingMessage(
+        joined,
+        {
+          observedTasks: 0,
+          activeTaskRuns: 0,
+          completed: 0,
+          failed: 0,
+        },
+        'Waiting for Tasks. SolverNet active, Harness loaded; no incoming Tasks since startup.',
+      ),
+    ).toMatch(/waiting for tasks/i);
   });
 
   it('shows the OperatorCard from operator roles even when legacy enabled is false', async () => {
@@ -244,6 +279,7 @@ describe('OverviewPage empty-state gating', () => {
           // payload must still be preferred via the harness signal.
           solverNet: { name: 'prediction', enabled: false },
           diagnostics: [],
+          nextAction: { description: 'Waiting for Tasks.' },
         },
         totals: {
           observedTasks: 22,

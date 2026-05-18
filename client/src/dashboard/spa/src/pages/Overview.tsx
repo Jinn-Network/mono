@@ -5,10 +5,15 @@ import { HeroStats } from './overview/HeroStats.js';
 import { AlertBand } from './overview/AlertBand.js';
 import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/LiveNowBand.js';
 import { NetworkCard } from './overview/NetworkCard.js';
-import { OperatorCard, type OperatorCardRole } from './overview/OperatorCard.js';
+import { OperatorCard } from './overview/OperatorCard.js';
 import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
 import { AdvancedDetails } from './overview/AdvancedDetails.js';
 import { HarnessStatusPanel } from './overview/HarnessStatusPanel.js';
+import {
+  detectJoinedSolverNet,
+  operatorWaitingMessage,
+  type BootstrapWithSolverNets,
+} from './overview/joined-solver-net.js';
 
 interface OverviewStatusV1 {
   fleet?: {
@@ -84,178 +89,6 @@ interface OverviewStatusV1 {
   };
 }
 
-type OverviewTaskRunTotals = NonNullable<OverviewStatusV1['taskRuns']>['totals'];
-
-/**
- * The operator's joined SolverNets per spec §12. Tasks 21/22 finish the
- * migration from the legacy short-name-keyed `solverNets` shape to the
- * `manifestCid`-keyed shape; until then, OperatorCard accepts both.
- *
- * New shape:    { '<manifestCid>': { name, manifestCid, roles: ['solver'|'evaluator'], harness?, ... } }
- * Legacy shape: { '<shortName>':   { enabled: boolean, roles?: ['solving'|'evaluating'], ... } }
- */
-interface BootstrapWithSolverNets {
-  solverNets?: Record<
-    string,
-    {
-      name?: string;
-      manifestCid?: string;
-      enabled?: boolean;
-      roles?: string[];
-      solverType?: string;
-      harness?: string;
-    }
-  >;
-  joinedSolverNets?: Record<
-    string,
-    {
-      name?: string;
-      manifestCid?: string;
-      roles?: string[];
-      /**
-       * Harness name bound to this joined entry. Used to discriminate which
-       * underlying solverType the joined SolverNet runs: e.g.
-       * `prediction-v1-baseline` ⇒ `prediction.v1`. The bootstrap endpoint
-       * pass-throughs the operator's config record.
-       */
-      harness?: string;
-      /** Optional explicit solverType override; honoured when present. */
-      solverType?: string;
-    }
-  >;
-}
-
-interface JoinedSolverNet {
-  /** Display name for the OperatorCard. */
-  name: string;
-  /** Manifest CID / config key used for deep-linking into the joined config. */
-  configId?: string;
-  /** Roles narrowed to OperatorCard's `solving` / `evaluating` vocabulary. */
-  roles: OperatorCardRole[];
-  /**
-   * Best-effort discriminator for the underlying solver type. Derived from
-   * the join entry (legacy short-name → 'prediction.v1'; manifest-keyed
-   * `harness === 'prediction-v1-baseline'` → 'prediction.v1'). Used by the
-   * Overview wiring to decide whether the SolverNet-scoped
-   * `predictionV1.totals` payload applies to this joined net.
-   */
-  solverType?: string;
-}
-
-/**
- * Map a join entry's `harness` name to the canonical solverType the harness
- * supports. Currently only the prediction harness is registered here — other
- * solver types have no dedicated scoped status payload to route to, so
- * widening this table prematurely would have no consumer.
- */
-function solverTypeForHarness(harness: string | undefined): string | undefined {
-  if (harness === 'prediction-v1-baseline') return 'prediction.v1';
-  return undefined;
-}
-
-/**
- * Detect whether the operator has joined any SolverNet. Returns the first
- * joined entry projected into OperatorCard's prop shape. The explicit
- * `joinedSolverNets` config block wins over the legacy `solverNets` map. The new
- * manifestCid-keyed shape (any entry with non-empty `roles`) wins over the
- * legacy `enabled` flag; both are accepted during the Tasks 21/22 migration
- * (spec §12). The predictionV1 status payload is a final-fallback signal
- * for daemons that haven't been restarted since this migration landed.
- */
-function detectJoinedSolverNet(
-  joinedSolverNets: BootstrapWithSolverNets['joinedSolverNets'] | undefined,
-  bootstrapSolverNets: BootstrapWithSolverNets['solverNets'] | undefined,
-  predictionEnabled: boolean,
-  predictionRoles: string[] | undefined,
-): JoinedSolverNet | null {
-  if (joinedSolverNets) {
-    for (const [key, entry] of Object.entries(joinedSolverNets)) {
-      if (!entry || typeof entry !== 'object') continue;
-      const rawRoles = Array.isArray(entry.roles) ? entry.roles : [];
-      if (rawRoles.length === 0) continue;
-      const roles = mapRolesToOperatorVocab(rawRoles);
-      // Manifest-keyed entries don't carry a top-level solverType today, so
-      // we lean on the bound `harness` name to identify the underlying
-      // solver. An explicit `solverType` field on the entry wins when present.
-      const solverType = entry.solverType ?? solverTypeForHarness(entry.harness);
-      return {
-        name: entry.name ?? entry.manifestCid ?? key,
-        configId: entry.manifestCid ?? key,
-        roles: roles.length > 0 ? roles : ['solving'],
-        ...(solverType ? { solverType } : {}),
-      };
-    }
-  }
-
-  if (bootstrapSolverNets) {
-    // Pass 1: new shape — entries keyed by manifestCid (heuristic: starts
-    // with 'baf' / 'Qm', or has a `manifestCid` field) with non-empty roles.
-    for (const [key, entry] of Object.entries(bootstrapSolverNets)) {
-      if (!entry || typeof entry !== 'object') continue;
-      const looksLikeCid =
-        entry.manifestCid !== undefined ||
-        key.startsWith('baf') ||
-        key.startsWith('Qm');
-      if (!looksLikeCid) continue;
-      const rawRoles = Array.isArray(entry.roles) ? entry.roles : [];
-      if (rawRoles.length === 0) continue;
-      const roles = mapRolesToOperatorVocab(rawRoles);
-      const solverType = entry.solverType ?? solverTypeForHarness(entry.harness);
-      return {
-        name: entry.name ?? key,
-        configId: entry.manifestCid ?? key,
-        roles: roles.length > 0 ? roles : ['solving'],
-        ...(solverType ? { solverType } : {}),
-      };
-    }
-    // Pass 2: legacy short-name shape — enabled entries or operator-visible roles.
-    for (const [key, entry] of Object.entries(bootstrapSolverNets)) {
-      if (!entry || typeof entry !== 'object') continue;
-      const rawRoles = Array.isArray(entry.roles) ? entry.roles : [];
-      const roles = mapRolesToOperatorVocab(rawRoles);
-      if (entry.enabled !== true && roles.length === 0) continue;
-      // Legacy short-name 'prediction' maps to solverType prediction.v1;
-      // honour an explicit field or harness signal first so non-prediction
-      // legacy entries (if they ever surface) don't get mislabelled.
-      const solverType =
-        entry.solverType ??
-        solverTypeForHarness(entry.harness) ??
-        (key === 'prediction' ? 'prediction.v1' : undefined);
-      return {
-        name: entry.name ?? key,
-        configId: entry.manifestCid ?? key,
-        roles: roles.length > 0 ? roles : ['solving'],
-        ...(solverType ? { solverType } : {}),
-      };
-    }
-  }
-
-  // Pass 3: predictionV1 status payload as a last-resort signal. The daemon
-  // surfaces this for back-compat with the pre-spec-§12 single-net world.
-  const mappedPredictionRoles = mapRolesToOperatorVocab(predictionRoles ?? []);
-  if (predictionEnabled || mappedPredictionRoles.length > 0) {
-    return {
-      name: 'prediction',
-      configId: 'prediction',
-      roles: mappedPredictionRoles.length > 0 ? mappedPredictionRoles : ['solving'],
-      solverType: 'prediction.v1',
-    };
-  }
-  return null;
-}
-
-function mapRolesToOperatorVocab(roles: string[]): OperatorCardRole[] {
-  const mapped: OperatorCardRole[] = [];
-  for (const r of roles) {
-    if (r === 'solving' || r === 'solver') {
-      if (!mapped.includes('solving')) mapped.push('solving');
-    } else if (r === 'evaluating' || r === 'evaluator') {
-      if (!mapped.includes('evaluating')) mapped.push('evaluating');
-    }
-  }
-  return mapped;
-}
-
 function formatEth(wei?: string): string {
   if (!wei || !/^\d+$/.test(wei)) return '—';
   try {
@@ -265,28 +98,6 @@ function formatEth(wei?: string): string {
   } catch {
     return '—';
   }
-}
-
-function operatorWaitingMessage(
-  joined: JoinedSolverNet | null,
-  taskRunTotals: OverviewTaskRunTotals,
-  predictionDescription: string | undefined,
-): string | undefined {
-  const hasGenericRuns =
-    (taskRunTotals?.observedTasks ?? 0) > 0 ||
-    (taskRunTotals?.activeTaskRuns ?? 0) > 0 ||
-    (taskRunTotals?.completed ?? 0) > 0 ||
-    (taskRunTotals?.failed ?? 0) > 0;
-  if (hasGenericRuns) {
-    if ((taskRunTotals?.activeTaskRuns ?? 0) > 0) {
-      return 'Working on current run.';
-    }
-    return 'Waiting for the next available run.';
-  }
-  if (joined?.configId === 'prediction') {
-    return predictionDescription;
-  }
-  return undefined;
 }
 
 export function OverviewPage(): JSX.Element {
@@ -319,18 +130,18 @@ export function OverviewPage(): JSX.Element {
   const taskRunTotals = status?.taskRuns?.totals;
   const predictionTotals = status?.predictionV1?.totals;
   // Per jinn-mono-0t6p: the NetworkCard's counters must be scoped to the
-  // joined SolverNet. `predictionV1.totals` is filtered by
-  // `solverType === 'prediction.v1'` in the build layer, while
+  // joined SolverNet. `predictionV1.totals` is filtered to prediction task
+  // runs in the build layer, while
   // `taskRuns.totals` is global across every solver type the operator's
-  // SQLite has ever observed. The discriminator is the joined net's
-  // resolved `solverType` (see `detectJoinedSolverNet`): both the legacy
-  // short-name `solverNets.prediction` path AND the manifest-keyed
-  // `joinedSolverNets[<cid>]` path resolve to `'prediction.v1'` via the
-  // bound harness, so users on either shape get scoped counters. For any
-  // other joined net we fall back to taskRunTotals (no scoped payload
-  // exists for those solver types today — captured as a follow-up risk).
+  // SQLite has ever observed. The discriminator is the joined net's scoped
+  // status key (see `detectJoinedSolverNet`): both the legacy short-name
+  // `solverNets.prediction` path AND the manifest-keyed
+  // `joinedSolverNets[<cid>]` path route to `predictionV1` via the bound
+  // harness, so users on either shape get scoped counters. For any other
+  // joined net we fall back to taskRunTotals (no scoped payload exists for
+  // those SolverNets today — captured as a follow-up risk).
   const preferPredictionTotals =
-    joined?.solverType === 'prediction.v1' && predictionTotals !== undefined;
+    joined?.scopedStatusKey === 'predictionV1' && predictionTotals !== undefined;
   const primaryTotals = preferPredictionTotals ? predictionTotals : taskRunTotals;
   const fallbackTotals = preferPredictionTotals ? taskRunTotals : predictionTotals;
   // Old daemons only ship `failed`; surface it under `localErrors` so the
