@@ -1,14 +1,13 @@
-# CHANGELOG auto-mirror on Release publish — implements jinn-mono-2cl.10.
+# CHANGELOG auto-mirror on Release publish.
 #
 # On a GitHub Release publish, upsert the Release body as a section under the Unreleased
-# heading in cargo/client/CHANGELOG.md, then open or update a PR. Captain stops
+# heading in client/CHANGELOG.md, then open or update a PR. Captain stops
 # hand-editing CHANGELOG.md; the GitHub Release body is the single source of
 # truth. npm consumers still get CHANGELOG.md in the package tarball.
 #
 # Reference:
-# - cargo/docs/engineering/handbook.md §Building in public — substrate
-# - cargo/docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md Thread 7
-# - cargo/client/CHANGELOG.md (current hand-maintained state)
+# - docs/engineering/handbook.md §Building in public — substrate
+# - client/CHANGELOG.md (current hand-maintained state)
 
 name: CHANGELOG mirror
 

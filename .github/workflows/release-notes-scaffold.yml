@@ -1,18 +1,18 @@
-# Monday release-notes scaffold cron — implements jinn-mono-2cl.2.
+# Monday release-notes scaffold cron.
 #
 # Creates a GitHub Release **draft** every Monday at 09:00 UTC with the mechanical inputs for the
 # named Build Notes release (merged PRs since the previous stable client semver tag with authors,
-# closed bd issues, contributor list, line-change stats, suggested semver bump = patch). Captain edits the draft in
-# the GitHub Release UI to fill in <build name>, ## Highlights, and ## Known issues, then clicks
-# Publish. Publish triggers npm `latest` (already wired in `npm-publish.yml` on release: published)
-# and the CHANGELOG auto-mirror (`changelog-mirror.yml`, jinn-mono-2cl.10).
+# closed-Issue references, contributor list, line-change stats, suggested semver bump = patch).
+# Captain edits the draft in the GitHub Release UI to fill in <build name>, ## Highlights, and
+# ## Known issues, then clicks Publish. Publish triggers npm `latest` (already wired in
+# `npm-publish.yml` on release: published) and the CHANGELOG auto-mirror (`changelog-mirror.yml`).
 #
 # v0 status: shipped with `workflow_dispatch` only — cron schedule below is commented out.
 # Promote to scheduled cron after first manual run validates output.
 #
 # Reference:
-# - cargo/docs/engineering/handbook.md §The shipping machine
-# - cargo/docs/superpowers/specs/2026-05-11-engineering-handbook-codesign.md Threads 5 + 6
+# - docs/engineering/handbook.md §The shipping machine
+# - log/decisions/2026-05-18-bd-vs-gh-substrate.md (DR-2026-05-18 — issue substrate retirement)
 # - Hermes v0.13.0 release notes for the shape reference
 #
 # Two-train cadence: this workflow targets `next` (integration branch). Captain's Publish
@@ -99,7 +99,7 @@ jobs:
           echo "base=$BASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "suggested=$SUGGESTED" >> "$GITHUB_OUTPUT"
 
-      - name: Gather merged PRs + closed-bd references since last tag
+      - name: Gather merged PRs + closed-Issue references since last tag
         id: prs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -121,18 +121,18 @@ jobs:
           echo "$PRS_JSON" | jq -r 'sort_by(.number) | .[] | "\(.number)\t\(.title)\t\(.author.login)"' > /tmp/prs.txt
           echo "$PRS_JSON" | jq -r '.[].author.login' | sort -u > /tmp/contributors.txt
 
-          # Closed-bd list: parse each PR body for `closes/fixes/resolves jinn-mono-<id>`
-          # (GitHub's close-keyword set, `\b`-anchored to avoid substring matches like `disclosed`).
-          # This is a proxy for "bd issues closed in this window" that needs no bd CLI on the runner.
-          # PRs that *document* close-keyword syntax (rare) can produce false-positives — the
-          # Captain edits this list before publishing the Release, so that's acceptable.
+          # Closed-Issue references: parse each PR body for close-keyword + Issue ref.
+          # Per DR-2026-05-18 the canonical Issue substrate is GitHub Issues (`#N`); the legacy
+          # `jinn-mono-<id>` form is recognised so historical PR bodies during the migration
+          # window still aggregate cleanly. Both forms are emitted in a single unified list.
+          # `\b` anchors prevent substring matches like `disclosed`.
           echo "$PRS_JSON" | jq -r '.[].body // ""' \
-            | grep -oiE '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' \
-            | grep -oiE 'jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' | sort -u > /tmp/bd-ids-raw.txt || true
-          if [ -s /tmp/bd-ids-raw.txt ]; then
-            sed 's/^/- /' /tmp/bd-ids-raw.txt > /tmp/bd-closed.txt
+            | grep -oiE '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+(jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*|#[0-9]+)' \
+            | grep -oiE '(jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*|#[0-9]+)' | sort -u > /tmp/closed-refs-raw.txt || true
+          if [ -s /tmp/closed-refs-raw.txt ]; then
+            sed 's/^/- /' /tmp/closed-refs-raw.txt > /tmp/closed-refs.txt
           else
-            echo "- (none referenced via \`Closes jinn-mono-<id>\` in merged PRs this window — Captain may add manually)" > /tmp/bd-closed.txt
+            echo "- (none referenced via \`Closes #<N>\` or legacy \`Closes jinn-mono-<id>\` in merged PRs this window — Captain may add manually)" > /tmp/closed-refs.txt
           fi
 
       - name: Compute stats
@@ -192,7 +192,7 @@ jobs:
             fi
             echo ""
             echo "## Closed this week"
-            cat /tmp/bd-closed.txt
+            cat /tmp/closed-refs.txt
             echo ""
             echo "## Stats"
             echo "- Window: $PREV_TAG → HEAD ($TODAY)"
@@ -214,7 +214,7 @@ jobs:
           # git tag until the draft is published, so multiple unpublished drafts with different
           # tags (one per scheduled cut) coexist safely. When Captain clicks Publish, the tag
           # `v<SUGGESTED>` is created in git, which is what npm-publish.yml (release: published)
-          # and the dual-tag policy (jinn-mono-2cl.6) expect.
+          # and the dual-tag policy (see handbook §Cadence) expect.
           TAG="v${SUGGESTED}"
           EXISTING="$(gh release view "$TAG" --json id,isDraft --jq '.id' 2>/dev/null || true)"
           if [ -n "$EXISTING" ]; then
