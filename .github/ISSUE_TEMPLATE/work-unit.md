@@ -10,10 +10,8 @@ assignees: []
 Per docs/engineering/handbook.md §The shapes of work + DR-2026-05-18, every
 work-unit Issue declares a shape via the `## Run-mode` section below and via
 a Conventional Commits prefix in the title. Epics (containers) are exempt;
-they use the EPIC template.
-
-Shapes (pick one for `Run-mode`):
-  BUG-FIX / FEATURE / REFACTOR / SPIKE / CHORE / DOCS / TEST / INCIDENT / INTERACTIVE DESIGN
+they use the EPIC template. The canonical list of shapes + Run-mode values
+lives in the handbook — see the link above.
 
 Title prefix examples:
   fix: SWE typed payload fallback validation
