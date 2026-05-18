@@ -1072,6 +1072,61 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('watchForDeliveries skips expired recovery delivery work once the claim window has ended', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-18T12:00:00.000Z'));
+
+    try {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+      const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+      vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+        requestId: REQUEST_ID,
+        deliveryDataHex: TASK_CID_DIGEST,
+        mechAddress: TEST_CONFIG.safeAddress,
+      }]);
+
+      const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 1 });
+      await adapter.initialize();
+      (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+      (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+      (adapter as any).deliveryBlockCursor = 100n;
+      const expiredTask = {
+        id: 'prediction-task-1',
+        description: 'expired recovery task',
+        claimPolicy: {
+          mode: 'exclusive',
+          maxClaims: 1,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 600,
+          claimWindowEndTs: Date.now() - 1_000,
+        },
+      };
+      (adapter as any).pendingEvaluations.set(REQUEST_ID, expiredTask);
+      (adapter as any).originalStates.set(REQUEST_ID, expiredTask);
+      (adapter as any).requestKinds.set(REQUEST_ID, 'solution');
+
+      const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+      const nextPromise = gen.next();
+
+      await vi.advanceTimersByTimeAsync(5);
+
+      expect(claimDelivery).not.toHaveBeenCalled();
+      expect(fetchFromIpfs).not.toHaveBeenCalled();
+      expect((adapter as any).pendingEvaluations.has(REQUEST_ID)).toBe(false);
+      expect((adapter as any).originalStates.has(REQUEST_ID)).toBe(false);
+      expect((adapter as any).requestKinds.has(REQUEST_ID)).toBe(false);
+
+      await adapter.stop();
+      await vi.advanceTimersByTimeAsync(5);
+
+      await expect(nextPromise).resolves.toMatchObject({ done: true, value: undefined });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('V2 claimDelivery derives evidenceHash from the signed execution envelope', async () => {
     const { keccak256 } = await import('viem');
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');

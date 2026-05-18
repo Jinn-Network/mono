@@ -312,6 +312,30 @@ export class MechAdapter implements ExecutionAdapter {
     this.persistPendingEvaluationSolutions();
   }
 
+  private clearPendingDeliveryRecoveryState(requestId: string): void {
+    this.originalStates.delete(requestId);
+    this.pendingEvaluations.delete(requestId);
+    this.requestKinds.delete(requestId);
+  }
+
+  private shouldSkipExpiredRecoveryDelivery(requestId: string): boolean {
+    const task = this.originalStates.get(requestId) ?? this.pendingEvaluations.get(requestId);
+    const rawClaimWindowEndTs = task?.claimPolicy?.claimWindowEndTs ?? task?.window?.endTs;
+    if (rawClaimWindowEndTs == null) return false;
+
+    const claimWindowEndMs = rawClaimWindowEndTs > 10_000_000_000
+      ? rawClaimWindowEndTs
+      : rawClaimWindowEndTs * 1000;
+    if (Date.now() < claimWindowEndMs) return false;
+
+    console.error(
+      `[mech] skipping recovery delivery for ${requestId}: ` +
+      `claim window expired at ${new Date(claimWindowEndMs).toISOString()}`,
+    );
+    this.clearPendingDeliveryRecoveryState(requestId);
+    return true;
+  }
+
   async postTask(state: Task): Promise<PostedTask> {
     const restorationState: Task = {
       ...state,
@@ -1008,6 +1032,7 @@ export class MechAdapter implements ExecutionAdapter {
             const iDelivered = mechAddress.toLowerCase() === this.config.safeAddress.toLowerCase();
             const iCreatedRestoration = this.pendingEvaluations.has(requestId);
             if (!iDelivered && !iCreatedRestoration) continue;
+            if (iCreatedRestoration && this.shouldSkipExpiredRecoveryDelivery(requestId)) continue;
 
             // (a) Deliverer-side claim path: if this Safe delivered the request,
             //     claim it first so router counters credit the deliverer.
@@ -1048,9 +1073,7 @@ export class MechAdapter implements ExecutionAdapter {
               };
 
               // Clean up after yielding
-              this.originalStates.delete(requestId);
-              this.pendingEvaluations.delete(requestId);
-              this.requestKinds.delete(requestId);
+              this.clearPendingDeliveryRecoveryState(requestId);
             } catch (err) {
               console.error(`[mech] Failed to parse delivery ${requestId}:`, err);
             }
