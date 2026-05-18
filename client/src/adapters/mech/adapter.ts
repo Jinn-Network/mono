@@ -318,19 +318,33 @@ export class MechAdapter implements ExecutionAdapter {
     this.requestKinds.delete(requestId);
   }
 
-  private shouldSkipExpiredRecoveryDelivery(requestId: string): boolean {
+  private recoveryDeliveryExpirySeconds(requestId: string): number | undefined {
     const task = this.originalStates.get(requestId) ?? this.pendingEvaluations.get(requestId);
-    const rawClaimWindowEndTs = task?.claimPolicy?.claimWindowEndTs ?? task?.window?.endTs;
-    if (rawClaimWindowEndTs == null) return false;
+    const claimPolicy = task?.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY;
+    const normalizeTsToSeconds = (value: number | undefined): number | undefined => {
+      if (value == null) return undefined;
+      return value > 10_000_000_000 ? Math.floor(value / 1000) : value;
+    };
+    const submissionDeadlineSeconds = normalizeTsToSeconds(claimPolicy.submissionDeadlineTs);
+    if (submissionDeadlineSeconds != null) return submissionDeadlineSeconds;
 
-    const claimWindowEndMs = rawClaimWindowEndTs > 10_000_000_000
-      ? rawClaimWindowEndTs
-      : rawClaimWindowEndTs * 1000;
-    if (Date.now() < claimWindowEndMs) return false;
+    const claimWindowEndSeconds = normalizeTsToSeconds(
+      claimPolicy.claimWindowEndTs ?? task?.window?.endTs,
+    );
+    if (claimWindowEndSeconds == null) return undefined;
+    return claimWindowEndSeconds + claimPolicy.claimLeaseTtlSeconds;
+  }
+
+  private shouldSkipExpiredRecoveryDelivery(
+    requestId: string,
+    currentChainTimestampSeconds: number,
+    recoveryExpirySeconds: number,
+  ): boolean {
+    if (currentChainTimestampSeconds <= recoveryExpirySeconds) return false;
 
     console.error(
       `[mech] skipping recovery delivery for ${requestId}: ` +
-      `claim window expired at ${new Date(claimWindowEndMs).toISOString()}`,
+      `submission deadline expired at ${new Date(recoveryExpirySeconds * 1000).toISOString()}`,
     );
     this.clearPendingDeliveryRecoveryState(requestId);
     return true;
@@ -1023,6 +1037,7 @@ export class MechAdapter implements ExecutionAdapter {
           this.deliveryBlockCursor = currentBlock;
 
           const decoded = decodeDeliverLogs(logs);
+          let currentBlockTimestampSeconds: number | undefined;
           for (const { requestId, deliveryDataHex, mechAddress } of decoded) {
             // Two concerns, independent:
             //   (a) Did this Safe DELIVER this? → claim it (counter credit goes to msg.sender)
@@ -1032,7 +1047,24 @@ export class MechAdapter implements ExecutionAdapter {
             const iDelivered = mechAddress.toLowerCase() === this.config.safeAddress.toLowerCase();
             const iCreatedRestoration = this.pendingEvaluations.has(requestId);
             if (!iDelivered && !iCreatedRestoration) continue;
-            if (iCreatedRestoration && this.shouldSkipExpiredRecoveryDelivery(requestId)) continue;
+            if (iCreatedRestoration) {
+              const recoveryExpirySeconds = this.recoveryDeliveryExpirySeconds(requestId);
+              if (recoveryExpirySeconds != null) {
+                if (currentBlockTimestampSeconds == null) {
+                  const currentBlockData = await this.publicClient.getBlock({ blockNumber: currentBlock });
+                  currentBlockTimestampSeconds = Number(currentBlockData.timestamp);
+                }
+                if (
+                  this.shouldSkipExpiredRecoveryDelivery(
+                    requestId,
+                    currentBlockTimestampSeconds,
+                    recoveryExpirySeconds,
+                  )
+                ) {
+                  continue;
+                }
+              }
+            }
 
             // (a) Deliverer-side claim path: if this Safe delivered the request,
             //     claim it first so router counters credit the deliverer.

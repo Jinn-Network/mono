@@ -1072,14 +1072,85 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('watchForDeliveries skips expired recovery delivery work once the claim window has ended', async () => {
+  it('watchForDeliveries still claims recovery deliveries while the submission deadline remains open', async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-05-18T12:00:00.000Z'));
+    vi.setSystemTime(new Date('2026-05-18T12:30:00.000Z'));
 
     try {
       const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
       const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
       const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+      const claimWindowEndTs = Date.parse('2026-05-18T12:00:00.000Z');
+      const submissionDeadlineTs = Date.parse('2026-05-18T12:20:00.000Z');
+      const blockTimestampSeconds = Math.floor(Date.parse('2026-05-18T12:10:00.000Z') / 1000);
+
+      vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+        requestId: REQUEST_ID,
+        deliveryDataHex: TASK_CID_DIGEST,
+        mechAddress: TEST_CONFIG.safeAddress,
+      }]);
+      vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'result' });
+
+      const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 1 });
+      await adapter.initialize();
+      (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+      (adapter as any).publicClient.getBlock = vi.fn().mockResolvedValue({ timestamp: BigInt(blockTimestampSeconds) });
+      (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+      (adapter as any).deliveryBlockCursor = 100n;
+      const taskWithinLease = {
+        id: 'prediction-task-1',
+        description: 'recovery task still within submission deadline',
+        claimPolicy: {
+          mode: 'exclusive',
+          maxClaims: 1,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 600,
+          claimWindowEndTs,
+          submissionDeadlineTs,
+        },
+      };
+      (adapter as any).pendingEvaluations.set(REQUEST_ID, taskWithinLease);
+      (adapter as any).originalStates.set(REQUEST_ID, taskWithinLease);
+      (adapter as any).requestKinds.set(REQUEST_ID, 'solution');
+
+      const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+      const { value } = await gen.next();
+
+      expect((adapter as any).publicClient.getBlock).toHaveBeenCalledWith({ blockNumber: 101n });
+      expect(claimDelivery).toHaveBeenCalledOnce();
+      expect(fetchFromIpfs).toHaveBeenCalledOnce();
+      expect(value).toMatchObject({
+        requestId: REQUEST_ID,
+        task: taskWithinLease,
+        result: { data: 'result' },
+        deliveryMechAddress: TEST_CONFIG.safeAddress,
+      });
+
+      await adapter.stop();
+      const donePromise = gen.next();
+      await vi.advanceTimersByTimeAsync(5);
+      await expect(donePromise).resolves.toMatchObject({ done: true, value: undefined });
+
+      expect((adapter as any).pendingEvaluations.has(REQUEST_ID)).toBe(false);
+      expect((adapter as any).originalStates.has(REQUEST_ID)).toBe(false);
+      expect((adapter as any).requestKinds.has(REQUEST_ID)).toBe(false);
+
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('watchForDeliveries skips recovery deliveries once the submission deadline has passed on chain', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-18T12:05:00.000Z'));
+
+    try {
+      const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+      const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+      const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+      const claimWindowEndTs = Date.parse('2026-05-18T12:00:00.000Z');
+      const submissionDeadlineTs = Date.parse('2026-05-18T12:20:00.000Z');
+      const blockTimestampSeconds = Math.floor(Date.parse('2026-05-18T12:20:01.000Z') / 1000);
 
       vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
         requestId: REQUEST_ID,
@@ -1090,6 +1161,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 1 });
       await adapter.initialize();
       (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+      (adapter as any).publicClient.getBlock = vi.fn().mockResolvedValue({ timestamp: BigInt(blockTimestampSeconds) });
       (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
       (adapter as any).deliveryBlockCursor = 100n;
       const expiredTask = {
@@ -1100,7 +1172,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
           maxClaims: 1,
           maxClaimsPerOperator: 1,
           claimLeaseTtlSeconds: 600,
-          claimWindowEndTs: Date.now() - 1_000,
+          claimWindowEndTs,
+          submissionDeadlineTs,
         },
       };
       (adapter as any).pendingEvaluations.set(REQUEST_ID, expiredTask);
@@ -1112,6 +1185,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
       await vi.advanceTimersByTimeAsync(5);
 
+      expect((adapter as any).publicClient.getBlock).toHaveBeenCalledWith({ blockNumber: 101n });
       expect(claimDelivery).not.toHaveBeenCalled();
       expect(fetchFromIpfs).not.toHaveBeenCalled();
       expect((adapter as any).pendingEvaluations.has(REQUEST_ID)).toBe(false);
