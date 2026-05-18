@@ -20,6 +20,7 @@ import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js
 import type { Task } from '../types/index.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { gateClaimByReadiness } from './readiness-gate.js';
+import { SkipLogDeduper } from './skip-log-dedup.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -169,6 +170,7 @@ export class Daemon {
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
   private jinnClaimLoop?: JinnClaimLoop;
+  private skipLogDeduper = new SkipLogDeduper();
 
   constructor(private readonly config: DaemonConfig) {
     if (config.store) {
@@ -426,9 +428,19 @@ export class Daemon {
       const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
       const accept = await engine.canAcceptTask({ solverType, taskRole, task: taskAnnouncement.task });
       if (!accept.ok) {
-        console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
+        // Dedupe per (taskId, reason): on a single-slot daemon the engine-watcher
+        // re-observes every pending task each pass, so the original `console.log`
+        // here produced hundreds of identical "another … task is already in flight"
+        // lines per minute. We log once per (taskId, reason) and stay quiet until
+        // the reason for skipping changes (jinn-mono-kzan).
+        if (this.skipLogDeduper.shouldLog(taskAnnouncement.taskId, accept.reason)) {
+          console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
+        }
         continue;
       }
+      // Task is acceptable now; reset dedupe state so a future skip (e.g. after
+      // this slot fills again) logs once instead of being silently swallowed.
+      this.skipLogDeduper.forget(taskAnnouncement.taskId);
 
       // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),
       // skip this task without blocking other loops. Logs once per ready↔not-ready transition.

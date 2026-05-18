@@ -705,11 +705,31 @@ function defaultLog(entry: {
   msg: string;
   data?: unknown;
 }): void {
+  const rendered = formatLogData(entry.data);
+  const line = rendered ? `${entry.msg} ${rendered}` : entry.msg;
   if (entry.level === 'error') {
-    console.error(entry.msg, entry.data ?? '');
+    console.error(line);
   } else if (entry.level === 'warn') {
-    console.warn(entry.msg, entry.data ?? '');
+    console.warn(line);
   } else {
-    console.log(entry.msg, entry.data ?? '');
+    console.log(line);
+  }
+}
+
+/**
+ * Render `data` for stdout. Plain `console.log(msg, obj)` prints `[object Object]`
+ * when stdout is non-TTY (e.g. piped through the operator console), which loses
+ * the structured payload operators actually need (verdict, score, txHash, …).
+ * JSON.stringify with a BigInt-safe replacer keeps the line readable in both
+ * TTY and non-TTY contexts. Exported for unit coverage.
+ */
+export function formatLogData(data: unknown): string {
+  if (data === undefined || data === null) return '';
+  try {
+    return JSON.stringify(data, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value,
+    );
+  } catch {
+    return String(data);
   }
 }
