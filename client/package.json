@@ -48,6 +48,7 @@
     "build": "yarn build:sdk && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs scripts/swe-rebench-v2-seed-pool.json scripts/swe-rebench-v2-known-bad.json dist/scripts/ && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs",
     "typecheck": "yarn build:sdk && tsc --noEmit",
     "test": "yarn build:sdk && vitest run",
+    "lint:no-late-mount": "node scripts/check-no-late-route-mount.mjs",
     "test:watch": "vitest",
     "test:claude-prediction": "yarn build && JINN_TEST_CLAUDE_PREDICTION=1 vitest run test/harnesses/impls/claude-mcp-prediction/isolation.test.ts",
     "test:claude-prediction-apy": "yarn build && JINN_TEST_CLAUDE_PREDICTION_APY=1 vitest run test/harnesses/impls/claude-mcp-prediction-apy/isolation.test.ts",
@@ -83,6 +84,8 @@
     "dev:spa": "yarn workspace @jinn-network/operator-spa dev",
     "e2e:spa": "yarn build && playwright test --config=playwright.config.ts test/dashboard/spa.e2e.test.ts",
     "e2e:solvernet-flow": "yarn build && playwright test --config=playwright.config.ts test/dashboard/solvernet-flow.e2e.test.ts",
+    "e2e:funding-sequence": "yarn build && playwright test --config=playwright.config.ts test/dashboard/funding-sequence.e2e.test.ts",
+    "e2e:dashboard": "yarn build && playwright test --config=playwright.config.ts",
     "e2e:donation": "vitest run test/smoke/donation-mode-smoke.test.ts test/smoke/donation-ipfs-http-smoke.test.ts"
   },
   "dependencies": {

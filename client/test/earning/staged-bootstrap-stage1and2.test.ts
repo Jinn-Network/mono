@@ -411,4 +411,133 @@ describe('FleetBootstrapper.ensureStage1And2 — combined walk (nghf)', () => {
     expect(result.fleet_state.services[0]!.agent_id).toBe(FLEET_AGENT_ID);
     expect(result.fleet_state.fleet_stage).toBe('stage1_and_2');
   });
+
+  // ── Boundary tests for the Stage 2 master ETH gate (jinn-mono-u34i convention) ──
+  //
+  // The u34i regression (Stage 1 gate == transfer amount → no master gas
+  // headroom) was missed because the existing tests mocked balances at 0.05
+  // or 0.1 ETH — way above any gate. Boundary tests at gate ± 1 wei catch
+  // the class of "did someone bump the transfer without bumping the gate?"
+  // bugs that look harmless in 0.05-ETH mocks.
+  //
+  // The Stage 2 gate fires after ensureStage1 returns ok. With a fresh fleet
+  // and standard mode, the gate is `minEoaGasEth * 2 = 0.01 ETH` (line ~467
+  // in bootstrap.ts) — covering the per-service transfer (`minEoaGasEth =
+  // 0.005 ETH`, line ~1043) plus master's own gas reserve (`minEoaGasEth`).
+  //
+  // To isolate the Stage 2 gate from Stage 1's, we pre-seed `fleet_stage:
+  // 'stage1'` so Stage 1 short-circuits and Stage 2 is the only thing that
+  // can reject on funding.
+  const STAGE2_FRESH_GATE_WEI = 10_000_000_000_000_000n; // minEoaGasEth (0.005) * 2 = 0.01 ETH
+
+  it('Stage 2 fresh-fleet gate rejects master at gate - 1 wei (jinn-mono-u34i boundary)', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage2-bound-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      // Stage 1 already complete — isolate the Stage 2 gate.
+      fleet_agent_id: FLEET_AGENT_ID,
+      fleet_safe_address: FLEET_SAFE,
+      fleet_identity_registry: IDENTITY_REGISTRY,
+      fleet_stage: 'stage1',
+      services: [],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    // Exactly one wei below the Stage 2 gate.
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      STAGE2_FRESH_GATE_WEI - 1n,
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
+
+    const result = await bootstrapper.ensureStage1And2('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.funding).toBeDefined();
+    expect(result.funding!.eth_required).toBe('1'); // shortfall is exactly 1 wei
+  });
+
+  it('Stage 2 fresh-fleet gate accepts master at gate (jinn-mono-u34i boundary)', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage2-bound-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      fleet_agent_id: FLEET_AGENT_ID,
+      fleet_safe_address: FLEET_SAFE,
+      fleet_identity_registry: IDENTITY_REGISTRY,
+      fleet_stage: 'stage1',
+      services: [],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+
+    // Exactly the Stage 2 gate (gate uses strict `<`, so >= passes).
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      STAGE2_FRESH_GATE_WEI,
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
+
+    // Per-service steps are mocked so the gate is the only thing under test.
+    vi.spyOn(bootstrapper as any, 'stepStolasStake').mockImplementation(
+      async (_s: any, _m: any, index: number) =>
+        store.updateService(index, {
+          safe_address: STAKING_SAFE,
+          service_id: 81,
+          staking_address: '0x0000000000000000000000000000000000000003',
+          step: 'staked',
+        }),
+    );
+    vi.spyOn(bootstrapper as any, 'stepDeployMech').mockImplementation(
+      async (_s: any, _m: any, index: number) =>
+        store.updateService(index, {
+          mech_address: '0x000000000000000000000000000000000000aabb',
+          step: 'mech_deployed',
+        }),
+    );
+    vi.spyOn(bootstrapper as any, 'stepRegisterAgent').mockImplementation(
+      async (_s: any, _m: any, index: number) => {
+        const fleet = await store.load('base');
+        await store.updateService(index, {
+          agent_id: fleet.fleet_agent_id,
+          identity_registry_address: fleet.fleet_identity_registry,
+          step: 'complete',
+          safe_bound_to_agent: true,
+        });
+        return store.load('base');
+      },
+    );
+
+    const result = await bootstrapper.ensureStage1And2('test-password');
+
+    expect(result.ok).toBe(true);
+    expect(result.fleet_state.services).toHaveLength(1);
+    expect(result.fleet_state.services[0]!.step).toBe('complete');
+  });
 });

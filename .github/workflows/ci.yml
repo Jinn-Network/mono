@@ -28,6 +28,10 @@ jobs:
       # anvil are excluded by vitest config and don't run under `yarn test`.
       - uses: foundry-rs/foundry-toolchain@v1
       - run: yarn typecheck
+      # Late-mount lint: blocks app.METHOD(...) outside the startApiServer
+      # call graph. Catches the Hono "matcher is already built" crash class
+      # at code-review time. See jinn-mono-u34i.
+      - run: yarn lint:no-late-mount
       - run: yarn test
       - run: yarn build
 
@@ -98,3 +102,38 @@ jobs:
             exit 1
           fi
           echo "✓ Tarball contents verified"
+
+  funding-sequence-e2e:
+    # Playwright E2E for the AwaitingFundingCard auto-continue sequence
+    # (jinn-mono-u34i). Catches wiring/UX regressions that unit tests can't
+    # see — specifically the Stage 1 → Stage 2 gate transition where the
+    # funding card's local dripStatus.targetReached must reset when the
+    # daemon's gate advances. Sequential /v1/bootstrap mocks reproduce the
+    # exact scenario that broke the 2026-05-18 canary.
+    #
+    # Scoped to just the funding-sequence test for now — the other dashboard
+    # E2Es (spa.e2e.test.ts, spa-config.e2e.test.ts, solvernet-flow.e2e.test.ts,
+    # HarnessSection.e2e.test.ts) have stale failures unrelated to u34i; fixing
+    # those is filed as a follow-up. When they're green, swap this run to
+    # `yarn e2e:dashboard` to gate all of them.
+    name: Funding Sequence E2E (Playwright)
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      # Install only chromium — the playwright.config.ts targets chromium
+      # exclusively, so this is the minimal browser surface.
+      - run: npx playwright install --with-deps chromium
+      - run: yarn e2e:funding-sequence
+      # Upload traces on failure so a reviewer can step through the timeline.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: client/test-results/
+          retention-days: 7
