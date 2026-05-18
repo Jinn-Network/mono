@@ -129,8 +129,27 @@ jobs:
           echo "$PRS_JSON" | jq -r '.[].body // ""' \
             | grep -oiE '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+(jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*|#[0-9]+)' \
             | grep -oiE '(jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*|#[0-9]+)' | sort -u > /tmp/closed-refs-raw.txt || true
-          if [ -s /tmp/closed-refs-raw.txt ]; then
-            sed 's/^/- /' /tmp/closed-refs-raw.txt > /tmp/closed-refs.txt
+
+          # Filter `#<N>` refs: PRs and Issues share the same number space on GitHub, so the
+          # regex can't tell them apart. Drop any `#<N>` that resolves to a PR rather than an
+          # Issue (PRs already appear in the "Changes" section above; double-listing is noise).
+          : > /tmp/closed-refs.txt.new
+          while IFS= read -r ref; do
+            case "$ref" in
+              \#[0-9]*)
+                N="${ref#\#}"
+                if gh issue view "$N" --repo "${{ github.repository }}" --json number >/dev/null 2>&1; then
+                  printf -- "- %s\n" "$ref" >> /tmp/closed-refs.txt.new
+                fi
+                ;;
+              *)
+                printf -- "- %s\n" "$ref" >> /tmp/closed-refs.txt.new
+                ;;
+            esac
+          done < /tmp/closed-refs-raw.txt
+
+          if [ -s /tmp/closed-refs.txt.new ]; then
+            mv /tmp/closed-refs.txt.new /tmp/closed-refs.txt
           else
             echo "- (none referenced via \`Closes #<N>\` or legacy \`Closes jinn-mono-<id>\` in merged PRs this window — Captain may add manually)" > /tmp/closed-refs.txt
           fi
