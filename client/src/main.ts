@@ -167,7 +167,7 @@ const config = loadConfig(CONFIG_PATH);
 if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') {
   console.warn('[main] Mainnet is disabled before launch; using testnet defaults.');
   config.network = 'testnet';
-  config.rpcUrl = 'https://sepolia.base.org';
+  config.rpcUrl = 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu';
 }
 let activeClaudePath = config.claudePath ?? 'claude';
 const selectClaudePath = (claudePath: string): void => {
@@ -919,6 +919,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./harnesses/readiness-registry.js').HarnessReadinessRegistry | undefined;
   } = { current: undefined };
 
+  // jinn-mono-u34i: same eager-register / late-populate pattern for the
+  // DiscoveryAPI. Pre-fix, /v1/discovery/* routes only mounted when
+  // `config.discovery` was set at startApiServer time — but main.ts builds
+  // `sharedDiscoveryApi` post-bootstrap, so the routes were never registered
+  // and the panel's /build page got a permanent 404 on plugin-publications +
+  // builder-artifacts. Holder ref lets the routes register eagerly and
+  // start returning real data the moment main.ts assigns holder.current.
+  const discoveryApiHolder: {
+    current: import('./discovery/types.js').DiscoveryAPI | undefined;
+  } = { current: undefined };
+
   let setupApiServer: ApiServer;
   try {
     setupApiServer = await startApiServer({
@@ -1045,6 +1056,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // harness readiness routes. Until main.ts sets the holder, requests
       // return 503 subsystem_not_ready (the panel handles that gracefully).
       harnessReadinessRegistry: { holder: harnessReadinessRegistryHolder },
+      // jinn-mono-u34i: see discoveryApiHolder comment above.
+      discovery: { holder: discoveryApiHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -1500,6 +1513,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       sharedDiscoveryApi = await buildOnchainFloor();
     }
   }
+
+  // jinn-mono-u34i: populate the holder so the /v1/discovery/* routes
+  // registered eagerly at server-start time start returning real data on
+  // the panel's next refetch. Before this, the routes 404'd forever and
+  // the /build page rendered "Discovery unavailable" permanently.
+  discoveryApiHolder.current = sharedDiscoveryApi;
 
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrl,

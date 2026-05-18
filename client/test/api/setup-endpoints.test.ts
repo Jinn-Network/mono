@@ -840,6 +840,40 @@ describe('POST /v1/setup/network', () => {
 
     expect(res.status).toBe(400);
   });
+
+  it('creates config.json when it does not exist (jinn-mono-u34i)', async () => {
+    // Fresh operator: daemon ran with built-in defaults, no config.json on
+    // disk. Pre-u34i the endpoint 404'd with `config_not_found`, blocking
+    // the only operator-app affordance for switching off a rate-limited
+    // public RPC. Operator was forced to drop into the terminal and hand-
+    // write JSON — violation of the never-leaves-the-app principle.
+    //
+    // Fix: the endpoint defers to persistTopLevelConfigValue, which already
+    // creates the parent dir + file when missing (same pattern as every
+    // other write endpoint in this module).
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-network-no-cfg-'));
+    const configPath = join(dir, 'config.json');
+    // CRITICAL: do NOT pre-write the file.
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/setup/network', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rpcUrl: 'https://base-sepolia.gateway.tenderly.co/abc123' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; restartRequired: boolean; rpcUrl: string };
+    expect(body.ok).toBe(true);
+    expect(body.restartRequired).toBe(true);
+    expect(body.rpcUrl).toBe('https://base-sepolia.gateway.tenderly.co/abc123');
+
+    // The file was created with the new rpcUrl.
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.rpcUrl).toBe('https://base-sepolia.gateway.tenderly.co/abc123');
+  });
 });
 
 describe('POST /v1/operator/join/:cid', () => {

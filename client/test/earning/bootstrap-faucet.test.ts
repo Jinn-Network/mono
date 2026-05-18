@@ -63,7 +63,11 @@ describe('Fleet bootstrap faucet cap', () => {
 
     await bootstrapper.bootstrap('test-password');
 
-    expect(requestTestnetFundingMock).toHaveBeenCalledTimes(100);
+    // Fresh-fleet Stage 2 gate is now `minEoaGasEth = 0.005 ETH` (jinn-mono-u34i:
+    // dropped from `× 2` because the `× 2` double-counted a service-1 transfer
+    // that doesn't fire — HD-1 reuses Stage 1's leftover). At 0.0001 ETH/drip
+    // that's 50 drips to reach the target.
+    expect(requestTestnetFundingMock).toHaveBeenCalledTimes(50);
   });
 
   it('does not send an extra faucet request after the drip cap', async () => {
@@ -107,8 +111,10 @@ describe('Fleet bootstrap faucet cap', () => {
 
     expect(result.ok).toBe(false);
     expect(result.funding).toBeDefined();
+    // Stage 2 gate is now `minEoaGasEth = 0.005 ETH` for fresh fleets
+    // (jinn-mono-u34i tightening; see comment in the test above).
     const expectedCap = computeFaucetDripCap({
-      targetWei: 10_000_000_000_000_000n,
+      targetWei: 5_000_000_000_000_000n,
       balanceWei: 0n,
     });
     expect(expectedCap).toBeGreaterThan(60);

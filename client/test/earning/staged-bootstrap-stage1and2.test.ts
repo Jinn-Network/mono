@@ -428,7 +428,11 @@ describe('FleetBootstrapper.ensureStage1And2 — combined walk (nghf)', () => {
   // To isolate the Stage 2 gate from Stage 1's, we pre-seed `fleet_stage:
   // 'stage1'` so Stage 1 short-circuits and Stage 2 is the only thing that
   // can reject on funding.
-  const STAGE2_FRESH_GATE_WEI = 10_000_000_000_000_000n; // minEoaGasEth (0.005) * 2 = 0.01 ETH
+  // Stage 2 master gate for a fresh-fleet N=1 operator. Was `minEoaGasEth × 2`
+  // (= 0.010 ETH); dropped to `minEoaGasEth × 1` (= 0.005 ETH) in jinn-mono-u34i
+  // because the `× 2` double-counted a service-1 transfer that doesn't fire
+  // (HD-1 carries Stage 1 leftover, gets a conditional top-up if needed).
+  const STAGE2_FRESH_GATE_WEI = 5_000_000_000_000_000n; // minEoaGasEth = 0.005 ETH
 
   it('Stage 2 fresh-fleet gate rejects master at gate - 1 wei (jinn-mono-u34i boundary)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage2-bound-'));

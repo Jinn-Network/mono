@@ -157,12 +157,22 @@ export interface ApiServerConfig {
   /** Operator review API for pending captures. */
   captures?: CapturesRoutesDeps;
   /**
-   * Discovery API instance. When set, mounts GET /v1/discovery/* routes
-   * that proxy DiscoveryAPI methods (listPluginPublications, listBuilderArtifacts,
-   * getPluginScores) so the SPA's /build route can fetch them without direct
-   * GraphQL or RPC access.
+   * Discovery API. Mounts GET /v1/discovery/* routes that proxy DiscoveryAPI
+   * methods (listPluginPublications, listBuilderArtifacts, getPluginScores)
+   * so the SPA's /build route can fetch them without direct GraphQL or RPC
+   * access.
+   *
+   * Accepts either a direct instance or a holder ref (same pattern as
+   * solverNetsLauncher / harnessReadinessRegistry). main.ts uses the holder
+   * shape because the daemon's DiscoveryAPI is constructed post-bootstrap;
+   * routes register eagerly at server start so Hono's matcher includes them
+   * before the first request. Without this, every /v1/discovery/* request
+   * gets a 404 forever, and the /build page renders "Discovery unavailable"
+   * permanently (jinn-mono-u34i field repro).
    */
-  discovery?: DiscoveryAPI;
+  discovery?:
+    | DiscoveryAPI
+    | { holder: { current: DiscoveryAPI | undefined } };
 }
 
 export interface ApiServer {
@@ -385,8 +395,18 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   }
 
   if (config.discovery) {
-    const discoveryInstance = config.discovery;
-    addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
+    const disc = config.discovery;
+    if ('holder' in disc) {
+      // Lazy holder shape — register routes eagerly; handler returns 503
+      // subsystem_not_ready until main.ts populates holder.current after
+      // bootstrap. Same pattern as harnessReadinessRegistry.
+      addDiscoveryRoutes(app, {
+        getDiscovery: () => disc.holder.current ?? null,
+      });
+    } else {
+      const discoveryInstance = disc;
+      addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
+    }
   }
 
   if (config.solverNets) {

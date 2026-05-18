@@ -22,9 +22,18 @@
   --break-red: #a85a5a;
   --seer-violet: #7a6db0;
 
+  /* Surface aliases — PanelCard and a handful of pages reference
+     --surface / --surface-sunken (the older name) while the rest of the
+     SPA reaches for --bg-elevated / --bg-sunken. We keep both wired to
+     the same flat colors so panels actually render their fill instead
+     of falling through to transparent. */
+  --surface: var(--bg-elevated);
+  --surface-sunken: var(--bg-sunken);
+
   --radius-1: 4px;
   --radius-2: 6px;
   --radius-3: 10px;
+  --radius-pill: 999px;
 
   --serif: 'Instrument Serif', 'Times New Roman', serif;
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
@@ -106,4 +115,111 @@ textarea:focus-visible {
 
 .agent-rail .xterm-accessibility-tree {
   display: none;
+}
+
+/* /build intro markdown — the quickstart is rendered through the
+   minimal markdown subset. Without explicit styling the headings,
+   prose, code fences, and lists all render as unstyled text. The rules
+   below apply the two-voice type system (serif for the page-level
+   heading, mono for everything else), hairline rules between sections,
+   and a sunken code-block fill that picks up --bg-sunken via the
+   --surface-sunken alias. No new tokens are introduced. */
+.hfmf-intro-markdown h1 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: 0;
+  color: var(--fg);
+  margin: 0 0 16px;
+}
+.hfmf-intro-markdown h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: 0;
+  color: var(--fg);
+  margin: 28px 0 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.hfmf-intro-markdown h2:first-child,
+.hfmf-intro-markdown h1 + h2 {
+  padding-top: 0;
+  border-top: none;
+}
+.hfmf-intro-markdown h3 {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin: 20px 0 8px;
+}
+.hfmf-intro-markdown p {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.7;
+  letter-spacing: -0.01em;
+  color: var(--fg-muted);
+  margin: 0 0 12px;
+  max-width: 72ch;
+}
+.hfmf-intro-markdown ul {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--fg-muted);
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+.hfmf-intro-markdown ul li {
+  position: relative;
+  padding-left: 16px;
+  margin: 4px 0;
+}
+.hfmf-intro-markdown ul li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+  color: var(--fg-dim);
+}
+.hfmf-intro-markdown code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent-sky);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-1);
+  padding: 1px 6px;
+}
+.hfmf-intro-markdown pre {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: 14px 16px;
+  margin: 0 0 14px;
+  overflow-x: auto;
+}
+.hfmf-intro-markdown pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+.hfmf-intro-markdown a {
+  color: var(--accent-sky);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+}
+.hfmf-intro-markdown a:hover {
+  color: var(--accent-sky-hover);
+  border-bottom-color: var(--accent-sky);
 }

@@ -30,6 +30,11 @@ export function NetworkSection({
   const [error, setError] = useState<string | null>(null);
 
   const dirty = draft !== rpcUrl;
+  // Surface a "shared RPC — bring your own" warning when the operator is
+  // still on Jinn's shipped default. The default is a free public Tenderly
+  // gateway shared with every default-config operator; reliable steady-state
+  // operation requires the operator's own key. See contracts.ts comment.
+  const onSharedDefault = rpcUrl === defaultRpcUrl;
   const chainLabel = chain === 'base' ? 'Base mainnet (chain id 8453)' : 'Base Sepolia (chain id 84532)';
 
   const save = async (): Promise<void> => {
@@ -139,6 +144,70 @@ export function NetworkSection({
           >
             Use default
           </button>
+          {onSharedDefault && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '10px 12px',
+                border: '1px solid var(--wane)',
+                borderRadius: '6px',
+                background: 'transparent',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '12px',
+                lineHeight: 1.55,
+                color: 'var(--fg)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+              }}
+              data-testid="network-shared-rpc-warning"
+            >
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '10px',
+                  fontWeight: 500,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: 'var(--wane)',
+                }}
+              >
+                Shared RPC
+              </span>
+              <span>
+                You're on the default RPC — a free public gateway shared with
+                every operator on the default config. Fine for setup; not
+                reliable under load. Get your own free key from{' '}
+                <a
+                  href="https://dashboard.tenderly.co/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent-sky)' }}
+                >
+                  Tenderly
+                </a>
+                ,{' '}
+                <a
+                  href="https://www.alchemy.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent-sky)' }}
+                >
+                  Alchemy
+                </a>
+                , or{' '}
+                <a
+                  href="https://www.quicknode.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent-sky)' }}
+                >
+                  QuickNode
+                </a>{' '}
+                and paste it above.
+              </span>
+            </div>
+          )}
         </ConfigField>
       </div>
     </SectionCard>

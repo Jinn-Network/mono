@@ -251,7 +251,7 @@ describe('JoinFlow — harness options', () => {
     expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Codex 0.1.0');
   });
 
-  it('shows the Hermes install description when Hermes Agent is selected', async () => {
+  it('shows the Hermes description when Hermes Agent is selected', async () => {
     apiMock.getSolverNets.mockResolvedValue({
       ...baseCatalog,
       nets: [
@@ -282,11 +282,63 @@ describe('JoinFlow — harness options', () => {
       expect(screen.getByTestId('join-harness-hermes-description')).toBeTruthy(),
     );
     expect(screen.getByTestId('join-harness-hermes-description').textContent).toMatch(
-      /requires separate install/i,
-    );
-    expect(screen.getByTestId('join-harness-hermes-description').textContent).toMatch(
       /Nous Research/,
     );
+    expect(screen.getByTestId('join-harness-hermes-description').textContent).toMatch(
+      /Built-in learning loop/,
+    );
+  });
+
+  it('drops claude-code-learner from default plugins when Hermes Agent is selected', async () => {
+    // Hermes owns its own learning loop (skill self-improvement, memory
+    // curation, FTS5 session search — see harnesses/impls/hermes-agent/
+    // harness.ts), so the Jinn-side `claude-code-learner` plugin must not
+    // be force-enabled on Hermes joins. Claude Code keeps it by default.
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          compatibleHarnesses: [
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).some((o) => o.value === 'hermes-agent')).toBe(true),
+    );
+
+    // Claude Code: learner is in the default chip set. The harness select
+    // exposes canonical names — `claude-code-learner` is aliased to
+    // `claude-code` by canonicalHarnessName.
+    fireEvent.change(harnessSelect, { target: { value: 'claude-code' } });
+    await waitFor(() => {
+      const chips = Array.from(
+        document.querySelectorAll('[data-testid="join-plugin-option-chip"]'),
+      ) as HTMLElement[];
+      expect(chips.some((c) => c.getAttribute('data-plugin') === 'claude-code-learner')).toBe(true);
+    });
+
+    // Hermes: learner chip is gone.
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+    // Wait for the harness change to propagate (hermes description appears).
+    await waitFor(() =>
+      expect(screen.getByTestId('join-harness-hermes-description')).toBeTruthy(),
+    );
+    const chips = Array.from(
+      document.querySelectorAll('[data-testid="join-plugin-option-chip"]'),
+    ) as HTMLElement[];
+    const chipPlugins = chips.map((c) => c.getAttribute('data-plugin'));
+    expect(chipPlugins).not.toContain('claude-code-learner');
+    expect(chipPlugins).toContain('network-tools');
   });
 });
 

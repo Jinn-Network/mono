@@ -58,9 +58,12 @@ describe('auth command', () => {
       });
       await auth.run(ctx);
       const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+      // Testnet default flipped to a Tenderly gateway in 2026-05-18 — the
+      // public sepolia.base.org node rate-limited SolverNet manifest fetches
+      // and balance polls during/after bootstrap.
       expect(persisted).toMatchObject({
         network: 'testnet',
-        rpcUrl: 'https://sepolia.base.org',
+        rpcUrl: 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu',
         runtimeMode: 'bare',
       });
     } finally {

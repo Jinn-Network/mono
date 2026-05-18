@@ -69,7 +69,6 @@ function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['d
   }
 }
 
-const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
 
 /**
@@ -567,8 +566,14 @@ export async function gatherGatheredStatusRaw(
     minMasterEthWei: (
       !fleet || fleet.fleet_stage === 'none'
         ? stage1MinMasterEth(chainCfg, status?.config?.targetServices ?? 1)
-        : chainCfg.minEoaGasEth *
-          (fleet.services.length > 0 ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+        : // Stage 2 master gas budget — minEoaGasEth (stake gas) + per-extra-
+          // service transfers. The historic `× 2` for fresh fleets was wrong:
+          // it double-counted a service-1 transfer that doesn't fire (HD-1
+          // carries Stage 1 leftover). Dropped in jinn-mono-u34i so the
+          // operator-facing 0.020 ETH budget actually clears Stage 2's gate.
+          chainCfg.minEoaGasEth +
+            chainCfg.minEoaGasEth *
+              BigInt(Math.max(0, (status?.config?.targetServices ?? 1) - 1))
     ).toString(),
     master: {
       address: fleet?.master_address ?? null,

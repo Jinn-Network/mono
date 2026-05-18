@@ -116,10 +116,21 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       Boolean(parsed.master_address) &&
       fundingGate?.master_address?.toLowerCase() === parsed.master_address?.toLowerCase() &&
       !allRunning;
+    // Three states map to currentStep:
+    //   1. fundingGateActive → 'awaiting_funding' (phase 2 in the panel).
+    //   2. funding cleared, services.length === 0 → 'safe_deployed' (phase 3,
+    //      subState 'Deploying'). This is the "Stage 1 in flight" window —
+    //      the daemon is deploying the fleet Safe, minting agentId, and
+    //      binding via setAgentWallet, none of which creates a service row
+    //      until Stage 2's distributor.stake() lands. Previously this branch
+    //      also returned 'awaiting_funding' which left the panel lying for
+    //      30-60s of post-funding bootstrap work. jinn-mono-u34i UX fix.
+    //   3. services.length > 0 → first service's step (the normal post-
+    //      Stage-2 path).
     const currentStepIdx = fundingGateActive
       ? STEP_INDEX.get('awaiting_funding')!
       : services.length === 0
-      ? (parsed.master_address ? STEP_INDEX.get('awaiting_funding')! : 0)
+      ? (parsed.master_address ? STEP_INDEX.get('safe_deployed')! : 0)
       : Math.min(...services.map((s) => STEP_INDEX.get(s.step) ?? 0));
     const currentStep = STEPS[currentStepIdx];
 

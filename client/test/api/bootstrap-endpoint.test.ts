@@ -67,7 +67,17 @@ describe('GET /v1/bootstrap', () => {
     expect(body.mode).toBe('uninitialized');
   });
 
-  it('reports awaiting_funding after master wallet creation before service rows exist', async () => {
+  it('advances past awaiting_funding once master wallet exists with no persisted funding gate (jinn-mono-u34i)', async () => {
+    // Pre-u34i this case returned 'awaiting_funding' even when no funding
+    // gate file existed — leaving the panel on phase 2 ("Fund your wallet")
+    // during the entire post-funding Stage 1 window (Safe deploy, agentId
+    // mint, setAgentWallet bind), 30-60s of stale "still awaiting funds"
+    // copy while the daemon was actively deploying contracts.
+    //
+    // The fix: when no funding-gate file is persisted and master_address is
+    // set, currentStep advances to 'safe_deployed' — the first phase-3 step
+    // in Onboarding.tsx's phase map ('Joining Jinn · Deploying'). The panel
+    // transitions immediately, accurately reflecting the daemon's state.
     const earningDir = makeFixtureEarningDir({
       master_address: '0xabc',
       chain: 'base-sepolia',
@@ -79,7 +89,7 @@ describe('GET /v1/bootstrap', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { mode: string; currentStep: string; services: unknown[] };
     expect(body.mode).toBe('setup');
-    expect(body.currentStep).toBe('awaiting_funding');
+    expect(body.currentStep).toBe('safe_deployed');
     expect(body.services).toHaveLength(0);
   });
 

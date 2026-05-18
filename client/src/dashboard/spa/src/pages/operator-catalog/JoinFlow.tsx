@@ -24,7 +24,7 @@ import { PluginPicker } from '../configuration/PluginPicker.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 const HERMES_AGENT_DESCRIPTION =
-  'Self-improving agent by Nous Research. Built-in learning loop, 200+ models via OpenRouter plus Nous Portal, NVIDIA NIM, GLM, Kimi, and more.';
+  'Self-improving agent by Nous Research. Built-in learning loop.';
 
 /**
  * Operator participation flow keyed by `manifestCid`.
@@ -415,8 +415,7 @@ export function JoinFlow({
                     color: 'var(--fg-muted)',
                   }}
                 >
-                  {HERMES_AGENT_DESCRIPTION}{' '}
-                  <span style={{ color: 'var(--break-amber)' }}>(requires separate install)</span>
+                  {HERMES_AGENT_DESCRIPTION}
                 </span>
               )}
             </div>
@@ -461,6 +460,7 @@ export function JoinFlow({
               }
               rowTestId="join-plugin-option"
               searchTestId="join-plugin-search"
+              harness={form.harness}
             />
           </div>
         </section>

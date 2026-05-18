@@ -44,7 +44,9 @@ function persistRuntimeMode(mode: AuthContext, configPath: string = DEFAULT_CONF
   }
   const network = current['network'] === 'mainnet' ? 'mainnet' : 'testnet';
   if (current['rpcUrl'] === undefined) {
-    current['rpcUrl'] = network === 'testnet' ? 'https://sepolia.base.org' : 'https://mainnet.base.org';
+    current['rpcUrl'] = network === 'testnet'
+      ? 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu'
+      : 'https://mainnet.base.org';
   }
   current['runtimeMode'] = mode;
   mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });

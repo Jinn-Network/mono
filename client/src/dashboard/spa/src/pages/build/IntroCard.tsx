@@ -11,12 +11,39 @@ const QUICKSTART_URL =
 export function IntroCard(): JSX.Element {
   return (
     <PanelCard>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '20px' }}>
+        <span className="j-label">Quickstart · 60 seconds</span>
+      </div>
       <div className="hfmf-intro-markdown">{renderMarkdownSubset(quickstartMd)}</div>
-      <p style={{ marginTop: '16px' }}>
-        <a href={QUICKSTART_URL} target="_blank" rel="noreferrer">
-          Read the full quickstart on GitHub
+      <div
+        style={{
+          marginTop: '24px',
+          paddingTop: '20px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          flexWrap: 'wrap',
+        }}
+      >
+        <span className="j-label">Next</span>
+        <a
+          href={QUICKSTART_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="j-mono"
+          style={{
+            fontSize: '12px',
+            color: 'var(--accent-sky)',
+            textDecoration: 'none',
+            borderBottom: '1px solid var(--border)',
+            paddingBottom: '1px',
+          }}
+        >
+          Read the full quickstart on GitHub →
         </a>
-      </p>
+      </div>
     </PanelCard>
   );
 }
