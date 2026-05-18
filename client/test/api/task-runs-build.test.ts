@@ -46,7 +46,61 @@ describe('gatherTaskRunsStatus', () => {
         solutions: 1,
         verdicts: 1,
         failed: 1,
+        settledFailed: 0,
+        localErrors: 1,
       });
+    });
+  });
+
+  it('splits FAILED runs into on-chain settled failures and local engine errors', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      // local error: failed before reaching the marketplace (no delivery tx).
+      insertTask(persistence, {
+        requestId: 'local-error',
+        taskId: 'task-local',
+        taskRole: 'restoration',
+      });
+      // settled failure: delivery tx landed on-chain but the run terminated FAILED.
+      insertTask(persistence, {
+        requestId: 'settled-fail',
+        taskId: 'task-settled',
+        taskRole: 'restoration',
+      });
+      // settled failure for an evaluation run — same split logic applies.
+      insertTask(persistence, {
+        requestId: 'settled-fail-eval',
+        taskId: 'task-settled-eval',
+        taskRole: 'evaluation',
+      });
+
+      store.db
+        .prepare(
+          `UPDATE task_runs
+             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?
+             WHERE request_id = ?`,
+        )
+        .run(1_100, 'SkippableError', 'local-error');
+      store.db
+        .prepare(
+          `UPDATE task_runs
+             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?, delivery_tx_hash = ?
+             WHERE request_id = ?`,
+        )
+        .run(1_200, 'claimDelivery reverted', '0xdeadbeef', 'settled-fail');
+      store.db
+        .prepare(
+          `UPDATE task_runs
+             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?, delivery_tx_hash = ?
+             WHERE request_id = ?`,
+        )
+        .run(1_300, 'verdict rejected', '0xfeedface', 'settled-fail-eval');
+
+      const status = gatherTaskRunsStatus(store);
+
+      expect(status.totals.failed).toBe(3);
+      expect(status.totals.settledFailed).toBe(2);
+      expect(status.totals.localErrors).toBe(1);
     });
   });
 });

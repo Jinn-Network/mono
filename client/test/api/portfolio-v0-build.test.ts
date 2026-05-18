@@ -61,6 +61,24 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
+  it('splits FAILED runs into settled fails and local errors via delivery_tx_hash', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      seedIntent(persistence, 'req-local-error');
+      seedIntent(persistence, 'req-settled-fail');
+      persistence.markFailed('req-local-error', 'SkippableError');
+      persistence.markFailed('req-settled-fail', 'claimDelivery reverted');
+      store.db
+        .prepare('UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?')
+        .run('0xdeadbeef', 'req-settled-fail');
+
+      const result = gatherPortfolioV0Status(store);
+      expect(result.totals.failed).toBe(2);
+      expect(result.totals.settledFailed).toBe(1);
+      expect(result.totals.localErrors).toBe(1);
+    });
+  });
+
   it('includes solverType and implName in in-flight summaries', async () => {
     await withTempStore(async (store) => {
       const persistence = new TaskRunPersistence(store.db);

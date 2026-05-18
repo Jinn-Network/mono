@@ -79,7 +79,17 @@ export interface PortfolioV0Status {
   totals: {
     /** Tasks that reached terminal success and delivered their result. */
     delivered: number;
+    /**
+     * Sum of `settledFailed` and `localErrors`. Retained for callers that
+     * still want a single failure count; new surfaces should prefer the
+     * split fields to distinguish on-chain settled fails from local
+     * engine errors.
+     */
     failed: number;
+    /** FAILED runs whose delivery tx landed on-chain (settled failure). */
+    settledFailed: number;
+    /** FAILED runs that never reached the marketplace (local engine error). */
+    localErrors: number;
     active: number;
   };
   /** Tasks currently being processed (not in a terminal state). */
@@ -153,9 +163,13 @@ export function gatherPortfolioV0Status(
     (a, b) => b.stateUpdatedAt - a.stateUpdatedAt,
   );
   const recentVerdicts = allTerminal.slice(0, RECENT_VERDICTS_LIMIT).map(toVerdict);
+  const settledFailed = failed.filter((task) => task.deliveryTxHash !== null);
+  const localErrors = failed.filter((task) => task.deliveryTxHash === null);
   const totals = {
     delivered: complete.length,
     failed: failed.length,
+    settledFailed: settledFailed.length,
+    localErrors: localErrors.length,
     active: inFlight.length,
   };
 

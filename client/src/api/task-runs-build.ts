@@ -26,7 +26,27 @@ export interface TaskRunsStatus {
     completed: number;
     solutions: number;
     verdicts: number;
+    /**
+     * Sum of `settledFailed` and `localErrors`. Retained for callers that
+     * still want the rolled-up count, but operator surfaces should prefer
+     * the split fields so the on-chain vs. local distinction is visible.
+     */
     failed: number;
+    /**
+     * FAILED task runs whose `delivery_tx_hash` landed on-chain before the
+     * run terminated — the marketplace recorded the delivery and a
+     * downstream step (claimDelivery, on-chain verdict) marked it as a
+     * settled failure. This is the count that should align with the public
+     * explorer's per-operator fail count.
+     */
+    settledFailed: number;
+    /**
+     * FAILED task runs with no on-chain delivery tx — the run never reached
+     * the marketplace (SkippableError, claim-time rejects, runner crashes,
+     * recovery aborts). Operator-only debugging signal; not visible on
+     * the public explorer.
+     */
+    localErrors: number;
   };
   inFlight: TaskRunSummary[];
   recentTasks: TaskRunSummary[];
@@ -41,6 +61,8 @@ export function gatherTaskRunsStatus(store: Store): TaskRunsStatus {
   const allRecent = [...allRuns].sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt);
   const solutions = complete.filter((run) => run.taskRole !== 'evaluation');
   const verdicts = complete.filter((run) => run.taskRole === 'evaluation');
+  const settledFailed = failed.filter((run) => run.deliveryTxHash !== null);
+  const localErrors = failed.filter((run) => run.deliveryTxHash === null);
 
   return {
     totals: {
@@ -50,6 +72,8 @@ export function gatherTaskRunsStatus(store: Store): TaskRunsStatus {
       solutions: solutions.length,
       verdicts: verdicts.length,
       failed: failed.length,
+      settledFailed: settledFailed.length,
+      localErrors: localErrors.length,
     },
     inFlight: [...inFlight]
       .sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt)

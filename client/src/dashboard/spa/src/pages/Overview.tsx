@@ -44,6 +44,8 @@ interface OverviewStatusV1 {
       solutions?: number;
       verdicts?: number;
       failed?: number;
+      settledFailed?: number;
+      localErrors?: number;
     };
     inFlight?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
     recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
@@ -69,7 +71,15 @@ interface OverviewStatusV1 {
       };
     };
     operatorError?: string;
-    totals?: { observedTasks?: number; activeTaskRuns?: number; solutions?: number; verdicts?: number; failed?: number };
+    totals?: {
+      observedTasks?: number;
+      activeTaskRuns?: number;
+      solutions?: number;
+      verdicts?: number;
+      failed?: number;
+      settledFailed?: number;
+      localErrors?: number;
+    };
     recentTasks?: Array<{ state: string; taskRole: 'restoration' | 'evaluation' | null; stateUpdatedAt: number }>;
   };
 }
@@ -262,12 +272,25 @@ export function OverviewPage(): JSX.Element {
   );
   const taskRunTotals = status?.taskRuns?.totals;
   const predictionTotals = status?.predictionV1?.totals;
+  // Split per jinn-mono-0t6p: `settledFailed` aligns with the public
+  // explorer's per-operator fail count (delivery landed on-chain, run
+  // ended FAILED), `localErrors` is the operator-only debugging signal
+  // for runs that never reached the marketplace. Falls back to the
+  // legacy `failed` rollup when an older daemon hasn't shipped the
+  // split yet.
+  const totalFailed = taskRunTotals?.failed ?? predictionTotals?.failed ?? 0;
+  const settledFailed =
+    taskRunTotals?.settledFailed ?? predictionTotals?.settledFailed;
+  const localErrors = taskRunTotals?.localErrors ?? predictionTotals?.localErrors;
   const totals = {
     tasks: taskRunTotals?.observedTasks ?? predictionTotals?.observedTasks ?? 0,
     active: taskRunTotals?.activeTaskRuns ?? predictionTotals?.activeTaskRuns ?? 0,
     solutions: taskRunTotals?.solutions ?? predictionTotals?.solutions ?? 0,
     verdicts: taskRunTotals?.verdicts ?? predictionTotals?.verdicts ?? 0,
-    failed: taskRunTotals?.failed ?? predictionTotals?.failed ?? 0,
+    settledFailed: settledFailed ?? 0,
+    // Old daemons only ship `failed`; surface it under `localErrors` so the
+    // operator's debugging signal isn't lost during the rollout window.
+    localErrors: localErrors ?? (settledFailed === undefined ? totalFailed : 0),
   };
   const services: ServiceIdentity[] = (status?.fleet?.services ?? []).map((s) => ({
     index: s.index,

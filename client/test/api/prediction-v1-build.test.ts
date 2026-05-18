@@ -71,6 +71,8 @@ describe('gatherPredictionV1Status', () => {
         solutions: 0,
         verdicts: 0,
         failed: 0,
+        settledFailed: 0,
+        localErrors: 0,
       });
       expect(result.recentTasks).toEqual([]);
     });
@@ -138,6 +140,8 @@ describe('gatherPredictionV1Status', () => {
         solutions: 1,
         verdicts: 1,
         failed: 1,
+        settledFailed: 0,
+        localErrors: 1,
       });
       expect(result.latest).toEqual({
         taskAt: 40,
@@ -159,6 +163,35 @@ describe('gatherPredictionV1Status', () => {
         requestId: 'verdict-a',
         taskRole: 'evaluation',
       });
+    });
+  });
+
+  it('splits FAILED prediction runs into settled fails and local errors via delivery_tx_hash', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      // Local engine error: no delivery tx ever landed.
+      seedPredictionRun(store, persistence, {
+        requestId: 'local-error',
+        taskId: 'task-local',
+        state: 'FAILED',
+        stateUpdatedAt: 100,
+      });
+      // Settled failure: delivery tx landed on-chain before the run failed.
+      seedPredictionRun(store, persistence, {
+        requestId: 'settled-fail',
+        taskId: 'task-settled',
+        state: 'FAILED',
+        stateUpdatedAt: 200,
+      });
+      store.db
+        .prepare(`UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?`)
+        .run('0xdeadbeef', 'settled-fail');
+
+      const result = gatherPredictionV1Status(store);
+
+      expect(result.totals.failed).toBe(2);
+      expect(result.totals.settledFailed).toBe(1);
+      expect(result.totals.localErrors).toBe(1);
     });
   });
 });
