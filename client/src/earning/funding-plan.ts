@@ -238,7 +238,7 @@ export async function planFleetFunding(
           standardFleetAlreadyComplete
             ? 0n
             : isPreStage1
-              ? stage1MinMasterEth(config)
+              ? stage1MinMasterEth(config, targetServices)
               : config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
         )
       : SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);

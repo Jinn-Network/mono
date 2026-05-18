@@ -1096,12 +1096,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         chain: NETWORK_CHAIN,
         rpcUrl: config.rpcUrl,
         // Note: do NOT pass minEoaGasWei here. setup-endpoints.ts derives
-        // its faucet target from stage1MinMasterEth(getChainConfig(chain)) —
-        // the same helper the daemon's ensureStage1 gate uses. Passing a
-        // computed value from here would re-introduce the drift seam that
-        // hit operators in the 2026-05-18 canary (jinn-mono-u34i): faucet
-        // dripped to one target while the daemon waited for a different one.
-        // The override field remains for tests that want a custom target.
+        // its faucet target from stage1MinMasterEth(getChainConfig(chain),
+        // targetServices) — the same helper the daemon's ensureStage1 gate
+        // uses. Passing a computed value from here would re-introduce the
+        // drift seam that hit operators in the 2026-05-18 canary
+        // (jinn-mono-u34i): faucet dripped to one target while the daemon
+        // waited for a different one. The override field remains for tests
+        // that want a custom target.
+        // targetServices DOES need to flow through so the faucet drips enough
+        // ETH to cover ALL services for the operator's chosen targetServices.
+        targetServices: config.targetServices,
         claudePath: activeClaudePath,
         getClaudePath: () => activeClaudePath,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,

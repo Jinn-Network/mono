@@ -62,6 +62,11 @@ export interface SetupRoutesConfig {
   chain?: JinnOnchainNetwork;
   rpcUrl?: string;
   minEoaGasWei?: string;
+  /**
+   * Pass through from JinnConfig.targetServices so the faucet drip target
+   * scales with multi-service deployments. Defaults to 1 (testnet operators).
+   */
+  targetServices?: number;
   claudePath?: string;
   getClaudePath?: () => string;
   runtimeMode?: 'bare' | 'docker-compose' | 'container';
@@ -182,14 +187,16 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     const requestFunding = config.requestFunding ?? requestTestnetFunding;
     const interDripPauseMs = config.interDripPauseMs ?? 1_000;
     // Faucet drip target. Single source of truth: stage1MinMasterEth(chain
-    // config), which is also what FleetBootstrapper.ensureStage1 gates on
-    // (jinn-mono-u34i). The optional `config.minEoaGasWei` override is for
-    // tests that want a custom target. Production callers should NOT pass
-    // it — letting the default win prevents the faucet/gate drift that hit
-    // operators in the 2026-05-18 canary run.
+    // config, targetServices), which is also what FleetBootstrapper.ensureStage1
+    // gates on (jinn-mono-u34i). The faucet drips master ETH until it can
+    // complete the ENTIRE bootstrap — operator gets one drip session, not one
+    // per stage. The optional `config.minEoaGasWei` override is for tests
+    // that want a custom target; production callers should NOT pass it.
+    // `config.targetServices` is also for tests / multi-service deployments;
+    // defaults to 1 (the testnet faucet's audience).
     const targetWei = config.minEoaGasWei
       ? BigInt(config.minEoaGasWei)
-      : stage1MinMasterEth(getChainConfig(chain));
+      : stage1MinMasterEth(getChainConfig(chain), config.targetServices ?? 1);
     const publicClient = config.rpcUrl
       ? createJinnPublicClient(config.rpcUrl, 'base-sepolia')
       : null;

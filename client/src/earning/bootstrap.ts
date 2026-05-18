@@ -101,13 +101,48 @@ const addr = (value: string): Address => getAddress(value) as Address;
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
 const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
-/** Stage 1 master ETH requirement: the agent-funding transfer (STAGE1_AGENT_ETH)
- *  plus master's own gas reserve (minEoaGasEth). Centralized so the daemon's
- *  ensureStage1 gate, the read-side funding-plan, and gather-status all agree.
- *  See jinn-mono-u34i. */
+/** Master ETH required to FINISH the whole bootstrap from a fresh start (not
+ *  just to enter Stage 1). Centralized so the daemon's ensureStage1 gate,
+ *  the read-side funding-plan, gather-status, and the panel faucet target
+ *  all agree on a single "one-shot fund the operator" number.
+ *
+ *  Components for a 1-service standard-mode bootstrap:
+ *    - STAGE1_AGENT_ETH (0.010 ETH): master → HD-1 fleet-agent transfer in
+ *      Stage 1. HD-1 then pays for its own Safe deploy + register +
+ *      setAgentWallet out of this; the leftover (~0.005 ETH) sits on HD-1
+ *      and covers service 1's Stage 2 work too (mech deploy + rebind).
+ *    - minEoaGasEth × STANDARD_MASTER_BOOTSTRAP_MULTIPLIER (0.010 ETH):
+ *      master reserve required at Stage 2 entry. Matches the existing Stage 2
+ *      gate at ensureStage1And2 line ~484 — covers one per-service transfer
+ *      worth of headroom plus master's own gas reserve for distributor.stake()
+ *      and ongoing daemon ops.
+ *    - minEoaGasEth × (targetServices - 1): per-extra-service top-up. Service
+ *      1 piggybacks on HD-1's Stage 1 funding (no extra master transfer);
+ *      services 2..N each need their own minEoaGasEth (= 0.005 ETH) from master.
+ *
+ *  Total for N=1: 0.010 + 0.010 + 0 = 0.020 ETH (single deposit; daemon won't
+ *  ask again).
+ *  Total for N=2: 0.025 ETH.
+ *  Total for N=3: 0.030 ETH.
+ *
+ *  Pre-u34i this was 0.015 ETH = STAGE1_AGENT_ETH + minEoaGasEth — enough to
+ *  enter Stage 1, but Stage 1 then drained master to 0.005 and Stage 2's gate
+ *  (0.010) re-prompted. The 2026-05-18 canary's "I sent the stated 0.015 and
+ *  now it's asking again" frustration. See jinn-mono-u34i + the follow-up
+ *  one-shot-funding work.
+ */
 export const STAGE1_AGENT_ETH = 10_000_000_000_000_000n; // 0.01 ETH (moved out of stepFleetSafeDeploy)
-export function stage1MinMasterEth(config: { minEoaGasEth: bigint }): bigint {
-  return STAGE1_AGENT_ETH + config.minEoaGasEth;
+export function stage1MinMasterEth(
+  config: { minEoaGasEth: bigint },
+  targetServices: number = 1,
+): bigint {
+  const extraServiceTransfers =
+    config.minEoaGasEth * BigInt(Math.max(0, targetServices - 1));
+  return (
+    STAGE1_AGENT_ETH +
+    config.minEoaGasEth * STANDARD_MASTER_BOOTSTRAP_MULTIPLIER +
+    extraServiceTransfers
+  );
 }
 
 /** Conservative default: ~0.001 ETH/day master gas if not configured. */
@@ -410,7 +445,7 @@ export class FleetBootstrapper {
       // which equaled the transfer amount and left no gas headroom, so a
       // master holding the gate's minimum would fail eth_estimateGas with
       // "gas required exceeds allowance (0)".
-      const requiredMasterEth = stage1MinMasterEth(this.config);
+      const requiredMasterEth = stage1MinMasterEth(this.config, this.targetServices);
       const masterAddress = state.master_address!;
       const masterBalance = await this.publicClient.getBalance({
         address: masterAddress as Address,

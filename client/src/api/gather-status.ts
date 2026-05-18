@@ -555,13 +555,18 @@ export async function gatherGatheredStatusRaw(
     fleet,
     migrationArchive: migrationArchive.entries.length > 0 ? migrationArchive : undefined,
     rpc: { ok: false, error: undefined },
-    // Pre-Stage-1 (fleet state missing or fleet_stage === 'none'): Stage 1
-    // needs STAGE1_AGENT_ETH for the master → agent transfer plus
-    // minEoaGasEth reserved for the master's own gas. Post-Stage-1, keep
-    // the existing 1× / 2× minEoaGasEth heuristic. See jinn-mono-u34i.
+    // Pre-Stage-1 (fleet state missing or fleet_stage === 'none'):
+    // stage1MinMasterEth returns the FULL bootstrap budget — Stage 1 transfer
+    // + Stage 2 reserve + per-extra-service top-ups — so the operator funds
+    // ONCE and the daemon doesn't re-prompt at the Stage 2 gate. See
+    // jinn-mono-u34i (gate-vs-transfer parity) and the one-shot-funding
+    // follow-up.
+    // Post-Stage-1, fall back to the existing 1× / 2× minEoaGasEth heuristic
+    // (the operator already funded Stage 1; this gate only needs to cover
+    // what's left).
     minMasterEthWei: (
       !fleet || fleet.fleet_stage === 'none'
-        ? stage1MinMasterEth(chainCfg)
+        ? stage1MinMasterEth(chainCfg, status?.config?.targetServices ?? 1)
         : chainCfg.minEoaGasEth *
           (fleet.services.length > 0 ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
     ).toString(),
