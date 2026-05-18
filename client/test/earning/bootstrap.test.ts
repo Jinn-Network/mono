@@ -1173,6 +1173,90 @@ describe('Fleet bootstrap', () => {
     expect(svc.error).toContain('safe_binding_failed');
   });
 
+  it('agent_registered step retries setAgentWallet on returned ok:false (production race) and succeeds (jinn-mono-k1ng)', async () => {
+    // jinn-mono-k1ng: the existing h74p tests mock `mockRejectedValueOnce(new
+    // Error(...))` — i.e. they assume bindAgentWalletToSafe THROWS on the
+    // race. In production it RETURNS `{ ok: false, error }` (try/catch
+    // internal). The previous retry only caught throws, so it was dead code.
+    // This test mocks the REAL production shape: two transient ok:false
+    // followed by ok:true. The unified bindAgentWalletWithRetry must retry
+    // on returned ok:false (not just thrown exceptions) for the per-service
+    // path to actually heal the race in-process — without relying on the
+    // 'safe_binding_pending' resume-on-next-bootstrap fallback.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: '0x2222222222222222222222222222222222222222',
+          service_id: 42,
+          mech_address: '0x3333333333333333333333333333333333333333',
+          staking_address: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
+          step: 'agent_registered',
+          error: null,
+          agent_id: '777',
+          agent_uri: '',
+          identity_registry_address: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+          agent_registered_tx: '0x' + 'dd'.repeat(32),
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      safeBindingRetryDelayMs: 0,
+    });
+
+    const bindingMod = await import('../../src/earning/agent-wallet-binding.js');
+    const transientOkFalse = {
+      ok: false as const,
+      error: {
+        kind: 'safe_binding_failed' as const,
+        message: 'Execution reverted for an unknown reason.',
+        shortMessage: 'Execution reverted for an unknown reason.',
+        revertReason: null,
+      },
+    };
+    const successOutcome = {
+      ok: true as const,
+      txHash: ('0x' + 'ee'.repeat(32)) as `0x${string}`,
+      identityDigest: ('0x' + '11'.repeat(32)) as `0x${string}`,
+      safeMessageHash: ('0x' + '22'.repeat(32)) as `0x${string}`,
+      signature: ('0x' + '33'.repeat(65)) as `0x${string}`,
+      deadline: 9_999_999_999n,
+    };
+    const bindSpy = vi
+      .spyOn(bindingMod, 'bindAgentWalletToSafe')
+      .mockResolvedValueOnce(transientOkFalse)
+      .mockResolvedValueOnce(transientOkFalse)
+      .mockResolvedValueOnce(successOutcome);
+
+    const fleet = await store.load('base');
+    const next = await (bootstrapper as any).resumeServiceStandard(fleet, mnemonic, 1);
+
+    const svc = next.services.find((s: any) => s.index === 1);
+    expect(bindSpy).toHaveBeenCalledTimes(3);
+    expect(svc.safe_bound_to_agent).toBe(true);
+    expect(svc.step).toBe('complete');
+    expect(svc.error).toBe(null);
+  });
+
   it('resume path: complete service with agent_id + safe_bound_to_agent=false runs binding step', async () => {
     // Should-fix #3: legacy operator who minted agent NFT (agent_id set) but
     // never ran the Safe-binding step (safe_bound_to_agent=false). Resuming
