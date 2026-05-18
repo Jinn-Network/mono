@@ -24,6 +24,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
+import { stage1MinMasterEth } from '../earning/bootstrap.js';
+import { getChainConfig } from '../earning/contracts.js';
 import { FleetStateStore } from '../earning/store.js';
 import { decryptMnemonic, encryptMnemonic } from '../earning/wallet.js';
 import {
@@ -179,7 +181,15 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
 
     const requestFunding = config.requestFunding ?? requestTestnetFunding;
     const interDripPauseMs = config.interDripPauseMs ?? 1_000;
-    const targetWei = config.minEoaGasWei ? BigInt(config.minEoaGasWei) : null;
+    // Faucet drip target. Single source of truth: stage1MinMasterEth(chain
+    // config), which is also what FleetBootstrapper.ensureStage1 gates on
+    // (jinn-mono-u34i). The optional `config.minEoaGasWei` override is for
+    // tests that want a custom target. Production callers should NOT pass
+    // it — letting the default win prevents the faucet/gate drift that hit
+    // operators in the 2026-05-18 canary run.
+    const targetWei = config.minEoaGasWei
+      ? BigInt(config.minEoaGasWei)
+      : stage1MinMasterEth(getChainConfig(chain));
     const publicClient = config.rpcUrl
       ? createJinnPublicClient(config.rpcUrl, 'base-sepolia')
       : null;

@@ -328,8 +328,8 @@ describe('Fleet bootstrap', () => {
       rpcUrl: 'http://127.0.0.1:8545',
     });
 
-    // Master is funded
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    // Master is funded — pre-Stage-1 gate is STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH (jinn-mono-u34i).
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(15_000_000_000_000_000n);
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
 
     // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).
@@ -389,7 +389,8 @@ describe('Fleet bootstrap', () => {
       targetServices: 3,
     });
 
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    // Pre-Stage-1 gate is STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH (jinn-mono-u34i).
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(15_000_000_000_000_000n);
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
 
     // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).
@@ -659,7 +660,8 @@ describe('Fleet bootstrap', () => {
       stakingMode: 'standard',
     });
 
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    // Pre-Stage-1 gate is STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH (jinn-mono-u34i).
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(15_000_000_000_000_000n);
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
 
     // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).

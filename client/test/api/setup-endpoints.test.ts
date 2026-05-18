@@ -4,6 +4,8 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addSetupRoutes } from '../../src/api/setup-endpoints.js';
+import { stage1MinMasterEth } from '../../src/earning/bootstrap.js';
+import { getChainConfig } from '../../src/earning/contracts.js';
 import { FleetStateStore } from '../../src/earning/store.js';
 import { encryptMnemonic, generateMnemonic } from '../../src/earning/wallet.js';
 
@@ -334,6 +336,48 @@ describe('POST /v1/setup/drip', () => {
     const TARGET_WEI = 10_000_000_000_000_000n;
     expect(BigInt(attempts) * DRIP_WEI >= TARGET_WEI).toBe(true);
     expect(attempts).toBeGreaterThan(60);
+  });
+
+  // ── Wiring invariant test (jinn-mono-u34i) ───────────────────────────────
+  //
+  // The class of bug this test exists to catch: the faucet endpoint and the
+  // daemon's Stage 1 funding gate must agree on what "fully funded" means.
+  // Before u34i, the daemon read the gate from stage1MinMasterEth() while
+  // main.ts plumbed a separately-computed number through `minEoaGasWei` to
+  // the faucet endpoint. The two drifted (0.01 vs 0.015 ETH); the faucet
+  // declared itself done while the daemon kept polling, and the operator
+  // was stuck. No unit test caught it because each module passed its own
+  // tests with its own idea of the target.
+  //
+  // The fix routes both through stage1MinMasterEth(getChainConfig(chain)).
+  // This test locks the invariant: with NO minEoaGasWei override (the
+  // production wiring), the faucet's reported target equals what the daemon
+  // gate uses. If someone changes one without the other in the future, this
+  // test fails loudly.
+  it('default faucet target equals daemon Stage 1 gate (no override → derived from chain config) (jinn-mono-u34i)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-default-target-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0x4444444444444444444444444444444444444444',
+    });
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding: vi.fn(async () => ({ ok: true, txHash: '0x' + 'aa'.repeat(32) })),
+      // Critical: do NOT pass minEoaGasWei. The endpoint must derive the
+      // target from the chain config using the same helper as the daemon.
+      maxFaucetIters: 0, // short-circuit the loop; we only care about targetWei in the response
+      interDripPauseMs: 0,
+    });
+
+    const res = await app.request('/v1/setup/drip', { method: 'POST' });
+
+    const body = (await res.json()) as { targetWei?: string };
+    const expected = stage1MinMasterEth(getChainConfig('base-sepolia')).toString();
+    expect(body.targetWei).toBe(expected);
   });
 
   it('stops the user-triggered faucet loop at the wall-clock cutoff', async () => {

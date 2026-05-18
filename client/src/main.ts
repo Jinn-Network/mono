@@ -28,7 +28,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
-import { addHarnessReadinessRoutes } from './api/harness-readiness-endpoint.js';
+// addHarnessReadinessRoutes is wired through startApiServer's holder ref now
+// (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiToken } from './api/ui-token.js';
@@ -907,6 +908,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./api/solvernets-endpoints.js').SolverNetsEndpointsDeps | undefined;
   } = { current: undefined };
 
+  // jinn-mono-u34i: same pattern for the harness readiness registry. The
+  // registry is built post-bootstrap (depends on the keystore being
+  // available), but the routes must be registered at server start to land in
+  // Hono's matcher before the panel's first poll. Late-mounting via
+  // `addHarnessReadinessRoutes(setupApiServer.app, ...)` after the panel had
+  // been polling for minutes threw "Can not add a route since the matcher is
+  // already built" and crashed the daemon on the running-mode transition.
+  const harnessReadinessRegistryHolder: {
+    current: import('./harnesses/readiness-registry.js').HarnessReadinessRegistry | undefined;
+  } = { current: undefined };
+
   let setupApiServer: ApiServer;
   try {
     setupApiServer = await startApiServer({
@@ -1029,6 +1041,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // eagerly here; deps are populated by main.ts post-bootstrap via the
       // holder, and each route handler reads `holder.current` per-request.
       solverNetsLauncher: { holder: solverNetEndpointsDepsHolder },
+      // jinn-mono-u34i: same eager-register / late-populate pattern for the
+      // harness readiness routes. Until main.ts sets the holder, requests
+      // return 503 subsystem_not_ready (the panel handles that gracefully).
+      harnessReadinessRegistry: { holder: harnessReadinessRegistryHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -1079,7 +1095,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         earningDir: config.earningDir,
         chain: NETWORK_CHAIN,
         rpcUrl: config.rpcUrl,
-        minEoaGasWei: (CHAIN_CONFIG.minEoaGasEth * 2n).toString(),
+        // Note: do NOT pass minEoaGasWei here. setup-endpoints.ts derives
+        // its faucet target from stage1MinMasterEth(getChainConfig(chain)) —
+        // the same helper the daemon's ensureStage1 gate uses. Passing a
+        // computed value from here would re-introduce the drift seam that
+        // hit operators in the 2026-05-18 canary (jinn-mono-u34i): faucet
+        // dripped to one target while the daemon waited for a different one.
+        // The override field remains for tests that want a custom target.
         claudePath: activeClaudePath,
         getClaudePath: () => activeClaudePath,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
@@ -1672,10 +1694,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   });
   harnessReadinessRegistry.start();
   await harnessReadinessRegistry.refreshNow();
-  // Mount /v1/harnesses/readiness and /v1/harnesses/:name/readiness on the
-  // already-running HTTP server. Hono matches eagerly on first request; these
-  // routes are registered before the daemon's first claim-loop tick.
-  addHarnessReadinessRoutes(setupApiServer.app, { registry: harnessReadinessRegistry });
+  // Routes were registered eagerly at startApiServer time via the holder
+  // ref pattern (jinn-mono-u34i). Populate the holder now and the already-
+  // mounted /v1/harnesses/readiness routes start returning real data.
+  // Late-mounting via addHarnessReadinessRoutes(setupApiServer.app, ...)
+  // is no longer needed and would throw on Hono's locked matcher.
+  harnessReadinessRegistryHolder.current = harnessReadinessRegistry;
   console.log('[main] HarnessReadinessRegistry started; /v1/harnesses/readiness routes active.');
 
   // ── Engine deps ───────────────────────────────────────────────────────────────

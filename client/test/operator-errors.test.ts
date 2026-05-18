@@ -41,6 +41,27 @@ describe('formatBootstrapOperatorMessage', () => {
     expect(r.hint).toBeDefined();
   });
 
+  it('maps `gas required exceeds allowance (0)` as insufficient funds, not OOG (jinn-mono-u34i)', () => {
+    const r = formatBootstrapOperatorMessage(
+      new Error('Execution reverted with reason: gas required exceeds allowance (0).'),
+    );
+    // (0) allowance from geth means the sender cannot pay for even 1 wei of
+    // gas — that's a balance issue, not a gas-limit issue.
+    expect(r.summary.toLowerCase()).toContain('eth');
+    expect(r.summary.toLowerCase()).not.toContain('ran out of gas');
+    expect(r.hint).toBeDefined();
+    expect(r.hint!.toLowerCase()).toContain('send eth');
+  });
+
+  it('keeps `gas required exceeds allowance (50000)` as OOG (true gas-limit shortfall)', () => {
+    const r = formatBootstrapOperatorMessage(
+      new Error('gas required exceeds allowance (50000)'),
+    );
+    expect(r.summary.toLowerCase()).toContain('gas');
+    expect(r.summary.toLowerCase()).not.toContain('not enough eth');
+    expect(r.hint).toBeDefined();
+  });
+
   it('does not misclassify generic execution-reverted errors as insufficient funds', () => {
     const r = formatBootstrapOperatorMessage(new Error('execution reverted: insufficient gas for inner call'));
     // The substring "insufficient" appears but this is gas, not balance — make

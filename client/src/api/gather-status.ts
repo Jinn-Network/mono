@@ -13,6 +13,7 @@ import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import { FleetStateStore } from '../earning/store.js';
 import { getChainConfig } from '../earning/contracts.js';
+import { stage1MinMasterEth } from '../earning/bootstrap.js';
 import { JINN_STAKING_ABI } from '../earning/jinn-rewards.js';
 import type { FleetState } from '../earning/types.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
@@ -554,9 +555,15 @@ export async function gatherGatheredStatusRaw(
     fleet,
     migrationArchive: migrationArchive.entries.length > 0 ? migrationArchive : undefined,
     rpc: { ok: false, error: undefined },
+    // Pre-Stage-1 (fleet state missing or fleet_stage === 'none'): Stage 1
+    // needs STAGE1_AGENT_ETH for the master → agent transfer plus
+    // minEoaGasEth reserved for the master's own gas. Post-Stage-1, keep
+    // the existing 1× / 2× minEoaGasEth heuristic. See jinn-mono-u34i.
     minMasterEthWei: (
-      chainCfg.minEoaGasEth *
-      (fleet && fleet.services.length > 0 ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+      !fleet || fleet.fleet_stage === 'none'
+        ? stage1MinMasterEth(chainCfg)
+        : chainCfg.minEoaGasEth *
+          (fleet.services.length > 0 ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
     ).toString(),
     master: {
       address: fleet?.master_address ?? null,

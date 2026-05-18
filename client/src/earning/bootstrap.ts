@@ -82,6 +82,7 @@ import {
   flattenErrorMessage,
   sleep,
   viemSendTransactionWithRetry,
+  waitForContractCode,
   waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
 import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
@@ -99,6 +100,15 @@ const addr = (value: string): Address => getAddress(value) as Address;
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
 const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+
+/** Stage 1 master ETH requirement: the agent-funding transfer (STAGE1_AGENT_ETH)
+ *  plus master's own gas reserve (minEoaGasEth). Centralized so the daemon's
+ *  ensureStage1 gate, the read-side funding-plan, and gather-status all agree.
+ *  See jinn-mono-u34i. */
+export const STAGE1_AGENT_ETH = 10_000_000_000_000_000n; // 0.01 ETH (moved out of stepFleetSafeDeploy)
+export function stage1MinMasterEth(config: { minEoaGasEth: bigint }): bigint {
+  return STAGE1_AGENT_ETH + config.minEoaGasEth;
+}
 
 /** Conservative default: ~0.001 ETH/day master gas if not configured. */
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
@@ -321,13 +331,16 @@ export class FleetBootstrapper {
     try {
       state = await this.ensureMasterWallet(state, password);
 
-      // Stage 1 funding gate — ETH only (no OLAS). Self-bond Stage 1 needs:
-      // master ETH for the agent-funding transfer + agent ETH for Safe deploy
-      // + Safe deploy gas + ERC-8004 register + setAgentWallet (two agent EOA
-      // txs through the IdentityRegistry contract). 0.005 ETH is the
-      // configured `minEoaGasEth` floor; bump by 2x for safety.
-      const requiredMasterEth =
-        this.config.minEoaGasEth * STANDARD_MASTER_BOOTSTRAP_MULTIPLIER;
+      // Stage 1 funding gate — ETH only (no OLAS). Stage 1 needs
+      // STAGE1_AGENT_ETH (0.01) for the master → agent transfer plus
+      // minEoaGasEth (0.005) reserved for the master's own gas to send that
+      // transfer. The agent EOA then pays for Safe deploy + ERC-8004 register
+      // + setAgentWallet out of the funds it just received.
+      // See jinn-mono-u34i: pre-fix this gate was 2×minEoaGasEth (= 0.01 ETH),
+      // which equaled the transfer amount and left no gas headroom, so a
+      // master holding the gate's minimum would fail eth_estimateGas with
+      // "gas required exceeds allowance (0)".
+      const requiredMasterEth = stage1MinMasterEth(this.config);
       const masterAddress = state.master_address!;
       const masterBalance = await this.publicClient.getBalance({
         address: masterAddress as Address,
@@ -785,8 +798,9 @@ export class FleetBootstrapper {
 
     // Fund agent EOA so it can pay for Safe deploy + setAgentWallet gas.
     // 0.01 ETH covers Safe deploy (~250k gas) + register (~80k) + setAgentWallet
-    // (~200k) at testnet gas prices comfortably.
-    const STAGE1_AGENT_ETH = 10_000_000_000_000_000n; // 0.01 ETH
+    // (~200k) at testnet gas prices comfortably. STAGE1_AGENT_ETH is the
+    // module-level constant used both here and in `stage1MinMasterEth` so the
+    // gate and the transfer agree (jinn-mono-u34i).
     const masterAccount = deriveMasterSigner(mnemonic);
     const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
     const agentBalance = await this.publicClient.getBalance({
@@ -832,10 +846,9 @@ export class FleetBootstrapper {
     if (receipt.status !== 'success') {
       throw new Error(`Fleet Safe deployment tx failed: ${deployHash}`);
     }
-    const deployedCode = await this.publicClient.getCode({
-      address: getAddress(fleetSafe) as Address,
-    });
-    if (deployedCode === undefined || deployedCode === '0x') {
+    try {
+      await waitForContractCode(this.publicClient, getAddress(fleetSafe) as Address);
+    } catch {
       throw new Error(`Fleet Safe deployment succeeded but no code at ${fleetSafe}`);
     }
     console.error(`[fleet-bootstrap] Stage 1: fleet Safe deployed (tx=${deployHash})`);
@@ -1861,8 +1874,9 @@ export class FleetBootstrapper {
         throw new Error(`Safe deployment tx failed for service ${index}: ${deployHash}`);
       }
 
-      const deployedCode = await this.publicClient.getCode({ address: getAddress(safeAddress) as Address });
-      if (deployedCode === undefined || deployedCode === '0x') {
+      try {
+        await waitForContractCode(this.publicClient, getAddress(safeAddress) as Address);
+      } catch {
         throw new Error(`Safe deployment succeeded but no code at ${safeAddress}`);
       }
 

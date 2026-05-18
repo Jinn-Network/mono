@@ -135,8 +135,16 @@ export interface ApiServerConfig {
    * When set, mounts `GET /v1/harnesses/readiness` and
    * `GET /v1/harnesses/:name/readiness` under the UI token gate.
    * SPA polls the composed endpoint; the join flow uses the per-harness one.
+   *
+   * Accepts either a direct registry or a holder ref (same pattern as
+   * solverNetsLauncher). main.ts uses the holder shape because the registry is
+   * constructed post-bootstrap; routes register eagerly at server start so
+   * Hono's matcher includes them before the first request — adding routes
+   * after the matcher is built throws (jinn-mono-u34i field repro).
    */
-  harnessReadinessRegistry?: HarnessReadinessRegistry;
+  harnessReadinessRegistry?:
+    | HarnessReadinessRegistry
+    | { holder: { current: HarnessReadinessRegistry | undefined } };
   /**
    * When set, mounts `GET /api/hermes/doctor` under the UI token gate.
    * Powers the dashboard's Hermes install precheck panel in the join flow.
@@ -426,13 +434,18 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   }
 
   if (config.harnessReadinessRegistry) {
-    addHarnessReadinessRoutes(app, { registry: config.harnessReadinessRegistry });
+    const reg = config.harnessReadinessRegistry;
+    if ('holder' in reg) {
+      // Lazy holder shape: register routes eagerly with a getter; main.ts
+      // populates holder.current post-bootstrap. Until then, the routes
+      // return 503 subsystem_not_ready (panel handles this gracefully).
+      addHarnessReadinessRoutes(app, {
+        getRegistry: () => reg.holder.current ?? null,
+      });
+    } else {
+      addHarnessReadinessRoutes(app, { registry: reg });
+    }
   }
-  // When harnessReadinessRegistry is absent at startApiServer time, main.ts
-  // mounts the routes post-bootstrap via addHarnessReadinessRoutes(app, ...)
-  // on the exposed setupApiServer.app reference (same pattern as
-  // registerSolverNetsEndpoints). No warning needed — routes are always live
-  // before the first operator request that cares about harness readiness.
 
   if (config.ui) {
     addHermesDoctorRoutes(app, config.hermesDoctor ?? {});

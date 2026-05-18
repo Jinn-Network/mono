@@ -4,6 +4,7 @@ import {
   isRecoverableTransactionError,
   withRecoverableRetry,
   viemFeeOverridesForAttempt,
+  waitForContractCode,
 } from '../src/tx-retry.js';
 import { SafeInnerRevertError } from '../src/adapters/mech/safe-revert.js';
 
@@ -160,6 +161,64 @@ describe('tx-retry', () => {
         ),
       ).rejects.toThrow('insufficient funds');
       expect(calls).toBe(1);
+    });
+  });
+
+  describe('waitForContractCode', () => {
+    const ADDR = '0x17397Dc17f2630EC603B1AC5F62F3A84B2fe3C8e' as const;
+
+    it('returns bytecode immediately when code is present on first call', async () => {
+      const getCode = vi.fn().mockResolvedValue('0xdeadbeef');
+      const publicClient = { getCode };
+      const code = await waitForContractCode(publicClient as never, ADDR, {
+        maxAttempts: 5,
+        baseDelayMs: 1,
+        maxDelayMs: 2,
+      });
+      expect(code).toBe('0xdeadbeef');
+      expect(getCode).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries while getCode returns 0x and resolves once bytecode is present (RPC propagation race)', async () => {
+      const getCode = vi
+        .fn()
+        .mockResolvedValueOnce('0x')
+        .mockResolvedValueOnce('0x')
+        .mockResolvedValueOnce('0xdeadbeef');
+      const publicClient = { getCode };
+      const code = await waitForContractCode(publicClient as never, ADDR, {
+        maxAttempts: 5,
+        baseDelayMs: 1,
+        maxDelayMs: 2,
+      });
+      expect(code).toBe('0xdeadbeef');
+      expect(getCode).toHaveBeenCalledTimes(3);
+    });
+
+    it('throws after maxAttempts when getCode keeps returning 0x', async () => {
+      const getCode = vi.fn().mockResolvedValue('0x');
+      const publicClient = { getCode };
+      await expect(
+        waitForContractCode(publicClient as never, ADDR, {
+          maxAttempts: 3,
+          baseDelayMs: 1,
+          maxDelayMs: 2,
+        }),
+      ).rejects.toThrow(/no contract code/i);
+      expect(getCode).toHaveBeenCalledTimes(3);
+    });
+
+    it('throws after maxAttempts when getCode returns undefined', async () => {
+      const getCode = vi.fn().mockResolvedValue(undefined);
+      const publicClient = { getCode };
+      await expect(
+        waitForContractCode(publicClient as never, ADDR, {
+          maxAttempts: 2,
+          baseDelayMs: 1,
+          maxDelayMs: 2,
+        }),
+      ).rejects.toThrow(/no contract code/i);
+      expect(getCode).toHaveBeenCalledTimes(2);
     });
   });
 
