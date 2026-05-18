@@ -48,9 +48,14 @@ if [ -f "${JSONL_PATH}" ]; then
 fi
 
 say "Push to Dolt remote"
-bd dolt push 2>&1 || {
-  echo "warning: bd dolt push failed — Captain may need to push manually before tagging the remote." >&2
-}
+# Hard-stop on push failure. A silent push failure means the remote is stale, and the manual
+# Dolt-remote tag step in the next section would tag the wrong (pre-freeze) head — corrupting
+# the archive intent. Surface the failure now so Captain can fix auth / connectivity before
+# attempting the tag.
+if ! bd dolt push 2>&1; then
+  echo "error: bd dolt push failed — fix the underlying issue (Dolt auth, network, remote state) and re-run the script before attempting the manual tag step. Do NOT proceed to tag the remote until this push succeeds." >&2
+  exit 1
+fi
 
 say "Manual follow-up (Captain runs these)"
 cat <<EOF
