@@ -123,6 +123,12 @@ In addition to the single-op concerns listed earlier:
 | Verify hash deep-links | Navigate to `/configuration#network` etc. |
 | Test against real chain state | Reuse a bootstrapped HOME, no mocks |
 | Test pure SPA wiring | Fresh HOME + mock all `/v1/*` endpoints |
+| Spot a cross-op visibility bug | Multi-op chrome-devtools — drive two pages, [`references/multi-op-chrome-devtools.md`](references/multi-op-chrome-devtools.md) |
+| Add cross-op regression coverage | Multi-op Playwright — [`references/multi-op-playwright.md`](references/multi-op-playwright.md) |
+| Test SPA route surface (T1.4) | [`references/scenario-spa-route-smoke.md`](references/scenario-spa-route-smoke.md) |
+| Test cross-op donation (T2.1) | [`references/scenario-cross-op-donation.md`](references/scenario-cross-op-donation.md) |
+| Test producer/evaluator on Anvil-fork (T2.2) | [`references/scenario-producer-evaluator.md`](references/scenario-producer-evaluator.md) |
+| Test multi-op SPA flow (T2.3) | [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) |
 
 ## Common mistakes
 
