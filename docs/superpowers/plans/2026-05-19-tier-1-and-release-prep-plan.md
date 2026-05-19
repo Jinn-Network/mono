@@ -23,9 +23,12 @@
 |---|---|
 | `client/scripts/release/scenario-types.ts` | Shared `ScenarioVerdict`, `FailClass`, `ScenarioOptions` types |
 | `client/scripts/release/run-tier-1.ts` | Orchestrator: run T1.1–T1.4 in parallel, emit verdicts + marker |
-| `client/test/release/tier-1/T1.1-bootstrap-fresh-anvil.ts` | T1.1 callable + Vitest wrapper |
-| `client/test/release/tier-1/T1.2-harness-readiness-contract.ts` | T1.2 callable + Vitest wrapper |
-| `client/test/release/tier-1/T1.3-indexer-round-trip.ts` | T1.3 callable + Vitest wrapper |
+| `client/test/release/tier-1/T1.1-bootstrap-fresh-anvil.ts` | T1.1 callable (importable by the orchestrator without invoking Vitest) |
+| `client/test/release/tier-1/T1.1-bootstrap-fresh-anvil.test.ts` | T1.1 Vitest wrapper — imports the callable, asserts verdict shape |
+| `client/test/release/tier-1/T1.2-harness-readiness-contract.ts` | T1.2 callable |
+| `client/test/release/tier-1/T1.2-harness-readiness-contract.test.ts` | T1.2 Vitest wrapper |
+| `client/test/release/tier-1/T1.3-indexer-round-trip.ts` | T1.3 callable |
+| `client/test/release/tier-1/T1.3-indexer-round-trip.test.ts` | T1.3 Vitest wrapper |
 | `client/test/dashboard/release-prep/spa-route-smoke.e2e.test.ts` | T1.4 Playwright test |
 
 **New refactor outputs:**
@@ -420,8 +423,10 @@ git commit -m "feat(release): add ScenarioVerdict types + failure classifier"
 ## Task 4: T1.1 — bootstrap-fresh-anvil
 
 **Files:**
-- Create: `client/test/release/tier-1/T1.1-bootstrap-fresh-anvil.ts`
-- Test: included inline (Vitest in same file)
+- Create: `client/test/release/tier-1/T1.1-bootstrap-fresh-anvil.ts` (callable export only — no `vitest` imports)
+- Create: `client/test/release/tier-1/T1.1-bootstrap-fresh-anvil.test.ts` (Vitest wrapper that imports the callable)
+
+**NOTE (added 2026-05-19 from PR #347 execution):** Plan C's original task put the callable and the Vitest `describe` block in the same file. The orchestrator imports the callable; if the callable's file has top-level `describe`/`it` from `vitest`, those imports fire on every orchestrator run and crash outside a Vitest test context. Split into two files: the `.ts` file exports `runT11BootstrapFreshAnvil` only; the `.test.ts` file imports it and wraps with Vitest. The code below shows the original single-file shape — when executing, place the `runT11...` function (and its supporting imports) in `T1.1-bootstrap-fresh-anvil.ts`, and the `describe(...)` block (plus its `import { describe, it, expect } from 'vitest'`) in `T1.1-bootstrap-fresh-anvil.test.ts`. Same pattern applies to Tasks 5 and 6.
 
 **What this scenario does:** Spawn an Anvil fork of Base Sepolia, generate a fresh master EOA, fund it, run the bootstrap state machine through all 11 phases, assert phase=`complete`. Cleans up Anvil + tmpdir on exit.
 
@@ -586,7 +591,10 @@ git commit -m "feat(release): add T1.1 bootstrap-fresh-anvil scenario"
 ## Task 5: T1.2 — harness-readiness-contract
 
 **Files:**
-- Create: `client/test/release/tier-1/T1.2-harness-readiness-contract.ts`
+- Create: `client/test/release/tier-1/T1.2-harness-readiness-contract.ts` (callable export only)
+- Create: `client/test/release/tier-1/T1.2-harness-readiness-contract.test.ts` (Vitest wrapper)
+
+(See Task 4's NOTE about the file split. Apply the same split here.)
 
 **What this scenario does:** Spawn a fresh-HOME daemon (no bootstrap needed — daemon can run with a `mode: 'setup'` payload). Query `/v1/harnesses/readiness` and `/v1/harnesses/:name/readiness` for each known harness (`claude-code-learner`, `codex-code-learner`, `hermes-agent`). Assert each response has the expected shape (`{ name, ready: boolean, requirements: [...], reasons: [...] }`).
 
@@ -726,7 +734,12 @@ git commit -m "feat(release): add T1.2 harness-readiness-contract scenario"
 ## Task 6: T1.3 — indexer-round-trip
 
 **Files:**
-- Create: `client/test/release/tier-1/T1.3-indexer-round-trip.ts`
+- Create: `client/test/release/tier-1/T1.3-indexer-round-trip.ts` (callable export only)
+- Create: `client/test/release/tier-1/T1.3-indexer-round-trip.test.ts` (Vitest wrapper)
+
+(See Task 4's NOTE about the file split. Apply the same split here.)
+
+**Update from PR #347 execution:** the executing session marked T1.3 as `skip` because the Ponder spawn helper didn't exist yet. The session filed **GitHub issue #341** to track the Ponder helper. Plan D's Task 2 builds the helper, so the skip will lift when Plan D lands.
 
 **What this scenario does:** Spawn a local Ponder indexer + a daemon configured to use it. Post a task on Anvil fork. Query the Discovery API (`/v1/discovery/tasks` or equivalent). Assert the posted task appears with the correct schema.
 
