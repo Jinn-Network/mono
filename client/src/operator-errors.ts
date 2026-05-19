@@ -125,11 +125,18 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
   // pay for even 1 wei of gas. That's an insufficient-balance error, not an
   // OOG. Must come before the broader OOG matcher below so it doesn't fall
   // through. See jinn-mono-u34i.
+  //
+  // jinn-mono-hjex.6 review: this branch is semantically the same shortfall
+  // as the explicit "insufficient funds for gas" branch below (zero spendable
+  // balance vs gas), so it must classify as `insufficient_funds` — NOT
+  // `gas_too_low` — so the SPA renders the funding-shortfall UI (send ETH to
+  // address X) instead of a misleading "re-run, the daemon will retry gas".
   if (lower.includes('gas required exceeds allowance (0)')) {
     return {
       summary: 'Not enough ETH on the paying account to cover gas (and value, if any).',
       hint: 'Send ETH to the master wallet, agent EOA, or Safe depending on which step failed.',
       rawMessage: msg,
+      category: 'insufficient_funds',
     };
   }
 

@@ -45,7 +45,7 @@ describe('formatBootstrapOperatorMessage', () => {
     expect(r.category).toBe('gas_too_low');
   });
 
-  it('maps `gas required exceeds allowance (0)` as insufficient funds, not OOG (jinn-mono-u34i)', () => {
+  it('maps `gas required exceeds allowance (0)` as insufficient funds, not OOG (jinn-mono-u34i / hjex.6 review)', () => {
     const r = formatBootstrapOperatorMessage(
       new Error('Execution reverted with reason: gas required exceeds allowance (0).'),
     );
@@ -55,6 +55,10 @@ describe('formatBootstrapOperatorMessage', () => {
     expect(r.summary.toLowerCase()).not.toContain('ran out of gas');
     expect(r.hint).toBeDefined();
     expect(r.hint!.toLowerCase()).toContain('send eth');
+    // jinn-mono-hjex.6 review: this branch must classify as insufficient_funds
+    // (zero spendable balance) so the SPA renders the funding-shortfall UI,
+    // not the gas-retry UI.
+    expect(r.category).toBe('insufficient_funds');
   });
 
   it('keeps `gas required exceeds allowance (50000)` as OOG (true gas-limit shortfall)', () => {

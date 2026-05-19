@@ -101,6 +101,7 @@ import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
+import { keepSetupUiOnBootstrapError } from './setup/halt-mode.js';
 import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
@@ -729,8 +730,9 @@ class SetupBootstrapHalted extends Error {
   }
 }
 
-const keepSetupUiOnBootstrapError = (): boolean =>
-  process.env['JINN_NO_UI'] !== '1' && process.env['JINN_NO_DAEMON'] !== '1';
+// hjex.6: gate for the halt-and-resume loop. Lives in ./setup/halt-mode.ts
+// so it can be unit-tested without dragging main.ts's top-level side
+// effects (password resolution, config load) into the test.
 
 // ── Main ────────────────────────────────────────────────────────────────────
 

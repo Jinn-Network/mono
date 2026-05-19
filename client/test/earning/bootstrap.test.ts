@@ -1501,8 +1501,11 @@ describe('Fleet bootstrap', () => {
       autoTestnetFaucet: false,
     });
 
-    // Master is funded
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+    // Master is funded. Must be >= stage1MinMasterEth (0.020 ETH for N=1 on
+    // base-sepolia post-u34i one-shot-funding); otherwise ensureStage1 returns
+    // the funding-shortfall result before stepStolasStake's
+    // agent_already_bound guard can fire.
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(50_000_000_000_000_000n);
 
     // mapAgentInstances returns 47n — agent EOA is already bound on-chain (service 47 from the dogfood case)
     vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
@@ -1521,6 +1524,16 @@ describe('Fleet bootstrap', () => {
       registryMultisig: null,
       safeDeployed: false,
     });
+
+    // ensureStage1 now does Safe-predict + Safe-deploy + identity-register
+    // before Phase 2 runs (post jinn-mono-u34i refactor). The test only
+    // exercises the agent_already_bound guard in stepStolasStake; bypass
+    // Stage 1 with a stub state that pretends fleet identity already exists.
+    vi.spyOn(bootstrapper as any, 'ensureStage1').mockImplementation(async () => ({
+      ok: true,
+      fleet_state: await (bootstrapper as any).store.load('base-sepolia'),
+      message: 'stage1 stubbed for hjex.1 regression',
+    }));
 
     const result = await bootstrapper.bootstrap('test-password');
 
@@ -1662,12 +1675,48 @@ describe('structured error envelope (jinn-mono-hjex.6)', () => {
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
+  /**
+   * Helper: install mocks that satisfy ensureStage1 + the post-Stage-1
+   * `getBalance` re-check, so the test's `bootstrapService` mock is the
+   * first thing that can throw inside `ensureStage1And2`.
+   *
+   * After the u34i/wkbw rebase ensureStage1 calls getCode() + ensureStage1
+   * runs a real flow that the unit-level tests can't satisfy without a
+   * network. Stubbing ensureStage1 to a clean ok-result is the smallest
+   * fixture that keeps the post-rebase `category`/`txHash` assertions
+   * meaningful.
+   */
+  function stubEnsureStage1AndBalance(bootstrapper: FleetBootstrapper): void {
+    // Empty services so ensureStage1And2's "create new" loop calls
+    // bootstrapService for service 1 — that's the test's mock target.
+    const stubState = {
+      master_address: '0x000000000000000000000000000000000000dEaD',
+      fleet_stage: 'stage1' as const,
+      services: [] as any[],
+    };
+    vi.spyOn(bootstrapper as any, 'ensureStage1').mockResolvedValue({
+      ok: true,
+      fleet_state: stubState,
+      message: 'stage1 stubbed',
+    });
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      100_000_000_000_000_000n,
+    );
+    // Phase 2 calls loadExistingMnemonic → decryptMnemonic. Bypass with a
+    // canonical test mnemonic; the test never spends from it.
+    vi.spyOn(bootstrapper as any, 'loadExistingMnemonic').mockResolvedValue(
+      'test test test test test test test test test test test junk',
+    );
+    // Skip the reconcile branch; it would otherwise read chain state.
+    vi.spyOn(bootstrapper as any, 'reconcileFleetWithChain').mockImplementation(
+      async (state: any) => state,
+    );
+    vi.spyOn((bootstrapper as any).store, 'patchFleet').mockImplementation(async () => stubState);
+  }
+
   it('returns errorCategory: insufficient_funds when bootstrap fails with an EVM insufficient-funds error', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-'));
     dirs.push(earningDir);
-
-    // Enough ETH to pass the funding gate, so we get into Phase 2 and hit the exception.
-    const sufficientBalance = 100_000_000_000_000_000n; // 0.1 ETH
 
     const bootstrapper = new FleetBootstrapper({
       earningDir,
@@ -1675,8 +1724,8 @@ describe('structured error envelope (jinn-mono-hjex.6)', () => {
       rpcUrl: 'http://127.0.0.1:8545',
       stakingMode: 'standard',
     });
+    stubEnsureStage1AndBalance(bootstrapper);
 
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(sufficientBalance);
     // Simulate an EVM "insufficient funds for gas" revert during service creation.
     vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
       new Error('insufficient funds for gas * price + value: have 0 want 1000000000000000'),
@@ -1700,8 +1749,8 @@ describe('structured error envelope (jinn-mono-hjex.6)', () => {
       rpcUrl: 'http://127.0.0.1:8545',
       stakingMode: 'standard',
     });
+    stubEnsureStage1AndBalance(bootstrapper);
 
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(100_000_000_000_000_000n);
     vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
       new Error('execution reverted: out of gas while creating contract'),
     );
@@ -1722,8 +1771,8 @@ describe('structured error envelope (jinn-mono-hjex.6)', () => {
       rpcUrl: 'http://127.0.0.1:8545',
       stakingMode: 'standard',
     });
+    stubEnsureStage1AndBalance(bootstrapper);
 
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(100_000_000_000_000_000n);
     vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
       new Error('some completely unrecognized blockchain error'),
     );
@@ -1746,8 +1795,8 @@ describe('structured error envelope (jinn-mono-hjex.6)', () => {
       rpcUrl: 'http://127.0.0.1:8545',
       stakingMode: 'standard',
     });
+    stubEnsureStage1AndBalance(bootstrapper);
 
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(100_000_000_000_000_000n);
     // Simulate an on-chain revert that embeds the tx hash in the message,
     // matching the pattern thrown by stepStakeService / stepSelfBond* paths.
     vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
@@ -1770,8 +1819,8 @@ describe('structured error envelope (jinn-mono-hjex.6)', () => {
       rpcUrl: 'http://127.0.0.1:8545',
       stakingMode: 'standard',
     });
+    stubEnsureStage1AndBalance(bootstrapper);
 
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(100_000_000_000_000_000n);
     vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
       new Error('RPC connection refused'),
     );
