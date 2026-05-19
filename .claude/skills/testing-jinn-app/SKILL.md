@@ -84,6 +84,35 @@ Live template: `client/test/dashboard/spa-config.e2e.test.ts`. The pattern:
 
 Run a single E2E file: `yarn build && playwright test --config=playwright.config.ts test/dashboard/spa-config.e2e.test.ts` (model after the `e2e:spa` script in `client/package.json`).
 
+## Multi-operator scenarios
+
+The single-op recipes above (manual smoke, automated E2E) cover testing one operator in isolation. Multi-operator scenarios — where two daemons interact via the chain and via the operator app — require additional infrastructure that this section documents. Reference docs in `references/` cover each pattern in detail.
+
+Spawn pattern: two (or more) daemons run concurrently against distinct HOMEs (substrate-derived workspaces from Plan A's `substrate-copy`, or fresh tmp HOMEs for clean-state E2Es). Each daemon gets a distinct `JINN_API_PORT`. Helpers in `client/test/helpers/multi-op-daemon.ts` wrap the spawn + teardown lifecycle.
+
+Three method-pattern reference docs cover the mechanics:
+
+- [`references/multi-op-spawn.md`](references/multi-op-spawn.md) — bash + TypeScript spawn recipes; port management; teardown.
+- [`references/multi-op-chrome-devtools.md`](references/multi-op-chrome-devtools.md) — multi-page chrome-devtools driving for cross-op manual smoke.
+- [`references/multi-op-playwright.md`](references/multi-op-playwright.md) — Playwright template for two-daemon automated tests.
+
+Four scenario reference docs are the contracts release-prep's gate runner consumes. Each describes one scenario at the level of detail an implementer needs:
+
+- [`references/scenario-spa-route-smoke.md`](references/scenario-spa-route-smoke.md) — T1.4: load every SPA route against a mocked daemon, assert clean.
+- [`references/scenario-cross-op-donation.md`](references/scenario-cross-op-donation.md) — T2.1: op-a produces corpus artifact, op-b consumes via x402.
+- [`references/scenario-producer-evaluator.md`](references/scenario-producer-evaluator.md) — T2.2: op-a solves task on Anvil-fork, op-b evaluates.
+- [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) — T2.3: op-a launches SolverNet via SPA, op-b joins via SPA, both observe each other.
+
+### Things to watch for (multi-op specific)
+
+In addition to the single-op concerns listed earlier:
+
+- **Cross-operator visibility lag** — op-b sees op-a's actions only after the indexer has caught up (~2 indexer-poll-intervals). Wait, don't assume instant.
+- **Identity collisions** — spawning two daemons with the same HOME means both fight for the same agentId/Safe/nonce. Always verify *both* apiPort AND source HOME directory are distinct before spawning.
+- **Workspace bleed** — substrate-derived workspaces under `~/jinn-dev/workspaces/` are auto-pruned at 7 days by `substrate-reap`. Don't leave a workspace assumed to be there between test runs; either own its lifecycle or use a fresh one each test.
+- **Substrate staleness** — if `substrate-verify` reports drift, all multi-op scenarios using substrate workspaces will fail in non-obvious ways. Run verify before any multi-op session.
+- **RPC saturation under concurrent load** — substrate ops currently share one Tenderly key (per spec §2). If both daemons hammer the RPC simultaneously, expect HTTP 429. Tracked as `jinn-mono-lrey`; for now, add jittered delays in scenarios where both daemons are RPC-active.
+
 ## Quick reference
 
 | Goal | Approach |
