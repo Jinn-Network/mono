@@ -120,7 +120,17 @@ async function cliMain(): Promise<void> {
   }
   const skipOnChain = process.argv.includes('--skip-on-chain');
   const result = await verifySubstrate(opName, { skipOnChain });
-  console.log(JSON.stringify(result, null, 2));
+  const printable = {
+    ...result,
+    onChain: result.onChain
+      ? {
+          ...result.onChain,
+          ethBalanceWei: result.onChain.ethBalanceWei.toString(),
+          olasBalanceWei: result.onChain.olasBalanceWei?.toString() ?? null,
+        }
+      : null,
+  };
+  console.log(JSON.stringify(printable, null, 2));
   process.exit(result.ok ? 0 : 1);
 }
 

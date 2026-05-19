@@ -123,5 +123,18 @@ describe('substrate-verify (on-chain check)', () => {
     expect(result.onChain).not.toBeNull();
     expect(result.onChain!.ethBalanceWei).toBe(0n);
     expect(result.failures.some((f) => f.toLowerCase().includes('eth balance'))).toBe(true);
+
+    const printable = {
+      ...result,
+      onChain: result.onChain
+        ? {
+            ...result.onChain,
+            ethBalanceWei: result.onChain.ethBalanceWei.toString(),
+            olasBalanceWei: result.onChain.olasBalanceWei?.toString() ?? null,
+          }
+        : null,
+    };
+    expect(() => JSON.stringify(printable)).not.toThrow();
+    expect(typeof printable.onChain!.ethBalanceWei).toBe('string');
   });
 });
