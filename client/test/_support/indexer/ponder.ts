@@ -120,9 +120,14 @@ async function waitForHealth(baseUrl: string, timeoutMs: number): Promise<void> 
  * The pattern is reliable: it comes from viem's HTTP transport retry logic, which
  * doubles from 125ms up to ~8s before giving up. The first 4s delay (retry_count=7)
  * is our fast-fail signal.
+ *
+ * Returns a { promise, cancel } pair. The caller MUST call cancel() after the
+ * Promise.race resolves to detach the data listeners — otherwise the listeners
+ * accumulate across test invocations and Node emits MaxListenersExceededWarning.
  */
-function watchForRpcDiagnosticFailure(child: ChildProcess): Promise<never> {
-  return new Promise<never>((_, reject) => {
+function watchForRpcDiagnosticFailure(child: ChildProcess): { promise: Promise<never>; cancel: () => void } {
+  let cleanup = (): void => {};
+  const promise = new Promise<never>((_, reject) => {
     const onData = (chunk: Buffer | string): void => {
       const text = chunk.toString();
       // Match "retry_delay=NNNN" where NNNN >= 4000 during an rpc_diagnostic action.
@@ -140,15 +145,17 @@ function watchForRpcDiagnosticFailure(child: ChildProcess): Promise<never> {
         );
       }
     };
-    const cleanup = (): void => {
-      child.stdout?.off('data', onData);
-      child.stderr?.off('data', onData);
-    };
+    const onExit = (): void => { cleanup(); };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
-    // When the process exits, stop watching (the exitPromise in the caller handles that).
-    child.once('exit', cleanup);
+    child.once('exit', onExit);
+    cleanup = (): void => {
+      child.stdout?.off('data', onData);
+      child.stderr?.off('data', onData);
+      child.off('exit', onExit);
+    };
   });
+  return { promise, cancel: () => cleanup() };
 }
 
 export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<PonderHandle> {
@@ -202,6 +209,12 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
   const baseUrl = `http://127.0.0.1:${port}`;
   const graphqlUrl = `${baseUrl}/graphql`;
 
+  // Track whether the child has exited. `child.killed` is set synchronously when
+  // kill() is called — before the OS reaps the process — so it cannot be used as
+  // a "has the process actually gone?" guard for the SIGKILL fallback.
+  let exited = false;
+  child.once('exit', () => { exited = true; });
+
   // Race readiness against three failure conditions:
   // 1. Process exits unexpectedly (binary missing, immediate crash)
   // 2. RPC diagnostic fails after retries (RPC unreachable; fast-fail before timeout)
@@ -219,19 +232,23 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
     );
   });
 
-  const rpcFailurePromise = watchForRpcDiagnosticFailure(child);
+  const rpcWatcher = watchForRpcDiagnosticFailure(child);
   const healthyPromise = waitForHealth(baseUrl, readyTimeoutMs);
 
   try {
-    await Promise.race([healthyPromise, exitPromise, rpcFailurePromise]);
+    await Promise.race([healthyPromise, exitPromise, rpcWatcher.promise]);
   } catch (err) {
-    if (!child.killed) {
+    // Always detach RPC watcher listeners before throwing.
+    rpcWatcher.cancel();
+    if (!exited) {
       try { child.kill('SIGTERM'); } catch {}
       await new Promise<void>((r) => setTimeout(r, 200));
-      if (!child.killed) { try { child.kill('SIGKILL'); } catch {} }
+      if (!exited) { try { child.kill('SIGKILL'); } catch {} }
     }
     throw err;
   }
+  // Detach RPC watcher listeners on the happy path so they don't accumulate.
+  rpcWatcher.cancel();
 
   let torn = false;
   return {
@@ -244,7 +261,7 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
       try { child.kill('SIGTERM'); } catch {}
       // Give the process a short grace period to flush and exit.
       await new Promise<void>((r) => setTimeout(r, 300));
-      if (!child.killed) {
+      if (!exited) {
         try { child.kill('SIGKILL'); } catch {}
       }
     },
