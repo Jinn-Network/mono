@@ -894,6 +894,7 @@ export interface DecodedDeliverEvent {
   requestId: string;
   deliveryDataHex: string;
   mechAddress: string;
+  blockNumber?: bigint;
 }
 
 export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
@@ -917,6 +918,7 @@ export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
           requestId: String(args.requestId),
           deliveryDataHex: String(args.data),
           mechAddress: String(args.mechServiceMultisig),
+          blockNumber: log.blockNumber ?? undefined,
         });
       }
     } catch {
