@@ -71,8 +71,26 @@ const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
 const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
 const DEFAULT_ROUTER_LOG_CHUNK_BLOCKS = 9_999n;
-const DEFAULT_TASK_DISCOVERY_FROM_BLOCK: Record<number, bigint> = {
-  84532: 41_153_291n,
+/**
+ * Floor block for the on-chain TaskCreated backlog scan, per chain.
+ *
+ * A daemon with no joined-SolverNet store cursor (fresh bootstrap) will scan
+ * from this block forward. Existing operators with a persisted cursor are
+ * unaffected — their cursor is used as long as it's already past this floor.
+ *
+ * Base Sepolia (84532): 41_510_000 lands at 2026-05-14T19:51Z, ~2h after the
+ * fufn validated-pool was rebuilt to `EVAL_SEMANTICS_VERSION='3'` (2026-05-14
+ * T17:28Z). Everything created before that rebuild is a "ghost" — admitted
+ * under a prior semantics regime that the current evaluators can't score —
+ * so a fresh operator should not waste compute claiming them.
+ * See gh #300 for the proper fix (symmetric solver-side admission filter and
+ * generalised scan-age window).
+ *
+ * Base mainnet (8453): unchanged at 25_000_000 — Phase 0 era, no v3-rebuild
+ * equivalent on mainnet.
+ */
+export const DEFAULT_TASK_DISCOVERY_FROM_BLOCK: Record<number, bigint> = {
+  84532: 41_510_000n,
   8453: 25_000_000n,
 };
 const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {

@@ -1125,3 +1125,22 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 });
+
+describe('DEFAULT_TASK_DISCOVERY_FROM_BLOCK (gh #300 — ghost-task floor)', () => {
+  // The Base Sepolia floor sits just after the 2026-05-14T17:28Z rebuild of
+  // the fufn validated-pool to `EVAL_SEMANTICS_VERSION='3'`. Tasks created
+  // before that rebuild are admitted under a prior semantics regime and the
+  // current evaluators refuse to score them ("admission_missing_or_unscorable
+  // under semanticsVersion=3"). A fresh operator must not waste compute
+  // claiming them. This is the regression guard against accidentally rolling
+  // the floor back to a pre-rebuild block.
+  it('Base Sepolia floor is set after the v3 pool rebuild', async () => {
+    const { DEFAULT_TASK_DISCOVERY_FROM_BLOCK } = await import('../../../src/adapters/mech/adapter.js');
+    expect(DEFAULT_TASK_DISCOVERY_FROM_BLOCK[84532]).toBe(41_510_000n);
+  });
+
+  it('Base mainnet floor is unchanged (no v3-rebuild equivalent on mainnet)', async () => {
+    const { DEFAULT_TASK_DISCOVERY_FROM_BLOCK } = await import('../../../src/adapters/mech/adapter.js');
+    expect(DEFAULT_TASK_DISCOVERY_FROM_BLOCK[8453]).toBe(25_000_000n);
+  });
+});
