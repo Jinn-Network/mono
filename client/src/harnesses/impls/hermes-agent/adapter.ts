@@ -16,6 +16,23 @@ const ENV_ALLOWLIST = [
   'NODE_PATH', 'NODE_OPTIONS', 'NPM_CONFIG_PREFIX',
 ];
 
+/**
+ * Detects OpenRouter-style `<org>/<model>` model ids so the adapter can default
+ * `--provider openrouter` for the catalog entries shipped in `HERMES_MODELS`.
+ * This is a v0.1.6 PATCH — it routes the catalog correctly today by exploiting
+ * the fact that every catalog entry happens to be OpenRouter-routed. The
+ * PROPER fix is provider as a first-class field on the catalog + join config
+ * (gh issue #295); when that lands, this inference goes away.
+ *
+ * Explicit `hermesProvider` always wins — this fallback only fires when nothing
+ * was configured at the join site.
+ */
+const OPENROUTER_MODEL_FORMAT = /^[a-z0-9_-]+\/[a-z0-9_.\-:]+$/i;
+function inferProviderFromModelId(modelId: string | undefined): string | undefined {
+  if (!modelId) return undefined;
+  return OPENROUTER_MODEL_FORMAT.test(modelId) ? 'openrouter' : undefined;
+}
+
 export interface HermesHarnessAdapterConfig {
   hermesPath?: string;
   hermesModel?: string;
@@ -71,6 +88,10 @@ export class HermesHarnessAdapter {
   async runTask(inputs: TaskSessionInputs): Promise<void> {
     const hermesHome = inputs.implStateDir;
     const model = inputs.model ?? inputs.claudeModel ?? this.hermesModel;
+    // Provider resolution: explicit `hermesProvider` wins. If unset, fall back
+    // to inference from the model id format. See `inferProviderFromModelId`
+    // above + gh #293 / #295.
+    const provider = this.hermesProvider ?? inferProviderFromModelId(model);
 
     // Step 1: bootstrap — seed auth from the operator's home, write config.yaml + .env.
     //
@@ -87,7 +108,7 @@ export class HermesHarnessAdapter {
       hermesHome,
       workingDir: inputs.workingDir,
       model,
-      provider: this.hermesProvider,
+      provider,
       solverPluginRoots: inputs.pluginRoots ?? [],
       env: {
         storePath: this.storePath,
@@ -135,8 +156,8 @@ export class HermesHarnessAdapter {
     if (model) {
       args.push('--model', model);
     }
-    if (this.hermesProvider) {
-      args.push('--provider', this.hermesProvider);
+    if (provider) {
+      args.push('--provider', provider);
     }
 
     const env = buildAgentEnv({

@@ -111,6 +111,117 @@ describe('HermesHarnessAdapter', () => {
     }
   });
 
+  it('infers --provider openrouter when hermesProvider is unset and model has <org>/<model> format', async () => {
+    // gh #293: HERMES_MODELS catalog ships OpenRouter-format ids. Without
+    // this inference, Hermes falls back to its operator-pinned provider
+    // default (usually google-gemini-cli) and routes a deepseek/... id to
+    // Google → HTTP 404 Code Assist. This is a v0.1.6 patch; the proper
+    // fix (provider as first-class catalog field) is gh #295.
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        // hermesProvider deliberately unset — exercise the inference path.
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      // inputs() defaults model to 'anthropic/claude-opus-4.6' — slashed format.
+      await adapter.runTask(inputs(work, home));
+
+      expect(spawnCalls).toHaveLength(1);
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('openrouter');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('omits --provider when hermesProvider is unset and model has no slash', async () => {
+    // Inference must NOT fire on bare model ids (e.g. `gpt-4o`,
+    // `claude-haiku-4-5-20251001`). Those should fall through to whatever
+    // the operator's `$HERMES_HOME/config.yaml` resolves.
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const taskInputs = inputs(work, home);
+      taskInputs.model = 'gpt-4o';
+      await adapter.runTask(taskInputs);
+
+      expect(spawnCalls).toHaveLength(1);
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--model');
+      expect(call.args).toContain('gpt-4o');
+      expect(call.args).not.toContain('--provider');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('explicit hermesProvider wins over inference', async () => {
+    // Regression guard: if the operator deliberately pins a provider (env
+    // var, future per-join field), inference must NOT override it. Catches
+    // a footgun where the inference grows beyond OpenRouter detection and
+    // silently re-routes operators away from their pinned setup.
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        hermesProvider: 'nous-portal',
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      // Slashed model id — inference WOULD return 'openrouter' if not for
+      // the explicit hermesProvider above.
+      await adapter.runTask(inputs(work, home));
+
+      expect(spawnCalls).toHaveLength(1);
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('nous-portal');
+      expect(call.args).not.toContain('openrouter');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
   it('forwards abort signal to SIGTERM on the child', async () => {
     const controller = new AbortController();
     const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
