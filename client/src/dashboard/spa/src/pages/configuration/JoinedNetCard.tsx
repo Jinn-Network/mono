@@ -18,6 +18,7 @@ import {
   harnessOptionLabel,
 } from './harnessNames.js';
 import { PluginPicker } from './PluginPicker.js';
+import { CostEstimatePanel, useCostSurfaceDecision } from './CostEstimatePanel.js';
 
 /**
  * Per-SolverNet edit card on /operator → SolverNets → Joined.
@@ -206,6 +207,15 @@ export function JoinedNetCard({
       if (res.restartRequired) onRestartPending?.();
     },
   });
+
+  const [highCostAcknowledged, setHighCostAcknowledged] = useState(false);
+  const isSolver = joined.roles.includes('solver');
+  const costDecision = useCostSurfaceDecision(
+    isSolver ? form.harness : undefined,
+    isSolver ? form.model : undefined,
+  );
+  const requiresCostConfirmation = isSolver && costDecision.requiresConfirmation;
+  const costGateBlocked = requiresCostConfirmation && !highCostAcknowledged;
 
   const [confirmingLeave, setConfirmingLeave] = useState(false);
   const leaveMutation = useMutation({
@@ -450,6 +460,7 @@ export function JoinedNetCard({
                   harness,
                   model: defaultModelForHarness(harness),
                 }));
+                setHighCostAcknowledged(false);
               }}
               style={{
                 ...selectStyle,
@@ -556,7 +567,10 @@ export function JoinedNetCard({
               aria-label="Model"
               data-testid="joined-net-card-model-select"
               value={form.model}
-              onChange={(e) => setForm({ ...form, model: e.target.value })}
+              onChange={(e) => {
+                setForm({ ...form, model: e.target.value });
+                setHighCostAcknowledged(false);
+              }}
               style={selectStyle}
             >
               {modelOptions.map((m) => (
@@ -577,6 +591,48 @@ export function JoinedNetCard({
               })()}
             </select>
           </div>
+
+          {isSolver && (
+            <CostEstimatePanel
+              harness={form.harness}
+              modelId={form.model}
+              variant="inline"
+              testIdPrefix="joined-net-card-cost"
+            />
+          )}
+
+          {requiresCostConfirmation && (
+            <label
+              data-testid="joined-net-card-cost-confirmation"
+              data-cost-confirmation-checked={highCostAcknowledged ? 'true' : 'false'}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '8px',
+                padding: '10px 12px',
+                border: '1px solid var(--break-red)',
+                borderRadius: 'var(--radius-2)',
+                background: 'var(--bg)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '12px',
+                color: 'var(--fg)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                data-testid="joined-net-card-cost-confirmation-checkbox"
+                checked={highCostAcknowledged}
+                onChange={(e) => setHighCostAcknowledged(e.target.checked)}
+                style={{ accentColor: 'var(--break-red)', marginTop: '2px', width: '14px', height: '14px' }}
+                aria-label="I understand the per-task cost and have a budget for this"
+              />
+              <span>
+                I understand — I have a budget for this. The selected model is estimated above $1/task on
+                my own provider key.
+              </span>
+            </label>
+          )}
 
           {saveMutation.isError && (
             <span
@@ -614,9 +670,9 @@ export function JoinedNetCard({
               <button
                 type="button"
                 data-testid="joined-net-card-save"
-                disabled={!dirty || saveMutation.isPending}
+                disabled={!dirty || saveMutation.isPending || costGateBlocked}
                 onClick={() => saveMutation.mutate()}
-                style={primaryButtonStyle(dirty && !saveMutation.isPending)}
+                style={primaryButtonStyle(dirty && !saveMutation.isPending && !costGateBlocked)}
               >
                 {saveMutation.isPending ? 'Saving…' : 'Save'}
               </button>
