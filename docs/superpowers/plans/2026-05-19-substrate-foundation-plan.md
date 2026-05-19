@@ -274,7 +274,9 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 
 export function defaultSubstrateRoot(): string {
-  return path.join(os.homedir(), 'jinn-dev');
+  // Use HOME env var first so tests can override (Task 2's tests set process.env.HOME).
+  // `||` not `??` so an empty-string HOME also falls back to os.homedir().
+  return path.join(process.env.HOME || os.homedir(), 'jinn-dev');
 }
 
 export function goldPath(opName: string, substrateRoot: string = defaultSubstrateRoot()): string {
@@ -602,7 +604,20 @@ async function cliMain(): Promise<void> {
   }
   const skipOnChain = process.argv.includes('--skip-on-chain');
   const result = await verifySubstrate(opName, { skipOnChain });
-  console.log(JSON.stringify(result, null, 2));
+  // BigInts in result.onChain (ethBalanceWei, olasBalanceWei) crash JSON.stringify
+  // with `TypeError: Do not know how to serialize a BigInt`. Convert to string for
+  // CLI output. Programmatic callers get the raw BigInts via the verifySubstrate return.
+  const printable = {
+    ...result,
+    onChain: result.onChain
+      ? {
+          ...result.onChain,
+          ethBalanceWei: result.onChain.ethBalanceWei.toString(),
+          olasBalanceWei: result.onChain.olasBalanceWei?.toString() ?? null,
+        }
+      : null,
+  };
+  console.log(JSON.stringify(printable, null, 2));
   process.exit(result.ok ? 0 : 1);
 }
 
@@ -1076,6 +1091,20 @@ export async function adoptOperator(opts: AdoptOptions): Promise<void> {
     throw new Error(`source operator at ${opts.sourceDir} has no earning/earning_state.json`);
   }
   const svc = state.services?.[0];
+  // Throw rather than ?? to a sentinel: silently substituting zeros/fakes when the
+  // source is half-bootstrapped masks real config problems. The resulting manifest
+  // would claim valid identity while pointing at 0x0000... addresses — worse than
+  // failing fast.
+  if (!svc) {
+    throw new Error(
+      `source operator at ${opts.sourceDir} has earning_state.json with no services entry — operator may not have reached the service-registration step yet`,
+    );
+  }
+  if (!cfg || !cfg.rpcUrl) {
+    throw new Error(
+      `source operator at ${opts.sourceDir} has config.json without rpcUrl — cannot derive substrate manifest`,
+    );
+  }
 
   // 5. Build manifest
   const manifest: Manifest = {
@@ -1091,18 +1120,18 @@ export async function adoptOperator(opts: AdoptOptions): Promise<void> {
       fleetAgentId: state.fleet_agent_id ?? null,
       fleetSafeAddress: state.fleet_safe_address ?? null,
       fleetStage: state.fleet_stage ?? null,
-      serviceId: svc?.service_id ?? 0,
-      serviceStep: svc?.step ?? 'unknown',
-      agentEoa: svc?.agent_address ?? '0x0000000000000000000000000000000000000000',
-      safeAddress: svc?.safe_address ?? '0x0000000000000000000000000000000000000000',
-      mechAddress: svc?.mech_address ?? '0x0000000000000000000000000000000000000000',
-      stakingAddress: svc?.staking_address ?? '0x0000000000000000000000000000000000000000',
-      identityRegistry: svc?.identity_registry_address ?? state.fleet_identity_registry ?? '0x0000000000000000000000000000000000000000',
+      serviceId: svc.service_id,
+      serviceStep: svc.step ?? 'unknown',
+      agentEoa: svc.agent_address,
+      safeAddress: svc.safe_address,
+      mechAddress: svc.mech_address ?? '0x0000000000000000000000000000000000000000',
+      stakingAddress: svc.staking_address ?? '0x0000000000000000000000000000000000000000',
+      identityRegistry: svc.identity_registry_address ?? state.fleet_identity_registry ?? '0x0000000000000000000000000000000000000000',
     },
     config: {
       apiPort: opts.apiPort,
-      rpcUrl: cfg?.rpcUrl ?? 'https://base-sepolia.example/unknown',
-      joinedSolverNets: cfg?.joinedSolverNets ? Object.keys(cfg.joinedSolverNets) : [],
+      rpcUrl: cfg.rpcUrl,
+      joinedSolverNets: cfg.joinedSolverNets ? Object.keys(cfg.joinedSolverNets) : [],
     },
   };
 
