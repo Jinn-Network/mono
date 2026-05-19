@@ -1,0 +1,24 @@
+diff --git a/sympy/printing/str.py b/sympy/printing/str.py
+index d6d3f1b4ce..49f03250d6 100644
+--- a/sympy/printing/str.py
++++ b/sympy/printing/str.py
+@@ -314,8 +314,10 @@ def _print_Mul(self, expr):
+         if c < 0:
+             expr = _keep_coeff(-c, e)
+             sign = "-"
++            prec_n = PRECEDENCE["Mul"]
+         else:
+             sign = ""
++            prec_n = prec
+
+         a = []  # items in the numerator
+         b = []  # items that are in the denominator (if any)
+@@ -362,7 +364,7 @@ def apow(i):
+
+         a = a or [S.One]
+
+-        a_str = [self.parenthesize(x, prec, strict=False) for x in a]
++        a_str = [self.parenthesize(x, prec_n, strict=False) for x in a]
+         b_str = [self.parenthesize(x, prec, strict=False) for x in b]
+
+         # To parenthesize Pow with exp = -1 and having more than one Symbol
