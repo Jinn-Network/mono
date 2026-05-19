@@ -36,6 +36,11 @@ jobs:
     environment: npm-publish
     env:
       JINN_BUILD_COMMIT: ${{ github.sha }}
+      # Use the high-quota Tenderly Base Sepolia gateway for CI e2e gates.
+      # Without this, the e2e falls back to the public `https://sepolia.base.org`
+      # which is heavily rate-limited and bites the `Base Sepolia fork
+      # SolverNet creation + launch + lifecycle` phase. See #313 thread.
+      BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
     steps:
       - uses: actions/checkout@v5
 
