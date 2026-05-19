@@ -1,6 +1,4 @@
 import * as net from 'node:net';
-import * as path from 'node:path';
-import * as os from 'node:os';
 import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon';
 import { goldPath } from '../../../scripts/release/substrate-paths';
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { setupTier3Scenario, type Tier3Handle, isDailyDriverRunning } from './tier-3-helpers';
 
 describe('isDailyDriverRunning', () => {
