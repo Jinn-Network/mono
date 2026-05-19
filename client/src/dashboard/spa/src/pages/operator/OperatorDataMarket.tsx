@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { SectionCard } from '../../components/SectionCard.js';
@@ -82,6 +82,7 @@ function DonationStatusPanel({
   saving,
   error,
   onSave,
+  registerRevert,
 }: {
   pricing: OperatorPricingConfig;
   eligibleRuns: number;
@@ -89,22 +90,11 @@ function DonationStatusPanel({
   saving: boolean;
   error: string | null;
   onSave: (pricing: OperatorPricingConfig) => void;
+  registerRevert: (revert: (() => void) | null) => void;
 }): JSX.Element {
   // Optimistic local state: starts from persisted value; reverts if the write-through fails.
   const [donationEnabled, setDonationEnabled] = useState(pricing.donation.enabled);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
-
-  // Track whether we initiated a donation write-through so we can revert on error.
-  const writeThroughPending = useRef(false);
-  const prevError = useRef(error);
-  useEffect(() => {
-    const errorJustArrived = error !== null && prevError.current === null;
-    prevError.current = error;
-    if (errorJustArrived && writeThroughPending.current) {
-      writeThroughPending.current = false;
-      setDonationEnabled(pricing.donation.enabled);
-    }
-  }, [error, pricing.donation.enabled]);
 
   // Build a draft for the non-donation pricing fields — Save covers those.
   // Donation writes through immediately so it is always "in sync" with server.
@@ -112,8 +102,8 @@ function DonationStatusPanel({
     publicEndpoint: pricing.publicEndpoint,
     defaultPriceUsdc: pricing.defaultPriceUsdc,
     perArtifactTypePrice: pricing.perArtifactTypePrice,
-    donation: { enabled: pricing.donation.enabled },
-  }), [pricing.defaultPriceUsdc, pricing.donation.enabled, pricing.perArtifactTypePrice, pricing.publicEndpoint]);
+    donation: { enabled: donationEnabled },
+  }), [pricing.defaultPriceUsdc, pricing.perArtifactTypePrice, pricing.publicEndpoint, donationEnabled]);
 
   const dirty = !samePricing(pricing, draft);
   const requestDonationChange = (enabled: boolean): void => {
@@ -125,12 +115,19 @@ function DonationStatusPanel({
   };
 
   const confirmDonationEnable = (): void => {
-    // Optimistically show "on" immediately; revert in the useEffect above if mutation fails.
+    // Build the confirmed pricing inline so we don't depend on the post-update value of
+    // `draft` (which is memoised against `donationEnabled` and would still be `false`
+    // when read inside this synchronous handler — React batches state updates).
+    const confirmed: OperatorPricingConfig = {
+      ...draft,
+      donation: { enabled: true },
+    };
+    // Optimistically show "on" immediately; register a revert callback so the parent's
+    // mutation `onError` can flip us back if the server rejects the write.
     setDonationEnabled(true);
     setConfirmationOpen(false);
-    writeThroughPending.current = true;
-    prevError.current = null; // reset so the next error is treated as fresh
-    onSave({ ...pricing, donation: { enabled: true } });
+    registerRevert(() => setDonationEnabled(false));
+    onSave(confirmed);
   };
 
   return (
@@ -313,7 +310,15 @@ function DonationStatusPanel({
           <button
             type="button"
             disabled={!dirty || saving}
-            onClick={() => onSave(draft)}
+            onClick={() => {
+              // If the local toggle disagrees with the server, register a revert so the
+              // optimistic local state flips back when the mutation rejects.
+              const priorEnabled = pricing.donation.enabled;
+              if (donationEnabled !== priorEnabled) {
+                registerRevert(() => setDonationEnabled(priorEnabled));
+              }
+              onSave(draft);
+            }}
             style={{
               border: '1px solid var(--accent-sky)',
               background: dirty ? 'var(--accent-sky)' : 'transparent',
@@ -435,11 +440,25 @@ export function OperatorDataMarket({
     refetchInterval: 10_000,
   });
 
+  // Revert callback registered by the donation panel before each write-through; called
+  // by `pricingMutation.onError` so the optimistic toggle flips back if the server
+  // rejects. Stored as a ref so re-renders don't clobber it mid-mutation.
+  const revertRef = useRef<(() => void) | null>(null);
+  const registerRevert = (revert: (() => void) | null): void => {
+    revertRef.current = revert;
+  };
+
   const pricingMutation = useMutation({
     mutationFn: (pricing: OperatorPricingConfig) => api.operator.updatePricing(pricing),
     onSuccess: async () => {
+      revertRef.current = null;
       onRestartPending();
       await queryClient.invalidateQueries({ queryKey: ['operator-artifacts'] });
+    },
+    onError: () => {
+      const revert = revertRef.current;
+      revertRef.current = null;
+      revert?.();
     },
   });
 
@@ -512,6 +531,7 @@ export function OperatorDataMarket({
             saving={pricingMutation.isPending}
             error={pricingMutation.error instanceof Error ? pricingMutation.error.message : null}
             onSave={(pricing) => pricingMutation.mutate(pricing)}
+            registerRevert={registerRevert}
           />
         </>
       )}
