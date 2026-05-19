@@ -1,0 +1,29 @@
+{
+  "master_address": "0x7777777777777777777777777777777777777777",
+  "chain": "base-sepolia",
+  "staking_mode": "standard",
+  "services": [
+    {
+      "index": 1,
+      "agent_address": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "safe_address": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "service_id": 9998,
+      "mech_address": "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "staking_address": "0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "step": "complete",
+      "error": null,
+      "agent_id": "99002",
+      "agent_uri": "",
+      "identity_registry_address": "0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+      "agent_registered_tx": "0xfixture",
+      "safe_bound_to_agent": true,
+      "error_revert_reason": null,
+      "error_short_message": null
+    }
+  ],
+  "updated_at": "2026-05-01T00:00:00.000Z",
+  "fleet_agent_id": "99002",
+  "fleet_safe_address": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  "fleet_identity_registry": "0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+  "fleet_stage": "stage1_and_2"
+}
