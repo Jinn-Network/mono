@@ -227,4 +227,83 @@ describe('GET /v1/bootstrap', () => {
       bafkreiswe: { name: 'SWE-rebench v2', roles: ['solver', 'evaluator'] },
     });
   });
+
+  it('surfaces a retire_failed envelope when migration archive has a wipe_suppressed=true entry (jinn-mono-hjex.1)', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 1, step: 'complete', safe_address: '0xsafe', service_id: 42 }],
+    });
+    writeFileSync(
+      join(earningDir, 'earning_migrations.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        updated_at: new Date().toISOString(),
+        entries: [
+          {
+            migration_id: 'm1',
+            retire_status: 'failed',
+            retire_error: 'distributor.unstakeAndWithdraw reverted with InsufficientStake',
+            retire_tx_hash: '0x' + 'ab'.repeat(32),
+            state_reset_at: null,
+            wipe_suppressed: true,
+          },
+        ],
+      }),
+    );
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as { retire_failed?: { retire_error: string; tx_hash: string | null } };
+    expect(body.retire_failed).toBeDefined();
+    expect(body.retire_failed!.retire_error).toContain('InsufficientStake');
+    expect(body.retire_failed!.tx_hash).toBe('0x' + 'ab'.repeat(32));
+  });
+
+  it('does NOT surface a retire_failed envelope for pre-PR archive entries lacking wipe_suppressed (jinn-mono-hjex.1)', async () => {
+    // Pre-PR entries had retire_status='failed' but state was actually wiped.
+    // The legacy `!state_reset_at` filter would falsely surface these. The
+    // `wipe_suppressed === true` filter must suppress them.
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 1, step: 'complete', safe_address: '0xsafe', service_id: 42 }],
+    });
+    writeFileSync(
+      join(earningDir, 'earning_migrations.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        updated_at: new Date().toISOString(),
+        entries: [
+          // Three legacy shapes: undefined, null, and empty-string state_reset_at
+          // — all WITHOUT wipe_suppressed. None should surface a retire_failed
+          // envelope; the legacy `!state_reset_at` filter would have falsely
+          // matched all three.
+          {
+            migration_id: 'legacy-undef',
+            retire_status: 'failed',
+            retire_error: 'legacy undefined reset',
+            // state_reset_at intentionally omitted
+          },
+          {
+            migration_id: 'legacy-null',
+            retire_status: 'failed',
+            retire_error: 'legacy null reset',
+            state_reset_at: null,
+          },
+          {
+            migration_id: 'legacy-empty',
+            retire_status: 'failed',
+            retire_error: 'legacy empty reset',
+            state_reset_at: '',
+          },
+        ],
+      }),
+    );
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as { retire_failed?: unknown };
+    expect(body.retire_failed).toBeUndefined();
+  });
 });

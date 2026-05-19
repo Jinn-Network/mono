@@ -50,6 +50,14 @@ export interface EarningMigrationArchiveEntry {
   retire_tx_hash?: string | null;
   retire_error?: string | null;
   state_reset_at?: string | null;
+  /**
+   * True iff the migration explicitly suppressed the local-state wipe because
+   * the on-chain retire failed (jinn-mono-hjex.1). Pre-PR archive entries do
+   * NOT have this field — readers that filter on it MUST treat undefined as
+   * `false` so legacy entries (where state was wiped even though retire
+   * failed) are not surfaced as preserved-state retire failures.
+   */
+  wipe_suppressed?: boolean;
 }
 
 export interface EarningMigrationArchive {

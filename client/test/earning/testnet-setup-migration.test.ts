@@ -140,6 +140,10 @@ describe('automatic testnet setup migration', () => {
     expect(archive.entries).toHaveLength(1);
     expect(archive.entries[0]!.retire_status).toBe('failed');
     expect(archive.entries[0]!.retire_error).toContain('retire rejected');
+    // wipe_suppressed must be set so consumers (bootstrap-endpoint) can
+    // distinguish this entry from pre-PR archive rows where state was wiped.
+    expect(archive.entries[0]!.wipe_suppressed).toBe(true);
+    expect(archive.entries[0]!.state_reset_at).toBeNull();
 
     // Envelope is surfaced in the result
     expect(result.retireFailedEnvelope).toBeDefined();
@@ -170,10 +174,11 @@ describe('automatic testnet setup migration', () => {
     expect(result.retireFailedEnvelope!.kind).toBe('retire_failed');
     expect(result.retireFailedEnvelope!.retire_error).toContain('InsufficientStake');
 
-    // Archive records the failure, state_reset_at is null
+    // Archive records the failure, state_reset_at is null, wipe_suppressed=true
     const archive = await store.loadMigrationArchive();
     expect(archive.entries[0]!.retire_status).toBe('failed');
     expect(archive.entries[0]!.state_reset_at).toBeNull();
+    expect(archive.entries[0]!.wipe_suppressed).toBe(true);
   });
 
   it('records the retirement tx hash when receipt waiting fails after broadcast', async () => {

@@ -11,7 +11,7 @@ import {
   deriveMasterAddress,
   deriveAgentAddress,
 } from '../../src/earning/wallet.js';
-import { createDefaultFleetState } from '../../src/earning/types.js';
+import { createDefaultFleetState, type FleetState } from '../../src/earning/types.js';
 import { DEPRECATED_BASE_SEPOLIA_STAKING_PROXY } from '../../src/earning/testnet-setup-migration.js';
 
 const BOOTSTRAP_TEST_TIMEOUT_MS = 15_000;
@@ -1457,9 +1457,15 @@ describe('Fleet bootstrap', () => {
 
   it('refuses to stake when agent_address is already registered on-chain (jinn-mono-hjex.1)', async () => {
     // Simulates the scenario after a failed migration: service_id was cleared
-    // but agent_address kept. mapAgentInstances returns non-zero on-chain,
-    // so calling stake() would revert with AgentInstanceRegistered (0x631695bd).
-    // stepStolasStake must detect this and fail fast with a typed error.
+    // but agent_address kept. mapAgentInstanceOperators returns a non-zero
+    // operator address on-chain, so calling stake() would revert with
+    // AgentInstanceRegistered (0x631695bd). stepStolasStake must detect this
+    // and fail fast with a typed error.
+    //
+    // We invoke stepStolasStake directly (rather than via the full
+    // bootstrap() entrypoint) because the upstream Stage-1 ETH gate aborts
+    // before the staking step is reached in unit-test mocks. The point of
+    // this test is the guard itself.
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);
 
@@ -1471,7 +1477,7 @@ describe('Fleet bootstrap', () => {
     const masterAddr = deriveMasterAddress(mnemonic);
     const agentAddr = deriveAgentAddress(mnemonic, 1);
     // State after a failed migration: service_id null but agent_address present
-    await store.save({
+    const state: FleetState = {
       ...createDefaultFleetState('base-sepolia'),
       master_address: masterAddr,
       services: [
@@ -1491,7 +1497,8 @@ describe('Fleet bootstrap', () => {
           safe_bound_to_agent: false,
         },
       ],
-    });
+    };
+    await store.save(state);
 
     const bootstrapper = new FleetBootstrapper({
       earningDir,
@@ -1501,51 +1508,44 @@ describe('Fleet bootstrap', () => {
       autoTestnetFaucet: false,
     });
 
-    // Master is funded. Must be >= stage1MinMasterEth (0.020 ETH for N=1 on
-    // base-sepolia post-u34i one-shot-funding); otherwise ensureStage1 returns
-    // the funding-shortfall result before stepStolasStake's
-    // agent_already_bound guard can fire.
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(50_000_000_000_000_000n);
-
-    // mapAgentInstances returns 47n — agent EOA is already bound on-chain (service 47 from the dogfood case)
-    vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
+    // mapAgentInstanceOperators returns a non-zero operator address — agent EOA
+    // is already bound on-chain (operator that registered the instance during the
+    // failed retire).
+    const previousOperator = '0x1111111111111111111111111111111111111111';
+    const readContractSpy = vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
       async ({ functionName }: { functionName: string }) => {
-        if (functionName === 'mapAgentInstances') return 47n;
-        // Other readContract calls (e.g., staking state checks) return safe defaults
+        if (functionName === 'mapAgentInstanceOperators') return previousOperator;
         return 0n;
       },
     );
 
-    // reconcileFleetWithChain uses gatherChainSignals — stub it so we get to stepStolasStake
-    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
-      stakingState: null,
-      stakingMultisig: null,
-      registryState: null,
-      registryMultisig: null,
-      safeDeployed: false,
-    });
+    // Guard fires before stolasPreflightCheck / stake submission, but stub the
+    // preflight anyway so failure modes downstream of the guard cannot leak in.
+    vi.spyOn(bootstrapper as any, 'stolasPreflightCheck').mockResolvedValue(undefined);
 
-    // ensureStage1 now does Safe-predict + Safe-deploy + identity-register
-    // before Phase 2 runs (post jinn-mono-u34i refactor). The test only
-    // exercises the agent_already_bound guard in stepStolasStake; bypass
-    // Stage 1 with a stub state that pretends fleet identity already exists.
-    vi.spyOn(bootstrapper as any, 'ensureStage1').mockImplementation(async () => ({
-      ok: true,
-      fleet_state: await (bootstrapper as any).store.load('base-sepolia'),
-      message: 'stage1 stubbed for hjex.1 regression',
-    }));
+    let thrown: unknown;
+    try {
+      await (bootstrapper as any).stepStolasStake(state, mnemonic, 1);
+    } catch (err) {
+      thrown = err;
+    }
 
-    const result = await bootstrapper.bootstrap('test-password');
-
-    expect(result.ok).toBe(false);
-    expect(result.message).toContain('agent_already_bound');
-    expect(result.message).toContain(agentAddr);
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain('agent_already_bound');
+    expect((thrown as Error).message).toContain(agentAddr);
+    // Confirm the guard actually queried the registry — proves the guard fired
+    // rather than the failure coming from some downstream path.
+    const operatorReads = readContractSpy.mock.calls.filter(
+      ([args]: any[]) => args?.functionName === 'mapAgentInstanceOperators',
+    );
+    expect(operatorReads.length).toBeGreaterThan(0);
   });
 
-  it('does NOT trip the agent_already_bound guard when mapAgentInstances returns 0n (unregistered)', async () => {
+  it('does NOT trip the agent_already_bound guard when mapAgentInstanceOperators returns zero address (unregistered)', async () => {
     // Simulates a clean state after migration: service_id null, agent_address present,
-    // but the agent EOA is NOT registered on-chain (mapAgentInstances returns 0n).
-    // stepStolasStake should proceed past the precondition without throwing.
+    // but the agent EOA is NOT registered on-chain (mapAgentInstanceOperators returns
+    // the zero address). stepStolasStake should proceed past the precondition without
+    // throwing the typed agent_already_bound error.
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
     dirs.push(earningDir);
 
@@ -1556,7 +1556,7 @@ describe('Fleet bootstrap', () => {
 
     const masterAddr = deriveMasterAddress(mnemonic);
     const agentAddr = deriveAgentAddress(mnemonic, 1);
-    await store.save({
+    const state: FleetState = {
       ...createDefaultFleetState('base-sepolia'),
       master_address: masterAddr,
       services: [
@@ -1576,7 +1576,8 @@ describe('Fleet bootstrap', () => {
           safe_bound_to_agent: false,
         },
       ],
-    });
+    };
+    await store.save(state);
 
     const bootstrapper = new FleetBootstrapper({
       earningDir,
@@ -1586,28 +1587,131 @@ describe('Fleet bootstrap', () => {
       autoTestnetFaucet: false,
     });
 
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
-
-    // mapAgentInstances returns 0n — agent EOA is NOT registered on-chain
-    vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
+    // mapAgentInstanceOperators returns zero address — agent EOA is NOT registered.
+    const readContractSpy = vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
       async ({ functionName }: { functionName: string }) => {
-        if (functionName === 'mapAgentInstances') return 0n;
+        if (functionName === 'mapAgentInstanceOperators') {
+          return '0x0000000000000000000000000000000000000000';
+        }
         return 0n;
       },
     );
 
-    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
-      stakingState: null,
-      stakingMultisig: null,
-      registryState: null,
-      registryMultisig: null,
-      safeDeployed: false,
+    // Make the preflight throw a sentinel AFTER the guard, so we can prove
+    // the guard ran without entering the actual stake() submission (which
+    // hangs on the mocked RPC's retry loop).
+    let preflightReached = false;
+    vi.spyOn(bootstrapper as any, 'stolasPreflightCheck').mockImplementation(async () => {
+      preflightReached = true;
+      throw new Error('stolasPreflightCheck-sentinel');
     });
 
-    const result = await bootstrapper.bootstrap('test-password');
+    let thrown: unknown;
+    try {
+      await (bootstrapper as any).stepStolasStake(state, mnemonic, 1);
+    } catch (err) {
+      thrown = err;
+    }
 
-    // Guard did not fire — error must NOT contain agent_already_bound
-    expect(result.message).not.toContain('agent_already_bound');
+    // Guard ran (registry was queried) and did NOT throw agent_already_bound.
+    // stepStolasStake advanced past the guard into the preflight sentinel.
+    expect(preflightReached).toBe(true);
+    expect((thrown as Error | undefined)?.message ?? '').not.toContain('agent_already_bound');
+    expect((thrown as Error | undefined)?.message ?? '').toContain('stolasPreflightCheck-sentinel');
+    const operatorReads = readContractSpy.mock.calls.filter(
+      ([args]: any[]) => args?.functionName === 'mapAgentInstanceOperators',
+    );
+    expect(operatorReads.length).toBeGreaterThan(0);
+  });
+
+  it('retry-after-failed-retire: stepStolasStake proceeds past the guard with no agent_already_bound trip (jinn-mono-hjex.1)', async () => {
+    // Regression for the original hjex.1 sequence: a previous migration retire
+    // failed and left local state preserved (service_id null, agent_address kept,
+    // and the on-chain registry NEVER registered the agent EOA because the retire
+    // failed before binding). On the retry, stepStolasStake's pre-stake guard
+    // must not spuriously trip — mapAgentInstanceOperators returns the zero
+    // address because no operator ever bound this EOA, and stepStolasStake must
+    // proceed past the precondition into the stake submission path.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+
+    // Persist post-failed-migration state: service_id cleared but other fields
+    // preserved (matches the migration's retire-failure preservation behaviour).
+    const state: FleetState = {
+      ...createDefaultFleetState('base-sepolia'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: null,
+          service_id: null,
+          mech_address: null,
+          staking_address: null,
+          step: 'awaiting_stake',
+          error: null,
+          agent_id: null,
+          agent_uri: null,
+          identity_registry_address: null,
+          agent_registered_tx: null,
+          safe_bound_to_agent: false,
+        },
+      ],
+    };
+    await store.save(state);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      autoTestnetFaucet: false,
+    });
+
+    // mapAgentInstanceOperators returns zero address (no operator bound).
+    const readContractSpy = vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
+      async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'mapAgentInstanceOperators') {
+          return '0x0000000000000000000000000000000000000000';
+        }
+        return 0n;
+      },
+    );
+
+    // Stub the preflight. Short-circuit the actual stake submission by making
+    // the preflight throw a sentinel error AFTER the guard — so we can prove
+    // the guard ran to completion without enabling full tx flow on the mock.
+    let preflightReached = false;
+    vi.spyOn(bootstrapper as any, 'stolasPreflightCheck').mockImplementation(async () => {
+      preflightReached = true;
+      throw new Error('stolasPreflightCheck-sentinel');
+    });
+
+    let thrown: unknown;
+    try {
+      await (bootstrapper as any).stepStolasStake(state, mnemonic, 1);
+    } catch (err) {
+      thrown = err;
+    }
+
+    // The guard ran (proved by the operator read) and did NOT throw
+    // agent_already_bound. stepStolasStake then advanced into the preflight
+    // (our sentinel), proving we got past the guard.
+    const operatorReads = readContractSpy.mock.calls.filter(
+      ([args]: any[]) => args?.functionName === 'mapAgentInstanceOperators',
+    );
+    expect(operatorReads.length).toBeGreaterThan(0);
+    expect(preflightReached).toBe(true);
+    expect((thrown as Error | undefined)?.message ?? '').not.toContain('agent_already_bound');
+    expect((thrown as Error | undefined)?.message ?? '').toContain('stolasPreflightCheck-sentinel');
   });
 });
 
