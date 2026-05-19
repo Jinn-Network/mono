@@ -8,6 +8,8 @@ jinn-client.tgz
 .acceptance/
 acceptance-runs/
 release-runs/
+tier-1-evidence/
+tier-2-evidence/
 test-results/
 playwright-report/
 playwright/.cache/
