@@ -28,7 +28,7 @@ How this team ships — cadence, dist-tags, work-shape taxonomy, AI workflow rul
 
 ### Work shape (declare it before executing)
 
-Seven shapes plus one emergency sub-flow, keyed to Conventional Commits prefixes. Declare the shape in the bd issue's `Run-mode` field; replicate it as the PR title prefix.
+Seven shapes plus one emergency sub-flow plus one meta-shape (`INTERACTIVE DESIGN`, for design-only sessions whose output is a spec or DR, not implementation), keyed to Conventional Commits prefixes. Declare the shape in the GitHub Issue body's `## Run-mode` section; replicate it as the PR title prefix.
 
 - **`fix`** — bug fix. Regression test first. Skill chain: `systematic-debugging` → `executing-plans` → `verification-before-completion` → `receiving-code-review`.
 - **`feat`** — feature. TDD. Skill chain: (`brainstorming` if ambiguous) → `writing-plans` → `test-driven-development` → `executing-plans` / `dispatching-parallel-agents` → `verification-before-completion` → `receiving-code-review`.
@@ -37,17 +37,17 @@ Seven shapes plus one emergency sub-flow, keyed to Conventional Commits prefixes
 - **`chore`** — deps, CI, dev tooling. Integration tests if touches a dep.
 - **`docs`** — documentation. Canonical-doc changes need Discussion + CODEOWNERS approval.
 - **`test`** — test-only. Meta test discipline.
-- **`fix(incident)`** — hotfix sub-flow. Relaxed review; post-hoc regression test required as a follow-up bead before closing the incident.
+- **`fix(incident)`** — hotfix sub-flow. Relaxed review; post-hoc regression test required as a follow-up Issue before closing the incident.
 
-If a bd issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a bd under `jinn-mono-2cl` when friction surfaces).
+If an Issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a GitHub Issue under the engineering handbook umbrella when friction surfaces).
 
 ### Eight ratified AI workflow rules
 
-1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses `git worktree add cargo/.tasks/<id>`.
-2. **Beads frame problems, not solutions.** bd body = context + impact + acceptance criteria. Solutions go in design sessions.
-3. **bd-as-SoR, not `MEMORY.md`.** Use `bd remember` / `bd memories`.
+1. **Worktree-for-multi-agent.** Multi-agent or speculative subagent work uses a separate git worktree (current convention: `git worktree add ../jinn-mono_worktrees/<name>`), not the primary checkout.
+2. **Issues frame problems, not solutions.** GitHub Issue body = context + impact + acceptance criteria. Solutions go in design sessions or implementation plans, not the Issue body.
+3. **GitHub Issues are the single SoR for engineering work.** Per DR-2026-05-18, `bd` retires; all new engineering work originates as a GitHub Issue on `Jinn-Network/mono`. Parent/child use native sub-issues; sprint/epic/status live on the "Jinn engineering" Project (v2) board. The `.beads/` checkout stays in-tree as read-only archive of historical `jinn-mono-<id>` references.
 4. **Agent PR review parity.** Codex / Opus / Sonnet / Claude PRs reviewed like human PRs. No agent self-merge. Exception: `fix(incident)` with reviewer justification.
-5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open; see `jinn-mono-8qbc`.)_
+5. _(Deferred — supervised-diff for the self-modifying learner. Mechanism open.)_
 6. **Integration tests > mocks for migration / contract surfaces.**
 7. **TDD for new features, regression test for fixes.**
 8. **Auto-canary on push to `next`; Monday-only named stable cut promotes `main`.** Cadence policy.
@@ -63,7 +63,9 @@ If a bd issue does not fit one of these shapes, it is mis-scoped — split or re
 
 ### Daily entry point
 
-`eng-day` skill (in `cargo/.claude/skills/eng-day/`) is the canonical daily brief. Fallback when the GitHub Project board doesn't exist yet: `bd ready` + `gh pr list --search 'is:open draft:false'`.
+`eng-day` skill (in `.claude/skills/eng-day/`) is the canonical daily brief. Fallback: `gh issue list --search 'is:open no:assignee'` + `gh pr list --search 'is:open draft:false'`.
+
+**Operator-local cleanup (one-time, per DR-2026-05-18):** if your `.claude/settings.json` has a `bd prime` SessionStart or PreCompact hook (the legacy beads workflow primer), remove it. `.claude/settings.json` is gitignored, so this cleanup is per-operator. The hook is no longer recommended; CLAUDE.md auto-load covers session start.
 
 ## Repository Structure
 

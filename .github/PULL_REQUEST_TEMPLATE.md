@@ -10,9 +10,9 @@ The shape goes in the PR title as a Conventional Commits prefix:
   refactor: extract Harness selection from buildHarnesses
 -->
 
-## Linked bd
+## Linked Issue
 
-<!-- e.g. Closes jinn-mono-XXX -->
+<!-- e.g. Closes #123. Per DR-2026-05-18 the canonical issue substrate is GitHub Issues; the legacy `Closes jinn-mono-<id>` form continues to resolve for archived references but new work links to GH Issue numbers. -->
 
 ## Test plan
 
@@ -24,7 +24,7 @@ How was this verified? Reference the test discipline for the shape:
 - chore (deps): integration test
 - spike: not applicable (output is a finding)
 - docs / test: skipped or meta
-- fix(incident): defer test; file a follow-up bead for the regression test BEFORE closing the incident
+- fix(incident): defer test; file a follow-up Issue for the regression test BEFORE closing the incident
 -->
 
 ## Agent identity (if AI-authored)
