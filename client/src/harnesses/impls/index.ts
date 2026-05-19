@@ -20,6 +20,7 @@ import {
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 import { HermesHarness, HermesHarnessAdapter } from './hermes-agent/index.js';
+import { maybeCreateStubHarnessFromEnv } from './stub.js';
 import {
   canonicalHarnessName,
   canonicalHarnessNameSet,
@@ -210,6 +211,13 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
       ipfsRegistryUrl: env.ipfsRegistryUrl,
     }),
   );
+
+  // Env-gated stub harness for T2.2 release gate. Active only when
+  // JINN_HARNESS_STUB_INSTANCE is set; no-op otherwise.
+  const stub = maybeCreateStubHarnessFromEnv();
+  if (stub) {
+    out.push(stub);
+  }
 
   // Operator-supplied external Harnesses are appended before the default learner
   // so explicit SolverNet harness settings can select them.
