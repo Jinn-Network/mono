@@ -16,6 +16,9 @@ export default defineConfig({
       'plugins/**/test/**/*.test.ts',
       // SPA component tests live next to their components in src/dashboard/spa.
       'src/dashboard/spa/src/**/*.test.{ts,tsx}',
+      // Release-tier scenario files embed inline Vitest suites but use the
+      // T<id>-<name>.ts naming convention (not *.test.ts).
+      'test/release/**/*.ts',
     ],
     exclude: ['test/e2e/**', 'test/**/*.e2e.test.ts', 'node_modules/**'],
     // Default to node; SPA component tests opt into jsdom via the .tsx
