@@ -38,6 +38,7 @@ import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
+import { requestDaemonRestart } from './restart-daemon.js';
 import { buildEnvelope, emitEnvelope, type ErrorCode, type ErrorEnvelope } from './errors/envelope.js';
 import {
   clearBootstrapError,
@@ -944,10 +945,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
       },
       admin: {
-        onRestartRequested: () => {
-          console.log('[main] Restart requested via operator MCP. Exiting...');
-          process.exit(0);
-        },
+        // jinn-mono #289: in interactive mode (the dashboard SPA case),
+        // spawn a detached replacement before exiting so the panel reconnects
+        // to a live daemon instead of seeing a 502 + terminal prompt. In
+        // headless mode (`JINN_NO_UI=1`), exit without respawning so the
+        // supervisor / systemd / docker entrypoint decides what to do.
+        onRestartRequested: () => requestDaemonRestart(),
       },
       harnessStatus: {
         getStatus: async () => {
