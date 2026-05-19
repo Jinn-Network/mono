@@ -316,6 +316,11 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskDiscovery: {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
+        // Opt out of the gh #300 ghost-task floor for this test — the
+        // fixture candidates use tiny block numbers that pre-date the
+        // production default floor; this test is about discovery
+        // yielding, not floor filtering.
+        onchainFromBlock: 0,
       },
     });
     await adapter.initialize();
@@ -357,6 +362,112 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('discovery filters out pre-floor candidates (gh #300 ghost-task floor)', async () => {
+    // The DiscoveryAPI (Ponder indexer or onchain-floor listClaimableTasks)
+    // returns all claimable tasks regardless of when they were created.
+    // Without a parallel floor filter here, the floor on the on-chain
+    // TaskCreated backlog scan is bypassed by the DiscoveryAPI path. This
+    // test pins that filter: a candidate with `createdAtBlock` below the
+    // configured floor must be skipped before canClaimTask is called.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([
+        // Pre-floor candidate — should be filtered out.
+        {
+          taskId: '42',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 50,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+        // Post-floor candidate — should be yielded.
+        {
+          taskId: '43',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          createdAtBlock: 150,
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+      ]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'post-floor-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        onchainFromBlock: 100,
+      },
+    });
+    await adapter.initialize();
+
+    const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const first = await iter.next();
+
+    // Only the post-floor candidate (taskId 43) should be yielded; the
+    // pre-floor candidate (taskId 42) is filtered before canClaimTask runs.
+    expect(first.value).toMatchObject({ taskId: '43' });
+    expect(canClaimTask).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(canClaimTask).mock.calls[0][3]).toBe('43');
+
+    await adapter.stop();
+  });
+
+  it('discovery passes through candidates with missing createdAtBlock (cannot filter without it)', async () => {
+    // Defensive: if the DiscoveryAPI omits createdAtBlock for some reason
+    // (legacy indexer schema, partial response), we let the candidate
+    // through rather than dropping it silently. canClaimTask then enforces
+    // claimability and signed-task fetch validates the rest.
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const mockDiscoveryApi: DiscoveryAPI = {
+      findClaimableTasks: vi.fn().mockResolvedValueOnce([
+        {
+          taskId: '99',
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: MANIFEST_DIGEST,
+          // No createdAtBlock.
+          createdAtTx: TX_HASH,
+          attemptCount: 0,
+          operatorAttemptCount: 0,
+        },
+      ]),
+      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
+      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+      queryEnvelopes: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'no-block-task' }));
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      taskDiscovery: {
+        discoveryApi: mockDiscoveryApi,
+        solverNetManifestCids: ['bafyfixturecid'],
+        onchainFromBlock: 100,
+      },
+    });
+    await adapter.initialize();
+
+    const iter = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();
+    const first = await iter.next();
+    expect(first.value).toMatchObject({ taskId: '99' });
+
+    await adapter.stop();
+  });
+
   it('discovery yields one backlog task per polling pass', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { canClaimTask } = await import('../../../src/adapters/mech/contracts.js');
@@ -394,6 +505,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskDiscovery: {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
+        // gh #300: opt out of the floor — fixtures use tiny block numbers.
+        onchainFromBlock: 0,
       },
     });
     await adapter.initialize();
@@ -451,6 +564,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
         discoveryApi: mockDiscoveryApi,
         solverNetManifestCids: ['bafyfixturecid'],
         allowedTaskIds: ['43'],
+        // gh #300: opt out of the floor — fixtures use tiny block numbers.
+        onchainFromBlock: 0,
       },
     });
     await adapter.initialize();

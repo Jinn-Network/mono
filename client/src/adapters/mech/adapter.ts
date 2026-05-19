@@ -585,9 +585,27 @@ export class MechAdapter implements ExecutionAdapter {
       return;
     }
 
+    const discoveryFloorBlock = this.onchainTaskDiscoveryFromBlock();
+
     for (const candidate of candidates) {
       if (!this.isDiscoveryTaskAllowed(candidate.taskId)) continue;
       if (this.claimedRestorationTaskIds.has(candidate.taskId)) continue;
+
+      // gh #300 ghost-task floor — same floor as the on-chain TaskCreated
+      // backlog scan, applied to the DiscoveryAPI path too. Without this,
+      // the Ponder indexer (or onchain floor's listClaimableTasks) returns
+      // pre-floor tasks that are still claimable on-chain but unscorable
+      // under the current admission regime, defeating the floor's
+      // intent. Candidates without `createdAtBlock` are passed through
+      // (DiscoveryAPI is allowed to omit that field; we can't filter
+      // without it).
+      if (
+        discoveryFloorBlock != null &&
+        candidate.createdAtBlock != null &&
+        BigInt(candidate.createdAtBlock) < discoveryFloorBlock
+      ) {
+        continue;
+      }
 
       // Verify claimability per backend: HttpSubgraphDiscoveryAPI cannot run
       // canClaimTask (no on-chain simulation), so this check is load-bearing
