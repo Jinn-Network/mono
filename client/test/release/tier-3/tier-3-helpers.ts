@@ -1,0 +1,100 @@
+import * as net from 'node:net';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon';
+import { goldPath } from '../../../scripts/release/substrate-paths';
+
+const DAILY_DRIVER_PORTS = [7331, 7332];     // ~/.jinn-client and ~/jinn-canary-test default ports
+
+export function resolveGoldDaemonHome(opName: string): string {
+  return goldPath(opName);
+}
+
+export interface IsDailyDriverOptions {
+  ports?: number[];
+}
+
+export async function isDailyDriverRunning(opts: IsDailyDriverOptions = {}): Promise<boolean> {
+  const ports = opts.ports ?? DAILY_DRIVER_PORTS;
+  for (const port of ports) {
+    const inUse = await isPortInUse(port);
+    if (inUse) return true;
+  }
+  return false;
+}
+
+async function isPortInUse(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const tester = net.createServer();
+    tester.once('error', (err: NodeJS.ErrnoException) => {
+      resolve(err.code === 'EADDRINUSE');
+    });
+    tester.once('listening', () => {
+      tester.close(() => resolve(false));
+    });
+    // Omit host arg so the tester binds to the same default interface (::) that
+    // net.createServer().listen(port) uses on dual-stack systems. Pinning to
+    // '127.0.0.1' here would miss an IPv6 listener occupying the same port.
+    tester.listen(port);
+  });
+}
+
+export interface Tier3SetupOptions {
+  scenarioId: string;
+  mode: 'human-invoked' | 'autonomous';
+  portBase?: number;                  // daemons get portBase, portBase+1
+  dailyDriverPorts?: number[];        // override the default mutex check
+  extraEnv?: NodeJS.ProcessEnv;
+}
+
+export interface Tier3Handle {
+  daemons: MultiOpHandle;
+  teardown: () => Promise<void>;
+}
+
+export async function setupTier3Scenario(opts: Tier3SetupOptions): Promise<Tier3Handle> {
+  // 1. Daily-driver mutex check
+  const dailyUp = await isDailyDriverRunning({ ports: opts.dailyDriverPorts });
+  if (dailyUp) {
+    if (opts.mode === 'autonomous') {
+      throw new Error(
+        'daily driver appears to be running on one of the substrate-shared ports. ' +
+        'Autonomous mode refuses to SIGTERM it. Re-run in human-invoked mode or stop the daily driver first.',
+      );
+    }
+    // human-invoked mode: instruct caller to stop daily driver first.
+    // We don't auto-SIGTERM because that requires the caller's process to have permission
+    // over the daily-driver process; instead surface explicitly and let release-readiness
+    // handle the SIGTERM via its own daemon-mutex Phase 5 logic.
+    throw new Error(
+      'daily driver is running on a substrate-shared port. ' +
+      'In human-invoked mode, release-readiness should SIGTERM it before invoking Tier 3.',
+    );
+  }
+
+  // 2. Spawn daemons against gold paths (no workspace copy)
+  const portBase = opts.portBase ?? 7350;
+  let daemons: MultiOpHandle;
+  try {
+    daemons = await spawnMultiOpDaemons({
+      ops: [
+        { name: 'op-a', home: resolveGoldDaemonHome('op-a'), apiPort: portBase },
+        { name: 'op-b', home: resolveGoldDaemonHome('op-b'), apiPort: portBase + 1 },
+      ],
+      extraEnv: opts.extraEnv,
+      readyTimeoutMs: 60000,           // real chain warm-up may be slower than fork
+    });
+  } catch (err) {
+    throw new Error(`Tier 3 daemon spawn failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  let torn = false;
+  return {
+    daemons,
+    teardown: async () => {
+      if (torn) return;
+      torn = true;
+      await daemons.teardown();
+    },
+  };
+}
