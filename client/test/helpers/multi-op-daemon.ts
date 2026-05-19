@@ -65,10 +65,10 @@ export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<Mu
 
   // When the test seed config has an unreachable rpcUrl (e.g. a dummy hostname
   // used in beforeAll setup), JINN_RPC_URL overrides config so the daemon's
-  // RPC preflight can pass. Use BASE_SEPOLIA_RPC_URL from the host environment
-  // when available; otherwise fall back to the same public Tenderly gateway the
-  // daemon's config.ts uses as its default for testnet.
+  // RPC preflight can pass. Fallback chain: host JINN_RPC_URL, then
+  // BASE_SEPOLIA_RPC_URL, then the public Tenderly gateway (matches config.ts:986).
   const fallbackRpcUrl =
+    process.env['JINN_RPC_URL'] ??
     process.env['BASE_SEPOLIA_RPC_URL'] ??
     'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu';
 
