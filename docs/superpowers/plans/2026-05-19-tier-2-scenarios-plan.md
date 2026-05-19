@@ -164,10 +164,12 @@ export async function setupTier2Scenario(opts: Tier2SetupOptions): Promise<Tier2
         home: workspace!.opPaths[name],
         apiPort: opts.portBase + i,
       })),
-      // JINN_RPC_URL — not BASE_RPC_URL — because config.ts gives JINN_RPC_URL
-      // unconditional precedence. The spawn helper surfaces extraEnv RPC keys
-      // through JINN_RPC_URL anyway, but explicit at the call site is clearer.
-      extraEnv: { JINN_RPC_URL: anvil.rpcUrl, ...opts.extraEnv },
+      // Spread extraEnv FIRST, then set JINN_RPC_URL — fork URL must win.
+      // Inverse order ({ JINN_RPC_URL: anvil.rpcUrl, ...opts.extraEnv }) would
+      // let a caller-supplied opts.extraEnv.JINN_RPC_URL silently override the
+      // fork RPC, breaking fork isolation. config.ts gives JINN_RPC_URL
+      // unconditional precedence over BASE_RPC_URL/BASE_SEPOLIA_RPC_URL.
+      extraEnv: { ...opts.extraEnv, JINN_RPC_URL: anvil.rpcUrl },
       readyTimeoutMs: 45000,
     });
 
@@ -452,6 +454,8 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 4: Implement the stub harness**
 
+**NOTE (added from PR #352 execution):** Plan D's original code below shows a simplified `StubHarness` interface (`{ name, isReady, solve }`). The real `Harness` interface at `client/src/harnesses/types.ts` is richer: `name`, `version`, `supports(ctx)`, `prepare()`, `solve(...)`, etc. The executing session adopted the real interface (Path A — implement against what exists) rather than bridging. Use the real `Harness` interface; the simplified shape below is conceptual.
+
 ```typescript
 // client/src/harnesses/impls/stub.ts
 import * as fs from 'node:fs/promises';
@@ -624,6 +628,8 @@ git commit -m "test(release): add SWE-rebench v2 fixture instance + canned solut
 
 **Files:**
 - Create: `client/test/release/tier-2/T2.1-cross-op-donation.ts`
+
+**NOTE (added from PR #352 execution):** The endpoints `/v1/corpus/produce`, `/v1/corpus/:cid`, `/v1/corpus/:cid/pay`, `/v1/discovery/corpus` do NOT exist in the v0.1.6 daemon — they were speculative in Plan B's scenario doc. The executing session implemented T2.1 with a **skip-on-prereq** pattern: probe for endpoint existence first; if missing, return `verdict: 'skip'` with a `failNotes` referencing the GH issue tracking the gap. **GH issue #349** filed for the missing endpoints. T2.1 will activate once those endpoints land. Adapt the code below to use the skip-on-prereq pattern (probe the endpoint with a HEAD request or a minimal POST; if 404, skip).
 
 **What this scenario does:** Per the contract in `.claude/skills/testing-jinn-app/references/scenario-cross-op-donation.md` (Plan B): op-a produces a corpus artifact, indexer attributes it, op-b queries via Discovery API (returns 402), op-b pays x402, op-b retrieves (returns 200 with valid payload + ERC-8128 signature).
 
@@ -809,6 +815,8 @@ git commit -m "feat(release): add T2.1 cross-op donation scenario"
 
 **Files:**
 - Create: `client/test/release/tier-2/T2.2-producer-evaluator.ts`
+
+**NOTE (added from PR #352 execution):** Same skip-on-prereq pattern as Task 5. The endpoints `/v1/tasks` (POST), `/v1/tasks/:id`, `/v1/verdicts`, `/v1/activity` don't all exist in v0.1.6 in the shapes assumed here. **GH issue #350** filed for the missing endpoints. T2.2 returns `verdict: 'skip'` until the endpoints land. Adapt the code below to probe + skip on 404.
 
 **What this scenario does:** Per `.claude/skills/testing-jinn-app/references/scenario-producer-evaluator.md`: op-a posts a known-solvable SWE-rebench v2 task, claims, solves via the stubbed harness, delivers; op-b claims the verdict request, runs the real evaluator Docker image, posts verdict. Assert `verdictCode === KNOWN_EXPECTED_VERDICT`. Activity counters increment.
 
@@ -1126,6 +1134,10 @@ git commit -m "feat(release): add T2.3 multi-op SPA flow Playwright test"
 - Test: `client/test/dashboard/multi-op/launcher-join-flow.e2e.test.ts` re-run to verify
 
 The T2.3 test references `data-testid="manifest-cid"` and `data-testid="operator-count"`. If these don't exist on the launched-SolverNet dashboard, add them.
+
+**NOTE (added from PR #352 execution):**
+- `manifest-cid` was added cleanly — it aliases existing manifest data.
+- `operator-count` was NOT added: the launched-record data shape doesn't include operator-join counts yet. The session deliberately filed **GH issue #351** instead of speculatively wiring a data path that doesn't exist. T2.3 currently asserts on `manifest-cid` only and skips the "1 operator joined" assertion until #351 is resolved.
 
 - [ ] **Step 1: Find the launched-SolverNet dashboard component**
 
