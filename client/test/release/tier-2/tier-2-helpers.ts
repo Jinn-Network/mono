@@ -55,7 +55,7 @@ export async function setupTier2Scenario(opts: Tier2SetupOptions): Promise<Tier2
         home: workspace!.opPaths[name],
         apiPort: opts.portBase + i,
       })),
-      extraEnv: { JINN_RPC_URL: anvil.rpcUrl, ...opts.extraEnv },
+      extraEnv: { ...opts.extraEnv, JINN_RPC_URL: anvil.rpcUrl },
       readyTimeoutMs: 45000,
     });
 

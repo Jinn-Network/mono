@@ -12,6 +12,9 @@ describe('setupTier2Scenario', () => {
     try { await fs.access(goldOpA); } catch { return; }
     // Skip if BASE_SEPOLIA_RPC_URL is not configured (Tier 2 env requirement).
     if (!process.env['BASE_SEPOLIA_RPC_URL']) return;
+    // Skip if dist binary is not built (avoids confusing process-not-found errors).
+    const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist', 'bin', 'jinn.js');
+    try { await fs.access(distPath); } catch { return; }
 
     let handle: Awaited<ReturnType<typeof setupTier2Scenario>> | undefined;
     try {
@@ -34,6 +37,9 @@ describe('setupTier2Scenario', () => {
     try { await fs.access(goldOpA); } catch { return; }
     // Skip if BASE_SEPOLIA_RPC_URL is not configured (Tier 2 env requirement).
     if (!process.env['BASE_SEPOLIA_RPC_URL']) return;
+    // Skip if dist binary is not built (avoids confusing process-not-found errors).
+    const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist', 'bin', 'jinn.js');
+    try { await fs.access(distPath); } catch { return; }
 
     const handle = await setupTier2Scenario({ scenarioId: 'T2.X-cleanup', portBase: 7742 });
     const workspaceRoot = handle.workspace.workspaceRoot;
