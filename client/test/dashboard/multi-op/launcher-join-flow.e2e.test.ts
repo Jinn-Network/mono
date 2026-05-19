@@ -57,6 +57,12 @@ test('T2.3 — op-a launches, op-b joins, both observe each other', async ({ bro
     // ===== op-a sees op-b's join =====
     await opAPage.goto(`${opAUrl}/launcher/launched`);
     await opAPage.getByText(solverNetName).click();
+    // NOTE: The assertion below will fail until the SPA surfaces operator join counts.
+    // `LaunchedSolverNetRecord` (client/src/dashboard/spa/src/api/types.ts:466) does not
+    // include an operatorsJoined field and the launched dashboard has no element with
+    // data-testid="operator-count". A daemon endpoint + SPA surface must be added first.
+    // Tracked in: https://github.com/Jinn-Network/mono/issues/351
+    // See docs/superpowers/plans/2026-05-19-tier-2-scenarios-plan.md Task 9.
     await expect(opAPage.getByTestId('operator-count')).toHaveText(/1/, { timeout: 60000 });
   } finally {
     await opACtx.close();

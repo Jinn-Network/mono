@@ -152,6 +152,7 @@ export function StatusHeader({
           label="Manifest cid"
           value={truncateCid(record.manifestCid)}
           testid="launcher-launched-manifest-cid"
+          additionalTestIds={['manifest-cid']}
           mono
           title={record.manifestCid}
         />
@@ -177,6 +178,8 @@ interface IdentityFieldProps {
   label: string;
   value: string;
   testid?: string;
+  /** Extra test-ids to alias this field's value — rendered as hidden spans. */
+  additionalTestIds?: string[];
   mono?: boolean;
   title?: string;
 }
@@ -185,6 +188,7 @@ function IdentityField({
   label,
   value,
   testid,
+  additionalTestIds,
   mono = false,
   title,
 }: IdentityFieldProps): JSX.Element {
@@ -215,6 +219,11 @@ function IdentityField({
         }}
       >
         {value}
+        {additionalTestIds?.map((id) => (
+          <span key={id} data-testid={id} style={{ display: 'none' }} aria-hidden="true">
+            {value}
+          </span>
+        ))}
       </dd>
     </div>
   );
