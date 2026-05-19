@@ -21,6 +21,7 @@ import {
   harnessOptionLabel,
 } from '../configuration/harnessNames.js';
 import { PluginPicker } from '../configuration/PluginPicker.js';
+import { CostEstimatePanel, useCostSurfaceDecision } from '../configuration/CostEstimatePanel.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 const HERMES_AGENT_DESCRIPTION =
@@ -132,6 +133,7 @@ export function JoinFlow({
   // their choice — that was the cause of issue #329, where SWE-rebench v2
   // (whose catalog default is Hermes) re-overrode every Claude Code click.
   const operatorPickedHarness = useRef(false);
+  const [highCostAcknowledged, setHighCostAcknowledged] = useState(false);
 
   // The catalog loads independently of the manifest — when it arrives, if
   // the operator hasn't picked a harness yet, shift the seed default to the
@@ -235,7 +237,19 @@ export function JoinFlow({
 
   const showSolverFields = form.roles.includes('solver');
   const showEvaluatorInfo = form.roles.includes('evaluator');
-  const canSubmit = form.roles.length > 0 && !submitMutation.isPending;
+
+  // Cost-protection surface (Issue #331). Only consulted when the solver
+  // role is selected — the evaluator role binds to a manifest-supplied
+  // implementation and bypasses operator harness choice entirely.
+  const costDecision = useCostSurfaceDecision(
+    showSolverFields ? form.harness : undefined,
+    showSolverFields ? form.model : undefined,
+  );
+  const requiresCostConfirmation = showSolverFields && costDecision.requiresConfirmation;
+  const costGateBlocked = requiresCostConfirmation && !highCostAcknowledged;
+
+  const canSubmit =
+    form.roles.length > 0 && !submitMutation.isPending && !costGateBlocked;
 
   return (
     <main data-testid="join-flow" data-manifest-cid={cid} style={pageStyle}>
@@ -406,6 +420,7 @@ export function JoinFlow({
                     harness,
                     model: defaultModelForHarness(harness),
                   });
+                  setHighCostAcknowledged(false);
                 }}
                 style={selectStyle}
               >
@@ -438,7 +453,10 @@ export function JoinFlow({
                 aria-label="Model"
                 data-testid="join-model-select"
                 value={form.model}
-                onChange={(e) => setForm({ ...form, model: e.target.value })}
+                onChange={(e) => {
+                  setForm({ ...form, model: e.target.value });
+                  setHighCostAcknowledged(false);
+                }}
                 style={selectStyle}
               >
                 {modelOptions.map((m) => (
@@ -460,6 +478,45 @@ export function JoinFlow({
               </select>
             </div>
           </div>
+
+          <CostEstimatePanel
+            harness={form.harness}
+            modelId={form.model}
+            testIdPrefix="join-flow-cost"
+          />
+
+          {requiresCostConfirmation && (
+            <label
+              data-testid="join-flow-cost-confirmation"
+              data-cost-confirmation-checked={highCostAcknowledged ? 'true' : 'false'}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '10px',
+                padding: '12px 14px',
+                border: '1px solid var(--break-red)',
+                borderRadius: 'var(--radius-2)',
+                background: 'var(--bg)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '12px',
+                color: 'var(--fg)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                data-testid="join-flow-cost-confirmation-checkbox"
+                checked={highCostAcknowledged}
+                onChange={(e) => setHighCostAcknowledged(e.target.checked)}
+                style={{ accentColor: 'var(--break-red)', marginTop: '2px', width: '14px', height: '14px' }}
+                aria-label="I understand the per-task cost and have a budget for this"
+              />
+              <span>
+                I understand — I have a budget for this. The selected model is estimated at more than $1
+                per task; I am responsible for the API spend on my own provider key.
+              </span>
+            </label>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <span style={fieldLabelStyle}>Plugins</span>

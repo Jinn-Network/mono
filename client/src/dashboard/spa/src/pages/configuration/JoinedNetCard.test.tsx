@@ -418,3 +418,79 @@ describe('<JoinedNetCard />', () => {
     expect(onRestart).not.toHaveBeenCalled();
   });
 });
+
+describe('<JoinedNetCard /> — cost surfacing + confirmation gate (Issue #331 P0)', () => {
+  const HERMES_CATALOG: SolverNetCatalogEntry = {
+    name: 'Prediction Markets',
+    description: 'Predict things',
+    state: 'live',
+    contract: { id: 'prediction', version: 'v1' },
+    supportedRoles: ['solving', 'evaluating'],
+    compatibleHarnesses: [
+      { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving'] },
+      { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving'] },
+    ],
+    compatiblePlugins: [],
+  };
+
+  it('renders the subscription reassurance row for Claude Code (no false-positive gate)', () => {
+    wrap(<JoinedNetCard joined={ENTRY} catalogEntry={HERMES_CATALOG} defaultExpanded />);
+    expect(screen.getByTestId('joined-net-card-cost-subscription')).toBeTruthy();
+    expect(screen.getByTestId('joined-net-card-cost-subscription').textContent).toMatch(
+      /subscription/i,
+    );
+    expect(screen.queryByTestId('joined-net-card-cost-confirmation')).toBeNull();
+    expect(screen.queryByTestId('joined-net-card-cost-panel')).toBeNull();
+  });
+
+  it('shows the cost panel + confirmation when the operator switches to Hermes + Opus 4.7', async () => {
+    vi.mocked(api.operator.join).mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: { manifestCid: 'bafybeiaaa', roles: ['solver', 'evaluator'] },
+    });
+    wrap(<JoinedNetCard joined={ENTRY} catalogEntry={HERMES_CATALOG} defaultExpanded />);
+
+    fireEvent.change(screen.getByTestId('joined-net-card-harness-select'), {
+      target: { value: 'hermes-agent' },
+    });
+
+    // Hermes default model is anthropic/claude-opus-4.7 (Opus 4.7 via
+    // OpenRouter), well above the $1/task gate.
+    await waitFor(() =>
+      expect(screen.getByTestId('joined-net-card-cost-panel')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('joined-net-card-cost-panel').getAttribute('data-cost-high-cost')).toBe(
+      'true',
+    );
+    expect(screen.getByTestId('joined-net-card-cost-amount').textContent).toMatch(/\$2\.25/);
+    expect(screen.getByTestId('joined-net-card-cost-confirmation')).toBeTruthy();
+
+    // Save disabled until acknowledged.
+    const save = screen.getByTestId('joined-net-card-save') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    fireEvent.click(
+      screen.getByTestId('joined-net-card-cost-confirmation-checkbox'),
+    );
+    await waitFor(() => expect(save.disabled).toBe(false));
+
+    fireEvent.click(save);
+    await waitFor(() => expect(api.operator.join).toHaveBeenCalled());
+  });
+
+  it('does NOT show the confirmation gate when the model stays under $1/task', () => {
+    const sonnetEntry: JoinedNetEntry = {
+      ...ENTRY,
+      harness: 'hermes-agent',
+      model: 'deepseek/deepseek-v4-flash',
+    };
+    wrap(<JoinedNetCard joined={sonnetEntry} catalogEntry={HERMES_CATALOG} defaultExpanded />);
+    expect(screen.getByTestId('joined-net-card-cost-panel')).toBeTruthy();
+    expect(screen.getByTestId('joined-net-card-cost-panel').getAttribute('data-cost-high-cost')).toBe(
+      'false',
+    );
+    expect(screen.queryByTestId('joined-net-card-cost-confirmation')).toBeNull();
+  });
+});
