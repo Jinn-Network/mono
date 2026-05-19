@@ -1,7 +1,18 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createPublicClient, http, parseAbi, type Address } from 'viem';
+import { baseSepolia } from 'viem/chains';
 import { ManifestSchema, type Manifest, type VerifyResult } from './types';
 import { goldPath } from './substrate-paths';
+
+const MIN_MASTER_ETH_WEI = 2_000_000_000_000_000n;   // 0.002 ETH
+const IDENTITY_REGISTRY_ABI = parseAbi([
+  'function getAgentWallet(uint256 agentId) view returns (address)',
+]);
+const OLAS_TOKEN_ADDRESS_BASE_SEPOLIA: Address = '0x54330d28ca3357F294334BDC454a032e7f353416';
+const OLAS_TOKEN_ABI = parseAbi([
+  'function balanceOf(address account) view returns (uint256)',
+]);
 
 export interface VerifyOptions {
   substrateRoot?: string;
@@ -51,9 +62,54 @@ export async function verifySubstrate(opName: string, opts: VerifyOptions = {}):
     return { opName, ok: failures.length === 0, failures, warnings, onChain: null };
   }
 
-  // On-chain check implementation lands in Task 5
-  warnings.push('on-chain check not yet implemented; skipping');
-  return { opName, ok: failures.length === 0, failures, warnings, onChain: null };
+  const client = createPublicClient({ chain: baseSepolia, transport: http(manifest.config.rpcUrl) });
+  const onChain = {
+    boundSafeAddress: null as string | null,
+    ethBalanceWei: 0n,
+    olasBalanceWei: null as bigint | null,
+  };
+
+  // Master ETH balance
+  try {
+    onChain.ethBalanceWei = await client.getBalance({ address: manifest.operator.masterAddress as Address });
+    if (onChain.ethBalanceWei < MIN_MASTER_ETH_WEI) {
+      failures.push(`master ETH balance ${onChain.ethBalanceWei} below minimum ${MIN_MASTER_ETH_WEI}`);
+    }
+  } catch (err) {
+    failures.push(`failed to read master ETH balance: ${(err as Error).message}`);
+  }
+
+  // AgentId binding (skip if pre-fleet shape)
+  if (manifest.shape === 'current' && manifest.operator.fleetAgentId !== null && manifest.operator.fleetSafeAddress !== null) {
+    try {
+      const bound = await client.readContract({
+        address: manifest.operator.identityRegistry as Address,
+        abi: IDENTITY_REGISTRY_ABI,
+        functionName: 'getAgentWallet',
+        args: [BigInt(manifest.operator.fleetAgentId)],
+      });
+      onChain.boundSafeAddress = bound;
+      if (bound.toLowerCase() !== manifest.operator.fleetSafeAddress.toLowerCase()) {
+        failures.push(`identityRegistry.getAgentWallet(${manifest.operator.fleetAgentId})=${bound} does not match manifest.fleetSafeAddress=${manifest.operator.fleetSafeAddress}`);
+      }
+    } catch (err) {
+      failures.push(`failed to read identityRegistry.getAgentWallet: ${(err as Error).message}`);
+    }
+  }
+
+  // OLAS balance on Safe (informational; staked balance is locked so we just check)
+  try {
+    onChain.olasBalanceWei = await client.readContract({
+      address: OLAS_TOKEN_ADDRESS_BASE_SEPOLIA,
+      abi: OLAS_TOKEN_ABI,
+      functionName: 'balanceOf',
+      args: [manifest.operator.safeAddress as Address],
+    });
+  } catch {
+    // Non-blocking; legacy ops or future schema may not have OLAS readable
+  }
+
+  return { opName, ok: failures.length === 0, failures, warnings, onChain };
 }
 
 async function cliMain(): Promise<void> {
