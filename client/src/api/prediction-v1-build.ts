@@ -9,6 +9,7 @@
 import type { Store } from '../store/store.js';
 import { TaskRunPersistence, type PersistedTaskRun } from '../harnesses/engine/persistence.js';
 import type { PredictionOperatorStatus } from '../solver-nets/prediction-operator-ux.js';
+import { taskRunRoutingKey } from './task-run-routing.js';
 
 /**
  * Operator-mode visible roles. The launcher is configured per-net but is
@@ -55,7 +56,16 @@ export interface PredictionV1Status {
     activeTaskRuns: number;
     solutions: number;
     verdicts: number;
+    /**
+     * Sum of `settledFailed` and `localErrors`. Retained for callers that
+     * still want the rolled-up count; new surfaces should prefer the split
+     * fields to align with the public explorer.
+     */
     failed: number;
+    /** FAILED runs whose delivery tx landed on-chain (settled failure). */
+    settledFailed: number;
+    /** FAILED runs that never reached the marketplace (local engine error). */
+    localErrors: number;
   };
   latest: {
     taskAt: number | null;
@@ -88,6 +98,8 @@ export function gatherPredictionV1Status(
   const verdicts = complete
     .filter((run) => run.taskRole === 'evaluation')
     .sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt);
+  const settledFailed = failed.filter((run) => run.deliveryTxHash !== null);
+  const localErrors = failed.filter((run) => run.deliveryTxHash === null);
 
   return {
     operator: options.operator ?? null,
@@ -98,6 +110,8 @@ export function gatherPredictionV1Status(
       solutions: solutions.length,
       verdicts: verdicts.length,
       failed: failed.length,
+      settledFailed: settledFailed.length,
+      localErrors: localErrors.length,
     },
     latest: {
       taskAt: latestAt(allRuns),
@@ -111,7 +125,7 @@ export function gatherPredictionV1Status(
 }
 
 function isPredictionV1Run(run: PersistedTaskRun): boolean {
-  return run.solverType === 'prediction.v1';
+  return taskRunRoutingKey(run) === 'prediction.v1';
 }
 
 function taskIdentity(run: PersistedTaskRun): string {

@@ -260,6 +260,8 @@ function predictionV1Unavailable(
       solutions: 0,
       verdicts: 0,
       failed: 0,
+      settledFailed: 0,
+      localErrors: 0,
     },
     latest: {
       taskAt: null,
