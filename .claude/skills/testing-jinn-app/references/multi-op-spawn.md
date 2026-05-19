@@ -9,7 +9,10 @@ Two flavors:
 1. **Substrate-derived workspaces** — use Plan A's `substrate-copy.ts` to create per-run isolated copies of `op-a` / `op-b` from gold. Best for scenarios that need pre-bootstrapped identity (most T2.x scenarios).
 
    ```typescript
-   import { copyWorkspace } from '@/scripts/release/substrate-copy';
+   // Path relative to the importing file. Plan A's substrate-copy lives at
+   // `client/scripts/release/substrate-copy.ts` (outside `src/`, so the `@/`
+   // alias does NOT reach it — use a relative path).
+   import { copyWorkspace } from '../../scripts/release/substrate-copy';
 
    const handle = await copyWorkspace({ ops: ['op-a', 'op-b'] });
    // handle.opPaths['op-a'] → '/Users/.../jinn-dev/workspaces/<run-id>/op-a/'

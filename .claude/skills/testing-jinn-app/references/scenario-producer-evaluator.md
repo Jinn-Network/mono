@@ -25,14 +25,25 @@ This is the Anvil-fork mechanical counterpart to Tier 3's real-testnet variant. 
 ## Steps
 
 ```typescript
+import { spawnAnvilFork } from '../_support/chain/anvil';   // base-fork helper
+import { baseSepolia } from 'viem/chains';
+
 const workspace = await copyWorkspace({ ops: ['op-a', 'op-b'] });
-const anvil = await spawnAnvilForkOfBaseSepolia();    // existing helper, returns rpcUrl + cleanup
+const anvil = await spawnAnvilFork({
+  forkUrl: process.env['BASE_SEPOLIA_RPC_URL']!,
+  chain: baseSepolia,
+  silent: true,
+});
 const daemons = await spawnMultiOpDaemons({
   ops: [
     { name: 'op-a', home: workspace.opPaths['op-a'], apiPort: 7732 },
     { name: 'op-b', home: workspace.opPaths['op-b'], apiPort: 7733 },
   ],
-  extraEnv: { BASE_RPC_URL: anvil.rpcUrl, JINN_HARNESS_STUB_INSTANCE: KNOWN_INSTANCE_ID },
+  // JINN_RPC_URL — not BASE_RPC_URL — because config.ts gives JINN_RPC_URL
+  // unconditional precedence; the spawn helper surfaces extraEnv RPC keys
+  // through JINN_RPC_URL so this works either way, but using JINN_RPC_URL
+  // here makes the precedence explicit.
+  extraEnv: { JINN_RPC_URL: anvil.rpcUrl, JINN_HARNESS_STUB_INSTANCE: KNOWN_INSTANCE_ID },
 });
 
 // 1. op-a posts a known-solvable task
@@ -73,7 +84,7 @@ expect(opBActivity.verdictsCount).toBeGreaterThan(0);
 
 // 6. Cleanup
 await daemons.teardown();
-await anvil.stop();
+await anvil.teardown();
 await workspace.teardown();
 ```
 
@@ -121,8 +132,8 @@ This avoids the ~$0.10 API call per run while exercising the rest of the loop.
 ## Dependencies
 
 - Substrate workspace from Plan A
-- Existing `spawnAnvilForkOfBaseSepolia` helper (from `client/test/e2e/task-first-helpers.ts`)
-- Existing JinnRouter V3 fork-upgrade pattern (same file)
+- Existing `spawnAnvilFork` helper at `client/test/_support/chain/anvil.ts`. Pass `forkUrl: BASE_SEPOLIA_RPC_URL` and `chain: baseSepolia` for a Base Sepolia fork (no convenience wrapper today). Teardown via `harness.teardown()`. The full Task-First fork runner at `client/test/e2e/task-first-helpers.ts` (`runBaseSepoliaForkTaskFirstFullLoop`) shows the JinnRouter V3 fork-upgrade pattern.
+- Existing JinnRouter V3 fork-upgrade pattern (in `client/test/e2e/task-first-helpers.ts`)
 - Stubbed harness registration mechanism — to be added or extended in Plan C/D if not present
 - KNOWN_INSTANCE_ID, KNOWN_REPO, KNOWN_COMMIT, KNOWN_EXPECTED_VERDICT — fixture constants for a known-solvable SWE-rebench instance (existing pattern in `client/test/release/tier-2/fixtures/`)
 

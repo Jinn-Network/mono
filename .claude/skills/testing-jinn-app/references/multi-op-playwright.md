@@ -9,7 +9,12 @@ For automated regression coverage of two-operator flows. Tests live under `clien
 import { test, expect, type Page } from '@playwright/test';
 import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon';
 import { copyWorkspace } from '../../../scripts/release/substrate-copy';
-import { mockDaemonApi } from '../helpers/mock-daemon-api';   // existing single-op mock helper
+// `mockDaemonApi` is currently a private function inside
+// `client/test/dashboard/spa-config.e2e.test.ts` (see line ~130). Before
+// landing multi-op tests, Plan C/D needs to extract it to a shared module —
+// e.g. `client/test/dashboard/helpers/mock-daemon-api.ts` — and accept a
+// `port` argument (the single-op version is hardcoded to 7332).
+import { mockDaemonApi } from '../helpers/mock-daemon-api';
 
 let workspace: Awaited<ReturnType<typeof copyWorkspace>>;
 let daemons: MultiOpHandle;

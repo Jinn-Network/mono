@@ -24,21 +24,27 @@ This catches a class of bug invisible to single-op tests and to mocked multi-op 
 
 ```typescript
 import { test, expect } from '@playwright/test';
+import { baseSepolia } from 'viem/chains';
 import { spawnMultiOpDaemons } from '../../helpers/multi-op-daemon';
 import { copyWorkspace } from '../../../scripts/release/substrate-copy';
-import { spawnAnvilForkOfBaseSepolia } from '../../e2e/task-first-helpers';
+import { spawnAnvilFork } from '../../_support/chain/anvil';
 
 let workspace, daemons, anvil, opAUrl, opBUrl;
 
 test.beforeAll(async () => {
   workspace = await copyWorkspace({ ops: ['op-a', 'op-b'] });
-  anvil = await spawnAnvilForkOfBaseSepolia();
+  anvil = await spawnAnvilFork({
+    forkUrl: process.env['BASE_SEPOLIA_RPC_URL']!,
+    chain: baseSepolia,
+    silent: true,
+  });
   daemons = await spawnMultiOpDaemons({
     ops: [
       { name: 'op-a', home: workspace.opPaths['op-a'], apiPort: 7732 },
       { name: 'op-b', home: workspace.opPaths['op-b'], apiPort: 7733 },
     ],
-    extraEnv: { BASE_RPC_URL: anvil.rpcUrl },
+    // JINN_RPC_URL — config.ts gives it unconditional precedence over BASE_RPC_URL.
+    extraEnv: { JINN_RPC_URL: anvil.rpcUrl },
   });
   opAUrl = daemons.daemons['op-a'].handshakeUrl ?? `http://127.0.0.1:7732/`;
   opBUrl = daemons.daemons['op-b'].handshakeUrl ?? `http://127.0.0.1:7733/`;
@@ -46,7 +52,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await daemons?.teardown();
-  await anvil?.stop();
+  await anvil?.teardown();
   await workspace?.teardown();
 });
 
@@ -143,7 +149,7 @@ test('op-a launches → op-b sees → op-b joins → op-a sees join', async ({ b
 ## Dependencies
 
 - Substrate workspace from Plan A
-- spawnAnvilForkOfBaseSepolia helper (existing)
+- `spawnAnvilFork` helper at `client/test/_support/chain/anvil.ts` (pass `forkUrl: BASE_SEPOLIA_RPC_URL` + `chain: baseSepolia` for a Base Sepolia fork)
 - The SPA Launcher Create wizard's data-testid attributes (`manifest-cid` etc.) — may need to be added to the SPA in Plan C/D if missing
 - The Operator catalog page at `/operator/...` (existing in v0.1.6)
 - The launched-SolverNet dashboard at `/launcher/launched/:id` (existing in v0.1.6)
