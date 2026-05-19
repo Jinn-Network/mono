@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HermesPrecheckPanel } from './HermesPrecheckPanel.js';
 import { useLocation, useParams } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -127,25 +127,33 @@ export function JoinFlow({
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showHermesPrecheck, setShowHermesPrecheck] = useState(false);
+  // Tracks whether the operator has explicitly picked a harness in this
+  // session. Once true, the catalog-arrival effect below MUST NOT stomp
+  // their choice — that was the cause of issue #329, where SWE-rebench v2
+  // (whose catalog default is Hermes) re-overrode every Claude Code click.
+  const operatorPickedHarness = useRef(false);
 
   // The catalog loads independently of the manifest — when it arrives, if
-  // the operator hasn't picked a harness yet (`form.harness` still equal to
-  // the seed default) and the catalog's first compatible option differs,
-  // shift to that. This is render-time-safe because we only call setForm
-  // when the values are unequal — React queues the re-render and bails out
-  // from infinite loops automatically.
+  // the operator hasn't picked a harness yet, shift the seed default to the
+  // catalog's first compatible option. Once-per-catalog-load via useEffect
+  // (NOT a render-time setState) so subsequent dropdown selections don't
+  // get reverted on every re-render.
   const catalogPreferredHarness = solverCompatibleHarnesses[0]?.name;
-  if (
-    catalogPreferredHarness &&
-    form.harness === DEFAULT_HARNESS &&
-    catalogPreferredHarness !== DEFAULT_HARNESS
-  ) {
-    setForm({
-      ...form,
+  useEffect(() => {
+    if (operatorPickedHarness.current) return;
+    if (!catalogPreferredHarness) return;
+    if (catalogPreferredHarness === form.harness) return;
+    setForm((prev) => ({
+      ...prev,
       harness: catalogPreferredHarness,
       model: defaultModelForHarness(catalogPreferredHarness),
-    });
-  }
+    }));
+    // form.harness intentionally omitted: we only react to the catalog
+    // value changing (initial load / contract switch). Including form.harness
+    // would re-fire this effect after the operator picks something and
+    // bounce them back to the catalog default.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogPreferredHarness]);
   const modelOptions = modelOptionsForHarness(form.harness);
 
   const submitMutation = useMutation({
@@ -389,6 +397,10 @@ export function JoinFlow({
                 value={form.harness}
                 onChange={(e) => {
                   const harness = e.target.value;
+                  // Mark the choice as operator-driven so the catalog-arrival
+                  // effect above doesn't bounce them back to the catalog
+                  // default on the next render (issue #329).
+                  operatorPickedHarness.current = true;
                   setForm({
                     ...form,
                     harness,
