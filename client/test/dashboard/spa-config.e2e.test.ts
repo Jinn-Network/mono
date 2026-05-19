@@ -8,11 +8,12 @@
  * so the SPA renders running-mode without needing a live bootstrapped
  * fleet. It exercises the SPA wiring, not the daemon's bootstrap.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mockDaemonApi } from './helpers/mock-daemon-api';
 
 const PORT = 17332;
 
@@ -20,61 +21,6 @@ let daemon: ChildProcess | null = null;
 let homeDir = '';
 let handshakeUrl: string | null = null;
 
-const RUNNING_BOOTSTRAP = {
-  schemaVersion: 1,
-  mode: 'running',
-  steps: ['wallet'],
-  currentStep: 'complete',
-  services: [
-    { index: 1, step: 'complete', safe_address: '0x0e767E28C6889CcD0DfB88E631a3702D56Ce24FC' },
-  ],
-  master_address: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
-  chain: 'base-sepolia',
-  rpcUrl: 'https://sepolia.base.org',
-  defaultRpcUrl: 'https://sepolia.base.org',
-  solverNets: {
-    prediction: {
-      enabled: true,
-      roles: ['solving'],
-      harness: 'claude-code-learner',
-      model: 'claude-haiku-4-5-20251001',
-      plugins: ['jinn-prediction-plugin'],
-    },
-  },
-};
-
-const STATUS_PAYLOAD = {
-  schemaVersion: 1,
-  fleet: { services: [{ index: 1, step: 'complete', safeAddress: '0x0e767E28C6889CcD0DfB88E631a3702D56Ce24FC', agentId: 5474, safeBoundToAgent: true }] },
-  predictionV1: {
-    operator: {
-      ok: true,
-      enabled: true,
-      diagnostics: [],
-      solverNet: { name: 'prediction', enabled: true, roles: ['solving'] },
-      nextAction: { description: 'Waiting for Tasks. SolverNet active, Harness loaded.' },
-    },
-    totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
-  },
-  rewards: { pendingStakingRewardsWei: '0' },
-  masterGas: { balanceWei: '0', runwayDaysExcess: '4' },
-};
-
-const SOLVERNETS_CATALOG = {
-  schemaVersion: 1,
-  generatedAt: new Date().toISOString(),
-  nets: [
-    {
-      name: 'prediction',
-      description: 'Forecast resolved outcomes; rewarded by Brier score on verified resolutions.',
-      contract: { id: 'prediction', version: 'v1' },
-      state: 'live',
-      supportedRoles: ['solving', 'evaluating'],
-      compatibleHarnesses: [{ name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving', 'evaluating'] }],
-      compatiblePlugins: [{ name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' }],
-    },
-  ],
-};
 
 test.beforeAll(async () => {
   homeDir = mkdtempSync(join(tmpdir(), 'jinn-spa-config-e2e-'));
@@ -127,32 +73,6 @@ test.afterAll(async () => {
   }
 });
 
-async function mockDaemonApi(page: Page): Promise<void> {
-  await page.route(`**/v1/bootstrap`, (route) =>
-    route.fulfill({ contentType: 'application/json', body: JSON.stringify(RUNNING_BOOTSTRAP) }),
-  );
-  await page.route(`**/v1/status`, (route) =>
-    route.fulfill({ contentType: 'application/json', body: JSON.stringify(STATUS_PAYLOAD) }),
-  );
-  await page.route(`**/v1/solvernets`, (route) =>
-    route.fulfill({ contentType: 'application/json', body: JSON.stringify(SOLVERNETS_CATALOG) }),
-  );
-  await page.route(`**/v1/setup/solvernets/prediction`, (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: true,
-        restartRequired: true,
-        name: 'prediction',
-        config: { enabled: true, roles: ['solving', 'evaluating'] },
-      }),
-    }),
-  );
-  // Suppress the auth handshake redirect; the SPA will silently fall back.
-  await page.route(`**/auth/handshake**`, (route) =>
-    route.fulfill({ contentType: 'application/json', body: '{"ok":true}' }),
-  );
-}
 
 test('operator opens Operator tab, enables Evaluator role alongside Solver, sees restart banner', async ({ page }) => {
   await mockDaemonApi(page);
