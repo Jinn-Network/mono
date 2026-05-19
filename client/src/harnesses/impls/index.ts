@@ -104,6 +104,8 @@ export interface HarnessEnv {
   hermesModel?: string;
   /** Hermes provider (e.g. 'anthropic'). */
   hermesProvider?: string;
+  /** Timeout (ms) for the `hermes doctor` probe in HermesHarness.isReady. */
+  hermesDoctorTimeoutMs?: number;
 }
 
 /**
@@ -258,7 +260,11 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     storePath: env.storePath,
     corpusEnv: env.corpusEnv ?? {},
   });
-  out.push(new HermesHarness({ adapter: hermesAdapter }));
+  out.push(new HermesHarness({
+    adapter: hermesAdapter,
+    ...(env.hermesPath !== undefined ? { hermesPath: env.hermesPath } : {}),
+    ...(env.hermesDoctorTimeoutMs !== undefined ? { hermesDoctorTimeoutMs: env.hermesDoctorTimeoutMs } : {}),
+  }));
 
   if (env.disabledNames && env.disabledNames.length > 0) {
     const disabled = canonicalHarnessNameSet(env.disabledNames);

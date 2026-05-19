@@ -1,12 +1,17 @@
 // client/src/harnesses/impls/hermes-agent/harness.ts
-import type { Harness, HarnessContext, Solution } from '../../types.js';
+import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types.js';
 import { HERMES_AGENT_HARNESS } from '../../names.js';
 import type { HermesHarnessAdapter } from './adapter.js';
 import { harvestOutput } from '../learner/harvest.js';
+import { probeHermesDoctor } from '../../../api/hermes-doctor-endpoint.js';
 
 export interface HermesHarnessConfig {
   adapter: HermesHarnessAdapter;
   version?: string;
+  /** Hermes binary path used by `isReady()`. Defaults to `hermes` (PATH lookup). */
+  hermesPath?: string;
+  /** Timeout for the `hermes doctor` probe. Defaults to 30s. */
+  hermesDoctorTimeoutMs?: number;
 }
 
 /**
@@ -26,10 +31,59 @@ export class HermesHarness implements Harness {
   readonly version: string;
   readonly freezeStateHashIgnore = ['auth', 'auth.json', 'bin/tirith', '.env', 'config.yaml'] as const;
   private readonly adapter: HermesHarnessAdapter;
+  private readonly hermesPath: string | undefined;
+  private readonly hermesDoctorTimeoutMs: number | undefined;
 
   constructor(config: HermesHarnessConfig) {
     this.adapter = config.adapter;
     this.version = config.version ?? '0.1.0';
+    this.hermesPath = config.hermesPath;
+    this.hermesDoctorTimeoutMs = config.hermesDoctorTimeoutMs;
+  }
+
+  /**
+   * Readiness probe — shells out to `hermes doctor` via the shared
+   * `probeHermesDoctor` helper (same logic the SPA precheck endpoint
+   * uses). Reports:
+   *   - `installed: false` → binary not on PATH → ready=false with install
+   *     nextStep so the operator sees an actionable message instead of
+   *     N/N failed claims (#330).
+   *   - `exitCode !== 0` → binary exists but `hermes doctor` reports a
+   *     configuration problem (e.g. provider not signed in) → ready=false
+   *     with a nextStep that points at the SPA precheck panel.
+   *   - `exitCode === 0` → ready=true.
+   */
+  async isReady(_ctx?: { solverType: string; role?: 'restoration' | 'evaluation' }): Promise<ReadyStatus> {
+    const config: { hermesPath?: string; hermesDoctorTimeoutMs?: number } = {};
+    if (this.hermesPath !== undefined) config.hermesPath = this.hermesPath;
+    if (this.hermesDoctorTimeoutMs !== undefined) config.hermesDoctorTimeoutMs = this.hermesDoctorTimeoutMs;
+    const result = probeHermesDoctor(config);
+    if (!result.installed) {
+      return {
+        ready: false,
+        reason: 'hermes binary not installed',
+        nextStep: {
+          description:
+            'Install the Hermes agent runner — see the Hermes precheck panel in the operator dashboard for the install command.',
+          url: '/api/hermes/doctor',
+        },
+      };
+    }
+    if (result.exitCode !== 0) {
+      const stderr = result.stderr.trim();
+      const stdout = result.stdout.trim();
+      const detail = stderr.length > 0 ? stderr : stdout;
+      return {
+        ready: false,
+        reason: `hermes doctor exit ${result.exitCode}${detail ? `: ${detail}` : ''}`,
+        nextStep: {
+          description:
+            'Run `hermes doctor` locally to surface the configuration problem, or open the Hermes precheck panel in the operator dashboard to sign in / select a provider.',
+          url: '/api/hermes/doctor',
+        },
+      };
+    }
+    return { ready: true };
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
