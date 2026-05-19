@@ -1537,7 +1537,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       ? {
           discoveryApi: sharedDiscoveryApi,
           solverNetManifestCids: taskDiscoveryManifestCids,
-          onchainFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
+          // No explicit `onchainFromBlock` — let `MechAdapter`'s
+          // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow
+          // through. Hardcoding here shadowed the adapter's default and
+          // re-introduced the ghost-task floor every release; removing the
+          // shadow makes `adapter.ts` the single source of truth. See gh
+          // #300.
           ...(config.taskDiscoveryAllowedTaskIds?.length
             ? { allowedTaskIds: config.taskDiscoveryAllowedTaskIds }
             : {}),
