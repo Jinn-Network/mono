@@ -52,9 +52,21 @@ All four run in parallel. Wall-clock for the tier ≈ max of the budgets (~90s).
 
 ## Tier 2 scenarios
 
-Detailed contracts: [`references/tier-2-scenarios.md`](references/tier-2-scenarios.md) (placeholder; expanded by Plan D)
+Detailed contracts: [`references/tier-2-scenarios.md`](references/tier-2-scenarios.md)
 
-Tier 2 implementations land in Plan D. release-prep's runner will be extended at that point to call a `run-tier-2.ts` orchestrator alongside `run-tier-1.ts`.
+| ID | Name | Wall-clock budget |
+|---|---|---|
+| T2.1 | cross-operator-donation | 5min |
+| T2.2 | producer-evaluator-anvil-fork | 5min |
+| T2.3 | multi-op-spa-flow | 5min |
+
+All three run in parallel against separate substrate workspaces. Wall-clock for the tier ≈ max of the budgets (~5min).
+
+Tier 2 is invoked from release-readiness's Phase 5 (per spec §4). Standalone invocation:
+
+```bash
+yarn release:tier-2 <candidate-version>
+```
 
 ## Failure classification
 
