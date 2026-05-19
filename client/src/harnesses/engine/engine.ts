@@ -673,6 +673,7 @@ export class TaskEngine {
     }
     if (current.state === TaskRunState.DISCOVERED) {
       this.persistence.transition(task.requestId, TaskRunState.CLAIMED);
+      console.log(`[harness-engine] ${task.requestId} DISCOVERED → CLAIMED`);
     } else {
       console.log(
         `[harness-engine] ${task.requestId}: claim completed but state is already ${current.state}; skipping CLAIMED transition`,
@@ -1969,13 +1970,15 @@ export class TaskEngine {
     task: PersistedTaskRun,
     fn: () => Promise<void>,
   ): Promise<void> {
-    const oldState = task.state;
+    // Each transition method (claim, takePreSnapshot, runImpl, pack, deliver)
+    // logs its own domain-specific line on success (e.g. with manifestCid,
+    // deliveryTx, impl name). We deliberately don't emit a generic
+    // `oldState → newState` line here: doing so produced duplicate
+    // transition lines in the operator log (jinn-mono-kzan). On failure,
+    // the catch below marks the task FAILED and rethrows so the caller can
+    // surface the error.
     try {
       await fn();
-      const updated = this.persistence.getByRequestId(task.requestId);
-      if (updated && updated.state !== oldState) {
-        console.log(`[harness-engine] ${task.requestId} ${oldState} → ${updated.state}`);
-      }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       this.persistence.markFailed(task.requestId, reason);
