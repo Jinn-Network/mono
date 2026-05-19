@@ -289,6 +289,56 @@ describe('JoinFlow — harness options', () => {
     );
   });
 
+  it('selecting Claude Code in the dropdown sticks even when the catalog default is Hermes (issue #329)', async () => {
+    // Issue #329 regression. Production SWE-rebench v2 catalog
+    // (`client/src/main.ts`) lists Hermes first; selecting Claude Code from
+    // the dropdown silently reverted to Hermes on every render because a
+    // render-time `setForm` was bouncing form.harness back to the catalog
+    // default whenever it equalled the seed `claude-code`. Cover the full
+    // sequence: catalog default Hermes -> operator picks Claude Code -> value
+    // sticks across re-renders -> submit carries claude-code.
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          compatibleHarnesses: [
+            { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    // Catalog-arrival effect picks Hermes as the seed.
+    await waitFor(() => expect(harnessSelect.value).toBe('hermes-agent'));
+
+    // Operator selects Claude Code.
+    fireEvent.change(harnessSelect, { target: { value: 'claude-code' } });
+
+    // The pick must stick — not silently revert to Hermes on re-render.
+    await waitFor(() => expect(harnessSelect.value).toBe('claude-code'));
+    // Force several re-renders (toggle Evaluator on and off) to exercise the
+    // catalog-arrival effect's dependency tracking — Claude Code must remain.
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+    expect(harnessSelect.value).toBe('claude-code');
+
+    // Submit carries the operator's choice.
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+    await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
+    expect(apiMock.operatorJoin).toHaveBeenCalledWith(
+      'bafybeiaaa',
+      expect.objectContaining({ harness: 'claude-code', roles: ['solver'] }),
+    );
+  });
+
   it('drops claude-code-learner from default plugins when Hermes Agent is selected', async () => {
     // Hermes owns its own learning loop (skill self-improvement, memory
     // curation, FTS5 session search — see harnesses/impls/hermes-agent/
