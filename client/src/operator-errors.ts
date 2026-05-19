@@ -56,6 +56,13 @@ export interface OperatorErrorParts {
    * untouched message to diagnose. Always populated.
    */
   rawMessage: string;
+  /**
+   * Structured category for the error type when it can be determined with
+   * confidence. Absent for unclassified errors. Consumers can use this to
+   * render structured UI (e.g. "insufficient_funds" → show address + amount)
+   * rather than relying on prose parsing. jinn-mono-hjex.6
+   */
+  category?: 'insufficient_funds' | 'gas_too_low' | 'nonce_conflict';
 }
 
 /**
@@ -109,6 +116,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
       summary: 'A transaction with the same nonce is already pending, and the new gas price is too low.',
       hint: 'Wait for confirmation, cancel/replace with a higher maxFeePerGas, or clear the stuck nonce.',
       rawMessage: msg,
+      category: 'nonce_conflict',
     };
   }
 
@@ -117,11 +125,18 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
   // pay for even 1 wei of gas. That's an insufficient-balance error, not an
   // OOG. Must come before the broader OOG matcher below so it doesn't fall
   // through. See jinn-mono-u34i.
+  //
+  // jinn-mono-hjex.6 review: this branch is semantically the same shortfall
+  // as the explicit "insufficient funds for gas" branch below (zero spendable
+  // balance vs gas), so it must classify as `insufficient_funds` — NOT
+  // `gas_too_low` — so the SPA renders the funding-shortfall UI (send ETH to
+  // address X) instead of a misleading "re-run, the daemon will retry gas".
   if (lower.includes('gas required exceeds allowance (0)')) {
     return {
       summary: 'Not enough ETH on the paying account to cover gas (and value, if any).',
       hint: 'Send ETH to the master wallet, agent EOA, or Safe depending on which step failed.',
       rawMessage: msg,
+      category: 'insufficient_funds',
     };
   }
 
@@ -140,6 +155,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
         'Transaction ran out of gas — the Safe wrapper or inner contract call needed more gas than the supplied limit.',
       hint: 'Re-run; the daemon estimates gas dynamically and a transient RPC failure may have forced a fallback. If it persists, the gas requirement of the underlying step has likely drifted past the safe-adapter fallback floor.',
       rawMessage: msg,
+      category: 'gas_too_low',
     };
   }
 
@@ -155,8 +171,11 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
   ) {
     return {
       summary: 'Not enough ETH on the paying account to cover gas (and value, if any).',
-      hint: 'Send ETH to the master wallet, agent EOA, or Safe depending on which step failed.',
+      // The structured envelope (jinn-mono-hjex.6) surfaces the specific address
+      // and amounts; this hint is the fallback for non-SPA consumers.
+      hint: 'Check the bootstrap error details for the specific address and required amount.',
       rawMessage: msg,
+      category: 'insufficient_funds',
     };
   }
 

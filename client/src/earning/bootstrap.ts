@@ -89,6 +89,7 @@ import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
 import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
+import { displayFleetServiceIndex } from './fleet-display-index.js';
 import { rpcHostForDisplay } from '../preflight/rpc-network.js';
 import {
   detectDeprecatedTestnetSetup,
@@ -99,7 +100,63 @@ import type { Account } from 'viem/accounts';
 const addr = (value: string): Address => getAddress(value) as Address;
 
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
-const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+
+/**
+ * 2× cold-start headroom for master ETH target on a fresh bootstrap.
+ *
+ * Gas accounting for a single standard-mode service on first run:
+ *   ~1.3M gas for the Safe deploy + stake + mech (at 2 gwei ≈ 0.0026 ETH)
+ *   + 0.002 ETH Safe seed (sent to the Safe so it can pay mech fees)
+ *   ≈ 0.0046 ETH minimum; 2× gives ≈ 0.009–0.010 ETH — the bootstrap
+ *   `minEoaGasEth` default.
+ *
+ * The multiplier only applies when no service has a persisted `service_id`
+ * on-chain (i.e. the fleet is truly cold — OR migration-wiped, where
+ * services exist in shape but lost their on-chain anchor). Once any service
+ * has committed a `service_id`, the fleet is past the cold-start cliff and
+ * 1× suffices.
+ *
+ * Single source of truth: imported by funding-plan.ts.
+ */
+export const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+
+/**
+ * Compute the required master ETH gate for the standard staking mode.
+ *
+ * @param services         Persisted service states
+ * @param minEoaGasEth     Configured minimum EOA gas target (wei)
+ * @param standardMultiplier  Cold-start multiplier (defaults to {@link STANDARD_MASTER_BOOTSTRAP_MULTIPLIER})
+ * @param pendingSetupMigration  True when deprecated testnet setup detected
+ * @param targetServices   How many services the fleet is aiming for
+ */
+export function computeRequiredMasterEth({
+  services,
+  minEoaGasEth,
+  standardMultiplier = STANDARD_MASTER_BOOTSTRAP_MULTIPLIER,
+  pendingSetupMigration = false,
+  targetServices = 1,
+}: {
+  services: Array<{ service_id: number | null | undefined; step?: string }>;
+  minEoaGasEth: bigint;
+  standardMultiplier?: bigint;
+  pendingSetupMigration?: boolean;
+  targetServices?: number;
+}): bigint {
+  const completedCount = services.filter(s =>
+    s.step !== undefined && isOperationalServiceStep(s.step),
+  ).length;
+  const standardFleetAlreadyComplete =
+    !pendingSetupMigration && completedCount >= targetServices;
+  if (standardFleetAlreadyComplete) return 0n;
+
+  // "Cold in liability" = no service has an on-chain anchor yet.
+  // This includes:
+  //   1. Fresh fleet (services array is empty)
+  //   2. Migration-wiped fleet (services exist in shape but service_id === null)
+  // Apply the 2× headroom multiplier in both cases.
+  const hasPersistedOnChain = services.some(s => s.service_id != null);
+  return minEoaGasEth * (hasPersistedOnChain ? 1n : standardMultiplier);
+}
 
 /** Master ETH required to FINISH the whole bootstrap from a fresh start (not
  *  just to enter Stage 1). Centralized so the daemon's ensureStage1 gate,
@@ -575,15 +632,13 @@ export class FleetBootstrapper {
         stakingMode: this.stakingMode,
         currentStakingContract: this.config.stakingContract,
       }).services.length > 0;
-      const completedCountBeforeFunding = state.services.filter(s =>
-        isOperationalServiceStep(s.step),
-      ).length;
       const standardFleetAlreadyComplete =
         this.stakingMode === 'standard' &&
-        !pendingSetupMigration &&
-        completedCountBeforeFunding >= this.targetServices;
-      const standardFleetHasInProgressServices =
-        this.stakingMode === 'standard' && state.services.length > 0;
+        state.services.length >= this.targetServices &&
+        state.services.every(svc =>
+          svc.step !== undefined && isOperationalServiceStep(svc.step),
+        ) &&
+        !pendingSetupMigration;
       const requiredMasterEth = this.stakingMode === 'standard'
         ? (
             standardFleetAlreadyComplete
@@ -764,7 +819,7 @@ export class FleetBootstrapper {
         message: `Fleet bootstrap complete. ${state.services.filter(s => isOperationalServiceStep(s.step)).length}/${this.targetServices} services running.`,
       };
     } catch (error) {
-      const { summary, hint, rawMessage } = formatBootstrapOperatorMessage(error);
+      const { summary, hint, rawMessage, category } = formatBootstrapOperatorMessage(error);
       const userMessage = hint !== undefined ? `${summary}\nHint: ${hint}` : summary;
       if (this.debug) {
         console.error(`[fleet-bootstrap] Bootstrap failed:`, error);
@@ -778,11 +833,21 @@ export class FleetBootstrapper {
           console.error(`[fleet-bootstrap] raw: ${rawMessage.split('\n')[0]}`);
         }
       }
+      // Extract a tx hash embedded in the error message by the on-chain revert
+      // paths (format: "...tx failed for service N: 0x<hash>" or
+      // "...tx reverted: 0x<hash>"). Surfaced in the fatal envelope so the SPA
+      // can render a block-explorer link. jinn-mono-hjex reviewer fix.
+      const txHashMatch = /(0x[a-fA-F0-9]{64})/.exec(rawMessage);
+      const txHash = txHashMatch ? txHashMatch[1] : null;
       return {
         ok: false,
         fleet_state: state,
         message: userMessage,
         rawErrorMessage: rawMessage,
+        // Preserve the structured category so the error envelope in main.ts
+        // can surface it in `details.category` for SPA consumers. jinn-mono-hjex.6
+        ...(category !== undefined ? { errorCategory: category } : {}),
+        ...(txHash !== null ? { txHash } : {}),
       };
     }
   }
@@ -1386,6 +1451,34 @@ export class FleetBootstrapper {
       }
     }
 
+    // Pre-stake precondition: if migration cleared service_id but kept agent_address,
+    // check the EOA is not already registered on-chain as an agent instance. If it is,
+    // calling stake() again would revert with AgentInstanceRegistered (selector 0x631695bd)
+    // and there is nothing useful the operator can do without rotating the agent EOA.
+    // Fail fast with a typed error instead of letting the contract revert.
+    if (svc.agent_address && svc.service_id === null && this.config.serviceRegistry) {
+      let alreadyBound = false;
+      try {
+        const boundServiceId = (await this.publicClient.readContract({
+          address: getAddress(this.config.serviceRegistry) as Address,
+          abi: SERVICE_REGISTRY_L2_ABI,
+          functionName: 'mapAgentInstances',
+          args: [getAddress(svc.agent_address) as Address],
+        })) as bigint;
+        alreadyBound = boundServiceId > 0n;
+      } catch {
+        // Registry read failure is non-fatal — proceed and let stake() surface
+        // the error if the agent really is bound.
+      }
+      if (alreadyBound) {
+        throw new Error(
+          `agent_already_bound: agent EOA ${svc.agent_address} is already registered as an agent instance on-chain. ` +
+          `The previous setup retirement may have been incomplete. ` +
+          `Contact support or rotate the agent EOA to continue.`,
+        );
+      }
+    }
+
     // Fresh distributor stake() creates a new on-chain service. If state still
     // references an old Safe (e.g. hand-edited JSON), sweep it before replacing.
     if (svc.service_id === null && svc.safe_address && state.master_address) {
@@ -1470,46 +1563,20 @@ export class FleetBootstrapper {
     const svc = state.services.find(s => s.index === index)!;
     const serviceId = svc.service_id!;
     const stakingAddress = this.stakingAddressForService(svc);
+    const di = displayFleetServiceIndex(svc);
 
-    // `reStake()` is operator-scoped: the master EOA must match the
-    // distributor's recorded `mapServiceIdCuratingAgents[serviceId]` entry.
-    // If it doesn't, the operator is likely using the wrong earning dir or
-    // password, or the service needs owner / managing-agent recovery.
-    const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
-
-    const reStakeData = encodeFunctionData({
-      abi: STOLAS_DISTRIBUTOR_ABI,
-      functionName: 'reStake',
-      args: [stakingAddress, BigInt(serviceId)],
-    }) as Hex;
-
-    console.error(`[fleet-bootstrap] Service ${index}: calling distributor.reStake() for evicted service ${serviceId}`);
-    let reStakeHash: Hex;
-    try {
-      reStakeHash = await viemSendTransactionWithRetry(masterWallet, this.publicClient, {
-        account: masterAccount as Account,
-        to: addr(this.config.distributorAddress),
-        data: reStakeData,
-        gas: 1_500_000n,
-      });
-    } catch (err) {
-      const message = flattenErrorMessage(err);
-      if (isUnauthorizedAccountError(message)) {
-        throw new Error(
-          `Service ${index} (service_id ${serviceId}) is evicted on the staking proxy, but master EOA ${masterAccount.address} is not authorized to reStake it. ` +
-          `The distributor only permits the recorded service operator, a managing agent, or the owner. ` +
-          `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service, then re-run jinn bootstrap; otherwise request owner / managing-agent recovery or abandon-and-rebootstrap. ` +
-          `reStake revert: ${message}`,
-        );
-      }
-      throw err;
-    }
-    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, reStakeHash);
-    if (receipt.status !== 'success') {
-      throw new Error(`reStake failed for service ${index}: ${reStakeHash}`);
-    }
-    console.error(`[fleet-bootstrap] Service ${index}: reStake confirmed (tx: ${reStakeHash})`);
+    // Delegate to the standalone exported helper (shared with EvictionLoop /
+    // the dashboard "Re-stake now" CTA). This eliminates the duplicate
+    // implementation (jinn-mono-hjex.3).
+    await recoverEvictedService({
+      serviceDisplayIndex: di,
+      serviceId,
+      stakingAddress: stakingAddress,
+      distributorAddress: this.config.distributorAddress,
+      rpcUrl: this.config.rpcUrl,
+      chain: this.chain,
+      mnemonic,
+    });
 
     // Service is now Staked again with the same service_id, safe_address, and mech_address.
     // Step back to `mech_deployed` so the resume loop advances through
@@ -2448,3 +2515,83 @@ export class FleetBootstrapper {
 
 /** @deprecated Use FleetBootstrapper */
 export const EarningBootstrapper = FleetBootstrapper;
+
+// ---------------------------------------------------------------------------
+// Standalone recovery helper — callable from the eviction loop (hjex.3)
+// ---------------------------------------------------------------------------
+
+export interface RecoverEvictedServiceOptions {
+  /** Display index of the service (used only for log messages). */
+  serviceDisplayIndex: number;
+  serviceId: number;
+  stakingAddress: string;
+  distributorAddress: string;
+  rpcUrl: string;
+  chain: JinnOnchainNetwork;
+  mnemonic: string;
+}
+
+/**
+ * Re-stake an evicted service by calling `distributor.reStake(stakingProxy, serviceId)`.
+ *
+ * Extracted from `FleetBootstrapper.recoverEvictedService` so it can be called
+ * from the in-process `EvictionLoop` without requiring a full bootstrapper
+ * context (jinn-mono-hjex.3).
+ *
+ * The caller is responsible for advancing the local service step back to
+ * `mech_deployed` after this returns (just like the bootstrapper resume path does).
+ */
+export async function recoverEvictedService(
+  opts: RecoverEvictedServiceOptions,
+): Promise<void> {
+  const {
+    serviceDisplayIndex,
+    serviceId,
+    stakingAddress,
+    distributorAddress,
+    rpcUrl,
+    chain,
+    mnemonic,
+  } = opts;
+
+  const masterAccount = deriveMasterSigner(mnemonic);
+  const publicClient = createJinnPublicClient(rpcUrl, chain);
+  const masterWallet = createJinnWalletClient(rpcUrl, chain, masterAccount);
+
+  const reStakeData = encodeFunctionData({
+    abi: STOLAS_DISTRIBUTOR_ABI,
+    functionName: 'reStake',
+    args: [addr(stakingAddress), BigInt(serviceId)],
+  }) as Hex;
+
+  console.error(
+    `[eviction-recovery] Service ${serviceDisplayIndex}: calling distributor.reStake() for evicted service ${serviceId}`,
+  );
+  let reStakeHash: Hex;
+  try {
+    reStakeHash = await viemSendTransactionWithRetry(masterWallet, publicClient, {
+      account: masterAccount as Account,
+      to: addr(distributorAddress),
+      data: reStakeData,
+      gas: 1_500_000n,
+    });
+  } catch (err) {
+    const message = flattenErrorMessage(err);
+    if (isUnauthorizedAccountError(message)) {
+      throw new Error(
+        `Service ${serviceDisplayIndex} (service_id ${serviceId}) is evicted on the staking proxy, but master EOA ` +
+        `${masterAccount.address} is not authorized to reStake it. ` +
+        `Verify JINN_EARNING_DIR and JINN_PASSWORD derive the original master EOA for this service. ` +
+        `reStake revert: ${message}`,
+      );
+    }
+    throw err;
+  }
+  const receipt = await waitForTransactionReceiptWithRetry(publicClient, reStakeHash);
+  if (receipt.status !== 'success') {
+    throw new Error(`reStake failed for service ${serviceDisplayIndex}: ${reStakeHash}`);
+  }
+  console.error(
+    `[eviction-recovery] Service ${serviceDisplayIndex}: reStake confirmed (tx: ${reStakeHash})`,
+  );
+}

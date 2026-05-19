@@ -23,6 +23,7 @@ import { stage1MinMasterEth } from './bootstrap.js';
 import { decryptMnemonic, deriveMasterAddress } from './wallet.js';
 import { isOperationalServiceStep, type FleetState, type FundingRequirement, type StakingMode } from './types.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from './viem-clients.js';
+import { STANDARD_MASTER_BOOTSTRAP_MULTIPLIER } from './bootstrap.js';
 
 export interface FundingPlanOptions {
   earningDir?: string;

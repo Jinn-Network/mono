@@ -13,6 +13,7 @@ import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
+import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
@@ -70,6 +71,13 @@ export interface DaemonConfig {
    * Omitted or interval 0 → loop not started.
    */
   balanceTopup?: BalanceTopupLoopConfig;
+
+  /**
+   * Periodic eviction-check + auto-restake loop (jinn-mono-hjex.3).
+   * Polls getStakingState for each service; restakes automatically when evicted.
+   * Omitted or interval 0 → loop not started.
+   */
+  evictionCheck?: EvictionLoopConfig;
 
   /**
    * Cross-chain JINN claim loop (jinn-mono-7x5). Emits ClaimTicket on L2,
@@ -168,6 +176,7 @@ export class Daemon {
   private readonly apiToken: string;
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
+  private evictionLoop?: EvictionLoop;
   private jinnClaimLoop?: JinnClaimLoop;
 
   constructor(private readonly config: DaemonConfig) {
@@ -214,6 +223,9 @@ export class Daemon {
         ...config.balanceTopup,
         jinnStore: this.store,
       });
+    }
+    if (config.evictionCheck && config.evictionCheck.intervalMs > 0) {
+      this.evictionLoop = new EvictionLoop(config.evictionCheck);
     }
     if (config.jinnClaim && config.jinnClaim.intervalMs > 0) {
       this.jinnClaimLoop = new JinnClaimLoop({
@@ -340,6 +352,19 @@ export class Daemon {
         }),
       );
     }
+    if (this.evictionLoop) {
+      this.loopPromises.push(
+        this.evictionLoop.run().catch(err => {
+          console.error('[daemon] eviction-check crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'eviction-check loop crashed',
+            errorCode: 'eviction_check_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     if (this.jinnClaimLoop) {
       this.loopPromises.push(
         this.jinnClaimLoop.run().catch(err => {
@@ -374,6 +399,7 @@ export class Daemon {
     this.deliveryWatcherLoop.stop();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
+    this.evictionLoop?.stop();
     this.jinnClaimLoop?.stop();
     this.peerSync?.stop();
 

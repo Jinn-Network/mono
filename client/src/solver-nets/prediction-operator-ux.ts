@@ -19,6 +19,8 @@ import { PredictionV1TaskSchema, type PredictionV1Task } from '../types/predicti
 import type { SolverPluginEntry } from '../plugins/types.js';
 import {
   loadSolverNets as defaultLoadSolverNets,
+  rolesFromJoinedConfig,
+  type JoinedSolverNetConfig,
   type LoadedSolverNet,
   type SolverNetConfig,
   type SolverNetOperatorRole,
@@ -214,6 +216,28 @@ function missingSolverNetStatus(
   };
 }
 
+/**
+ * Build a synthetic SolverNetConfig from the first entry in joinedSolverNets.
+ * This lets the diagnostic loop run unchanged when an operator has joined a
+ * SolverNet via the manifest-keyed flow but has no legacy solverNets[name] entry.
+ */
+function synthesizeFromJoined(
+  joinedSolverNets: Record<string, JoinedSolverNetConfig>,
+  solverType = 'prediction.v1',
+): SolverNetConfig {
+  const first = Object.values(joinedSolverNets)[0];
+  const roles = rolesFromJoinedConfig(first);
+  return {
+    enabled: true,
+    solverType,
+    roles: roles.length > 0 ? roles : ['solving'],
+    harness: first.harness ?? '',
+    model: first.model,
+    plugins: (first.plugins ?? []) as SolverNetConfig['plugins'],
+    taskGenerator: { enabled: false },
+  };
+}
+
 export async function buildPredictionOperatorStatus({
   config,
   configPath,
@@ -223,8 +247,12 @@ export async function buildPredictionOperatorStatus({
   loadSolverNets = defaultLoadSolverNets,
   daemonRunning = false,
 }: BuildPredictionOperatorStatusOptions): Promise<PredictionOperatorStatus> {
-  const net = config.solverNets[name];
-  if (!net) return missingSolverNetStatus(configPath, name, daemonRunning);
+  const legacy = config.solverNets[name];
+  const hasJoined = Object.keys(config.joinedSolverNets ?? {}).length > 0;
+  if (!legacy && !hasJoined) {
+    return missingSolverNetStatus(configPath, name, daemonRunning);
+  }
+  const net: SolverNetConfig = legacy ?? synthesizeFromJoined(config.joinedSolverNets!, 'prediction.v1');
 
   const diagnostics: PredictionOperatorDiagnostic[] = [];
   let loadedNet: LoadedSolverNet | undefined;

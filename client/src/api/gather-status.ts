@@ -108,6 +108,27 @@ function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
   return network === 'testnet' ? 'base-sepolia' : 'base';
 }
 
+/**
+ * Derive the SolverNet name to use for the prediction operator diagnostic.
+ *
+ * Priority: (1) first legacy `solverNets` entry name, (2) first joined entry's
+ * `name` field, (3) first joined entry's manifestCid, (4) fallback `'prediction'`.
+ *
+ * This replaces the previous hard-coded `'prediction'` string so that operators
+ * who joined a SolverNet via the manifest-keyed flow still get a useful diagnostic
+ * (jinn-mono-hjex.2).
+ */
+function derivePredictionSolverNetName(config: JinnConfig): string {
+  const legacyNames = Object.keys(config.solverNets);
+  if (legacyNames.length > 0) return legacyNames[0]!;
+  const joinedEntries = Object.entries(config.joinedSolverNets ?? {});
+  if (joinedEntries.length > 0) {
+    const [cid, entry] = joinedEntries[0]!;
+    return entry.name ?? cid;
+  }
+  return 'prediction';
+}
+
 function predictionOperatorCacheKey(configPath: string, name: string): string {
   return `${configPath}\0${name}`;
 }
@@ -483,10 +504,11 @@ export async function gatherGatheredStatusRaw(
   let predictionOperatorError: string | undefined;
   if (status?.config) {
     try {
+      const solverNetName = derivePredictionSolverNetName(status.config);
       const raw = await getCachedPredictionOperatorStatus(
         status.config,
         status.configPath ?? '<default>',
-        'prediction',
+        solverNetName,
       );
       predictionOperator = narrowOperatorStatusForApi(raw);
     } catch (error) {
@@ -629,6 +651,51 @@ export async function gatherGatheredStatusRaw(
       if (pr.nextCheckpointAt) raw.nextCheckpointAt = pr.nextCheckpointAt;
     } else {
       raw.pendingRewardsError = pr.error;
+    }
+
+    // Eviction state + inactivity — best-effort; never blocks the rest of status assembly.
+    try {
+      const evictedByServiceIndex: Record<number, boolean> = {};
+      const inactivityByServiceIndex: Record<number, number> = {};
+      await Promise.all(
+        fleet.services.map(async (svc) => {
+          const serviceId = svc.service_id;
+          const stakingProxy = svc.staking_address;
+          if (!serviceId || !stakingProxy) return;
+          const di = displayFleetServiceIndex(svc);
+          try {
+            const [state, info] = await Promise.all([
+              client.readContract({
+                address: stakingProxy as `0x${string}`,
+                abi: JINN_STAKING_ABI,
+                functionName: 'getStakingState',
+                args: [BigInt(serviceId)],
+              }),
+              client.readContract({
+                address: stakingProxy as `0x${string}`,
+                abi: JINN_STAKING_ABI,
+                functionName: 'getServiceInfo',
+                args: [BigInt(serviceId)],
+              }).catch(() => null),
+            ]);
+            // getStakingState returns uint8; 2 = Evicted enum value
+            evictedByServiceIndex[di] = Number(state) === 2;
+            // getServiceInfo returns a struct — inactivity is seconds of accumulated inactivity
+            if (info != null) {
+              const inactivity = (info as { inactivity: bigint }).inactivity;
+              if (typeof inactivity === 'bigint') {
+                inactivityByServiceIndex[di] = Number(inactivity);
+              }
+            }
+          } catch {
+            // Transient RPC errors: skip silently; evicted defaults to false
+          }
+        }),
+      );
+      raw.evictedByServiceIndex = evictedByServiceIndex;
+      raw.inactivityByServiceIndex = inactivityByServiceIndex;
+    } catch {
+      // Non-fatal: staking state reads should not prevent status from returning
     }
   }
 

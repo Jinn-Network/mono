@@ -110,6 +110,12 @@ export const JinnConfigSchema = z.object({
    */
   balanceTopupIntervalMs: z.number().int().min(0).default(300_000),
 
+  /**
+   * Interval between eviction-state polls for the staking proxy (ms).
+   * Default 60000 (1 min). Set to 0 to disable. Env: JINN_EVICTION_CHECK_INTERVAL_MS
+   */
+  evictionCheckIntervalMs: z.number().int().min(0).default(60_000),
+
   /** HTTP API port */
   apiPort: z.number().int().positive().default(7331),
 
@@ -743,6 +749,7 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.rewardClaimIntervalMs = parseInt(env['JINN_REWARD_CLAIM_INTERVAL_MS'], 10);
   }
   if (env['JINN_BALANCE_TOPUP_INTERVAL_MS']) merged.balanceTopupIntervalMs = Number.parseInt(env['JINN_BALANCE_TOPUP_INTERVAL_MS'], 10);
+  if (env['JINN_EVICTION_CHECK_INTERVAL_MS']) merged.evictionCheckIntervalMs = Number.parseInt(env['JINN_EVICTION_CHECK_INTERVAL_MS'], 10);
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];

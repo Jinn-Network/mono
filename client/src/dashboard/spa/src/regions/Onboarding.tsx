@@ -20,7 +20,7 @@
  * phases that genuinely require pre-running-mode completion.
  */
 import { useQuery } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { useState, useCallback, type ReactNode } from 'react';
 import { api } from '../api/client.js';
 import type {
   BootstrapErrorEnvelope,
@@ -65,8 +65,22 @@ function bootstrapPhaseFor(step: string): BootstrapPhaseDescriptor {
   return PHASE_FOR_STEP[step] ?? { phase: 1, subState: null };
 }
 
-function statusFor(rowPhase: Phase, currentPhase: Phase): PhaseStatus {
-  if (rowPhase < currentPhase) return 'done';
+/** @internal exported for unit tests */
+export function statusFor(rowPhase: Phase, currentPhase: Phase, fundingTargetMet?: boolean): PhaseStatus {
+  if (rowPhase < currentPhase) {
+    // Phase 2 (Fund your wallet) stays 'active' until the endpoint explicitly
+    // signals that the balance target is met. This prevents a momentary drip
+    // that briefly crossed the threshold from flipping phase 2 to DONE before
+    // the bootstrapper has actually advanced past awaiting_funding on-chain.
+    //
+    // `fundingTargetMet === false` (explicit false from the funding gate) means
+    // the gate is still open; absent funding block means the gate has cleared.
+    // (Numbering note: hjex.7 was authored against the 4-phase shape where
+    // Fund was Phase 3; after vh74.2 collapsed Onboarding to 3 phases, Fund
+    // is now Phase 2.)
+    if (rowPhase === 2 && fundingTargetMet === false) return 'active';
+    return 'done';
+  }
   if (rowPhase === currentPhase) return 'active';
   return 'queued';
 }
@@ -96,7 +110,12 @@ export function Onboarding(): JSX.Element {
   const bootstrapError = bootstrap.error;
   const activeService = bootstrap.services.find((svc) => svc.step === bootstrap.currentStep)
     ?? bootstrap.services[0];
-
+  // hjex.7: explicit `false` means the funding gate is still open; absent
+  // (undefined) means the bootstrapper has cleared funding. The statusFor()
+  // helper keeps Phase 3 (Fund your wallet) 'active' until this clears, so a
+  // momentary drip that briefly crossed the threshold doesn't flip the row
+  // to DONE before the bootstrapper advances past awaiting_funding on-chain.
+  const fundingTargetMet = bootstrap.funding?.targetMet;
   return (
     <div
       className="min-h-screen w-full"
@@ -122,11 +141,11 @@ export function Onboarding(): JSX.Element {
 
           <ol className="flex flex-col">
             {([1, 2, 3] as Phase[]).map((p) => {
-              const status = statusFor(p, currentPhase);
+              const status = statusFor(p, currentPhase, fundingTargetMet);
               const showError = bootstrapError && p === currentPhase;
               return (
                 <PhaseRow key={p} phase={p} status={showError ? 'error' : status}>
-                  {showError && <BootstrapErrorCard envelope={bootstrapError} />}
+                  {showError && <BootstrapErrorCard envelope={bootstrapError} chainExplorerBase={explorer} />}
                   {!showError && p === 2 && status === 'active' && masterAddress && (
                     <AwaitingFundingCard
                       address={masterAddress}
@@ -329,9 +348,34 @@ function ActivePulse(): JSX.Element {
   );
 }
 
-function BootstrapErrorCard({ envelope }: { envelope: BootstrapErrorEnvelope }): JSX.Element {
+function BootstrapErrorCard({ envelope, chainExplorerBase }: { envelope: BootstrapErrorEnvelope; chainExplorerBase: string }): JSX.Element {
   const txHash = extractTxHash(envelope);
   const generatedAt = formatRelativeTime(envelope.generatedAt);
+  const [retryState, setRetryState] = useState<'idle' | 'retrying' | 'success' | 'error'>('idle');
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const details = envelope.details as Record<string, unknown> | undefined;
+  const category = typeof details?.['category'] === 'string' ? details['category'] : undefined;
+  const isInsufficientFunds = category === 'insufficient_funds';
+  const fundingAddress = typeof details?.['address'] === 'string' ? details['address'] : null;
+  const requiredWei = typeof details?.['requiredWei'] === 'string' ? details['requiredWei']
+    : typeof details?.['needWei'] === 'string' ? details['needWei'] : null;
+  const haveWei = typeof details?.['haveWei'] === 'string' ? details['haveWei'] : null;
+  const txHashFromDetails = typeof details?.['txHash'] === 'string' ? details['txHash'] : null;
+  const resolvedTxHash = txHashFromDetails ?? txHash;
+
+  const handleRetry = useCallback(async () => {
+    setRetryState('retrying');
+    setRetryError(null);
+    try {
+      await api.retryBootstrap();
+      setRetryState('success');
+    } catch (err) {
+      setRetryState('error');
+      setRetryError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   return (
     <div
       className="px-5 py-4 flex flex-col gap-3"
@@ -354,15 +398,31 @@ function BootstrapErrorCard({ envelope }: { envelope: BootstrapErrorEnvelope }):
       <p className="j-mono text-xs break-words" style={{ color: 'var(--fg)' }}>
         {envelope.message}
       </p>
-      {envelope.hint && (
+      {isInsufficientFunds && fundingAddress && (
+        <div className="flex flex-col gap-1">
+          <ErrorDetailRow label="Send ETH to">{fundingAddress}</ErrorDetailRow>
+          {requiredWei && (
+            <ErrorDetailRow label="Required">{formatWeiAsEth(requiredWei)}</ErrorDetailRow>
+          )}
+          {haveWei && (
+            <ErrorDetailRow label="Currently have">{formatWeiAsEth(haveWei)}</ErrorDetailRow>
+          )}
+          {requiredWei && haveWei && (
+            <ErrorDetailRow label="Shortfall">
+              {formatWeiAsEth((BigInt(requiredWei) - BigInt(haveWei)).toString())}
+            </ErrorDetailRow>
+          )}
+        </div>
+      )}
+      {!isInsufficientFunds && envelope.hint && (
         <p className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
           <span style={{ color: 'var(--fg-dim)' }}>Fix · </span>
           {envelope.hint}
         </p>
       )}
-      {txHash && (
+      {resolvedTxHash && (
         <a
-          href={`https://sepolia.basescan.org/tx/${txHash}`}
+          href={`${chainExplorerBase}/tx/${resolvedTxHash}`}
           target="_blank"
           rel="noopener noreferrer"
           className="j-mono text-[11px] hover:underline self-start"
@@ -371,13 +431,76 @@ function BootstrapErrorCard({ envelope }: { envelope: BootstrapErrorEnvelope }):
           view failed tx ↗
         </a>
       )}
-      <p className="j-mono text-[11px]" style={{ color: 'var(--fg-dim)' }}>
-        Setup is paused at this step. Once you've addressed the cause, run{' '}
-        <code style={{ color: 'var(--fg-muted)' }}>jinn run</code> again to retry from
-        the persisted state.
-      </p>
+      <div className="flex items-center gap-3 mt-1">
+        <button
+          type="button"
+          onClick={() => { void handleRetry(); }}
+          disabled={retryState === 'retrying'}
+          className="j-label"
+          style={{
+            padding: '5px 12px',
+            borderRadius: 'var(--radius-2)',
+            border: '1px solid var(--break-red)',
+            background: retryState === 'retrying' ? 'rgba(168, 90, 90, 0.15)' : 'transparent',
+            color: retryState === 'retrying' ? 'var(--fg-dim)' : 'var(--break-red)',
+            cursor: retryState === 'retrying' ? 'default' : 'pointer',
+            fontSize: '11px',
+          }}
+        >
+          {retryState === 'retrying' ? 'Retrying…' : retryState === 'success' ? 'Resuming…' : 'Retry'}
+        </button>
+        {retryState === 'success' && (
+          <span className="j-mono text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+            Daemon resumed — waiting for bootstrap to complete
+          </span>
+        )}
+        {retryState === 'error' && retryError && (
+          <span className="j-mono text-[11px]" style={{ color: 'var(--break-red)' }}>
+            {retryError}
+          </span>
+        )}
+      </div>
+      {retryState === 'idle' && (
+        <p className="j-mono text-[11px]" style={{ color: 'var(--fg-dim)' }}>
+          Once you've addressed the cause above, click Retry or{' '}
+          <code style={{ color: 'var(--fg-muted)' }}>jinn run</code> to resume from
+          the persisted state.
+        </p>
+      )}
     </div>
   );
+}
+
+function ErrorDetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="j-mono text-[11px] shrink-0" style={{ color: 'var(--fg-dim)', minWidth: '100px' }}>
+        {label}
+      </span>
+      <span className="j-mono text-[11px] break-all" style={{ color: 'var(--fg)' }}>
+        {children}
+      </span>
+    </div>
+  );
+}
+
+function formatWeiAsEth(wei: string): string {
+  try {
+    const n = BigInt(wei);
+    // Show as ETH with up to 6 decimal places
+    const eth = Number(n) / 1e18;
+    if (eth === 0) return '0 ETH';
+    if (eth < 0.000001) return `${n} wei`;
+    return `${eth.toFixed(6).replace(/\.?0+$/, '')} ETH`;
+  } catch {
+    return wei;
+  }
 }
 
 function extractTxHash(envelope: BootstrapErrorEnvelope): string | null {

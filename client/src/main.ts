@@ -47,8 +47,8 @@ import {
 import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
-import { FleetBootstrapper } from './earning/bootstrap.js';
-import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
+import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
+import { DEFAULT_TESTNET_ARTIFACTS, STAKING_ABI, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
 import {
@@ -102,6 +102,7 @@ import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
+import { keepSetupUiOnBootstrapError } from './setup/halt-mode.js';
 import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
@@ -568,11 +569,17 @@ async function bootstrap(): Promise<{
         hint: 'Fund the listed address and re-run this command.',
         exampleCli: 'jinn fund-requirements --json',
         details: {
-          role: 'master',
+          // jinn-mono-hjex.6: structured envelope so SPA can render the
+          // specific address + amount instead of a prose disjunction.
+          category: 'insufficient_funds',
+          step: 'awaiting_funding',
           address: result.funding.master_address,
+          requiredWei: result.funding.eth_required,
+          haveWei: result.funding.eth_balance,
+          // Legacy aliases kept for any external consumers that read these.
+          role: 'master',
           asset: 'native',
           needWei: result.funding.eth_required,
-          haveWei: result.funding.eth_balance,
         },
       });
     }
@@ -591,11 +598,17 @@ async function bootstrap(): Promise<{
       hint: 'Bootstrap failed before the fleet reached a runnable state.',
       details: {
         cause: result.message,
+        // jinn-mono-hjex.6: propagate structured category from the bootstrapper
+        // so the SPA can render category-specific UI (e.g. funding shortfall).
+        ...(result.errorCategory !== undefined ? { category: result.errorCategory } : {}),
         // Preserve the raw underlying error so a misclassified summary can
         // be diagnosed without re-running with JINN_DEBUG. See jinn-mono-jz9f.
         ...(result.rawErrorMessage && result.rawErrorMessage !== result.message
           ? { rawErrorMessage: result.rawErrorMessage }
           : {}),
+        // jinn-mono-hjex reviewer fix: propagate tx hash so the SPA can render
+        // a block-explorer link for failed on-chain revert transactions.
+        ...(result.txHash != null ? { txHash: result.txHash } : {}),
       },
     });
   }
@@ -718,8 +731,9 @@ class SetupBootstrapHalted extends Error {
   }
 }
 
-const keepSetupUiOnBootstrapError = (): boolean =>
-  process.env['JINN_NO_UI'] !== '1' && process.env['JINN_NO_DAEMON'] !== '1';
+// hjex.6: gate for the halt-and-resume loop. Lives in ./setup/halt-mode.ts
+// so it can be unit-tested without dragging main.ts's top-level side
+// effects (password resolution, config load) into the test.
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
@@ -931,6 +945,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./discovery/types.js').DiscoveryAPI | undefined;
   } = { current: undefined };
 
+  // hjex.3: holder for the restake callback. Populated in running mode after
+  // bootstrap completes (when mnemonic + distributorAddress are available).
+  const restakeCallbackRef: { current: ((serviceId: number) => Promise<{ ok: boolean; error?: string }>) | undefined } = {
+    current: undefined,
+  };
+
+  // hjex.6: retry signal for the bootstrap halt-and-resume loop.
+  // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
+  // timeout), main() waits on this promise instead of returning, so the setup
+  // API stays alive and the operator can click Retry in the SPA.
+  // The retry endpoint resolves this promise to trigger a re-run.
+  let retryBootstrapResolve: (() => void) | null = null;
+  let retryBootstrapReject: ((err: unknown) => void) | null = null;
+
   let setupApiServer: ApiServer;
   try {
     setupApiServer = await startApiServer({
@@ -1135,6 +1163,30 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           // (and thus Overview's `solverNet.enabled` gating) reflects the
           // toggle immediately. (jinn-mono-l2zl.15.4.12)
           invalidatePredictionOperatorStatusCache(config);
+        },
+        // hjex.3: delegate to the live callback populated once running mode starts.
+        restake: (serviceId) => {
+          if (!restakeCallbackRef.current) {
+            return Promise.resolve({ ok: false, error: 'restake_not_available_in_setup_mode' });
+          }
+          return restakeCallbackRef.current(serviceId);
+        },
+        // hjex.6: re-trigger the bootstrap state machine from the SPA Retry button.
+        // Resolves the halt-and-resume promise; main() will loop back and call
+        // bootstrap() again. Rejects if the daemon is not currently halted.
+        retryBootstrap: () => {
+          return new Promise<void>((resolve, reject) => {
+            if (!retryBootstrapResolve) {
+              reject(new Error('daemon_not_halted'));
+              return;
+            }
+            const prevResolve = retryBootstrapResolve;
+            // The resolve will unblock the main loop's await. When bootstrap
+            // completes (success or new halt), the caller receives the result
+            // via the /v1/bootstrap polling endpoint.
+            prevResolve();
+            resolve();
+          });
         },
       },
       status: {
@@ -1364,29 +1416,95 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     setupController.refresh({ keystoreExists: true, allComplete: false });
   }
 
+  // hjex.6: halt-and-resume loop for bootstrap retries.
+  // When failBootstrap() throws SetupBootstrapHalted, we wait for the operator
+  // to click Retry in the SPA (which resolves retryBootstrapResolve) rather
+  // than returning and exiting. On each retry, we loop back and call bootstrap()
+  // again. bootstrap() is idempotent — completed steps are no-ops.
   let bootstrapResult;
-  try {
-    bootstrapResult = await bootstrap();
-  } catch (err) {
-    if (err instanceof SetupBootstrapHalted) {
-      return {
-        schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
-        kind: 'setup_halted',
-        pid: process.pid,
-        network: config.network,
-        phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
-        apiPort: setupApiServer.port,
-        dashboardUrl: `http://127.0.0.1:${setupApiServer.port}`,
-        error: err.envelope,
-      };
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      bootstrapResult = await bootstrap();
+      break; // success — exit the retry loop
+    } catch (err) {
+      if (err instanceof SetupBootstrapHalted) {
+        // Install the retry signal so the endpoint can unblock us.
+        const retrySignal = new Promise<void>((resolve, reject) => {
+          retryBootstrapResolve = resolve;
+          retryBootstrapReject = reject;
+        });
+        console.log('[main] Bootstrap halted. Waiting for retry signal from the dashboard...');
+
+        // hjex.6: Auto-resume funding poller.
+        // When the halt is a funding shortfall, poll the master EOA balance
+        // every JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance
+        // meets or exceeds the required amount, auto-signal the retry loop.
+        // Only runs while the halt signal is pending; stops on any signal.
+        let fundingPollHandle: ReturnType<typeof setTimeout> | null = null;
+        const isHaltedOnFunding = err.envelope.code === 'funding_required';
+        const haltDetails = err.envelope.details as Record<string, unknown> | undefined;
+        const haltAddress = typeof haltDetails?.['address'] === 'string'
+          ? haltDetails['address'] as `0x${string}`
+          : null;
+        const haltRequired = typeof haltDetails?.['requiredWei'] === 'string'
+          ? BigInt(haltDetails['requiredWei'])
+          : typeof haltDetails?.['needWei'] === 'string'
+            ? BigInt(haltDetails['needWei'])
+            : null;
+        const fundingPollIntervalMs = (() => {
+          const raw = process.env['JINN_FUNDING_POLL_INTERVAL_MS'];
+          if (!raw) return 15_000;
+          const n = Number.parseInt(raw, 10);
+          return Number.isFinite(n) && n > 0 ? n : 15_000;
+        })();
+        if (isHaltedOnFunding && haltAddress && haltRequired !== null) {
+          const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
+          const schedulePoll = (): void => {
+            fundingPollHandle = setTimeout(async () => {
+              // Guard: if the signal was already fired, stop polling.
+              if (!retryBootstrapResolve) return;
+              try {
+                const balance = await publicClient.getBalance({ address: haltAddress });
+                if (balance >= haltRequired) {
+                  console.log(
+                    `[main] Funding shortfall cleared (have ${balance}, required ${haltRequired}). ` +
+                    `Auto-resuming bootstrap...`,
+                  );
+                  retryBootstrapResolve?.();
+                  return; // don't schedule the next poll
+                }
+              } catch (pollErr) {
+                // Balance read failed — not fatal, just skip this tick.
+                const msg = pollErr instanceof Error ? pollErr.message : String(pollErr);
+                console.log(`[main] Funding poller balance read failed (will retry): ${msg}`);
+              }
+              schedulePoll(); // reschedule
+            }, fundingPollIntervalMs);
+          };
+          schedulePoll();
+        }
+
+        try {
+          await retrySignal;
+        } finally {
+          retryBootstrapResolve = null;
+          retryBootstrapReject = null;
+          if (fundingPollHandle !== null) {
+            clearTimeout(fundingPollHandle);
+            fundingPollHandle = null;
+          }
+        }
+        console.log('[main] Retry triggered — re-running bootstrap...');
+        continue; // loop back to the bootstrap() call
+      }
+      // If bootstrap throws an unexpected error (vs. SetupBootstrapHalted),
+      // tear down the API we just started so we don't leave a dangling listener.
+      await setupApiServer.close().catch(() => undefined);
+      await closeCaptureReceiver();
+      sharedStore.close();
+      throw err;
     }
-    // If bootstrap throws (vs. emitEnvelope-exits), tear down the API we
-    // just started so we don't leave a dangling listener on the port.
-    await setupApiServer.close().catch(() => undefined);
-    await closeCaptureReceiver();
-    sharedStore.close();
-    throw err;
   }
 
   // Bootstrap completed — flip the controller into 'running' so any waiters
@@ -1461,6 +1579,31 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
   publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
+
+  // hjex.3: populate the restake callback now that mnemonic is available.
+  if (config.stakingMode === 'standard' && CHAIN_CONFIG.distributorAddress) {
+    const fleetStore = earningStore;
+    restakeCallbackRef.current = async (serviceId: number) => {
+      try {
+        const state = await fleetStore.load(NETWORK_CHAIN);
+        const svc = state.services.find(s => s.service_id === serviceId);
+        if (!svc) return { ok: false, error: `service_not_found:${serviceId}` };
+        if (!svc.staking_address) return { ok: false, error: 'staking_address_missing' };
+        await recoverEvictedServiceFn({
+          serviceDisplayIndex: Math.max(0, svc.index - 1),
+          serviceId,
+          stakingAddress: svc.staking_address,
+          distributorAddress: CHAIN_CONFIG.distributorAddress!,
+          rpcUrl: config.rpcUrl,
+          chain: NETWORK_CHAIN,
+          mnemonic: mnemonicForMaster,
+        });
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    };
+  }
 
   const evictionRecovery =
     config.stakingMode === 'standard' &&
@@ -2249,6 +2392,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             eoaTopupTarget: CHAIN_CONFIG.minEoaGasEth,
             safeTopupTrigger: CHAIN_CONFIG.safeTopupTrigger,
             safeTopupTarget: CHAIN_CONFIG.minSafeEth,
+          }
+        : undefined,
+    // Eviction-check loop — only in standard staking mode (requires distributorAddress).
+    // Running mode only: setup-halted daemons must not try to restake services that
+    // haven't been staked yet (hjex.3).
+    evictionCheck:
+      config.evictionCheckIntervalMs > 0 &&
+      config.stakingMode === 'standard' &&
+      CHAIN_CONFIG.distributorAddress
+        ? {
+            intervalMs: config.evictionCheckIntervalMs,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            readContract: (opts) => publicClient.readContract(opts as Parameters<typeof publicClient.readContract>[0]) as Promise<bigint>,
+            recoverEvictedService: async (svc) => {
+              if (!svc.service_id || !svc.staking_address) return;
+              await recoverEvictedServiceFn({
+                serviceDisplayIndex: Math.max(0, svc.index - 1),
+                serviceId: svc.service_id,
+                stakingAddress: svc.staking_address,
+                distributorAddress: CHAIN_CONFIG.distributorAddress!,
+                rpcUrl: config.rpcUrl,
+                chain: NETWORK_CHAIN,
+                mnemonic: mnemonicForMaster,
+              });
+            },
           }
         : undefined,
   });

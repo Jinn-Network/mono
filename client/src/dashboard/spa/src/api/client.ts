@@ -161,6 +161,11 @@ export const api = {
         body: JSON.stringify(patch),
       },
     ),
+  restake: (serviceId: number) =>
+    jfetch<{ ok: boolean; error?: string }>(
+      `/v1/setup/restake/${encodeURIComponent(String(serviceId))}`,
+      { method: 'POST' },
+    ),
   retryAgentBinding: (patch?: { serviceIndex?: number }) =>
     jfetch<{
       ok: boolean;
@@ -169,6 +174,11 @@ export const api = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch ?? {}),
+    }),
+  /** Re-enter the bootstrap state machine in-process. jinn-mono-hjex.6 */
+  retryBootstrap: () =>
+    jfetch<{ ok: boolean; error?: string }>('/v1/setup/bootstrap/retry', {
+      method: 'POST',
     }),
   updateHarnessMode: (mode: 'train' | 'frozen') =>
     jfetch<{ ok: boolean; restartRequired: boolean; mode: 'train' | 'frozen' }>(

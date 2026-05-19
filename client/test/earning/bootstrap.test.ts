@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { getAddress } from 'viem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { FleetBootstrapper, computeRequiredMasterEth } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';
 import {
   generateMnemonic,
@@ -1453,5 +1453,381 @@ describe('Fleet bootstrap', () => {
     expect(bindSpy).not.toHaveBeenCalled();
     const svc = next.services.find((s: any) => s.index === 1);
     expect(svc.safe_bound_to_agent).toBe(true);
+  });
+
+  it('refuses to stake when agent_address is already registered on-chain (jinn-mono-hjex.1)', async () => {
+    // Simulates the scenario after a failed migration: service_id was cleared
+    // but agent_address kept. mapAgentInstances returns non-zero on-chain,
+    // so calling stake() would revert with AgentInstanceRegistered (0x631695bd).
+    // stepStolasStake must detect this and fail fast with a typed error.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    // State after a failed migration: service_id null but agent_address present
+    await store.save({
+      ...createDefaultFleetState('base-sepolia'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: null,
+          service_id: null,
+          mech_address: null,
+          staking_address: null,
+          step: 'awaiting_stake',
+          error: null,
+          agent_id: null,
+          agent_uri: null,
+          identity_registry_address: null,
+          agent_registered_tx: null,
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      autoTestnetFaucet: false,
+    });
+
+    // Master is funded. Must be >= stage1MinMasterEth (0.020 ETH for N=1 on
+    // base-sepolia post-u34i one-shot-funding); otherwise ensureStage1 returns
+    // the funding-shortfall result before stepStolasStake's
+    // agent_already_bound guard can fire.
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(50_000_000_000_000_000n);
+
+    // mapAgentInstances returns 47n — agent EOA is already bound on-chain (service 47 from the dogfood case)
+    vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
+      async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'mapAgentInstances') return 47n;
+        // Other readContract calls (e.g., staking state checks) return safe defaults
+        return 0n;
+      },
+    );
+
+    // reconcileFleetWithChain uses gatherChainSignals — stub it so we get to stepStolasStake
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: null,
+      stakingMultisig: null,
+      registryState: null,
+      registryMultisig: null,
+      safeDeployed: false,
+    });
+
+    // ensureStage1 now does Safe-predict + Safe-deploy + identity-register
+    // before Phase 2 runs (post jinn-mono-u34i refactor). The test only
+    // exercises the agent_already_bound guard in stepStolasStake; bypass
+    // Stage 1 with a stub state that pretends fleet identity already exists.
+    vi.spyOn(bootstrapper as any, 'ensureStage1').mockImplementation(async () => ({
+      ok: true,
+      fleet_state: await (bootstrapper as any).store.load('base-sepolia'),
+      message: 'stage1 stubbed for hjex.1 regression',
+    }));
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('agent_already_bound');
+    expect(result.message).toContain(agentAddr);
+  });
+
+  it('does NOT trip the agent_already_bound guard when mapAgentInstances returns 0n (unregistered)', async () => {
+    // Simulates a clean state after migration: service_id null, agent_address present,
+    // but the agent EOA is NOT registered on-chain (mapAgentInstances returns 0n).
+    // stepStolasStake should proceed past the precondition without throwing.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-'));
+    dirs.push(earningDir);
+
+    const mnemonic = generateMnemonic();
+    const encrypted = await encryptMnemonic(mnemonic, 'test-password');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(encrypted);
+
+    const masterAddr = deriveMasterAddress(mnemonic);
+    const agentAddr = deriveAgentAddress(mnemonic, 1);
+    await store.save({
+      ...createDefaultFleetState('base-sepolia'),
+      master_address: masterAddr,
+      services: [
+        {
+          index: 1,
+          agent_address: agentAddr,
+          safe_address: null,
+          service_id: null,
+          mech_address: null,
+          staking_address: null,
+          step: 'awaiting_stake',
+          error: null,
+          agent_id: null,
+          agent_uri: null,
+          identity_registry_address: null,
+          agent_registered_tx: null,
+          safe_bound_to_agent: false,
+        },
+      ],
+    });
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      autoTestnetFaucet: false,
+    });
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(10_000_000_000_000_000n);
+
+    // mapAgentInstances returns 0n — agent EOA is NOT registered on-chain
+    vi.spyOn((bootstrapper as any).publicClient, 'readContract').mockImplementation(
+      async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'mapAgentInstances') return 0n;
+        return 0n;
+      },
+    );
+
+    vi.spyOn(bootstrapper as any, 'gatherChainSignals').mockResolvedValue({
+      stakingState: null,
+      stakingMultisig: null,
+      registryState: null,
+      registryMultisig: null,
+      safeDeployed: false,
+    });
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    // Guard did not fire — error must NOT contain agent_already_bound
+    expect(result.message).not.toContain('agent_already_bound');
+  });
+});
+
+describe('computeRequiredMasterEth (jinn-mono-hjex.7)', () => {
+  const MIN_ETH = 5_000_000_000_000_000n; // 0.005 ETH
+
+  it('applies 2× cold-start multiplier when services array is empty (fresh fleet)', () => {
+    const required = computeRequiredMasterEth({
+      services: [],
+      minEoaGasEth: MIN_ETH,
+    });
+    expect(required).toBe(MIN_ETH * 2n);
+  });
+
+  it('applies 2× cold-start multiplier when services are migration-wiped (service_id === null) (jinn-mono-hjex.7)', () => {
+    const required = computeRequiredMasterEth({
+      services: [{ service_id: null, step: 'awaiting_stake' }],
+      minEoaGasEth: MIN_ETH,
+    });
+    expect(required).toBe(MIN_ETH * 2n);
+  });
+
+  it('uses 1× multiplier when at least one service has a persisted service_id', () => {
+    const required = computeRequiredMasterEth({
+      services: [{ service_id: 42, step: 'staked' }],
+      minEoaGasEth: MIN_ETH,
+    });
+    expect(required).toBe(MIN_ETH);
+  });
+
+  it('returns 0n when fleet is already complete (no pending setup migration)', () => {
+    const required = computeRequiredMasterEth({
+      services: [{ service_id: 42, step: 'complete' }],
+      minEoaGasEth: MIN_ETH,
+      targetServices: 1,
+      pendingSetupMigration: false,
+    });
+    expect(required).toBe(0n);
+  });
+
+  it('applies 2× multiplier to migration-wiped services regardless of step', () => {
+    // Migration-wiped: service_id is null but step advanced (race condition)
+    const required = computeRequiredMasterEth({
+      services: [{ service_id: null, step: 'staked' }],
+      minEoaGasEth: MIN_ETH,
+    });
+    expect(required).toBe(MIN_ETH * 2n);
+  });
+
+  it('respects custom standardMultiplier override', () => {
+    const required = computeRequiredMasterEth({
+      services: [],
+      minEoaGasEth: MIN_ETH,
+      standardMultiplier: 3n,
+    });
+    expect(required).toBe(MIN_ETH * 3n);
+  });
+});
+
+describe('structured error envelope (jinn-mono-hjex.6)', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  /**
+   * Helper: install mocks that satisfy ensureStage1 + the post-Stage-1
+   * `getBalance` re-check, so the test's `bootstrapService` mock is the
+   * first thing that can throw inside `ensureStage1And2`.
+   *
+   * After the u34i/wkbw rebase ensureStage1 calls getCode() + ensureStage1
+   * runs a real flow that the unit-level tests can't satisfy without a
+   * network. Stubbing ensureStage1 to a clean ok-result is the smallest
+   * fixture that keeps the post-rebase `category`/`txHash` assertions
+   * meaningful.
+   */
+  function stubEnsureStage1AndBalance(bootstrapper: FleetBootstrapper): void {
+    // Empty services so ensureStage1And2's "create new" loop calls
+    // bootstrapService for service 1 — that's the test's mock target.
+    const stubState = {
+      master_address: '0x000000000000000000000000000000000000dEaD',
+      fleet_stage: 'stage1' as const,
+      services: [] as any[],
+    };
+    vi.spyOn(bootstrapper as any, 'ensureStage1').mockResolvedValue({
+      ok: true,
+      fleet_state: stubState,
+      message: 'stage1 stubbed',
+    });
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      100_000_000_000_000_000n,
+    );
+    // Phase 2 calls loadExistingMnemonic → decryptMnemonic. Bypass with a
+    // canonical test mnemonic; the test never spends from it.
+    vi.spyOn(bootstrapper as any, 'loadExistingMnemonic').mockResolvedValue(
+      'test test test test test test test test test test test junk',
+    );
+    // Skip the reconcile branch; it would otherwise read chain state.
+    vi.spyOn(bootstrapper as any, 'reconcileFleetWithChain').mockImplementation(
+      async (state: any) => state,
+    );
+    vi.spyOn((bootstrapper as any).store, 'patchFleet').mockImplementation(async () => stubState);
+  }
+
+  it('returns errorCategory: insufficient_funds when bootstrap fails with an EVM insufficient-funds error', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-'));
+    dirs.push(earningDir);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+    stubEnsureStage1AndBalance(bootstrapper);
+
+    // Simulate an EVM "insufficient funds for gas" revert during service creation.
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error('insufficient funds for gas * price + value: have 0 want 1000000000000000'),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCategory).toBe('insufficient_funds');
+    // The funding gate must NOT be set — this is an exception, not an early-return.
+    expect(result.funding).toBeUndefined();
+  });
+
+  it('returns errorCategory: gas_too_low when bootstrap fails with an out-of-gas error', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-oog-'));
+    dirs.push(earningDir);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+    stubEnsureStage1AndBalance(bootstrapper);
+
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error('execution reverted: out of gas while creating contract'),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCategory).toBe('gas_too_low');
+  });
+
+  it('does not set errorCategory for unclassified errors', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-unclassified-'));
+    dirs.push(earningDir);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+    stubEnsureStage1AndBalance(bootstrapper);
+
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error('some completely unrecognized blockchain error'),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCategory).toBeUndefined();
+  });
+
+  it('surfaces txHash in result when a contract-revert path embeds it in the error message', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-txhash-'));
+    dirs.push(earningDir);
+
+    const expectedTxHash = '0x' + 'ab'.repeat(32);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+    stubEnsureStage1AndBalance(bootstrapper);
+
+    // Simulate an on-chain revert that embeds the tx hash in the message,
+    // matching the pattern thrown by stepStakeService / stepSelfBond* paths.
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error(`stOLAS stake() tx failed for service 1: ${expectedTxHash}`),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.txHash).toBe(expectedTxHash);
+  });
+
+  it('does not set txHash when the error message has no embedded tx hash', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fleet-hjex6-notxhash-'));
+    dirs.push(earningDir);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+    stubEnsureStage1AndBalance(bootstrapper);
+
+    vi.spyOn(bootstrapper as any, 'bootstrapService').mockRejectedValue(
+      new Error('RPC connection refused'),
+    );
+
+    const result = await bootstrapper.bootstrap('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.txHash).toBeUndefined();
   });
 });

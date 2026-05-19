@@ -26,7 +26,7 @@ export interface FleetV1Service {
     agent: { address: string; balances: Array<{ asset: string; amountWei: string }> };
     multisig: { address: string; balances: Array<{ asset: string; amountWei: string }> };
   };
-  staking: { staked: boolean; evicted: boolean; sinceBlock: number | null };
+  staking: { staked: boolean; evicted: boolean; sinceBlock: number | null; inactivitySeconds: number | null };
   activity: { lastEventAt: string | null; counts: Record<string, number> };
   rewards: { pending: string; asset: 'reward' };
   attention: null | {
@@ -129,8 +129,9 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
     },
     staking: {
       staked: isStakedLikeServiceStep(svc.step),
-      evicted: false,
+      evicted: raw.evictedByServiceIndex?.[di] ?? false,
       sinceBlock: null,
+      inactivitySeconds: raw.inactivityByServiceIndex?.[di] ?? null,
     },
     activity: {
       lastEventAt: per?.lastEventAt ?? null,
