@@ -121,7 +121,7 @@ describe('StubHarness', () => {
   });
 });
 
-describe('StubHarness.maybeCreateStubHarnessFromEnv', async () => {
+describe('StubHarness.maybeCreateStubHarnessFromEnv', () => {
   it('returns null when JINN_HARNESS_STUB_INSTANCE is not set', async () => {
     const { maybeCreateStubHarnessFromEnv } = await import('../../src/harnesses/impls/stub.js');
     delete process.env['JINN_HARNESS_STUB_INSTANCE'];
