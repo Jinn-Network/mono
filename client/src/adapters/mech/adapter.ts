@@ -24,7 +24,7 @@ import {
   digestHexToGatewayUrl,
 } from './ipfs.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
-import { SignedEnvelopeSchema } from '../../types/envelope.js';
+import { normalizeEnvelopeRole, SignedEnvelopeSchema } from '../../types/envelope.js';
 import {
   submitTask,
   claimTask as claimTaskOnchain,
@@ -44,7 +44,7 @@ import {
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
-import { VerdictCode } from './verdict-code.js';
+import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
@@ -984,9 +984,17 @@ export class MechAdapter implements ExecutionAdapter {
     );
   }
 
-  private async evidenceHashForDelivery(requestId: string, deliveryDataHex: string): Promise<Hex | undefined> {
+  private async deliveryClaimForDelivery(requestId: string, deliveryDataHex: string): Promise<{
+    evidenceHash: Hex | undefined;
+    kind: 'solution' | 'verdict';
+    verdictCode?: VerdictCode;
+  }> {
+    const fallbackKind = this.requestKinds.get(requestId) ?? 'solution';
     if (this.config.routerClaimDeliveryVariant !== 'v2' && this.config.routerClaimDeliveryVariant !== 'v3') {
-      return undefined;
+      return {
+        evidenceHash: undefined,
+        kind: fallbackKind,
+      };
     }
 
     const deliveryDigest = deliveryDataHex.startsWith('0x')
@@ -998,11 +1006,6 @@ export class MechAdapter implements ExecutionAdapter {
       envelopeCid,
     );
     const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
-    // Strip signature to recompute the hash over the unsigned body.
-    //
-    // Important: compute over the fetched wire object, not over the parsed
-    // schema result. The schema normalizes some nested objects and may strip
-    // extension metadata that was present when the envelope was signed.
     const rawSigned = rawEnvelope as Record<string, unknown>;
     const { signature: _rawSignature, ...unsignedBody } = rawSigned;
     const signature = parsed.signature;
@@ -1013,19 +1016,38 @@ export class MechAdapter implements ExecutionAdapter {
         `recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
       );
     }
-    return recomputed as Hex;
+
+    const role = normalizeEnvelopeRole(parsed.role);
+    if (role === 'capture') {
+      throw new Error(`unsupported delivery envelope role=capture for requestId ${requestId}`);
+    }
+    const kind = role === 'verdict' ? 'verdict' : 'solution';
+    const payload = rawSigned['payload'];
+    const rawVerdict = payload != null && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)['verdict']
+      : undefined;
+
+    return {
+      evidenceHash: recomputed as Hex,
+      kind,
+      verdictCode: kind === 'verdict' ? verdictCodeFromValue(rawVerdict) : undefined,
+    };
   }
 
   private async ensureDeliveryClaimed(
     requestId: string,
     deliveryDataHex: string,
   ): Promise<'claimed' | 'already-claimed' | 'skipped' | 'retry'> {
-    let evidenceHash: Hex | undefined;
+    let claimOptions: {
+      evidenceHash: Hex | undefined;
+      kind: 'solution' | 'verdict';
+      verdictCode?: VerdictCode;
+    };
     try {
-      evidenceHash = await this.evidenceHashForDelivery(requestId, deliveryDataHex);
+      claimOptions = await this.deliveryClaimForDelivery(requestId, deliveryDataHex);
     } catch (err) {
       console.error(
-        `[mech] evidenceHash derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
+        `[mech] delivery claim metadata derivation failed for ${requestId} — skipping claim, will retry on next loop:`,
         err,
       );
       return 'retry';
@@ -1040,8 +1062,9 @@ export class MechAdapter implements ExecutionAdapter {
         requestId as Hex,
         {
           variant: this.config.routerClaimDeliveryVariant,
-          kind: this.requestKinds.get(requestId) ?? 'solution',
-          evidenceHash,
+          kind: claimOptions.kind,
+          evidenceHash: claimOptions.evidenceHash,
+          verdictCode: claimOptions.verdictCode,
         },
         this.config.evictionRecovery,
       );

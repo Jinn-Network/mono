@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
+import { VerdictCode } from '../../../src/adapters/mech/verdict-code.js';
 import type { SignedTaskV1 } from '../../../src/types/task-document.js';
 import type { DiscoveryAPI, ClaimableTaskCandidate } from '../../../src/discovery/types.js';
 import { DiscoveryUnavailableError } from '../../../src/discovery/types.js';
@@ -112,6 +113,7 @@ vi.mock('../../../src/harnesses/engine/canonical-json.js', () => ({
 
 // MOCK_JUSTIFICATION: envelope schema validation is covered in envelope tests; here we isolate adapter routing logic.
 vi.mock('../../../src/types/envelope.js', () => ({
+  normalizeEnvelopeRole: vi.fn((role: unknown) => role === 'restoration' ? 'solution' : role),
   SignedEnvelopeSchema: {
     parse: vi.fn(),
   },
@@ -1441,6 +1443,67 @@ describe('MechAdapter TaskCoordinator flow', () => {
       TEST_CONFIG.routerAddress,
       REQUEST_ID,
       { variant: 'v2', kind: 'solution', evidenceHash: expectedHash },
+      undefined,
+    );
+    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID);
+
+    await adapter.stop();
+  });
+
+  it('watchForDeliveries derives verdict claim metadata from the signed verdict envelope on retry', async () => {
+    const { keccak256 } = await import('viem');
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+
+    const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
+    const fakeEnvelope = {
+      schemaVersion: 'jinn.execution.v1',
+      solverType: 'prediction.v1',
+      role: 'verdict',
+      payload: {
+        verdict: 'REJECTED',
+      },
+      signature: {
+        algo: 'secp256k1',
+        signer: '0xabc',
+        hash: expectedHash,
+        sig: '0xsig',
+      },
+    };
+    vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'verdict' });
+    vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
+      requestId: REQUEST_ID,
+      deliveryDataHex: TASK_CID_DIGEST,
+      mechAddress: '0x9999999999999999999999999999999999999999',
+    }]);
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, routerClaimDeliveryVariant: 'v3' });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).deliveryBlockCursor = 100n;
+    (adapter as any).pendingEvaluations.set(REQUEST_ID, { id: 'prediction-task-1', description: 'test', role: 'evaluation' });
+    (adapter as any).originalStates.set(REQUEST_ID, { id: 'prediction-task-1', description: 'test', role: 'evaluation' });
+
+    const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
+    await gen.next();
+
+    expect(claimDelivery).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      REQUEST_ID,
+      {
+        variant: 'v3',
+        kind: 'verdict',
+        evidenceHash: expectedHash,
+        verdictCode: VerdictCode.Fail,
+      },
       undefined,
     );
     expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID);
