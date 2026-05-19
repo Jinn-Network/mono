@@ -1700,6 +1700,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     hermesPath: config.hermesPath,
     hermesModel: config.hermesModel,
     hermesProvider: config.hermesProvider,
+    hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
   })) {
     implRegistry.register(impl);
   }
