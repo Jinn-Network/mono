@@ -1456,16 +1456,23 @@ export class FleetBootstrapper {
     // calling stake() again would revert with AgentInstanceRegistered (selector 0x631695bd)
     // and there is nothing useful the operator can do without rotating the agent EOA.
     // Fail fast with a typed error instead of letting the contract revert.
+    //
+    // ServiceRegistryL2 exposes the `mapAgentInstanceOperators(address) → address` mapping:
+    // it returns the operator address that registered the given agent instance, or the
+    // zero address when no operator has bound that instance. A non-zero return means the
+    // EOA is already bound. (There is no `mapAgentInstances(address) → uint256` getter on
+    // the deployed registry — an earlier draft of this guard referenced one and was a
+    // permanent no-op.)
     if (svc.agent_address && svc.service_id === null && this.config.serviceRegistry) {
       let alreadyBound = false;
       try {
-        const boundServiceId = (await this.publicClient.readContract({
+        const boundOperator = (await this.publicClient.readContract({
           address: getAddress(this.config.serviceRegistry) as Address,
           abi: SERVICE_REGISTRY_L2_ABI,
-          functionName: 'mapAgentInstances',
+          functionName: 'mapAgentInstanceOperators',
           args: [getAddress(svc.agent_address) as Address],
-        })) as bigint;
-        alreadyBound = boundServiceId > 0n;
+        })) as Address;
+        alreadyBound = boundOperator !== '0x0000000000000000000000000000000000000000';
       } catch {
         // Registry read failure is non-fatal — proceed and let stake() surface
         // the error if the agent really is bound.

@@ -305,6 +305,16 @@ export async function migrateDeprecatedTestnetSetup(
         // still running on-chain against the old setup. Preserve all fields so
         // they can continue operating. Surface the error via the envelope so
         // callers (bootstrap, /v1/bootstrap) can show an actionable message.
+        //
+        // Also mark wipe_suppressed=true on the archive entry. Pre-PR archive
+        // entries with retire_status='failed' but no wipe_suppressed flag had
+        // their state wiped anyway; consumers (bootstrap-endpoint) filter on
+        // wipe_suppressed === true to avoid surfacing a spurious retire_failed
+        // envelope for those legacy entries.
+        entry = await params.stateStore.upsertMigrationArchiveEntry({
+          ...entry,
+          wipe_suppressed: true,
+        });
         console.error(
           'Previous Jinn setup could not be fully retired automatically; it was archived for recovery. Local state is preserved — resolve the retire failure before upgrading.',
         );

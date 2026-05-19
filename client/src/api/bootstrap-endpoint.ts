@@ -69,6 +69,14 @@ interface MigrationArchiveEntryOnDisk {
   retire_error?: string | null;
   retire_tx_hash?: string | null;
   state_reset_at?: string | null;
+  /**
+   * True iff the migration explicitly suppressed the local-state wipe because
+   * the on-chain retire failed (jinn-mono-hjex.1). Pre-PR archive entries do
+   * NOT carry this field, so `wipe_suppressed === true` is the correct filter
+   * — `!state_reset_at` would falsely match legacy entries (where state was
+   * wiped even though retire failed) and surface a spurious envelope.
+   */
+  wipe_suppressed?: boolean;
 }
 
 interface MigrationArchiveOnDisk {
@@ -77,8 +85,10 @@ interface MigrationArchiveOnDisk {
 
 /**
  * Reads the migration archive and returns the most recent retire_error from
- * any entry whose retire_status is 'failed' and state_reset_at is null
- * (i.e. the wipe was suppressed because retire failed).
+ * any entry where the migration explicitly suppressed the local-state wipe
+ * (`wipe_suppressed === true`). Pre-PR archive entries lack the field — they
+ * are intentionally NOT surfaced because their local state was wiped, so
+ * showing a "service state preserved" envelope would mislead the operator.
  */
 function readLatestRetireError(earningDir: string): { retire_error: string; tx_hash: string | null } | null {
   const archivePath = join(earningDir, MIGRATIONS_FILE);
@@ -90,10 +100,12 @@ function readLatestRetireError(earningDir: string): { retire_error: string; tx_h
     return null;
   }
   const entries = archive.entries ?? [];
-  // Find the most recent failed retire where the wipe did not proceed
-  // (state_reset_at null means the guard preserved local state)
+  // Only surface entries where the wipe was *explicitly* suppressed by this
+  // PR's guard. Pre-PR entries have wipe_suppressed=undefined (falsy) and are
+  // ignored even though retire_status==='failed' — their state was reset, so
+  // the envelope would not apply.
   const failed = entries.filter(
-    e => e.retire_status === 'failed' && !e.state_reset_at && e.retire_error,
+    e => e.retire_status === 'failed' && e.wipe_suppressed === true && e.retire_error,
   );
   if (failed.length === 0) return null;
   const latest = failed[failed.length - 1]!;

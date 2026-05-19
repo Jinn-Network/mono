@@ -542,8 +542,8 @@ export const SERVICE_REGISTRY_L2_ABI = [
   },
   {
     inputs: [{ name: 'agentInstance', type: 'address' }],
-    name: 'mapAgentInstances',
-    outputs: [{ name: 'serviceId', type: 'uint256' }],
+    name: 'mapAgentInstanceOperators',
+    outputs: [{ name: 'operator', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
