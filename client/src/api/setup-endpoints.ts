@@ -62,6 +62,11 @@ export interface SetupRoutesConfig {
   chain?: JinnOnchainNetwork;
   rpcUrl?: string;
   minEoaGasWei?: string;
+  /**
+   * Pass through from JinnConfig.targetServices so the faucet drip target
+   * scales with multi-service deployments. Defaults to 1 (testnet operators).
+   */
+  targetServices?: number;
   claudePath?: string;
   getClaudePath?: () => string;
   runtimeMode?: 'bare' | 'docker-compose' | 'container';
@@ -182,14 +187,16 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     const requestFunding = config.requestFunding ?? requestTestnetFunding;
     const interDripPauseMs = config.interDripPauseMs ?? 1_000;
     // Faucet drip target. Single source of truth: stage1MinMasterEth(chain
-    // config), which is also what FleetBootstrapper.ensureStage1 gates on
-    // (jinn-mono-u34i). The optional `config.minEoaGasWei` override is for
-    // tests that want a custom target. Production callers should NOT pass
-    // it — letting the default win prevents the faucet/gate drift that hit
-    // operators in the 2026-05-18 canary run.
+    // config, targetServices), which is also what FleetBootstrapper.ensureStage1
+    // gates on (jinn-mono-u34i). The faucet drips master ETH until it can
+    // complete the ENTIRE bootstrap — operator gets one drip session, not one
+    // per stage. The optional `config.minEoaGasWei` override is for tests
+    // that want a custom target; production callers should NOT pass it.
+    // `config.targetServices` is also for tests / multi-service deployments;
+    // defaults to 1 (the testnet faucet's audience).
     const targetWei = config.minEoaGasWei
       ? BigInt(config.minEoaGasWei)
-      : stage1MinMasterEth(getChainConfig(chain));
+      : stage1MinMasterEth(getChainConfig(chain), config.targetServices ?? 1);
     const publicClient = config.rpcUrl
       ? createJinnPublicClient(config.rpcUrl, 'base-sepolia')
       : null;
@@ -717,14 +724,21 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       return c.json({ error: 'invalid_body', detail: 'expected JSON body' }, 400);
     }
 
+    // `persistConfigValue` (calling `persistTopLevelConfigValue` in
+    // config.ts) creates the parent dir + file when missing — same pattern
+    // as every other write path in this module. The pre-u34i version 404'd
+    // here on missing config.json, which broke fresh operators (who don't
+    // have config.json yet, since the daemon happily runs with defaults)
+    // from changing their RPC via the panel: the only operator-app affordance
+    // for switching off a rate-limited public RPC. Operator-never-leaves-the-app
+    // principle. See jinn-mono-u34i.
     const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
-    if (!existsSync(cfgPath)) {
-      return c.json({ error: 'config_not_found', path: cfgPath }, 404);
-    }
 
     let nextRpcUrl: string;
     if (body.rpcUrl === null || body.rpcUrl === '') {
-      nextRpcUrl = config.defaultRpcUrlForChain?.() ?? 'https://sepolia.base.org';
+      nextRpcUrl =
+        config.defaultRpcUrlForChain?.() ??
+        'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu';
     } else if (typeof body.rpcUrl === 'string') {
       try {
         const parsed = new URL(body.rpcUrl);

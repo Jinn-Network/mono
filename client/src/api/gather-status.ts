@@ -69,7 +69,6 @@ function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['d
   }
 }
 
-const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
 
 /**
@@ -555,15 +554,26 @@ export async function gatherGatheredStatusRaw(
     fleet,
     migrationArchive: migrationArchive.entries.length > 0 ? migrationArchive : undefined,
     rpc: { ok: false, error: undefined },
-    // Pre-Stage-1 (fleet state missing or fleet_stage === 'none'): Stage 1
-    // needs STAGE1_AGENT_ETH for the master → agent transfer plus
-    // minEoaGasEth reserved for the master's own gas. Post-Stage-1, keep
-    // the existing 1× / 2× minEoaGasEth heuristic. See jinn-mono-u34i.
+    // Pre-Stage-1 (fleet state missing or fleet_stage === 'none'):
+    // stage1MinMasterEth returns the FULL bootstrap budget — Stage 1 transfer
+    // + Stage 2 reserve + per-extra-service top-ups — so the operator funds
+    // ONCE and the daemon doesn't re-prompt at the Stage 2 gate. See
+    // jinn-mono-u34i (gate-vs-transfer parity) and the one-shot-funding
+    // follow-up.
+    // Post-Stage-1, fall back to the existing 1× / 2× minEoaGasEth heuristic
+    // (the operator already funded Stage 1; this gate only needs to cover
+    // what's left).
     minMasterEthWei: (
       !fleet || fleet.fleet_stage === 'none'
-        ? stage1MinMasterEth(chainCfg)
-        : chainCfg.minEoaGasEth *
-          (fleet.services.length > 0 ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+        ? stage1MinMasterEth(chainCfg, status?.config?.targetServices ?? 1)
+        : // Stage 2 master gas budget — minEoaGasEth (stake gas) + per-extra-
+          // service transfers. The historic `× 2` for fresh fleets was wrong:
+          // it double-counted a service-1 transfer that doesn't fire (HD-1
+          // carries Stage 1 leftover). Dropped in jinn-mono-u34i so the
+          // operator-facing 0.020 ETH budget actually clears Stage 2's gate.
+          chainCfg.minEoaGasEth +
+            chainCfg.minEoaGasEth *
+              BigInt(Math.max(0, (status?.config?.targetServices ?? 1) - 1))
     ).toString(),
     master: {
       address: fleet?.master_address ?? null,

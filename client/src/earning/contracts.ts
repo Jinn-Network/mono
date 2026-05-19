@@ -249,7 +249,15 @@ const BASE_CONFIG: ChainConfig = {
 
 const BASE_SEPOLIA_CONFIG: ChainConfig = {
   chainId: 84532,
-  rpcUrl: 'https://sepolia.base.org',
+  // Default testnet RPC: a Tenderly gateway with a free public key. Higher
+  // rate limits than `https://sepolia.base.org` (the prior default) — the
+  // public node throttled SolverNet manifest discovery and balance polls
+  // during/after bootstrap (operators hit 404 + rate-limit churn until
+  // retries happened to land). The panel surfaces a "shared RPC — bring
+  // your own" warning when the operator is still on this default; operators
+  // should get their own key (Tenderly / Alchemy / QuickNode free tiers)
+  // for reliable steady-state operation.
+  rpcUrl: 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu',
 
   // Autonolas protocol contracts (Base Sepolia)
   serviceRegistry: '0x31D3202d8744B16A120117A053459DDFAE93c855',

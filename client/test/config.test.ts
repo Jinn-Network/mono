@@ -187,7 +187,13 @@ describe('loadConfig RPC override handling', () => {
 
     const config = loadConfig(configPath);
 
-    expect(config.rpcUrl).toBe('https://sepolia.base.org');
+    // Testnet default flipped from the public sepolia.base.org node to a
+    // Tenderly gateway (free public key) in response to the 2026-05-18 canary
+    // rate-limit churn. The public node's per-IP cap throttled SolverNet
+    // manifest discovery and balance polls during/after bootstrap; Tenderly
+    // has much higher headroom. Operators are nudged to bring their own key
+    // via the NetworkSection panel warning.
+    expect(config.rpcUrl).toBe('https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu');
   });
 
   it('defaults testnet discovery to the privately-operated Ponder indexer (http mode)', async () => {

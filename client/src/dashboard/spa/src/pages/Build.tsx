@@ -35,14 +35,55 @@ export function BuildPage(): JSX.Element {
         display: 'flex',
         flexDirection: 'column',
         gap: '24px',
-        padding: '24px',
+        padding: '32px 24px 48px',
         maxWidth: 1100,
         margin: '0 auto',
       }}
     >
+      <header
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          paddingBottom: '8px',
+        }}
+      >
+        {/* Single Gold-as-Hint emphasis on this surface — the page eyebrow.
+            The page-level H1 ("Build a plug-in") is rendered by IntroCard
+            from the quickstart markdown; we don't repeat it here so there
+            is exactly one H1 on the page. */}
+        <span className="j-label" style={{ color: 'var(--accent-gold)' }}>
+          Build · Plug-ins
+        </span>
+        <p
+          className="j-mono"
+          style={{
+            color: 'var(--fg-muted)',
+            fontSize: '14px',
+            lineHeight: 1.7,
+            margin: 0,
+            maxWidth: '64ch',
+          }}
+        >
+          Scaffold a SolverPlugin, publish it to npm and IPFS, watch it appear
+          in the registry under your builder identity. Anchored on the
+          SWE-rebench v2 SolverNet for v0.
+        </p>
+      </header>
+
       <IntroCard />
       <ShapeCatalogue />
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '16px',
+          paddingTop: '8px',
+          borderTop: '1px solid var(--border)',
+        }}
+      >
+        <span className="j-label">Registry</span>
         <ArtifactTypeFilterChip value={artifactType} onChange={setArtifactType} />
       </div>
       {artifactType === 'plugin' ? (

@@ -533,6 +533,7 @@ export function JoinedNetCard({
                 }
                 rowTestId="joined-net-card-plugin-row"
                 searchTestId="joined-net-card-plugin-search"
+                harness={form.harness}
               />
             ) : (
               <PluginPicker
@@ -544,6 +545,7 @@ export function JoinedNetCard({
                 }
                 rowTestId="joined-net-card-plugin-row"
                 searchTestId="joined-net-card-plugin-search"
+                harness={form.harness}
               />
             )}
           </div>

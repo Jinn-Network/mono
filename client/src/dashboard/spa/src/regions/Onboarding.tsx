@@ -132,6 +132,7 @@ export function Onboarding(): JSX.Element {
                       address={masterAddress}
                       minimumWei={bootstrap.funding?.targetWei ?? '10000000000000000'}
                       chainExplorerBase={explorer}
+                      chain={bootstrap.chain}
                     />
                   )}
                   {!showError && p === 3 && status === 'active' && (

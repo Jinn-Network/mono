@@ -976,10 +976,14 @@ export function loadConfig(configPath?: string): JinnConfig {
     );
   }
 
-  // 4. Resolve rpcUrl default based on network (if not explicitly set)
+  // 4. Resolve rpcUrl default based on network (if not explicitly set).
+  // Testnet default is a Tenderly gateway (free public key) — much higher
+  // rate limits than `https://sepolia.base.org`. See contracts.ts comment +
+  // the panel's "shared RPC" warning in NetworkSection.tsx for the operator-
+  // facing pitch to bring their own key.
   const parsed = result.data;
   const defaultRpcUrl = parsed.network === 'testnet'
-    ? 'https://sepolia.base.org'
+    ? 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu'
     : 'https://mainnet.base.org';
 
   return {

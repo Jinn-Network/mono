@@ -328,8 +328,9 @@ describe('Fleet bootstrap', () => {
       rpcUrl: 'http://127.0.0.1:8545',
     });
 
-    // Master is funded — pre-Stage-1 gate is STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH (jinn-mono-u34i).
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(15_000_000_000_000_000n);
+    // Master is funded — pre-Stage-1 gate is the FULL bootstrap budget:
+    // STAGE1_AGENT_ETH (0.010) + minEoaGasEth*2 (0.010) = 0.020 ETH for N=1 (jinn-mono-u34i one-shot funding).
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(20_000_000_000_000_000n);
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
 
     // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).
@@ -389,8 +390,11 @@ describe('Fleet bootstrap', () => {
       targetServices: 3,
     });
 
-    // Pre-Stage-1 gate is STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH (jinn-mono-u34i).
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(15_000_000_000_000_000n);
+    // Pre-Stage-1 gate is the FULL bootstrap budget. For targetServices=3
+    // standard mode: STAGE1_AGENT_ETH (0.010) + minEoaGasEth*2 (0.010) +
+    // minEoaGasEth*(targetServices-1) (0.010) = 0.030 ETH (jinn-mono-u34i
+    // one-shot funding). Operator funds once for all 3 services.
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(30_000_000_000_000_000n);
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
 
     // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).
@@ -660,8 +664,8 @@ describe('Fleet bootstrap', () => {
       stakingMode: 'standard',
     });
 
-    // Pre-Stage-1 gate is STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH (jinn-mono-u34i).
-    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(15_000_000_000_000_000n);
+    // Pre-Stage-1 gate is the FULL bootstrap budget = 0.020 ETH for N=1 (jinn-mono-u34i one-shot funding).
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(20_000_000_000_000_000n);
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0xdeadbeef');
 
     // Stage 1 mocks — bootstrap() now calls ensureStage1 first (nghf).

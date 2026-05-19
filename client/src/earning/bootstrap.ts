@@ -101,13 +101,50 @@ const addr = (value: string): Address => getAddress(value) as Address;
 const SAFE_TOKEN_BOOTSTRAP_MULTIPLIER = 2n;
 const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
-/** Stage 1 master ETH requirement: the agent-funding transfer (STAGE1_AGENT_ETH)
- *  plus master's own gas reserve (minEoaGasEth). Centralized so the daemon's
- *  ensureStage1 gate, the read-side funding-plan, and gather-status all agree.
- *  See jinn-mono-u34i. */
+/** Master ETH required to FINISH the whole bootstrap from a fresh start (not
+ *  just to enter Stage 1). Centralized so the daemon's ensureStage1 gate,
+ *  the read-side funding-plan, gather-status, and the panel faucet target
+ *  all agree on a single "one-shot fund the operator" number.
+ *
+ *  Components for a 1-service standard-mode bootstrap:
+ *    - STAGE1_AGENT_ETH (0.010 ETH): master → HD-1 fleet-agent transfer.
+ *      HD-1 pays for its own Safe deploy + register + setAgentWallet out
+ *      of this; leftover covers service 1's Stage 2 work (mech deploy +
+ *      rebind). May get a conditional minEoaGasEth top-up from master if
+ *      Stage 1's gas eats too much of the original transfer.
+ *    - minEoaGasEth × STANDARD_MASTER_BOOTSTRAP_MULTIPLIER (0.010 ETH):
+ *      master gas budget across both stages. Real spend (~0.0025 ETH at
+ *      typical 6 gwei Base Sepolia) leaves room for ~4× gas-spike margin
+ *      plus the conditional HD-1 top-up.
+ *    - minEoaGasEth × (targetServices - 1): per-extra-service top-up for
+ *      services 2..N. Service 1 piggybacks on HD-1's Stage 1 funding.
+ *
+ *  Total for N=1: 0.010 + 0.010 = 0.020 ETH.
+ *  Total for N=2: 0.025 ETH.
+ *  Total for N=3: 0.030 ETH.
+ *
+ *  This number works ONLY when Stage 2's internal gate is `minEoaGasEth ×
+ *  1n` (0.005 ETH) — not the historic `× 2n`. After Stage 1 transfers 0.010
+ *  out, master sits at ~0.0099 ETH (0.020 minus transfer minus Stage 1
+ *  funding-tx gas). The 0.005 gate clears that with margin; the 0.010 gate
+ *  did not. See the Stage 2 gate at ensureStage1And2 line ~484.
+ *
+ *  Operator may see a "low runway" warning after bootstrap — that's
+ *  intentional. The operator-facing 0.020 ETH covers bootstrap completion,
+ *  not multi-week post-bootstrap runway. Top-up is a separate concern.
+ */
 export const STAGE1_AGENT_ETH = 10_000_000_000_000_000n; // 0.01 ETH (moved out of stepFleetSafeDeploy)
-export function stage1MinMasterEth(config: { minEoaGasEth: bigint }): bigint {
-  return STAGE1_AGENT_ETH + config.minEoaGasEth;
+export function stage1MinMasterEth(
+  config: { minEoaGasEth: bigint },
+  targetServices: number = 1,
+): bigint {
+  const extraServiceTransfers =
+    config.minEoaGasEth * BigInt(Math.max(0, targetServices - 1));
+  return (
+    STAGE1_AGENT_ETH +
+    config.minEoaGasEth * STANDARD_MASTER_BOOTSTRAP_MULTIPLIER +
+    extraServiceTransfers
+  );
 }
 
 /** Conservative default: ~0.001 ETH/day master gas if not configured. */
@@ -410,7 +447,7 @@ export class FleetBootstrapper {
       // which equaled the transfer amount and left no gas headroom, so a
       // master holding the gate's minimum would fail eth_estimateGas with
       // "gas required exceeds allowance (0)".
-      const requiredMasterEth = stage1MinMasterEth(this.config);
+      const requiredMasterEth = stage1MinMasterEth(this.config, this.targetServices);
       const masterAddress = state.master_address!;
       const masterBalance = await this.publicClient.getBalance({
         address: masterAddress as Address,
@@ -551,7 +588,17 @@ export class FleetBootstrapper {
         ? (
             standardFleetAlreadyComplete
               ? 0n
-              : this.config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+              // Stage 2 master gas budget — covers distributor.stake() (~0.003
+              // ETH at typical 6 gwei Base Sepolia) plus per-extra-service
+              // top-up transfers. Previously this was `× 2` for fresh fleets,
+              // which double-counted a service-1 transfer that doesn't actually
+              // fire (HD-1 carries Stage 1 leftover, gets a conditional top-up
+              // only if needed). See jinn-mono-u34i: the `× 2` figure also
+              // exceeded the post-Stage-1 master balance at the operator-facing
+              // 0.020 ETH budget by ~127k gwei of Stage 1 gas burn, causing a
+              // second funding prompt.
+              : this.config.minEoaGasEth +
+                this.config.minEoaGasEth * BigInt(Math.max(0, this.targetServices - 1))
           )
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
       const autoFaucetEnabled = this.autoTestnetFaucet;

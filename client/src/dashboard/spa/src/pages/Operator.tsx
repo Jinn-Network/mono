@@ -36,7 +36,9 @@ export function OperatorPage({ onRestartPending = () => undefined }: OperatorPag
 
   const chain = data?.chain ?? 'base-sepolia';
   const rpcUrl = data?.rpcUrl ?? '';
-  const defaultRpcUrl = data?.defaultRpcUrl ?? (chain === 'base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org');
+  const defaultRpcUrl = data?.defaultRpcUrl ?? (chain === 'base'
+    ? 'https://mainnet.base.org'
+    : 'https://base-sepolia.gateway.tenderly.co/75tyLMQuD8EHpXxMwINIKu');
 
   return (
     <div

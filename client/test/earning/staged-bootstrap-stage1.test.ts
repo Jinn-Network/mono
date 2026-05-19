@@ -183,14 +183,16 @@ describe('FleetBootstrapper.ensureStage1 — greenfield walk (nghf)', () => {
     expect((bootstrapper as any).stepFleetIdentityRegister).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects funding at the gate when master has exactly the old (pre-u34i) threshold but not enough for transfer + gas (jinn-mono-u34i)', async () => {
+  it('rejects funding at the gate when master has only enough for Stage 1 transfer (jinn-mono-u34i)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage1-'));
     dirs.push(earningDir);
     const bootstrapper = buildBootstrapper(earningDir);
-    // 0.011 ETH on the master — above the OLD 0.01 ETH gate, below the NEW
-    // STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH gate. Pre-fix this would
-    // pass the gate and then revert in the funding tx with
-    // "gas required exceeds allowance (0)".
+    // 0.011 ETH on the master — above the pre-u34i 0.010 ETH gate (which
+    // equaled the transfer amount → zero gas headroom → revert), and BELOW
+    // the new full-bootstrap budget of 0.020 ETH. Pre-fix this either
+    // halted in the funding tx OR halted at Stage 2's separate gate after
+    // Stage 1 succeeded. Now the daemon refuses to even enter Stage 1
+    // until the operator funds the whole bootstrap up front.
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
       11_000_000_000_000_000n, // 0.011 ETH
     );
@@ -201,7 +203,26 @@ describe('FleetBootstrapper.ensureStage1 — greenfield walk (nghf)', () => {
     expect(result.fleet_state.fleet_stage).toBe('none');
   });
 
-  it('accepts funding when master has STAGE1_AGENT_ETH + minEoaGasEth = 0.015 ETH (jinn-mono-u34i)', async () => {
+  it('rejects funding at the gate when master is one wei below the full-bootstrap budget (jinn-mono-u34i boundary)', async () => {
+    // Boundary test for the new full-bootstrap gate: STAGE1_AGENT_ETH (0.010)
+    // + minEoaGasEth*2 (0.010) = 0.020 ETH for N=1. Below this by even one
+    // wei must be rejected — otherwise Stage 1 would succeed, drain master
+    // to (gate - STAGE1_AGENT_ETH - 1 wei = 0.010 - 1 wei), and Stage 2's
+    // existing gate (also 0.010) would re-prompt. The whole point of bumping
+    // Stage 1's gate is that this scenario can never reach Stage 2 with
+    // insufficient master ETH.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage1-'));
+    dirs.push(earningDir);
+    const bootstrapper = buildBootstrapper(earningDir);
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      20_000_000_000_000_000n - 1n, // 0.020 ETH minus one wei
+    );
+    const result = await bootstrapper.ensureStage1('test-password');
+    expect(result.ok).toBe(false);
+    expect(result.funding?.eth_required).toBe('1'); // shortfall = exactly 1 wei
+  });
+
+  it('accepts funding when master has the full-bootstrap budget (jinn-mono-u34i one-shot funding)', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-u34i-stage1-'));
     dirs.push(earningDir);
 
@@ -212,12 +233,12 @@ describe('FleetBootstrapper.ensureStage1 — greenfield walk (nghf)', () => {
 
     const bootstrapper = buildBootstrapper(earningDir);
 
-    // Exactly 0.015 ETH — the new gate's minimum. Pre-fix this would have
-    // sailed past the old 0.01 ETH gate too, but the funding tx (transfer
-    // 0.01 ETH + gas) had no headroom. With the new gate, this is the
-    // minimum balance that should allow Stage 1 to proceed.
+    // Exactly 0.020 ETH — the full-bootstrap budget for N=1 standard mode.
+    // After Stage 1 transfers 0.010 ETH to HD-1, master sits at 0.010 ETH
+    // which exactly satisfies Stage 2's existing 0.010 ETH gate. End result:
+    // operator funds once, daemon completes both stages without re-prompting.
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
-      15_000_000_000_000_000n, // 0.015 ETH
+      20_000_000_000_000_000n, // 0.020 ETH
     );
     let safeDeployed = false;
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockImplementation(async () =>

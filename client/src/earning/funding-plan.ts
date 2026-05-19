@@ -90,7 +90,6 @@ export interface FundingPlan {
 }
 
 const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
-const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
 const addr = (value: string): Address => getAddress(value) as Address;
 
@@ -238,8 +237,14 @@ export async function planFleetFunding(
           standardFleetAlreadyComplete
             ? 0n
             : isPreStage1
-              ? stage1MinMasterEth(config)
-              : config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+              ? stage1MinMasterEth(config, targetServices)
+              // Stage 2 master gas budget (post-Stage-1 funding plan view) —
+              // mirrors the gate in ensureStage1And2 after the jinn-mono-u34i
+              // tightening: minEoaGasEth (stake gas) + per-extra-service
+              // transfers. The `× 2` heuristic was dropped because for N=1
+              // it double-counted a service-1 transfer that doesn't fire.
+              : config.minEoaGasEth +
+                config.minEoaGasEth * BigInt(Math.max(0, targetServices - 1))
         )
       : SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);
 

@@ -5,12 +5,21 @@ interface Props {
   address: string;
   minimumWei: string;
   chainExplorerBase: string;
+  /** Daemon's configured chain (e.g. 'base' or 'base-sepolia'). Surfaced in
+   *  the funding-card copy so the operator knows which network to send on. */
+  chain?: string;
 }
+
+const CHAIN_DISPLAY_NAME: Record<string, string> = {
+  base: 'Base',
+  'base-sepolia': 'Base Sepolia',
+};
 
 export function AwaitingFundingCard({
   address,
   minimumWei,
   chainExplorerBase,
+  chain,
 }: Props): JSX.Element {
   const [copied, setCopied] = useState(false);
   const [fundingStartedAt, setFundingStartedAt] = useState<number | null>(null);
@@ -161,7 +170,7 @@ export function AwaitingFundingCard({
           {address}
         </span>
         <span className="j-mono text-xs" style={{ color: 'var(--fg-muted)' }}>
-          send at least {minimumEth} so the daemon can pay gas for setup, or use the testnet faucet.
+          send at least {minimumEth} on {CHAIN_DISPLAY_NAME[chain ?? ''] ?? 'this chain'}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-2">

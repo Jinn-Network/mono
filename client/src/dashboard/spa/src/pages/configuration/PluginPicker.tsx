@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { canonicalHarnessName, HERMES_AGENT_HARNESS } from './harnessNames.js';
 
 export interface CatalogPluginOption {
   name: string;
@@ -19,9 +20,15 @@ export interface PluginPickerProps {
   onChange: (plugins: string[], disabledDefaultPlugins: string[]) => void;
   rowTestId: string;
   searchTestId: string;
+  /**
+   * Selected harness. Determines which bundled plugins are surfaced as
+   * defaults — e.g. Hermes owns its own learning loop (see harness.ts) so
+   * `claude-code-learner` is dropped from the Hermes default set.
+   */
+  harness?: string;
 }
 
-const INCLUDED_PLUGINS: PluginOption[] = [
+const ALL_INCLUDED_PLUGINS: PluginOption[] = [
   {
     name: 'network-tools',
     version: '0.1.0',
@@ -37,6 +44,13 @@ const INCLUDED_PLUGINS: PluginOption[] = [
     description: 'Learner loop',
   },
 ];
+
+function includedPluginsFor(harness: string | undefined): PluginOption[] {
+  if (canonicalHarnessName(harness) === HERMES_AGENT_HARNESS) {
+    return ALL_INCLUDED_PLUGINS.filter((p) => p.name !== 'claude-code-learner');
+  }
+  return ALL_INCLUDED_PLUGINS;
+}
 
 const DEFAULT_COMPATIBLE_PLUGINS = new Set([
   'swe-rebench-v2-runtime',
@@ -75,10 +89,14 @@ function uniquePluginValues(values: string[]): string[] {
   return out;
 }
 
-function buildOptions(available: CatalogPluginOption[], selected: string[]): PluginOption[] {
+function buildOptions(
+  available: CatalogPluginOption[],
+  selected: string[],
+  harness: string | undefined,
+): PluginOption[] {
   const seen = new Set<string>();
   const out: PluginOption[] = [];
-  for (const plugin of INCLUDED_PLUGINS) {
+  for (const plugin of includedPluginsFor(harness)) {
     seen.add(plugin.name);
     out.push(plugin);
   }
@@ -121,11 +139,15 @@ export function PluginPicker({
   onChange,
   rowTestId,
   searchTestId,
+  harness,
 }: PluginPickerProps): JSX.Element {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<PluginOption | null>(null);
-  const options = useMemo(() => buildOptions(available, selected), [available, selected]);
+  const options = useMemo(
+    () => buildOptions(available, selected, harness),
+    [available, selected, harness],
+  );
   const selectedSet = new Set(selected.map(stripBundledPrefix));
   const disabledDefaultSet = new Set(disabledDefaultPlugins.map(stripBundledPrefix));
   const activeSet = new Set(selectedSet);
