@@ -76,9 +76,6 @@ export async function spawnMultiOpDaemons(opts: SpawnMultiOpOptions): Promise<Mu
     for (const op of opts.ops) {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
-        // Allow callers to supply their own RPC via extraEnv; only inject the
-        // fallback when neither JINN_RPC_URL nor BASE_SEPOLIA_RPC_URL is set in
-        // the process environment or extraEnv.
         JINN_RPC_URL: fallbackRpcUrl,
         ...opts.extraEnv,
         HOME: op.home,
