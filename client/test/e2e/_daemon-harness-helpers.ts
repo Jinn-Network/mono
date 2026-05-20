@@ -10,6 +10,7 @@ import {
   createPublicClient,
   createWalletClient,
   decodeEventLog,
+  getAbiItem,
   getAddress,
   http,
   keccak256,
@@ -1688,6 +1689,13 @@ export async function waitForVerdict(
 ): Promise<SettledVerdict> {
   const routerAddress = v3Env.routerAddress;
   const deadline = Date.now() + timeoutMs;
+  // Topic-filter the getLogs scan to just the VerdictDeliveryClaimed event so
+  // the node returns only matching logs (~1 per task) instead of every router
+  // log — keeps RPC payloads small over a worst-case 300s poll window.
+  const verdictEvent = getAbiItem({
+    abi: JINN_ROUTER_ABI,
+    name: 'VerdictDeliveryClaimed',
+  });
   // First scan must cover the block containing TaskCreated — the whole loop
   // (claim → solve → deliver → claimEvaluation → verdict) can race forward on
   // Anvil's instant-mine, so start the floor at the task's creation block.
@@ -1702,6 +1710,7 @@ export async function waitForVerdict(
     if (fromBlock <= currentBlock) {
       const logs = await fixture.publicClient.getLogs({
         address: routerAddress,
+        event: verdictEvent,
         fromBlock,
         toBlock: currentBlock,
       });
