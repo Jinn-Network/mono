@@ -1,3 +1,4 @@
+import * as fs from 'node:fs/promises';
 import { z } from 'zod';
 
 export const FailClassSchema = z.enum(['real-bug', 'flake-infra', 'flake-timing', 'agent-crash']);
@@ -52,4 +53,60 @@ export function classifyFailure(err: unknown): FailClass {
     if (re.test(msg)) return 'flake-timing';
   }
   return 'real-bug';
+}
+
+/** Outcome a scenario body returns when it does not fail (which throws). */
+export type ScenarioOutcome =
+  | { verdict: 'pass' }
+  | { verdict: 'skip'; failNotes: string };
+
+/** Append-only evidence log handed to a scenario body. */
+export interface EvidenceLog {
+  log(msg: string): void;
+}
+
+/**
+ * Run a Tier-1 scenario body with the shared boilerplate: wall-clock timing,
+ * timestamped evidence-log accumulation, the evidence-file write, and the
+ * pass/fail/skip verdict shape. The body runs its logic and either returns a
+ * non-fail outcome or throws — a thrown error becomes a classified `fail`.
+ */
+export async function runScenario(
+  scenarioId: string,
+  opts: ScenarioOptions,
+  body: (evidence: EvidenceLog) => Promise<ScenarioOutcome>,
+): Promise<ScenarioVerdict> {
+  const started = Date.now();
+  const evidenceLines: string[] = [];
+  const evidence: EvidenceLog = {
+    log: (msg) => evidenceLines.push(`[${new Date().toISOString()}] ${msg}`),
+  };
+
+  const writeEvidence = (): Promise<void> =>
+    fs.writeFile(opts.evidencePath, evidenceLines.join('\n'));
+
+  try {
+    const outcome = await body(evidence);
+    await writeEvidence();
+    return {
+      scenarioId,
+      verdict: outcome.verdict,
+      wallClockMs: Date.now() - started,
+      evidencePath: opts.evidencePath,
+      failClass: null,
+      failNotes: outcome.verdict === 'skip' ? outcome.failNotes : null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    evidence.log(`FAILED: ${message}`);
+    await writeEvidence();
+    return {
+      scenarioId,
+      verdict: 'fail',
+      wallClockMs: Date.now() - started,
+      evidencePath: opts.evidencePath,
+      failClass: classifyFailure(err),
+      failNotes: message,
+    };
+  }
 }

@@ -1,7 +1,6 @@
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import * as os from 'node:os';
-import { type ScenarioVerdict, type ScenarioOptions } from '../../../scripts/release/scenario-types.js';
+import { runScenario, type ScenarioVerdict, type ScenarioOptions } from '../../../scripts/release/scenario-types.js';
+
+const SKIP_REASON = 'Ponder spawn helper not available — see GH issue #341';
 
 /**
  * T1.3 — indexer round-trip.
@@ -16,23 +15,10 @@ import { type ScenarioVerdict, type ScenarioOptions } from '../../../scripts/rel
  * so the orchestrator does not block on it.
  */
 export async function runT13IndexerRoundTrip(opts: ScenarioOptions): Promise<ScenarioVerdict> {
-  const started = Date.now();
-  const evidenceLines: string[] = [];
-  const log = (msg: string): void => {
-    evidenceLines.push(`[${new Date().toISOString()}] ${msg}`);
-  };
-
-  log('T1.3 indexer-round-trip — Ponder spawn helper missing; returning skip');
-  log('Tracked: https://github.com/Jinn-Network/mono/issues/341');
-  await fs.writeFile(opts.evidencePath, evidenceLines.join('\n'));
-
-  return {
-    scenarioId: 'T1.3',
-    verdict: 'skip',
-    wallClockMs: Date.now() - started,
-    evidencePath: opts.evidencePath,
-    failClass: null,
-    failNotes: 'Ponder spawn helper not available — see GH issue #341',
-  };
+  return runScenario('T1.3', opts, async ({ log }) => {
+    log('T1.3 indexer-round-trip — Ponder spawn helper missing; returning skip');
+    log('Tracked: https://github.com/Jinn-Network/mono/issues/341');
+    return { verdict: 'skip', failNotes: SKIP_REASON };
+  });
 }
 
