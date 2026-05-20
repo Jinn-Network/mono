@@ -545,8 +545,12 @@ export class TaskEngine {
     const empty: ReapWorkDirsReport = { removed: [], protected: [], scanned: 0, errors: [] };
     if (this.workDirReaperOpts.disabled) return empty;
 
-    const inFlightRequestIds = new Set(this.persistence.getInFlight().map((t) => t.requestId));
-    const terminalRequestIds = new Set(this.persistence.getTerminal().map((t) => t.requestId));
+    // Read the in-flight / terminal partition as a single atomic snapshot.
+    // Two separate queries would leave a TOCTOU window: a task transitioning
+    // DELIVERING → COMPLETE between the reads could be classified terminal and
+    // have its working directory deleted while deliver() still needs it.
+    const { terminal: terminalRequestIds, inFlight: inFlightRequestIds } =
+      this.persistence.getReaperPartition();
 
     const report = reapWorkDirs({
       workingDirRoot: this.paths.workingDirRoot,

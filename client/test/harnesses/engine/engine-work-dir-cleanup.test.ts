@@ -127,4 +127,64 @@ describe('TaskEngine work-dir cleanup (#320)', () => {
 
     expect(existsSync(doneDir)).toBe(false);
   });
+
+  // ── TOCTOU race regression (PR #377 review) ──────────────────────────────
+  //
+  // reapWorkDirsNow() must read the in-flight / terminal partition as a single
+  // atomic snapshot. Two separate queries (getInFlight() + getTerminal()) left
+  // a window where a task transitioning DELIVERING → COMPLETE between the reads
+  // could be classified terminal and have its working dir deleted while
+  // deliver() still referenced files in it — a data-loss vector.
+
+  it('getReaperPartition: a DELIVERING task is classified in-flight, never terminal', () => {
+    persistence.insertDiscovered(makeInput('0xdelivering'));
+    persistence.transition('0xdelivering', TaskRunState.CLAIMED);
+    persistence.transition('0xdelivering', TaskRunState.WAITING);
+    persistence.transition('0xdelivering', TaskRunState.PRE_SNAPSHOT);
+    persistence.transition('0xdelivering', TaskRunState.RUNNING);
+    persistence.transition('0xdelivering', TaskRunState.POST_SNAPSHOT);
+    persistence.transition('0xdelivering', TaskRunState.PACKAGING);
+    persistence.transition('0xdelivering', TaskRunState.DELIVERING);
+
+    const { terminal, inFlight } = persistence.getReaperPartition();
+
+    expect(inFlight.has('0xdelivering')).toBe(true);
+    expect(terminal.has('0xdelivering')).toBe(false);
+  });
+
+  it('getReaperPartition: every row lands in exactly one set (consistent snapshot)', () => {
+    persistence.insertDiscovered(makeInput('0xterminal'));
+    driveToComplete(persistence, '0xterminal');
+    persistence.insertDiscovered(makeInput('0xinflight'));
+    persistence.transition('0xinflight', TaskRunState.CLAIMED);
+    persistence.insertDiscovered(makeInput('0xdiscovered')); // still DISCOVERED
+
+    const { terminal, inFlight } = persistence.getReaperPartition();
+
+    // No request ID appears in both sets, and none is lost.
+    const overlap = [...terminal].filter((id) => inFlight.has(id));
+    expect(overlap).toHaveLength(0);
+    expect(terminal.size + inFlight.size).toBe(3);
+    expect(terminal.has('0xterminal')).toBe(true);
+    expect(inFlight.has('0xinflight')).toBe(true);
+    expect(inFlight.has('0xdiscovered')).toBe(true);
+  });
+
+  it('reapWorkDirsNow never deletes the work dir of a task still DELIVERING', () => {
+    persistence.insertDiscovered(makeInput('0xdelivering'));
+    persistence.transition('0xdelivering', TaskRunState.CLAIMED);
+    persistence.transition('0xdelivering', TaskRunState.WAITING);
+    persistence.transition('0xdelivering', TaskRunState.PRE_SNAPSHOT);
+    persistence.transition('0xdelivering', TaskRunState.RUNNING);
+    persistence.transition('0xdelivering', TaskRunState.POST_SNAPSHOT);
+    persistence.transition('0xdelivering', TaskRunState.PACKAGING);
+    persistence.transition('0xdelivering', TaskRunState.DELIVERING);
+    const dir = makeWorkDir(workRoot, '0xdelivering');
+
+    const report = engine.reapWorkDirsNow();
+
+    expect(existsSync(dir)).toBe(true);
+    expect(report.protected).toContain('0xdelivering');
+    expect(report.removed).not.toContain('0xdelivering');
+  });
 });
