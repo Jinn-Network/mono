@@ -155,7 +155,9 @@ describe('<OverviewActivityPage />', () => {
     });
     wrap(<OverviewActivityPage pollIntervalMs={60_000} />);
     await waitFor(() => {
-      expect(screen.getByTestId('overview-activity-recent-empty')).toBeTruthy();
+      const empty = screen.getByTestId('overview-activity-recent-empty');
+      expect(empty).toBeTruthy();
+      expect(empty.textContent).toMatch(/no recent activity/i);
     });
   });
 });
