@@ -342,6 +342,36 @@ describe('<JoinedNetCard />', () => {
     expect(screen.queryByTestId('joined-net-card-orphaned')).toBeNull();
   });
 
+  // Regression for #338: rvx in the v0.1.6 dogfood asked "what does 'stops
+  // claims' mean? and 'on the next restart' — does this mean it'll keep going
+  // until I restart?" The pre-fix copy said only "Leaving stops claims for
+  // this SolverNet on the next daemon restart." which was ambiguous on three
+  // axes: (a) what happens right now to the config, (b) what the running
+  // daemon does in the meantime, (c) what happens to in-flight tasks. The
+  // copy must now say all three explicitly.
+  it('Leave explainer covers immediate config removal, the until-restart behaviour, and the in-flight caveat (#338)', () => {
+    wrap(<JoinedNetCard joined={ENTRY} catalogEntry={CATALOG} defaultExpanded />);
+    const explainer = screen.getByTestId('joined-net-card-leave-explainer');
+    const text = explainer.textContent ?? '';
+    // (a) immediate effect on config.
+    expect(text).toMatch(/removes this SolverNet from your config right away/i);
+    // (b) running daemon keeps going until restart.
+    expect(text).toMatch(/keeps? .*loaded copy in memory/i);
+    expect(text).toMatch(/until you restart/i);
+    // (c) in-flight task caveat.
+    expect(text).toMatch(/already in flight/i);
+  });
+
+  it('Retired-banner copy explains the post-leave restart step (#338)', async () => {
+    wrap(<JoinedNetCard joined={ENTRY} defaultExpanded />);
+    const banner = await waitFor(() =>
+      screen.getByTestId('joined-net-card-orphaned'),
+    );
+    const text = banner.textContent ?? '';
+    expect(text).toMatch(/removes the entry from your config/i);
+    expect(text).toMatch(/restart the daemon/i);
+  });
+
   describe('orphaned state (manifest fetch fails)', () => {
     it('shows the RETIRED banner and a Leave button, no edit form, when manifest fetch fails', async () => {
       // Card resolves internally; the suite-level mock makes both queries fail.

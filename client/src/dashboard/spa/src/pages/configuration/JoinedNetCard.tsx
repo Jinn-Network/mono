@@ -359,7 +359,7 @@ export function JoinedNetCard({
           <span style={{ color: 'var(--wane)', textTransform: 'uppercase', letterSpacing: '0.14em', fontSize: '10px', marginRight: '8px' }}>
             Retired
           </span>
-          Manifest no longer in the registry. This SolverNet is not claiming on-chain anymore — leaving it cleans up your config.
+          Manifest no longer in the registry. This SolverNet is not claiming on-chain anymore — leaving it removes the entry from your config. Restart the daemon afterwards so it stops looking for this manifest at startup.
           {leaveMutation.isError && (
             <div role="alert" style={{ marginTop: '6px', color: 'var(--break-red)', fontSize: '11px' }}>
               {leaveMutation.error instanceof Error ? leaveMutation.error.message : 'Leave failed.'}
@@ -687,21 +687,27 @@ export function JoinedNetCard({
               borderTop: '1px dashed var(--border)',
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center',
+              alignItems: 'flex-start',
               gap: '12px',
               flexWrap: 'wrap',
             }}
           >
             <span
+              data-testid="joined-net-card-leave-explainer"
               style={{
                 fontFamily: "'JetBrains Mono', monospace",
                 fontSize: '11px',
                 color: 'var(--fg-dim)',
                 lineHeight: 1.5,
+                maxWidth: '440px',
               }}
             >
-              Leaving stops claims for this SolverNet on the next daemon
-              restart. You can re-join from the Discover catalog later.
+              Leave removes this SolverNet from your config right away. The
+              running daemon keeps its loaded copy in memory, so it will go on
+              claiming and finishing tasks for this SolverNet until you restart
+              it — restart to actually stop new claims. Tasks already in flight
+              run to completion either way. You can re-join from the Discover
+              catalog later.
             </span>
             {!confirmingLeave ? (
               <button
