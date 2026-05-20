@@ -451,14 +451,7 @@ describe('probeCodexDoctor — auth liveness (#366)', () => {
 
   it('falls back to access_token expiry when id_token carries no exp', () => {
     okSpawn();
-    const header = Buffer.from('{}').toString('base64url');
-    const noExpPayload = Buffer.from(JSON.stringify({ sub: 'u' })).toString('base64url');
-    const idTokenNoExp = `${header}.${noExpPayload}.sig`;
     const futureExp = Math.floor(NOW_MS / 1000) + 3600;
-    const accessPayload = Buffer.from(
-      JSON.stringify({ sub: 'u', exp: futureExp }),
-    ).toString('base64url');
-    const accessToken = `${header}.${accessPayload}.sig`;
 
     const result = probeCodexDoctor({
       env: {},
@@ -467,7 +460,7 @@ describe('probeCodexDoctor — auth liveness (#366)', () => {
         JSON.stringify({
           auth_mode: 'chatgpt',
           OPENAI_API_KEY: null,
-          tokens: { id_token: idTokenNoExp, access_token: accessToken },
+          tokens: { id_token: jwtWithExp(undefined), access_token: jwtWithExp(futureExp) },
         }),
     });
     expect(result.authStatus).toBe('ok');

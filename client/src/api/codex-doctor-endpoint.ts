@@ -87,6 +87,10 @@ interface CodexAuthFile {
  * Decodes a JWT's payload and returns its `exp` claim (epoch seconds), or
  * `undefined` when the token is absent, malformed, or carries no `exp`.
  * Defensive: never throws.
+ *
+ * Note: the JWT signature is intentionally NOT verified — this is not a
+ * security gap. The daemon only needs the `exp` claim for a liveness hint;
+ * Codex itself verifies signatures when the token is actually used.
  */
 function jwtExpiry(token: string | null | undefined): number | undefined {
   if (typeof token !== 'string' || token.length === 0) return undefined;
