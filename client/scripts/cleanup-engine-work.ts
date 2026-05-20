@@ -191,10 +191,12 @@ function main(): void {
     }
   }
 
-  const reclaimable = candidates.reduce(
-    (sum, name) => sum + dirSizeBytes(join(workingDirRoot, name)),
-    0,
+  // Size each candidate once, up front. The dry run reports this as the
+  // reclaimable estimate; the --apply path sums the subset actually removed.
+  const candidateSizes = new Map(
+    candidates.map((name) => [name, dirSizeBytes(join(workingDirRoot, name))]),
   );
+  const reclaimable = [...candidateSizes.values()].reduce((a, b) => a + b, 0);
 
   console.log(
     `  scanned ${entries.length} dir(s); ${candidates.length} removable ` +
@@ -221,7 +223,11 @@ function main(): void {
     orphanMaxAgeMs,
   });
 
-  console.log(`  removed ${report.removed.length} dir(s); ~${humanBytes(reclaimable)} freed.`);
+  const freed = report.removed.reduce(
+    (sum, name) => sum + (candidateSizes.get(name) ?? 0),
+    0,
+  );
+  console.log(`  removed ${report.removed.length} dir(s); ${humanBytes(freed)} freed.`);
   if (report.errors.length > 0) {
     console.log(`  ${report.errors.length} dir(s) could not be removed:`);
     for (const e of report.errors) console.log(`    - ${e.requestId}: ${e.error}`);
