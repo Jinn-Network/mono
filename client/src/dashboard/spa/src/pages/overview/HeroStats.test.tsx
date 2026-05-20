@@ -11,6 +11,7 @@ function defaultProps() {
     statusLabel: 'WORKING',
     statusState: 'working' as const,
     statusDot: 'var(--vow-green)',
+    statusReason: '1 task restoring',
     activeAction: null,
     evicted: false,
     onClaim: () => undefined,
@@ -85,5 +86,54 @@ describe('HeroStats', () => {
   it('does not render Re-stake now button when evicted=true but onRestake is not provided (jinn-mono-hjex.3)', () => {
     render(<HeroStats {...defaultProps()} evicted={true} evictedServiceId={42} />);
     expect(screen.queryByTestId('restake-button')).toBeNull();
+  });
+
+  // ── Status tile reason line (jinn-mono #328 fix #1) ───────────────────────
+  //
+  // The STATUS hero tile used to render only the label ("ATTENTION") with no
+  // explanation. `statusReason` (deriveLiveNow().line) is now surfaced as a
+  // small subdued secondary line under the label so the operator sees *why*.
+  it('renders the status reason line under the STATUS label (jinn-mono #328 fix #1)', () => {
+    render(<HeroStats {...defaultProps()} statusReason="1 task restoring" />);
+    const reason = screen.getByTestId('overview-status-reason');
+    expect(reason.textContent).toBe('1 task restoring');
+    // The reason lives inside the STATUS tile, not elsewhere on the page.
+    expect(screen.getByTestId('overview-status-stat').contains(reason)).toBe(true);
+  });
+
+  it('surfaces the attention reason so ATTENTION is never bare (jinn-mono #328 fix #1)', () => {
+    render(
+      <HeroStats
+        {...defaultProps()}
+        statusLabel="ATTENTION"
+        statusState="attention"
+        statusDot="var(--break-red)"
+        statusReason="Harness does not support prediction.v1"
+      />,
+    );
+    expect(screen.getByText('ATTENTION')).toBeTruthy();
+    expect(screen.getByTestId('overview-status-reason').textContent).toBe(
+      'Harness does not support prediction.v1',
+    );
+  });
+
+  it('renders the reason line in non-attention states too (jinn-mono #328 fix #1)', () => {
+    render(
+      <HeroStats
+        {...defaultProps()}
+        statusLabel="IDLE"
+        statusState="idle"
+        statusDot="var(--fg-muted)"
+        statusReason="waiting for next task"
+      />,
+    );
+    expect(screen.getByTestId('overview-status-reason').textContent).toBe(
+      'waiting for next task',
+    );
+  });
+
+  it('omits the reason line when statusReason is empty (jinn-mono #328 fix #1)', () => {
+    render(<HeroStats {...defaultProps()} statusReason="" />);
+    expect(screen.queryByTestId('overview-status-reason')).toBeNull();
   });
 });
