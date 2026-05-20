@@ -19,10 +19,13 @@ The jinn app is the operator dashboard SPA at `client/src/dashboard/spa/`, serve
 
 ## Daemon spawn (shared by both recipes)
 
-All commands assume cwd = `jinn-mono/cargo/client`.
+All commands assume cwd = `jinn-mono/client`.
 
 1. Build: `yarn build` — produces `dist/bin/jinn.js` and the SPA bundle in `dist/dashboard/`. **Re-run after every SPA source edit** — the daemon serves the bundled SPA from disk.
 2. Spawn: `node dist/bin/jinn.js run --no-ui`. **Against the operator's real `~/.jinn`, that's the whole command** — the daemon auto-reads `~/.jinn-client/keystore-password` (written at first bootstrap) when `JINN_PASSWORD` is unset. Do NOT ask the operator for a password.
+
+   > **CAVEAT — Restart-button / respawn tests must NOT use `--no-ui`.**
+   > `--no-ui` sets `JINN_NO_UI=1`, which puts the daemon into headless/supervised mode. In that mode, `requestDaemonRestart` (see `client/src/restart-daemon.ts`) skips the in-process respawn and calls `process.exit(0)` instead — it expects an external supervisor (systemd, Docker, etc.) to bring the daemon back. If you are testing the operator **Restart** button or any restart-respawn behaviour (issue #289), launch the daemon **without** `--no-ui`; otherwise the restart kills the daemon with no respawn and the test cannot pass.
 
    Env vars only matter when you're deviating from the default setup:
    - `HOME=<tmpdir>` — only set for a *fresh, clean-state* spawn (e.g. E2E test). Omit to attach to the bootstrapped fleet at `~/.jinn` (Base Sepolia master `0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF`, agent #5474, safe `0x0e767E28C6889CcD0DfB88E631a3702D56Ce24FC`).
