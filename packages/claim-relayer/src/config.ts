@@ -70,7 +70,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ClaimRelayerCo
     dbPath: path.resolve(env.JINN_CLAIM_RELAYER_DB_PATH ?? path.join(homedir(), '.jinn', 'claim-relayer.sqlite')),
     port: parseNumber(env.JINN_CLAIM_RELAYER_PORT, 8737, 'JINN_CLAIM_RELAYER_PORT'),
     pollIntervalMs: parseNumber(env.JINN_CLAIM_RELAYER_POLL_INTERVAL_MS, 60_000, 'JINN_CLAIM_RELAYER_POLL_INTERVAL_MS'),
-    batchBlocks: parseInteger(env.JINN_CLAIM_RELAYER_BATCH_BLOCKS ?? '5000', 'JINN_CLAIM_RELAYER_BATCH_BLOCKS'),
+    batchBlocks: parseInteger(env.JINN_CLAIM_RELAYER_BATCH_BLOCKS ?? '2000', 'JINN_CLAIM_RELAYER_BATCH_BLOCKS'),
     artifacts,
   };
 }

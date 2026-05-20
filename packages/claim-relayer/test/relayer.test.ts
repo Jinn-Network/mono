@@ -140,6 +140,7 @@ function makeClients(options: {
   fixture?: MessengerFixture;
   snapshot?: ClaimSnapshot;
   onchainSnapshotHash?: Hex;
+  legacyWeightGetters?: boolean;
   distributorState?: {
     operatorRatio?: bigint;
     daoRatio?: bigint;
@@ -169,6 +170,18 @@ function makeClients(options: {
     readContract: vi.fn(async ({ functionName }: any) => {
       if (functionName === 'owner') return options.owner ?? SIGNER;
       if (functionName === 'messenger') return options.distributorMessenger ?? MESSENGER;
+      if (options.legacyWeightGetters) {
+        if (
+          functionName === 'wTaskCreation' ||
+          functionName === 'wSolutionDelivery' ||
+          functionName === 'wVerdictDelivery'
+        ) {
+          throw new Error(`missing live getter ${functionName}`);
+        }
+        if (functionName === 'wCreation') return distributorState.wTaskCreation;
+        if (functionName === 'wRestorationDelivery') return distributorState.wSolutionDelivery;
+        if (functionName === 'wEvaluationDelivery') return distributorState.wVerdictDelivery;
+      }
       if (functionName in distributorState) {
         return distributorState[functionName as keyof typeof distributorState];
       }
@@ -265,6 +278,22 @@ describe('ClaimRelayer', () => {
     expect(clients.l1Public.simulateContract).not.toHaveBeenCalled();
     expect(clients.l1Wallet.writeContract).not.toHaveBeenCalled();
     expect(store.countByStatus().skipped).toBe(1);
+  });
+
+  it('falls back to the live Sepolia distributor weight getter names', async () => {
+    const store = makeStore();
+    const clients = makeClients({ legacyWeightGetters: true });
+    const relayer = new ClaimRelayer(makeConfig(), store, clients);
+
+    await expect(relayer.runOnce()).resolves.toMatchObject({ claimed: 1, failed: 0 });
+
+    const readNames = clients.l1Public.readContract.mock.calls.map((call) => call[0].functionName);
+    expect(readNames).toContain('wTaskCreation');
+    expect(readNames).toContain('wCreation');
+    expect(readNames).toContain('wSolutionDelivery');
+    expect(readNames).toContain('wRestorationDelivery');
+    expect(readNames).toContain('wVerdictDelivery');
+    expect(readNames).toContain('wEvaluationDelivery');
   });
 
   it('fails on fixture mismatch and does not submit claim', async () => {

@@ -221,9 +221,9 @@ export class ClaimRelayer {
     ] = await Promise.all([
       this.readDistributorUint('operatorRatio'),
       this.readDistributorUint('daoRatio'),
-      this.readDistributorUint('wTaskCreation'),
-      this.readDistributorUint('wSolutionDelivery'),
-      this.readDistributorUint('wVerdictDelivery'),
+      this.readDistributorWeight('wTaskCreation', 'wCreation'),
+      this.readDistributorWeight('wSolutionDelivery', 'wRestorationDelivery'),
+      this.readDistributorWeight('wVerdictDelivery', 'wEvaluationDelivery'),
       this.readDistributorUint('totalClaimedOperator', [snapshot.serviceId]),
       this.readDistributorUint('totalClaimedDao', [snapshot.serviceId]),
     ]);
@@ -248,6 +248,14 @@ export class ClaimRelayer {
       functionName,
       args,
     }) as Promise<bigint>;
+  }
+
+  private async readDistributorWeight(primary: string, legacy: string): Promise<bigint> {
+    try {
+      return await this.readDistributorUint(primary);
+    } catch {
+      return this.readDistributorUint(legacy);
+    }
   }
 
   private async assertSnapshotHash(snapshot: ClaimSnapshot): Promise<void> {

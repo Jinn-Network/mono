@@ -112,6 +112,27 @@ export const JINN_DISTRIBUTOR_ABI = [
   },
   {
     type: 'function',
+    name: 'wCreation',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'wRestorationDelivery',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'wEvaluationDelivery',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
     name: 'totalClaimedOperator',
     stateMutability: 'view',
     inputs: [{ name: 'serviceId', type: 'uint256' }],

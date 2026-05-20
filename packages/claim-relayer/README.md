@@ -16,7 +16,7 @@ Optional environment:
 - `JINN_CLAIM_RELAYER_DB_PATH`
 - `JINN_CLAIM_RELAYER_PORT`
 - `JINN_CLAIM_RELAYER_POLL_INTERVAL_MS`
-- `JINN_CLAIM_RELAYER_BATCH_BLOCKS`
+- `JINN_CLAIM_RELAYER_BATCH_BLOCKS` (defaults to `2000`, matching the Base Sepolia public RPC log-range cap)
 
 Default artifacts are resolved from `../../client/deployments/deployment-jinn-mvi-l1-sepolia.json`
 and `../../client/deployments/deployment-jinn-mvi-l2-baseSepolia.json`.
