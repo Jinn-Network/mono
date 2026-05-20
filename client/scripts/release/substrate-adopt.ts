@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { goldPath } from './substrate-paths';
+import { copyTree, goldPath } from './substrate-paths';
 import type { Manifest } from './types';
 import { ManifestSchema } from './types';
 
@@ -14,6 +14,10 @@ const EXCLUDE_PATTERNS: RegExp[] = [
   /^run-/,
 ];
 
+function isExcluded(name: string): boolean {
+  return EXCLUDE_DIRS.has(name) || EXCLUDE_PATTERNS.some((re) => re.test(name));
+}
+
 export interface AdoptOptions {
   sourceDir: string;            // path to the existing .jinn-client/ dir
   opName: string;               // "op-a", "op-b", etc.
@@ -21,25 +25,6 @@ export interface AdoptOptions {
   shape: Manifest['shape'];
   apiPort: number;
   substrateRoot?: string;
-}
-
-async function copyTreeWithExcludes(srcDir: string, dstDir: string): Promise<void> {
-  await fs.mkdir(dstDir, { recursive: true });
-  const entries = await fs.readdir(srcDir, { withFileTypes: true });
-  for (const ent of entries) {
-    if (EXCLUDE_DIRS.has(ent.name)) continue;
-    if (EXCLUDE_PATTERNS.some((re) => re.test(ent.name))) continue;
-    const srcPath = path.join(srcDir, ent.name);
-    const dstPath = path.join(dstDir, ent.name);
-    if (ent.isDirectory()) {
-      await copyTreeWithExcludes(srcPath, dstPath);
-    } else if (ent.isFile()) {
-      await fs.copyFile(srcPath, dstPath);
-      // preserve mode (keystore-password should remain chmod 600)
-      const stat = await fs.stat(srcPath);
-      await fs.chmod(dstPath, stat.mode);
-    }
-  }
 }
 
 async function readJsonOrNull<T>(p: string): Promise<T | null> {
@@ -83,7 +68,7 @@ export async function adoptOperator(opts: AdoptOptions): Promise<void> {
   await fs.mkdir(goldJinn, { recursive: true });
 
   // 2. Copy the source dir with excludes
-  await copyTreeWithExcludes(opts.sourceDir, goldJinn);
+  await copyTree(opts.sourceDir, goldJinn, isExcluded);
 
   // 3. Rewrite apiPort in the copied config.json
   const cfgPath = path.join(goldJinn, 'config.json');

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { goldPath, workspacePath, generateRunId } from './substrate-paths';
+import { copyTree, goldPath, workspacePath, generateRunId } from './substrate-paths';
 
 export interface CopyWorkspaceOptions {
   ops: string[];                    // names of gold ops to include
@@ -13,22 +13,6 @@ export interface WorkspaceHandle {
   workspaceRoot: string;            // ~/jinn-dev/workspaces/<run-id>/
   opPaths: Record<string, string>;  // opName → ~/jinn-dev/workspaces/<run-id>/<opName>/
   teardown: () => Promise<void>;
-}
-
-async function copyDir(src: string, dst: string): Promise<void> {
-  await fs.mkdir(dst, { recursive: true });
-  const entries = await fs.readdir(src, { withFileTypes: true });
-  for (const ent of entries) {
-    const s = path.join(src, ent.name);
-    const d = path.join(dst, ent.name);
-    if (ent.isDirectory()) {
-      await copyDir(s, d);
-    } else if (ent.isFile()) {
-      await fs.copyFile(s, d);
-      const stat = await fs.stat(s);
-      await fs.chmod(d, stat.mode);
-    }
-  }
 }
 
 export async function copyWorkspace(opts: CopyWorkspaceOptions): Promise<WorkspaceHandle> {
@@ -49,7 +33,7 @@ export async function copyWorkspace(opts: CopyWorkspaceOptions): Promise<Workspa
   for (const opName of opts.ops) {
     const src = goldPath(opName, opts.substrateRoot);
     const dst = workspacePath(runId, opName, opts.substrateRoot);
-    await copyDir(src, dst);
+    await copyTree(src, dst);
     opPaths[opName] = dst;
   }
 
