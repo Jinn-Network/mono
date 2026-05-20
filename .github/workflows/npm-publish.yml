@@ -188,18 +188,14 @@ jobs:
         working-directory: contracts
         run: yarn install --immutable
 
-      # NOTE: marked continue-on-error 2026-05-19 because the gate
-      # saturates the Tenderly Base Sepolia key during a single run —
-      # multiple full fork operator bootstraps in one job exceed the
-      # quota and produce HTTP errors unrelated to the candidate release.
-      # See jinn-mono-lrey for the architectural follow-up
-      # (per-call RPC footprint, key isolation, fork-state caching, etc.).
-      # Until that lands, ship decisions rely on independent evidence
-      # (real testnet A3 verification, local release-prep gates).
-      - name: Release gate — operator-gate (staking + e2e on Anvil fork)
+      # Tier 1 — mechanical floor (per spec/2026-05-19 §3 of release-readiness design).
+      # Replaces the legacy operator-gate that saturated the Tenderly RPC under
+      # multi-bootstrap load (see jinn-mono-lrey). Tier 1 runs four scenarios
+      # (T1.1-T1.4) in parallel against a single Anvil fork; per-scenario budgets
+      # cap wall-clock; verdicts feed the release-evidence marker.
+      - name: Release gate — Tier 1 mechanical floor
         if: steps.meta.outputs.dist_tag == 'latest'
-        continue-on-error: true
-        run: yarn release:operator-gate
+        run: yarn release:tier-1 "${{ steps.meta.outputs.publish_version }}"
 
       - name: Publish stable
         if: steps.meta.outputs.dist_tag == 'latest'
