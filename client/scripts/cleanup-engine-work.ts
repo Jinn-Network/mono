@@ -182,10 +182,14 @@ function main(): void {
       candidates.push(name);
       continue;
     }
-    // Orphan — age-gate it.
+    // Orphan — age-gate it. Prefer birthtime (creation) over mtime so a
+    // continuously-written orphan still ages out; fall back to mtime where
+    // the platform does not record birthtime (birthtimeMs === 0). Matches
+    // the daemon reaper in work-dir-reaper.ts.
     try {
-      const mtimeMs = statSync(join(workingDirRoot, name)).mtimeMs;
-      if (now - mtimeMs >= orphanMaxAgeMs) candidates.push(name);
+      const st = statSync(join(workingDirRoot, name));
+      const ageRefMs = st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs;
+      if (now - ageRefMs >= orphanMaxAgeMs) candidates.push(name);
     } catch {
       /* vanished — skip */
     }

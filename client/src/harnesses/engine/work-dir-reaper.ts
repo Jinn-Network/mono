@@ -87,11 +87,16 @@ export function reapWorkDirs(opts: ReapWorkDirsOptions): ReapWorkDirsReport {
   for (const requestId of entries) {
     const dir = join(opts.workingDirRoot, requestId);
     let isDir = false;
-    let mtimeMs = 0;
+    // Age the orphan off its creation time where the platform records it
+    // (birthtimeMs > 0, e.g. APFS / ext4). Writing a file into an orphan dir
+    // bumps mtime, so an mtime-only TTL would keep a continuously-written
+    // orphan alive forever. Fall back to mtime where birthtime is unavailable
+    // (returns 0), which is the conservative, never-too-aggressive choice.
+    let ageRefMs = 0;
     try {
       const st = statSync(dir);
       isDir = st.isDirectory();
-      mtimeMs = st.mtimeMs;
+      ageRefMs = st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs;
     } catch {
       continue; // vanished between readdir and stat — fine.
     }
@@ -108,7 +113,7 @@ export function reapWorkDirs(opts: ReapWorkDirsOptions): ReapWorkDirsReport {
     // (3) Orphan (no DB row) — remove only once past the max age.
     const isTerminal = opts.terminalRequestIds.has(requestId);
     const isOrphan = !isTerminal; // not in-flight, not terminal → no row
-    if (isOrphan && now() - mtimeMs < orphanMaxAgeMs) {
+    if (isOrphan && now() - ageRefMs < orphanMaxAgeMs) {
       continue; // young orphan — give the DB a chance to catch up.
     }
 
