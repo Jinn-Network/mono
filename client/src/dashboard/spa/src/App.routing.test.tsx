@@ -155,6 +155,39 @@ describe('App routes', () => {
     ).toBeTruthy());
   });
 
+  // Issue #219: the live activity surface belongs on /overview (the
+  // Dashboard), not on /operator (Settings). Assert both placements at the
+  // route level: present on /overview, absent on /operator.
+  it('renders the activity surface on /overview, not on /operator', async () => {
+    const { unmount } = render(
+      withProviders(
+        <Switch>
+          <Route path="/overview"><OverviewPage /></Route>
+          <Route path="/operator"><OperatorPage /></Route>
+        </Switch>,
+        '/overview',
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-activity-in-flight')).toBeTruthy();
+    });
+    expect(screen.getByTestId('overview-activity-recent')).toBeTruthy();
+    unmount();
+
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/overview"><OverviewPage /></Route>
+          <Route path="/operator"><OperatorPage /></Route>
+        </Switch>,
+        '/operator',
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId('operator-page')).toBeTruthy());
+    expect(screen.queryByTestId('overview-activity-in-flight')).toBeNull();
+    expect(screen.queryByTestId('overview-activity-recent')).toBeNull();
+  });
+
   it('renders LauncherPage on /launcher', async () => {
     render(
       withProviders(
