@@ -69,6 +69,8 @@ export interface HarnessEnv {
   codexPath?: string;
   /** Default Codex model when a SolverNet does not specify one. */
   codexModel?: string;
+  /** Local OpenAI-compatible Codex provider base URL. */
+  codexBaseUrl?: string;
   /**
    * Timeout (ms) for the `codex --version` probe in the Codex variant of
    * `LearnerHarness.isReady`.
@@ -253,6 +255,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   const codexLearnerAdapter = new CodexCodeHarnessAdapter({
     codexPath: env.codexPath,
     codexModel: env.codexModel,
+    codexBaseUrl: env.codexBaseUrl,
     storePath: env.storePath,
     daemonApiUrl: env.daemonApiUrl,
     daemonApiToken: env.daemonApiToken,
@@ -263,6 +266,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     adapter: codexLearnerAdapter,
     claudePath: env.claudePath,
     ...(env.codexPath !== undefined ? { codexPath: env.codexPath } : {}),
+    ...(env.codexModel !== undefined ? { codexModel: env.codexModel } : {}),
+    ...(env.codexBaseUrl !== undefined ? { codexBaseUrl: env.codexBaseUrl } : {}),
     ...(env.codexDoctorTimeoutMs !== undefined
       ? { codexDoctorTimeoutMs: env.codexDoctorTimeoutMs }
       : {}),

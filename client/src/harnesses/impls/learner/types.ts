@@ -130,6 +130,10 @@ export interface LearnerHarnessConfig {
    * passed to `probeCodexDoctor()`. Defaults to 'codex' (from PATH).
    */
   codexPath?: string;
+  /** Default Codex model when a SolverNet does not specify one. */
+  codexModel?: string;
+  /** Local OpenAI-compatible Codex provider base URL. */
+  codexBaseUrl?: string;
   /**
    * Timeout (ms) for the `codex --version` probe in the Codex variant's
    * `isReady()`. Defaults to 30s.

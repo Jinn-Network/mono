@@ -1248,6 +1248,98 @@ describe('hermes config keys', () => {
   });
 });
 
+describe('codex local provider config keys', () => {
+  const dirs: string[] = [];
+  const CODEX_ENV_KEYS = [
+    'JINN_CODEX_MODEL',
+    'JINN_CODEX_BASE_URL',
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+  for (const k of CODEX_ENV_KEYS) saved[k] = process.env[k];
+
+  afterEach(async () => {
+    for (const k of CODEX_ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-codex-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('loads local Codex provider config from file', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      codexModel: 'llama3.1',
+      codexBaseUrl: 'http://127.0.0.1:11434/v1',
+    });
+
+    const cfg = loadConfig(configPath);
+
+    expect(cfg.codexModel).toBe('llama3.1');
+    expect(cfg.codexBaseUrl).toBe('http://127.0.0.1:11434/v1');
+  });
+
+  it('env vars override Codex provider config values', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      codexModel: 'gpt-5.4-mini',
+      codexBaseUrl: 'http://127.0.0.1:11434/v1',
+    });
+    process.env['JINN_CODEX_MODEL'] = 'qwen2.5-coder';
+    process.env['JINN_CODEX_BASE_URL'] = 'http://localhost:1234/v1';
+
+    const cfg = loadConfig(configPath);
+
+    expect(cfg.codexModel).toBe('qwen2.5-coder');
+    expect(cfg.codexBaseUrl).toBe('http://localhost:1234/v1');
+  });
+
+  it('rejects remote Codex provider base URLs', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      codexBaseUrl: 'https://api.openai.com/v1',
+    });
+
+    let caught: any;
+    try {
+      loadConfig(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.code).toBe('config_invalid');
+    const issues: Array<{ path: string; message: string }> = caught.details?.issues ?? [];
+    expect(issues.some((issue) =>
+      issue.path === 'codexBaseUrl' && /must be a local/i.test(issue.message)
+    )).toBe(true);
+  });
+
+  it('rejects credentials embedded in Codex provider base URLs', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      codexBaseUrl: 'http://user:pass@127.0.0.1:11434/v1',
+    });
+
+    let caught: any;
+    try {
+      loadConfig(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.code).toBe('config_invalid');
+    const issues: Array<{ path: string; message: string }> = caught.details?.issues ?? [];
+    expect(issues.some((issue) =>
+      issue.path === 'codexBaseUrl' && /must be a local/i.test(issue.message)
+    )).toBe(true);
+  });
+});
+
 describe('migrateLegacySolverNets', () => {
   it('migrates a single legacy solverNets entry into joinedSolverNets keyed by `legacy:<name>`', () => {
     const raw: Record<string, unknown> = {

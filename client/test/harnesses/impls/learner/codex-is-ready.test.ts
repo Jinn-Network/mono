@@ -86,6 +86,62 @@ describe('LearnerHarness.isReady — Codex variant (#348)', () => {
     expect(result.nextStep?.description).toMatch(/sign in|OPENAI_API_KEY|codex login/i);
   });
 
+  it('returns ready=true for local Codex provider when binary is installed without OpenAI auth', async () => {
+    vi.mocked(probeCodexDoctor).mockReturnValue({
+      installed: true,
+      authenticated: false,
+      authStatus: 'not_configured',
+      exitCode: 0,
+      stdout: 'codex 1.2.3',
+      stderr: '',
+    });
+    const harness = new LearnerHarness({
+      name: CODEX_HARNESS,
+      adapter: new NoOpAdapter(),
+      codexBaseUrl: 'http://127.0.0.1:11434/v1',
+    });
+    const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+    expect(result.ready).toBe(true);
+  });
+
+  it('still requires the Codex binary for local provider readiness', async () => {
+    vi.mocked(probeCodexDoctor).mockReturnValue({
+      installed: false,
+      authenticated: false,
+      authStatus: 'not_configured',
+      exitCode: null,
+      stdout: '',
+      stderr: '',
+    });
+    const harness = new LearnerHarness({
+      name: CODEX_HARNESS,
+      adapter: new NoOpAdapter(),
+      codexBaseUrl: 'http://127.0.0.1:11434/v1',
+    });
+    const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toMatch(/not installed/i);
+  });
+
+  it('does not skip Codex auth for remote provider URLs', async () => {
+    vi.mocked(probeCodexDoctor).mockReturnValue({
+      installed: true,
+      authenticated: false,
+      authStatus: 'not_configured',
+      exitCode: 0,
+      stdout: 'codex 1.2.3',
+      stderr: '',
+    });
+    const harness = new LearnerHarness({
+      name: CODEX_HARNESS,
+      adapter: new NoOpAdapter(),
+      codexBaseUrl: 'https://api.openai.com/v1',
+    });
+    const result = await harness.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toMatch(/base URL must be local/i);
+  });
+
   // #366: a stale/expired auth.json must not read as ready. The reason MUST
   // be distinct from the not-configured case so the operator sees a
   // re-login hint rather than a first-time sign-in hint.

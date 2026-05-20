@@ -1,7 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../../src/harnesses/names.js';
+import { probeCodexDoctor } from '../../../src/api/codex-doctor-endpoint.js';
 import type { Harness } from '../../../src/harnesses/types.js';
+
+vi.mock('../../../src/api/codex-doctor-endpoint.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../src/api/codex-doctor-endpoint.js')>();
+  return {
+    ...actual,
+    probeCodexDoctor: vi.fn(),
+  };
+});
 
 const ENV = {
   stub: true as const,
@@ -75,5 +85,25 @@ describe('buildHarnesses — external impls + disabledNames', () => {
     });
     expect(impls.some((impl) => impl.name === CODEX_HARNESS)).toBe(false);
     expect(impls.some((impl) => impl.name === CLAUDE_CODE_HARNESS)).toBe(true);
+  });
+
+  it('threads local Codex provider config into the Codex harness readiness', async () => {
+    vi.mocked(probeCodexDoctor).mockReturnValue({
+      installed: true,
+      authenticated: false,
+      authStatus: 'not_configured',
+      exitCode: 0,
+      stdout: 'codex 1.2.3',
+      stderr: '',
+    });
+    const impls = buildHarnesses({
+      ...ENV,
+      codexBaseUrl: 'http://127.0.0.1:11434/v1',
+    });
+    const codex = impls.find((impl) => impl.name === CODEX_HARNESS);
+
+    expect(codex).toBeDefined();
+    await expect(codex!.isReady!({ solverType: 'swe-rebench-v2.v1', role: 'restoration' }))
+      .resolves.toEqual({ ready: true });
   });
 });
