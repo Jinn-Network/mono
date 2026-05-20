@@ -4,6 +4,8 @@ import type { OperatorNotification } from './taxonomy.js';
 // when wiring this up in Task 1.4. Kept loose here so the deriver can be tested
 // in isolation without dragging the full status schema into the notifications module.
 export interface DeriveInput {
+  /** milliseconds since epoch; defaults to Date.now() if omitted */
+  now?: number;
   bootstrap: { mode: string; blockingReason?: string };
   status: {
     funds: { eth: string; runwayDays: number };
@@ -21,6 +23,15 @@ export interface DeriveInput {
 
 const RUNWAY_LOW_THRESHOLD_DAYS = 3;
 const PASSWORD_ROTATION_INTERVAL_MS = 1000 * 60 * 60 * 24 * 90;
+
+function safeBigInt(s: string | undefined): bigint {
+  if (!s) return 0n;
+  try {
+    return BigInt(s);
+  } catch {
+    return 0n;
+  }
+}
 
 export function deriveNotifications(input: DeriveInput): OperatorNotification[] {
   const out: OperatorNotification[] = [];
@@ -107,7 +118,8 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
   }
 
   if (s.passwordRotatedAt) {
-    const age = Date.now() - new Date(s.passwordRotatedAt).getTime();
+    const now = input.now ?? Date.now();
+    const age = now - new Date(s.passwordRotatedAt).getTime();
     if (age > PASSWORD_ROTATION_INTERVAL_MS) {
       out.push({
         kind: 'password_rotation_due',
@@ -118,7 +130,7 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
     }
   }
 
-  if (BigInt(s.rewards.claimableWei) > 0n) {
+  if (safeBigInt(s.rewards.claimableWei) > 0n) {
     out.push({
       kind: 'claim_available',
       severity: 'info',

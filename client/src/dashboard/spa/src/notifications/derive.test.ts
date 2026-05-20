@@ -79,4 +79,114 @@ describe('deriveNotifications', () => {
     const kinds = out.map(n => n.kind);
     expect(new Set(kinds).size).toBe(kinds.length);
   });
+
+  it('emits bootstrap_blocked when mode is not running', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      bootstrap: { mode: 'awaiting_funding', blockingReason: 'Wallet needs ETH' },
+    });
+    expect(out).toContainEqual(expect.objectContaining({
+      kind: 'bootstrap_blocked',
+      severity: 'blocking',
+      message: 'Wallet needs ETH',
+    }));
+  });
+
+  it('emits bootstrap_blocked with fallback message when blockingReason is absent', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      bootstrap: { mode: 'awaiting_funding' },
+    });
+    expect(out).toContainEqual(expect.objectContaining({
+      kind: 'bootstrap_blocked',
+      message: 'Bootstrap incomplete',
+    }));
+  });
+
+  it('emits rpc_unreachable when rpc.reachable is false', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: { ...baseState.status, rpc: { reachable: false } },
+    });
+    expect(out).toContainEqual(expect.objectContaining({
+      kind: 'rpc_unreachable',
+      severity: 'blocking',
+    }));
+  });
+
+  it('emits service_evicted when at least one service has evicted === true', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: {
+        ...baseState.status,
+        services: [
+          { evicted: false, safeBound: true },
+          { evicted: true, safeBound: true },
+        ],
+      },
+    });
+    expect(out.map(n => n.kind)).toContain('service_evicted');
+  });
+
+  it('emits safe_binding_pending when at least one service has safeBound === false', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: {
+        ...baseState.status,
+        services: [{ evicted: false, safeBound: false }],
+      },
+    });
+    expect(out).toContainEqual(expect.objectContaining({
+      kind: 'safe_binding_pending',
+      severity: 'warning',
+    }));
+  });
+
+  it('emits password_rotation_due when password age exceeds 90 days', () => {
+    const rotatedAt = new Date('2026-01-01T00:00:00Z').toISOString();
+    // 120 days after rotation
+    const now = new Date('2026-05-01T00:00:00Z').getTime();
+    const out = deriveNotifications({
+      ...baseState,
+      now,
+      status: { ...baseState.status, passwordRotatedAt: rotatedAt },
+    });
+    expect(out.map(n => n.kind)).toContain('password_rotation_due');
+  });
+
+  it('does not emit password_rotation_due when password is fresh', () => {
+    const rotatedAt = new Date('2026-05-15T00:00:00Z').toISOString();
+    // only 5 days after rotation
+    const now = new Date('2026-05-20T00:00:00Z').getTime();
+    const out = deriveNotifications({
+      ...baseState,
+      now,
+      status: { ...baseState.status, passwordRotatedAt: rotatedAt },
+    });
+    expect(out.map(n => n.kind)).not.toContain('password_rotation_due');
+  });
+
+  it('emits claim_available when claimableWei is a decimal string > 0', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: { ...baseState.status, rewards: { claimableWei: '1' } },
+    });
+    expect(out.map(n => n.kind)).toContain('claim_available');
+  });
+
+  it('emits claim_available when claimableWei is a hex string (does not throw)', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: { ...baseState.status, rewards: { claimableWei: '0x10' } },
+    });
+    expect(out.map(n => n.kind)).toContain('claim_available');
+  });
+
+  it('does not emit claim_available when claimableWei is malformed (treats as zero)', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: { ...baseState.status, rewards: { claimableWei: 'not-a-number' } },
+    });
+    expect(out.map(n => n.kind)).not.toContain('claim_available');
+  });
 });
