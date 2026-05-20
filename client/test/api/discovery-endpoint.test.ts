@@ -167,12 +167,13 @@ describe('discovery-endpoint — auth gating (jinn-mono-0nih)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('gates all three discovery sub-paths', async () => {
+  it('gates every discovery sub-path', async () => {
     const app = gatedApp(stubDiscovery({}));
     for (const path of [
       '/v1/discovery/plugin-publications?solverType=foo',
       '/v1/discovery/builder-artifacts?builderAgentId=1',
       '/v1/discovery/plugin-scores?cid=bafy',
+      '/v1/discovery/solvernet-operator-count?cid=bafytest',
     ]) {
       const res = await app.request(path);
       expect(res.status, `${path} should require auth`).toBe(401);
