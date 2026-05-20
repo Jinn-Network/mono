@@ -10,18 +10,40 @@ import { api } from '../../api/client.js';
  *   bootstrapping > attention > working > idle (priority order; first match)
  *
  * Reads from /v1/status (cached against the existing ['status'] queryKey
- * used by Overview/HeroStats so we don't double-poll). Renders a
- * "View activity →" link to /overview/activity for the per-task drilldown
- * + full event stream.
+ * used by Overview/HeroStats so we don't double-poll).
+ *
+ * The band's non-attention CTA points operators at the activity surface.
+ * Since issue #219 that surface is a primary section on the Dashboard
+ * (/overview); the dedicated /overview/activity page is a focused drilldown.
+ * The `activity` prop selects where the band points: on /operator (Settings)
+ * it points at the Dashboard so Settings doesn't read as the home for
+ * activity; on the activity drilldown it stays on /overview/activity.
  *
  * Attention trigger mirrors today's AlertBand: first error-severity
  * diagnostic from operator.diagnostics, excluding `prediction_solvernet_disabled`.
  * When multiple diagnostics exist, the band shows the highest-priority one
- * + an "N more" pill that links into the activity page.
+ * + an "N more" pill that links into the same activity surface.
  */
 
 const TERMINAL_STATES = new Set(['COMPLETE', 'FAILED']);
-const VIEW_ACTIVITY_HREF = '/overview/activity';
+
+/** Where the band's non-attention CTA + the "N more" pill point. */
+export interface ActivityTarget {
+  href: string;
+  label: string;
+}
+
+/** Dashboard activity surface — the canonical home for live activity (#219). */
+export const ACTIVITY_TARGET_DASHBOARD: ActivityTarget = {
+  href: '/overview',
+  label: 'View on Dashboard',
+};
+
+/** The dedicated /overview/activity drilldown. */
+export const ACTIVITY_TARGET_DRILLDOWN: ActivityTarget = {
+  href: '/overview/activity',
+  label: 'View activity',
+};
 
 export type LiveNowState = 'bootstrapping' | 'attention' | 'working' | 'idle';
 
@@ -30,12 +52,13 @@ export interface LiveNowDerived {
   line: string;
   meta: string;
   /** Primary right-side link for the current state. In attention this is the
-   *  fix-it action (e.g. `Configure harness`); in the other three states it
-   *  is `View activity`. The action that's most likely to help operators
-   *  resolve what they're looking at wins the right-side slot. */
+   *  fix-it action (e.g. `Configure SolverNet`); in the other three states it
+   *  is the activity CTA (label/href from the `ActivityTarget`). The action
+   *  that's most likely to help operators resolve what they're looking at
+   *  wins the right-side slot. */
   cta: { label: string; href: string };
   /** Attention-only: number of additional diagnostics beyond the one shown.
-   *  Renders as a small pill linking into `/overview/activity` so the
+   *  Renders as a small pill linking into the activity surface so the
    *  operator can see the full list. */
   attentionMore?: number;
 }
@@ -157,8 +180,11 @@ function hasJoinedSolverNet(
 export function deriveLiveNow(
   status: LiveNowStatusInput | undefined,
   joinedSolverNets?: Record<string, unknown>,
+  activity: ActivityTarget = ACTIVITY_TARGET_DRILLDOWN,
 ): LiveNowDerived {
-  const viewActivityCta = { label: 'View activity', href: VIEW_ACTIVITY_HREF };
+  // `ActivityTarget` is structurally the `cta` shape, so the band's
+  // non-attention CTA is the activity target verbatim.
+  const viewActivityCta = activity;
 
   // Bootstrapping: any service not at a complete-equivalent step.
   const services = status?.fleet?.services ?? [];
@@ -251,7 +277,19 @@ interface BootstrapWithJoined {
   joinedSolverNets?: Record<string, unknown>;
 }
 
-export function LiveNowBand(): JSX.Element {
+export interface LiveNowBandProps {
+  /**
+   * Where the band's activity links point. Defaults to the dedicated
+   * /overview/activity drilldown. /operator passes `ACTIVITY_TARGET_DASHBOARD`
+   * so Settings points at the Dashboard rather than reading as the home for
+   * activity (#219).
+   */
+  activity?: ActivityTarget;
+}
+
+export function LiveNowBand({
+  activity = ACTIVITY_TARGET_DRILLDOWN,
+}: LiveNowBandProps = {}): JSX.Element {
   const { data } = useQuery<LiveNowStatusInput>({
     queryKey: ['status'],
     queryFn: () => api.getStatus() as Promise<LiveNowStatusInput>,
@@ -266,7 +304,7 @@ export function LiveNowBand(): JSX.Element {
     queryFn: () => api.getBootstrap() as Promise<BootstrapWithJoined>,
     refetchInterval: 30_000,
   });
-  const derived = deriveLiveNow(data, bootstrap?.joinedSolverNets);
+  const derived = deriveLiveNow(data, bootstrap?.joinedSolverNets, activity);
   const tone = LIVE_NOW_TONE[derived.state];
   const stateLabel = LIVE_NOW_STATE_LABEL[derived.state];
 
@@ -307,7 +345,7 @@ export function LiveNowBand(): JSX.Element {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {derived.attentionMore !== undefined && (
             <Link
-              href={VIEW_ACTIVITY_HREF}
+              href={activity.href}
               data-testid="live-now-attention-more"
               style={{
                 fontSize: '10px',
