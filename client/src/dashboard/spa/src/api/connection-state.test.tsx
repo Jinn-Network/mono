@@ -75,12 +75,13 @@ describe('useConnectionState', () => {
     expect(result.current.status).toBe('disconnected');
     if (result.current.status === 'disconnected') {
       expect(result.current.attempts).toBeGreaterThanOrEqual(1);
-      expect(result.current.lastError).toBe('probe failed');
+      // The real rejection reason is threaded through, not a literal stub.
+      expect(result.current.lastError).toBe('network down');
     }
   });
 
-  it('treats a 5xx as down but a 401/403 as alive', async () => {
-    // 503 then 200: the 503 counts as a failure, the 200 clears it.
+  it('treats 502/503/504 as down but a 401/403 as alive', async () => {
+    // 503 then 503: an unavailable gateway counts as a daemon-down failure.
     globalThis.fetch = makeFetch([{ status: 503 }, { status: 503 }]);
     const { result } = renderHook(() =>
       useConnectionState({ pollIntervalMs: 1000, failureThreshold: 2 }),
@@ -90,6 +91,9 @@ describe('useConnectionState', () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
     expect(result.current.status).toBe('disconnected');
+    if (result.current.status === 'disconnected') {
+      expect(result.current.lastError).toMatch(/HTTP 503/);
+    }
 
     // A 403 (auth surface) must NOT be read as a dead daemon.
     globalThis.fetch = makeFetch([{ status: 403 }]);
@@ -100,6 +104,21 @@ describe('useConnectionState', () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
     expect(authResult.current.status).toBe('connected');
+  });
+
+  it('treats a genuine 500 as alive-but-erroring, not offline', async () => {
+    // A 500 from a *live* daemon is an uncaught throw in gatherStatusForApi.
+    // The process answered, so it is up — the probe must NOT flip to
+    // disconnected and wrongly tell the operator to re-run `jinn run`.
+    globalThis.fetch = makeFetch([{ status: 500 }]);
+    const { result } = renderHook(() =>
+      useConnectionState({ pollIntervalMs: 1000, failureThreshold: 2 }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(result.current.status).toBe('connected');
   });
 
   it('auto-reconnects when the daemon comes back', async () => {

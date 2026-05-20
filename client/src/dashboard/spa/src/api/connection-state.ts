@@ -6,7 +6,7 @@
  * last-known state forever. Operators thought the node was still working;
  * only a manual page refresh surfaced the truth.
  *
- * This hook fires a small `/v1/status` HEAD-ish poll on a short cadence
+ * This hook fires a small `GET /v1/status` poll on a short cadence
  * (default 2s) and counts consecutive failures. After two failures (~4s) it
  * flips into `disconnected`; the SPA renders the offline banner. While
  * disconnected the poll keeps trying with exponential backoff (capped at
@@ -50,7 +50,14 @@ export interface UseConnectionStateOptions {
   probeUrl?: string;
 }
 
-async function probe(url: string, timeoutMs: number): Promise<boolean> {
+interface ProbeResult {
+  /** True when the daemon process is reachable (it answered at all). */
+  ok: boolean;
+  /** Human-readable failure reason when `ok` is false; null otherwise. */
+  error: string | null;
+}
+
+async function probe(url: string, timeoutMs: number): Promise<ProbeResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -60,12 +67,25 @@ async function probe(url: string, timeoutMs: number): Promise<boolean> {
       cache: 'no-store',
       signal: controller.signal,
     });
-    // 401/403 still mean the daemon is alive and responding. Only treat
-    // network-level failures + 5xx as "daemon is down". The auth surface
-    // owns its own redirect.
-    return res.status < 500;
-  } catch {
-    return false;
+    // The daemon answered, so its process is alive. Distinguish "process
+    // down" from "process up but erroring":
+    //  - A genuine 500 is the daemon catching an uncaught throw in
+    //    `gatherStatusForApi` — the process is *up*, just erroring. Telling
+    //    the operator to re-run `jinn run` would be wrong, so treat 500 as
+    //    alive.
+    //  - 401/403 also mean the daemon is alive; the auth surface owns its
+    //    own redirect.
+    //  - Only 502/503/504 (gateway / unavailable / timeout) mean the
+    //    process is genuinely unreachable behind whatever is fronting it.
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      return { ok: false, error: `daemon unavailable (HTTP ${res.status})` };
+    }
+    return { ok: true, error: null };
+  } catch (err) {
+    // Network-level rejection (connection refused, abort/timeout) — the
+    // daemon process is not answering at all.
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
   } finally {
     clearTimeout(timer);
   }
@@ -103,10 +123,10 @@ export function useConnectionState(
     };
 
     const tick = async () => {
-      const ok = await probe(probeUrl, probeTimeoutMs);
+      const result = await probe(probeUrl, probeTimeoutMs);
       if (cancelledRef.current) return;
 
-      if (ok) {
+      if (result.ok) {
         consecutiveFailuresRef.current = 0;
         backoffRef.current = pollIntervalMs;
         setState((prev) =>
@@ -124,12 +144,16 @@ export function useConnectionState(
       if (failures >= failureThreshold) {
         setState((prev) => {
           if (prev.status === 'disconnected') {
-            return { ...prev, attempts: prev.attempts + 1, lastError: 'probe failed' };
+            return {
+              ...prev,
+              attempts: prev.attempts + 1,
+              lastError: result.error,
+            };
           }
           return {
             status: 'disconnected',
             since: Date.now(),
-            lastError: 'probe failed',
+            lastError: result.error,
             attempts: 1,
           };
         });
