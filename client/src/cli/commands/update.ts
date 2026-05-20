@@ -1,5 +1,7 @@
 import { execSync } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
@@ -19,6 +21,36 @@ class StringWriter {
   private chunks: string[] = [];
   write(s: string): boolean { this.chunks.push(s); return true; }
   toString(): string { return this.chunks.join(''); }
+}
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_JSON_PATH = join(HERE, '..', '..', '..', 'package.json');
+
+function readClientVersion(): string {
+  try {
+    const raw = readFileSync(PACKAGE_JSON_PATH, 'utf-8');
+    const pkg = JSON.parse(raw) as { version?: string };
+    return pkg.version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Formats the final all-good indicator line for `jinn update`.
+ * Green when stderr is a TTY and NO_COLOR is unset; plain text otherwise.
+ *
+ * Exported for tests; the daemon never imports this directly.
+ */
+export function formatUpdateSuccessLine(
+  version: string,
+  opts: { stderrIsTty: boolean; noColor: boolean },
+): string {
+  const text = `✓ jinn updated to v${version}`;
+  if (opts.stderrIsTty && !opts.noColor) {
+    return `\x1b[32m${text}\x1b[0m`;
+  }
+  return text;
 }
 
 interface IntegrationInstallResultEntry {
@@ -456,6 +488,18 @@ Examples:
           noColor: Boolean(ctx.env['NO_COLOR']),
         },
       );
+
+      // All-good indicator (#337): on happy path, end terminal output with a
+      // clear success line on stderr so it appears last regardless of JSON or
+      // human mode and never pollutes the structured stdout payload. Failure
+      // path is unchanged — existing error lines already make the state legible.
+      if (allOk) {
+        const noColor = Boolean(ctx.env['NO_COLOR']);
+        const stderrIsTty = Boolean(process.stderr.isTTY);
+        console.error(
+          formatUpdateSuccessLine(readClientVersion(), { stderrIsTty, noColor }),
+        );
+      }
     },
   };
 }
