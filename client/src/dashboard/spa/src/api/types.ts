@@ -957,3 +957,19 @@ export interface CodexDoctorResponse {
   stdout: string;
   stderr: string;
 }
+
+// ── One-click operator debug report (issue #420) ─────────────────────────────
+// Mirrors the daemon's `GET /v1/debug-report/manifest` response — what the
+// downloadable support bundle will contain, shown to the operator before they
+// download so they can see exactly what is included and what is redacted.
+
+export interface DebugReportRedactionSummary {
+  version: string;
+  redacted: string[];
+  kept: string[];
+}
+
+export interface DebugReportManifest {
+  files: string[];
+  redaction: DebugReportRedactionSummary;
+}

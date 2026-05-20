@@ -35,6 +35,7 @@ import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
@@ -817,6 +818,12 @@ function emitProgress(envelope: ProgressEnvelope): void {
 export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
 
+  // Issue #420: initialise the rotating daemon file logger early so lifecycle
+  // events (tapped in `observability/emit-event.ts`) accumulate durable,
+  // pre-redacted log lines for the one-click debug report. Constructing the
+  // singleton here also runs the startup age-based cleanup of stale rotations.
+  getFileLogger();
+
   // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
   //
   // Cost-mutating API routes (`POST /v1/artifacts/acquire`, `POST /artifacts`)
@@ -1131,6 +1138,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         onOperatorConfigUpdated: (operator) => {
           config.operator = operator;
         },
+      },
+      // Issue #420: one-click operator debug report. The bundle assembler
+      // reads the live resolved `config` so the download reflects env
+      // overrides + defaults, not just the on-disk config file.
+      debugReport: {
+        store: sharedStore,
+        config,
+        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
       },
       captures: {
         captures: capturesStore,
@@ -2678,6 +2693,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         } catch {
           /* ignore */
         }
+        // Issue #420: flush + close the rotating daemon file logger.
+        closeFileLogger();
       }
       console.log('[main] Shutdown complete.');
       process.exit(exitCode);

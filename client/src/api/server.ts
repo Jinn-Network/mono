@@ -56,6 +56,7 @@ import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
 import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 import { addDiscoveryRoutes } from './discovery-endpoint.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
+import { addDebugReportRoutes, type DebugReportRoutesConfig } from './debug-report-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -183,6 +184,13 @@ export interface ApiServerConfig {
   discovery?:
     | DiscoveryAPI
     | { holder: { current: DiscoveryAPI | undefined } };
+  /**
+   * One-click operator debug report (issue #420). When set, mounts
+   * `GET /v1/debug-report/manifest` + `POST /v1/debug-report` under the UI
+   * token gate. The bundle assembler reads the live resolved config so the
+   * download reflects env overrides + defaults, not just the on-disk file.
+   */
+  debugReport?: DebugReportRoutesConfig;
 }
 
 export interface ApiServer {
@@ -493,6 +501,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/api/hermes/*', requireUiToken(config.ui.token));
     app.use('/api/captures/*', requireUiToken(config.ui.token));
     app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
+    app.use('/v1/debug-report', requireUiToken(config.ui.token));
+    app.use('/v1/debug-report/*', requireUiToken(config.ui.token));
   }
 
   addEventsRoutes(app);
@@ -559,6 +569,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.agentBinding) {
     addAgentBindingRoutes(app, config.agentBinding);
+  }
+
+  if (config.debugReport) {
+    addDebugReportRoutes(app, config.debugReport);
   }
 
   if (config.ui && config.admin) {

@@ -1,4 +1,5 @@
 import type { Store } from '../store/store.js';
+import { getFileLogger } from './file-logger.js';
 
 export const ALLOWED_LIFECYCLE_KINDS = [
   'task_posted',
@@ -71,5 +72,15 @@ export function emitEvent(
     outcome: event.outcome ?? 'ok',
     kind: event.kind,
   };
-  process.stderr.write(`${JSON.stringify(payload)}\n`);
+  const line = JSON.stringify(payload);
+  process.stderr.write(`${line}\n`);
+
+  // Issue #420: tee every lifecycle event into the rotating daemon file
+  // logger so the one-click debug report has durable, pre-redacted logs.
+  // Best-effort — a logging failure must never affect event emission.
+  try {
+    getFileLogger().write(line);
+  } catch {
+    /* ignore */
+  }
 }

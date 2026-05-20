@@ -32,6 +32,7 @@ import type {
   DiscoverySolverNetOperatorCountResponse,
   HarnessReadinessEntry,
   CodexDoctorResponse,
+  DebugReportManifest,
 } from './types.js';
 
 interface JsonErrorPayload {
@@ -479,6 +480,32 @@ export const api = {
           body: JSON.stringify({ repoRemoteUrl, trusted }),
         },
       ),
+  },
+
+  // ── One-click operator debug report (issue #420) ──────────────────────────
+  debugReport: {
+    /** Describe the support bundle before download (file list + redaction). */
+    manifest: () => jfetch<DebugReportManifest>('/v1/debug-report/manifest'),
+    /**
+     * Download the redacted `.tar.gz` support bundle. `jfetch` assumes JSON,
+     * so this uses a raw `fetch` and reads the binary body via `res.blob()`.
+     * `screenshotPngBase64` is the client-captured dashboard PNG (base64, no
+     * data-URI prefix); omitted when capture failed.
+     */
+    download: async (screenshotPngBase64?: string): Promise<Blob> => {
+      const res = await fetch('/v1/debug-report', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(
+          screenshotPngBase64 ? { screenshotPngBase64 } : {},
+        ),
+      });
+      if (!res.ok) {
+        throw new Error(`debug report failed: ${res.status} ${res.statusText}`);
+      }
+      return res.blob();
+    },
   },
 
   // ── Discovery (hfmf) — proxied via daemon's /v1/discovery/* routes ──────────

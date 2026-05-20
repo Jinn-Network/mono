@@ -1,5 +1,6 @@
 import { Link } from 'wouter';
 import { Badge } from '../components/ui/badge.js';
+import { DebugReportButton } from '../components/DebugReportButton.js';
 
 export interface HeaderProps {
   network: 'testnet' | 'mainnet';
@@ -21,7 +22,10 @@ export function Header({ network }: HeaderProps): JSX.Element {
       >
         jinn operator
       </Link>
-      <Badge variant="outline">{network}</Badge>
+      <div className="flex items-center gap-3">
+        <Badge variant="outline">{network}</Badge>
+        <DebugReportButton />
+      </div>
     </header>
   );
 }

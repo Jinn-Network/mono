@@ -879,6 +879,7 @@ __metadata:
     autoprefixer: "npm:^10.4.20"
     class-variance-authority: "npm:^0.7.0"
     clsx: "npm:^2.1.1"
+    html-to-image: "npm:^1.11.13"
     jsdom: "npm:^25"
     lucide-react: "npm:^0.454.0"
     postcss: "npm:^8.4.49"
@@ -5445,6 +5446,13 @@ __metadata:
   dependencies:
     whatwg-encoding: "npm:^3.1.1"
   checksum: 10c0/523398055dc61ac9b34718a719cb4aa691e4166f29187e211e1607de63dc25ac7af52ca7c9aead0c4b3c0415ffecb17326396e1202e2e86ff4bca4c0ee4c6140
+  languageName: node
+  linkType: hard
+
+"html-to-image@npm:^1.11.13":
+  version: 1.11.13
+  resolution: "html-to-image@npm:1.11.13"
+  checksum: 10c0/03bd7192d87b99499e37ff12a8e2b41ddce4cf8e33a93dfadff18df0f213434c7f1ba8328db2158f4805da07b7aec3c90aec3152908281153217e86784218b10
   languageName: node
   linkType: hard
 
