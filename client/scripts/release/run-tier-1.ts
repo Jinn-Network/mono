@@ -37,9 +37,32 @@ async function runT14SpaRouteSmoke(outputDir: string): Promise<ScenarioVerdict> 
     );
     let stdout = '';
     let stderr = '';
+    // Exactly one of 'error' / 'close' settles the Promise. Without the guard,
+    // a spawn that fails (e.g. `yarn` not on PATH) emits 'error' but never
+    // 'close' — the Promise would hang until CI's 90-min job timeout.
+    let settled = false;
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', async (err) => {
+      if (settled) return;
+      settled = true;
+      const wallClockMs = Date.now() - started;
+      await fs.writeFile(
+        evidencePath,
+        `=== spawn error ===\n${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
+      );
+      resolve({
+        scenarioId: 'T1.4',
+        verdict: 'fail',
+        wallClockMs,
+        evidencePath,
+        failClass: 'flake-infra',
+        failNotes: `Playwright spawn failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    });
     child.on('close', async (code) => {
+      if (settled) return;
+      settled = true;
       const wallClockMs = Date.now() - started;
       await fs.writeFile(
         evidencePath,
@@ -71,15 +94,17 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
   );
   await fs.mkdir(outputDir, { recursive: true });
 
-  // T1.1-T1.3 callables run in parallel. Each is wrapped so an unexpected
-  // throw (rather than a returned fail verdict) becomes an agent-crash verdict
-  // — keeps the scenarioId paired with its runner, no index correlation.
+  // All four Tier 1 scenarios run in parallel (spec §3 — tier wall-clock is
+  // the max of its scenarios, not the sum). T1.1-T1.3 are in-process callables;
+  // T1.4 spawns a Playwright subprocess. Each is wrapped so an unexpected throw
+  // (rather than a returned fail verdict) becomes an agent-crash verdict —
+  // keeps the scenarioId paired with its runner, no index correlation.
   const callables: { id: string; run: () => Promise<ScenarioVerdict> }[] = [
     {
       id: 'T1.1',
       run: () => runT11BootstrapFreshAnvil({
         evidencePath: path.join(outputDir, 'T1.1.log'),
-        wallClockBudgetMs: 180000,
+        wallClockBudgetMs: 90000,
       }),
     },
     {
@@ -94,8 +119,14 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
         evidencePath: path.join(outputDir, 'T1.3.log'),
       }),
     },
+    {
+      // T1.4 needs a separate subprocess (Playwright); runT14SpaRouteSmoke
+      // already resolves with a verdict for both spawn-error and close cases.
+      id: 'T1.4',
+      run: () => runT14SpaRouteSmoke(outputDir),
+    },
   ];
-  const callableVerdicts = await Promise.all(
+  const verdicts = await Promise.all(
     callables.map(async ({ id, run }): Promise<ScenarioVerdict> => {
       try {
         return await run();
@@ -112,14 +143,14 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
     }),
   );
 
-  // T1.4 needs a separate subprocess (Playwright).
-  const t14 = await runT14SpaRouteSmoke(outputDir);
-  const verdicts = [...callableVerdicts, t14];
-
   // Validate every verdict against the schema (catches contract drift).
   for (const v of verdicts) ScenarioVerdictSchema.parse(v);
 
-  const allPassed = verdicts.every((v) => v.verdict === 'pass');
+  // A `skip` is non-failing — T1.3 permanently skips (GH #341) until the
+  // Ponder spawn helper lands, and a skip must not pull a clean run to failed.
+  const hasFailure = verdicts.some((v) => v.verdict === 'fail');
+  const hasSkip = verdicts.some((v) => v.verdict === 'skip');
+  const allPassed = !hasFailure;
 
   // Write summary.json
   const summary = {
@@ -130,7 +161,18 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
   };
   await fs.writeFile(path.join(outputDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
-  // Marker block — one `tier-1-<id>=<status>` line per scenario.
+  // Maps scenario IDs to the canonical marker keys defined in the release
+  // readiness spec §"Marker schema extension" (2026-05-19). The key names are
+  // load-bearing — release-readiness parses them — so they are pinned here
+  // rather than derived from the scenario ID.
+  const MARKER_KEY_BY_SCENARIO: Record<string, string> = {
+    'T1.1': 'tier-1-bootstrap',
+    'T1.2': 'tier-1-harness-readiness',
+    'T1.3': 'tier-1-indexer-roundtrip',
+    'T1.4': 'tier-1-spa-route-smoke',
+  };
+
+  // Marker block — one `tier-1-<key>=<status>` line per scenario.
   const markerValue = (v: ScenarioVerdict): string => {
     switch (v.verdict) {
       case 'pass':
@@ -141,14 +183,18 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
         return `failed:${v.failClass}`;
     }
   };
+  // passed-with-skips distinguishes a clean run that had a skipped scenario
+  // from a pure all-pass run; both are non-failing for the gate.
+  const overall = hasFailure ? 'failed' : hasSkip ? 'passed-with-skips' : 'passed';
   const markerLines: string[] = [
     '<!-- jinn-release-evidence:v1',
     `release-candidate=${opts.candidateVersion ?? 'unknown'}`,
     ...verdicts.map((v) => {
-      const key = `tier-1-${v.scenarioId.toLowerCase().replace(/\./g, '-')}`;
+      const key = MARKER_KEY_BY_SCENARIO[v.scenarioId]
+        ?? `tier-1-${v.scenarioId.toLowerCase().replace(/\./g, '-')}`;
       return `${key}=${markerValue(v)}`;
     }),
-    `tier-1-overall=${allPassed ? 'passed' : 'failed'}`,
+    `tier-1-overall=${overall}`,
     '-->',
   ];
   await fs.writeFile(path.join(outputDir, 'marker.txt'), markerLines.join('\n') + '\n');
