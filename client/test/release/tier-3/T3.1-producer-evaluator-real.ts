@@ -76,11 +76,21 @@ export async function runT31ProducerEvaluatorReal(opts: ScenarioOptionsT3): Prom
       return body.state === 'DELIVERED' ? body : null;
     }, { timeoutMs: 8 * 60 * 1000, intervalMs: 5000, label: 'op-a-delivery' });
     log(`   deliveryTx=${delivered.deliveryTxHash}`);
-    if (delivered.cost?.usd !== undefined) {
-      log(`   cost so far: $${delivered.cost.usd.toFixed(4)}`);
-      if (delivered.cost.usd > COST_CAP_USD) {
-        throw new Error(`cost cap exceeded: spent $${delivered.cost.usd.toFixed(4)}, cap $${COST_CAP_USD}`);
-      }
+    // Post-delivery cost-cap audit. This is a *post-hoc* check: it confirms the
+    // run stayed within budget after the fact. Real-time enforcement is the
+    // daemon's job — it receives JINN_TIER3_COST_CAP_USD via extraEnv (see the
+    // setupTier3Scenario call above) and is responsible for the live cutoff
+    // that aborts a run before it overspends. This audit is fail-safe: if the
+    // daemon does not report a cost, we cannot verify the cap held, so we FAIL
+    // rather than silently treating an unverifiable run as a pass.
+    if (delivered.cost?.usd === undefined) {
+      throw new Error(
+        'cost cap cannot be verified — daemon did not report cost; refusing to treat as pass',
+      );
+    }
+    log(`   cost so far: $${delivered.cost.usd.toFixed(4)}`);
+    if (delivered.cost.usd > COST_CAP_USD) {
+      throw new Error(`cost cap exceeded: spent $${delivered.cost.usd.toFixed(4)}, cap $${COST_CAP_USD}`);
     }
 
     log('4. wait for op-b to claim verdict request, run evaluator, post verdict');
