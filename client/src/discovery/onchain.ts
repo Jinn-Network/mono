@@ -159,6 +159,25 @@ function resolveFromBlock(
   return toBigInt(opts.taskDiscoveryFromBlock, defaultFromBlock);
 }
 
+/**
+ * Resolve the start block for a scan that must always see full history,
+ * deliberately ignoring `cursorCache`. Used by `scanPluginMetadataEvents`:
+ * `foldPluginPublications` re-folds from scratch each call, so a cursor would
+ * cause latent data-loss (every publication before the cursor would vanish).
+ * Priority order:
+ *  1. opts.taskDiscoveryFromBlock — explicit override
+ *  2. DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[chainId] — chain default
+ *  3. currentBlock (no history)
+ */
+function resolveScanFromBlock(
+  opts: OnchainDiscoveryAPIOptions,
+  currentBlock: bigint,
+): bigint {
+  const defaultFromBlock =
+    DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[opts.chainId] ?? currentBlock;
+  return toBigInt(opts.taskDiscoveryFromBlock, defaultFromBlock);
+}
+
 /** Decode a MetadataSet log into a SetMetadataEvent or null if not a solvernet-manifest event. */
 function decodeSolvernetMetadataLog(log: {
   data: Hex;
@@ -313,13 +332,32 @@ function decodePluginMetadataLog(log: {
 }
 
 /**
+ * The chain-attested provenance anchor for a folded publication. Carried
+ * alongside the public `PluginPublication` shape so `listPluginPublications`
+ * can sort by `(blockNumber, transactionIndex, logIndex) desc` for true
+ * parity with the HTTP layer's `orderBy: blockNumber` without widening the
+ * public result type.
+ */
+interface PluginPublicationAnchor {
+  blockNumber: bigint;
+  transactionIndex: number;
+  logIndex: number;
+}
+
+/**
  * Fold a stream of plug-in MetadataSet events into the latest state per
  * `<agentId>:<pluginCid>` key, most-recent-wins by
  * (blockNumber, transactionIndex, logIndex). A v2 revocation only mutates the
  * `revoked` / `revokedReason` fields of an existing publish; a revocation with
  * no prior publish is meaningless and dropped (no row materialised).
+ *
+ * Returns the materialised rows plus an `anchors` map keyed by row identity,
+ * so callers can sort by the chain-attested anchor.
  */
-function foldPluginPublications(events: PluginMetadataEvent[]): PluginPublication[] {
+function foldPluginPublications(events: PluginMetadataEvent[]): {
+  rows: PluginPublication[];
+  anchors: Map<PluginPublication, PluginPublicationAnchor>;
+} {
   interface Folded {
     agentId: string;
     pluginCid: string;
@@ -379,7 +417,9 @@ function foldPluginPublications(events: PluginMetadataEvent[]): PluginPublicatio
     }
   }
 
-  return [...byKey.values()].map((row) => {
+  const rows: PluginPublication[] = [];
+  const anchors = new Map<PluginPublication, PluginPublicationAnchor>();
+  for (const row of byKey.values()) {
     const out: PluginPublication = {
       artifactType: 'plugin',
       builderAgentId: row.agentId,
@@ -392,8 +432,14 @@ function foldPluginPublications(events: PluginMetadataEvent[]): PluginPublicatio
       revoked: row.revoked,
     };
     if (row.revokedReason !== undefined) out.revokedReason = row.revokedReason;
-    return out;
-  });
+    rows.push(out);
+    anchors.set(out, {
+      blockNumber: row.blockNumber,
+      transactionIndex: row.transactionIndex,
+      logIndex: row.logIndex,
+    });
+  }
+  return { rows, anchors };
 }
 
 /**
@@ -946,7 +992,14 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     }
 
-    const fromBlock = resolveFromBlock(opts, 'plugins', currentBlock);
+    // No cursor here. `listPluginPublications` must return the *complete*
+    // catalog from a single call: `foldPluginPublications` re-folds from
+    // scratch every call, so it must see *all* events. A cursor would scan
+    // only `[cachedBlock, head]` on the second call and silently drop every
+    // publication before the cursor — unlike `findClaimableTasks`, whose
+    // caller accumulates across calls, this method has no accumulator.
+    // Always scan from the chain default, ignoring any injected cursorCache.
+    const fromBlock = resolveScanFromBlock(opts, currentBlock);
 
     let events: PluginMetadataEvent[];
     try {
@@ -982,7 +1035,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     }
 
-    if (currentBlock > 0n) opts.cursorCache?.write('plugins', currentBlock);
+    // Intentionally no cursorCache.write here — see resolveScanFromBlock.
     return events;
   }
 
@@ -1003,7 +1056,8 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       );
     }
 
-    let rows = foldPluginPublications(events);
+    const { rows: foldedRows, anchors: foldedAnchors } = foldPluginPublications(events);
+    let rows = foldedRows;
 
     // Apply the same filters the HTTP layer pushes into its `where` clause.
     if (args?.builderAgentId !== undefined) {
@@ -1017,14 +1071,29 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       rows = rows.filter((r) => !r.revoked);
     }
 
-    // Newest-first by publishedAt, mirroring the HTTP layer's
-    // `orderBy: "blockNumber", orderDirection: "desc"`.
-    rows.sort((a, b) => b.publishedAt - a.publishedAt);
+    // Newest-first by the fold's chain-attested anchor
+    // (blockNumber, transactionIndex, logIndex) desc — true parity with the
+    // HTTP layer's `orderBy: "blockNumber", orderDirection: "desc"`. Sorting
+    // by the builder-supplied `publishedAt` would diverge: that value is not
+    // chain-attested. `foldedAnchors` carries the anchor alongside each row so
+    // the public `PluginPublication` shape stays unchanged.
+    rows.sort((a, b) => {
+      const aa = foldedAnchors.get(a);
+      const ba = foldedAnchors.get(b);
+      if (!aa || !ba) return 0;
+      if (aa.blockNumber !== ba.blockNumber) {
+        return aa.blockNumber > ba.blockNumber ? -1 : 1;
+      }
+      if (aa.transactionIndex !== ba.transactionIndex) {
+        return ba.transactionIndex - aa.transactionIndex;
+      }
+      return ba.logIndex - aa.logIndex;
+    });
 
-    if (args?.limit !== undefined && args.limit >= 0) {
-      rows = rows.slice(0, args.limit);
-    }
-    return rows;
+    // Clamp `limit` to `[1, 500]` (default 100), mirroring the HTTP layer for
+    // drop-in `with-fallback` parity.
+    const limit = Math.min(500, Math.max(1, args?.limit ?? 100));
+    return rows.slice(0, limit);
   }
 
   // ── listBuilderArtifacts (gh#290) ─────────────────────────────────────────

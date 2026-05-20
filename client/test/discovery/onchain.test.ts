@@ -1131,6 +1131,200 @@ describe('OnchainDiscoveryAPI — listPluginPublications (gh#290)', () => {
     });
     await expect(api.listPluginPublications()).rejects.toBeInstanceOf(DiscoveryUnavailableError);
   });
+
+  it('returns the full catalog on every call even when a cursorCache is injected (no data-loss regression)', async () => {
+    // An injected cursorCache must NOT cause the second call to scan only
+    // [cachedBlock, head]. `foldPluginPublications` re-folds from scratch, so
+    // if the scan window narrowed, every publication before the cursor would
+    // vanish from the result. This guards that latent data-loss bug.
+    const pluginA = buildPluginPublishLog({
+      agentId: 1n,
+      pluginCid: 'bafyOldPlugin',
+      pluginName: '@a/old',
+      pluginVersion: '1.0.0',
+      pluginSha256: SHA_1,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 100n,
+      blockNumber: 1_000n,
+    });
+    const pluginB = buildPluginPublishLog({
+      agentId: 2n,
+      pluginCid: 'bafyNewPlugin',
+      pluginName: '@b/new',
+      pluginVersion: '1.0.0',
+      pluginSha256: SHA_2,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 200n,
+      blockNumber: 8_000n,
+    });
+
+    // A cursorCache whose `read` advances to near-head after the first scan —
+    // mimicking the behaviour that previously broke the floor.
+    let cached: bigint | null = null;
+    const cache: OnchainCursorCache = {
+      read: vi.fn((label: string) => (label === 'plugins' ? cached : null)),
+      write: vi.fn((label: string, block: bigint) => {
+        if (label === 'plugins') cached = block;
+      }),
+    };
+
+    // Each call gets a fresh single-batch mock returning BOTH plugins. If the
+    // floor honoured the cursor, the second call's getLogs `fromBlock` would
+    // jump past block 1_000 — but the floor must always scan from the default.
+    const mkApi = () =>
+      createOnchainDiscoveryAPI({
+        chainId: CHAIN_ID,
+        identityRegistryAddress: IDENTITY_REGISTRY,
+        taskDiscoveryFromBlock: 0,
+        chunkBlocks: 100_000,
+        publicClient: buildMockClient([[pluginA, pluginB]]) as never,
+        cursorCache: cache,
+      });
+
+    const first = await mkApi().listPluginPublications();
+    expect(first.map((r) => r.cid).sort()).toEqual(['bafyNewPlugin', 'bafyOldPlugin']);
+
+    // Second call: the catalog must still be complete — the old plugin must
+    // not have vanished behind a cursor.
+    const second = await mkApi().listPluginPublications();
+    expect(second.map((r) => r.cid).sort()).toEqual(['bafyNewPlugin', 'bafyOldPlugin']);
+
+    // The floor never consults nor advances a 'plugins' cursor.
+    expect(cache.write).not.toHaveBeenCalledWith('plugins', expect.anything());
+  });
+
+  it('always scans plugin: events from the chain default, never from an injected cursor', async () => {
+    const cache: OnchainCursorCache = {
+      // Even if a stale 'plugins' cursor is present, the floor must ignore it.
+      read: vi.fn(() => 7_777n),
+      write: vi.fn(),
+    };
+    const mockClient = buildMockClient([[]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      chunkBlocks: 100_000,
+      publicClient: mockClient as never,
+      cursorCache: cache,
+    });
+
+    await api.listPluginPublications();
+
+    // getLogs scanned from block 0 (taskDiscoveryFromBlock), not from 7_777.
+    const getLogsCall = mockClient.getLogs.mock.calls[0][0];
+    expect(getLogsCall.fromBlock).toBe(0n);
+  });
+
+  it('clamps limit to [1, 500], mirroring the HTTP layer', async () => {
+    // Six plugins on six distinct blocks.
+    const logs: Log[] = Array.from({ length: 6 }, (_, i) =>
+      buildPluginPublishLog({
+        agentId: BigInt(i + 1),
+        pluginCid: `bafyPlugin${i}`,
+        pluginName: `@p/plugin${i}`,
+        pluginVersion: '1.0.0',
+        pluginSha256: SHA_1,
+        supports: ['swe-rebench-v2.v1'],
+        publishedAt: BigInt(100 + i),
+        blockNumber: BigInt(1_000 + i),
+      }),
+    );
+    const mkApi = () =>
+      createOnchainDiscoveryAPI({
+        chainId: CHAIN_ID,
+        identityRegistryAddress: IDENTITY_REGISTRY,
+        taskDiscoveryFromBlock: 0,
+        publicClient: buildMockClient([logs]) as never,
+      });
+
+    // limit=0 clamps up to 1.
+    expect(await mkApi().listPluginPublications({ limit: 0 })).toHaveLength(1);
+    // Negative limit clamps up to 1.
+    expect(await mkApi().listPluginPublications({ limit: -5 })).toHaveLength(1);
+    // limit above 500 clamps down to 500 (here capped by the 6 available rows).
+    expect(await mkApi().listPluginPublications({ limit: 9_999 })).toHaveLength(6);
+    // A valid in-range limit is honoured exactly.
+    expect(await mkApi().listPluginPublications({ limit: 3 })).toHaveLength(3);
+  });
+
+  it('sorts newest-first by chain anchor (blockNumber desc), not by builder-supplied publishedAt', async () => {
+    // publishedAt is deliberately inverted relative to blockNumber: the older
+    // block carries the larger publishedAt. The floor must order by the
+    // chain-attested blockNumber, matching the HTTP layer's orderBy.
+    const earlyBlockLatePublishedAt = buildPluginPublishLog({
+      agentId: 1n,
+      pluginCid: 'bafyEarlyBlock',
+      pluginName: '@a/early',
+      pluginVersion: '1.0.0',
+      pluginSha256: SHA_1,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 9_000n, // larger publishedAt
+      blockNumber: 1_000n, // smaller blockNumber
+    });
+    const lateBlockEarlyPublishedAt = buildPluginPublishLog({
+      agentId: 2n,
+      pluginCid: 'bafyLateBlock',
+      pluginName: '@b/late',
+      pluginVersion: '1.0.0',
+      pluginSha256: SHA_2,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 100n, // smaller publishedAt
+      blockNumber: 8_000n, // larger blockNumber
+    });
+    const mockClient = buildMockClient([
+      [earlyBlockLatePublishedAt, lateBlockEarlyPublishedAt],
+    ]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+
+    const rows = await api.listPluginPublications();
+    // blockNumber desc → late-block row first, despite its smaller publishedAt.
+    expect(rows.map((r) => r.cid)).toEqual(['bafyLateBlock', 'bafyEarlyBlock']);
+  });
+
+  it('breaks blockNumber ties by (transactionIndex, logIndex) desc', async () => {
+    const sameBlock = 5_000n;
+    const lowerLog = buildPluginPublishLog({
+      agentId: 1n,
+      pluginCid: 'bafyLowerLog',
+      pluginName: '@a/lower',
+      pluginVersion: '1.0.0',
+      pluginSha256: SHA_1,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 100n,
+      blockNumber: sameBlock,
+      transactionIndex: 0,
+      logIndex: 1,
+    });
+    const higherLog = buildPluginPublishLog({
+      agentId: 2n,
+      pluginCid: 'bafyHigherLog',
+      pluginName: '@b/higher',
+      pluginVersion: '1.0.0',
+      pluginSha256: SHA_2,
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 100n,
+      blockNumber: sameBlock,
+      transactionIndex: 0,
+      logIndex: 9,
+    });
+    const mockClient = buildMockClient([[lowerLog, higherLog]]);
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      identityRegistryAddress: IDENTITY_REGISTRY,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+
+    const rows = await api.listPluginPublications();
+    // Same block, same txIndex → higher logIndex sorts first.
+    expect(rows.map((r) => r.cid)).toEqual(['bafyHigherLog', 'bafyLowerLog']);
+  });
 });
 
 describe('limitedConcurrency — partial-failure resilience', () => {
