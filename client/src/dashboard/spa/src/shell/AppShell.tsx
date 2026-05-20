@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { NotificationsList } from '../notifications/components/NotificationsList.js';
+import { useNotifications } from '../notifications/useNotifications.js';
 
 /**
  * Three-region grid for the running-mode operator dashboard. The header +
@@ -20,6 +22,7 @@ export interface AppShellProps {
 
 export function AppShell({ header, tabs, rail, children }: AppShellProps): JSX.Element {
   const showRail = rail != null;
+  const notices = useNotifications();
   return (
     <div
       className="w-full"
@@ -27,7 +30,7 @@ export function AppShell({ header, tabs, rail, children }: AppShellProps): JSX.E
         background: 'var(--bg)',
         color: 'var(--fg)',
         display: 'grid',
-        gridTemplateRows: 'auto auto minmax(0, 1fr)',
+        gridTemplateRows: notices.length > 0 ? 'auto auto auto minmax(0, 1fr)' : 'auto auto minmax(0, 1fr)',
         gridTemplateColumns: showRail ? '1fr 320px' : '1fr',
         // Lock the outer shell to the viewport so internal regions (main,
         // aside) can scroll independently. Without this, the agent rail's
@@ -43,6 +46,11 @@ export function AppShell({ header, tabs, rail, children }: AppShellProps): JSX.E
       <div style={{ gridColumn: '1 / -1', borderBottom: '1px solid var(--border)' }}>
         {tabs}
       </div>
+      {notices.length > 0 && (
+        <div style={{ gridColumn: '1 / -1', borderBottom: '1px solid var(--border)' }}>
+          <NotificationsList notices={notices} />
+        </div>
+      )}
       <main style={{ overflowY: 'auto', minHeight: 0 }}>{children}</main>
       {showRail && (
         <aside

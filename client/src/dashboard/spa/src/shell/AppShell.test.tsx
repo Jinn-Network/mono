@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { Router } from 'wouter';
+import { memoryLocation } from 'wouter/memory-location';
 import { AppShell } from './AppShell.js';
+
+vi.mock('../notifications/useNotifications.js', () => ({
+  useNotifications: vi.fn(() => [
+    { kind: 'harness_not_ready', severity: 'blocking', message: 'X', jumpTo: '/operator/memberships' },
+  ]),
+}));
 
 describe('AppShell', () => {
   it('renders header, tabs, main outlet, and rail slots', () => {
@@ -33,5 +41,21 @@ describe('AppShell', () => {
     expect(screen.getByTestId('header')).toBeTruthy();
     expect(screen.getByTestId('main')).toBeTruthy();
     expect(screen.queryByTestId('rail')).toBeNull();
+  });
+
+  it('mounts NotificationsList with derived notices', () => {
+    const { hook } = memoryLocation({ path: '/' });
+    render(
+      <Router hook={hook}>
+        <AppShell
+          header={<div data-testid="header">H</div>}
+          tabs={<div data-testid="tabs">T</div>}
+        >
+          <div data-testid="main">M</div>
+        </AppShell>
+      </Router>,
+    );
+    expect(screen.getByRole('region', { name: /notifications/i })).toBeTruthy();
+    expect(screen.getByText('X')).toBeTruthy();
   });
 });
