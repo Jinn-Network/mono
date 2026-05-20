@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -34,7 +35,7 @@ vi.mock('./regions/LoadingScreen.js', () => ({
 // flag, so this is the precise gating behaviour under test. Stubbing here
 // also avoids pulling in the heavy page subtrees the real shell mounts.
 vi.mock('./shell/AppShell.js', () => ({
-  AppShell: ({ rail }: { rail?: unknown }) => (
+  AppShell: ({ rail }: { rail?: ReactNode }) => (
     <div data-testid="app-shell">{rail ?? null}</div>
   ),
 }));
