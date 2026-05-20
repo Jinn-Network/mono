@@ -9,11 +9,17 @@ import type { ReactNode } from 'react';
 export interface AppShellProps {
   header: ReactNode;
   tabs: ReactNode;
-  rail: ReactNode;
+  /**
+   * Right-rail content (the embedded agent panel). Optional — when omitted
+   * (issue #326: embedded agent surface hidden by default) the shell
+   * collapses to a single column and renders no aside.
+   */
+  rail?: ReactNode;
   children: ReactNode;
 }
 
 export function AppShell({ header, tabs, rail, children }: AppShellProps): JSX.Element {
+  const showRail = rail != null;
   return (
     <div
       className="w-full"
@@ -22,7 +28,7 @@ export function AppShell({ header, tabs, rail, children }: AppShellProps): JSX.E
         color: 'var(--fg)',
         display: 'grid',
         gridTemplateRows: 'auto auto minmax(0, 1fr)',
-        gridTemplateColumns: '1fr 320px',
+        gridTemplateColumns: showRail ? '1fr 320px' : '1fr',
         // Lock the outer shell to the viewport so internal regions (main,
         // aside) can scroll independently. Without this, the agent rail's
         // xterm scrollback expands the document height past 800kpx and the
@@ -38,16 +44,18 @@ export function AppShell({ header, tabs, rail, children }: AppShellProps): JSX.E
         {tabs}
       </div>
       <main style={{ overflowY: 'auto', minHeight: 0 }}>{children}</main>
-      <aside
-        style={{
-          borderLeft: '1px solid var(--border)',
-          overflowY: 'auto',
-          minHeight: 0,
-          height: '100%',
-        }}
-      >
-        {rail}
-      </aside>
+      {showRail && (
+        <aside
+          style={{
+            borderLeft: '1px solid var(--border)',
+            overflowY: 'auto',
+            minHeight: 0,
+            height: '100%',
+          }}
+        >
+          {rail}
+        </aside>
+      )}
     </div>
   );
 }

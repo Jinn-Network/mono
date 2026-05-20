@@ -1,10 +1,14 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Onboarding, statusFor } from './Onboarding.js';
 import type { BootstrapState } from '../api/types.js';
 
 // Mock the API client so we control what bootstrap + status data returns.
+// `bootstrapOverride` lets individual tests tweak the returned bootstrap state
+// (e.g. the issue #326 embedded-agent flag) without re-mocking the module.
+let bootstrapOverride: Partial<BootstrapState> = {};
+
 vi.mock('../api/client.js', () => ({
   api: {
     getBootstrap: async (): Promise<BootstrapState> => ({
@@ -14,9 +18,20 @@ vi.mock('../api/client.js', () => ({
       currentStep: 'wallet',
       services: [],
       chain: 'base-sepolia',
+      ...bootstrapOverride,
     }),
   },
 }));
+
+// The embedded agent panel mounts an xterm.js terminal; stub it so the
+// onboarding tests stay free of the WebSocket / xterm setup.
+vi.mock('./Agent.js', () => ({
+  Agent: () => <div data-testid="agent-stub">agent</div>,
+}));
+
+afterEach(() => {
+  bootstrapOverride = {};
+});
 
 function withQueryClient(node: JSX.Element): JSX.Element {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -40,6 +55,31 @@ describe('Onboarding (3-phase post-vh74.2)', () => {
     render(withQueryClient(<Onboarding />));
     await screen.findByText(/Provisioning your wallet/i);
     expect(screen.queryByText(/Sign in to Claude/i)).toBeNull();
+  });
+
+  // Issue #326: the embedded "Ask Claude" panel is hidden by default. It only
+  // renders when the daemon reports embeddedAgentEnabled === true.
+  it('hides the "Ask Claude" panel when embeddedAgentEnabled is absent', async () => {
+    render(withQueryClient(<Onboarding />));
+    await screen.findByText(/Provisioning your wallet/i);
+    expect(screen.queryByText(/Ask Claude/i)).toBeNull();
+    expect(screen.queryByTestId('agent-stub')).toBeNull();
+  });
+
+  it('hides the "Ask Claude" panel when embeddedAgentEnabled is false', async () => {
+    bootstrapOverride = { embeddedAgentEnabled: false };
+    render(withQueryClient(<Onboarding />));
+    await screen.findByText(/Provisioning your wallet/i);
+    expect(screen.queryByText(/Ask Claude/i)).toBeNull();
+    expect(screen.queryByTestId('agent-stub')).toBeNull();
+  });
+
+  it('renders the "Ask Claude" panel when embeddedAgentEnabled is true', async () => {
+    bootstrapOverride = { embeddedAgentEnabled: true };
+    render(withQueryClient(<Onboarding />));
+    await screen.findByText(/Provisioning your wallet/i);
+    expect(screen.getByText(/Ask Claude/i)).toBeTruthy();
+    expect(screen.getByTestId('agent-stub')).toBeTruthy();
   });
 });
 

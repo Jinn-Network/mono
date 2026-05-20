@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
-import { addBootstrapRoutes } from '../../src/api/bootstrap-endpoint.js';
+import {
+  addBootstrapRoutes,
+  isEmbeddedAgentEnabled,
+} from '../../src/api/bootstrap-endpoint.js';
 import { buildEnvelope } from '../../src/errors/envelope.js';
 import { persistBootstrapError } from '../../src/errors/persisted-bootstrap-error.js';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -305,5 +308,68 @@ describe('GET /v1/bootstrap', () => {
     const res = await app.request('/v1/bootstrap');
     const body = await res.json() as { retire_failed?: unknown };
     expect(body.retire_failed).toBeUndefined();
+  });
+});
+
+// Issue #326: the embedded agent chat surface is gated behind
+// JINN_ENABLE_EMBEDDED_AGENT. The endpoint surfaces the resolved flag so the
+// SPA can hide the agent rail / onboarding panel; the daemon also uses it to
+// decide whether to mount /api/agent/ws.
+describe('isEmbeddedAgentEnabled', () => {
+  it('defaults to false when the env var is unset', () => {
+    expect(isEmbeddedAgentEnabled({})).toBe(false);
+  });
+
+  it('is true for "1"', () => {
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '1' })).toBe(true);
+  });
+
+  it('is true for "true" (case-insensitive, trimmed)', () => {
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: 'true' })).toBe(true);
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: ' TRUE ' })).toBe(true);
+  });
+
+  it('is false for any other value', () => {
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '0' })).toBe(false);
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: 'yes' })).toBe(false);
+    expect(isEmbeddedAgentEnabled({ JINN_ENABLE_EMBEDDED_AGENT: '' })).toBe(false);
+  });
+});
+
+describe('GET /v1/bootstrap — embeddedAgentEnabled flag (issue #326)', () => {
+  it('reports embeddedAgentEnabled=false by default', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as { embeddedAgentEnabled?: boolean };
+    expect(body.embeddedAgentEnabled).toBe(false);
+  });
+
+  it('reports embeddedAgentEnabled=true when the flag is set on the config', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 0, step: 'complete', safe_address: '0xsafe' }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir, embeddedAgentEnabled: true });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as { embeddedAgentEnabled?: boolean };
+    expect(body.embeddedAgentEnabled).toBe(true);
+  });
+
+  it('reports embeddedAgentEnabled=false on the uninitialized branch', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-bootstrap-empty-326-'));
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    const body = await res.json() as { mode: string; embeddedAgentEnabled?: boolean };
+    expect(body.mode).toBe('uninitialized');
+    expect(body.embeddedAgentEnabled).toBe(false);
   });
 });
