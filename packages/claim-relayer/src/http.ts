@@ -4,6 +4,7 @@ import type { ClaimRelayerConfig } from './config.js';
 import { redactConfig } from './config.js';
 import type { ClaimRelayerStore } from './db.js';
 import type { ClaimRelayer } from './relayer.js';
+import { redactSecrets } from './redact.js';
 
 export interface StatusPayload {
   ok: boolean;
@@ -25,12 +26,16 @@ export function buildStatusPayload(args: {
   startedAtMs: number;
 }): StatusPayload {
   const stats = args.relayer.getStatus();
+  const redactedStats = {
+    ...stats,
+    lastError: stats.lastError ? redactSecrets(stats.lastError) : null,
+  };
   return {
     ok: true,
-    ready: stats.ready,
+    ready: redactedStats.ready,
     uptimeSeconds: Math.max(0, Math.floor((Date.now() - args.startedAtMs) / 1000)),
     config: redactConfig(args.config),
-    stats,
+    stats: redactedStats,
     checkpoint: args.store.getCheckpoint(args.config.startBlock).toString(),
     tickets: {
       byStatus: args.store.countByStatus(),

@@ -13,6 +13,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { CLAIM_TICKET_TOPIC0 } from '../src/abis.js';
 import type { ClaimRelayerConfig } from '../src/config.js';
 import { ClaimRelayerStore } from '../src/db.js';
+import { buildStatusPayload } from '../src/http.js';
 import { ClaimRelayer, snapshotHash } from '../src/relayer.js';
 import type { ClaimSnapshot, MessengerFixture } from '../src/types.js';
 
@@ -45,6 +46,8 @@ function makeConfig(overrides: Partial<ClaimRelayerConfig> = {}): ClaimRelayerCo
     signerAddress: SIGNER,
     l1RpcUrl: 'https://l1.secret.example/rpc',
     l2RpcUrl: 'https://l2.secret.example/rpc',
+    l1Chain: { network: 'sepolia', chainId: 11155111 },
+    l2Chain: { network: 'base-sepolia', chainId: 84532 },
     startBlock: 10n,
     dbPath: ':memory:',
     port: 8737,
@@ -124,6 +127,20 @@ function emptyFixture(): MessengerFixture {
   };
 }
 
+async function waitForAssertion(assertion: () => void): Promise<void> {
+  let lastError: unknown;
+  for (let i = 0; i < 20; i++) {
+    try {
+      assertion();
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  throw lastError;
+}
+
 function matchingFixture(snapshot = makeSnapshot()): MessengerFixture {
   return {
     serviceId: snapshot.serviceId,
@@ -139,8 +156,14 @@ function makeClients(options: {
   distributorMessenger?: Address;
   fixture?: MessengerFixture;
   snapshot?: ClaimSnapshot;
+  snapshots?: ClaimSnapshot[];
   onchainSnapshotHash?: Hex;
   legacyWeightGetters?: boolean;
+  transientReadFailure?: {
+    functionName: string;
+    message: string;
+    times: number;
+  };
   distributorState?: {
     operatorRatio?: bigint;
     daoRatio?: bigint;
@@ -152,7 +175,9 @@ function makeClients(options: {
   };
 } = {}) {
   const snapshot = options.snapshot ?? makeSnapshot();
+  const snapshots = options.snapshots ?? [snapshot];
   const fixture = options.fixture ?? emptyFixture();
+  let transientReadFailures = options.transientReadFailure?.times ?? 0;
   const setFixtureTx = '0xaaa1' as Hex;
   const claimTx = '0xbbb2' as Hex;
   const distributorState = {
@@ -168,6 +193,14 @@ function makeClients(options: {
 
   const l1Public = {
     readContract: vi.fn(async ({ functionName }: any) => {
+      if (
+        options.transientReadFailure &&
+        functionName === options.transientReadFailure.functionName &&
+        transientReadFailures > 0
+      ) {
+        transientReadFailures--;
+        throw new Error(options.transientReadFailure.message);
+      }
       if (functionName === 'owner') return options.owner ?? SIGNER;
       if (functionName === 'messenger') return options.distributorMessenger ?? MESSENGER;
       if (options.legacyWeightGetters) {
@@ -203,11 +236,14 @@ function makeClients(options: {
   };
 
   const l2Public = {
-    getBlockNumber: vi.fn(async () => snapshot.l2BlockNumber),
-    getLogs: vi.fn(async () => [claimTicketLog(snapshot)]),
-    readContract: vi.fn(async ({ functionName }: any) => {
+    getBlockNumber: vi.fn(async () => snapshots[snapshots.length - 1].l2BlockNumber),
+    getLogs: vi.fn(async () => snapshots.map((entry) => claimTicketLog(entry))),
+    readContract: vi.fn(async ({ functionName, args }: any) => {
       if (functionName === 'claimSnapshotHashes') {
-        return options.onchainSnapshotHash ?? snapshotHash(snapshot);
+        if (options.onchainSnapshotHash) return options.onchainSnapshotHash;
+        const claimId = args?.[0] as bigint | undefined;
+        const matchingSnapshot = snapshots.find((entry) => entry.claimId === claimId) ?? snapshot;
+        return snapshotHash(matchingSnapshot);
       }
       throw new Error(`unexpected L2 read ${functionName}`);
     }),
@@ -240,6 +276,91 @@ describe('ClaimRelayer', () => {
     expect(result).toMatchObject({ scanned: 1, claimed: 0, failed: 1 });
     expect(clients.l1Public.simulateContract).not.toHaveBeenCalled();
     expect(store.countByStatus().failed).toBe(1);
+    expect(store.getCheckpoint(10n)).toBe(12n);
+  });
+
+  it('marks transient ticket failures retryable and leaves checkpoint behind', async () => {
+    const store = makeStore();
+    const secretError = [
+      'HTTP request failed.',
+      'URL: https://key.example/secret-provider-token',
+      'Request body: {"method":"eth_call"}',
+    ].join('\n');
+    const clients = makeClients({
+      transientReadFailure: {
+        functionName: 'operatorRatio',
+        message: secretError,
+        times: 1,
+      },
+    });
+    const config = makeConfig();
+    const relayer = new ClaimRelayer(config, store, clients);
+
+    const first = await relayer.runOnce();
+
+    expect(first).toMatchObject({ scanned: 1, claimed: 0, failed: 1 });
+    expect(store.getCheckpoint(10n)).toBe(9n);
+    expect(store.countByStatus().retryable).toBe(1);
+    expect(store.listTickets()[0].error).toContain('URL: [redacted-url]');
+    expect(JSON.stringify(store.listTickets())).not.toContain('key.example');
+    expect(relayer.getStatus().lastError).toContain('URL: [redacted-url]');
+    expect(relayer.getStatus().lastError).not.toContain('key.example');
+    const statusPayload = buildStatusPayload({
+      config,
+      store,
+      relayer,
+      startedAtMs: Date.now(),
+    });
+    expect(JSON.stringify(statusPayload)).not.toContain('key.example');
+    expect(statusPayload.stats.lastError).toContain('URL: [redacted-url]');
+
+    const second = await relayer.runOnce();
+
+    expect(second).toMatchObject({ scanned: 1, claimed: 1, failed: 0 });
+    expect(store.getCheckpoint(10n)).toBe(12n);
+    expect(store.countByStatus().claimed).toBe(1);
+    expect(store.countByStatus().retryable).toBe(0);
+  });
+
+  it('stops a batch after a retryable ticket instead of advancing later claims', async () => {
+    const store = makeStore();
+    const first = makeSnapshot({ claimId: 1n, l2BlockNumber: 12n, l2LogIndex: 0 });
+    const second = makeSnapshot({ claimId: 2n, l2BlockNumber: 12n, l2LogIndex: 1 });
+    const clients = makeClients({
+      snapshots: [first, second],
+      transientReadFailure: {
+        functionName: 'operatorRatio',
+        message: 'HTTP request failed. URL: https://key.example/rpc',
+        times: 1,
+      },
+    });
+    const relayer = new ClaimRelayer(makeConfig({ batchBlocks: 20n }), store, clients);
+
+    const result = await relayer.runOnce();
+
+    expect(result).toMatchObject({ scanned: 1, claimed: 0, failed: 1 });
+    expect(store.getCheckpoint(10n)).toBe(9n);
+    expect(clients.l1Wallet.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('retries transient L1 write failures without advancing the checkpoint', async () => {
+    const store = makeStore();
+    const snapshot = makeSnapshot();
+    const clients = makeClients({ snapshot, fixture: matchingFixture(snapshot) });
+    clients.l1Wallet.writeContract.mockRejectedValueOnce(
+      new Error('HTTP request failed. URL: https://key.example/write-token'),
+    );
+    const relayer = new ClaimRelayer(makeConfig(), store, clients);
+
+    await expect(relayer.runOnce()).resolves.toMatchObject({ claimed: 0, failed: 1 });
+    expect(store.getCheckpoint(10n)).toBe(9n);
+    expect(store.countByStatus().retryable).toBe(1);
+    expect(JSON.stringify(store.listTickets())).not.toContain('key.example');
+
+    await expect(relayer.runOnce()).resolves.toMatchObject({ claimed: 1, failed: 0 });
+    expect(store.getCheckpoint(10n)).toBe(12n);
+    expect(store.countByStatus().claimed).toBe(1);
+    expect(clients.l1Wallet.writeContract).toHaveBeenCalledTimes(2);
   });
 
   it('reuses a matching fixture and only submits the distributor claim', async () => {
@@ -345,5 +466,66 @@ describe('ClaimRelayer', () => {
       address: DISTRIBUTOR,
       functionName: 'claim',
     });
+  });
+
+  it('coalesces overlapping runOnce calls into one L1/checkpoint writer', async () => {
+    const store = makeStore();
+    const clients = makeClients();
+    let releaseBlock!: () => void;
+    const blockGate = new Promise<void>((resolve) => {
+      releaseBlock = resolve;
+    });
+    clients.l2Public.getBlockNumber.mockImplementation(async () => {
+      await blockGate;
+      return 12n;
+    });
+    const relayer = new ClaimRelayer(makeConfig(), store, clients);
+
+    const first = relayer.runOnce();
+    const second = relayer.runOnce();
+
+    await waitForAssertion(() => {
+      expect(clients.l2Public.getBlockNumber).toHaveBeenCalledTimes(1);
+    });
+    releaseBlock();
+    const results = await Promise.all([first, second]);
+
+    expect(results[0]).toEqual(results[1]);
+    expect(clients.l2Public.getLogs).toHaveBeenCalledTimes(1);
+    expect(clients.l1Wallet.writeContract).toHaveBeenCalledTimes(2);
+    expect(store.getCheckpoint(10n)).toBe(12n);
+  });
+
+  it('scopes checkpoints and tickets to the deployment identity', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'jinn-claim-relayer-scope-'));
+    const store = new ClaimRelayerStore(path.join(dir, 'relayer.sqlite'));
+    stores.push(store);
+    const snapshot = makeSnapshot({ claimId: 1n });
+    const firstClients = makeClients({ snapshot, fixture: matchingFixture(snapshot) });
+    const firstRelayer = new ClaimRelayer(makeConfig(), store, firstClients);
+
+    await expect(firstRelayer.runOnce()).resolves.toMatchObject({ claimed: 1 });
+    expect(store.getCheckpoint(10n)).toBe(12n);
+
+    const nextEmitter = '0x7777777777777777777777777777777777777777' as const;
+    const secondClients = makeClients({ snapshot, fixture: matchingFixture(snapshot) });
+    const secondRelayer = new ClaimRelayer(
+      makeConfig({
+        artifacts: {
+          l1ArtifactPath: '/tmp/l1.json',
+          l2ArtifactPath: '/tmp/l2.json',
+          distributor: DISTRIBUTOR,
+          messenger: MESSENGER,
+          claimEmitter: nextEmitter,
+        },
+      }),
+      store,
+      secondClients,
+    );
+
+    expect(store.getCheckpoint(10n)).toBe(9n);
+    await expect(secondRelayer.runOnce()).resolves.toMatchObject({ scanned: 1, claimed: 1 });
+    expect(secondClients.l1Public.simulateContract).toHaveBeenCalledTimes(1);
+    expect(store.countByStatus().claimed).toBe(1);
   });
 });

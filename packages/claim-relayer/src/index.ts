@@ -5,6 +5,7 @@ import { sepolia, baseSepolia } from 'viem/chains';
 import { loadConfig } from './config.js';
 import { ClaimRelayerStore } from './db.js';
 import { createStatusServer } from './http.js';
+import { errorToLogMessage } from './redact.js';
 import { ClaimRelayer } from './relayer.js';
 
 async function main(): Promise<void> {
@@ -42,7 +43,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
-  console.error(message);
+  console.error(errorToLogMessage(error));
   process.exitCode = 1;
 });

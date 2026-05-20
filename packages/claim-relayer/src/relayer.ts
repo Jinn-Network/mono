@@ -15,6 +15,7 @@ import {
 } from './abis.js';
 import type { ClaimRelayerConfig } from './config.js';
 import { ClaimRelayerStore } from './db.js';
+import { errorToMessage } from './redact.js';
 import type { ClaimSnapshot, MessengerFixture, RelayerStats } from './types.js';
 
 type PublicClientLike = {
@@ -47,6 +48,8 @@ export interface RunOnceResult {
 
 export class ClaimRelayer {
   private timer: NodeJS.Timeout | null = null;
+  private stopped = true;
+  private runInFlight: Promise<RunOnceResult> | null = null;
   private startupChecked = false;
   private readonly stats: RelayerStats;
 
@@ -55,6 +58,15 @@ export class ClaimRelayer {
     private readonly store: ClaimRelayerStore,
     private readonly clients: ClaimRelayerClients,
   ) {
+    this.store.setDeploymentIdentity({
+      l1Network: config.l1Chain.network,
+      l1ChainId: config.l1Chain.chainId,
+      l2Network: config.l2Chain.network,
+      l2ChainId: config.l2Chain.chainId,
+      claimEmitter: config.artifacts.claimEmitter,
+      distributor: config.artifacts.distributor,
+      messenger: config.artifacts.messenger,
+    });
     this.stats = {
       scannedTickets: 0,
       claimedTickets: 0,
@@ -101,17 +113,15 @@ export class ClaimRelayer {
   }
 
   async start(): Promise<void> {
+    this.stopped = false;
     await this.startupCheck();
     await this.runOnce();
-    this.timer = setInterval(() => {
-      this.runOnce().catch((error: unknown) => {
-        this.stats.lastError = error instanceof Error ? error.message : String(error);
-      });
-    }, this.config.pollIntervalMs);
+    this.scheduleNext();
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.stats.ready = false;
   }
@@ -121,6 +131,20 @@ export class ClaimRelayer {
   }
 
   async runOnce(): Promise<RunOnceResult> {
+    if (this.runInFlight) return this.runInFlight;
+
+    const run = this.runOnceInternal();
+    this.runInFlight = run;
+    try {
+      return await run;
+    } finally {
+      if (this.runInFlight === run) {
+        this.runInFlight = null;
+      }
+    }
+  }
+
+  private async runOnceInternal(): Promise<RunOnceResult> {
     if (!this.startupChecked) {
       await this.startupCheck();
     }
@@ -152,9 +176,12 @@ export class ClaimRelayer {
     let claimed = 0;
     let skipped = 0;
     let failed = 0;
+    let scanned = 0;
+    let hasRetryableFailure = false;
 
     for (const log of logs) {
       const snapshot = decodeClaimTicket(log);
+      scanned++;
       this.stats.scannedTickets++;
       const previousStatus = this.store.upsertObserved(snapshot);
       if (previousStatus === 'claimed') {
@@ -173,16 +200,24 @@ export class ClaimRelayer {
           this.stats.skippedTickets++;
         }
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.store.markFailed(snapshot.claimId, message);
+        const message = errorToMessage(error);
+        if (isPermanentTicketError(error)) {
+          this.store.markFailed(snapshot.claimId, message);
+        } else {
+          this.store.markRetryable(snapshot.claimId, message);
+          hasRetryableFailure = true;
+        }
         this.stats.failedTickets++;
         this.stats.lastError = message;
         failed++;
+        if (hasRetryableFailure) break;
       }
     }
 
-    this.store.setCheckpoint(toBlock);
-    return { fromBlock, toBlock, scanned: logs.length, claimed, skipped, failed };
+    if (!hasRetryableFailure) {
+      this.store.setCheckpoint(toBlock);
+    }
+    return { fromBlock, toBlock, scanned, claimed, skipped, failed };
   }
 
   async processSnapshot(snapshot: ClaimSnapshot): Promise<boolean> {
@@ -268,7 +303,7 @@ export class ClaimRelayer {
     }) as Hex;
 
     if (actual.toLowerCase() !== expected.toLowerCase()) {
-      throw new Error(
+      throw new PermanentTicketError(
         `snapshot hash mismatch for claim ${snapshot.claimId}: event=${expected} onchain=${actual}`,
       );
     }
@@ -339,6 +374,31 @@ export class ClaimRelayer {
     }
     return hash;
   }
+
+  private scheduleNext(): void {
+    if (this.stopped) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.runScheduledTick();
+    }, this.config.pollIntervalMs);
+  }
+
+  private async runScheduledTick(): Promise<void> {
+    try {
+      await this.runOnce();
+    } catch (error: unknown) {
+      this.stats.lastError = errorToMessage(error);
+    } finally {
+      this.scheduleNext();
+    }
+  }
+}
+
+export class PermanentTicketError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PermanentTicketError';
+  }
 }
 
 export function snapshotHash(snapshot: Pick<ClaimSnapshot, 'claimId' | 'serviceId' | 'taskCreationWeight' | 'solutionDeliveryWeight' | 'verdictDeliveryWeight' | 'multisig'>): Hex {
@@ -371,8 +431,12 @@ export function assertFixtureMatchesSnapshot(fixture: MessengerFixture, snapshot
     isAddressEqual(fixture.multisig, snapshot.multisig);
 
   if (!same) {
-    throw new Error(`fixture mismatch for claim ${snapshot.claimId}`);
+    throw new PermanentTicketError(`fixture mismatch for claim ${snapshot.claimId}`);
   }
+}
+
+function isPermanentTicketError(error: unknown): boolean {
+  return error instanceof PermanentTicketError;
 }
 
 function decodeClaimTicket(log: Record<string, unknown>): ClaimSnapshot {

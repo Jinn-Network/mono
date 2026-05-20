@@ -4,11 +4,18 @@ import { getAddress, isAddress, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { loadArtifactAddresses, type ArtifactAddresses } from './artifacts.js';
 
+export interface ChainIdentity {
+  network: string;
+  chainId: number;
+}
+
 export interface ClaimRelayerConfig {
   privateKey: Hex;
   signerAddress: Address;
   l1RpcUrl: string;
   l2RpcUrl: string;
+  l1Chain: ChainIdentity;
+  l2Chain: ChainIdentity;
   startBlock: bigint;
   dbPath: string;
   port: number;
@@ -16,6 +23,16 @@ export interface ClaimRelayerConfig {
   batchBlocks: bigint;
   artifacts: ArtifactAddresses;
 }
+
+export const DEFAULT_L1_CHAIN: ChainIdentity = {
+  network: 'sepolia',
+  chainId: 11155111,
+};
+
+export const DEFAULT_L2_CHAIN: ChainIdentity = {
+  network: 'base-sepolia',
+  chainId: 84532,
+};
 
 function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
@@ -66,6 +83,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ClaimRelayerCo
     signerAddress: account.address,
     l1RpcUrl: requiredEnv(env, 'JINN_CLAIM_RELAYER_L1_RPC_URL'),
     l2RpcUrl: requiredEnv(env, 'JINN_CLAIM_RELAYER_L2_RPC_URL'),
+    l1Chain: DEFAULT_L1_CHAIN,
+    l2Chain: DEFAULT_L2_CHAIN,
     startBlock: parseInteger(requiredEnv(env, 'JINN_CLAIM_RELAYER_START_BLOCK'), 'JINN_CLAIM_RELAYER_START_BLOCK'),
     dbPath: path.resolve(env.JINN_CLAIM_RELAYER_DB_PATH ?? path.join(homedir(), '.jinn', 'claim-relayer.sqlite')),
     port: parseNumber(env.JINN_CLAIM_RELAYER_PORT, 8737, 'JINN_CLAIM_RELAYER_PORT'),
@@ -80,6 +99,8 @@ export function redactConfig(config: ClaimRelayerConfig): Record<string, unknown
     signerAddress: config.signerAddress,
     l1RpcUrl: '[redacted]',
     l2RpcUrl: '[redacted]',
+    l1Chain: config.l1Chain,
+    l2Chain: config.l2Chain,
     hasPrivateKey: true,
     startBlock: config.startBlock.toString(),
     dbPath: config.dbPath,

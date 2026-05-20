@@ -69,22 +69,31 @@ export function loadArtifactAddresses(options: {
 } = {}): ArtifactAddresses {
   const l1ArtifactPath = path.resolve(options.l1ArtifactPath ?? DEFAULT_L1_ARTIFACT);
   const l2ArtifactPath = path.resolve(options.l2ArtifactPath ?? DEFAULT_L2_ARTIFACT);
-  const l1 = readJson(l1ArtifactPath);
-  const l2 = readJson(l2ArtifactPath);
+  const distributorOverride = options.distributorAddress && isAddress(options.distributorAddress)
+    ? getAddress(options.distributorAddress)
+    : undefined;
+  const messengerOverride = options.messengerAddress && isAddress(options.messengerAddress)
+    ? getAddress(options.messengerAddress)
+    : undefined;
+  const claimEmitterOverride = options.claimEmitterAddress && isAddress(options.claimEmitterAddress)
+    ? getAddress(options.claimEmitterAddress)
+    : undefined;
+  const l1 = distributorOverride && messengerOverride ? undefined : readJson(l1ArtifactPath);
+  const l2 = claimEmitterOverride ? undefined : readJson(l2ArtifactPath);
 
   return {
     l1ArtifactPath,
     l2ArtifactPath,
-    distributor: options.distributorAddress && isAddress(options.distributorAddress)
-      ? getAddress(options.distributorAddress)
+    distributor: distributorOverride
+      ? distributorOverride
       : pickAddress(l1, 'JinnDistributor', [
           ['contracts', 'JinnDistributor'],
           ['JinnDistributor'],
           ['distributor', 'address'],
           ['distributor'],
         ]),
-    messenger: options.messengerAddress && isAddress(options.messengerAddress)
-      ? getAddress(options.messengerAddress)
+    messenger: messengerOverride
+      ? messengerOverride
       : pickAddress(l1, 'MockMessenger', [
           ['contracts', 'Messenger'],
           ['contracts', 'MockMessenger'],
@@ -92,15 +101,12 @@ export function loadArtifactAddresses(options: {
           ['MockMessenger'],
           ['Messenger'],
         ]),
-    claimEmitter: options.claimEmitterAddress && isAddress(options.claimEmitterAddress)
-      ? getAddress(options.claimEmitterAddress)
+    claimEmitter: claimEmitterOverride
+      ? claimEmitterOverride
       : pickAddress(l2, 'TaskClaimEmitter', [
           ['contracts', 'TaskClaimEmitter'],
-          ['contracts', 'JinnClaimEmitter'],
           ['taskClaimEmitter', 'address'],
-          ['claimEmitter', 'address'],
           ['TaskClaimEmitter'],
-          ['JinnClaimEmitter'],
         ]),
   };
 }

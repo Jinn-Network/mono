@@ -31,6 +31,8 @@ function makeConfig(): ClaimRelayerConfig {
     signerAddress: SIGNER,
     l1RpcUrl: 'https://l1-secret.example/rpc?token=super-secret',
     l2RpcUrl: 'https://l2-secret.example/rpc?token=super-secret',
+    l1Chain: { network: 'sepolia', chainId: 11155111 },
+    l2Chain: { network: 'base-sepolia', chainId: 84532 },
     startBlock: 10n,
     dbPath: ':memory:',
     port: 0,
