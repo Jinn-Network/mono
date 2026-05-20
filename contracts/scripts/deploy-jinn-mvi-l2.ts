@@ -38,11 +38,11 @@
  *   JINN_MVI_L2_CHECKER             override TaskActivityCheckerV3 address
  *   JINN_MVI_L2_REGISTRY            override OLAS ServiceRegistry address
  *   JINN_MVI_L2_ARTIFACT_PATH       path to the V3 TaskCoordinator deploy artifact
- *                                   (default: alongside this script's
- *                                   working directory)
+ *                                   (default: deployment-task-coordinator-router-v3-{network}.json,
+ *                                   except Base Sepolia defaults to the bundled -fast artifact)
  *   JINN_MVI_ALLOW_CHAIN            opt in to a non-whitelisted chainId
  *   PHASE1A_TIMING_PROFILE          "canonical" | "fast-test" — selects the
- *                                   V3 artifact suffix
+ *                                   V3 artifact suffix when explicitly set
  */
 
 import { ethers } from "hardhat";
@@ -162,6 +162,36 @@ function getTaskV3ArtifactPath(networkName: string, fastSuffix: boolean): string
   );
 }
 
+function isFastTimingProfile(profile: string | undefined): boolean {
+  return profile === "fast-test";
+}
+
+function shouldUseFastTaskV3Artifact(args: {
+  chainId: number;
+  env?: Record<string, string | undefined>;
+}): boolean {
+  const env = args.env ?? process.env;
+  if (env.PHASE1A_TIMING_PROFILE !== undefined) {
+    return isFastTimingProfile(env.PHASE1A_TIMING_PROFILE);
+  }
+  return args.chainId === CHAIN_ID_BASE_SEPOLIA;
+}
+
+export function resolveTaskV3ArtifactPath(args: {
+  networkName: string;
+  chainId: number;
+  env?: Record<string, string | undefined>;
+}): string {
+  const env = args.env ?? process.env;
+  return (
+    env.JINN_MVI_L2_ARTIFACT_PATH ??
+    getTaskV3ArtifactPath(
+      args.networkName,
+      shouldUseFastTaskV3Artifact({ chainId: args.chainId, env }),
+    )
+  );
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -247,7 +277,7 @@ async function main() {
     scriptName: "Jinn MVI L2 emitter",
   });
 
-  const fastSuffix = (process.env.PHASE1A_TIMING_PROFILE ?? "canonical") === "fast-test";
+  const outputFastSuffix = isFastTimingProfile(process.env.PHASE1A_TIMING_PROFILE);
 
   // Resolve wiring. On Hardhat tests we tolerate fully-mocked wiring
   // because both the V3 artifact and the ServiceRegistry are
@@ -280,9 +310,10 @@ async function main() {
     // Live / testnet path. Read the V3 artifact + chain-pinned
     // service registry, allow env overrides for any of the three.
     const normalizedNetwork = networkName === "base-sepolia" ? "baseSepolia" : networkName;
-    const v3Path =
-      process.env.JINN_MVI_L2_ARTIFACT_PATH
-        ?? getTaskV3ArtifactPath(normalizedNetwork, fastSuffix);
+    const v3Path = resolveTaskV3ArtifactPath({
+      networkName: normalizedNetwork,
+      chainId,
+    });
     const checker = resolveChecker({ artifactPath: v3Path });
     const registry = resolveServiceRegistry({ chainId });
     wiring = {
@@ -310,7 +341,7 @@ async function main() {
   console.log();
 
   const normalizedNetwork = networkName === "base-sepolia" ? "baseSepolia" : networkName;
-  const artifactName = getJinnMviL2ArtifactName(normalizedNetwork, fastSuffix);
+  const artifactName = getJinnMviL2ArtifactName(normalizedNetwork, outputFastSuffix);
   const output = {
     network: normalizedNetwork,
     chainId,

@@ -21,10 +21,39 @@ import {
   JINN_MVI_L2_ALLOWED_CHAINS,
   assertChainIdAllowed,
 } from "../../../scripts/lib/jinn-mvi-helpers";
-import { deployJinnMviL2 } from "../../../scripts/deploy-jinn-mvi-l2";
+import {
+  deployJinnMviL2,
+  resolveTaskV3ArtifactPath,
+} from "../../../scripts/deploy-jinn-mvi-l2";
 
 describe("Jinn MVI L2 emitter deploy script", function () {
   this.timeout(60_000);
+
+  describe("artifact defaults", function () {
+    it("uses the bundled Base Sepolia fast V3 router artifact by default", function () {
+      const artifactPath = resolveTaskV3ArtifactPath({
+        networkName: "baseSepolia",
+        chainId: CHAIN_ID_BASE_SEPOLIA,
+        env: {},
+      });
+
+      expect(artifactPath).to.equal(
+        `${process.cwd()}/deployment-task-coordinator-router-v3-baseSepolia-fast.json`,
+      );
+    });
+
+    it("honors an explicit Base Sepolia canonical timing profile", function () {
+      const artifactPath = resolveTaskV3ArtifactPath({
+        networkName: "baseSepolia",
+        chainId: CHAIN_ID_BASE_SEPOLIA,
+        env: { PHASE1A_TIMING_PROFILE: "canonical" },
+      });
+
+      expect(artifactPath).to.equal(
+        `${process.cwd()}/deployment-task-coordinator-router-v3-baseSepolia.json`,
+      );
+    });
+  });
 
   describe("chainId gate", function () {
     it("allows Hardhat + Base Sepolia by default", function () {
