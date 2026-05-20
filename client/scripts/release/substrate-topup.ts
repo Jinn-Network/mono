@@ -1,8 +1,6 @@
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import { createPublicClient, http, parseAbi, type Address } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { ManifestSchema, type TopupResult, type Manifest } from './types';
+import { loadManifest, type TopupResult } from './types';
 import { goldPath } from './substrate-paths';
 
 const TARGET_ETH_WEI = 5_000_000_000_000_000n;       // 0.005 ETH
@@ -15,9 +13,7 @@ export interface TopupOptions {
 }
 
 export async function checkSubstrateTopup(opName: string, opts: TopupOptions = {}): Promise<TopupResult> {
-  const opDir = goldPath(opName, opts.substrateRoot);
-  const manifestRaw = await fs.readFile(path.join(opDir, 'manifest.json'), 'utf-8');
-  const manifest: Manifest = ManifestSchema.parse(JSON.parse(manifestRaw));
+  const manifest = await loadManifest(goldPath(opName, opts.substrateRoot));
 
   const client = createPublicClient({ chain: baseSepolia, transport: http(manifest.config.rpcUrl) });
   const needs: TopupResult['needs'] = [];

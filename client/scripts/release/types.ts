@@ -1,3 +1,5 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { z } from 'zod';
 
 const AddressSchema = z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'must be a 0x-prefixed 20-byte hex address');
@@ -39,6 +41,47 @@ export const ManifestSchema = z.object({
 });
 
 export type Manifest = z.infer<typeof ManifestSchema>;
+
+/** Result of a non-throwing manifest load — see loadManifestSafe. */
+export type LoadManifestResult =
+  | { ok: true; manifest: Manifest }
+  | { ok: false; error: string };
+
+/**
+ * Load and validate an operator's manifest.json without throwing.
+ * Returns a structured failure (file missing, bad JSON, schema mismatch)
+ * so callers that accumulate diagnostics can branch on it.
+ */
+export async function loadManifestSafe(opDir: string): Promise<LoadManifestResult> {
+  const manifestPath = path.join(opDir, 'manifest.json');
+
+  let manifestRaw: string;
+  try {
+    manifestRaw = await fs.readFile(manifestPath, 'utf-8');
+  } catch {
+    return { ok: false, error: `manifest.json not found at ${manifestPath}` };
+  }
+
+  let manifestJson: unknown;
+  try {
+    manifestJson = JSON.parse(manifestRaw);
+  } catch (err) {
+    return { ok: false, error: `manifest.json is not valid JSON: ${(err as Error).message}` };
+  }
+
+  const parsed = ManifestSchema.safeParse(manifestJson);
+  if (!parsed.success) {
+    return { ok: false, error: `manifest.json failed schema validation: ${parsed.error.message}` };
+  }
+  return { ok: true, manifest: parsed.data };
+}
+
+/** Load and validate an operator's manifest.json, throwing on any problem. */
+export async function loadManifest(opDir: string): Promise<Manifest> {
+  const result = await loadManifestSafe(opDir);
+  if (!result.ok) throw new Error(result.error);
+  return result.manifest;
+}
 
 export interface VerifyResult {
   opName: string;

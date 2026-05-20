@@ -1,8 +1,6 @@
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import { createPublicClient, http, parseAbi, type Address } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import { ManifestSchema, type Manifest, type VerifyResult } from './types';
+import { loadManifestSafe, type VerifyResult } from './types';
 import { goldPath } from './substrate-paths';
 
 const MIN_MASTER_ETH_WEI = 2_000_000_000_000_000n;   // 0.002 ETH
@@ -24,33 +22,14 @@ export async function verifySubstrate(opName: string, opts: VerifyOptions = {}):
   const warnings: string[] = [];
 
   const opDir = goldPath(opName, opts.substrateRoot);
-  const manifestPath = path.join(opDir, 'manifest.json');
 
-  // 1. Manifest exists
-  let manifestRaw: string;
-  try {
-    manifestRaw = await fs.readFile(manifestPath, 'utf-8');
-  } catch (err) {
-    failures.push(`manifest.json not found at ${manifestPath}`);
+  // 1-3. Manifest exists, parses, and validates against the schema
+  const loaded = await loadManifestSafe(opDir);
+  if (!loaded.ok) {
+    failures.push(loaded.error);
     return { opName, ok: false, failures, warnings, onChain: null };
   }
-
-  // 2. Manifest parses
-  let manifestJson: unknown;
-  try {
-    manifestJson = JSON.parse(manifestRaw);
-  } catch (err) {
-    failures.push(`manifest.json is not valid JSON: ${(err as Error).message}`);
-    return { opName, ok: false, failures, warnings, onChain: null };
-  }
-
-  // 3. Manifest validates against schema
-  const parseResult = ManifestSchema.safeParse(manifestJson);
-  if (!parseResult.success) {
-    failures.push(`manifest.json failed schema validation: ${parseResult.error.message}`);
-    return { opName, ok: false, failures, warnings, onChain: null };
-  }
-  const manifest: Manifest = parseResult.data;
+  const manifest = loaded.manifest;
 
   // 4. Name in manifest matches the op being verified
   if (manifest.name !== opName) {
