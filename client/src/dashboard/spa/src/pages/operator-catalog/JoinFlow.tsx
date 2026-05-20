@@ -969,6 +969,26 @@ function JoinSuccessCard({
   const roleLabel = success.roles
     .map((r) => (r === 'solver' ? 'Solver' : 'Evaluator'))
     .join(' + ');
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
+  const handleRestart = async (): Promise<void> => {
+    setRestarting(true);
+    setRestartError(null);
+    try {
+      const res = await api.restartDaemon();
+      if (!res.ok) {
+        throw new Error('Restart request failed.');
+      }
+      // Send the operator to the overview so they can watch the node
+      // come back up after the restart.
+      navigate('/overview');
+    } catch (err) {
+      setRestartError(
+        err instanceof Error ? err.message : 'Restart request failed.',
+      );
+      setRestarting(false);
+    }
+  };
   return (
     <>
       <div
@@ -1033,6 +1053,20 @@ function JoinSuccessCard({
           </span>
         )}
       </div>
+      {restartError && (
+        <div
+          role="alert"
+          data-testid="join-flow-success-restart-error"
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+            color: 'var(--break-red)',
+            lineHeight: 1.5,
+          }}
+        >
+          {restartError}
+        </div>
+      )}
       <footer
         style={{
           display: 'flex',
@@ -1055,14 +1089,25 @@ function JoinSuccessCard({
           onClick={() =>
             navigate(`/operator#solvernets/${success.manifestCid}`)
           }
+          style={ghostButtonStyle}
+        >
+          View joined SolverNet
+        </button>
+        <button
+          type="button"
+          data-testid="join-flow-success-restart-button"
+          onClick={handleRestart}
+          disabled={restarting}
           style={{
             ...ghostButtonStyle,
             background: 'var(--accent-sky)',
             color: 'var(--bg-sunken)',
             border: '1px solid var(--accent-sky)',
+            cursor: restarting ? 'wait' : 'pointer',
+            opacity: restarting ? 0.7 : 1,
           }}
         >
-          View joined SolverNet
+          {restarting ? 'Restarting…' : 'Restart node now'}
         </button>
       </footer>
     </>

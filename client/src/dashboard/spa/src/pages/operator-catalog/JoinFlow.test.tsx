@@ -27,6 +27,7 @@ const apiMock = vi.hoisted(() => ({
   operatorLeave: vi.fn(),
   hermesDoctor: vi.fn(),
   harnessReadiness: vi.fn(),
+  restartDaemon: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({
@@ -41,6 +42,7 @@ vi.mock('../../api/client.js', () => ({
     },
     hermesDoctor: () => apiMock.hermesDoctor(),
     harnessReadiness: (name: string) => apiMock.harnessReadiness(name),
+    restartDaemon: () => apiMock.restartDaemon(),
   },
 }));
 
@@ -146,6 +148,7 @@ beforeEach(() => {
   apiMock.operatorLeave.mockReset();
   apiMock.hermesDoctor.mockReset();
   apiMock.harnessReadiness.mockReset();
+  apiMock.restartDaemon.mockReset();
 
   // Default: every probed harness reports ready. Tests that exercise the
   // not-ready path override this per harness name.
@@ -170,6 +173,7 @@ beforeEach(() => {
     manifestCid: 'bafybeiaaa',
     config: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
   });
+  apiMock.restartDaemon.mockResolvedValue({ ok: true, scheduled: true });
 });
 
 afterEach(() => {
@@ -817,6 +821,52 @@ describe('JoinFlow — submission', () => {
     );
     fireEvent.click(screen.getByTestId('join-flow-success-view'));
     expect(nav.history.at(-1)).toBe('/operator#solvernets/bafybeiaaa');
+  });
+
+  it('success-card restart button restarts the daemon and goes to /overview (#328)', async () => {
+    const { nav } = wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('join-flow-success-restart-button'),
+      ).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByTestId('join-flow-success-restart-button'));
+
+    await waitFor(() => expect(apiMock.restartDaemon).toHaveBeenCalled());
+    await waitFor(() => expect(nav.history.at(-1)).toBe('/overview'));
+  });
+
+  it('success-card restart button surfaces an error and stays put on failure (#328)', async () => {
+    apiMock.restartDaemon.mockResolvedValue({ ok: false });
+    const { nav } = wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('join-flow-success-restart-button'),
+      ).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByTestId('join-flow-success-restart-button'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('join-flow-success-restart-error'),
+      ).toBeTruthy(),
+    );
+    // Restart failed — the operator was not redirected away.
+    expect(nav.history.at(-1)).toBe('/operator/join/bafybeiaaa');
   });
 
   it('omits solver-only fields when only evaluator is selected', async () => {
