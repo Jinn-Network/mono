@@ -23,9 +23,18 @@ import {
 import { PluginPicker } from '../configuration/PluginPicker.js';
 import { CostEstimatePanel, useCostSurfaceDecision } from '../configuration/CostEstimatePanel.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
+import { InlineHelp } from '../../components/InlineHelp.js';
 
 const HERMES_AGENT_DESCRIPTION =
   'Self-improving agent by Nous Research. Built-in learning loop.';
+
+/**
+ * Long-form decision context for the join form lives in
+ * `client/docs/operator/join-form-context.md`. Inline help points operators
+ * there for the full picture (Issue #334).
+ */
+const JOIN_FORM_CONTEXT_DOC =
+  'https://github.com/Jinn-Network/mono/blob/main/cargo/client/docs/operator/join-form-context.md';
 
 /**
  * Operator participation flow keyed by `manifestCid`.
@@ -328,7 +337,19 @@ export function JoinFlow({
       </section>
 
       <section style={cardStyle}>
-        <span style={cardLabelStyle}>Roles</span>
+        <span style={labelRowStyle}>
+          <span style={cardLabelStyle}>Roles</span>
+          <InlineHelp
+            label="Roles help"
+            docHref={`${JOIN_FORM_CONTEXT_DOC}#solver-vs-evaluator`}
+          >
+            Solver attempts tasks and submits solutions — this is the
+            spending role (model inference + gas) and the one with the most
+            per-task upside. Evaluator verifies others' solutions — lower spend,
+            steadier, lower variance. You can take either or both. Unsure? Start
+            as a solver on one SolverNet with a model you already pay for.
+          </InlineHelp>
+        </span>
         <div
           style={{
             display: 'grid',
@@ -404,7 +425,22 @@ export function JoinFlow({
             }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={fieldLabelStyle}>Harness</span>
+              <span style={labelRowStyle}>
+                <span style={fieldLabelStyle}>Harness</span>
+                <InlineHelp
+                  label="Harness help"
+                  docHref={`${JOIN_FORM_CONTEXT_DOC}#harness-and-model`}
+                >
+                  The harness is the runtime that executes a task. You need
+                  credentials for one harness, not for the harness and the
+                  model both. Claude Code uses whatever the `claude` CLI is
+                  signed in with — a Claude subscription or an Anthropic API
+                  key. Hermes Agent is a separate package; the join form runs an
+                  install precheck for it. The default shown is the SolverNet's
+                  first compatible option, not a recommendation to pay for two
+                  things.
+                </InlineHelp>
+              </span>
               <select
                 aria-label="Harness"
                 data-testid="join-harness-select"
@@ -448,7 +484,20 @@ export function JoinFlow({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={fieldLabelStyle}>Model</span>
+              <span style={labelRowStyle}>
+                <span style={fieldLabelStyle}>Model</span>
+                <InlineHelp
+                  label="Model help"
+                  docHref={`${JOIN_FORM_CONTEXT_DOC}#harness-and-model`}
+                >
+                  The model is the LLM the harness drives. The list is filtered
+                  to the models the selected harness supports — changing the
+                  harness resets the model to that harness's default. You pay
+                  for the model through the harness's credentials; there is no
+                  separate model subscription on top of that. See the cost
+                  estimate below before you commit.
+                </InlineHelp>
+              </span>
               <select
                 aria-label="Model"
                 data-testid="join-model-select"
@@ -519,7 +568,20 @@ export function JoinFlow({
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <span style={fieldLabelStyle}>Plugins</span>
+            <span style={labelRowStyle}>
+              <span style={fieldLabelStyle}>Plugins</span>
+              <InlineHelp
+                label="Plugins help"
+                docHref={`${JOIN_FORM_CONTEXT_DOC}#plug-ins`}
+              >
+                Plug-ins are optional — on a first run you almost certainly do
+                not need to touch this. A SolverPlugin is reusable AI tooling
+                (MCP servers, skills, extensions) a harness can load while it
+                solves. SolverNets ship task-specific plug-ins enabled by
+                default; you would only add your own here if you have built one.
+                You can re-join later with plug-ins added.
+              </InlineHelp>
+            </span>
             <PluginPicker
               available={catalogEntry?.compatiblePlugins ?? []}
               selected={form.plugins}
@@ -537,7 +599,20 @@ export function JoinFlow({
 
       {showEvaluatorInfo && !showSolverFields && (
         <section data-testid="join-flow-evaluator-info" style={cardStyle}>
-          <span style={cardLabelStyle}>Evaluator configuration</span>
+          <span style={labelRowStyle}>
+            <span style={cardLabelStyle}>Evaluator configuration</span>
+            <InlineHelp
+              label="Evaluator configuration help"
+              docHref={`${JOIN_FORM_CONTEXT_DOC}#why-the-evaluator-role-has-no-model-selector`}
+            >
+              There is no harness or model picker for the evaluator role — and
+              that is by design, not a sign the role is underdeveloped. Every
+              evaluator on a SolverNet must run the same evaluation function so
+              verdicts are comparable, so the SolverNet's manifest binds it for
+              you. For many SolverNets that function is deterministic and calls
+              no model at all.
+            </InlineHelp>
+          </span>
           <p
             style={{
               fontFamily: "'JetBrains Mono', monospace",
@@ -557,7 +632,18 @@ export function JoinFlow({
 
       {showEvaluatorInfo && showSolverFields && (
         <section data-testid="join-flow-evaluator-info" style={cardStyle}>
-          <span style={cardLabelStyle}>Evaluator binding</span>
+          <span style={labelRowStyle}>
+            <span style={cardLabelStyle}>Evaluator binding</span>
+            <InlineHelp
+              label="Evaluator binding help"
+              docHref={`${JOIN_FORM_CONTEXT_DOC}#why-the-evaluator-role-has-no-model-selector`}
+            >
+              The evaluator harness is bound by the SolverNet's manifest so
+              every evaluator runs the same evaluation function — verdicts have
+              to be comparable to be trustworthy. The harness and model fields
+              above configure only the solver role.
+            </InlineHelp>
+          </span>
           <p
             style={{
               fontFamily: "'JetBrains Mono', monospace",
@@ -744,6 +830,13 @@ const fieldLabelStyle: React.CSSProperties = {
   letterSpacing: '0.14em',
   textTransform: 'uppercase',
   color: 'var(--fg-muted)',
+};
+
+// Row that pairs a section / field label with its InlineHelp trigger.
+const labelRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: '8px',
 };
 
 const selectStyle: React.CSSProperties = {
