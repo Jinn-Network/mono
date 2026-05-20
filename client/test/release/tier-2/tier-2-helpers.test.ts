@@ -4,17 +4,26 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { setupTier2Scenario } from './tier-2-helpers.js';
 
+/**
+ * Returns true when the Tier 2 prerequisites are all present:
+ * Plan A's gold substrate, the BASE_SEPOLIA_RPC_URL env var, and the built
+ * dist binary. Tests call this and `return` early (skip) when it is false.
+ */
+async function tier2PrereqsMet(): Promise<boolean> {
+  // Plan A's substrate at ~/jinn-dev/operators/ (absent on fresh pre-Plan-A checkouts).
+  const goldOpA = path.join(os.homedir(), 'jinn-dev', 'operators', 'op-a');
+  try { await fs.access(goldOpA); } catch { return false; }
+  // BASE_SEPOLIA_RPC_URL is a Tier 2 env requirement.
+  if (!process.env['BASE_SEPOLIA_RPC_URL']) return false;
+  // The dist binary must be built (avoids confusing process-not-found errors).
+  const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist', 'bin', 'jinn.js');
+  try { await fs.access(distPath); } catch { return false; }
+  return true;
+}
+
 describe('setupTier2Scenario', () => {
   it('returns a handle with workspace, anvil, and two daemon URLs', async () => {
-    // This test requires Plan A's substrate to exist at ~/jinn-dev/operators/.
-    // Skip if not present (e.g. fresh checkout pre-Plan-A).
-    const goldOpA = path.join(os.homedir(), 'jinn-dev', 'operators', 'op-a');
-    try { await fs.access(goldOpA); } catch { return; }
-    // Skip if BASE_SEPOLIA_RPC_URL is not configured (Tier 2 env requirement).
-    if (!process.env['BASE_SEPOLIA_RPC_URL']) return;
-    // Skip if dist binary is not built (avoids confusing process-not-found errors).
-    const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist', 'bin', 'jinn.js');
-    try { await fs.access(distPath); } catch { return; }
+    if (!(await tier2PrereqsMet())) return;
 
     let handle: Awaited<ReturnType<typeof setupTier2Scenario>> | undefined;
     try {
@@ -33,13 +42,7 @@ describe('setupTier2Scenario', () => {
   }, 90000);
 
   it('teardown is idempotent and cleans up workspace + anvil + daemons', async () => {
-    const goldOpA = path.join(os.homedir(), 'jinn-dev', 'operators', 'op-a');
-    try { await fs.access(goldOpA); } catch { return; }
-    // Skip if BASE_SEPOLIA_RPC_URL is not configured (Tier 2 env requirement).
-    if (!process.env['BASE_SEPOLIA_RPC_URL']) return;
-    // Skip if dist binary is not built (avoids confusing process-not-found errors).
-    const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist', 'bin', 'jinn.js');
-    try { await fs.access(distPath); } catch { return; }
+    if (!(await tier2PrereqsMet())) return;
 
     const handle = await setupTier2Scenario({ scenarioId: 'T2.X-cleanup', portBase: 7742 });
     const workspaceRoot = handle.workspace.workspaceRoot;
