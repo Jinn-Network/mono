@@ -12,6 +12,8 @@ interface RunOptions {
 }
 
 export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: ScenarioVerdict[]; allPassed: boolean }> {
+  const candidateVersion = opts.candidateVersion ?? 'unknown';
+  const mode = opts.mode ?? 'human-invoked';
   const outputDir = opts.outputDir ?? path.join(
     process.cwd(),
     'tier-3-evidence',
@@ -21,7 +23,7 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
 
   const verdict = await runT31ProducerEvaluatorReal({
     evidencePath: path.join(outputDir, 'T3.1.log'),
-    mode: opts.mode ?? 'human-invoked',
+    mode,
     hermesModel: opts.hermesModel,
     wallClockBudgetMs: 10 * 60 * 1000,
   });
@@ -31,9 +33,9 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
   const allPassed = verdict.verdict === 'pass';
 
   const summary = {
-    candidateVersion: opts.candidateVersion ?? 'unknown',
+    candidateVersion,
     timestamp: new Date().toISOString(),
-    mode: opts.mode ?? 'human-invoked',
+    mode,
     verdicts,
     allPassed,
   };
@@ -41,7 +43,7 @@ export async function runTier3(opts: RunOptions = {}): Promise<{ verdicts: Scena
 
   const markerLines = [
     '<!-- jinn-release-evidence:v1',
-    `release-candidate=${opts.candidateVersion ?? 'unknown'}`,
+    `release-candidate=${candidateVersion}`,
     `tier-3-t3-1=${verdict.verdict === 'pass' ? 'passed' : `failed:${verdict.failClass}`}`,
     `tier-3-overall=${allPassed ? 'passed' : 'failed'}`,
     '-->',
