@@ -77,20 +77,23 @@ const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
 const EVALUATION_RETRY_YIELD_EVERY = 10;
 
 /**
- * Decide whether a `canClaimEvaluation` failure reason means the opportunity
- * can NEVER become claimable (terminal, prune it) versus one that could still
- * clear later (transient, keep retrying).
+ * Decide whether a `canClaimEvaluation` failure means the opportunity can NEVER
+ * become claimable (terminal, prune it) versus one that could still clear later
+ * (transient, keep retrying).
+ *
+ * Classification is done on the *structured* `revertName` decoded straight from
+ * the inner revert data — not by regex-unformatting the operator-facing `reason`
+ * string. The format→regex round-trip was fragile: an arg value containing a
+ * `(` corrupted the strip, and the `flattenErrorMessage` fallback produced
+ * arbitrary text the regex mangled, silently mis-classifying opportunities.
  *
  * A false-keep (re-checking a dead opportunity) only costs one more RPC; a
  * false-prune (dropping a still-claimable opportunity) loses real work — so
- * when in doubt we keep. Anything that does not resolve to a known
- * non-recoverable revert name is treated as transient.
+ * when in doubt we keep. Anything without a known non-recoverable revert name
+ * is treated as transient.
  */
-function isTerminalEvaluationReason(reason: string | undefined): boolean {
-  if (!reason) return false;
-  // Strip a decoded-argument suffix, e.g. `TCAttemptAlreadyFinalized(1, 0)`.
-  const bareName = reason.replace(/\(.*$/s, '').trim();
-  return isNonRecoverableInnerRevert(bareName);
+function isTerminalEvaluationReason(revertName: string | null | undefined): boolean {
+  return isNonRecoverableInnerRevert(revertName);
 }
 const DEFAULT_ROUTER_LOG_CHUNK_BLOCKS = 9_999n;
 /**
@@ -759,7 +762,7 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.mechContractAddress,
     );
     if (!claimable.ok) {
-      const terminal = isTerminalEvaluationReason(claimable.reason);
+      const terminal = isTerminalEvaluationReason(claimable.revertName);
       console.log(
         `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}` +
           (terminal ? ' (terminal — pruned)' : ' (transient — will retry)'),

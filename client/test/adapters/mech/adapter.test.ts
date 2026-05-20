@@ -806,6 +806,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
       ok: false,
       reason: 'TCAttemptAlreadyFinalized(1, 0)',
+      revertName: 'TCAttemptAlreadyFinalized',
     });
 
     const adapter = new MechAdapter(TEST_CONFIG);
@@ -842,6 +843,46 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('classifies a terminal opportunity from the structured revertName even when the formatted reason contains a "("', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation, getTaskCidDigest } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    // The formatted `reason` here is intentionally pathological: a leading "("
+    // in the arg rendering. The old code regex-stripped `reason` (`/\(.*$/`)
+    // to recover the bare name — that strip would corrupt this string and the
+    // terminal check would silently fail, re-scanning a dead opportunity
+    // forever. Classification now reads the structured `revertName` directly,
+    // so the "(" in `reason` is irrelevant.
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'TCAttemptAlreadyFinalized((corrupt) 1, 0)',
+      revertName: 'TCAttemptAlreadyFinalized',
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    // Terminal — classified via the structured name, pruned despite the "(" in reason.
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    expect(getTaskCidDigest).not.toHaveBeenCalled();
+    expect(fetchSignedTaskFromIpfs).not.toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
   it('prunes a terminal-reason evaluation opportunity before the expensive restoration lookup', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { canClaimEvaluation, getTaskCidDigest } = await import('../../../src/adapters/mech/contracts.js');
@@ -850,6 +891,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
       ok: false,
       reason: 'TCMaxVerdictsReached(1, 0)',
+      revertName: 'TCMaxVerdictsReached',
     });
 
     const adapter = new MechAdapter(TEST_CONFIG);
@@ -883,6 +925,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
       ok: false,
       reason: 'HTTP request failed: 429 Too Many Requests',
+      revertName: null,
     });
 
     const adapter = new MechAdapter(TEST_CONFIG);
@@ -934,11 +977,11 @@ describe('MechAdapter TaskCoordinator flow', () => {
       _safe: unknown,
       _router: unknown,
       taskId: unknown,
-    ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    ): Promise<{ ok: true } | { ok: false; reason: string; revertName: string | null }> => {
       if (String(taskId) === '1') {
-        return { ok: false, reason: 'TCEvaluationDeadlinePassed(1)' };
+        return { ok: false, reason: 'TCEvaluationDeadlinePassed(1)', revertName: 'TCEvaluationDeadlinePassed' };
       }
-      return { ok: false, reason: 'execution reverted: connection timeout' };
+      return { ok: false, reason: 'execution reverted: connection timeout', revertName: null };
     };
     vi.mocked(canClaimEvaluation).mockImplementation(claimImpl as never);
 
