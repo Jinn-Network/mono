@@ -10,6 +10,12 @@ A hotfix targets `main` directly when a critical bug in `@latest` cannot wait fo
 
 If any of the above is in doubt: ship through `next` at the normal cadence.
 
+## Release-review gate carve-out
+
+The Monday cadence opens a standing **release-review PR** (`base: main`, `head: next`) as the holistic-review surface for the release window — see `docs/engineering/handbook.md` §Cadence and [DR-2026-05-20](../../log/decisions/2026-05-20-holistic-release-review-gate.md).
+
+**Hotfixes do not open a release-review PR.** They bypass `release-notes-scaffold.yml` entirely (that workflow runs only on the Monday cron / `workflow_dispatch`). For a hotfix, the holistic-review surface *is* the hotfix PR-to-`main` itself (step 4 below): the hotfix is a single small, scoped patch, so its own PR diff is already the whole change. There is no separate release-window diff to review because a hotfix is not a release window — it is one out-of-cadence patch. The `promote-main.yml` audit-comment step is best-effort and a missing release-review PR on the hotfix path is expected and non-fatal.
+
 ## Steps
 
 1. **Branch from `main`:** `git fetch origin && git checkout -b hotfix/<bd-id>-<slug> origin/main`.
