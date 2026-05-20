@@ -25,9 +25,9 @@ New files (across phases):
 
 ```
 client/src/dashboard/spa/src/notifications/                    [Phase 1]
-  taxonomy.ts                  # canonical 12 categories + Notification type
+  taxonomy.ts                  # canonical 12 categories + OperatorNotification type
   severity.ts                  # Blocking | Warning | Info
-  derive.ts                    # deriveNotifications(state) -> Notification[]
+  derive.ts                    # deriveNotifications(state) -> OperatorNotification[]
   useNotifications.ts          # hook
   components/
     NotificationsList.tsx      # global panel
@@ -205,7 +205,7 @@ export function isCanonicalKind(s: string): s is CanonicalKind {
   return (CANONICAL_KINDS as readonly string[]).includes(s);
 }
 
-export interface Notification {
+export interface OperatorNotification {
   kind: CanonicalKind;
   severity: Severity;
   message: string;
@@ -333,7 +333,7 @@ Expected: fail.
 `client/src/dashboard/spa/src/notifications/derive.ts`:
 
 ```ts
-import type { Notification } from './taxonomy.js';
+import type { OperatorNotification } from './taxonomy.js';
 
 // Loose shape — refine to the concrete BootstrapState + StatusSnapshot types
 // when wiring this up in Task 1.4. Kept loose here so the deriver can be tested
@@ -357,8 +357,8 @@ export interface DeriveInput {
 const RUNWAY_LOW_THRESHOLD_DAYS = 3;
 const PASSWORD_ROTATION_INTERVAL_MS = 1000 * 60 * 60 * 24 * 90;
 
-export function deriveNotifications(input: DeriveInput): Notification[] {
-  const out: Notification[] = [];
+export function deriveNotifications(input: DeriveInput): OperatorNotification[] {
+  const out: OperatorNotification[] = [];
   const s = input.status;
 
   if (input.bootstrap.mode !== 'running') {
@@ -544,15 +544,15 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { deriveNotifications, type DeriveInput } from './derive.js';
-import type { Notification } from './taxonomy.js';
+import type { OperatorNotification } from './taxonomy.js';
 
-const SEVERITY_ORDER: Record<Notification['severity'], number> = {
+const SEVERITY_ORDER: Record<OperatorNotification['severity'], number> = {
   blocking: 0,
   warning: 1,
   info: 2,
 };
 
-export function useNotifications(): Notification[] {
+export function useNotifications(): OperatorNotification[] {
   const status = useQuery({
     queryKey: ['status'],
     queryFn: () => api.getStatus(),
@@ -604,9 +604,9 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { NotificationsList } from './NotificationsList.js';
-import type { Notification } from '../taxonomy.js';
+import type { OperatorNotification } from '../taxonomy.js';
 
-const notices: Notification[] = [
+const notices: OperatorNotification[] = [
   { kind: 'harness_not_ready', severity: 'blocking', message: 'Claude not authenticated', jumpTo: '/operator/memberships' },
   { kind: 'funding_low', severity: 'warning', message: '1 day runway' },
   { kind: 'no_solvernets_joined', severity: 'info', message: 'No SolverNets joined' },
@@ -644,9 +644,9 @@ yarn vitest run src/dashboard/spa/src/notifications/components/NotificationsList
 
 ```tsx
 import { Link } from 'react-router-dom';
-import type { Notification } from '../taxonomy.js';
+import type { OperatorNotification } from '../taxonomy.js';
 
-export function NotificationItem({ notice }: { notice: Notification }): JSX.Element {
+export function NotificationItem({ notice }: { notice: OperatorNotification }): JSX.Element {
   return (
     <li
       data-kind={notice.kind}
@@ -666,10 +666,10 @@ export function NotificationItem({ notice }: { notice: Notification }): JSX.Elem
 `client/src/dashboard/spa/src/notifications/components/NotificationsList.tsx`:
 
 ```tsx
-import type { Notification } from '../taxonomy.js';
+import type { OperatorNotification } from '../taxonomy.js';
 import { NotificationItem } from './NotificationItem.js';
 
-export function NotificationsList({ notices }: { notices: Notification[] }): JSX.Element | null {
+export function NotificationsList({ notices }: { notices: OperatorNotification[] }): JSX.Element | null {
   if (notices.length === 0) return null;
   return (
     <section aria-label="Notifications" role="region">

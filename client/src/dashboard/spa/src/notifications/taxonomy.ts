@@ -21,7 +21,7 @@ export function isCanonicalKind(s: string): s is CanonicalKind {
   return (CANONICAL_KINDS as readonly string[]).includes(s);
 }
 
-export interface Notification {
+export interface OperatorNotification {
   kind: CanonicalKind;
   severity: Severity;
   message: string;
