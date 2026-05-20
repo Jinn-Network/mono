@@ -329,7 +329,7 @@ describe('createCommand run() — post-completion output (hfmf)', () => {
     };
     await createCommand.run(ctx);
     expect(output).toContain(
-      'Quickstart: https://github.com/Jinn-Network/mono/blob/main/cargo/client/docs/build/quickstart.md',
+      'Quickstart: https://github.com/Jinn-Network/mono/blob/main/client/docs/build/quickstart.md',
     );
   });
 });
