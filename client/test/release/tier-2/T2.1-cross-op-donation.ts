@@ -63,7 +63,7 @@ import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import { signCanonical } from '../../../src/harnesses/engine/signing.js';
 import { Store } from '../../../src/store/store.js';
 import { SignedEnvelopeSchema, type SignedEnvelope } from '../../../src/types/envelope.js';
-import { acquireArtifactWithPayment } from '../../../src/x402/acquire.js';
+import { acquireArtifactWithPayment, buildAcquisitionUrl } from '../../../src/x402/acquire.js';
 import { jsonRpc as anvilJsonRpc, type AnvilHarness } from '../../_support/chain/anvil.js';
 import { allocateAnvilPort } from '../../_support/chain/port-allocator.js';
 
@@ -470,6 +470,18 @@ export async function runT21CrossOpDonation(
 
     // ── Step 5: op-b discovers + pays x402 + retrieves the bytes ─────────────
     log('Step 5: op-b discovers the envelope, pays x402, retrieves + verifies the bytes');
+
+    // A3: probe the content URL unauthenticated — the x402 middleware must gate
+    // it with a 402. corpus.read's paid path would mask a missing gate (the
+    // balance-delta assertion only catches it indirectly), so assert directly.
+    const contentUrl = buildAcquisitionUrl(endpoint, artifactSha256);
+    const unpaidProbe = await fetch(contentUrl);
+    assert(
+      unpaidProbe.status === 402,
+      `A3: unpaid GET ${contentUrl} returned ${unpaidProbe.status}, expected 402`,
+    );
+    log(`  A3: unpaid probe of ${contentUrl} returned 402 (x402 gate active)`);
+
     const [producerBalanceBefore, consumerBalanceBefore] = await Promise.all([
       usdcBalance(publicClient, producer.address),
       usdcBalance(publicClient, consumer.address),
