@@ -37,12 +37,16 @@ export interface ScenarioOptions {
 const FLAKE_RULES: { klass: FailClass; patterns: RegExp[] }[] = [
   {
     klass: 'flake-infra',
+    // Each pattern must denote a genuine connectivity failure. A bare /network/i
+    // over-matches real bugs (e.g. "network mismatch (expected base-sepolia)"),
+    // so connectivity is matched only via the specific phrases below.
     patterns: [
       /HTTP request failed/i,
       /ECONNREFUSED/i,
       /ECONNRESET/i,
       /socket hang up/i,
-      /network/i,
+      /network error/i,
+      /network connection/i,
       /getaddrinfo/i,
     ],
   },

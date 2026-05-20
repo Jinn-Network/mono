@@ -76,4 +76,20 @@ describe('classifyFailure', () => {
   it('classifies unknown errors as real-bug (conservative default)', () => {
     expect(classifyFailure(new Error('something unexpected'))).toBe('real-bug');
   });
+
+  it('does not misclassify "network mismatch" bugs as flake-infra', () => {
+    // Regression: a bare /network/i pattern over-matched genuine regressions
+    // like a wrong-chain bug, letting the gate pass a real bug as infra flake.
+    expect(
+      classifyFailure(new Error('network mismatch (expected base-sepolia)')),
+    ).toBe('real-bug');
+    expect(
+      classifyFailure(new Error('wrong network: got base, expected base-sepolia')),
+    ).toBe('real-bug');
+  });
+
+  it('still classifies genuine connectivity failures as flake-infra', () => {
+    expect(classifyFailure(new Error('network error: connection lost'))).toBe('flake-infra');
+    expect(classifyFailure(new Error('getaddrinfo ENOTFOUND base.org'))).toBe('flake-infra');
+  });
 });
