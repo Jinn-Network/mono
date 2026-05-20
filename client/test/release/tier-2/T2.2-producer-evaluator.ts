@@ -30,11 +30,11 @@
  * (T2.2 producer-evaluator: missing /v1/tasks, /v1/verdicts, /v1/activity endpoints)
  */
 
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { setupTier2Scenario, type Tier2Handle } from './tier-2-helpers.js';
-import { classifyFailure, type ScenarioVerdict, type ScenarioOptions } from '../../../scripts/release/scenario-types.js';
+import { EvidenceLog, skipVerdict, failVerdict } from './scenario-evidence.js';
+import type { ScenarioVerdict, ScenarioOptions } from '../../../scripts/release/scenario-types.js';
 import {
   KNOWN_INSTANCE_ID,
   KNOWN_REPO,
@@ -78,19 +78,8 @@ export async function runT22ProducerEvaluator(
   opts: ScenarioOptions,
 ): Promise<ScenarioVerdict> {
   const started = Date.now();
-  const evidenceLines: string[] = [];
-  const log = (msg: string): void => {
-    evidenceLines.push(`[${new Date().toISOString()}] ${msg}`);
-  };
-
-  const flushEvidence = async (): Promise<void> => {
-    try {
-      await fs.mkdir(path.dirname(opts.evidencePath), { recursive: true });
-      await fs.writeFile(opts.evidencePath, evidenceLines.join('\n') + '\n');
-    } catch {
-      // best-effort; don't mask the primary error
-    }
-  };
+  const evidence = new EvidenceLog(opts.evidencePath);
+  const log = (msg: string): void => evidence.log(msg);
 
   let handle: Tier2Handle | null = null;
 
@@ -104,15 +93,13 @@ export async function runT22ProducerEvaluator(
       'exercise the T2.2 infrastructure setup. Even with the RPC set, T2.2 will ' +
       'currently still skip because the /v1/tasks endpoint is missing (see step 2).',
     );
-    await flushEvidence();
-    return {
+    await evidence.flush();
+    return skipVerdict({
       scenarioId: 'T2.2',
-      verdict: 'skip',
-      wallClockMs: Date.now() - started,
+      startedAt: started,
       evidencePath: opts.evidencePath,
-      failClass: null,
       failNotes: 'BASE_SEPOLIA_RPC_URL not set; skipping infrastructure setup',
-    };
+    });
   }
 
   try {
@@ -199,19 +186,17 @@ export async function runT22ProducerEvaluator(
       log('');
       log('Verdict: skip');
 
-      await flushEvidence();
-      return {
+      await evidence.flush();
+      return skipVerdict({
         scenarioId: 'T2.2',
-        verdict: 'skip',
-        wallClockMs: Date.now() - started,
+        startedAt: started,
         evidencePath: opts.evidencePath,
-        failClass: null,
         failNotes:
           'T2.2 /v1/tasks endpoint not present in this daemon build (v0.1.6). ' +
           'Real task posting goes via on-chain Mech Marketplace (postRestorationJob), not HTTP. ' +
           'Activity counts surface via GET /v1/status body.activityCounts. ' +
           'See https://github.com/Jinn-Network/mono/issues/350.',
-      };
+      });
     }
 
     // ── Step 3 (only reachable if a future build exposes /v1/tasks) ──────────
@@ -239,15 +224,13 @@ export async function runT22ProducerEvaluator(
     );
   } catch (err) {
     log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
-    await flushEvidence();
-    return {
+    await evidence.flush();
+    return failVerdict({
       scenarioId: 'T2.2',
-      verdict: 'fail',
-      wallClockMs: Date.now() - started,
+      startedAt: started,
       evidencePath: opts.evidencePath,
-      failClass: classifyFailure(err),
-      failNotes: err instanceof Error ? err.message : String(err),
-    };
+      error: err,
+    });
   } finally {
     if (handle) {
       try { await handle.teardown(); } catch {}

@@ -23,12 +23,10 @@
  * (T2.1 cross-op donation: missing producer endpoint /v1/corpus/produce)
  */
 
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-
 import { setupTier2Scenario, type Tier2Handle } from './tier-2-helpers.js';
+import { EvidenceLog, skipVerdict, failVerdict } from './scenario-evidence.js';
 import { spawnPonderIndexer } from '../../_support/indexer/ponder.js';
-import { classifyFailure, type ScenarioVerdict, type ScenarioOptions } from '../../../scripts/release/scenario-types.js';
+import type { ScenarioVerdict, ScenarioOptions } from '../../../scripts/release/scenario-types.js';
 
 // ── Candidate producer endpoints to probe ────────────────────────────────────
 // These are the speculative paths from the scenario plan. If any return non-404
@@ -60,19 +58,8 @@ export async function runT21CrossOpDonation(
   opts: ScenarioOptions,
 ): Promise<ScenarioVerdict> {
   const started = Date.now();
-  const evidenceLines: string[] = [];
-  const log = (msg: string): void => {
-    evidenceLines.push(`[${new Date().toISOString()}] ${msg}`);
-  };
-
-  const flushEvidence = async (): Promise<void> => {
-    try {
-      await fs.mkdir(path.dirname(opts.evidencePath), { recursive: true });
-      await fs.writeFile(opts.evidencePath, evidenceLines.join('\n') + '\n');
-    } catch {
-      // best-effort; don't mask the primary error
-    }
-  };
+  const evidence = new EvidenceLog(opts.evidencePath);
+  const log = (msg: string): void => evidence.log(msg);
 
   let handle: Tier2Handle | null = null;
   let indexer: Awaited<ReturnType<typeof spawnPonderIndexer>> | null = null;
@@ -87,15 +74,13 @@ export async function runT21CrossOpDonation(
       'exercise the T2.1 infrastructure setup. Even with the RPC set, T2.1 will ' +
       'currently still skip because the producer endpoint is missing (see step 2).',
     );
-    await flushEvidence();
-    return {
+    await evidence.flush();
+    return skipVerdict({
       scenarioId: 'T2.1',
-      verdict: 'skip',
-      wallClockMs: Date.now() - started,
+      startedAt: started,
       evidencePath: opts.evidencePath,
-      failClass: null,
       failNotes: 'BASE_SEPOLIA_RPC_URL not set; skipping infrastructure setup',
-    };
+    });
   }
 
   try {
@@ -167,18 +152,16 @@ export async function runT21CrossOpDonation(
       log('');
       log('Verdict: skip');
 
-      await flushEvidence();
-      return {
+      await evidence.flush();
+      return skipVerdict({
         scenarioId: 'T2.1',
-        verdict: 'skip',
-        wallClockMs: Date.now() - started,
+        startedAt: started,
         evidencePath: opts.evidencePath,
-        failClass: null,
         failNotes:
           'T2.1 producer endpoint /v1/corpus/produce not present in this daemon build (v0.1.6). ' +
           'Corpus production has no HTTP entry point; driven only via task execution + engine pack/pin path. ' +
           'See https://github.com/Jinn-Network/mono/issues/349.',
-      };
+      });
     }
 
     // ── Step 3 (only reachable if a future build exposes the producer surface) ─
@@ -207,15 +190,13 @@ export async function runT21CrossOpDonation(
     );
   } catch (err) {
     log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
-    await flushEvidence();
-    return {
+    await evidence.flush();
+    return failVerdict({
       scenarioId: 'T2.1',
-      verdict: 'fail',
-      wallClockMs: Date.now() - started,
+      startedAt: started,
       evidencePath: opts.evidencePath,
-      failClass: classifyFailure(err),
-      failNotes: err instanceof Error ? err.message : String(err),
-    };
+      error: err,
+    });
   } finally {
     if (indexer) {
       try { await indexer.teardown(); } catch {}
